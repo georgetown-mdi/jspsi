@@ -12,7 +12,10 @@ import {
 } from "../src/config/linkageTerms.js";
 
 import type { ConnectionEndpoint } from "../src/config/invitation.js";
-import type { LinkageStrategy } from "../src/config/linkageTerms.js";
+import type {
+  LinkageStrategy,
+  TransformStep,
+} from "../src/config/linkageTerms.js";
 
 // A linkable column set (ssn + names + dob give satisfiable keys) that ALSO
 // carries columns the inferred metadata discloses: `notes` infers as an `other`
@@ -324,5 +327,226 @@ describe("the consent summary's fan-out register", () => {
       /each able to match independently/,
     );
     expect(TRANSFORM_FUNCTION_GLOSSARY.split_on).not.toMatch(/refuses/);
+  });
+});
+
+describe("the consent summary's date-collapse marker", () => {
+  const metadata = inferMetadata(LINKAGE_ONLY_COLUMNS);
+  const baseTerms = getDefaultLinkageTerms("Inviter", metadata);
+  const LITERAL_REGION_FORMAT = "ACME-YYYYMMDD";
+  // One key over the date field, carrying whatever transform a case declares.
+  const termsWith = (transform: TransformStep[]) => ({
+    ...baseTerms,
+    linkageKeys: [
+      { name: "date", elements: [{ field: "date_of_birth", transform }] },
+    ],
+  });
+  const headerFor = (transform: TransformStep[]) =>
+    summarizeInvitation({ linkageTerms: termsWith(transform) }).linkageKeys[0]
+      .headerFields;
+  const paramsFor = (transform: TransformStep[]) =>
+    summarizeInvitation({ linkageTerms: termsWith(transform) }).linkageKeys[0]
+      .elements[0].transforms[0].params;
+  const parseDate = (outputFormat: string): TransformStep => ({
+    function: "parse_date",
+    params: { inputFormat: "MM/DD/YYYY", outputFormat },
+  });
+  const slice = (start: number, length: number): TransformStep => ({
+    function: "substring",
+    params: { start, length },
+  });
+
+  test("a value-preserving step between the parse_date and the slice keeps the collapse", () => {
+    // The header reads the whole element, so a step that leaves the window's
+    // characters where the layout put them no longer returns the marker to the
+    // milder truncation word while every record still lands on "ACME".
+    expect(
+      headerFor([
+        parseDate(LITERAL_REGION_FORMAT),
+        { function: "to_upper_case" },
+        slice(1, 4),
+      ]),
+    ).toEqual(["date of birth (any date)"]);
+    expect(headerFor([parseDate(LITERAL_REGION_FORMAT), slice(1, 4)])).toEqual([
+      "date of birth (any date)",
+    ]);
+  });
+
+  test("a run whose composed window leaves the layout shows no marker at all", () => {
+    // The first link reads the literal region and the second slices out of that
+    // window, so the element matches no record at all. Announcing "any date" for
+    // it would name an element that matches nothing as matching every date, and
+    // "partial" would name a truncation of a value no record ever holds: every
+    // step from the parse_date to the run's end reads the layout rather than the
+    // value, so the drop the probes measure is every record's, and the element
+    // takes the dead-pipeline surface the dead-key advisory speaks for.
+    expect(
+      headerFor([parseDate(LITERAL_REGION_FORMAT), slice(1, 4), slice(5, 2)]),
+    ).toEqual(["date of birth"]);
+  });
+
+  test("a value-dependent drop of every probe keeps the wider word", () => {
+    // The same all-probes drop with a step whose reach is the data's to decide.
+    // The measurement settles nothing there, so the header must not fall to the
+    // milder truncation word, and must not claim the element is dead either.
+    expect(
+      headerFor([
+        parseDate(LITERAL_REGION_FORMAT),
+        {
+          function: "filter_regex",
+          params: { pattern: "NOTHING-MATCHES-THIS" },
+        },
+        slice(1, 4),
+      ]),
+    ).toEqual(["date of birth (any date)"]);
+  });
+
+  test("a step the measurement cannot run shows the collapse, not the milder word", () => {
+    // A function name core does not recognize sits between the parse_date and the
+    // slice, so the measurement cannot compile the run. The header resolves that
+    // unknown breadth UP to "any date" rather than falling to the "pattern
+    // replacement"-style milder word the trailing step would otherwise name -- an
+    // inviter must not drop the marker by naming one step this build cannot run.
+    expect(
+      headerFor([
+        parseDate(LITERAL_REGION_FORMAT),
+        { function: "no_such_function" },
+        slice(1, 4),
+      ]),
+    ).toEqual(["date of birth (any date)"]);
+  });
+
+  test("a probe inflated past the value ceiling shows any date", () => {
+    // The round-2 ceiling evasion: a replace_regex expands the rendered probe past
+    // the per-value ceiling, so the measured run returns before it can read the
+    // window. Were the header to fall to "pattern replacement" there, an inviter
+    // could inflate one probe while every real date still collapsed onto one
+    // constant. The marker resolves up to "any date" instead.
+    expect(
+      headerFor([
+        parseDate(LITERAL_REGION_FORMAT),
+        {
+          function: "replace_regex",
+          params: { pattern: "ACME", replacement: "X".repeat(5000) },
+        },
+        slice(1, 4),
+      ]),
+    ).toEqual(["date of birth (any date)"]);
+  });
+
+  test("naming a probe's rendered value does not withdraw the collapse", () => {
+    // The probe dates ship in public source, so an inviter can author one step
+    // naming exactly what one of them renders to. The header still names the
+    // collapse the pipeline delivers for every other date.
+    expect(
+      headerFor([
+        parseDate(LITERAL_REGION_FORMAT),
+        { function: "null_if", params: { values: ["ACME-19710102"] } },
+        slice(1, 4),
+      ]),
+    ).toEqual(["date of birth (any date)"]);
+  });
+
+  test("a rescued dead run names the fallback rather than falling silent", () => {
+    // The run drops every date, but the coalesce puts every record back on one
+    // constant, so the element is not dead and the honest marker is the
+    // substitution's.
+    expect(
+      headerFor([
+        parseDate(LITERAL_REGION_FORMAT),
+        slice(1, 4),
+        slice(5, 2),
+        { function: "coalesce", params: { default: "UNKNOWN" } },
+      ]),
+    ).toEqual(["date of birth (fallback)"]);
+  });
+
+  test("a plain reformatting keeps no marker", () => {
+    // Routine canonicalization between equivalent full layouts, deliberately
+    // unflagged, and the slice that reads the date itself is the milder word.
+    expect(headerFor([parseDate("YYYY-MM-DD")])).toEqual(["date of birth"]);
+    expect(headerFor([parseDate("YYYY-MM-DD"), slice(1, 4)])).toEqual([
+      "date of birth (partial)",
+    ]);
+  });
+
+  test("the outputFormat row survives a params record padded past the display cap", () => {
+    // The same party authors the transform a stated limit understates and the
+    // params record beside it. Twenty filler entries ahead of the format would
+    // push it into the overflow marker were the rows shown in declaration order.
+    const filler = Object.fromEntries(
+      Array.from({ length: 20 }, (_, i) => [`filler${i}`, `value${i}`]),
+    );
+    const params = paramsFor([
+      {
+        function: "parse_date",
+        params: {
+          ...filler,
+          inputFormat: "MM/DD/YYYY",
+          outputFormat: LITERAL_REGION_FORMAT,
+        },
+      },
+      slice(1, 4),
+    ]);
+    expect(params.slice(0, 2)).toEqual([
+      "inputFormat: MM/DD/YYYY",
+      `outputFormat: ${LITERAL_REGION_FORMAT}`,
+    ]);
+    expect(params[params.length - 1]).toBe("... 6 more");
+  });
+
+  test("an over-long value ahead of the outputFormat does not spend its row", () => {
+    // The second suppression route: a value long enough to be truncated where it
+    // is rendered. Each row is bounded on its own, and the verdict-bearing rows
+    // lead, so nothing a partner declares is rendered ahead of the format.
+    const params = paramsFor([
+      {
+        function: "parse_date",
+        params: {
+          flood: "F".repeat(4000),
+          outputFormat: LITERAL_REGION_FORMAT,
+        },
+      },
+      slice(1, 4),
+    ]);
+    expect(params[0]).toBe(`outputFormat: ${LITERAL_REGION_FORMAT}`);
+    expect(params[1]).toMatch(/^flood: F+\.\.\.\[truncated\]$/);
+  });
+});
+
+describe("the consent summary's per-step params", () => {
+  const baseTerms = getDefaultLinkageTerms(
+    "Inviter",
+    inferMetadata(LINKAGE_ONLY_COLUMNS),
+  );
+
+  test("a step named after an Object prototype member still renders", () => {
+    // A step's `function` is partner free text, so a name that resolves only on
+    // Object.prototype reaches the lookup that leads a step's rows with the
+    // params a consent verdict reads. Unguarded, that lookup hands `new Set(...)`
+    // a prototype member rather than a param list and throws where the summary is
+    // rendered, taking the whole consent screen down with it.
+    for (const name of ["constructor", "toString", "__proto__", "valueOf"]) {
+      const summary = summarizeInvitation({
+        linkageTerms: {
+          ...baseTerms,
+          linkageKeys: [
+            {
+              name: "date",
+              elements: [
+                {
+                  field: "date_of_birth",
+                  transform: [{ function: name, params: { a: "1" } }],
+                },
+              ],
+            },
+          ],
+        },
+      });
+      expect(
+        summary.linkageKeys[0].elements[0].transforms[0].params,
+        name,
+      ).toEqual(["a: 1"]);
+    }
   });
 });

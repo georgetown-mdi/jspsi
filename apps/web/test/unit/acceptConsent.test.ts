@@ -1802,23 +1802,68 @@ describe("summarizeInvitation", () => {
     ).toBe("last name (partial)");
   });
 
-  test("keeps the milder word when a non-slice step breaks the run (stated limit)", () => {
+  test("names the collapse through a step between the parse_date and the slice", () => {
     // A case fold leaves a date of digits and separators exactly where the layout
-    // put it, so the runtime still collapses every record onto "ACME" -- but
-    // whether a given function preserves a given layout is a per-function,
-    // per-format property core does not decide, so the walk from the slice back
-    // to the parse_date ends at the intervening step and the header understates.
-    // Pinned so a change to this understatement fails here rather than silently.
+    // put it, so the runtime collapses every record onto "ACME" -- and core
+    // measures that rather than reading it off the intervening step's name, so
+    // the header names the collapse rather than the milder truncation.
+    const literalRegion = {
+      function: "parse_date",
+      params: { inputFormat: "MM/DD/YYYY", outputFormat: "ACME-YYYYMMDD" },
+    };
+    expect(
+      headerFor([
+        literalRegion,
+        { function: "to_upper_case" },
+        { function: "substring", params: { start: 1, length: 4 } },
+      ]),
+    ).toBe("last name (any date)");
+    // The same step over a window it DOES shift: removing the format's own dash
+    // pulls the year's first digit into a five-character window, so the honest
+    // word there is the truncation. One function, opposite verdicts -- which is
+    // why the header cannot read this off a step's name.
+    expect(
+      headerFor([
+        literalRegion,
+        { function: "remove_dashes" },
+        { function: "substring", params: { start: 1, length: 5 } },
+      ]),
+    ).toBe("last name (partial)");
+  });
+
+  test("withholds every marker where the run's window leaves the layout", () => {
+    // The first slice reads the literal region and the second composes out of
+    // that four-character window, so the element matches no record at all.
+    // Announcing the collapse at the first slice would name an element matching
+    // nothing as matching every date, and the truncation word would name a slice
+    // of a value no record holds -- so the header shows the field alone.
     expect(
       headerFor([
         {
           function: "parse_date",
           params: { inputFormat: "MM/DD/YYYY", outputFormat: "ACME-YYYYMMDD" },
         },
-        { function: "to_upper_case" },
+        { function: "substring", params: { start: 1, length: 4 } },
+        { function: "substring", params: { start: 5, length: 2 } },
+      ]),
+    ).toBe("last name");
+  });
+
+  test("keeps the collapse where an authored step names one probe date", () => {
+    // The dates the measurement probes ship in public source. A step naming what
+    // one of them renders to drops that probe, and the surviving probes still
+    // leave every other date on "ACME", so the header names the collapse rather
+    // than the milder word a withdrawn verdict would leave.
+    expect(
+      headerFor([
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "ACME-YYYYMMDD" },
+        },
+        { function: "null_if", params: { values: ["ACME-19710102"] } },
         { function: "substring", params: { start: 1, length: 4 } },
       ]),
-    ).toBe("last name (partial)");
+    ).toBe("last name (any date)");
   });
 
   test("shows no breadth marker for a parse_date whose input drops every record", () => {

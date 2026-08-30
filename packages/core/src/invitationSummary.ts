@@ -1,6 +1,7 @@
 import { APPLIED_SETTINGS } from "./appliedSettings.js";
 import {
   coalesceSubstitutesConstant,
+  CONSENT_VERDICT_PARAM_NAMES,
   dateFormatComponents,
   DEFAULT_DATE_OUTPUT_FORMAT,
   describeTransformCoercions,
@@ -280,13 +281,16 @@ export interface InvitationTransformSummary {
   /** Sanitized name of the transform function. */
   function: Displayable;
   /**
-   * One sanitized `key: value` string per declared parameter, in declaration
-   * order, capped at {@link MAX_DISPLAYED_PARAMS} (a trailing "... N more"
-   * entry marks any overflow). sanitizeForDisplay bounds each entry's length and
-   * the count is capped, so an arbitrarily large partner-supplied `params`
-   * record cannot flood the screen. Empty when the step declares no parameters.
-   * Each parameter is shown verbatim; a parameter core coerces before applying
-   * is clarified separately in {@link coercions}, not folded into its line.
+   * One sanitized `key: value` string per declared parameter -- the ones a
+   * consent verdict reads first, then the rest in declaration order
+   * ({@link orderedParamEntries}) -- capped at {@link MAX_DISPLAYED_PARAMS} (a
+   * trailing "... N more" entry marks any overflow). sanitizeForDisplay bounds
+   * each entry's length and the count is capped, so an arbitrarily large
+   * partner-supplied `params` record cannot flood the screen, and the leading
+   * order keeps the cap off the rows a header marker rests on. Empty when the
+   * step declares no parameters. Each parameter is shown verbatim; a parameter
+   * core coerces before applying is clarified separately in {@link coercions},
+   * not folded into its line.
    */
   params: Array<Displayable>;
   /**
@@ -725,10 +729,53 @@ function allowedCharactersClass(field: LinkageField): Displayable | undefined {
 /**
  * Upper bound on the number of transform parameters surfaced per step. A real
  * function takes a handful; the cap (with an overflow marker) keeps an
- * arbitrarily large partner-supplied `params` record -- the schema bounds
- * neither the entry count nor the value content -- from flooding the screen.
+ * arbitrarily large partner-supplied `params` record -- the schema bounds the
+ * entry count only well above any real parameter list, and bounds no value's
+ * content -- from flooding the screen.
+ *
+ * The cap is applied AFTER the verdict-bearing params lead
+ * ({@link orderedParamEntries}), so it can only ever drop a row no consent
+ * verdict reads. Sized far above the widest of those leading sets, so a step's
+ * whole verdict-bearing set is shown whatever else it declares.
  */
 const MAX_DISPLAYED_PARAMS = 16;
+
+/**
+ * A step's declared params in the order they are displayed: the ones a consent
+ * verdict reads ({@link CONSENT_VERDICT_PARAM_NAMES}) first, then the rest in
+ * declaration order.
+ *
+ * The consent header names ONE marker per element and states the limits it keeps
+ * (see {@link elementBreadthMarker}); the compensating surface for a limit is the
+ * detail row carrying the param the verdict turned on -- a `parse_date`'s
+ * `outputFormat` above all, whose literal region is what a collapsing window
+ * reads. Leaving those rows in declaration order lets the party that authored
+ * the transform also author what precedes them, so the same party that shapes
+ * the header's understatement pushes its compensating row past
+ * {@link MAX_DISPLAYED_PARAMS} into the overflow marker by declaring enough
+ * entries ahead of it. The other half of that -- content ahead of the row
+ * spending the row's own display budget -- costs it nothing today, but only
+ * because each entry is escaped and length-bounded on its own, which is a
+ * property of where the display boundary sits rather than of the order. Leading
+ * with the verdict-bearing rows settles both at the source: nothing a partner
+ * declares is rendered ahead of a row a verdict rests on.
+ *
+ * The lookup is guarded by `Object.hasOwn` rather than a bare index because the
+ * function name is partner free text: an index signature would type a name that
+ * only reaches `Object.prototype` (`constructor`, `toString`) as a hit.
+ */
+function orderedParamEntries(step: TransformStep): Array<[string, unknown]> {
+  const entries = Object.entries(step.params ?? {});
+  const verdictBearing = new Set(
+    Object.hasOwn(CONSENT_VERDICT_PARAM_NAMES, step.function)
+      ? CONSENT_VERDICT_PARAM_NAMES[step.function]
+      : [],
+  );
+  return [
+    ...entries.filter(([name]) => verdictBearing.has(name)),
+    ...entries.filter(([name]) => !verdictBearing.has(name)),
+  ];
+}
 
 /**
  * Render a transform parameter value for display. Primitives become their plain
@@ -819,7 +866,7 @@ function summarizeTransform(
   positionalSafe: boolean,
   substitutesFallback: boolean,
 ): InvitationTransformSummary {
-  const entries = Object.entries(step.params ?? {});
+  const entries = orderedParamEntries(step);
   const shown = entries.slice(0, MAX_DISPLAYED_PARAMS);
   const params = shown.map((entry) =>
     redactAndSanitizeForDisplay(`${entry[0]}: ${describeParamValue(entry[1])}`),
@@ -982,21 +1029,23 @@ const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
  * `parse_date` that merely reformats between equivalent layouts -- routine
  * standardization, deliberately not flagged so the recommended setup stays clean).
  * It is also undefined when the element's pipeline matches NOTHING -- a
- * `parse_date` whose input format drops every record, unless a later `coalesce`
- * rescues it to a constant -- since that is a narrowing-to-empty, not a broadening,
- * and is surfaced separately by the dead-key advisory. `remove_affixes` is in that
- * routine set by deliberate decision: stripping titles and suffixes (Dr., Jr.) is a
- * BROADENING canonicalizer in the same family as accent and case folding -- it
- * makes superficially-different spellings match -- not a record-DROPPING narrower
- * like the flagged `filter_regex` / `null_if`, so it earns no marker despite
- * removing characters. It names any rule that materially changes which records
+ * `parse_date` whose input format drops every record, or a `substring` run whose
+ * composed window falls outside every layout such a step renders, unless a later
+ * `coalesce` rescues it to a constant -- since that is a narrowing-to-empty, not
+ * a broadening, and is surfaced separately by the dead-key advisory.
+ * `remove_affixes` is in that routine set by deliberate decision: stripping
+ * titles and suffixes (Dr., Jr.) is a BROADENING canonicalizer in the same
+ * family as accent and case folding -- it makes superficially-different
+ * spellings match -- not a record-DROPPING narrower like the flagged
+ * `filter_regex` / `null_if`, so it earns no marker despite removing
+ * characters. It names any rule that materially changes which records
  * match: where the direction is determinable from the terms it names the EFFECT
  * ("partial" for a truncation, or for a `parse_date` whose output layout drops a
  * date component its input carries and so matches on only part of the date; "any
  * date" for a `parse_date` that leaves every date on one value, whether its output
- * carries no date token at all or a slice reads only that output's literal
- * characters -- a stronger breadth than the partial drop; "fuzzy" /
- * "sound-alike" / "fallback" for an expansion), and where an arbitrary
+ * carries no date token at all or a later slice is measured to read the same
+ * characters out of every date -- a stronger breadth than the partial drop;
+ * "fuzzy" / "sound-alike" / "fallback" for an expansion), and where an arbitrary
  * partner-authored pattern or value list -- or a fill whose reach into the sliced
  * value is a property of each record rather than of the terms -- makes the
  * direction indeterminate it names the RULE directly ("pattern replacement",
@@ -1062,20 +1111,17 @@ const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
  *   a window reading only characters the inviter's own format supplied: a literal
  *   region (`ACME-YYYYMMDD`) or a bare separator leaves every record holding the
  *   same constant. That is a collapse, not a coarsening, so it is decided in the
- *   collapse tier above from the format's token positions
- *   ({@link substringCollapsesParsedDateToConstant}) and shows "any date".
- *   Membership here would still be wrong for it: the verdict turns on the
- *   window's position within the layout, which a name-only set cannot express,
- *   and joining the set would suppress "partial" for every plain format. Staying
- *   out also stops a slice after a merely reformatting `parse_date` from showing
- *   NO marker, since that step earns none of its own. The limit: that collapse is
- *   read only where the substring reaches its `parse_date` through substrings
- *   alone -- a contiguous run composes into one window of the layout, but any
- *   other intervening step ends the walk, and the header then still says
- *   "partial" for a window that lands in the literal region anyway. The detail
- *   row carrying the outputFormat is the surface that exposes that shape, since
- *   it shows the inviter-authored format the window reads from. The
- *   understatement is ledgered below with the header's other known ones.
+ *   collapse tier above by measuring what the declared steps leave the window
+ *   holding ({@link substringCollapsesParsedDateToConstant}) and shows "any
+ *   date"; a window the run then slices back out of the layout altogether reads
+ *   nothing for any record and is the dead pipeline the tier above that
+ *   suppresses. Membership here would still be wrong for it: the verdict turns
+ *   on the window as well as the steps ahead of it, which a name-only set cannot
+ *   express, and joining the set would suppress "partial" for every plain
+ *   format. Staying out also stops a slice after a merely reformatting
+ *   `parse_date` from showing NO marker, since that step earns none of its own.
+ *   The limits that measurement keeps are value-DEPENDENT drops, recorded with
+ *   the header's other known ones below.
  * - `coalesce` keeps it. It substitutes only where an earlier rule has EMPTIED the
  *   value, so a record that still carries an identifier is truncated literally --
  *   unlike `pad_left`, which rewrites the value of every record. The two orders are
@@ -1107,8 +1153,7 @@ const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
  * 2. The dead-pipeline suppression, which silences every marker below it.
  * 3. The rules that COLLAPSE records onto one constant, widest first: "any date"
  *    (every record, whether its output layout carries no date token at all or a
- *    slice reaching it through substrings alone reads only that layout's literal
- *    characters) then
+ *    slice of that layout is measured to leave every date on one value) then
  *    "fallback" (every record an earlier rule of the element emptied). A collapse
  *    leaves the records it touches matching each other whatever else the pipeline
  *    does to that constant, so a coarsening word below would understate it -- the
@@ -1143,21 +1188,39 @@ const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
  * compound rather than re-cut: the header names ONE marker, and every re-ordering
  * that closes this case masks some other element's honest one.
  *
- * A second known understatement, in the collapse tier rather than in the ranking.
- * A `substring` reaches its `parse_date` through substrings alone -- a contiguous
- * run composes into one window of the rendered layout -- and any OTHER step
- * between the two ends that walk (core's
- * {@link substringCollapsesParsedDateToConstant}), so
- * `[parse_date(output "ACME-YYYYMMDD"), to_upper_case, substring(1, 4)]` renders
- * "partial" although the runtime leaves every record on "ACME". Many such steps
- * do leave the window's characters where they sit -- a case fold over a date of
- * digits and separators, a trim of a layout with no outer whitespace, a
- * `filter_regex` or `null_if` that passes the value through -- but whether a
- * given function preserves a given layout is a per-function, per-format property,
- * and deciding it takes a layout-preservation table core does not have. So the
- * milder word stands, held by a test driving both halves rather than by this
- * note, and the detail row carrying the outputFormat is the surface that exposes
- * the format whose literal region the window reads.
+ * A second known limit, in the collapse tier rather than in the ranking, and one
+ * that runs in the OVER-claiming direction alone. The date collapse is MEASURED:
+ * core compiles the steps between the `parse_date` and the end of the substring
+ * run and runs them over probe dates
+ * ({@link substringCollapsesParsedDateToConstant}), so an intervening step that
+ * leaves the window's characters where they sit -- a case fold, a trim, a
+ * `remove_dashes` over a window it does not shift -- earns "any date" rather than
+ * the milder "partial". What the measurement cannot settle is a value-DEPENDENT
+ * drop: a `filter_regex` or `null_if` that passes the probes and drops a real
+ * record, one sitting BEFORE the `parse_date` where it reads the acceptor's own
+ * values, and one that drops every probe, each leave an element earning "any
+ * date" while records it would have collapsed are in fact dropped. Reading a
+ * drop off such a step instead would mean assuming what the data decides, the
+ * same claim {@link pipelineAlwaysDrops} declines for the same reason -- it would
+ * flag a legitimate pipeline as dead -- so the residual is kept on the side that
+ * understates nothing. What the inviter cannot do is buy the milder word by
+ * naming a probe: the probe dates ship in public source, so a dropped probe
+ * leaves the verdict to the survivors, and a run that drops them all takes the
+ * collapse word unless every one of its steps reads the layout rather than the
+ * value, which makes it the dead pipeline the tier above suppresses. Nor can the
+ * inviter buy it by making a probe UNMEASURABLE: a step that inflates a probe past
+ * the per-value ceiling, or a function name this build cannot compile or run,
+ * takes the collapse word rather than the milder one -- core resolves a
+ * can't-measure reading upward, so a `replace_regex` crafted to blow one probe
+ * over the ceiling while every real date still collapses shows "any date", not
+ * "pattern replacement". Every half is held by tests driving the shipped pipeline
+ * rather than by this note.
+ *
+ * Every limit here sends the reader to a per-step detail row -- an `outputFormat`
+ * above all, the format whose literal region a collapsing window reads. Those
+ * rows lead their step's params ({@link orderedParamEntries}) precisely so the
+ * party that authors the transform a limit understates cannot also author the
+ * row's suppression.
  */
 function elementBreadthMarker(
   element: LinkageKeyElement,
@@ -1178,25 +1241,30 @@ function elementBreadthMarker(
   // not more -- the opposite of a broadening, and a narrowing-to-empty the separate
   // dead-key advisory surfaces -- so it earns no marker, whatever rule a later step
   // would otherwise name: a substring/phonetic/... after a dead `parse_date`
-  // null-propagates, so the record is dropped regardless. Defer to core's
-  // pipelineAlwaysDrops, which also accounts for a rescuing `coalesce`, so the
-  // marker cannot drift from the runtime.
+  // null-propagates, so the record is dropped regardless, and a substring run that
+  // slices its own window back out of the rendered layout reads nothing for any
+  // record while its last link still looks like a truncation. Defer to core's
+  // pipelineAlwaysDrops, which measures the second of those and accounts for a
+  // rescuing `coalesce`, so the marker cannot drift from the runtime.
   if (pipelineAlwaysDrops(element.transform)) return undefined;
   // A `parse_date` that leaves every record on one constant value collapses to the
   // maximal match breadth, so it is checked first and outranks every other rule the
   // element might also carry: once every value collapses to one, a further
   // substring/fuzzy/expansion loosening is moot, so "any date" is the honest
   // dominant effect and is never understated as a milder word. Two shapes reach it
-  // -- an output layout carrying no date token at all, and a window sliced out of
-  // the layout's literal region, which reads the same characters of the inviter's
-  // own format for every date. (A `parse_date` that drops only some components, and
-  // a window that still reads part of the date, are the milder "partial" handled
-  // below at the parse_date position.)
+  // -- an output layout carrying no date token at all, and a substring run core
+  // measures to leave every date on one value, which the literal region of the
+  // inviter's own format usually supplies. (A `parse_date` that drops only some
+  // components, and a window that still reads part of the date, are the milder
+  // "partial" handled below at the parse_date position.) Every index is offered
+  // because the predicate itself decides which one ends a maximal substring run;
+  // a verdict taken inside one would announce a collapse its later links slice
+  // back out of range.
   const parseDateBreadths = steps.map(parseDateBreadth);
   if (
     parseDateBreadths.includes("any date") ||
-    steps.some((step, index) =>
-      substringCollapsesParsedDateToConstant(step, steps.slice(0, index)),
+    steps.some((_step, index) =>
+      substringCollapsesParsedDateToConstant(steps, index),
     )
   )
     return displayText`any date`;
