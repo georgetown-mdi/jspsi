@@ -1,11 +1,24 @@
-// The encoder that builds the two machine-readable stdout lines
-// `probe-host-key`'s `--json` form emits (apps/cli/src/commands/probeHostKey.ts:
-// probeJsonLine and probeDiagnosisJsonLine). The probe's excerpt field can carry
-// bytes an untrusted peer chose, so its line has to be safe as BYTES, not only
-// valid as JSON: `JSON.stringify` escapes U+0000-U+001F, the quote, and the
-// backslash, which is enough to keep a line one line, but it passes DEL and the
-// C1 range straight through, and a value some untrusted party chose can carry
-// either.
+// The encoder that builds every machine-readable JSON line the CLI prints: the
+// two `probe-host-key --json` emits (apps/cli/src/commands/probeHostKey.ts:
+// probeJsonLine and probeDiagnosisJsonLine) and the `doctor --json` verdict
+// (apps/cli/src/doctor/verdict.ts: verdictJson). Each carries text chosen
+// somewhere other than this codebase -- the probe's excerpt is a latin1 decode
+// of bytes an untrusted peer sent, and a doctor check's meaning and action
+// interpolate the operator's own SMB_* values and, on two arms, an smbclient
+// NT_STATUS token that is ASCII by construction -- so these lines have to be
+// safe as BYTES, not only valid as JSON: `JSON.stringify` escapes
+// U+0000-U+001F, the quote, and the backslash, which is enough to keep a line
+// one line, but it passes DEL and the C1 range straight through, and a value
+// some other party chose can carry either.
+//
+// One machine-readable stream sits outside that set and is named rather than
+// covered: the opt-in fd-3 NDJSON events (apps/cli/src/eventStream.ts), which
+// serialize with a bare `JSON.stringify`. Their text arrives display-escaped
+// from composition (`redactAndSanitizeForDisplay` / `sanitizeErrorForDisplay`,
+// whose output is printable ASCII), so what holds those bytes is that boundary
+// one layer up rather than this encoder -- which is a property of the fields
+// that stream carries today, pinned there rather than here (eventStream.test.ts,
+// "every event serializes to a printable-ASCII line").
 //
 // This escapes them the way JSON already escapes a control byte, so the property
 // costs nothing at the consumer: `\uHHHH` is JSON's own escape, and the document

@@ -351,6 +351,31 @@ test("no raw ESC or newline survives serialization of a hostile event", () => {
   expect(line.includes("\n")).toBe(false);
 });
 
+test("every event serializes to a printable-ASCII line", () => {
+  // This stream is the machine-readable line the printable-ASCII encoder behind
+  // the --json stdout lines (apps/cli/src/util/jsonLine.ts) names as what it
+  // excludes: its text is display-escaped where each event is composed instead,
+  // and bare JSON.stringify passes DEL, the C1 range and U+2028 through, so the
+  // composition pass is the whole of what keeps those bytes off the descriptor.
+  // Held here, over the fields this stream carries, rather than in the encoder's
+  // header prose.
+  const PRINTABLE_ASCII_ONLY = /^[\x20-\x7e]*$/;
+  const hostile =
+    `${ESC_INJECTION}\n${RLO_INJECTION}` +
+    `${String.fromCharCode(0x7f)}${String.fromCharCode(0x9b)} \u{1f600}`;
+  const events: StreamEvent[] = [
+    buildStagesEvent([{ id: hostile, label: hostile }]),
+    buildStageEvent(hostile, hostile),
+    buildStageEndEvent(hostile, 1234),
+    buildWarningEvent(hostile),
+    buildMetricsEvent(1000, 2, 1),
+    buildResultEvent(false, { intersectionCount: 7, reportedByPartner: true }),
+    buildErrorEvent(new Error(hostile), "run"),
+  ];
+  for (const event of events)
+    expect(PRINTABLE_ASCII_ONLY.test(JSON.stringify(event))).toBe(true);
+});
+
 // --- fail-closed missing-fd path ---------------------------------------------
 
 test("assertEventStreamFdOpen throws a UsageError when fd 3 is not open", () => {

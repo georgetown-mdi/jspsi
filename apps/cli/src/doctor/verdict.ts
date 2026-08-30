@@ -5,6 +5,8 @@
 
 import { redactPrivateKeyMaterial } from "@psilink/core";
 
+import { asciiSafeJsonLine } from "../util/jsonLine";
+
 /**
  * Schema version of the `--json` verdict. A consumer reads this field first and
  * refuses a version it does not know; every additive field is compatible within
@@ -32,8 +34,18 @@ export type DoctorCheckStatus = "ok" | "warn" | "fail" | "skipped";
  */
 export type DoctorOverall = "ok" | "fix_and_retry" | "fatal";
 
+// The two shapes the emitted document is made of are type aliases rather than
+// interfaces for one reason: an object type alias carries the implicit index
+// signature asciiSafeJsonLine's JsonLineObject parameter needs, an interface
+// does not. What withholds a check record's human-only fields is verdictOf's
+// explicit field picking: the inner `satisfies DoctorCheck` on the map
+// callback's literal pins that at compile time (the outer annotation is
+// redundant with the return-type annotation), and the emitted-document
+// equality test covers what it misses -- a `checks: report.checks`
+// passthrough typechecks clean.
+
 /** One check as it appears in the `--json` verdict. */
-export interface DoctorCheck {
+export type DoctorCheck = {
   /** Stable identifier; the id set per mode is fixed and ordered. */
   id: string;
   status: DoctorCheckStatus;
@@ -41,7 +53,7 @@ export interface DoctorCheck {
   meaning?: string;
   /** What to do about it. */
   action?: string;
-}
+};
 
 /**
  * A check plus the fields that exist only for the human rendering. `summary` is
@@ -66,12 +78,12 @@ export interface DoctorReport {
 }
 
 /** The `--json` document. */
-export interface DoctorVerdict {
+export type DoctorVerdict = {
   version: number;
   mode: DoctorMode;
   overall: DoctorOverall;
   checks: DoctorCheck[];
-}
+};
 
 // Record builders shared by both batteries.
 
@@ -153,18 +165,34 @@ export function verdictOf(report: DoctorReport): DoctorVerdict {
     version: DOCTOR_VERDICT_VERSION,
     mode: report.mode,
     overall: overallOf(report),
-    checks: report.checks.map((check) => ({
-      id: check.id,
-      status: check.status,
-      ...(check.meaning !== undefined ? { meaning: check.meaning } : {}),
-      ...(check.action !== undefined ? { action: check.action } : {}),
-    })),
-  };
+    checks: report.checks.map(
+      (check) =>
+        ({
+          id: check.id,
+          status: check.status,
+          ...(check.meaning !== undefined ? { meaning: check.meaning } : {}),
+          ...(check.action !== undefined ? { action: check.action } : {}),
+        }) satisfies DoctorCheck,
+    ),
+  } satisfies DoctorVerdict;
 }
 
-/** The single stdout line the `--json` form emits. */
+/**
+ * The single stdout line the `--json` form emits. A check's `meaning` and
+ * `action` interpolate the operator's own `SMB_*` values (`SMB_PATH` reaches
+ * one verbatim, and its validation rejects only the C0 controls and DEL, so the
+ * C1 range, U+2028/U+2029 and an astral character all pass through) and, on the
+ * authentication and share_open arms, the smbclient NT_STATUS token, which is
+ * bounded to NT_STATUS_[A-Z_]+ where it is extracted and so is ASCII by
+ * construction. The line rides {@link asciiSafeJsonLine}, which leaves every byte of it
+ * printable ASCII while the keys, the value types, and the parsed values stay
+ * exactly what `JSON.stringify` alone produces. The escapes are JSON's own, so
+ * this is no second escaping altitude: a launcher that renders a parsed field
+ * to a human still escapes it once, at its own sink (see CONTRIBUTING.md,
+ * Operator-facing escaping).
+ */
 export function verdictJson(report: DoctorReport): string {
-  return JSON.stringify(verdictOf(report));
+  return asciiSafeJsonLine(verdictOf(report));
 }
 
 /**
