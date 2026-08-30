@@ -83,7 +83,7 @@ import type { DisclosureAccountingRead } from "@psi/disclosureAccountingStore";
 import type { ManagedBackupMarker } from "@psi/managedBackupState";
 import type { ManagedInputSource } from "@psi/managedInputHandle";
 import type { ManagedReinvite } from "@psi/managedReinvite";
-import type { ManagedRunFailure } from "./managedRunLaunchModel";
+import type { ManagedRunFailureAlert } from "./managedRunLaunchModel";
 import type { ManagedSpentState } from "@psi/managedLocalState";
 import type { RunOutputs } from "./runOutputs";
 
@@ -176,7 +176,9 @@ export function ManagedRunSurface({ id }: { id: string }) {
     migrationRefusal !== undefined && migrationRefusal !== "run-in-flight";
   const [outputs, setOutputs] = useState<RunOutputs>();
   const [finishedAt, setFinishedAt] = useState<Date>();
-  const [failure, setFailure] = useState<ManagedRunFailure>();
+  // The alert states alone: the hand-off state carries no copy and never lands here,
+  // because reaching it settles the surface onto the spent state below.
+  const [failure, setFailure] = useState<ManagedRunFailureAlert>();
   // The run's non-fatal notices, in arrival order. The driver raises one only for
   // a run that produced its outputs, and its close resolves after those outputs
   // reach here, so a notice lands on the completion surface beside the results.
@@ -949,7 +951,7 @@ function FailureRecovery({
   onReinvite,
   onResolveConfirmation,
 }: {
-  failure: ManagedRunFailure;
+  failure: ManagedRunFailureAlert;
   record: ManagedExchangeRecord;
   confirmationGated: boolean;
   compromiseResponse: boolean;

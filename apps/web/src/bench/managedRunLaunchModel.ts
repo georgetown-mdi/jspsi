@@ -1,9 +1,10 @@
 /**
  * The pure model behind the managed re-run's launch surface: the classification of a
  * launch outcome into what the surface shows -- the copy and the recovery affordance
- * for each state. No React, no I/O -- the run driver and the store live in the
- * component; this decides which state, its copy, and its recovery, so the surface
- * stays thin and the classification is unit-testable.
+ * for each state, bar the hand-off state, which the surface consumes by settling onto
+ * the stored spent state instead of rendering. No React, no I/O -- the run driver and
+ * the store live in the component; this decides which state, its copy, and its
+ * recovery, so the surface stays thin and the classification is unit-testable.
  *
  * Two layers feed a surface state:
  *
@@ -92,10 +93,10 @@ export interface ManagedRunRecordReadings {
   afterRun: ManagedExchangeRecord;
 }
 
-/** A classified launch state, ready to render: the state's kind (the pre-connection
- * benign states plus the derived tiers), its plain copy, and the recovery affordance
- * the host renders. */
-export interface ManagedRunFailure {
+/** A classified launch state the host renders as an alert: the state's kind (the
+ * pre-connection benign states plus the derived tiers), its plain copy, and the
+ * recovery affordance beneath it. */
+export interface ManagedRunFailureAlert {
   /** The state's kind. The benign states read from the error, plus the recorded
    * tiers derived from the record's bookkeeping. */
   kind:
@@ -103,7 +104,6 @@ export interface ManagedRunFailure {
     | "input"
     | "terms-shortfall"
     | "consent"
-    | "handed-off"
     | "custody-unreadable"
     | "already-running"
     | "missed"
@@ -119,10 +119,28 @@ export interface ManagedRunFailure {
   recovery: ManagedRunRecovery;
 }
 
+/** The classified hand-off state, which carries no copy: the surface consumes this
+ * kind by settling onto the stored spent state ({@link ./ManagedRunSurface.tsx}),
+ * which names the hand-off that spent the copy, what it left behind, and what the
+ * refused run did. Copy authored here would be prose no surface can reach, and the
+ * absent `title` and `message` are what keep it that way -- a host that renders this
+ * state as an alert instead does not typecheck. */
+export interface ManagedRunHandedOffFailure {
+  /** The state's kind, the discriminant the host branches on. */
+  kind: "handed-off";
+  /** Nothing here is retried and nothing here is re-settled. */
+  recovery: "none";
+}
+
+/** A classified launch state: an alert with its copy, or the hand-off state the
+ * surface branches on. */
+export type ManagedRunFailure =
+  ManagedRunFailureAlert | ManagedRunHandedOffFailure;
+
 /** The benign expiry state's copy: a lapsed stored secret, plain re-invite framing
  * (see docs/MANAGED_EXCHANGE.md, "Expiry is its own state"), naming the lapsed instant
  * the error carries so the operator sees when the bound passed. */
-function expiredFailure(expires: string): ManagedRunFailure {
+function expiredFailure(expires: string): ManagedRunFailureAlert {
   return {
     kind: "expired",
     title: "This exchange's stored secret has lapsed",
@@ -137,26 +155,15 @@ function expiredFailure(expires: string): ManagedRunFailure {
 
 /** The benign hand-off state: an export gave this browser's copy of the exchange
  * away, so the run refused before reading the input file and before connecting --
- * the single-owner invariant holding rather than a failure to recover from. The
- * copy names where the exchange runs instead in general terms and offers nothing
- * to take it back with: taking a handed-off exchange back is a deliberate act on
- * that exchange's own surface, not something a refused run decides on the
- * operator's behalf. Recovery is `"none"` -- nothing here is retried, and nothing
- * here is re-settled.
+ * the single-owner invariant holding rather than a failure to recover from.
  *
- * It names no next step on this exchange's own surface, because reaching this state
- * is what settles the run surface onto the stored spent state
- * ({@link ./ManagedRunSurface.tsx}) -- which names the hand-off that spent the copy
- * and the recovery that hand-off actually has. */
-const HANDED_OFF_FAILURE: ManagedRunFailure = {
+ * It carries no copy and offers nothing to take the exchange back with. Taking a
+ * handed-off exchange back is a deliberate act on that exchange's own surface, not
+ * something a refused run decides on the operator's behalf; and reaching this state
+ * is what settles the run surface onto the stored spent state, which is where the
+ * operator is told where the exchange runs and what the refused run did. */
+const HANDED_OFF_FAILURE: ManagedRunHandedOffFailure = {
   kind: "handed-off",
-  title: "This exchange was handed off",
-  message:
-    "This browser's copy of this exchange was handed off, so it does not run " +
-    "here any more. This run stopped before reading your file and before " +
-    "connecting, and nothing left this device. The exchange runs where you " +
-    "handed it over to -- the device you moved it to, or the machine running it " +
-    "from the command line.",
   recovery: "none",
 };
 
@@ -169,7 +176,7 @@ const HANDED_OFF_FAILURE: ManagedRunFailure = {
  * moved. Recovery is `"none"` -- the entry that did not read is what has to become
  * readable, which no affordance on this surface supplies, and the copy says so
  * rather than offering a retry that meets the same entry. */
-const CUSTODY_UNREADABLE_FAILURE: ManagedRunFailure = {
+const CUSTODY_UNREADABLE_FAILURE: ManagedRunFailureAlert = {
   kind: "custody-unreadable",
   title: "Part of this exchange's stored copy could not be read",
   message:
@@ -184,7 +191,7 @@ const CUSTODY_UNREADABLE_FAILURE: ManagedRunFailure = {
 
 /** The benign "already running elsewhere" state: another tab or a scheduled run holds
  * the single-writer lock. Not a failure of this run. */
-const ALREADY_RUNNING_FAILURE: ManagedRunFailure = {
+const ALREADY_RUNNING_FAILURE: ManagedRunFailureAlert = {
   kind: "already-running",
   title: "This exchange is already running",
   message:
@@ -212,7 +219,7 @@ const ALREADY_RUNNING_FAILURE: ManagedRunFailure = {
  * Its disclosure claim is this run's, so it is issued from THIS run's no-show error
  * alone (see {@link classifyManagedRunFailure}) and never from a record's recorded
  * outcome, which belongs to whichever run stamped it. */
-const MISSED_FAILURE: ManagedRunFailure = {
+const MISSED_FAILURE: ManagedRunFailureAlert = {
   kind: "missed",
   title: "Your partner did not arrive",
   message:
@@ -227,7 +234,7 @@ const MISSED_FAILURE: ManagedRunFailure = {
 
 /** The benign input state's copy. Fixed and non-oracular: an input rejection's
  * partner-influenced detail (the unsatisfied field names) is never echoed. */
-const INPUT_FAILURE: ManagedRunFailure = {
+const INPUT_FAILURE: ManagedRunFailureAlert = {
   kind: "input",
   title: "Your input file could not be used",
   message:
@@ -245,7 +252,7 @@ const INPUT_FAILURE: ManagedRunFailure = {
  * only ways forward are a conforming file or terms settled with the partner. Its
  * own recorded tier reaches it too, so an unattended run's shortfall reads here at
  * the next visit rather than through the input state's re-pick. */
-const TERMS_SHORTFALL_FAILURE: ManagedRunFailure = {
+const TERMS_SHORTFALL_FAILURE: ManagedRunFailureAlert = {
   kind: "terms-shortfall",
   title: "Your input file cannot match on everything this exchange agreed to",
   message:
@@ -265,7 +272,7 @@ const TERMS_SHORTFALL_FAILURE: ManagedRunFailure = {
  * than echoing a list the operator reads faster from their own file. It names
  * re-confirming the disclosure and says the run is not worth repeating as-is, because
  * the same input refuses identically. */
-const CONSENT_FAILURE: ManagedRunFailure = {
+const CONSENT_FAILURE: ManagedRunFailureAlert = {
   kind: "consent",
   title: "What this run would send is not what this exchange agreed to send",
   message:
@@ -284,7 +291,7 @@ const CONSENT_FAILURE: ManagedRunFailure = {
  * explains the failure). It is the one-sided persist alone: the other local-storage
  * refusal a run can meet rotates nothing, and reads as
  * {@link CUSTODY_UNREADABLE_FAILURE}. */
-const STORAGE_FAILURE: ManagedRunFailure = {
+const STORAGE_FAILURE: ManagedRunFailureAlert = {
   kind: "storage",
   title: "The last run could not be saved",
   message:
@@ -299,7 +306,7 @@ const STORAGE_FAILURE: ManagedRunFailure = {
  * imported) and has not successfully run since, so its secret may be one the
  * partnership has already moved past. Plain, specific copy naming re-invite -- no
  * attack checklist. */
-const IMPORTED_FAILURE: ManagedRunFailure = {
+const IMPORTED_FAILURE: ManagedRunFailureAlert = {
   kind: "imported",
   title: "This exchange was restored from a backup",
   message:
@@ -314,7 +321,7 @@ const IMPORTED_FAILURE: ManagedRunFailure = {
  * failed-closed handshake. Fixed, friendly copy -- the raw error can embed partner- or
  * server-controlled bytes and reads as an internal message, so it stays in the
  * dev-gated console. A temporary connection problem, retried in place. */
-const TRANSPORT_FAILURE: ManagedRunFailure = {
+const TRANSPORT_FAILURE: ManagedRunFailureAlert = {
   kind: "transport",
   title: "The run could not be completed",
   message:
@@ -330,7 +337,7 @@ const TRANSPORT_FAILURE: ManagedRunFailure = {
  * invents no new security guidance. The forwardable message and the two-outcome gate
  * are composed in {@link ../psi/managedFailureConfirmation.ts}; this copy is the lead
  * the surface shows above them. */
-const UNEXPLAINED_FAILURE: ManagedRunFailure = {
+const UNEXPLAINED_FAILURE: ManagedRunFailureAlert = {
   kind: "unexplained",
   title: "This run failed and needs you to check with your partner",
   message:
@@ -440,6 +447,40 @@ function missedFailure(
   return MISSED_FAILURE;
 }
 
+/** The record-derived tiers that attest what THIS run disclosed -- that it stopped
+ * before reading the input file and before connecting, that nothing left this device
+ * and the partner was not contacted -- and which therefore give way to the generic
+ * tier once this run's data exchange has started.
+ *
+ * The attestation is about the run being classified, while the tier is derived from a
+ * stored kind, and the two coincide only while that stamp is this run's. A failed
+ * run's bookkeeping write is best-effort (see {@link ../psi/managedRun.ts}) and the
+ * host falls back to its pre-run record when the post-failure reload rejects, so a
+ * stamp an earlier run left can still be standing when a failure from
+ * mid-data-exchange is classified. Each of these kinds is only ever stamped before
+ * the boundary, which makes that narrow rather than impossible -- and since the phase
+ * is what licenses the claim, the phase is what is read, not the guard the run that
+ * stamped the kind applied.
+ *
+ * The hand-off tier is here for a claim it does not carry in copy of its own: the
+ * surface reads that kind to settle onto the stored spent state
+ * ({@link ./ManagedRunSurface.tsx}), whose refused-run line attests exactly this.
+ *
+ * `"missed"` is deliberately absent. Its copy makes the same claim, but it is issued
+ * from THIS run's own no-show error and weighed against the record's standing desync
+ * evidence ({@link missedFailure}) rather than against the boundary -- the derived
+ * missed tier reaches the generic copy already ({@link tierFailure}).
+ *
+ * The re-invite tiers (`"expired"`, `"storage"`, `"imported"`), the input tier, and
+ * the unexplained tier are absent because none of their copy says anything about what
+ * this run disclosed: each reads the same on either side of the boundary. */
+const NON_DISCLOSURE_ATTESTING_TIERS: ReadonlyArray<ManagedFailureTier> = [
+  "handed-off",
+  "custody-unreadable",
+  "consent",
+  "terms-shortfall",
+];
+
 /**
  * Classify a launch failure into the surface's {@link ManagedRunFailure}. The
  * benign states are read through {@link benignRerunOutcome} (the single place the
@@ -466,16 +507,8 @@ function missedFailure(
  * device is read off the error only from before the boundary. The record cannot
  * stand in for it -- its `lastRun` is whatever the last write managed to stamp,
  * which is why the no-show copy is issued from the live error rather than from the
- * derived missed tier. A `"consent"` or `"terms-shortfall"` tier read from the
- * record's stored kind carries the guard the run that stamped it applied, so this
- * run's boundary does not gate that copy.
- *
- * The `"handed-off"` tier is the one derived tier the boundary does gate, because
- * the surface reads that kind to settle onto the stored spent state
- * ({@link ./ManagedRunSurface.tsx}), whose copy attests that THIS run stopped
- * before reading the input file and before connecting. No stamp another run left
- * licenses that claim, so past the boundary the derived hand-off gives way to the
- * generic tier exactly as the error-read state does.
+ * derived missed tier, and why the derived tiers making that same claim take this
+ * run's boundary too ({@link NON_DISCLOSURE_ATTESTING_TIERS}).
  *
  * A no-show is the one benign state that does not simply win: it is read against
  * the desync evidence the record already holds ({@link missedFailure}), because
@@ -500,7 +533,9 @@ export function classifyManagedRunFailure(
   const { afterRun } = records;
   const tier = deriveManagedFailureTier(afterRun, local, now);
   return tierFailure(
-    tier === "handed-off" && dataExchangeStarted ? "transport" : tier,
+    dataExchangeStarted && NON_DISCLOSURE_ATTESTING_TIERS.includes(tier)
+      ? "transport"
+      : tier,
     afterRun,
   );
 }
