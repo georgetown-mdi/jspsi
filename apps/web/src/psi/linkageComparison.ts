@@ -28,10 +28,12 @@ import type {
  * rule-set citation -- a partner-visible provenance claim lost over a property
  * that says nothing.
  *
- * So the prune lives on this side of the boundary, where the values are drafts
- * rather than documents, and every membership compare the editor makes comes
- * through here rather than reaching for core's strict predicate directly: one
- * place answers for the whole class, not whichever call site is asked next.
+ * So the prune is meant to live on this side of the boundary, where the values
+ * are drafts rather than documents: the editor's membership compares are
+ * expected to route through here rather than reaching for core's strict
+ * predicate directly, so the prune is applied uniformly across the class.
+ * Nothing currently enforces that routing -- a direct import of core's predicate
+ * would silently skip the prune.
  */
 
 /**
