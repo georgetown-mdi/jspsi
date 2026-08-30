@@ -339,6 +339,53 @@ export function safeParseManagedExchangeRecord(raw: unknown) {
 }
 
 /**
+ * A per-entry read of the stored list: the entries that parsed as v1 records, and
+ * the stored keys of the entries that did not. The unreadable half is the STORED
+ * KEY rather than the entry's own `id`, which a failed parse leaves untrusted --
+ * the same reason the diagnostic read's unreadable marker carries the key (see
+ * {@link ManagedExchangeDiagnosticEssentials}).
+ */
+export interface ManagedExchangeReadableRecords {
+  /** The entries that parsed, in the order the store yielded them. */
+  records: Array<ManagedExchangeRecord>;
+  /** The stored keys of the entries that did not parse. */
+  unreadableIds: Array<string>;
+}
+
+/**
+ * Partition a store's parallel key and value arrays into the records that parse
+ * and the stored keys of those that do not -- the tolerant counterpart of mapping
+ * {@link parseManagedExchangeRecord} over the values, which rejects the whole read
+ * on the first entry that fails.
+ *
+ * Tolerance is for the UNATTENDED read alone (see
+ * {@link ./managedScheduleRunner.ts}), where the two readings have very different
+ * costs: skipping one entry stops that exchange's scheduled runs, while rejecting
+ * wholesale stops every scheduled exchange in the store, standing, with nobody
+ * present to recover it. The attended list read stays strict, so an operator still
+ * meets the read-failed recovery surface that identifies and discards the
+ * offending entry.
+ *
+ * Never throws: every parse is per-entry, so an unreadable value becomes a
+ * reported key rather than a rejection.
+ */
+export function partitionReadableManagedExchanges(
+  keys: ReadonlyArray<IDBValidKey>,
+  values: ReadonlyArray<unknown>,
+): ManagedExchangeReadableRecords {
+  const records: Array<ManagedExchangeRecord> = [];
+  const unreadableIds: Array<string> = [];
+  for (let index = 0; index < keys.length; index += 1) {
+    try {
+      records.push(parseManagedExchangeRecord(values[index]));
+    } catch {
+      unreadableIds.push(String(keys[index]));
+    }
+  }
+  return { records, unreadableIds };
+}
+
+/**
  * The display essentials a diagnostic read surfaces for one stored entry, when the
  * entry parses: only the fields a recovery listing renders -- the label, this
  * party's side, and the last run's instant when recorded. Deliberately NOT the

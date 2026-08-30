@@ -362,16 +362,25 @@ on `intervalDays` and `windowSeconds`: the window containing an instant, and the
 first window after it, both then land within one period plus one width of that
 instant, which is inside the representable range for any clock reading a machine
 can hold. A period or width past the ceilings is refused by the schema, so it
-never reaches a surface as a record at all: the list read parses strictly and
-rejects wholesale on it, so the whole read fails and the saved-exchanges list
-routes to its read-failed recovery surface, whose separate per-entry diagnostic
-read is where the offending record is identified and discarded. The unattended
-tick reads the same strict list, so while such a record sits in the store no
-exchange runs unattended -- every wake's read fails with only a diagnostic log
-line naming it -- a blast radius reachable only from an artifact imported or
-hand-edited before these ceilings existed. The display
-derivation also refuses a reading instant within one period plus one width of the
-end of the representable range, which is the other half of the pair.
+never reaches a surface as a record at all: the attended list read parses
+strictly and rejects wholesale on it, so the whole read fails and the
+saved-exchanges list routes to its read-failed recovery surface, whose separate
+per-entry diagnostic read is where the offending record is identified and
+discarded. The display derivation also refuses a reading instant within one
+period plus one width of the end of the representable range, which is the other
+half of the pair.
+
+**The unattended read is per-entry, not strict.** A wake reads the store one
+entry at a time: an entry this build cannot parse -- an out-of-bounds period or
+width from an artifact imported or hand-edited before these ceilings existed, or
+any other record an app upgrade invalidated -- is **skipped**, reported as its own
+skip in the wake's diagnostic line, and every other due record still runs. Such an
+entry stays unparseable until an operator discards it, so a wholesale rejection
+here would be standing rather than transient: no exchange in the store would run
+unattended for as long as the entry sat there, with nobody present to meet the
+recovery surface. The skip costs one exchange its scheduled runs; the rejection
+would cost all of them. The attended read stays strict precisely so the operator
+does meet that surface, which is where a skipped entry is resolved.
 
 #### Catch-up on wake
 

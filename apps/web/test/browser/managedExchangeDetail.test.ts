@@ -446,6 +446,22 @@ describe("managed exchange detail schedule entry", () => {
     expect(saved[0].schedule).toBeNull();
   });
 
+  test("a save with scheduling off on a record that never had one carries no schedule edit", async () => {
+    // The toggle is a three-way edit and the untouched-off corner is its quiet
+    // one: `null` would be a drop of a schedule that is not there, which the
+    // store would apply as a write. Omitting the key leaves the record's
+    // attended-only shape exactly as it is.
+    const { saved } = renderEntry();
+
+    await expect.element(scheduleCheckbox()).not.toBeChecked();
+    await page.getByRole("textbox", { name: "Label" }).fill("Attended only");
+    await page.getByRole("button", { name: "Save settings" }).click();
+
+    await vi.waitFor(() => expect(saved).toHaveLength(1));
+    expect(saved[0].label).toBe("Attended only");
+    expect("schedule" in saved[0]).toBe(false);
+  });
+
   test("a save that touched only the label carries no schedule edit at all", async () => {
     // The planned window and the miss count are the runner's bookkeeping; a label
     // edit must not reset either, must not re-resolve the agreed instant, and must

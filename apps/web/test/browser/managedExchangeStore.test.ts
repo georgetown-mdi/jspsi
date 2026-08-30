@@ -16,6 +16,7 @@ import {
   getManagedExchange,
   listManagedExchanges,
   listManagedExchangesDiagnostic,
+  listReadableManagedExchanges,
   openManagedExchangeDatabase,
   persistManagedExchangeRotation,
   persistManagedExchangeScheduleAdvance,
@@ -27,6 +28,7 @@ import {
 } from "@psi/managedExchangeStore";
 import {
   MAX_LABEL_LENGTH,
+  MAX_SCHEDULE_INTERVAL_DAYS,
   composeManagedExchangeFile,
 } from "@psi/managedExchangeRecord";
 import {
@@ -48,6 +50,7 @@ import {
 
 import type { ExchangeRecord, WebRTCExchangeLocator } from "@psilink/core";
 import type {
+  ManagedExchangeRecord,
   ManagedExchangeSchedule,
   NewManagedExchange,
 } from "@psi/managedExchangeRecord";
@@ -710,6 +713,69 @@ describe("reader rejects unknown on a store read", () => {
     await rawPut({ ...created, schemaVersion: "psilink-managed-exchange/v2" });
     await expect(getManagedExchange(created.id)).rejects.toThrow();
     await expect(listManagedExchanges()).rejects.toThrow();
+  });
+});
+
+describe("the unattended read is per entry", () => {
+  /** Seed an entry carrying a period past the schema's ceiling under its own key
+   * -- the shape a pre-ceiling import or a hand-edit leaves in the store, written
+   * past the validating path that would refuse it. */
+  async function seedOutOfBoundsRecord(
+    from: ManagedExchangeRecord,
+  ): Promise<void> {
+    await rawPut({
+      ...from,
+      id: "legacy-out-of-bounds",
+      schedule: { ...schedule, intervalDays: MAX_SCHEDULE_INTERVAL_DAYS + 1 },
+    });
+  }
+
+  test("skips the entry it cannot parse and returns every record it can", async () => {
+    const good = await createManagedExchange(
+      newExchange({ label: "Good", schedule }),
+    );
+    await seedOutOfBoundsRecord(good);
+
+    // The attended read still rejects wholesale: that contract is what routes an
+    // operator to the read-failed recovery surface, and it is deliberately left
+    // as it is.
+    await expect(listManagedExchanges()).rejects.toThrow();
+
+    const read = await listReadableManagedExchanges();
+    expect(read.records.map((record) => record.id)).toEqual([good.id]);
+    expect(read.unreadableIds).toEqual(["legacy-out-of-bounds"]);
+  });
+
+  test("reports nothing unreadable for a store of valid records", async () => {
+    const first = await createManagedExchange(newExchange({ label: "First" }));
+    const second = await createManagedExchange(
+      newExchange({ label: "Second" }),
+    );
+
+    const read = await listReadableManagedExchanges();
+
+    expect(read.unreadableIds).toEqual([]);
+    expect(read.records.map((record) => record.id).sort()).toEqual(
+      [first.id, second.id].sort(),
+    );
+  });
+
+  test("names the key a delete acts on, so the read recovers once it is used", async () => {
+    const good = await createManagedExchange(
+      newExchange({ label: "Good", schedule }),
+    );
+    await seedOutOfBoundsRecord(good);
+    const [unreadableId] = (await listReadableManagedExchanges()).unreadableIds;
+
+    await deleteManagedExchange(unreadableId);
+
+    const read = await listReadableManagedExchanges();
+    expect(read.unreadableIds).toEqual([]);
+    expect(read.records.map((record) => record.id)).toEqual([good.id]);
+    // And the attended read recovers with it: one discard settles both.
+    expect((await listManagedExchanges()).map((record) => record.id)).toEqual([
+      good.id,
+    ]);
   });
 });
 

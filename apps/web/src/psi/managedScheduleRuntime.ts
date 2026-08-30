@@ -31,7 +31,7 @@ import log from "loglevel";
 import { appendSanitizedRunWarning } from "@bench/runWarnings";
 
 import {
-  listManagedExchanges,
+  listReadableManagedExchanges,
   persistManagedExchangeScheduleAdvance,
 } from "./managedExchangeStore";
 import { CLOSE_OUTCOME_WARNINGS } from "./exchangeLifecycle";
@@ -151,13 +151,15 @@ export function startManagedScheduleRuntime(
 }
 
 /** The platform seams: the store, the clock, an abort-aware delay, and the
- * browser run driver. */
+ * browser run driver. The record read is the store's per-entry one, never the
+ * strict list the attended surfaces take: an unattended wake has nobody present
+ * to meet the read-failed recovery surface a wholesale rejection routes to. */
 export function browserScheduleTickSeams(
   signal: AbortSignal,
 ): ManagedScheduleTickSeams {
   return {
     now: () => Date.now(),
-    listRecords: listManagedExchanges,
+    listRecords: listReadableManagedExchanges,
     listLocalState: listManagedLocalState,
     persistAdvance: persistManagedExchangeScheduleAdvance,
     delay: (ms) => delayUntilAborted(ms, signal),
@@ -211,10 +213,22 @@ async function runUnattendedAttempt(
   }
 }
 
-/** Write one tick's entries to the diagnostic log: a failed bookkeeping write is
- * the operator's to know about, the rest are triage detail. */
+/** Write one tick's entries to the diagnostic log: a failed bookkeeping write
+ * and a stored entry that could not be read are the operator's to know about,
+ * the rest are triage detail. */
 function reportTick(entries: Array<ManagedScheduleTickEntry>): void {
   for (const entry of entries) {
+    if (entry.skipped === "unreadable") {
+      // Standing rather than transient: the entry is skipped at this wake and
+      // every wake after it until the record is discarded, which is the saved
+      // exchanges list's read-failed recovery surface.
+      log.warn(
+        `scheduled managed exchange ${entry.id}: the stored record cannot be ` +
+          `read, so it is skipped until it is discarded from the saved ` +
+          `exchanges list; the other exchanges still run`,
+      );
+      continue;
+    }
     if (entry.skipped === "bookkeeping-failed") {
       log.warn(
         `scheduled managed exchange ${entry.id}: schedule bookkeeping failed ` +
