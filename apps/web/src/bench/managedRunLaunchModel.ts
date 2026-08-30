@@ -147,7 +147,7 @@ const HANDED_OFF_FAILURE: ManagedRunFailure = {
     "This browser's copy of this exchange was handed off, so it does not run " +
     "here any more. This run stopped before reading your file and before " +
     "connecting, and nothing left this device. The exchange runs where you " +
-    "handed it over to - the device you moved it to, or the machine running it " +
+    "handed it over to -- the device you moved it to, or the machine running it " +
     "from the command line. Open this exchange again to see which hand-off it " +
     "was and what it left you with.",
   recovery: "none",

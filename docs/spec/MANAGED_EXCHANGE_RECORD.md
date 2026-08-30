@@ -500,10 +500,10 @@ Two boundaries the occupancy holds:
 
 Within those, an attempt is re-made only for a partner who never arrived and for
 a failure with no determinate local cause. A lapsed `expires`, a copy an export
-handed off, an unusable input, a shortfall against the standing terms, a refused
-disclosure, a failed rotation persist, and a handshake that failed closed each
-reproduce identically on the next attempt, so each ends the window's occupancy
-where it happened.
+handed off, a hand-off state the run could not read, an unusable input, a
+shortfall against the standing terms, a refused disclosure, a failed rotation
+persist, and a handshake that failed closed each reproduce identically on the
+next attempt, so each ends the window's occupancy where it happened.
 
 The hand-off is the one of them a window can meet after starting cleanly, and it
 is why the spent state is read per ATTEMPT rather than per tick: the runner's own
@@ -708,6 +708,18 @@ The artifact's shape and custody model:
   `snake_case` conversion, so a `camelCase` `key` block is what maps onto a valid
   key file with no renaming. Only the embedded `exchangeDocument` is `snake_case`,
   because the CLI loads it as YAML through `camelizeKeys`.
+- **What a reconstructed `lastRun` can and cannot assert.** The `local.lastRun`
+  block is validated against the record's own `lastRun` schema rather than a
+  narrower one, so an artifact is accepted carrying every outcome and
+  `failureKind` the [record shape](#persisted-across-runs) names, `"handed-off"`
+  among them, and an import carries what it read onto the reconstructed record
+  verbatim. That widens what the surfaces display and nothing else: the run
+  path's custody refusal reads the [spent sibling
+  entry](#the-backup-marker-the-spent-state-and-the-import-marker-local-siblings-never-in-the-artifact),
+  never `lastRun`, so an artifact asserting `"handed-off"` misdescribes the tier
+  shown for a record that is in the operator's own custody. It cannot make a
+  record run that would otherwise refuse, and it cannot stop a refusal the spent
+  entry earns.
 - **CLI-separable format.** The record is the CLI's config-plus-key pair kept
   as one browser object, and its export stays consumable by the CLI toolchain
   rather than becoming a third format: the embedded `exchangeDocument` is a

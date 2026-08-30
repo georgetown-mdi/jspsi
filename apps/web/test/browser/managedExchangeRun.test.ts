@@ -5,20 +5,23 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
 
 import {
-  ManagedExchangeLockUnavailableError,
-  managedExchangeLockName,
-  withManagedExchangeLock,
-} from "@psi/managedExchangeLock";
+  MANAGED_EXCHANGE_LOCAL_STORE_NAME,
+  clearManagedExchanges,
+  createManagedExchange,
+  getManagedExchange,
+  openManagedExchangeDatabase,
+  spendManagedExchangeIfCurrent,
+} from "@psi/managedExchangeStore";
 import {
+  ManagedExchangeCustodyUnreadableError,
   ManagedExchangeSpentError,
   runManagedExchange,
 } from "@psi/managedExchangeRun";
 import {
-  clearManagedExchanges,
-  createManagedExchange,
-  getManagedExchange,
-  spendManagedExchangeIfCurrent,
-} from "@psi/managedExchangeStore";
+  ManagedExchangeLockUnavailableError,
+  managedExchangeLockName,
+  withManagedExchangeLock,
+} from "@psi/managedExchangeLock";
 import { ManagedInputError } from "@psi/managedInputGuard";
 import { RotationPersistError } from "@psi/managedRunRotate";
 import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
@@ -69,6 +72,27 @@ function deferred<T>(): {
     resolve = r;
   });
   return { promise, resolve };
+}
+
+/** Write a raw value into the sibling local-state store, bypassing the validating
+ * write path, so a test can stand up the entry a corruption or an app upgrade
+ * leaves behind and drive the real read against it. */
+async function putRawLocalState(id: string, value: unknown): Promise<void> {
+  const db = await openManagedExchangeDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(
+        MANAGED_EXCHANGE_LOCAL_STORE_NAME,
+        "readwrite",
+      );
+      transaction.objectStore(MANAGED_EXCHANGE_LOCAL_STORE_NAME).put(value, id);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  } finally {
+    db.close();
+  }
 }
 
 beforeEach(async () => {
@@ -640,6 +664,53 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     // The hand-off itself is untouched: the refusal records a run, not a spend.
     expect((await getManagedLocalState(created.id))?.spent).toMatchObject({
       handoff: "command-line",
+    });
+  });
+
+  test("a run whose custody reading fails refuses it as this device's storage", async () => {
+    // The sibling entry a corruption or an app upgrade invalidated, driven
+    // through the real validating read: a run that cannot tell whether the copy
+    // was handed off does not proceed on the assumption it was not. What it
+    // records is the storage tier -- the entry is unchanged at the next attempt,
+    // so the retryable transport fault would offer a retry, and a scheduled
+    // window would spend its whole attempt budget, on a permanent local problem.
+    const created = await createManagedExchange(newExchange());
+    await putRawLocalState(created.id, {
+      spent: { spentAt: "not an instant" },
+    });
+    let inputRead = false;
+    const refusedAt = Date.parse("2026-07-14T12:00:00.000Z");
+
+    const error: unknown = await runManagedExchange({
+      record: created,
+      acquireInput: () => {
+        inputRead = true;
+        return Promise.resolve(undefined);
+      },
+      handshake: () => {
+        throw new Error("the handshake must not run on an unread custody");
+      },
+      dataExchange: () => {
+        throw new Error("the data exchange must not run on an unread custody");
+      },
+      now: () => refusedAt,
+    }).then(
+      () => {
+        throw new Error("the run should have refused the unreadable custody");
+      },
+      (reason: unknown) => reason,
+    );
+
+    expect(error).toBeInstanceOf(ManagedExchangeCustodyUnreadableError);
+    // Fail-closed on the same terms as the hand-off refusal: no file read, no
+    // connection, and nothing rotated.
+    expect(inputRead).toBe(false);
+    const stored = await getManagedExchange(created.id);
+    expect(stored?.sharedSecret).toBe(created.sharedSecret);
+    expect(stored?.lastRun).toEqual({
+      at: new Date(refusedAt).toISOString(),
+      outcome: "failed",
+      failureKind: "storage",
     });
   });
 

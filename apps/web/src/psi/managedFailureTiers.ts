@@ -67,8 +67,10 @@ import type { ManagedLocalState } from "./managedLocalStateShape";
  *   arriving: an attended run's own wait expiring, or an agreed window passing without
  *   a completed handshake (recovery: the next window's automatic retry, or running the
  *   exchange again once the partner is ready).
- * - `"storage"` -- a recorded persist failure on the last run (recovery: re-invite;
- *   a one-sided persist failure may have desynced the two parties).
+ * - `"storage"` -- a failure of this device's own storage the last run recorded: a
+ *   rotation that did not persist, or the custody reading the locked window could
+ *   not complete before it (recovery: re-invite; a one-sided persist failure may
+ *   have desynced the two parties).
  * - `"imported"` -- a restore-from-backup or migration import since the last
  *   successful run (recovery: re-invite; a restored copy can hold a secret the
  *   partnership has rotated past).
@@ -151,8 +153,9 @@ export function deriveManagedFailureTier(
   // failure is the single-owner invariant holding rather than anything to recover
   // from here -- and nothing about it is a desync or an attack.
   if (lastRun.failureKind === "handed-off") return "handed-off";
-  // A recorded persist failure on the last run: a one-sided persist may have
-  // desynced the parties, so the recovery is re-invite -- Tier 1, no attack checklist.
+  // A recorded storage failure on the last run -- a persist that did not land, or
+  // a custody reading that did not complete: a one-sided persist may have desynced
+  // the parties, so the recovery is re-invite -- Tier 1, no attack checklist.
   if (lastRun.failureKind === "storage") return "storage";
 
   // A restore since the last success explains a failed-CLOSED handshake benignly: the

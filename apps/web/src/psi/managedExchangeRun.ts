@@ -32,7 +32,8 @@
  *   per run rather than a surface's mount-time reading, so a hand-off confirmed
  *   after a surface loaded -- or between two attempts at one scheduled window --
  *   stops the runs that follow it rather than only the ones that start after a
- *   reload.
+ *   reload. A reading that fails refuses the run on the same terms, as this
+ *   device's own `storage` failure rather than a hand-off.
  *
  * - **Persist-before-success.** The rotated secret is written durably (a strict-
  *   durability transaction awaited to `complete`) BEFORE the data exchange begins.
@@ -49,6 +50,7 @@ import {
   RotationPersistError,
   failedRun,
   runRotationCriticalSection,
+  storageFailureRun,
   succeededRun,
 } from "./managedRunRotate";
 import {
@@ -60,6 +62,7 @@ import { withManagedExchangeLock } from "./managedExchangeLock";
 
 import type { ManagedExchangeLastRun } from "./managedExchangeRecord";
 import type { ManagedExchangeLockOptions } from "./managedExchangeLock";
+import type { ManagedLocalState } from "./managedLocalStateShape";
 import type { RotationWriteBack } from "./managedRunRotate";
 
 /**
@@ -77,6 +80,28 @@ export class ManagedExchangeSpentError extends Error {
       `managed exchange ${id} was handed off, so this device's copy no longer runs it`,
     );
     this.name = "ManagedExchangeSpentError";
+  }
+}
+
+/**
+ * Raised when a run cannot read whether this device's copy was handed off: the
+ * sibling entry does not validate (a corrupted or app-upgrade-invalidated entry),
+ * or its store did not answer. The run refuses for the reason a spent copy's does
+ * -- custody that cannot be read is not custody this run may rotate on -- but the
+ * fault is this device's storage rather than a hand-off, so it is raised as its
+ * own type: the `storage` bookkeeping kind is what the record carries, and a
+ * scheduled window ends here rather than re-attempting a reading that is
+ * unchanged at the next attempt. An unclassified failure would instead fall
+ * through to the retryable `transport` tier, offering the operator a retry for a
+ * permanent local problem and spending the window's whole attempt budget on it.
+ */
+export class ManagedExchangeCustodyUnreadableError extends Error {
+  constructor(id: string, cause: unknown) {
+    super(
+      `managed exchange ${id} has an unreadable hand-off state, so this run does not rotate`,
+      { cause },
+    );
+    this.name = "ManagedExchangeCustodyUnreadableError";
   }
 }
 
@@ -174,6 +199,9 @@ export interface ManagedExchangeRunResult<TExchange> {
  * @throws {ManagedExchangeSpentError} if an export has handed this device's copy
  *   off; the `handed-off` `lastRun` is recorded best-effort before this
  *   propagates, and no input was read and no connection made.
+ * @throws {ManagedExchangeCustodyUnreadableError} if the sibling entry holding
+ *   that state cannot be read; the `storage` `lastRun` is recorded best-effort
+ *   before this propagates, on the same no-input, no-connection terms.
  * @throws {ManagedInputError} if the input guard rejects (a missing file, a gone
  *   permission, or an unsatisfiable column shape); the benign `lastRun` for that
  *   rejection is recorded best-effort before this propagates, and no connection was
@@ -279,22 +307,43 @@ export async function runManagedExchange<TInput, THandshake, TExchange>(
  * best-effort for the reason those are -- a failed bookkeeping write must not
  * replace the refusal the runner classifies on.
  *
- * @throws {ManagedExchangeSpentError} always, when the copy is spent.
- * @throws {ZodError} if the sibling entry is unreadable -- a run whose custody
- *   cannot be read does not rotate on the assumption it is still this device's.
+ * A reading that fails refuses the run too, as the {@link
+ * ManagedExchangeCustodyUnreadableError} it is: a run whose custody cannot be
+ * read does not rotate on the assumption it is still this device's, and the
+ * `storage` bookkeeping it records is what keeps this device's own storage fault
+ * out of the retryable transport tier.
+ *
+ * @throws {ManagedExchangeSpentError} when the copy is spent.
+ * @throws {ManagedExchangeCustodyUnreadableError} when the sibling entry cannot
+ *   be read.
  */
 async function refuseHandedOffCopy(
   id: string,
   now: () => number,
 ): Promise<void> {
-  const local = await getManagedLocalState(id);
-  if (local?.spent === undefined) return;
+  let local: ManagedLocalState | undefined;
   try {
-    await recordLastRun(id, failedRun(now(), "failed", "handed-off"));
-  } catch {
-    // Swallowed: the refusal below still reaches the runner.
+    local = await getManagedLocalState(id);
+  } catch (error) {
+    await recordRefusal(id, storageFailureRun(now()));
+    throw new ManagedExchangeCustodyUnreadableError(id, error);
   }
+  if (local?.spent === undefined) return;
+  await recordRefusal(id, failedRun(now(), "failed", "handed-off"));
   throw new ManagedExchangeSpentError(id);
+}
+
+/** Record a refusal's own bookkeeping, best-effort for the reason
+ * {@link refuseHandedOffCopy} gives. */
+async function recordRefusal(
+  id: string,
+  lastRun: ManagedExchangeLastRun,
+): Promise<void> {
+  try {
+    await recordLastRun(id, lastRun);
+  } catch {
+    // Swallowed: the refusal still reaches the runner.
+  }
 }
 
 /** The durable, field-scoped rotation write the ordering awaits before the data

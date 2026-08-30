@@ -13,6 +13,10 @@ import {
   composeManagedExchangeFile,
 } from "@psi/managedExchangeRecord";
 import {
+  ManagedExchangeCustodyUnreadableError,
+  ManagedExchangeSpentError,
+} from "@psi/managedExchangeRun";
+import {
   ManagedExchangeExpiredError,
   benignRerunOutcome,
   remapLapsedRunFailure,
@@ -24,9 +28,9 @@ import {
   managedInputFailureKind,
 } from "@psi/managedInputGuard";
 import { ManagedExchangeLockUnavailableError } from "@psi/managedExchangeLock";
-import { ManagedExchangeSpentError } from "@psi/managedExchangeRun";
 import { PartnerNoShowError } from "@psi/waitForConnection";
 import { RotationPersistError } from "@psi/managedRunRotate";
+import { parseManagedLocalState } from "@psi/managedLocalStateShape";
 import { recordManagedExchangeLastRun } from "@psi/managedExchangeStore";
 
 import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
@@ -54,12 +58,20 @@ vi.mock("@psi/managedExchangeStore", async (importOriginal) => ({
 // a copy an export handed off. It is a real IndexedDB read in the browser, so it
 // is the third platform piece these Node tests stub; `handedOff` is what the
 // stubbed read answers with.
-const handedOff = vi.hoisted(() => ({
-  state: undefined as { spent?: { spentAt: string } } | undefined,
-}));
+const handedOff = vi.hoisted(
+  (): {
+    state: { spent?: { spentAt: string } } | undefined;
+    // What the read rejects with instead of answering, for the entry a schema
+    // bound or an app upgrade invalidated.
+    unreadable: unknown;
+  } => ({ state: undefined, unreadable: undefined }),
+);
 vi.mock("@psi/managedLocalState", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  getManagedLocalState: () => Promise.resolve(handedOff.state),
+  getManagedLocalState: () =>
+    handedOff.unreadable === undefined
+      ? Promise.resolve(handedOff.state)
+      : Promise.reject(handedOff.unreadable),
 }));
 
 /** Grant the run+rotate lock immediately, so a Node test can drive the run through
@@ -80,6 +92,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.mocked(recordManagedExchangeLastRun).mockClear();
   handedOff.state = undefined;
+  handedOff.unreadable = undefined;
 });
 
 function record(
@@ -97,6 +110,17 @@ function record(
     sharedSecret: generateSharedSecret(),
     ...overrides,
   };
+}
+
+/** The rejection a corrupted or app-upgrade-invalidated sibling entry produces:
+ * the validating read's own error, rather than a stand-in for one. */
+function unreadableSiblingEntry(): unknown {
+  try {
+    parseManagedLocalState({ spent: { spentAt: "not an instant" } });
+  } catch (error) {
+    return error;
+  }
+  throw new Error("an invalid sibling entry must not parse");
 }
 
 /** Seams that fail loudly if reached: the expiry short-circuit must never touch
@@ -279,6 +303,53 @@ describe("runManagedRerun: a copy an export handed off", () => {
           at: new Date(at).toISOString(),
           outcome: "failed",
           failureKind: "handed-off",
+        },
+      ],
+    ]);
+  });
+
+  test("an unreadable sibling entry refuses the run as this device's storage failing", async () => {
+    // A run that cannot read its custody does not proceed on the assumption the
+    // copy is still this device's. What the record then carries is the storage
+    // tier: the entry is unchanged at the next attempt, so the retryable
+    // transport fault an unclassified failure falls through to would offer the
+    // operator a retry for a permanent local problem.
+    stubGrantingWebLocks();
+    handedOff.unreadable = unreadableSiblingEntry();
+    const at = Date.parse("2026-07-14T12:00:00.000Z");
+    let inputRead = false;
+
+    await expect(
+      runManagedRerun(
+        record(),
+        {
+          acquireInput: () => {
+            inputRead = true;
+            return Promise.resolve("rows");
+          },
+          handshake: () => {
+            throw new Error("the handshake must not run on an unread custody");
+          },
+          dataExchange: () => {
+            throw new Error(
+              "the data exchange must not run on an unread custody",
+            );
+          },
+        },
+        { now: () => at },
+      ),
+    ).rejects.toBeInstanceOf(ManagedExchangeCustodyUnreadableError);
+
+    // Fail-closed on the same terms as the hand-off refusal beside it: no file
+    // read, nothing dialed.
+    expect(inputRead).toBe(false);
+    expect(vi.mocked(recordManagedExchangeLastRun).mock.calls).toEqual([
+      [
+        "record-under-test",
+        {
+          at: new Date(at).toISOString(),
+          outcome: "failed",
+          failureKind: "storage",
         },
       ],
     ]);
@@ -598,6 +669,17 @@ describe("rerunFailureLastRun: the runner's failure bookkeeping", () => {
     expect(
       rerunFailureLastRun(
         new ManagedExchangeSpentError("id"),
+        AT,
+        false,
+        false,
+      ),
+    ).toBeUndefined();
+    // The unread custody refusal beside it, for the same reason: the section
+    // stamped the storage tier, and a transport stamp over it would offer a retry
+    // for a local problem that reproduces.
+    expect(
+      rerunFailureLastRun(
+        new ManagedExchangeCustodyUnreadableError("id", new Error("invalid")),
         AT,
         false,
         false,

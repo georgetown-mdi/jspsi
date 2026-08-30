@@ -41,13 +41,14 @@ import {
 } from "@psilink/core";
 
 import {
-  ManagedExchangeExpiredError,
-  managedExchangeLapsed,
-} from "./managedExpiry";
-import {
+  ManagedExchangeCustodyUnreadableError,
   ManagedExchangeSpentError,
   runManagedExchange,
 } from "./managedExchangeRun";
+import {
+  ManagedExchangeExpiredError,
+  managedExchangeLapsed,
+} from "./managedExpiry";
 import {
   ManagedInputError,
   managedInputFailureKind,
@@ -172,6 +173,9 @@ export interface ManagedRerunOptions {
  *   the handshake's own expiry failure).
  * @throws {ManagedExchangeSpentError} if an export handed this device's copy off;
  *   no input was read and no connection was attempted.
+ * @throws {ManagedExchangeCustodyUnreadableError} if the sibling entry holding
+ *   that state could not be read, on the same terms -- the run refuses rather
+ *   than rotating on an unread custody.
  * @throws {ManagedInputError} if the input guard rejects (a missing file, a gone
  *   permission, or an unsatisfiable column shape); no connection was attempted.
  * @throws {ManagedExchangeLockUnavailableError} if a run is already in progress in
@@ -297,10 +301,13 @@ export function remapLapsedRunFailure(
  * classifies, or `undefined` for a failure whose bookkeeping is owned elsewhere or
  * deliberately absent:
  *
- * - {@link ManagedInputError}, {@link RotationPersistError} and
- *   {@link ManagedExchangeSpentError}: recorded best-effort inside the critical
- *   section (the tier {@link managedInputFailureKind} reads off the rejection, the
- *   `storage` tier, and the `handed-off` tier a copy an export gave away records).
+ * - {@link ManagedInputError}, {@link RotationPersistError},
+ *   {@link ManagedExchangeSpentError} and
+ *   {@link ManagedExchangeCustodyUnreadableError}: recorded best-effort inside the
+ *   critical section (the tier {@link managedInputFailureKind} reads off the
+ *   rejection, the `storage` tier a failed rotation persist and an unreadable
+ *   custody entry share, and the `handed-off` tier a copy an export gave away
+ *   records).
  * - A core {@link LinkageTermsUnsatisfiableError} raised BEFORE the data exchange
  *   began: the benign `"terms-shortfall"` tier, stamped here because the refusal
  *   comes out of the pre-connection prepare rather than the input guard, which
@@ -349,6 +356,7 @@ export function rerunFailureLastRun(
   dataExchangeStarted: boolean,
 ): ManagedExchangeLastRun | undefined {
   if (
+    error instanceof ManagedExchangeCustodyUnreadableError ||
     error instanceof ManagedExchangeExpiredError ||
     error instanceof ManagedExchangeLockUnavailableError ||
     error instanceof ManagedExchangeSpentError ||
@@ -416,20 +424,25 @@ export type BenignRerunOutcome =
  *
  * `dataExchangeStarted` is the run's own phase boundary, reported by
  * {@link ManagedRerunOptions.onDataExchangeStart}. Every outcome whose copy tells
- * the operator nothing left this device -- `"missed"`, `"handed-off"`, and
+ * the operator nothing left this device carries it. `"missed"` and
  * `"terms-shortfall"` from either of its two raisers (core's refusal in the
- * pre-connection prepare, and the input guard's own column grading) -- carries it
- * as the same guard its bookkeeping counterpart does
+ * pre-connection prepare, and the input guard's own column grading) carry it as
+ * the same guard their bookkeeping counterpart applies
  * ({@link rerunFailureLastRun}), so the state a surface shows and the outcome the
- * record carries cannot disagree about a disclosure. The input-guard arm is gated
- * whole rather than on the kind it grades to, so a grading that gains a kind does
- * not have to re-derive the guard. None of these errors can be raised past the
- * boundary today (the spent check and the input guard both run before any
- * connection, core refuses an unsatisfiable shortfall inside the pre-connection
- * prepare, and the no-show is raised only by a wait that never opened a channel),
- * and the guard is what keeps that a check rather than a standing assumption: one
- * delivered past the boundary is not a benign outcome here, and falls through to
- * the caller's generic transport path.
+ * record carries cannot disagree about a disclosure. `"handed-off"` is guarded
+ * here alone -- that classifier records nothing for it -- and what holds the two
+ * together instead is where its stamp is written: the critical section writes it
+ * before the input guard and before any connection
+ * ({@link ./managedExchangeRun.ts}), so the recorded outcome is on the same side
+ * of the boundary as the state shown. The input-guard arm is gated whole rather
+ * than on the kind it grades to, so a grading that gains a kind does not have to
+ * re-derive the guard. None of these errors can be raised past the boundary today
+ * (the spent check and the input guard both run before any connection, core
+ * refuses an unsatisfiable shortfall inside the pre-connection prepare, and the
+ * no-show is raised only by a wait that never opened a channel), and the guard is
+ * what keeps that a check rather than a standing assumption: one delivered past
+ * the boundary is not a benign outcome here, and falls through to the caller's
+ * generic transport path.
  *
  * The guard binds the outcomes read here off THIS run's error, and nothing
  * further: a surface state derived instead from the record's stored bookkeeping
@@ -458,4 +471,4 @@ export function benignRerunOutcome(
 
 export { ManagedExchangeExpiredError, ManagedInputError };
 export { ManagedExchangeLockUnavailableError, RotationPersistError };
-export { ManagedExchangeSpentError };
+export { ManagedExchangeCustodyUnreadableError, ManagedExchangeSpentError };

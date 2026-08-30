@@ -12,6 +12,10 @@ import {
   tickManagedSchedules,
 } from "@psi/managedScheduleRunner";
 import {
+  ManagedExchangeCustodyUnreadableError,
+  ManagedExchangeSpentError,
+} from "@psi/managedExchangeRun";
+import {
   applyManagedExchangeLastRun,
   applyManagedExchangeLocalEdits,
   applyManagedExchangeScheduleAdvance,
@@ -25,7 +29,6 @@ import {
 } from "@psi/managedExchangeArtifact";
 import { ManagedExchangeExpiredError } from "@psi/managedExpiry";
 import { ManagedExchangeLockUnavailableError } from "@psi/managedExchangeLock";
-import { ManagedExchangeSpentError } from "@psi/managedExchangeRun";
 import { ManagedInputError } from "@psi/managedInputGuard";
 import { PartnerNoShowError } from "@psi/waitForConnection";
 import { RotationPersistError } from "@psi/managedRunRotate";
@@ -371,6 +374,13 @@ describe("a due window in the open runtime", () => {
       new ManagedInputError({ reason: "acquire", cause: new Error("gone") }),
       new ManagedExchangeExpiredError("2026-01-05T00:00:00.000Z"),
       new ManagedExchangeSpentError("record-under-test"),
+      // The custody reading that failed: a local storage problem the next attempt
+      // meets unchanged, so the window ends here rather than spending its whole
+      // attempt budget on it the way a transport fault would.
+      new ManagedExchangeCustodyUnreadableError(
+        "record-under-test",
+        new Error("the sibling entry did not validate"),
+      ),
     ]) {
       const runner = harness({
         records: [recordWith()],

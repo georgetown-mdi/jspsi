@@ -51,12 +51,15 @@ import {
   PartnerNoShowError,
 } from "./waitForConnection";
 import {
+  ManagedExchangeCustodyUnreadableError,
+  ManagedExchangeSpentError,
+} from "./managedExchangeRun";
+import {
   advanceManagedScheduleAfterWindow,
   catchUpManagedSchedule,
 } from "./managedSchedule";
 import { ManagedExchangeExpiredError } from "./managedExpiry";
 import { ManagedExchangeLockUnavailableError } from "./managedExchangeLock";
-import { ManagedExchangeSpentError } from "./managedExchangeRun";
 import { ManagedInputError } from "./managedInputGuard";
 import { RotationPersistError } from "./managedRunRotate";
 import { parseStoredInstant } from "./managedExchangeRecord";
@@ -513,9 +516,10 @@ export interface ManagedScheduleWindowVerdict {
  * data exchange after the handshake and the persist.
  *
  * Nothing else the mapper classifies says the partner was there: a lapsed
- * bound, a copy an export handed off, an unusable input, a shortfall against the
- * standing terms and a refused disclosure are all local and pre-connection, and a
- * failure with no determinate cause names no phase at all.
+ * bound, a copy an export handed off, a custody entry that could not be read, an
+ * unusable input, a shortfall against the standing terms and a refused disclosure
+ * are all local and pre-connection, and a failure with no determinate cause names
+ * no phase at all.
  */
 function attemptProvesContact(
   error: unknown,
@@ -545,17 +549,18 @@ function attemptProvesContact(
  *
  * Only two shapes are worth another attempt inside the window: the no-show, and
  * a failure with no determinate local cause (a dropped connection, a broker
- * fault). A lapsed bound, a copy an export handed off, an unusable input, a
- * shortfall against the standing terms, a refused disclosure, a failed rotation
- * persist, and a handshake that failed closed all reproduce identically on the
- * next attempt -- the first five because the local state that raised them is
- * unchanged, the persist failure because retrying a rotation whose write failed is
- * how a desync is made, and the closed handshake because hammering an
- * authentication failure is the one response to it that is never right. The
- * hand-off is the one of them a window can meet after starting cleanly: the tick's
- * own spent check reads the sibling state once, while the run path re-reads it
- * inside the lock on every attempt, so a hand-off confirmed mid-window ends the
- * window there instead of being re-attempted until it closes.
+ * fault). A lapsed bound, a copy an export handed off, a custody entry the run
+ * could not read, an unusable input, a shortfall against the standing terms, a
+ * refused disclosure, a failed rotation persist, and a handshake that failed
+ * closed all reproduce identically on the next attempt -- the first six because
+ * the local state that raised them is unchanged, the persist failure because
+ * retrying a rotation whose write failed is how a desync is made, and the closed
+ * handshake because hammering an authentication failure is the one response to it
+ * that is never right. The hand-off is the one of them a window can meet after
+ * starting cleanly: the tick's own spent check reads the sibling state once,
+ * while the run path re-reads it inside the lock on every attempt, so a hand-off
+ * confirmed mid-window ends the window there instead of being re-attempted until
+ * it closes.
  *
  * `dataExchangeStarted` overrides all of it: past that boundary this run's
  * payload could already have reached the partner, and a re-attempt would
@@ -581,6 +586,7 @@ export function managedScheduleWindowVerdict(
   if (
     error instanceof ManagedExchangeExpiredError ||
     error instanceof ManagedExchangeSpentError ||
+    error instanceof ManagedExchangeCustodyUnreadableError ||
     error instanceof ManagedInputError ||
     error instanceof LinkageTermsUnsatisfiableError ||
     error instanceof OutboundDisclosureRefusalError ||

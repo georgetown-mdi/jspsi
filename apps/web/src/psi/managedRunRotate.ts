@@ -109,11 +109,13 @@ export function missedRun(at: number): ManagedExchangeLastRun {
 }
 
 /**
- * Record a run that rotated the secret but failed to persist it. This is
- * structured `failureKind: "storage"` bookkeeping precisely so the next handshake
- * failure surfaces through the benign Tier-1 framing (a recorded persist failure
- * explains a desync) rather than the attack framing -- see
- * docs/MANAGED_EXCHANGE.md, "Telling a desync from an attack".
+ * Record a run that failed on this device's own storage: the rotation that could
+ * not be persisted, or the custody reading the locked window could not complete
+ * before it ({@link ./managedExchangeRun.ts}). This is structured
+ * `failureKind: "storage"` bookkeeping precisely so the next handshake failure
+ * surfaces through the benign Tier-1 framing (a recorded persist failure explains
+ * a desync) rather than the attack framing -- see docs/MANAGED_EXCHANGE.md,
+ * "Telling a desync from an attack".
  */
 export function storageFailureRun(at: number): ManagedExchangeLastRun {
   return {
