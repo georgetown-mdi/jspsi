@@ -1295,8 +1295,10 @@ const unbuiltRecordsByTerminatedRun = new WeakSet<object>();
  * {@link ExchangeResult.audit}: the run still failed, and the record's own
  * `outcome` field states that rather than passing for a completed run's.
  *
- * A failure raised BEFORE the payloads flowed carries nothing: there was no
- * disclosure to record.
+ * A failure raised BEFORE the payload exchange returns carries nothing, this
+ * party's own payload having possibly crossed inside it -- the initiator sends
+ * before it receives, and a cut in that window leaves no record (the durability
+ * point's stated residual: docs/spec/EXCHANGE_RECORD.md, When a record is owed).
  *
  * The lookup walks the `cause` chain, so a caller that re-raises the failure with
  * the original as its `cause` still recovers the record.

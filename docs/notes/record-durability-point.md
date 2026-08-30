@@ -18,9 +18,15 @@ Three points were available.
 
 **When the payload exchange completes.** The point at which the disclosure the record attests has provably happened: keys exchanged and matched, payload columns sent and received, and nothing afterwards able to undo any of it. The protocol already says as much about the swap -- "aborting does not undo the data exchange" -- and the record is precisely the artifact that says the data was exchanged. It is a boundary rather than a step, which is what makes it robust: everything on the far side of it fails into the same owed record, so a step added to the tail later inherits the rule instead of opening a hole in it.
 
-**Earlier, at some point inside the matching.** Rejected. A partial disclosure has no honest record: the record commits to the payloads in both directions and to the pairing, and a run cut off mid-cascade has no settled value for any of them. There is a genuine residual here, stated rather than closed: a run that dies before the payload exchange finishes discloses linkage-key material and records nothing. Recording that would need a different artifact attesting a different thing, not an earlier build of this one.
+**Earlier, at some point inside the matching.** Rejected. A partial disclosure has no honest record: the record commits to the payloads in both directions and to the pairing, and a run cut off mid-cascade has no settled value for any of them. Recording that would need a different artifact attesting a different thing, not an earlier build of this one.
 
 The second was taken. It is the only one of the three under which the artifact's existence tracks the fact it attests.
+
+## The residual window it leaves
+
+The point taken is the payload exchange's return, and the step is not symmetric: the initiator sends its payload before it receives the partner's. A cut inside that window therefore leaves the initiator's payload across the wire and no record of it -- along with the linkage-key material an even earlier cut discloses. The limit is stated where the rule is specified ([EXCHANGE_RECORD.md](../spec/EXCHANGE_RECORD.md#when-a-record-is-owed)), and what the operator gets in its place is the run's own error and its entry on the machine-readable event stream.
+
+Opening the region at this party's own payload send would close the window, and it is left as a decision for the maintainer rather than taken here. Its cost is structural rather than a matter of wording: the payload-exchange step would have to expose its partial progress to the caller, which today it does not -- it returns the partner's payload or throws -- so the record would be built from a run state no step currently reports.
 
 ## What a terminated run's record must not be
 

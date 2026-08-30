@@ -158,7 +158,11 @@ export function writeExchangeRecord(
   // below turns on: "the exchange succeeded, do not re-run it" is the wrong
   // instruction for the record of a run that disclosed and then failed. Read off
   // the record rather than passed in beside it, so the file and the words about
-  // it can never disagree.
+  // it can never disagree. One outcome covers every way the post-disclosure
+  // region can end -- the received-payload refusal as much as the receipt swap
+  // -- so the prose names no step: naming one would tell an operator a step
+  // failed that the run may never have reached (docs/spec/EXCHANGE_RECORD.md,
+  // When a record is owed).
   const terminated = record.outcome === "receipt-swap-terminated";
   try {
     writeFileOwnerOnly(keysFilePath, serializeVerificationKeys(keys));
@@ -177,8 +181,8 @@ export function writeExchangeRecord(
       "wrote self-attested exchange record (a local audit artifact, NOT a " +
         `signed or non-repudiable receipt) to ${recordFilePath}` +
         (terminated
-          ? "; it records a disclosure this run made before the signed-receipt " +
-            "swap failed, and states that no receipt accompanies it"
+          ? "; it records a disclosure this run made before the run " +
+            "terminated, and states that no receipt accompanies it"
           : ""),
     );
     return undefined;

@@ -6,16 +6,22 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 // Capture writeExchangeRecord's logger so the non-fatal "audit record could not
 // be written" WARN is asserted (proving the failure is surfaced) rather than
-// leaked to the suite output. getLogger is the only @psilink/core export
-// replaced; everything else stays real.
-const logCapture = vi.hoisted(() => ({ warnings: [] as string[] }));
+// leaked to the suite output, and so the INFO lines the successful writes emit
+// can be asserted for what they tell the operator. getLogger is the only
+// @psilink/core export replaced; everything else stays real.
+const logCapture = vi.hoisted(() => ({
+  infos: [] as string[],
+  warnings: [] as string[],
+}));
 
 vi.mock("@psilink/core", async (importActual) => {
   const actual = await importActual<typeof import("@psilink/core")>();
   return {
     ...actual,
     getLogger: () => ({
-      info: () => {},
+      info: (msg: string, ...args: unknown[]) => {
+        logCapture.infos.push([msg, ...args.map(String)].join(" "));
+      },
       warn: (msg: string, ...args: unknown[]) => {
         logCapture.warnings.push([msg, ...args.map(String)].join(" "));
       },
@@ -44,6 +50,7 @@ let dir: string;
 
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-record-test-"));
+  logCapture.infos.length = 0;
   logCapture.warnings.length = 0;
 });
 
@@ -146,6 +153,14 @@ test("writeExchangeRecord writes both files, parseable and owner-only", () => {
     parseVerificationKeys(JSON.parse(fs.readFileSync(keysFilePath, "utf8"))),
   ).toEqual(keys);
 
+  // A completed run's line carries none of the terminated tail: it has no
+  // disclosure-before-a-failure to report.
+  expect(
+    logCapture.infos.find((m) =>
+      m.includes("wrote self-attested exchange record"),
+    ),
+  ).not.toContain("terminated");
+
   // Owner-only permissions on POSIX (mirrors saveKeyFile).
   if (process.platform !== "win32") {
     expect(fs.statSync(recordFilePath).mode & 0o077).toBe(0);
@@ -189,8 +204,8 @@ test("writeExchangeRecord is non-fatal when the destination is unwritable", () =
 
 // --- A terminated run's record -----------------------------------------------
 
-/** The record a run that disclosed and then failed in the signed-receipt swap
- * leaves behind: the same shape and the same destination, saying so itself. */
+/** The record a run that disclosed and then terminated without a receipt leaves
+ * behind: the same shape and the same destination, saying so itself. */
 const terminatedRecord: ExchangeRecord = {
   ...record,
   outcome: "receipt-swap-terminated",
@@ -210,6 +225,19 @@ test("a terminated run's record is written to the same destination", () => {
     parseExchangeRecord(JSON.parse(fs.readFileSync(recordFilePath, "utf8"))),
   ).toEqual(terminatedRecord);
   expect(fs.existsSync(keysPathFor(recordFilePath))).toBe(true);
+
+  // The line naming the file says what the record covers and names no failing
+  // step: one outcome covers every way the post-disclosure region can end, so a
+  // line naming the receipt swap would report a step to an operator whose run
+  // was refused at the received-payload check before it -- or who configured no
+  // signing identity, and had no swap to fail.
+  const wrote = logCapture.infos.find((m) =>
+    m.includes("wrote self-attested exchange record"),
+  );
+  expect(wrote).toBeDefined();
+  expect(wrote).toContain("before the run terminated");
+  expect(wrote).toContain("no receipt accompanies it");
+  expect(wrote).not.toContain("swap");
 });
 
 test("a terminated run's lost record is not reported as a completed exchange", () => {
