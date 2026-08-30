@@ -57,7 +57,7 @@ describe("STUN default claim check", () => {
   it("reports the endpoint that moved, with its line", () => {
     const text = read("docs/CLI.md");
     expect(claimMismatches(text, "stun.example.org:3478")).toEqual([
-      { line: 419, endpoint: "stun.l.google.com:19302" },
+      { line: 421, endpoint: "stun.l.google.com:19302" },
     ]);
   });
 
