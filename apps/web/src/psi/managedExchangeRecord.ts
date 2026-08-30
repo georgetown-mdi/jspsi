@@ -120,15 +120,17 @@ export interface ManagedExchangeSchedule {
 export type ManagedExchangeRunOutcome =
   "succeeded" | "failed" | "desynced" | "missed";
 
-/** For a non-succeeded outcome, the kind of failure. Closed enum: the three benign
+/** For a non-succeeded outcome, the kind of failure. Closed enum: the four benign
  * pre-run problems -- an `"input"` problem (the file missing, unreadable, or gone
  * from under its handle), a `"terms-shortfall"` refusal (the file was read and
- * cannot satisfy every linkage key the standing terms declare) and a `"consent"`
+ * cannot satisfy every linkage key the standing terms declare), a `"consent"`
  * refusal (this run's outbound disclosure is not the set this exchange recorded
- * agreeing to send) -- are detected before any connection and never routed through
- * desync/attack framing. Each is its own kind because each has its own remedy:
- * putting the file back, a conforming file or terms re-agreed with the partner, and
- * re-settling what the exchange sends. */
+ * agreeing to send), and a `"handed-off"` refusal (an export gave this device's
+ * copy away, so the run does not rotate a secret whose owner is elsewhere) -- are
+ * detected before any connection and never routed through desync/attack framing.
+ * Each is its own kind because each has its own remedy: putting the file back, a
+ * conforming file or terms re-agreed with the partner, re-settling what the
+ * exchange sends, and running the exchange where it was handed to. */
 export type ManagedExchangeFailureKind =
   | "auth"
   | "transport"
@@ -136,6 +138,7 @@ export type ManagedExchangeFailureKind =
   | "input"
   | "terms-shortfall"
   | "consent"
+  | "handed-off"
   | "cancelled";
 
 /** Run bookkeeping the backup state and the desync UX read. Every field is a
@@ -252,6 +255,7 @@ export const lastRunSchema: ZodType<ManagedExchangeLastRun> = z.object({
       "input",
       "terms-shortfall",
       "consent",
+      "handed-off",
       "cancelled",
     ])
     .optional(),

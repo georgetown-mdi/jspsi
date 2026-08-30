@@ -6,6 +6,7 @@ import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
 
 import {
   ManagedExchangeLockUnavailableError,
+  ManagedExchangeSpentError,
   managedExchangeLockName,
   runManagedExchange,
   withManagedExchangeLock,
@@ -14,10 +15,12 @@ import {
   clearManagedExchanges,
   createManagedExchange,
   getManagedExchange,
+  spendManagedExchangeIfCurrent,
 } from "@psi/managedExchangeStore";
 import { ManagedInputError } from "@psi/managedInputGuard";
 import { RotationPersistError } from "@psi/managedRunRotate";
 import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
+import { getManagedLocalState } from "@psi/managedLocalState";
 
 import type { NewManagedExchange } from "@psi/managedExchangeRecord";
 import type { WebRTCExchangeLocator } from "@psilink/core";
@@ -25,9 +28,9 @@ import type { WebRTCExchangeLocator } from "@psilink/core";
 // The platform half of the run+rotate critical section, exercised against real
 // Chromium (real Web Locks and real IndexedDB): the single-writer lock's exclusion
 // under contention, the no-steal property, the strict-durability field-scoped
-// rotation write, and the persist-before-success wiring end to end. The pure
-// ordering and decision logic is unit-tested in Node without either platform in
-// test/unit/managedRunRotate.test.ts.
+// rotation write, the refusal of a copy a hand-off spent, and the
+// persist-before-success wiring end to end. The pure ordering and decision logic is
+// unit-tested in Node without either platform in test/unit/managedRunRotate.test.ts.
 
 const linkageTerms = getDefaultLinkageTerms("County Health Dept");
 
@@ -581,6 +584,101 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     expect(stored?.sharedSecret).toBe(rotatedSecret);
     // No succeeded outcome was recorded; the failure bookkeeping is the runner's.
     expect(stored?.lastRun).toBeUndefined();
+  });
+
+  test("a run refuses a copy a hand-off spent, rotating nothing", async () => {
+    // The escalation this closes: the spend and the run were only ever observed
+    // by the surfaces, so a run started in another context after a hand-off still
+    // rotated past the copy the operator had just handed over. The record and the
+    // sibling spent state here are the real ones the hand-off writes.
+    const created = await createManagedExchange(newExchange());
+    expect(
+      await spendManagedExchangeIfCurrent(
+        created.id,
+        created.sharedSecret,
+        "2026-07-14T09:00:00.000Z",
+        "command-line",
+      ),
+    ).toBe("spent");
+    let inputRead = false;
+    const refusedAt = Date.parse("2026-07-14T12:00:00.000Z");
+
+    const error: unknown = await runManagedExchange({
+      record: created,
+      acquireInput: () => {
+        inputRead = true;
+        return Promise.resolve(undefined);
+      },
+      handshake: () => {
+        throw new Error("the handshake must not run for a handed-off copy");
+      },
+      dataExchange: () => {
+        throw new Error("the data exchange must not run for a handed-off copy");
+      },
+      now: () => refusedAt,
+    }).then(
+      () => {
+        throw new Error("the run should have refused the handed-off copy");
+      },
+      (reason: unknown) => reason,
+    );
+
+    expect(error).toBeInstanceOf(ManagedExchangeSpentError);
+    // The refusal precedes the input guard, which precedes every connection.
+    expect(inputRead).toBe(false);
+    const stored = await getManagedExchange(created.id);
+    // The secret the hand-off gave away is exactly the one still stored: this run
+    // rotated nothing past it.
+    expect(stored?.sharedSecret).toBe(created.sharedSecret);
+    expect(stored?.lastRun).toEqual({
+      at: new Date(refusedAt).toISOString(),
+      outcome: "failed",
+      failureKind: "handed-off",
+    });
+    // The hand-off itself is untouched: the refusal records a run, not a spend.
+    expect((await getManagedLocalState(created.id))?.spent).toMatchObject({
+      handoff: "command-line",
+    });
+  });
+
+  test("the spent state is read per run, not once per surface", async () => {
+    // A record that ran cleanly and was handed off afterwards -- the shape a
+    // mount-time reading gets wrong, and the one a scheduled window meets between
+    // two attempts.
+    const created = await createManagedExchange(newExchange());
+    const rotatedSecret = generateSharedSecret();
+    await runManagedExchange({
+      record: created,
+      acquireInput: () => Promise.resolve(undefined),
+      handshake: () => Promise.resolve({ rotatedSecret, handshake: "c" }),
+      dataExchange: () => Promise.resolve("done"),
+    });
+    expect(
+      await spendManagedExchangeIfCurrent(
+        created.id,
+        rotatedSecret,
+        "2026-07-14T09:00:00.000Z",
+      ),
+    ).toBe("spent");
+
+    await expect(
+      runManagedExchange({
+        record: created,
+        acquireInput: () => Promise.resolve(undefined),
+        handshake: () =>
+          Promise.resolve({
+            rotatedSecret: generateSharedSecret(),
+            handshake: "c",
+          }),
+        dataExchange: () => Promise.resolve("done"),
+      }),
+    ).rejects.toBeInstanceOf(ManagedExchangeSpentError);
+
+    // The migrated copy's secret stands: the second run refused rather than
+    // rotating past the artifact the operator handed over.
+    expect((await getManagedExchange(created.id))?.sharedSecret).toBe(
+      rotatedSecret,
+    );
   });
 
   test("a slow run's stale success tail cannot mask a newer run's outcome", async () => {

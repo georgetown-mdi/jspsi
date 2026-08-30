@@ -10,14 +10,17 @@ import { createElement } from "react";
 import "@mantine/core/styles.css";
 
 import {
+  RECORD_GONE_HANDOFF_REASON,
+  RECORD_GONE_HANDOFF_TITLE,
   RUN_IN_FLIGHT_HANDOFF_REASON,
   RUN_IN_FLIGHT_HANDOFF_TITLE,
-  SUPERSEDED_HANDOFF_REASON,
   SUPERSEDED_HANDOFF_TITLE,
+  supersededHandoffReason,
 } from "@bench/managedHandoffGate";
 import {
   clearManagedExchanges,
   createManagedExchange,
+  deleteManagedExchange,
   persistManagedExchangeRotation,
 } from "@psi/managedExchangeStore";
 import { ManagedRunSurface } from "@bench/ManagedRunSurface";
@@ -135,13 +138,16 @@ const migrationConfirm = () =>
     name: "I saved the file; hand off this exchange",
   });
 
-// Each notice is matched on its heading exactly: the superseded reason closes on the
-// same words its heading opens with, so a loose match resolves to both.
+// Each notice is matched on its heading exactly, so a heading and the reason under
+// it cannot resolve to the same element.
 const waitNotice = () =>
   page.getByText(RUN_IN_FLIGHT_HANDOFF_TITLE, { exact: true });
 
 const supersededNotice = () =>
   page.getByText(SUPERSEDED_HANDOFF_TITLE, { exact: true });
+
+const recordGoneNotice = () =>
+  page.getByText(RECORD_GONE_HANDOFF_TITLE, { exact: true });
 
 // The in-flight reading behind the gate is a poll of the record's run lock, so an
 // assertion on a state a lock change produces waits out one poll interval rather
@@ -187,6 +193,46 @@ async function dispatchCommandLineExport(
   await expect
     .element(page.getByText("Confirm the hand-off."))
     .toBeInTheDocument();
+}
+
+/**
+ * Hold this record's lock reading STALE for the surfaces' poll -- their only
+ * reading of a run in another context -- until a click is dispatched, from which
+ * moment the reading is the true one again.
+ *
+ * That is the window a confirm handler's click-time re-read exists for, and it is
+ * the one the poll structurally cannot cover: the lock can be taken in the gap
+ * between two readings, leaving a confirm button enabled over a run that is
+ * already under way. Driving it by waiting out the real 400 ms interval would race
+ * the poll for the click; filtering this record's lock out of the readings until
+ * the click is dispatched makes the same ordering exact.
+ */
+function stalePollUntilClick(id: string): () => void {
+  const name = managedExchangeLockName(id);
+  const realQuery = navigator.locks.query.bind(navigator.locks);
+  let reportFree = true;
+  (navigator.locks as unknown as { query: unknown }).query = async () => {
+    const snapshot = await realQuery();
+    if (!reportFree) return snapshot;
+    return {
+      ...snapshot,
+      held: snapshot.held?.filter((lock) => lock.name !== name),
+    };
+  };
+  // Capture phase, so it runs while the click is being dispatched and before the
+  // handler React invokes on it: the button cannot be disabled out from under the
+  // click, and everything the handler itself reads is the truth. Only a real
+  // pointer's click counts -- the download dispatches reach the page as
+  // `anchor.click()`, whose untrusted event is not the operator pressing confirm.
+  const restoreOnClick = (event: Event) => {
+    if (event.isTrusted) reportFree = false;
+  };
+  document.addEventListener("click", restoreOnClick, { capture: true });
+  return () => {
+    document.removeEventListener("click", restoreOnClick, { capture: true });
+    (navigator.locks as unknown as { query: typeof realQuery }).query =
+      realQuery;
+  };
 }
 
 /** Hold this record's run+rotate lock the way a second tab's run or the scheduled
@@ -247,8 +293,9 @@ describe("a hand-off across a run of the same exchange", () => {
       await cronConfirm().click();
 
       await expect.element(supersededNotice()).toBeInTheDocument();
+      // The refusal's way out is the download button on this very panel.
       await expect
-        .element(page.getByText(SUPERSEDED_HANDOFF_REASON))
+        .element(page.getByText(supersededHandoffReason("command-line")))
         .toBeInTheDocument();
       await expect.element(cronConfirm()).toBeDisabled();
       expect((await getManagedLocalState(created.id))?.spent).toBeUndefined();
@@ -312,8 +359,15 @@ describe("a hand-off across a run of the same exchange", () => {
       await expect.element(supersededNotice()).toBeInTheDocument();
       await expect.element(migrationConfirm()).toBeDisabled();
       expect((await getManagedLocalState(created.id))?.spent).toBeUndefined();
+      // The refusal's way out is the route off THIS screen: its only download
+      // control lives on the one behind it, so the copy names the button that
+      // goes back rather than a download nothing here offers.
+      await expect
+        .element(page.getByText(supersededHandoffReason("migration")))
+        .toBeInTheDocument();
 
-      // Downloading again reads the rotated record, and that copy hands off.
+      // Downloading again reads the rotated record, and that copy hands off --
+      // by the two clicks the refusal above names, in that order.
       await page
         .getByRole("button", { name: "Keep it on this device" })
         .click();
@@ -326,6 +380,156 @@ describe("a hand-off across a run of the same exchange", () => {
         .toBeInTheDocument();
       expect((await getManagedLocalState(created.id))?.spent).toBeDefined();
     } finally {
+      downloads.restore();
+    }
+  });
+});
+
+describe("a hand-off whose record is gone", () => {
+  test("the move refuses without sending the operator for a download that cannot exist", async () => {
+    // The confirmation outlives the record: an operator who deleted the exchange
+    // (or whose browser storage was cleared) in another tab still has this screen
+    // standing, with the artifact already on their disk.
+    const created = await createManagedExchange(newExchange());
+    const downloads = captureDownloads();
+    try {
+      app.render(createElement(ManagedRunSurface, { id: created.id }));
+      await expect.element(migrateButton()).toBeInTheDocument();
+      await migrateButton().click();
+      await expect
+        .element(page.getByText("Confirm the move"))
+        .toBeInTheDocument();
+
+      await deleteManagedExchange(created.id);
+      await expect.element(migrationConfirm()).toBeEnabled();
+      await migrationConfirm().click();
+
+      // Its own refusal, not the superseded one: there is no copy here to hand
+      // over and none to download again either.
+      await expect.element(recordGoneNotice()).toBeInTheDocument();
+      await expect
+        .element(page.getByText(RECORD_GONE_HANDOFF_REASON))
+        .toBeInTheDocument();
+      await expect.element(supersededNotice()).not.toBeInTheDocument();
+      await expect.element(migrationConfirm()).toBeDisabled();
+      expect((await getManagedLocalState(created.id))?.spent).toBeUndefined();
+    } finally {
+      downloads.restore();
+    }
+  });
+
+  test("the command-line hand-off refuses the same way", async () => {
+    const created = await createManagedExchange(
+      newExchange({ inputFileHandle: await inputHandle() }),
+    );
+    const downloads = captureDownloads();
+    try {
+      app.render(createElement(ManagedRunSurface, { id: created.id }));
+      await dispatchCommandLineExport(downloads.captured);
+
+      await deleteManagedExchange(created.id);
+      await expect.element(cronConfirm()).toBeEnabled();
+      await cronConfirm().click();
+
+      await expect.element(recordGoneNotice()).toBeInTheDocument();
+      await expect.element(cronConfirm()).toBeDisabled();
+      await expect
+        .element(page.getByText("Handed off to the command line"))
+        .not.toBeInTheDocument();
+      expect((await getManagedLocalState(created.id))?.spent).toBeUndefined();
+    } finally {
+      downloads.restore();
+    }
+  });
+});
+
+describe("a confirmation clicked between two readings of the run lock", () => {
+  // The poll behind the withholding reads every 400 ms, so a run can take the
+  // lock while a confirm button is still enabled from the last reading. What
+  // covers that gap is the handler's own re-read at the click, and these are the
+  // two cases that exercise it -- one per hand-off.
+
+  test("the move confirmation re-reads the lock at the click and holds back", async () => {
+    const created = await createManagedExchange(newExchange());
+    const downloads = captureDownloads();
+    let restorePoll: (() => void) | undefined;
+    let release: (() => void) | undefined;
+    try {
+      app.render(createElement(ManagedRunSurface, { id: created.id }));
+      await expect.element(migrateButton()).toBeInTheDocument();
+      await migrateButton().click();
+      await expect.element(migrationConfirm()).toBeEnabled();
+
+      // Installed once the confirmation is up, so the click that dispatched the
+      // export is not the one the reading is restored on.
+      restorePoll = stalePollUntilClick(created.id);
+      release = await holdRunLockElsewhere(created.id);
+      // Still enabled: the poll's readings do not see this run, which is the
+      // state the click-time re-read exists for.
+      await expect.element(migrationConfirm()).toBeEnabled();
+      await migrationConfirm().click();
+
+      // Nothing spent, and the run is named as the reason rather than the
+      // operator being left with a confirmation that silently did nothing.
+      expect((await getManagedLocalState(created.id))?.spent).toBeUndefined();
+      await expect.element(waitNotice()).toBeInTheDocument();
+      await expect
+        .element(page.getByText("Handed off to another device"))
+        .not.toBeInTheDocument();
+
+      release();
+      release = undefined;
+      // The confirmation is intact once the run releases: the refused click
+      // consumed nothing.
+      await expect.element(migrationConfirm(), afterPoll).toBeEnabled();
+      await migrationConfirm().click();
+      await expect
+        .element(page.getByText("Handed off to another device"))
+        .toBeInTheDocument();
+      expect((await getManagedLocalState(created.id))?.spent).toBeDefined();
+    } finally {
+      release?.();
+      restorePoll?.();
+      downloads.restore();
+    }
+  });
+
+  test("the command-line confirmation re-reads the lock at the click and holds back", async () => {
+    const created = await createManagedExchange(
+      newExchange({ inputFileHandle: await inputHandle() }),
+    );
+    const downloads = captureDownloads();
+    let restorePoll: (() => void) | undefined;
+    let release: (() => void) | undefined;
+    try {
+      app.render(createElement(ManagedRunSurface, { id: created.id }));
+      await dispatchCommandLineExport(downloads.captured);
+      await expect.element(cronConfirm()).toBeEnabled();
+
+      restorePoll = stalePollUntilClick(created.id);
+      release = await holdRunLockElsewhere(created.id);
+      await expect.element(cronConfirm()).toBeEnabled();
+      await cronConfirm().click();
+
+      expect((await getManagedLocalState(created.id))?.spent).toBeUndefined();
+      await expect.element(waitNotice()).toBeInTheDocument();
+      await expect
+        .element(page.getByText("Handed off to the command line"))
+        .not.toBeInTheDocument();
+
+      release();
+      release = undefined;
+      await expect.element(cronConfirm(), afterPoll).toBeEnabled();
+      await cronConfirm().click();
+      await expect
+        .element(page.getByText("Handed off to the command line"))
+        .toBeInTheDocument();
+      expect((await getManagedLocalState(created.id))?.spent).toMatchObject({
+        handoff: "command-line",
+      });
+    } finally {
+      release?.();
+      restorePoll?.();
       downloads.restore();
     }
   });

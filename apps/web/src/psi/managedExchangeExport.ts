@@ -115,21 +115,36 @@ export interface ManagedMigrationDeps extends ManagedExportDeps {
   ) => Promise<ManagedSpendOutcome>;
 }
 
+/** Why a hand-off confirmation was refused. The two are carried apart because the
+ * operator's way out of them differs: `"superseded"` leaves a live record here to
+ * download again, while `"record-gone"` leaves nothing here at all -- a surface
+ * that folded them would send the second operator after a download nothing can
+ * produce. */
+export type ManagedHandoffRefusal = "superseded" | "record-gone";
+
 /**
- * Raised when a hand-off confirmation is refused: the exchange's stored secret is no
- * longer the one the downloaded artifact carries, so the copy the operator is
- * attesting to has been superseded -- by a run's rotation in any context, or by a
- * re-invite. Nothing is spent, and the remedy is to download the exchange again.
+ * Raised when a hand-off confirmation is refused, carrying which refusal it was so
+ * the surfaces can name the way out that exists.
  *
- * Also raised when the record is gone from the store, where there is no live copy
- * left to spend.
+ * `"superseded"`: the exchange's stored secret is no longer the one the downloaded
+ * artifact carries, so the copy the operator is attesting to has been superseded --
+ * by a run's rotation in any context, or by a re-invite. Nothing is spent, and the
+ * remedy is to download the exchange again.
+ *
+ * `"record-gone"`: the record is gone from the store, where there is no live copy
+ * left to spend and nothing left to download either.
  */
 export class ManagedHandoffSupersededError extends Error {
-  constructor(id: string) {
+  /** Which refusal this is, for the surface to phrase. */
+  readonly refusal: ManagedHandoffRefusal;
+  constructor(id: string, refusal: ManagedHandoffRefusal) {
     super(
-      `the downloaded hand-off artifact for managed exchange ${id} no longer carries its current secret`,
+      refusal === "record-gone"
+        ? `managed exchange ${id} is no longer stored, so there is no copy left to hand off`
+        : `the downloaded hand-off artifact for managed exchange ${id} no longer carries its current secret`,
     );
     this.name = "ManagedHandoffSupersededError";
+    this.refusal = refusal;
   }
 }
 
@@ -142,7 +157,8 @@ export class ManagedHandoffSupersededError extends Error {
  * artifact usable.
  *
  * @throws {ManagedHandoffSupersededError} if the stored secret has moved on, or the
- *   record is gone. Nothing is written in either case.
+ *   record is gone -- carrying which of the two it was. Nothing is written in
+ *   either case.
  */
 async function spendIfArtifactIsCurrent(
   id: string,
@@ -154,7 +170,11 @@ async function spendIfArtifactIsCurrent(
   ) => Promise<ManagedSpendOutcome>,
 ): Promise<void> {
   const outcome = await spend(exported.sharedSecret, spentAt.toISOString());
-  if (outcome === "superseded") throw new ManagedHandoffSupersededError(id);
+  if (outcome === "spent") return;
+  throw new ManagedHandoffSupersededError(
+    id,
+    outcome === "gone" ? "record-gone" : "superseded",
+  );
 }
 
 /** The atomic export step's result: the fresh read-and-mark instant (threaded so the
@@ -232,7 +252,8 @@ export interface ManagedMigrationDispatch {
    * transitioning this device's copy to its visible spent state. Called only after
    * the operator confirms the file is saved; not called on a cancelled save. Rejects
    * with {@link ManagedHandoffSupersededError}, spending nothing, when the record's
-   * secret has moved past the artifact this dispatch downloaded. */
+   * secret has moved past the artifact this dispatch downloaded or the record is no
+   * longer stored. */
   confirm: (spentAt: Date) => Promise<void>;
 }
 
@@ -300,7 +321,8 @@ export interface ManagedCronExportDispatch {
   /** Spend the source as of `spentAt` (the operator's confirmation instant), under
    * the command-line hand-off. Called only after the operator confirms both files
    * are saved. Rejects with {@link ManagedHandoffSupersededError}, spending nothing,
-   * when the record's secret has moved past the files this dispatch downloaded. */
+   * when the record's secret has moved past the files this dispatch downloaded or
+   * the record is no longer stored. */
   confirm: (spentAt: Date) => Promise<void>;
 }
 

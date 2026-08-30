@@ -332,7 +332,10 @@ describe("the spend is checked against the stored record in one step", () => {
     });
   });
 
-  test("a record already gone is superseded, and leaves no sibling entry behind", async () => {
+  test("a record already gone refuses as gone, and leaves no sibling entry behind", async () => {
+    // Reported as its own refusal rather than folded into the superseded one: the
+    // hand-off surfaces answer them differently, since a record that is not here
+    // cannot be downloaded again.
     const record = await createManagedExchange(newExchange());
     const downloadedSecret = record.sharedSecret;
     await deleteManagedExchange(record.id);
@@ -343,7 +346,7 @@ describe("the spend is checked against the stored record in one step", () => {
         downloadedSecret,
         "2026-07-14T13:00:00.000Z",
       ),
-    ).toBe("superseded");
+    ).toBe("gone");
 
     // No spent state stranded under an id with no record: there is no live copy
     // left to spend.

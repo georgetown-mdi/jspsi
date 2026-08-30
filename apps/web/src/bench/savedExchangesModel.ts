@@ -107,6 +107,10 @@ function tierStatus(tier: ManagedFailureTier, at: string): string {
       return `Last run stopped before connecting (${at}); settle the terms or use a covering file`;
     case "consent":
       return `Last run stopped before sending (${at}); settle what it sends`;
+    case "handed-off":
+      // The row already names the hand-off and its date beside this line, so the
+      // status says what the run did rather than repeating the state.
+      return `Last run stopped: this exchange was handed off (${at})`;
     case "storage":
       return `Last run could not be saved (${at}); re-invite to reconnect`;
     case "imported":

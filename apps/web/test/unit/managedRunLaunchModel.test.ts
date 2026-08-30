@@ -19,12 +19,15 @@ import {
   composeManagedExchangeFile,
 } from "@psi/managedExchangeRecord";
 import {
+  ManagedExchangeLockUnavailableError,
+  ManagedExchangeSpentError,
+} from "@psi/managedExchangeRun";
+import {
   RotationPersistError,
   missedRun,
   storageFailureRun,
 } from "@psi/managedRunRotate";
 import { ManagedExchangeExpiredError } from "@psi/managedExpiry";
-import { ManagedExchangeLockUnavailableError } from "@psi/managedExchangeRun";
 import { ManagedInputError } from "@psi/managedInputGuard";
 import { PartnerNoShowError } from "@psi/waitForConnection";
 
@@ -159,6 +162,39 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
     );
     expect(failure.kind).toBe("already-running");
     expect(failure.recovery).toBe("wait");
+  });
+
+  test("a run that met a handed-off copy refuses outright, with no way back offered", () => {
+    // The attended half of the hand-off refusal: the operator clicked Run on a
+    // surface that loaded before the hand-off. What they get is the refusal and
+    // where the exchange runs now -- no retry, no re-invite, and no override that
+    // would take the exchange back by pressing a button on a failed run.
+    const failure = classifyAgainstOneRecord(
+      new ManagedExchangeSpentError("abc"),
+      record(),
+      { spent: { spentAt: "2026-07-13T09:00:00.000Z" } },
+      NOW,
+      false,
+    );
+    expect(failure.kind).toBe("handed-off");
+    expect(failure.recovery).toBe("none");
+    expect(managedRunRetryable(failure)).toBe(false);
+    expect(managedRunReinvites(failure)).toBe(false);
+    expect(failure.message).not.toMatch(/temporary connection problem/);
+    expect(failure.message).not.toMatch(/attack|tamper|impersonat/i);
+    expect(failure.message).toMatch(/nothing left this device/);
+  });
+
+  test("the recorded hand-off kind reads the same at the next visit", () => {
+    // The unattended half: a scheduled run that met the hand-off stamped the kind
+    // and nobody saw it happen, so the same state must come back off the record.
+    const failure = managedRunFailureFromRecord(
+      record({ lastRun: failed("handed-off") }),
+      { spent: { spentAt: "2026-07-13T09:00:00.000Z" } },
+      NOW,
+    );
+    expect(failure?.kind).toBe("handed-off");
+    expect(failure?.recovery).toBe("none");
   });
 
   test("a partner who never arrived is the benign no-show state, not the transport copy", () => {

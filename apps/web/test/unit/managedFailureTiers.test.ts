@@ -116,6 +116,19 @@ describe("deriveManagedFailureTier: tier per recorded benign state", () => {
     ).toBe("transport");
   });
 
+  test("a recorded hand-off refusal is its own benign tier, not the attack one", () => {
+    // The kind a run stamps when it meets a copy an export gave away. Falling
+    // through to the unexplained tier would put the out-of-band attack checklist
+    // in front of an operator whose own hand-off is the whole explanation.
+    expect(
+      deriveManagedFailureTier(
+        record({ lastRun: failed("handed-off") }),
+        { spent: { spentAt: "2026-07-13T09:00:00.000Z" } },
+        NOW,
+      ),
+    ).toBe("handed-off");
+  });
+
   test("a cancelled run is treated as a retry, not a failure to tier", () => {
     expect(
       deriveManagedFailureTier(

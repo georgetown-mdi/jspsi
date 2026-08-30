@@ -672,8 +672,10 @@ export async function readRecordAndMarkBackedUp(
  * on.
  *
  * Resolves `"superseded"` -- having written nothing -- when the stored secret has
- * moved on or no record exists under `id`, where there is no live copy left to
- * spend. The secret is the identity that decides: it is what the hand-off files
+ * moved on, and `"gone"` when no record exists under `id` at all, where there is no
+ * live copy left to spend. The two are reported apart rather than as one refusal
+ * because a superseded record is still here to download again and a gone one is
+ * not. The secret is the identity that decides: it is what the hand-off files
  * carry and what a rotation moves, so an edit that leaves it alone (a label, a
  * max-age policy) leaves the downloaded copy spendable. Any backup marker is left
  * untouched -- present or absent, it is the export's business, not this write's.
@@ -700,15 +702,19 @@ export async function spendManagedExchangeIfCurrent(
       const read = records.get(id);
       const readLocal = local.get(id);
       // Refusal is the default, so every way out of the step short of the write --
-      // a missing record, a moved secret -- resolves as the refusal rather than
-      // relying on each to say so.
+      // a missing record, a moved secret -- resolves as a refusal rather than
+      // relying on each to say so. The missing record then names itself, because
+      // the two refusals leave the operator with different things to do.
       let outcome: ManagedSpendOutcome = "superseded";
       let failure: unknown;
       const applyWhenReady = () => {
         if (read.readyState !== "done" || readLocal.readyState !== "done")
           return;
         try {
-          if (read.result === undefined) return;
+          if (read.result === undefined) {
+            outcome = "gone";
+            return;
+          }
           const stored = parseManagedExchangeRecord(read.result);
           if (stored.sharedSecret !== expectedSharedSecret) return;
           markSpentOnLocalStore(local, id, readLocal.result, spentAt, handoff);

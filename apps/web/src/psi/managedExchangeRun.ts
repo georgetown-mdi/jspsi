@@ -29,6 +29,14 @@
  *   durable single-owner property rests on migration-not-sync export semantics,
  *   not on the lock.
  *
+ * - **A handed-off copy does not run.** The first thing the locked window does is
+ *   re-read the record's sibling spent state and refuse a copy an export has
+ *   handed off, before the input is read and before any connection. It is a read
+ *   per run rather than a surface's mount-time reading, so a hand-off confirmed
+ *   after a surface loaded -- or between two attempts at one scheduled window --
+ *   stops the runs that follow it rather than only the ones that start after a
+ *   reload.
+ *
  * - **Persist-before-success.** The rotated secret is written durably (a strict-
  *   durability transaction awaited to `complete`) BEFORE the data exchange begins.
  *   {@link runRotationCriticalSection} enforces the ordering, resolving the gate the
@@ -50,6 +58,7 @@ import {
   persistManagedExchangeRotation,
   recordManagedExchangeLastRun,
 } from "./managedExchangeStore";
+import { getManagedLocalState } from "./managedLocalState";
 
 import type { ManagedExchangeLastRun } from "./managedExchangeRecord";
 import type { RotationWriteBack } from "./managedRunRotate";
@@ -92,6 +101,24 @@ export class ManagedExchangeLockUnavailableError extends Error {
   constructor(id: string) {
     super(`a run is already in progress for managed exchange ${id}`);
     this.name = "ManagedExchangeLockUnavailableError";
+  }
+}
+
+/**
+ * Raised when a run finds this device's copy of the record handed off: an export
+ * spent it, so the secret it would rotate belongs to whoever the hand-off gave it
+ * to. Refusing is the whole response -- rotating would leave the new owner's first
+ * run meeting a partner that has moved on, which nothing short of a re-invite
+ * recovers, and the run has no standing to decide that on the operator's behalf.
+ * Raised inside the run+rotate lock before the input is read, so a refused run has
+ * touched neither the operator's file nor the network.
+ */
+export class ManagedExchangeSpentError extends Error {
+  constructor(id: string) {
+    super(
+      `managed exchange ${id} was handed off, so this device's copy no longer runs it`,
+    );
+    this.name = "ManagedExchangeSpentError";
   }
 }
 
@@ -201,7 +228,11 @@ export interface ManagedExchangeRunResult<TExchange> {
  * not the caller's to uphold, and the lock is not held for the (potentially long)
  * data exchange.
  *
- * The input guard runs FIRST, before the handshake opens any connection: its
+ * The spent check runs first of all, inside the lock: a record an export handed off
+ * refuses with a {@link ManagedExchangeSpentError} that records the `handed-off`
+ * `lastRun`, before the input is read and before any connection.
+ *
+ * The input guard runs next, before the handshake opens any connection: its
  * result is the handshake's argument, so a runner structurally cannot reorder the
  * guard after the handshake. A benign {@link ManagedInputError} records the
  * `lastRun` kind {@link managedInputFailureKind} reads off its rejection inside the
@@ -223,6 +254,9 @@ export interface ManagedExchangeRunResult<TExchange> {
  *
  * @throws {ManagedExchangeLockUnavailableError} if `lock.ifAvailable` is set and a
  *   run is already in progress on this device.
+ * @throws {ManagedExchangeSpentError} if an export has handed this device's copy
+ *   off; the `handed-off` `lastRun` is recorded best-effort before this
+ *   propagates, and no input was read and no connection made.
  * @throws {ManagedInputError} if the input guard rejects (a missing file, a gone
  *   permission, or an unsatisfiable column shape); the benign `lastRun` for that
  *   rejection is recorded best-effort before this propagates, and no connection was
@@ -243,6 +277,10 @@ export async function runManagedExchange<TInput, THandshake, TExchange>(
   const gate = await withManagedExchangeLock(
     record.id,
     async () => {
+      // A copy an export handed off is refused before anything else this window
+      // does: the sibling state is read here rather than trusted from whatever a
+      // caller loaded, so a hand-off confirmed since that load stops this run.
+      await refuseHandedOffCopy(record.id, now);
       // The input guard runs before the handshake opens any connection. A benign
       // input rejection records its classified kind inside the lock (this run's
       // record until the lock releases), then re-raises with no handshake attempted.
@@ -310,6 +348,36 @@ export async function runManagedExchange<TInput, THandshake, TExchange>(
   const lastRun = succeededRun(now());
   await recordLastRun(record.id, lastRun);
   return { exchange, lastRun };
+}
+
+/**
+ * Refuse this run when the record's sibling state says an export handed this
+ * device's copy off, recording the `handed-off` `lastRun` before it re-raises.
+ * Read inside the lock and before the input guard, so a run that meets a hand-off
+ * has read no input file and opened no connection.
+ *
+ * The bookkeeping is this section's own, like the input and storage tiers beside
+ * it: a scheduled run has nobody watching it, so the refusal is what the record
+ * carries afterwards rather than a line in a log the operator never sees. It is
+ * best-effort for the reason those are -- a failed bookkeeping write must not
+ * replace the refusal the runner classifies on.
+ *
+ * @throws {ManagedExchangeSpentError} always, when the copy is spent.
+ * @throws {ZodError} if the sibling entry is unreadable -- a run whose custody
+ *   cannot be read does not rotate on the assumption it is still this device's.
+ */
+async function refuseHandedOffCopy(
+  id: string,
+  now: () => number,
+): Promise<void> {
+  const local = await getManagedLocalState(id);
+  if (local?.spent === undefined) return;
+  try {
+    await recordLastRun(id, failedRun(now(), "failed", "handed-off"));
+  } catch {
+    // Swallowed: the refusal below still reaches the runner.
+  }
+  throw new ManagedExchangeSpentError(id);
 }
 
 /** The durable, field-scoped rotation write the ordering awaits before the data

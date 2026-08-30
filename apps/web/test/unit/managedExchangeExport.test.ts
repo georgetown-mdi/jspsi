@@ -177,10 +177,9 @@ describe("dispatchManagedMigration", () => {
         (_id: string, expectedSharedSecret: string, spentAt: string) => {
           order.push("spendIfCurrent");
           const current = stored.record;
-          if (
-            current === undefined ||
-            current.sharedSecret !== expectedSharedSecret
-          )
+          if (current === undefined)
+            return Promise.resolve<ManagedSpendOutcome>("gone");
+          if (current.sharedSecret !== expectedSharedSecret)
             return Promise.resolve<ManagedSpendOutcome>("superseded");
           spent.push(spentAt);
           return Promise.resolve<ManagedSpendOutcome>("spent");
@@ -239,20 +238,37 @@ describe("dispatchManagedMigration", () => {
     const dispatch = await dispatchManagedMigration(rec.id, deps);
     deps.stored.record = { ...rec, sharedSecret: generateSharedSecret() };
 
-    await expect(dispatch.confirm(new Date())).rejects.toBeInstanceOf(
-      ManagedHandoffSupersededError,
+    const refusal = await dispatch.confirm(new Date()).then(
+      () => {
+        throw new Error("the confirmation should have been refused");
+      },
+      (reason: unknown) => reason,
+    );
+    expect(refusal).toBeInstanceOf(ManagedHandoffSupersededError);
+    expect((refusal as ManagedHandoffSupersededError).refusal).toBe(
+      "superseded",
     );
     expect(deps.spent).toEqual([]);
   });
 
-  test("confirm refuses when the record is gone", async () => {
+  test("confirm refuses a record that is gone as its own refusal", async () => {
+    // Held apart from the superseded refusal because the surfaces answer them
+    // differently: this record cannot be downloaded again, so the copy that names
+    // a fresh download would send the operator after one nothing can produce.
     const rec = record();
     const deps = migrationDeps(rec);
     const dispatch = await dispatchManagedMigration(rec.id, deps);
     deps.stored.record = undefined;
 
-    await expect(dispatch.confirm(new Date())).rejects.toBeInstanceOf(
-      ManagedHandoffSupersededError,
+    const refusal = await dispatch.confirm(new Date()).then(
+      () => {
+        throw new Error("the confirmation should have been refused");
+      },
+      (reason: unknown) => reason,
+    );
+    expect(refusal).toBeInstanceOf(ManagedHandoffSupersededError);
+    expect((refusal as ManagedHandoffSupersededError).refusal).toBe(
+      "record-gone",
     );
     expect(deps.spent).toEqual([]);
   });
@@ -396,10 +412,9 @@ describe("dispatchManagedCronExport", () => {
           handoff: ManagedSpentHandoff,
         ) => {
           const current = stored.record;
-          if (
-            current === undefined ||
-            current.sharedSecret !== expectedSharedSecret
-          )
+          if (current === undefined)
+            return Promise.resolve<ManagedSpendOutcome>("gone");
+          if (current.sharedSecret !== expectedSharedSecret)
             return Promise.resolve<ManagedSpendOutcome>("superseded");
           spent.push({ spentAt, handoff });
           return Promise.resolve<ManagedSpendOutcome>("spent");
@@ -479,6 +494,24 @@ describe("dispatchManagedCronExport", () => {
 
     await expect(dispatch.confirm(new Date())).rejects.toBeInstanceOf(
       ManagedHandoffSupersededError,
+    );
+    expect(deps.spent).toEqual([]);
+  });
+
+  test("confirm refuses a record that is gone as its own refusal", async () => {
+    const rec = record();
+    const deps = cronDeps(rec);
+    const dispatch = await dispatchManagedCronExport(rec.id, deps);
+    deps.stored.record = undefined;
+
+    const refusal = await dispatch.confirm(new Date()).then(
+      () => {
+        throw new Error("the confirmation should have been refused");
+      },
+      (reason: unknown) => reason,
+    );
+    expect((refusal as ManagedHandoffSupersededError).refusal).toBe(
+      "record-gone",
     );
     expect(deps.spent).toEqual([]);
   });

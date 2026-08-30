@@ -690,7 +690,21 @@ handshake, so a run that reaches the partner between the download and the
 attestation supersedes what was downloaded: confirming it would hand the new
 owner a copy whose first run meets a partner that has moved on, and only a
 re-invite recovers the pair. The refusal says so, nothing is spent, and the
-remedy is to download the exchange again.
+remedy is to download the exchange again -- from where the refusal is shown,
+which is the download button beside the command-line panel's confirmation and
+"Keep it on this device" then "Move to another device" on the migration screen.
+An exchange that has gone from this browser entirely -- deleted, or cleared with
+the browser's storage -- refuses the same attestation for a different reason, and
+says that instead: there is nothing here to hand over and nothing here to
+download again.
+
+**And a run refuses a copy a hand-off has already given away.** The refusal runs
+both ways, on the run path itself rather than on what a screen last read: a run
+that finds this browser's copy spent stops before reading the input file and
+before connecting, so a hand-off confirmed while a run surface stood open, or
+between two attempts at one scheduled window, is not overtaken by the run that
+follows it. There is no override -- the exchange runs where the hand-off took
+it.
 
 Ahead of that refusal, both hand-offs -- and the downloads that start them --
 are withheld while this tab is running the exchange, and while a run in any

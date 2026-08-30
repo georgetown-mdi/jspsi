@@ -37,12 +37,18 @@ export interface ManagedSpentState {
   handoff?: ManagedSpentHandoff;
 }
 
-/** How a currency-checked spend ended: `"spent"` when the stored record still
- * carried the secret the hand-off downloaded, so the spent state was written, and
- * `"superseded"` when it did not -- a rotation or a re-invite moved the secret past
- * the downloaded copy, or the record is gone -- in which case nothing was written
- * and the caller refuses the hand-off. */
-export type ManagedSpendOutcome = "spent" | "superseded";
+/** How a currency-checked spend ended. `"spent"` is the one outcome that writes:
+ * the stored record still carried the secret the hand-off downloaded. The two
+ * refusals are held apart because the operator's way out of them differs -- a
+ * `"superseded"` record is still here and can be downloaded again, while a
+ * `"gone"` one is not there to download -- and a caller that folded them would
+ * send the second operator after a copy nothing can produce:
+ *
+ * - `"superseded"` -- a rotation or a re-invite moved the stored secret past the
+ *   downloaded copy.
+ * - `"gone"` -- no record is stored under that id at all, so there is no live copy
+ *   left to spend. */
+export type ManagedSpendOutcome = "spent" | "superseded" | "gone";
 
 /** This device's import marker for a record: stamped when the record was installed
  * or revived from a backup artifact. It is the evidence the desync tiering reads to

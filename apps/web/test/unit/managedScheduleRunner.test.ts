@@ -12,6 +12,10 @@ import {
   tickManagedSchedules,
 } from "@psi/managedScheduleRunner";
 import {
+  ManagedExchangeLockUnavailableError,
+  ManagedExchangeSpentError,
+} from "@psi/managedExchangeRun";
+import {
   applyManagedExchangeLastRun,
   applyManagedExchangeLocalEdits,
   applyManagedExchangeScheduleAdvance,
@@ -24,7 +28,6 @@ import {
   reconstructRecordFromArtifact,
 } from "@psi/managedExchangeArtifact";
 import { ManagedExchangeExpiredError } from "@psi/managedExpiry";
-import { ManagedExchangeLockUnavailableError } from "@psi/managedExchangeRun";
 import { ManagedInputError } from "@psi/managedInputGuard";
 import { PartnerNoShowError } from "@psi/waitForConnection";
 import { RotationPersistError } from "@psi/managedRunRotate";
@@ -369,6 +372,7 @@ describe("a due window in the open runtime", () => {
     for (const error of [
       new ManagedInputError({ reason: "acquire", cause: new Error("gone") }),
       new ManagedExchangeExpiredError("2026-01-05T00:00:00.000Z"),
+      new ManagedExchangeSpentError("record-under-test"),
     ]) {
       const runner = harness({
         records: [recordWith()],
@@ -384,6 +388,31 @@ describe("a due window in the open runtime", () => {
       // whether the two runners are still meeting.
       expect(runner.advances[0].advance.schedule.consecutiveMisses).toBe(0);
     }
+  });
+
+  test("a hand-off confirmed mid-window ends the window where it lands", async () => {
+    // The tick read the sibling state before the window opened, so the hand-off
+    // reaches this occupancy as the run path's own refusal on the second attempt.
+    // A retryable failure would otherwise have spun this window to the attempt
+    // cap; the refusal is what stops it there.
+    const runner = harness({
+      records: [recordWith()],
+      startAt: "2026-01-06T14:00:00.000Z",
+      script: [
+        { kind: "fail", error: new Error("the broker refused") },
+        { kind: "fail", error: new ManagedExchangeSpentError("spent-record") },
+      ],
+    });
+
+    const [entry] = await tickManagedSchedules(runner.seams);
+
+    expect(entry.attempts).toBe(2);
+    expect(entry.disposition).toBe("failed");
+    // The window says nothing about the partner: no miss counted, and the run
+    // that refused recorded its own `handed-off` bookkeeping, so the advance
+    // carries none.
+    expect(runner.advances[0].advance.schedule.consecutiveMisses).toBe(0);
+    expect(runner.advances[0].advance.lastRun).toBeUndefined();
   });
 
   test("bounds a window whose attempts fail immediately", async () => {

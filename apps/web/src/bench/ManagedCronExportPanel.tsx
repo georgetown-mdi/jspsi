@@ -19,15 +19,20 @@ import {
   managedCronExportPanelState,
 } from "./managedCronExportModel";
 import {
+  RECORD_GONE_HANDOFF_REASON,
+  RECORD_GONE_HANDOFF_TITLE,
   RUN_IN_FLIGHT_HANDOFF_REASON,
   RUN_IN_FLIGHT_HANDOFF_TITLE,
-  SUPERSEDED_HANDOFF_REASON,
   SUPERSEDED_HANDOFF_TITLE,
+  supersededHandoffReason,
 } from "./managedHandoffGate";
 import { CopyableCode } from "./CopyableCode";
 import styles from "./bench.module.css";
 
-import type { ManagedCronExportDispatch } from "@psi/managedExchangeExport";
+import type {
+  ManagedCronExportDispatch,
+  ManagedHandoffRefusal,
+} from "@psi/managedExchangeExport";
 import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
 
 /** The key file's custody rules, cited rather than restated here. */
@@ -97,11 +102,12 @@ export function ManagedCronExportPanel({
   // A dispatched export whose two downloads fired but whose spend awaits the
   // operator attesting both files are saved; dismissing it leaves the source live.
   const [dispatch, setDispatch] = useState<ManagedCronExportDispatch>();
-  // The confirmation the store refused because a run rotated past the files this
-  // panel downloaded. Its own state, not `failed`: the remedy is a fresh download
-  // rather than a retried attestation, so the confirmation stays refused until one
-  // is taken.
-  const [superseded, setSuperseded] = useState(false);
+  // The confirmation the store refused, and which refusal it was: a run rotated
+  // past the files this panel downloaded, or the record is gone from this browser
+  // entirely. Its own state, not `failed`: neither is cleared by retrying the
+  // attestation, so the confirmation stays refused until a fresh download replaces
+  // the dispatch.
+  const [refusal, setRefusal] = useState<ManagedHandoffRefusal>();
   const state = useMemo(() => managedCronExportPanelState(record), [record]);
 
   // Downloading mid-run only manufactures files the confirmation will refuse: the
@@ -110,7 +116,7 @@ export function ManagedCronExportPanel({
     if (busy || runInFlight) return;
     setBusy(true);
     setFailed(false);
-    setSuperseded(false);
+    setRefusal(undefined);
     void dispatchManagedCronExport(record.id, cronExportDeps)
       .then(setDispatch)
       .catch(() => setFailed(true))
@@ -133,7 +139,8 @@ export function ManagedCronExportPanel({
         setDispatch(undefined);
         onHandedOff(composed.command);
       } catch (error) {
-        if (error instanceof ManagedHandoffSupersededError) setSuperseded(true);
+        if (error instanceof ManagedHandoffSupersededError)
+          setRefusal(error.refusal);
         else setFailed(true);
       } finally {
         setBusy(false);
@@ -342,20 +349,26 @@ export function ManagedCronExportPanel({
                     {RUN_IN_FLIGHT_HANDOFF_REASON}
                   </Alert>
                 )}
-                {superseded && (
+                {refusal !== undefined && (
                   <Alert
                     color="yellow"
-                    title={SUPERSEDED_HANDOFF_TITLE}
+                    title={
+                      refusal === "record-gone"
+                        ? RECORD_GONE_HANDOFF_TITLE
+                        : SUPERSEDED_HANDOFF_TITLE
+                    }
                     mb="sm"
                   >
-                    {SUPERSEDED_HANDOFF_REASON}
+                    {refusal === "record-gone"
+                      ? RECORD_GONE_HANDOFF_REASON
+                      : supersededHandoffReason("command-line")}
                   </Alert>
                 )}
                 <p>
                   <Button
                     onClick={confirmHandoff}
                     loading={busy}
-                    disabled={runInFlight || superseded}
+                    disabled={runInFlight || refusal !== undefined}
                   >
                     I saved both files; hand off this exchange
                   </Button>{" "}
@@ -364,7 +377,7 @@ export function ManagedCronExportPanel({
                     disabled={busy}
                     onClick={() => {
                       setDispatch(undefined);
-                      setSuperseded(false);
+                      setRefusal(undefined);
                     }}
                   >
                     Keep it in this browser

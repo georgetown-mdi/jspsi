@@ -45,10 +45,12 @@ import {
   RunWarningsAlert,
 } from "./BenchRunSurface";
 import {
+  RECORD_GONE_HANDOFF_REASON,
+  RECORD_GONE_HANDOFF_TITLE,
   RUN_IN_FLIGHT_HANDOFF_REASON,
   RUN_IN_FLIGHT_HANDOFF_TITLE,
-  SUPERSEDED_HANDOFF_REASON,
   SUPERSEDED_HANDOFF_TITLE,
+  supersededHandoffReason,
 } from "./managedHandoffGate";
 import {
   classifyManagedRunFailure,
@@ -73,10 +75,13 @@ import type {
   ManagedExchangeLocalEdits,
   ManagedExchangeRecord,
 } from "@psi/managedExchangeRecord";
+import type {
+  ManagedHandoffRefusal,
+  ManagedMigrationDispatch,
+} from "@psi/managedExchangeExport";
 import type { DisclosureAccountingRead } from "@psi/disclosureAccountingStore";
 import type { ManagedBackupMarker } from "@psi/managedBackupState";
 import type { ManagedInputSource } from "@psi/managedInputHandle";
-import type { ManagedMigrationDispatch } from "@psi/managedExchangeExport";
 import type { ManagedReinvite } from "@psi/managedReinvite";
 import type { ManagedRunFailure } from "./managedRunLaunchModel";
 import type { ManagedSpentState } from "@psi/managedLocalState";
@@ -125,11 +130,13 @@ export function ManagedRunSurface({ id }: { id: string }) {
   const [accountingReads, setAccountingReads] = useState(0);
   const [exportBusy, setExportBusy] = useState(false);
   const [exportFailed, setExportFailed] = useState(false);
-  // A hand-off the store refused because a run rotated past the artifact it
-  // downloaded. Its own state, not exportFailed: the remedy is to download again
-  // rather than to retry the attestation, so the confirmation stays refused until
-  // the operator takes a fresh artifact.
-  const [migrationSuperseded, setMigrationSuperseded] = useState(false);
+  // A hand-off the store refused, and which refusal it was: a run rotated past the
+  // artifact this screen downloaded, or the record is gone from this browser
+  // entirely. Its own state, not exportFailed: neither is cleared by retrying the
+  // attestation, so the confirmation stays refused until the operator leaves this
+  // screen.
+  const [migrationRefusal, setMigrationRefusal] =
+    useState<ManagedHandoffRefusal>();
   // A dispatched migration whose download fired but whose spend awaits the operator
   // attesting "the file is saved"; a dismissed save leaves the source live.
   const [migrationDispatch, setMigrationDispatch] =
@@ -436,7 +443,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
     if (record === undefined || exportBusy || runInFlight) return;
     setExportBusy(true);
     setExportFailed(false);
-    setMigrationSuperseded(false);
+    setMigrationRefusal(undefined);
     void dispatchManagedMigration(record.id, {
       ...exportDeps,
       spendIfCurrent: spendManagedExchangeIfCurrent,
@@ -468,7 +475,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
         setMigrated(true);
       } catch (error) {
         if (error instanceof ManagedHandoffSupersededError)
-          setMigrationSuperseded(true);
+          setMigrationRefusal(error.refusal);
         else setExportFailed(true);
       } finally {
         setExportBusy(false);
@@ -727,16 +734,26 @@ export function ManagedRunSurface({ id }: { id: string }) {
                 {RUN_IN_FLIGHT_HANDOFF_REASON}
               </Alert>
             )}
-            {migrationSuperseded && (
-              <Alert color="yellow" title={SUPERSEDED_HANDOFF_TITLE} mb="md">
-                {SUPERSEDED_HANDOFF_REASON}
+            {migrationRefusal !== undefined && (
+              <Alert
+                color="yellow"
+                title={
+                  migrationRefusal === "record-gone"
+                    ? RECORD_GONE_HANDOFF_TITLE
+                    : SUPERSEDED_HANDOFF_TITLE
+                }
+                mb="md"
+              >
+                {migrationRefusal === "record-gone"
+                  ? RECORD_GONE_HANDOFF_REASON
+                  : supersededHandoffReason("migration")}
               </Alert>
             )}
             <p>
               <Button
                 onClick={confirmMigration}
                 loading={exportBusy}
-                disabled={runInFlight || migrationSuperseded}
+                disabled={runInFlight || migrationRefusal !== undefined}
               >
                 I saved the file; hand off this exchange
               </Button>{" "}
@@ -745,7 +762,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
                 disabled={exportBusy}
                 onClick={() => {
                   setMigrationDispatch(undefined);
-                  setMigrationSuperseded(false);
+                  setMigrationRefusal(undefined);
                 }}
               >
                 Keep it on this device
