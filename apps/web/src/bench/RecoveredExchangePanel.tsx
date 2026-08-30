@@ -33,11 +33,13 @@ import {
 } from "./BenchRunSurface";
 import { DiagnosticLogPanel } from "./DiagnosticLogPanel";
 import { ReceiptDownload } from "./ReceiptDownload";
+import { RecordDownload } from "./RecordDownload";
 import { RecurringHandoff } from "./RecurringHandoff";
 import { StatusPanel } from "./StatusPanel";
 import { appendSanitizedRunWarning } from "./runWarnings";
 import { reattachedRunState } from "./reattachedRunState";
 import styles from "./bench.module.css";
+import { useJobExchangeRecordOffer } from "./useJobExchangeRecordOffer";
 
 import type { ConsoleJobSeat } from "@psi/consoleJobAttachment";
 import type { ExchangeRun } from "./exchangeRun";
@@ -253,13 +255,14 @@ export function RecoveredExchangePanel() {
     );
   }
 
-  if (attachment == null || run === undefined) return null;
-
   // Three distinct renders. A delivered terminal wins over the probe's initial
   // reading; before the replay lands, that reading drives the heading so a
   // re-attached terminal run never flashes the wrong copy. `stopped` (failed or
   // cancelled -- including this panel's own Stop) must NOT promise downloads:
   // there is no result, so the copy points at the failure alert and Discard.
+  //
+  // Derived above the nothing-to-recover return because the record ask below is a
+  // hook and cannot sit behind one.
   const runState = reattachedRunState({
     failed: failure !== undefined,
     hasOutputs: outputs !== undefined,
@@ -267,6 +270,17 @@ export function RecoveredExchangePanel() {
   });
   const stopped = runState === "stopped";
   const running = runState === "running";
+
+  // Where the re-attached run's exchange record stands. A run that disclosed and
+  // then stopped is exactly the `stopped` render, which promises no downloads at
+  // all -- so without this the panel would offer that run's record nowhere while
+  // its own Discard removes it.
+  const recordOffer = useJobExchangeRecordOffer(
+    attachment?.jobId,
+    !running && outputs?.record === undefined,
+  );
+
+  if (attachment == null || run === undefined) return null;
 
   return (
     <section className={styles.callout} aria-label="Recovered exchange">
@@ -317,6 +331,7 @@ export function RecoveredExchangePanel() {
           )}
         </>
       )}
+      <RecordDownload offer={recordOffer} />
       <ReceiptDownload jobId={attachment.jobId} settled={!running} />
       {/* Available for as long as the appliance holds the job, collapsed
           throughout on this compact panel -- the run seats' rule, less the

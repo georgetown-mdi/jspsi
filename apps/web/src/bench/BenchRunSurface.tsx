@@ -417,6 +417,110 @@ export function FailureAlert({
   );
 }
 
+/** The title the untaken-record confirm heads with. It names what is about to be
+ * lost rather than the recovery being taken, because the recovery is what the
+ * operator already pressed and the record is the news. */
+export const UNTAKEN_RECORD_CONFIRM_TITLE = "Leave the exchange record behind?";
+
+/**
+ * What the untaken-record confirm says. The record of a disclosure that already
+ * happened is on the appliance, and the recovery the operator pressed removes the
+ * run's folder with it. Stated as the irreversible removal it is, and pointed at
+ * the download standing on the same screen.
+ */
+export const UNTAKEN_RECORD_CONFIRM_BODY =
+  "This run exchanged data before it stopped, and this appliance holds its " +
+  "record of that disclosure. Going on removes the run and the record with it, " +
+  "and neither party can recreate it. Download it from the exchange-record " +
+  "panel on this page first if you need the accounting entry.";
+
+/**
+ * One recovery a failure surface offers -- Try again, Start over, Back to your
+ * columns -- with the confirm the console's discard hazard calls for.
+ *
+ * Every one of these recoveries discards the appliance's exchange for this run:
+ * the run's whole folder is DELETEd so the single slot frees, which is
+ * irreversible and appliance-only. On most failures that costs nothing the
+ * operator has not already seen, so the control acts straight through and stays as
+ * cheap as it looks. Where the run left an exchange record standing untaken
+ * ({@link ./RecordDownload}), it does not: the record attests a disclosure that
+ * happened and cannot be recreated, so the recovery confirms first -- the same
+ * trade the completion path makes ({@link AnotherExchangeFoot}).
+ *
+ * `to` carries the recoveries that leave the bench rather than re-running in place
+ * (the acceptor's fresh-invitation link); the confirm's own commit button then
+ * navigates, so the confirmed and unconfirmed forms land in the same place.
+ */
+export function FailureRecoveryButton({
+  label,
+  onAct,
+  to,
+  confirmUntakenRecord,
+}: {
+  label: string;
+  /** Fires once the operator has committed to the recovery -- immediately when
+   * nothing is at risk, or from the confirm when something is. */
+  onAct: () => void;
+  /** The route the recovery navigates to, for a recovery that leaves this seat.
+   * Omitted for one that acts in place. */
+  to?: "/quick";
+  /** Whether this run has an exchange record the operator has been offered and the
+   * recovery would destroy. */
+  confirmUntakenRecord: boolean;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const commit = (marginTop: string | undefined) =>
+    to === undefined ? (
+      <Button
+        color="red"
+        variant="light"
+        mt={marginTop}
+        onClick={() => onAct()}
+      >
+        {label}
+      </Button>
+    ) : (
+      <Button
+        component={Link}
+        to={to}
+        color="red"
+        variant="light"
+        mt={marginTop}
+        onClick={() => onAct()}
+      >
+        {label}
+      </Button>
+    );
+  if (!confirmUntakenRecord) return commit("sm");
+  return (
+    <>
+      <Button
+        color="red"
+        variant="light"
+        mt="sm"
+        onClick={() => setConfirming(true)}
+      >
+        {label}
+      </Button>
+      <Modal
+        opened={confirming}
+        onClose={() => setConfirming(false)}
+        title={UNTAKEN_RECORD_CONFIRM_TITLE}
+        centered
+        transitionProps={{ duration: 0 }}
+      >
+        <p>{UNTAKEN_RECORD_CONFIRM_BODY}</p>
+        <Group mt="md">
+          <Button variant="default" onClick={() => setConfirming(false)}>
+            Cancel
+          </Button>
+          {commit(undefined)}
+        </Group>
+      </Modal>
+    </>
+  );
+}
+
 /**
  * The run's non-fatal warnings, accumulated in arrival order -- the driver's
  * `onWarning` slot rendered for the operator (e.g. the CLI's cross-party

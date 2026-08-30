@@ -11,6 +11,7 @@ import {
   DonePanel,
   DownloadRow,
   FailureAlert,
+  FailureRecoveryButton,
   NoResultFileInset,
   RECONNECTING_HEADING,
   ReattachedRunNotice,
@@ -22,10 +23,12 @@ import {
 } from "./BenchRunSurface";
 import { DiagnosticLogPanel } from "./DiagnosticLogPanel";
 import { ReceiptDownload } from "./ReceiptDownload";
+import { RecordDownload } from "./RecordDownload";
 import { RecurringHandoff } from "./RecurringHandoff";
 import { StatusPanel } from "./StatusPanel";
 import { reattachedRunState } from "./reattachedRunState";
 import styles from "./bench.module.css";
+import { useJobExchangeRecordOffer } from "./useJobExchangeRecordOffer";
 
 import type { ExchangeRun } from "./exchangeRun";
 import type { GeneratedInvitation } from "@psi/invitation";
@@ -108,10 +111,21 @@ export function InviterExchangeSection({
 }) {
   const phase =
     outputs !== undefined ? "done" : awaitingPartner(run) ? "share" : "running";
-  // The run reached a terminal, which is what the two appliance-artifact
+  // The run reached a terminal, which is what the three appliance-artifact
   // panels below key on: each states its artifact's standing once the run is
   // past producing it.
   const settled = phase === "done" || failure !== undefined;
+
+  // Where this run's exchange record stands on the appliance. Asked only once the
+  // run has settled and only where the completion downloads are not already
+  // carrying the pair, so the ordinary successful run makes no second request. The
+  // one answer drives both the record panel and whether the failure recoveries --
+  // each of which DELETEs the run's folder -- confirm before doing so.
+  const recordOffer = useJobExchangeRecordOffer(
+    serverJob ? jobId : undefined,
+    settled && outputs?.record === undefined,
+  );
+  const untakenRecord = recordOffer?.kind === "available";
 
   // A busy (409) create at start re-attached this surface to an exchange the
   // appliance already held (a second tab, a navigate-away-and-back, or an orphaned
@@ -190,14 +204,18 @@ export function InviterExchangeSection({
       {failure !== undefined && (
         <FailureAlert failure={failure}>
           {retryable && (
-            <Button color="red" variant="light" mt="sm" onClick={onTryAgain}>
-              Try again
-            </Button>
+            <FailureRecoveryButton
+              label="Try again"
+              onAct={onTryAgain}
+              confirmUntakenRecord={untakenRecord}
+            />
           )}
           {offersStartOver && (
-            <Button color="red" variant="light" mt="sm" onClick={onStartOver}>
-              Start over with a fresh invitation
-            </Button>
+            <FailureRecoveryButton
+              label="Start over with a fresh invitation"
+              onAct={onStartOver}
+              confirmUntakenRecord={untakenRecord}
+            />
           )}
         </FailureAlert>
       )}
@@ -320,6 +338,7 @@ export function InviterExchangeSection({
           )}
         </>
       )}
+      <RecordDownload offer={recordOffer} />
       {serverJob && jobId !== undefined && (
         <>
           <ReceiptDownload jobId={jobId} settled={settled} />

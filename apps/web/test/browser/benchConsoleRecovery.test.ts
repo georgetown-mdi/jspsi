@@ -53,6 +53,10 @@ interface RecoveryStubOptions {
    * leaves that route 404, keeping the graduation disclosure intrinsically gated
    * away (the way every existing recovery test sees no affordance). */
   handoff?: object;
+  /** The exchange record the job's status route reports. Absent leaves the body
+   * reporting `recordAvailable: false`, which is what a run that owes no record
+   * answers. */
+  record?: { createdAt: string; outcome: string };
 }
 
 /** A valid recurring-run hand-off body: enough for the finished render's collapsed
@@ -122,7 +126,16 @@ function stubRecoveryApi(options: RecoveryStubOptions = {}): {
             new Response(null, { status: options.statusCode }),
           );
         return Promise.resolve(
-          json({ status: jobStatus, recordAvailable: false }),
+          json({
+            status: jobStatus,
+            ...(options.record !== undefined
+              ? {
+                  recordAvailable: true,
+                  recordCreatedAt: options.record.createdAt,
+                  recordOutcome: options.record.outcome,
+                }
+              : { recordAvailable: false }),
+          }),
         );
       }
       if (url === `/api/jobs/${jobId}/handoff`)
@@ -555,6 +568,34 @@ describe("console strand recovery panel", () => {
     await expect
       .element(page.getByText("0 2 * * *", { exact: false }))
       .toBeVisible();
+  });
+
+  test("the stopped render offers the record of a run that disclosed first", async () => {
+    // The stopped lead says outright that there are no results to download, and
+    // the panel's own Discard removes the folder. A run that got as far as
+    // exchanging data still wrote its record of that disclosure, so this surface
+    // is the last place it can be taken from.
+    persistAttachment("job-fail");
+    stubRecoveryApi({
+      jobId: "job-fail",
+      status: "failed",
+      record: {
+        createdAt: "2026-07-08T14:32:00.000Z",
+        outcome: "receipt-swap-terminated",
+      },
+    });
+    app.render(createElement(InviterBench));
+
+    await expect
+      .element(page.getByText("An exchange started from this console stopped"))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByRole("link", {
+          name: "Download record (safe to share): psilink-record-2026-07-08T14-32-00-000Z.json",
+        }),
+      )
+      .toBeInTheDocument();
   });
 
   test("the stopped render offers no graduation disclosure", async () => {

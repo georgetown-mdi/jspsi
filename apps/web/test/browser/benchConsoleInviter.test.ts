@@ -15,10 +15,15 @@ import {
   SWEEP_CONFIRMATION_LABEL,
   SWEEP_CONTROL_LABEL,
 } from "@bench/runDiagnosticsModel";
+import {
+  TERMINATED_RECORD_KEYS_NOTICE,
+  TERMINATED_RECORD_LEAD,
+} from "@bench/RecordDownload";
 import { InviterBench } from "@bench/InviterBench";
 import { RECEIPT_MISSING_LEAD } from "@bench/ReceiptDownload";
 import { RETAIN_MODE_BILATERAL_NOTICE } from "@bench/exchangeFilesModel";
 import { SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT } from "@bench/filedropRendezvousChoice";
+import { UNTAKEN_RECORD_CONFIRM_BODY } from "@bench/BenchRunSurface";
 import styles from "@bench/bench.module.css";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
@@ -92,6 +97,9 @@ interface StubOptions {
   /** The receipt pair the job's status route reports. Unset, the status body
    * carries neither field, which is what a run that signed nothing answers. */
   receipt?: { requested: boolean; available: boolean };
+  /** The exchange record the job's status route reports. Unset, the body reports
+   * `recordAvailable: false`, which is what a run that owes no record answers. */
+  record?: { createdAt: string; outcome: string };
 }
 
 /** The same-origin job API, stubbed at the global fetch seam. Unmatched URLs fall
@@ -220,7 +228,13 @@ function stubJobApi(options: StubOptions = {}): {
         return Promise.resolve(
           jsonResponse({
             status: jobStatus,
-            recordAvailable: false,
+            ...(options.record !== undefined
+              ? {
+                  recordAvailable: true,
+                  recordCreatedAt: options.record.createdAt,
+                  recordOutcome: options.record.outcome,
+                }
+              : { recordAvailable: false }),
             ...(options.receipt !== undefined
               ? {
                   receiptRequested: options.receipt.requested,
@@ -1706,5 +1720,132 @@ describe("console inviter receipt on a failed run", () => {
     expect(
       page.getByRole("link", { name: /Download signed receipt/ }).query(),
     ).toBeNull();
+  });
+});
+
+// A run that disclosed and then terminated reaches this seat as a FAILURE, where
+// the completion downloads render nothing at all -- so the record of that
+// disclosure is offered only if something asks the appliance for it. These pin the
+// offer against that terminal, and pin the recovery beside it against destroying
+// the record without saying so.
+describe("console inviter exchange record on a terminated run", () => {
+  const CREATED_AT = "2026-07-08T14:32:00.000Z";
+  const RECORD_STAMP = "2026-07-08T14-32-00-000Z";
+
+  /** Create the invitation, reach the running run, then end it in a retryable
+   * transport terminal -- the failure whose recovery is Try again, which discards
+   * the run's folder on the appliance. */
+  async function runToExchangeFailure(
+    api: ReturnType<typeof stubJobApi>,
+  ): Promise<void> {
+    await reachReviewCreate();
+    await page.getByRole("button", { name: "Create the invitation" }).click();
+    await vi.waitFor(() =>
+      expect(api.captured.some((r) => r.url === "/api/jobs/job-7/events")).toBe(
+        true,
+      ),
+    );
+    api.emitEvent({ v: 1, type: "stage", id: "confirming protocol" });
+    api.setJobStatus("failed");
+    api.emitEvent({
+      v: 1,
+      type: "error",
+      category: "exchange",
+      message: "the exchange stopped before it finished",
+    });
+    api.closeEvents();
+    await expect
+      .element(page.getByRole("button", { name: "Try again" }))
+      .toBeInTheDocument();
+  }
+
+  test("offers the record the appliance holds, stamped from its own createdAt", async () => {
+    const api = stubJobApi({
+      sftp: { configured: true, host: "dr.example.gov", port: 2222 },
+      record: { createdAt: CREATED_AT, outcome: "receipt-swap-terminated" },
+    });
+    app.render(createElement(InviterBench));
+    await runToExchangeFailure(api);
+
+    await expect
+      .element(page.getByText(TERMINATED_RECORD_LEAD))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByRole("link", {
+          name: `Download record (safe to share): psilink-record-${RECORD_STAMP}.json`,
+        }),
+      )
+      .toBeInTheDocument();
+    // The keys half is offered, and offered honestly: this run wrote no result
+    // file, so there is nothing for the salts beside the record to open.
+    await expect
+      .element(
+        page.getByRole("link", {
+          name: `Download verification keys (keep private): psilink-record-${RECORD_STAMP}.keys.json`,
+        }),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText(TERMINATED_RECORD_KEYS_NOTICE))
+      .toBeInTheDocument();
+  });
+
+  test("the retry confirms before it destroys the record, and cancelling keeps the run", async () => {
+    const api = stubJobApi({
+      sftp: { configured: true, host: "dr.example.gov", port: 2222 },
+      record: { createdAt: CREATED_AT, outcome: "receipt-swap-terminated" },
+    });
+    app.render(createElement(InviterBench));
+    await runToExchangeFailure(api);
+    // Wait for the ask to land, so the press below is the confirming form.
+    await expect
+      .element(page.getByText(TERMINATED_RECORD_LEAD))
+      .toBeInTheDocument();
+
+    await page.getByRole("button", { name: "Try again" }).click();
+    await expect
+      .element(page.getByText(UNTAKEN_RECORD_CONFIRM_BODY))
+      .toBeInTheDocument();
+    // Nothing has been removed while the operator is still deciding.
+    expect(api.captured.some((r) => r.method === "DELETE")).toBe(false);
+
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await flushPendingUpdates();
+    expect(api.captured.some((r) => r.method === "DELETE")).toBe(false);
+    await expect
+      .element(
+        page.getByRole("link", { name: /Download record \(safe to share\)/ }),
+      )
+      .toBeInTheDocument();
+  });
+
+  test("a run that failed before disclosing offers nothing and retries straight through", async () => {
+    // No record is owed and none was written, so the appliance reports none: the
+    // panel renders nothing, and the recovery costs the operator nothing it has
+    // not already seen, so it does not interrupt them.
+    const api = stubJobApi({
+      sftp: { configured: true, host: "dr.example.gov", port: 2222 },
+    });
+    app.render(createElement(InviterBench));
+    await runToExchangeFailure(api);
+    await vi.waitFor(() =>
+      expect(
+        api.captured.filter((r) => r.url === "/api/jobs/job-7").length,
+      ).toBeGreaterThan(0),
+    );
+
+    expect(page.getByText(TERMINATED_RECORD_LEAD).query()).toBeNull();
+    expect(
+      page
+        .getByRole("link", { name: /Download record \(safe to share\)/ })
+        .query(),
+    ).toBeNull();
+
+    await page.getByRole("button", { name: "Try again" }).click();
+    expect(page.getByText(UNTAKEN_RECORD_CONFIRM_BODY).query()).toBeNull();
+    await vi.waitFor(() =>
+      expect(api.captured.some((r) => r.method === "DELETE")).toBe(true),
+    );
   });
 });

@@ -152,11 +152,14 @@ export const PARTNER_FINGERPRINT_PROBLEM =
  * nothing back but the exchange record of that disclosure, which is a materially
  * worse outcome than a missing receipt and has to be said in those words.
  *
- * The copy places that record rather than implying the console hands it over: the
- * run writes it into its own folder in the mounted data root, while the download
- * the run screen offers is gated on a succeeded run (`recordAvailable` in
- * jobManager), so on a terminated run the file is in the folder and not on the
- * screen -- and discarding the run removes it with the rest of the folder.
+ * The copy places that record rather than leaving the operator to find it: the run
+ * writes it into its own folder in the mounted data root, and the run screen
+ * offers it there as a download once the run stops ({@link ./RecordDownload}, off
+ * `recordAvailable` in jobManager, which gates on the record existing rather than
+ * on the run having succeeded). What it does NOT promise is a usable pair: a
+ * terminated run wrote no result file, so nothing re-supplies the commitments the
+ * keys would open. And discarding the run removes both with the rest of the
+ * folder, which is why the sentence names the download and the folder together.
  *
  * Nor would the refusal be symmetric across the two sides: the initiator sends
  * its own `{certificate, signature}` frame BEFORE it verifies the partner's,
@@ -185,9 +188,10 @@ export const NO_PARTNER_PIN_PROBLEM =
   "fail late rather than early: it goes all the way to the point where the two " +
   "sides sign -- your data has already gone to your partner by then -- and " +
   "stops there, leaving you no results and no receipt. What you are left with " +
-  "is the exchange record of what you had already disclosed, written as " +
-  "record.json with that run's files in the mounted folder rather than offered " +
-  "here for download; discarding the run removes it. Which side sends its " +
+  "is the exchange record of what you had already disclosed: the run screen " +
+  "offers it for download when the run stops, and it is written as record.json " +
+  "with that run's files in the mounted folder. Discarding the run removes it. " +
+  "Which side sends its " +
   "signature first is settled when the two sides meet, so on a run where this " +
   "side sends first, your partner would already have your signed receipt. To " +
   "exchange before their fingerprint arrives, choose 'No receipt' now and " +

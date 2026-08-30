@@ -5,6 +5,10 @@ import path from "node:path";
 
 import { z } from "zod";
 
+import { EXCHANGE_RECORD_OUTCOMES } from "@psilink/core";
+
+import type { ExchangeRecordOutcome } from "@psilink/core";
+
 /**
  * A server-generated job id: a v4 UUID. The client never supplies it, and every
  * route validates its format before any filesystem use, so a crafted id cannot
@@ -134,28 +138,47 @@ export function resultFileExists(outputPath: string): boolean {
   return jobFileExists(outputPath);
 }
 
-/** The ISO-8601 rule core stamps a record's `createdAt` with, applied here so the
- * status path validates the timestamp the same way rather than accepting any
- * non-empty string. */
-const recordCreatedAtSchema = z.iso.datetime();
+/** The two fields the status path reads off a record file: the timestamp the
+ * download filenames are stamped from, and what the record says became of the run
+ * that wrote it. */
+export interface JobRecordSummary {
+  createdAt: string;
+  outcome: ExchangeRecordOutcome;
+}
+
+/** The shape the status path holds a record file to: core's own `createdAt` rule
+ * (ISO-8601, so the stamp is a timestamp rather than any non-empty string) and
+ * core's accepted outcome set. Both are required, matching the record format,
+ * which carries an outcome on every record and states it rather than leaving a
+ * reader to infer one from silence (docs/spec/EXCHANGE_RECORD.md, When a record is
+ * owed). */
+const recordSummarySchema = z.object({
+  createdAt: z.iso.datetime(),
+  outcome: z.enum(EXCHANGE_RECORD_OUTCOMES),
+});
 
 /**
- * Read the `createdAt` timestamp from a server-produced record file, or null if
- * the file cannot be read, is not JSON, or its `createdAt` is not a valid
- * ISO-8601 timestamp. The file is small and server-produced (the CLI wrote it),
- * so it is read whole; the defensive null keeps a missing or malformed record
- * from throwing on the status path -- the caller treats null as "record
- * unavailable".
+ * Read the summary the status path needs from a server-produced record file, or
+ * null if the file cannot be read, is not JSON, or does not carry both a valid
+ * `createdAt` and a recognized `outcome`. The file is small and server-produced
+ * (the CLI wrote it), so it is read whole; the defensive null keeps a missing or
+ * malformed record from throwing on the status path -- the caller treats null as
+ * "record unavailable".
+ *
+ * Requiring the outcome is what lets every surface downstream state how the run
+ * ended rather than guess: a file this appliance's own CLI wrote always carries
+ * one, so a record without a recognized outcome is not a record this appliance can
+ * describe, and it is refused here instead of being offered under a completed
+ * run's framing.
  */
-export function readRecordCreatedAt(recordPath: string): string | null {
-  let createdAt: unknown;
+export function readRecordSummary(recordPath: string): JobRecordSummary | null {
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(fs.readFileSync(recordPath, "utf8"));
-    createdAt = (parsed as { createdAt?: unknown } | null)?.createdAt;
+    parsed = JSON.parse(fs.readFileSync(recordPath, "utf8"));
   } catch {
     return null;
   }
-  const result = recordCreatedAtSchema.safeParse(createdAt);
+  const result = recordSummarySchema.safeParse(parsed);
   return result.success ? result.data : null;
 }
 

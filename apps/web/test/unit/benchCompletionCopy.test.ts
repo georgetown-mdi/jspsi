@@ -1,12 +1,24 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  COMPLETED_RECORD_NOTICE,
+  RECORD_UNANSWERED_LEAD,
+  RECORD_UNANSWERED_NOTICE,
+  TERMINATED_RECORD_KEYS_NOTICE,
+  TERMINATED_RECORD_LEAD,
+  TERMINATED_RECORD_NOTICE,
+} from "@bench/RecordDownload";
+import {
   RECEIPT_MISSING_LEAD,
   RECEIPT_MISSING_NOTICE,
   RECEIPT_UNANSWERED_LEAD,
   RECEIPT_UNANSWERED_NOTICE,
 } from "@bench/ReceiptDownload";
-import { completionOutcome } from "@bench/BenchRunSurface";
+import {
+  UNTAKEN_RECORD_CONFIRM_BODY,
+  UNTAKEN_RECORD_CONFIRM_TITLE,
+  completionOutcome,
+} from "@bench/BenchRunSurface";
 
 import type { RunOutputs } from "@bench/runOutputs";
 
@@ -87,5 +99,69 @@ describe("the missing-receipt copy", () => {
     expect(RECEIPT_UNANSWERED_NOTICE).toContain("keep the run");
     expect(RECEIPT_UNANSWERED_NOTICE).not.toContain(RECEIPT_MISSING_LEAD);
     expect(RECEIPT_UNANSWERED_NOTICE).not.toContain("holds none");
+  });
+});
+
+describe("the exchange-record copy", () => {
+  test("the terminated lead leads with the disclosure, not the failure", () => {
+    // The alert above already says the run stopped. What the operator would not
+    // otherwise know -- and what the record is FOR -- is that data had already
+    // crossed, so the lead must not read as one more restatement of the failure.
+    expect(TERMINATED_RECORD_LEAD).toContain("already exchanged data");
+    expect(TERMINATED_RECORD_LEAD).toContain("record of that disclosure");
+  });
+
+  test("the terminated notice names the accounting use and the destruction", () => {
+    // Two things the operator can act on: what the file is good for, and that
+    // every control on this surface removes it.
+    expect(TERMINATED_RECORD_NOTICE).toContain("disclosure accounting");
+    expect(TERMINATED_RECORD_NOTICE).toContain("Download it now");
+    expect(TERMINATED_RECORD_NOTICE).toContain("removes this run's files");
+    expect(TERMINATED_RECORD_NOTICE).toContain("still happened");
+    // It stands on the run seats and on the compact recovery panel, whose controls
+    // are worded differently, so it names no control by its label.
+    expect(TERMINATED_RECORD_NOTICE).not.toMatch(/"Try again"|"Discard"/);
+  });
+
+  test("the terminated keys notice states what the pair cannot do", () => {
+    // A terminated run wrote no result file, and all three of the record's
+    // commitments re-supply from one, so the keys beside it open nothing. The pair
+    // otherwise looks exactly like a completed run's, which is why this is said at
+    // the download rather than left to be discovered.
+    expect(TERMINATED_RECORD_KEYS_NOTICE).toContain("nothing");
+    expect(TERMINATED_RECORD_KEYS_NOTICE).toContain("to open");
+    expect(TERMINATED_RECORD_KEYS_NOTICE).toContain("result");
+    // What it does NOT do is write the record off: it still states the disclosure
+    // and still pairs with a receipt the partner holds.
+    expect(TERMINATED_RECORD_KEYS_NOTICE).toContain("still states what");
+    expect(TERMINATED_RECORD_KEYS_NOTICE).toContain("keys private");
+    // And the completed run's copy must not carry the limitation, which does not
+    // hold for it.
+    expect(COMPLETED_RECORD_NOTICE).not.toContain("nothing to open");
+  });
+
+  test("the unanswered copy states the silence conditionally", () => {
+    // There is no "a record was requested" field to state an absence against --
+    // whether one is owed depends on how far the run got -- so the copy states the
+    // condition rather than asserting a record exists, and names what to avoid
+    // meanwhile.
+    expect(RECORD_UNANSWERED_LEAD).toContain("stopped answering");
+    expect(RECORD_UNANSWERED_NOTICE).toContain("stopped asking");
+    expect(RECORD_UNANSWERED_NOTICE).toContain("If this run got as far as");
+    expect(RECORD_UNANSWERED_NOTICE).toContain("reload");
+    expect(RECORD_UNANSWERED_NOTICE).toContain("keep the run");
+  });
+
+  test("the untaken-record confirm names the loss and the way to avoid it", () => {
+    // The confirm fires on a recovery the operator has already pressed, so it
+    // earns its interruption only by naming what that press destroys and where the
+    // file still is.
+    expect(UNTAKEN_RECORD_CONFIRM_TITLE).toContain("exchange record");
+    expect(UNTAKEN_RECORD_CONFIRM_BODY).toContain("exchanged data before it");
+    expect(UNTAKEN_RECORD_CONFIRM_BODY).toContain("removes the run");
+    expect(UNTAKEN_RECORD_CONFIRM_BODY).toContain(
+      "neither party can recreate it",
+    );
+    expect(UNTAKEN_RECORD_CONFIRM_BODY).toContain("Download it");
   });
 });

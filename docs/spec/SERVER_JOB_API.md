@@ -38,8 +38,8 @@ The loopback Host-allowlist closes DNS rebinding, a standard technique the Origi
 | `GET` | `/api/jobs/:jobId/events` | `200` `text/event-stream` | SSE event relay with full-history replay. `404` on unknown id. |
 | `POST` | `/api/jobs/:jobId/cancel` | `202` | Request cancellation; idempotent (`202` even if already terminal). `404` on unknown id. |
 | `GET` | `/api/jobs/:jobId/result` | `200` `text/csv` | The matched-result CSV, only after the job succeeded. `404` otherwise. |
-| `GET` | `/api/jobs/:jobId/record` | `200` `application/json` | The self-attested exchange record, only after the job succeeded. `404` otherwise. |
-| `GET` | `/api/jobs/:jobId/keys` | `200` `application/json` | The private verification keys paired with the record, only after the job succeeded. `404` otherwise. |
+| `GET` | `/api/jobs/:jobId/record` | `200` `application/json` | The self-attested exchange record, once the run has settled and the pair is on disk -- a run that disclosed and then terminated included (see [The `GET /api/jobs/:jobId/record` and `/api/jobs/:jobId/keys` responses](#the-get-apijobsjobidrecord-and-apijobsjobidkeys-responses)). `404` otherwise. |
+| `GET` | `/api/jobs/:jobId/keys` | `200` `application/json` | The private verification keys paired with the record, under that same gate. `404` otherwise. |
 | `GET` | `/api/jobs/:jobId/receipt` | `200` `application/json` | The dual-signed receipt a `certificate`-mode run wrote, at any point in the run's life (see [The `GET /api/jobs/:jobId/receipt` response](#the-get-apijobsjobidreceipt-response)). `404` for a run that signed nothing, or before the file exists. |
 | `GET` | `/api/jobs/:jobId/log` | `200` `text/plain` | The diagnostic log a `diagnosticRun` intent captured, at any point in the run's life (see [The `GET /api/jobs/:jobId/log` response](#the-get-apijobsjobidlog-response)). `404` for a run that captured none, or before the CLI opened the file. |
 | `GET` | `/api/jobs/:jobId/handoff` | `200` hand-off JSON | The recurring-run hand-off: the portable, secret-free template plus its metadata (see [The recurring-run hand-off](#the-recurring-run-hand-off)). `404` on malformed, unknown, or already-deleted id. |
@@ -68,6 +68,7 @@ The job id is a server-generated v4 UUID; the client never supplies it. Every id
   "resultAvailable": <bool>,
   "recordAvailable": <bool>,
   "recordCreatedAt": "<iso-8601>",  // present only when recordAvailable is true
+  "recordOutcome": "completed" | "receipt-swap-terminated",  // same
   "logRequested": <bool>,
   "logAvailable": <bool>,
   "receiptRequested": <bool>,
@@ -75,7 +76,17 @@ The job id is a server-generated v4 UUID; the client never supplies it. Every id
 }
 ```
 
-`terminal` is null until the child exits; `resultAvailable` is true exactly when `status` is `succeeded`. `recordAvailable` is true only when the job succeeded, both the record and its verification-keys file are on disk, and the record validates and yields a `createdAt`; the record pair is offered all-or-nothing. `recordCreatedAt` is the record's own timestamp, present exactly when `recordAvailable` is true -- a client derives the download filename from it, matching the in-browser exchange path. Because the CLI's record write is non-fatal (a disk failure after a successful exchange is warned, not thrown), a job can be `resultAvailable: true` with `recordAvailable: false`.
+`terminal` is null until the child exits; `resultAvailable` is true exactly when `status` is `succeeded`.
+
+`recordAvailable` is true only when the run has SETTLED (`status` is anything but `running`), both the record and its verification-keys file are on disk, and the record validates into a `createdAt` and a recognized [`outcome`](EXCHANGE_RECORD.md#when-a-record-is-owed); the record pair is offered all-or-nothing. Three properties fix that gate.
+
+- **It turns on the record's existence, not on the run having succeeded.** A record is owed from the moment the payload exchange returns, so a run that disclosed and then terminated writes one to the same destination a completed run's takes, and it is precisely the disclosure-accounting artifact that run's operator needs. A failure before that point owes no record and writes none, so it reports `recordAvailable: false` on the file's own absence rather than on a status test standing in for it.
+- **Settling is a separate claim from the file being there, and both are required.** The CLI writes the pair near the end of a run, so a mid-run read could take a half-written state for the run's answer; a complete pair sitting in a running job's workdir does not open the routes.
+- **A record that carries no recognized `outcome` reads as unavailable.** Every record this appliance's own CLI writes states one, so a file without it is not a record the appliance can describe -- and describing it is load-bearing, per `recordOutcome` below.
+
+`recordCreatedAt` is the record's own timestamp and `recordOutcome` its own outcome, both present exactly when `recordAvailable` is true. A client derives the download filenames from the timestamp, matching the in-browser exchange path, and reads the outcome to say what it is offering: a terminated record's commitments re-supply from a result file that run never wrote, so the keys beside it have nothing to open ([EXCHANGE_RECORD.md](EXCHANGE_RECORD.md#when-a-record-is-owed)) -- a client that offered the two alike would make a claim the record does not.
+
+Because the CLI's record write is non-fatal (a disk failure after a successful exchange is warned, not thrown), a job can be `resultAvailable: true` with `recordAvailable: false`.
 
 `logRequested` is true exactly when this job's intent asked for a diagnostic run, and `logAvailable` is true exactly when it did AND the log file is on disk. Both are read off the log path the server set at job creation from that intent, never from anything the reading request carries. Neither is gated on status: the run a diagnostic log exists for is the one that misbehaved, so a still-running or failed job reports the log as soon as the CLI has opened it. A run that did not ask for one has no log path at all, so no file planted at that name in its workdir can make `logAvailable` true.
 
@@ -85,7 +96,7 @@ The pair is what a client watching for a log reads: `logAvailable: false` alone 
 
 An ask that yields neither field -- a non-`200`, a body that is not this status body, or a request that never completed -- is not an answer about the log at all, and a client does not read it as "not yet": a job the server forgot across a restart, or a route that keeps failing, answers that way for as long as the client keeps asking. A client bounds how many such asks it makes in a row -- the console's seat spends a few seconds on them, not the run -- and tells its operator the server stopped answering for that run, rather than watching silently for a log that will never be reported. An answered ask ends the run of them, whatever it answered.
 
-`status` and `terminal.outcome` answer different questions and are read together. `status` is the ARTIFACT promise, set by the terminal event the CLI emitted, and it is what the result, record, and keys routes gate on. `terminal.outcome` is the RUN classification, set by the child's exit (see [Exit-code reconciliation](#exit-code-reconciliation)). They diverge on exactly one condition: `completedWithPersistenceLoss`, the CLI's persistence-loss exit ([CLI_EVENTS.md](CLI_EVENTS.md#persistence-loss)) -- the exchange completed and a local write did not. A run that took one and still emitted its `result` terminal is `succeeded` with `terminal.outcome: "completedWithPersistenceLoss"`, and its artifacts are served: the exchange happened and the result file is on disk. The `warning` events that preceded the terminal name what was lost; the outcome is what tells a supervisor -- or the console seat -- that the run must not be repeated, because repeating it would re-send this party's data for an exchange that already happened.
+`status` and `terminal.outcome` answer different questions and are read together. `status` is the ARTIFACT promise, set by the terminal event the CLI emitted, and it is what the result route gates on (the record and keys routes read it only for the settled-versus-running distinction above). `terminal.outcome` is the RUN classification, set by the child's exit (see [Exit-code reconciliation](#exit-code-reconciliation)). They diverge on exactly one condition: `completedWithPersistenceLoss`, the CLI's persistence-loss exit ([CLI_EVENTS.md](CLI_EVENTS.md#persistence-loss)) -- the exchange completed and a local write did not. A run that took one and still emitted its `result` terminal is `succeeded` with `terminal.outcome: "completedWithPersistenceLoss"`, and its artifacts are served: the exchange happened and the result file is on disk. The `warning` events that preceded the terminal name what was lost; the outcome is what tells a supervisor -- or the console seat -- that the run must not be repeated, because repeating it would re-send this party's data for an exchange that already happened.
 
 ### The `GET /api/jobs/:jobId/result` response
 
@@ -93,7 +104,11 @@ Served only when `status === "succeeded"` and the output file exists and is read
 
 ### The `GET /api/jobs/:jobId/record` and `/api/jobs/:jobId/keys` responses
 
-Served under the same gate as the result response -- only when `status === "succeeded"` and the respective file (`record.json`, `record.keys.json`) exists and is readable, `404` otherwise. The bodies are the job's server-chosen record and keys files inside its workdir, never a client-named path. Headers: `Content-Type: application/json; charset=utf-8`, a fixed `Content-Disposition: attachment; filename="psilink-record.json"` / `"psilink-record.keys.json"` (a server-side fallback; the browser's save name is set by its download control and carries the record's timestamp), and `X-Content-Type-Options: nosniff`, plus the `no-store` discipline. A client offers these two downloads only when `recordAvailable` on the status route is true, so it never links a `404`. The verification keys are private material -- a salt plus the record's commitment can open a committed value -- so `/keys` is gated and `no-store` identically to `/record` and `/result`; see [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md).
+Both are served under the status route's own `recordAvailable` rule above -- the run settled, both files (`record.json`, `record.keys.json`) readable, and the record validating into a `createdAt` and a recognized `outcome` -- and `404` otherwise. One gate for the two routes and the status field means a client that offers a download whenever `recordAvailable` is true never links a `404`, and the pair is never split. Unlike the result response this is NOT gated on `status === "succeeded"`: a run that disclosed and then terminated exits non-zero and still owes the record of that disclosure, so gating on success would withhold the accounting artifact from the run whose operator most needs it -- while the console's own recovery controls remove the workdir it sits in.
+
+The bodies are the job's server-chosen record and keys files inside its workdir, never a client-named path. Headers: `Content-Type: application/json; charset=utf-8`, a fixed `Content-Disposition: attachment; filename="psilink-record.json"` / `"psilink-record.keys.json"` (a server-side fallback; the browser's save name is set by its download control and carries the record's timestamp), and `X-Content-Type-Options: nosniff`, plus the `no-store` discipline. The verification keys are private material -- a salt plus the record's commitment can open a committed value -- so `/keys` is gated and `no-store` identically to `/record` and `/result`; see [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md).
+
+What the keys are USABLE for is the client's to state, not this route's to withhold. A terminated run wrote no result file and all three of the record's commitments re-supply from one, so nothing can be opened against that run's keys; the file is still the operator's own material, written beside the record it pairs with, so it is served and `recordOutcome` is what lets the surface say so.
 
 ### The `GET /api/jobs/:jobId/receipt` response
 
@@ -186,7 +201,7 @@ The resolved mount paths are deliberately not in the body -- neither leg's, and 
 
 ### The `GET /api/jobs/:jobId/log` response
 
-Served when the job exists, its intent asked for a diagnostic run, and the log file is readable; `404` in every other case, including a run that captured no log. Unlike the result, record, and keys responses this one is NOT gated on `status === "succeeded"`: the run a diagnostic log exists for is the one that failed or stalled, and withholding the log until success would withhold it exactly when it is wanted.
+Served when the job exists, its intent asked for a diagnostic run, and the log file is readable; `404` in every other case, including a run that captured no log. Unlike the result response this one is NOT gated on `status === "succeeded"`, nor even on the run having settled: the run a diagnostic log exists for is the one that failed or stalled, and withholding the log until success -- or until the stall ends -- would withhold it exactly when it is wanted.
 
 The body is `run.log` inside the job's own workdir. The path is composed from the workdir and that fixed name and then confirmed to resolve strictly under the workdir (`resolveWorkdirFile`), so no operator-typed or intent-supplied value reaches it -- the intent's control is a bare boolean, and the client never names a file.
 
@@ -392,7 +407,7 @@ Each job gets a workdir at `<dataRoot>/<jobId>/`, created mode `0o700` (owner-on
 | `.psilink.key` | The key file carrying the shared secret (exchange mode only), owner-only on the same discipline as the CLI's own key-file write (see [CREDENTIAL_STORAGE.md](CREDENTIAL_STORAGE.md#posix-write-discipline)). |
 | `input.csv` | The client's input CSV content, written only for an inline `inputCsv` intent; a mounted `inputFile` is read in place. |
 | `output.csv` | The CLI's matched-result output (written by the CLI on success). |
-| `record.json` | The self-attested exchange record (written by the CLI on success; the write is non-fatal, so it may be absent). |
+| `record.json` | The self-attested exchange record (written by the CLI on every run that disclosed, whether it then finished or terminated; the write is non-fatal, so it may be absent). |
 | `record.keys.json` | The private verification keys paired with the record (owner-only; written alongside the record under the same non-fatal write). |
 | `run.log` | The CLI's own diagnostic log, written only when the intent asked for a diagnostic run. The CLI opens it itself (`--log-file`, append, created owner-only), so the mode is its write discipline rather than this server's. |
 | `receipt.json` | The dual-signed receipt, written only when the intent asked for `certificate` signing. The CLI writes it itself at the path the composed `signing.receipt_output` pins, owner-only on its own discipline. The name is pinned rather than left to the CLI's default timestamped one so the server knows the path to serve. |

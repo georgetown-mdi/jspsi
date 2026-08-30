@@ -1077,17 +1077,20 @@ describe("the receipts card's model", () => {
     expect(NO_PARTNER_PIN_PROBLEM).toMatch(
       /the exchange record of what you had already disclosed/,
     );
-    // And it is placed where the operator can act on it. The console gates the
-    // record download on a succeeded run, so copy that said "you keep the record"
-    // and stopped would point at a button this run never shows: the file is in the
-    // run's folder in the mount, and goes when the run is discarded.
+    // And it is placed where the operator can act on it, in both places it can be
+    // acted on: the console offers a terminated run's record on the run screen,
+    // and the file itself is in the run's folder in the mount. Copy that named
+    // only the folder would send an operator into the mount for a file the screen
+    // was already offering.
+    expect(NO_PARTNER_PIN_PROBLEM).toMatch(
+      /the run screen offers it for download when the run stops/,
+    );
     expect(NO_PARTNER_PIN_PROBLEM).toMatch(
       /record\.json with that run's files in the mounted folder/,
     );
-    expect(NO_PARTNER_PIN_PROBLEM).toMatch(
-      /rather than offered here for download/,
-    );
-    expect(NO_PARTNER_PIN_PROBLEM).toMatch(/discarding the run removes it/);
+    // Placement is not permanence: the one control the failure surface leads with
+    // takes the record away, so the sentence that offers it also says so.
+    expect(NO_PARTNER_PIN_PROBLEM).toMatch(/Discarding the run removes it/);
   });
 
   test("the unpinned problem states the initiator's extra disclosure", () => {

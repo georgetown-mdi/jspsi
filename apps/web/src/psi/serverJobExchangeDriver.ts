@@ -1,6 +1,6 @@
 import { ProcessState, getLogger, joinErrorCauseChain } from "@psilink/core";
 
-import { recordFileStamp } from "@bench/runOutputs";
+import { jobRecordDownloads } from "@psi/jobExchangeRecord";
 import { whenDiagnostic } from "@utils/diagnostics";
 
 import { ERROR_MESSAGE_CHAIN_FIELD } from "./relayErrorChain";
@@ -237,17 +237,6 @@ export class RelayedTerminalError extends Error {
  * through this endpoint rather than as a browser object URL. */
 function jobResultUrl(jobId: string): string {
   return `/api/jobs/${jobId}/result`;
-}
-
-/** The self-attested exchange record, served from the appliance. */
-function jobRecordUrl(jobId: string): string {
-  return `/api/jobs/${jobId}/record`;
-}
-
-/** The private verification keys paired with the record, served from the
- * appliance. */
-function jobKeysUrl(jobId: string): string {
-  return `/api/jobs/${jobId}/keys`;
 }
 
 /** The default {@link JobApiClient}, hitting the real same-origin job endpoints
@@ -808,13 +797,7 @@ function withRecordDownloads(
   jobId: string,
   createdAt: string,
 ): RunOutputs {
-  const stamp = recordFileStamp(createdAt);
-  outputs.record = {
-    recordUrl: jobRecordUrl(jobId),
-    recordFileName: `psilink-record-${stamp}.json`,
-    keysUrl: jobKeysUrl(jobId),
-    keysFileName: `psilink-record-${stamp}.keys.json`,
-  };
+  outputs.record = jobRecordDownloads(jobId, createdAt);
   return outputs;
 }
 
