@@ -136,6 +136,9 @@ function harness(options: {
   startAt: string;
   script?: AttemptScript;
   localState?: Map<string, ManagedLocalState>;
+  /** Stored keys the per-entry read could not parse, as the store reports them
+   * beside the records it could. */
+  unreadableIds?: Array<string>;
   stopAfterAttempts?: number;
   failAdvanceFor?: string;
   /** A write applied to the stored record immediately before the conditioned
@@ -164,7 +167,11 @@ function harness(options: {
 
   const seams: ManagedScheduleTickSeams = {
     now: () => clockMs,
-    listRecords: () => Promise.resolve([...stored.values()]),
+    listRecords: () =>
+      Promise.resolve({
+        records: [...stored.values()],
+        unreadableIds: options.unreadableIds ?? [],
+      }),
     listLocalState: () =>
       Promise.resolve(
         options.localState ?? new Map<string, ManagedLocalState>(),
@@ -907,6 +914,68 @@ describe("records the tick leaves alone", () => {
     // The window is left unaccounted, so the wake that finds it elapsed counts
     // it exactly as a window this runtime slept through.
     expect(runner.advances).toHaveLength(0);
+  });
+});
+
+describe("a stored entry the read could not parse", () => {
+  test("is skipped and named, while every other due record still runs", async () => {
+    const healthy = recordWith();
+    const runner = harness({
+      records: [healthy],
+      startAt: "2026-01-06T14:30:00.000Z",
+      script: [{ kind: "succeed" }],
+      // An out-of-bounds or app-upgrade-invalidated entry: unparseable until an
+      // operator discards it, so failing the wake on it would stop every
+      // scheduled exchange in the store, standing, at every wake.
+      unreadableIds: ["legacy-out-of-bounds"],
+    });
+
+    const entries = await tickManagedSchedules(runner.seams);
+
+    expect(entries).toContainEqual({
+      id: "legacy-out-of-bounds",
+      caughtUpMisses: 0,
+      attempts: 0,
+      skipped: "unreadable",
+    });
+    const ran = entries.find((entry) => entry.id === healthy.id);
+    expect(ran?.disposition).toBe("succeeded");
+    expect(runner.attempts.map((attempt) => attempt.id)).toEqual([healthy.id]);
+  });
+
+  test("has nothing attempted or written for it", async () => {
+    const runner = harness({
+      records: [],
+      startAt: "2026-01-06T14:30:00.000Z",
+      unreadableIds: ["first-bad", "second-bad"],
+    });
+
+    const entries = await tickManagedSchedules(runner.seams);
+
+    expect(entries.map((entry) => entry.skipped)).toEqual([
+      "unreadable",
+      "unreadable",
+    ]);
+    expect(runner.attempts).toHaveLength(0);
+    expect(runner.advances).toHaveLength(0);
+  });
+
+  test("does not enter the in-flight registry it would never leave", async () => {
+    const runner = harness({
+      records: [],
+      startAt: "2026-01-06T14:30:00.000Z",
+      unreadableIds: ["legacy-out-of-bounds"],
+    });
+    const inFlight = new Set<string>();
+
+    await tickManagedSchedules(runner.seams, inFlight);
+
+    // Nothing runs for it, so nothing settles to clear it: an entry left in the
+    // registry would report as `"in-flight"` at every later wake instead of as
+    // the unreadable entry it is.
+    expect([...inFlight]).toEqual([]);
+    const second = await tickManagedSchedules(runner.seams, inFlight);
+    expect(second[0].skipped).toBe("unreadable");
   });
 });
 

@@ -9,6 +9,7 @@ import { describe, expect, test } from "vitest";
 import {
   MANAGED_EXCHANGE_SCHEMA_VERSION,
   MAX_LABEL_LENGTH,
+  MAX_SCHEDULE_INTERVAL_DAYS,
   applyManagedExchangeInputHandle,
   applyManagedExchangeLastRun,
   applyManagedExchangeLocalEdits,
@@ -19,6 +20,7 @@ import {
   composeManagedExchangeFile,
   diagnoseManagedExchangeRecord,
   parseManagedExchangeRecord,
+  partitionReadableManagedExchanges,
   safeParseManagedExchangeRecord,
 } from "@psi/managedExchangeRecord";
 import { withTimeZone } from "../utils/hostTimeZone";
@@ -936,5 +938,83 @@ describe("diagnoseManagedExchangeRecord", () => {
         schemaVersion: "psilink-managed-exchange/v2",
       }),
     ).toThrow();
+  });
+});
+
+describe("partitionReadableManagedExchanges", () => {
+  /** A record carrying a period past the schema's ceiling -- the shape a
+   * pre-ceiling import or a hand-edit leaves behind, which the strict read
+   * rejects. Assembled past the schema on purpose: the builder would refuse it. */
+  function outOfBoundsRecord(): unknown {
+    const record = buildManagedExchangeRecord(
+      newExchange({ label: "Out of bounds", schedule }),
+    );
+    return {
+      ...record,
+      schedule: { ...schedule, intervalDays: MAX_SCHEDULE_INTERVAL_DAYS + 1 },
+    };
+  }
+
+  test("skips an out-of-bounds record and keeps every readable one", () => {
+    const first = buildManagedExchangeRecord(newExchange({ label: "First" }));
+    const second = buildManagedExchangeRecord(newExchange({ label: "Second" }));
+    const bad = outOfBoundsRecord();
+    // What the strict read does with the same value, for contrast: the whole
+    // list fails, which is the wholesale rejection the tolerant read exists to
+    // avoid at an unattended wake.
+    expect(() => parseManagedExchangeRecord(bad)).toThrow();
+
+    const read = partitionReadableManagedExchanges(
+      [first.id, "legacy-key", second.id],
+      [first, bad, second],
+    );
+
+    expect(read.records.map((record) => record.label)).toEqual([
+      "First",
+      "Second",
+    ]);
+    expect(read.unreadableIds).toEqual(["legacy-key"]);
+  });
+
+  test("reports the stored key, not the unreadable entry's own id", () => {
+    const record = buildManagedExchangeRecord(newExchange());
+    // A failed parse leaves the entry's own `id` untrusted, so the key the store
+    // holds it under is what a report names and a delete acts on.
+    const read = partitionReadableManagedExchanges(
+      ["the-store-key"],
+      [{ ...record, id: "the-embedded-id", schedule: { nonsense: true } }],
+    );
+
+    expect(read.records).toEqual([]);
+    expect(read.unreadableIds).toEqual(["the-store-key"]);
+  });
+
+  test("skips an entry an app upgrade invalidated, on the same reading", () => {
+    const good = buildManagedExchangeRecord(newExchange({ label: "Good" }));
+    const read = partitionReadableManagedExchanges(
+      ["future", good.id],
+      [{ ...good, schemaVersion: "psilink-managed-exchange/v2" }, good],
+    );
+
+    expect(read.records.map((record) => record.id)).toEqual([good.id]);
+    expect(read.unreadableIds).toEqual(["future"]);
+  });
+
+  test("never throws, even when no entry parses at all", () => {
+    const read = partitionReadableManagedExchanges(
+      ["a", "b"],
+      [undefined, "not a record"],
+    );
+
+    expect(read.records).toEqual([]);
+    expect(read.unreadableIds).toEqual(["a", "b"]);
+  });
+
+  test("reports nothing unreadable for a store of valid records", () => {
+    const record = buildManagedExchangeRecord(newExchange());
+    const read = partitionReadableManagedExchanges([record.id], [record]);
+
+    expect(read.records).toEqual([record]);
+    expect(read.unreadableIds).toEqual([]);
   });
 });

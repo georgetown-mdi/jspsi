@@ -61,6 +61,7 @@ import { RotationPersistError } from "./managedRunRotate";
 import { parseStoredInstant } from "./managedExchangeRecord";
 
 import type {
+  ManagedExchangeReadableRecords,
   ManagedExchangeRecord,
   ManagedExchangeSchedule,
   ManagedExchangeScheduleAdvance,
@@ -128,8 +129,12 @@ export interface ManagedScheduleAttempt {
 export interface ManagedScheduleTickSeams {
   /** The wake instant, UTC milliseconds. */
   now: () => number;
-  /** Every stored managed exchange. */
-  listRecords: () => Promise<Array<ManagedExchangeRecord>>;
+  /** Every stored managed exchange this build can read, and the stored keys of
+   * the entries it cannot. Read per entry rather than strictly, so one entry a
+   * schema bound or an app upgrade invalidated costs its own exchange's
+   * scheduled runs instead of every exchange's (see
+   * {@link ManagedExchangeReadableRecords}). */
+  listRecords: () => Promise<ManagedExchangeReadableRecords>;
   /** Each record's local sibling state, read once per tick. Its `spent` marker
    * is what keeps a handed-off copy from running: a migration export transitions
    * the source to spent precisely so neither the operator nor the schedule runs
@@ -151,6 +156,7 @@ export interface ManagedScheduleTickSeams {
 
 /** Why a record's tick attempted nothing. */
 export type ManagedScheduleSkipReason =
+  | "unreadable"
   | "no-schedule"
   | "spent"
   | "in-flight"
@@ -165,7 +171,9 @@ export type ManagedScheduleSkipReason =
  * checks. A tick reports rather than throws: one record's unusable schedule or
  * failed store write must not stop the records beside it. */
 export interface ManagedScheduleTickEntry {
-  /** The record this entry reports on. */
+  /** The record this entry reports on: its `id`, or -- for an entry that did not
+   * parse -- the key the store holds it under, the record's own `id` being
+   * untrusted once the parse failed. */
   id: string;
   /** Fully-elapsed windows the catch-up walk counted as missed before any
    * attempt. */
@@ -187,6 +195,13 @@ export interface ManagedScheduleTickEntry {
  * Run one tick over every stored managed exchange: apply catch-up, then occupy
  * the window it lands on if that window is open now.
  *
+ * A stored entry the read could not parse is reported as its own
+ * `"unreadable"` skip and passed over, and every other record still runs. The
+ * entry stays unreadable until an operator discards it, so a read that rejected
+ * wholesale on it would fail this wake and every wake after it, taking every
+ * other exchange's scheduled run with it -- the tolerated skip costs one
+ * exchange what the rejection costs all of them.
+ *
  * Records are ticked concurrently, and a record whose previous tick is still
  * running is passed over rather than started a second time. Each one holds its
  * own single-writer lock and its own rendezvous, and occupying a window can take
@@ -204,11 +219,19 @@ export async function tickManagedSchedules(
   seams: ManagedScheduleTickSeams,
   inFlight: Set<string> = new Set(),
 ): Promise<Array<ManagedScheduleTickEntry>> {
-  const [records, localState] = await Promise.all([
+  const [{ records, unreadableIds }, localState] = await Promise.all([
     seams.listRecords(),
     seams.listLocalState(),
   ]);
-  return Promise.all(
+  const unreadable: Array<ManagedScheduleTickEntry> = unreadableIds.map(
+    (id) => ({
+      id,
+      caughtUpMisses: 0,
+      attempts: 0,
+      skipped: "unreadable" as const,
+    }),
+  );
+  const ticked = await Promise.all(
     records.map((record) => {
       if (inFlight.has(record.id))
         return {
@@ -225,6 +248,7 @@ export async function tickManagedSchedules(
       ).finally(() => inFlight.delete(record.id));
     }),
   );
+  return [...unreadable, ...ticked];
 }
 
 /** Run one record's tick, reporting rather than throwing (see

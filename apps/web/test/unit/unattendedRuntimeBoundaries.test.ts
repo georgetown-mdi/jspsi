@@ -171,7 +171,8 @@ function seamsForDueWindow(record: ManagedExchangeRecord): {
     attempts: () => attempts,
     seams: {
       now: () => Date.parse("2026-01-06T14:30:00.000Z"),
-      listRecords: () => Promise.resolve([record]),
+      listRecords: () =>
+        Promise.resolve({ records: [record], unreadableIds: [] }),
       listLocalState: () =>
         Promise.resolve(new Map<string, ManagedLocalState>()),
       persistAdvance: () => Promise.resolve(record),

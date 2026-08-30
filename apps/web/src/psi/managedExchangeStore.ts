@@ -31,6 +31,7 @@ import {
   buildManagedExchangeRecord,
   diagnoseManagedExchangeRecord,
   parseManagedExchangeRecord,
+  partitionReadableManagedExchanges,
 } from "./managedExchangeRecord";
 import { parseManagedLocalState } from "./managedLocalStateShape";
 
@@ -38,6 +39,7 @@ import type {
   ManagedExchangeDiagnosticEssentials,
   ManagedExchangeLastRun,
   ManagedExchangeLocalEdits,
+  ManagedExchangeReadableRecords,
   ManagedExchangeRecord,
   ManagedExchangeRotation,
   ManagedExchangeScheduleAdvance,
@@ -286,6 +288,52 @@ export async function listManagedExchanges(): Promise<
 > {
   const raws = await withStore("readonly", (store) => store.getAll());
   return raws.map((raw) => parseManagedExchangeRecord(raw));
+}
+
+/**
+ * Read every managed exchange record PER ENTRY: an entry this build cannot parse
+ * is skipped and its stored key returned beside the records, rather than failing
+ * the whole read the way {@link listManagedExchanges} deliberately does.
+ *
+ * This is the UNATTENDED runner's read (see {@link ./managedScheduleRunner.ts}),
+ * and only that: a wake has nobody present to meet the read-failed recovery
+ * surface, so one unparseable entry rejecting wholesale would stop every OTHER
+ * exchange's scheduled run too, at every wake, for as long as the entry sits in
+ * the store. The tick reports the returned keys as its own skips, so a skipped
+ * entry is named rather than silently dropped, and the attended list read stays
+ * strict so the recovery surface still opens on it.
+ *
+ * The keys and values are read in ONE transaction over the records store, so an
+ * entry that does not parse still yields the key it is stored under -- the record's
+ * own `id` being untrusted once the parse failed.
+ */
+export async function listReadableManagedExchanges(): Promise<ManagedExchangeReadableRecords> {
+  const db = await openManagedExchangeDatabase();
+  try {
+    return await new Promise<ManagedExchangeReadableRecords>(
+      (resolve, reject) => {
+        const transaction = db.transaction(
+          MANAGED_EXCHANGE_STORE_NAME,
+          "readonly",
+        );
+        const store = transaction.objectStore(MANAGED_EXCHANGE_STORE_NAME);
+        const keysRequest = store.getAllKeys();
+        const valuesRequest = store.getAll();
+        transaction.oncomplete = () => {
+          resolve(
+            partitionReadableManagedExchanges(
+              keysRequest.result,
+              valuesRequest.result,
+            ),
+          );
+        };
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+      },
+    );
+  } finally {
+    db.close();
+  }
 }
 
 /**

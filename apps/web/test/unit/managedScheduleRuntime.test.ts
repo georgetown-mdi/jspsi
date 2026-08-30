@@ -12,6 +12,7 @@ import {
   startManagedScheduleRuntime,
 } from "../../src/psi/managedScheduleRuntime.js";
 import { CLOSE_OUTCOME_WARNINGS } from "../../src/psi/exchangeLifecycle.js";
+import { listReadableManagedExchanges } from "../../src/psi/managedExchangeStore.js";
 
 import type { ManagedExchangeRecord } from "../../src/psi/managedExchangeRecord.js";
 import type { ManagedRunDriverConfig } from "../../src/psi/managedRunDriver.js";
@@ -177,6 +178,18 @@ describe("the two notices an unattended run can raise", () => {
   });
 });
 
+describe("the store read a wake takes", () => {
+  test("is the per-entry one, never the strict list a single bad record fails", () => {
+    // The strict read rejects the whole list on one unparseable entry. Nobody is
+    // present at a wake to meet the read-failed recovery surface that rejection
+    // routes to, so taking it here would stop every scheduled exchange in the
+    // store for as long as that entry sat in it.
+    expect(
+      browserScheduleTickSeams(new AbortController().signal).listRecords,
+    ).toBe(listReadableManagedExchanges);
+  });
+});
+
 describe("the host that wakes the tick", () => {
   /** The record the paused tick below is occupying a window for. */
   const OCCUPIED = "record-occupying-its-window";
@@ -299,6 +312,37 @@ describe("the host that wakes the tick", () => {
     expect(vi.getTimerCount()).toBe(0);
     await vi.advanceTimersByTimeAsync(10_000);
     expect(tick).not.toHaveBeenCalled();
+  });
+
+  test("warns about a stored entry the read could not parse, naming its recovery", async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => undefined);
+    const tick = vi.fn(() =>
+      Promise.resolve([
+        {
+          id: "legacy-out-of-bounds",
+          caughtUpMisses: 0,
+          attempts: 0,
+          skipped: "unreadable" as const,
+        },
+      ]),
+    );
+
+    startManagedScheduleRuntime({
+      signal: new AbortController().signal,
+      intervalMs: 1000,
+      tick,
+      seams,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    // A skip that stands until an operator acts, so it is a warning rather than
+    // the triage-level debug line the transient skips take.
+    expect(warn).toHaveBeenCalledTimes(1);
+    const line = String(warn.mock.calls[0][0]);
+    expect(line).toContain("legacy-out-of-bounds");
+    expect(line).toContain("saved exchanges list");
+    warn.mockRestore();
   });
 
   test("reports a tick that threw rather than leaving it unhandled", async () => {
