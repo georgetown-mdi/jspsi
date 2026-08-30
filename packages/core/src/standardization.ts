@@ -3049,18 +3049,27 @@ function substringWindow(
   return to > from ? { start: from, end: to } : undefined;
 }
 
-// The dates {@link substringCollapsesParsedDateToConstant} measures a pipeline
-// over. Chosen so that the first two differ in EVERY digit of every rendered
-// component -- 1971 against 2068 in all four year digits, 01 against 12 in both
-// month digits, 02 against 31 in both day digits -- which is what makes "the
-// windows agree" the property the verdict claims rather than a coincidence of
-// one sample: a window reading any character the date supplied differs between
-// those two wherever the layout put it. The other two add digit variety for a
-// step that rewrites characters rather than moving them. Every year is inside
-// the `YY` pivot window (1969-2068, {@link TWO_DIGIT_YEAR_PIVOT}) and every date
-// is a real calendar date, so each probe is a value the factory can actually
-// emit whichever input format parsed it.
-const DATE_COLLAPSE_PROBES: ReadonlyArray<{
+/**
+ * The dates {@link substringCollapsesParsedDateToConstant} measures a pipeline
+ * over. Chosen so that the first two differ in EVERY digit of every rendered
+ * component -- 1971 against 2068 in all four year digits, 01 against 12 in both
+ * month digits, 02 against 31 in both day digits -- which is what makes "the
+ * windows agree" the property the verdict claims rather than a coincidence of
+ * one sample: a window reading any character the date supplied differs between
+ * those two wherever the layout put it. The other two add digit variety for a
+ * step that rewrites characters rather than moving them. Every year is inside
+ * the `YY` pivot window (1969-2068, {@link TWO_DIGIT_YEAR_PIVOT}) and every date
+ * is a real calendar date, so each probe is a value the factory can actually
+ * emit whichever input format parsed it.
+ *
+ * These dates are public whether or not they are exported -- they ship in source
+ * an inviter can read -- which is why a probe a declared step drops leaves the
+ * verdict to the surviving ones rather than withdrawing it.
+ *
+ * @internal exported so the test that authors a step naming a probe's rendered
+ * value names a real one rather than a date it assumes is probed.
+ */
+export const DATE_COLLAPSE_PROBES: ReadonlyArray<{
   year: string;
   month: string;
   day: string;
@@ -3071,42 +3080,178 @@ const DATE_COLLAPSE_PROBES: ReadonlyArray<{
   { year: "2007", month: "11", day: "24" },
 ];
 
-// The single value `compiled` leaves one rendered date on, or undefined where
-// the run gives no reading of one.
+// What a compiled run leaves one starting value on. The shapes are read apart
+// because the verdicts below turn on WHICH of them was reached, not merely on
+// whether a value was:
 //
-// Three shapes decline rather than answer. A step that leaves the value over the
-// per-step ceiling refuses the whole exchange at run time
-// ({@link MAX_TRANSFORMED_VALUE_LENGTH}), so no marker it would earn is ever
-// shown; a run ending on several candidates is a fan-out, which the consent
-// header ranks above this verdict anyway; and a run ending on nothing is a drop,
-// the opposite of a collapse.
-function runMeasuredSteps(
-  rendered: string,
+// - `value`: the characters the run holds, which is what a collapse compares
+//   across probes.
+// - `dropped`: the run produced no value, which is the opposite of a collapse
+//   and, where the run is layout-determined, is every record's fate.
+// - `candidates`: a non-empty candidate set, so the record still keys -- which
+//   is what a collapsed constant needs of the pipeline's TAIL, while a fan-out
+//   inside a measured run is a breadth the consent header ranks above this
+//   verdict anyway and so gives it no reading.
+// - `unread`: a shape no verdict here reads. A step that leaves the value over
+//   the per-step ceiling refuses the whole exchange at run time
+//   ({@link MAX_TRANSFORMED_VALUE_LENGTH}), so no marker it would earn is ever
+//   shown; an empty candidate set keys nothing; and an empty string is neither a
+//   value a window holds nor the null drop a record's key is discarded on.
+type MeasuredRunOutcome =
+  | { kind: "value"; value: string }
+  | { kind: "dropped" }
+  | { kind: "candidates" }
+  | { kind: "unread" };
+
+function runCompiledSteps(
+  input: string,
   compiled: ReadonlyArray<CompiledStep>,
-): string | undefined {
-  let current: FieldValue = rendered;
+): MeasuredRunOutcome {
+  let current: FieldValue = input;
   for (const step of compiled) {
     current = applyStep(current, step);
-    if (valueOverCeiling(current) !== undefined) return undefined;
+    if (valueOverCeiling(current) !== undefined) return { kind: "unread" };
   }
-  return typeof current === "string" && current !== "" ? current : undefined;
+  if (current === null) return { kind: "dropped" };
+  if (current instanceof Set)
+    return current.size > 0 ? { kind: "candidates" } : { kind: "unread" };
+  return current === ""
+    ? { kind: "unread" }
+    : { kind: "value", value: current };
 }
 
-// Whether the pipeline's remaining steps still yield a value for the one
-// constant every record holds by then. No probing: with a single value left
-// there is nothing for the data to decide, so a step that drops it drops every
-// record.
-function collapsedValueSurvives(
-  collapsed: string,
-  compiled: ReadonlyArray<CompiledStep>,
-): boolean {
-  let current: FieldValue = collapsed;
-  for (const step of compiled) {
-    current = applyStep(current, step);
-    if (valueOverCeiling(current) !== undefined) return false;
+/**
+ * The functions whose effect on a value a `parse_date` rendered is settled by
+ * the output LAYOUT alone. Every date the factory renders under one output
+ * format has the same length and carries the format's own characters in the same
+ * places -- only the digits differ ({@link renderDateOutput} substitutes
+ * fixed-width components) -- and each function here maps any two such values to
+ * values that again share a length and are null together, so a window read after
+ * it lands on the same characters for every date. That composes: a run built
+ * only from these leaves every date holding a value, or drops every date.
+ *
+ * Membership is what parts a measured all-probes drop that is really DEAD from
+ * one the data decides, and its converse is the safe side: a function absent
+ * from the set makes such a run report a value-DEPENDENT drop, which announces
+ * the wider breadth word rather than claiming an element matches nothing. So
+ * only functions that read no content are here. `null_if`, `filter_regex`,
+ * `extract_regex` and `replace_regex` turn on the value's own characters;
+ * `remove_affixes` and `phonetic` match word content; a nested `parse_date` can
+ * parse one rendering and not another; and `split_on` leaves a candidate set
+ * rather than a value.
+ *
+ * @internal exported so the drift test can hold this classification to the real
+ * functions: each name is driven over a corpus of dates under several output
+ * formats, and one whose outputs differ in length or in null-ness between two
+ * dates fails. That drives one params shape per function, so it catches a listed
+ * function that starts reading content, not a listed function some other params
+ * shape would expose; the membership decision itself stays a review call.
+ */
+export const LAYOUT_DETERMINED_FUNCTION_NAMES: ReadonlySet<string> = new Set([
+  "remove_non_ascii",
+  "replace_separators_with_spaces",
+  "squash_spaces",
+  "remove_punctuation",
+  "remove_dashes",
+  "trim_whitespace",
+  "to_upper_case",
+  "to_lower_case",
+  "remove_accents",
+  "substring",
+  "pad_left",
+  "coalesce",
+]);
+
+// What running a substring run's measured steps over {@link DATE_COLLAPSE_PROBES}
+// establishes about the window the run reads.
+type ParsedDateRunReading =
+  | { kind: "collapsed"; value: string }
+  | { kind: "valueDependentDrop" }
+  | { kind: "layoutDeterminedDrop" }
+  | { kind: "undetermined" };
+
+const UNDETERMINED: ParsedDateRunReading = { kind: "undetermined" };
+
+/**
+ * Run the steps from the `parse_date` that laid out the value to the end of the
+ * substring run at `index` over the probe dates, and report what they leave the
+ * window holding. Both terms-level verdicts below read this one measurement.
+ *
+ * The shape conditions, all necessary before anything is run:
+ *
+ * - `index` is the END of a maximal run of consecutive `substring` steps. A
+ *   reading taken at a link INSIDE a run describes a window the run's later
+ *   links can slice back out of range; the value a run leaves is the value its
+ *   last link leaves.
+ * - Some `parse_date` runs ahead of that run. The NEAREST one laid out the value
+ *   the run reads; steps before it are unconstrained, since they can only change
+ *   whether a value parses, never the layout a parsed date renders to.
+ * - That `parse_date`'s input format can parse a date at all
+ *   ({@link parseDateInputDropsEveryRecord}); one that cannot supplies no value
+ *   to slice, and the drop is already the one {@link pipelineAlwaysDrops} names
+ *   at the `parse_date` itself.
+ *
+ * A DROPPED probe does not defeat the reading. The probe dates are baked into
+ * shipped public source, so requiring every one of them to survive would let a
+ * single authored step naming one probe's rendered value -- a `null_if` on
+ * "ACME-19710102" under an `ACME-YYYYMMDD` layout -- withdraw the verdict while
+ * the pipeline still put every other date on one constant. The surviving probes
+ * decide instead, and where NONE survives the reading turns on whether the run
+ * is layout-determined ({@link LAYOUT_DETERMINED_FUNCTION_NAMES}): a run that
+ * reads no content drops every date it will ever see, while one carrying a
+ * value-dependent step has told the measurement nothing, and the consent
+ * direction there is the wider breadth word rather than the narrower one.
+ */
+function readParsedDateRun(
+  steps: ReadonlyArray<TransformStep>,
+  index: number,
+): ParsedDateRunReading {
+  if (steps[index]?.function !== "substring") return UNDETERMINED;
+  if (steps[index + 1]?.function === "substring") return UNDETERMINED;
+  let runStart = index;
+  while (runStart > 0 && steps[runStart - 1].function === "substring")
+    runStart -= 1;
+  let parseDateIndex = runStart - 1;
+  while (parseDateIndex >= 0 && steps[parseDateIndex].function !== "parse_date")
+    parseDateIndex -= 1;
+  if (parseDateIndex < 0) return UNDETERMINED;
+  const parseDateStep = steps[parseDateIndex];
+  if (parseDateInputDropsEveryRecord(parseDateStep.params)) return UNDETERMINED;
+  const rawOutputFormat = parseDateStep.params?.outputFormat;
+  const outputFormat =
+    typeof rawOutputFormat === "string"
+      ? rawOutputFormat
+      : DEFAULT_DATE_OUTPUT_FORMAT;
+  const measuredSteps = steps.slice(parseDateIndex + 1, index + 1);
+  try {
+    // Only the steps up to the run's end are compiled here; the rest of the
+    // pipeline is compiled by the caller that needs it, and only once a collapse
+    // is established, so an element that collapses nowhere costs one pass over
+    // each of its runs rather than one over its whole tail.
+    const compiled = compileSteps([...measuredSteps]);
+    const survivors = new Set<string>();
+    for (const probe of DATE_COLLAPSE_PROBES) {
+      const outcome = runCompiledSteps(
+        renderDateOutput(outputFormat, probe.year, probe.month, probe.day),
+        compiled,
+      );
+      if (outcome.kind === "unread" || outcome.kind === "candidates")
+        return UNDETERMINED;
+      if (outcome.kind === "value") survivors.add(outcome.value);
+      if (survivors.size > 1) return UNDETERMINED;
+    }
+    const [collapsed] = survivors;
+    if (collapsed !== undefined) return { kind: "collapsed", value: collapsed };
+    return measuredSteps.every((step) =>
+      LAYOUT_DETERMINED_FUNCTION_NAMES.has(step.function),
+    )
+      ? { kind: "layoutDeterminedDrop" }
+      : { kind: "valueDependentDrop" };
+  } catch {
+    // A step this build cannot compile or run gives no reading of what the
+    // window holds, and the consent header names only what it can establish.
+    return UNDETERMINED;
   }
-  if (current === null) return false;
-  return typeof current === "string" ? current !== "" : current.size > 0;
 }
 
 /**
@@ -3119,33 +3264,42 @@ function collapsedValueSurvives(
  *
  * MEASURED, not derived from the step names: the steps between the `parse_date`
  * and the run are compiled and RUN over {@link DATE_COLLAPSE_PROBES}, and the
- * verdict is that every probe leaves the run holding one identical, non-empty
- * value. Whether a step preserves what a window reads is a property of the
- * function AND of the window -- `remove_dashes` collapses a four-character
- * window of `ACME-YYYYMMDD` but not a five-character one -- so a name allowlist
- * of "layout-preserving" functions decides it wrongly in both directions, and a
- * layout-preservation table is a second reading of behavior the factories
- * already define. Running the shipped steps is the reading that cannot drift
- * from them, the same reason {@link coalesceSubstitutesConstant} reads a step's
- * params and position rather than its name.
+ * verdict is that every probe still holding a value leaves the run on one
+ * identical, non-empty one. Whether a step preserves what a window reads is a
+ * property of the function AND of the window -- `remove_dashes` collapses a
+ * four-character window of `ACME-YYYYMMDD` but not a five-character one -- so a
+ * name allowlist of "layout-preserving" functions decides it wrongly in both
+ * directions, and a layout-preservation table is a second reading of behavior
+ * the factories already define. Running the shipped steps is the reading that
+ * cannot drift from them, the same reason {@link coalesceSubstitutesConstant}
+ * reads a step's params and position rather than its name. The one name set the
+ * measurement does consult ({@link LAYOUT_DETERMINED_FUNCTION_NAMES}) answers a
+ * different question -- whether a step can read the value's CONTENT at all --
+ * and only to choose which way an undecided measurement falls.
  *
- * Four conditions, all necessary:
+ * The conditions:
  *
- * - `index` is the END of a maximal run of consecutive `substring` steps. A
- *   verdict taken at a link INSIDE a run announces a collapse the run's later
- *   links can slice back out of range, which would name an element that matches
- *   nothing as matching every date; the value a run leaves is the value its last
- *   link leaves.
- * - Some `parse_date` runs ahead of that run. The NEAREST one laid out the value
- *   the run reads; steps before it are unconstrained, since they can only change
- *   whether a value parses, never the layout a parsed date renders to.
- * - That `parse_date`'s input format can parse a date at all
- *   ({@link parseDateInputDropsEveryRecord}); one that cannot supplies no value
- *   to slice, which is a narrowing the dead-key advisory surfaces.
- * - The collapsed value survives the REST of the pipeline. Every record holds
- *   the same value by then, so what the remaining steps do to it is determinate
- *   with no probing at all: a later step that drops that one value drops every
- *   record, and an element matching nothing is not one matching every date.
+ * - The run reads a layout some live `parse_date` ahead of it rendered, taken at
+ *   the run's END -- the shape {@link readParsedDateRun} establishes and where
+ *   the reasons for each of those live.
+ * - Every probe that SURVIVES the run leaves it on one identical, non-empty
+ *   value. A dropped probe does not withdraw the verdict: the probe dates ship
+ *   in public source, so a single step naming one of their rendered values would
+ *   otherwise buy the milder word for a pipeline that still puts every other
+ *   date on the constant.
+ * - Where no probe survives at all, the run is announced as a collapse unless it
+ *   is layout-determined ({@link LAYOUT_DETERMINED_FUNCTION_NAMES}), in which
+ *   case it drops every date and is the dead pipeline
+ *   {@link substringRunDropsEveryParsedDate} names instead. A value-dependent
+ *   step that drops all four probes has told the measurement nothing, and on a
+ *   consent surface an undecided measurement takes the wider breadth word rather
+ *   than the reassuring one.
+ * - The collapsed value survives the REST of the pipeline. Every surviving
+ *   record holds the same value by then, so what the remaining steps do to it is
+ *   determinate with no probing at all: a later step that drops that one value
+ *   drops every record still in hand, and an element matching nothing is not one
+ *   matching every date. The all-probes-dropped case has no such value, so it
+ *   takes the wider word without a tail reading.
  *
  * The measurement is bounded by the terms the schema already bounds: the steps
  * up to the run's end run once per probe and the rest of the pipeline once, on
@@ -3153,15 +3307,17 @@ function collapsedValueSurvives(
  * run at all -- a function name this build does not recognize, a pattern that
  * fails to compile -- decline the verdict rather than guess it.
  *
- * The limits it keeps, both value-DEPENDENT drops the terms cannot settle. A
- * `filter_regex` or `null_if` between the `parse_date` and the run is measured
- * over the probes alone, so one that passes them and drops a real record leaves
- * the verdict standing; and one BEFORE the `parse_date` reads the acceptor's own
- * values, which the terms do not carry, so it is not measured at all. Either can
- * leave an element earning "any date" while it in fact drops the records it
- * would have collapsed. That is the same residual {@link pipelineAlwaysDrops}
- * declines to claim, for the same reason: assuming a value-dependent drop from
- * the terms would flag a legitimate pipeline as dead.
+ * The limit it keeps is a value-DEPENDENT drop the terms cannot settle, and it
+ * runs in the over-claiming direction alone. A `filter_regex` or `null_if`
+ * between the `parse_date` and the run is measured over the probes alone, so one
+ * that passes them and drops a real record leaves the verdict standing; one
+ * BEFORE the `parse_date` reads the acceptor's own values, which the terms do
+ * not carry, so it is not measured at all; and one that drops every probe hands
+ * the run the collapse word outright. Each can leave an element earning "any
+ * date" while it in fact drops records it would have collapsed. Reading a drop
+ * off such a step instead is the claim {@link pipelineAlwaysDrops} declines for
+ * the same reason -- it would flag a legitimate pipeline as dead -- so the
+ * residual is kept where it understates nothing.
  *
  * Shared so the consent header's collapse marker in `invitationSummary.ts` turns
  * on core's own steps rather than a restated reading of them.
@@ -3170,50 +3326,43 @@ export function substringCollapsesParsedDateToConstant(
   steps: ReadonlyArray<TransformStep>,
   index: number,
 ): boolean {
-  if (steps[index]?.function !== "substring") return false;
-  if (steps[index + 1]?.function === "substring") return false;
-  let runStart = index;
-  while (runStart > 0 && steps[runStart - 1].function === "substring")
-    runStart -= 1;
-  let parseDateIndex = runStart - 1;
-  while (parseDateIndex >= 0 && steps[parseDateIndex].function !== "parse_date")
-    parseDateIndex -= 1;
-  if (parseDateIndex < 0) return false;
-  const parseDateStep = steps[parseDateIndex];
-  if (parseDateInputDropsEveryRecord(parseDateStep.params)) return false;
-  const rawOutputFormat = parseDateStep.params?.outputFormat;
-  const outputFormat =
-    typeof rawOutputFormat === "string"
-      ? rawOutputFormat
-      : DEFAULT_DATE_OUTPUT_FORMAT;
-  let collapsed: string | undefined;
+  const reading = readParsedDateRun(steps, index);
+  if (reading.kind === "valueDependentDrop") return true;
+  if (reading.kind !== "collapsed") return false;
   try {
-    // Only the steps up to the run's end are measured over the probes; the rest
-    // of the pipeline is compiled at all only once a collapse is established, so
-    // an element that collapses nowhere costs one pass over each of its runs
-    // rather than one over its whole tail.
-    const compiled = compileSteps([
-      ...steps.slice(parseDateIndex + 1, index + 1),
-    ]);
-    for (const probe of DATE_COLLAPSE_PROBES) {
-      const measured = runMeasuredSteps(
-        renderDateOutput(outputFormat, probe.year, probe.month, probe.day),
-        compiled,
-      );
-      if (measured === undefined) return false;
-      if (collapsed === undefined) collapsed = measured;
-      else if (measured !== collapsed) return false;
-    }
-    if (collapsed === undefined) return false;
-    return collapsedValueSurvives(
-      collapsed,
+    const tail = runCompiledSteps(
+      reading.value,
       compileSteps([...steps.slice(index + 1)]),
     );
+    return tail.kind === "value" || tail.kind === "candidates";
   } catch {
-    // A step this build cannot compile or run gives no reading of what the
-    // window holds, and the consent header names only what it can establish.
     return false;
   }
+}
+
+/**
+ * Whether the `substring` run ending at `index` drops EVERY date an earlier
+ * `parse_date` can render, whatever the acceptor's data -- the value-independent
+ * certainty {@link pipelineAlwaysDrops} is built from, measured rather than
+ * derived from the step names. The motivating shape is a run whose composed
+ * window falls back out of range (`ACME-YYYYMMDD` sliced to `ACME`, then sliced
+ * again from its fifth character), which reads nothing for any record while its
+ * last link is still a `substring` a breadth marker would call a truncation.
+ *
+ * Claimed only where the measured steps are layout-determined
+ * ({@link LAYOUT_DETERMINED_FUNCTION_NAMES}), so what the probes did is what
+ * every date does. A run carrying a value-dependent step that happens to drop
+ * all four probes is NOT dead: the data decides it, which is the residual
+ * {@link pipelineAlwaysDrops} declines to read from the terms.
+ *
+ * @internal exported so the rescue-equivalence sweep can model the same drop
+ * source the shipped predicate reads.
+ */
+export function substringRunDropsEveryParsedDate(
+  steps: ReadonlyArray<TransformStep>,
+  index: number,
+): boolean {
+  return readParsedDateRun(steps, index).kind === "layoutDeterminedDrop";
 }
 
 /**
@@ -3249,22 +3398,28 @@ export const CONSENT_VERDICT_PARAM_NAMES: Readonly<
 /**
  * Whether a transform/standardization pipeline produces NO value for every
  * possible input -- a self-defeating "dead" pipeline, determinable from the terms
- * alone without any data. Today the only value-INDEPENDENT drop core recognizes is
- * a `parse_date` whose input format omits a required component
- * ({@link parseDateInputDropsEveryRecord}); a later `coalesce` with a string
- * default RESCUES a dropped value to that constant (see {@link applyStep}'s
- * coalesce branch), so a pipeline ending in such a coalesce is NOT dead -- it
- * yields a constant key, which the linkage layer treats as benign (a duplicated
- * key contributes no match but is no silent-empty hazard, the same reason the
+ * alone without any data. Two value-INDEPENDENT drops are recognized: a
+ * `parse_date` whose input format omits a required component
+ * ({@link parseDateInputDropsEveryRecord}), and a `substring` run whose composed
+ * window falls outside every layout an earlier live `parse_date` can render
+ * ({@link substringRunDropsEveryParsedDate}), which is measured over probe dates
+ * rather than composed arithmetically. A later `coalesce` with a string default
+ * RESCUES a dropped value to that constant (see {@link applyStep}'s coalesce
+ * branch), so a pipeline ending in such a coalesce is NOT dead -- it yields a
+ * constant key, which the linkage layer treats as benign (a duplicated key
+ * contributes no match but is no silent-empty hazard, the same reason the
  * coverage sweep does not flag a constant field). A coalesce BEFORE the drop, or
  * one with no string default, does not rescue.
  *
  * Steps whose drop behavior depends on the VALUE -- a `substring` past the end of
- * a short value, a `filter_regex` no value matches -- are deliberately NOT treated
- * as always-dropping: that is the data-dependent residual the satisfiability layer
- * leaves to the runtime coverage sweep, and assuming it here could wrongly flag a
- * legitimate pipeline. Only a value-independent certainty is reported, so this can
- * never claim a producible pipeline is dead.
+ * a short value the pipeline did not itself lay out, a `filter_regex` no value
+ * matches -- are deliberately NOT treated as always-dropping: that is the
+ * data-dependent residual the satisfiability layer leaves to the runtime coverage
+ * sweep, and assuming it here could wrongly flag a legitimate pipeline. A run
+ * measured over the probes is claimed only where every step in it reads the
+ * layout rather than the content ({@link LAYOUT_DETERMINED_FUNCTION_NAMES}), so
+ * this still reports a value-independent certainty alone and can never claim a
+ * producible pipeline is dead.
  */
 export function pipelineAlwaysDrops(
   steps: ReadonlyArray<TransformStep> | undefined,
@@ -3287,8 +3442,9 @@ export function pipelineAlwaysDrops(
     // pipeline stays dropped until a rescuing coalesce.
     if (dropped) continue;
     if (
-      step.function === "parse_date" &&
-      parseDateInputDropsEveryRecord(step.params)
+      (step.function === "parse_date" &&
+        parseDateInputDropsEveryRecord(step.params)) ||
+      substringRunDropsEveryParsedDate(steps, index)
     )
       dropped = true;
   }
@@ -3481,15 +3637,18 @@ export function decideLinkageTermsVerdict(
       .filter((name) => !unsatisfiedNames.has(name)),
   );
   // The dead scan walks a key's element transform steps (each parse_date step a
-  // parseDateFormat tokenization over a MAX_DATE_FORMAT_LENGTH-bounded format), so
-  // its cost is O(total transform steps in `terms`) and needs no separate budget:
-  // on the partner-controlled accept path `terms` comes from a decoded invitation
-  // already bounded to MAX_ENCODED_INVITATION_LENGTH, so the step total stays small
-  // (a packed-to-the-cap hostile token measures single-digit milliseconds); on the
+  // parseDateFormat tokenization over a MAX_DATE_FORMAT_LENGTH-bounded format,
+  // and each maximal substring run one compile plus DATE_COLLAPSE_PROBES passes
+  // over the steps it spans), so its cost is O(total transform steps in `terms`)
+  // and needs no separate budget: on the partner-controlled accept path `terms`
+  // comes from a decoded invitation already bounded to
+  // MAX_ENCODED_INVITATION_LENGTH, so the step total stays small (a
+  // packed-to-the-cap hostile token measures single-digit milliseconds); on the
   // operator's own committed-config path the terms are self-authored and drive
   // strictly heavier per-row compile + RE2 work at exchange time, so this scan is
   // never the dominant cost. parseDateInputDropsEveryRecord never calls
-  // parseDateFormat on a non-string, so a hostile param shape cannot make it throw.
+  // parseDateFormat on a non-string, so a hostile param shape cannot make it
+  // throw, and the measured run catches whatever its own compile or run raises.
   const keys: GradedLinkageKey[] = terms.linkageKeys.map((key) => ({
     key,
     fitness: !key.elements.every((e) => producibleNames.has(e.field))

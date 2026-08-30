@@ -372,13 +372,60 @@ describe("the consent summary's date-collapse marker", () => {
     ]);
   });
 
-  test("a run whose composed window leaves the layout announces no collapse", () => {
+  test("a run whose composed window leaves the layout shows no marker at all", () => {
     // The first link reads the literal region and the second slices out of that
     // window, so the element matches no record at all. Announcing "any date" for
-    // it would name an element that matches nothing as matching every date.
+    // it would name an element that matches nothing as matching every date, and
+    // "partial" would name a truncation of a value no record ever holds: every
+    // step from the parse_date to the run's end reads the layout rather than the
+    // value, so the drop the probes measure is every record's, and the element
+    // takes the dead-pipeline surface the dead-key advisory speaks for.
     expect(
       headerFor([parseDate(LITERAL_REGION_FORMAT), slice(1, 4), slice(5, 2)]),
-    ).toEqual(["date of birth (partial)"]);
+    ).toEqual(["date of birth"]);
+  });
+
+  test("a value-dependent drop of every probe keeps the wider word", () => {
+    // The same all-probes drop with a step whose reach is the data's to decide.
+    // The measurement settles nothing there, so the header must not fall to the
+    // milder truncation word, and must not claim the element is dead either.
+    expect(
+      headerFor([
+        parseDate(LITERAL_REGION_FORMAT),
+        {
+          function: "filter_regex",
+          params: { pattern: "NOTHING-MATCHES-THIS" },
+        },
+        slice(1, 4),
+      ]),
+    ).toEqual(["date of birth (any date)"]);
+  });
+
+  test("naming a probe's rendered value does not withdraw the collapse", () => {
+    // The probe dates ship in public source, so an inviter can author one step
+    // naming exactly what one of them renders to. The header still names the
+    // collapse the pipeline delivers for every other date.
+    expect(
+      headerFor([
+        parseDate(LITERAL_REGION_FORMAT),
+        { function: "null_if", params: { values: ["ACME-19710102"] } },
+        slice(1, 4),
+      ]),
+    ).toEqual(["date of birth (any date)"]);
+  });
+
+  test("a rescued dead run names the fallback rather than falling silent", () => {
+    // The run drops every date, but the coalesce puts every record back on one
+    // constant, so the element is not dead and the honest marker is the
+    // substitution's.
+    expect(
+      headerFor([
+        parseDate(LITERAL_REGION_FORMAT),
+        slice(1, 4),
+        slice(5, 2),
+        { function: "coalesce", params: { default: "UNKNOWN" } },
+      ]),
+    ).toEqual(["date of birth (fallback)"]);
   });
 
   test("a plain reformatting keeps no marker", () => {
@@ -431,5 +478,42 @@ describe("the consent summary's date-collapse marker", () => {
     ]);
     expect(params[0]).toBe(`outputFormat: ${LITERAL_REGION_FORMAT}`);
     expect(params[1]).toMatch(/^flood: F+\.\.\.\[truncated\]$/);
+  });
+});
+
+describe("the consent summary's per-step params", () => {
+  const baseTerms = getDefaultLinkageTerms(
+    "Inviter",
+    inferMetadata(LINKAGE_ONLY_COLUMNS),
+  );
+
+  test("a step named after an Object prototype member still renders", () => {
+    // A step's `function` is partner free text, so a name that resolves only on
+    // Object.prototype reaches the lookup that leads a step's rows with the
+    // params a consent verdict reads. Unguarded, that lookup hands `new Set(...)`
+    // a prototype member rather than a param list and throws where the summary is
+    // rendered, taking the whole consent screen down with it.
+    for (const name of ["constructor", "toString", "__proto__", "valueOf"]) {
+      const summary = summarizeInvitation({
+        linkageTerms: {
+          ...baseTerms,
+          linkageKeys: [
+            {
+              name: "date",
+              elements: [
+                {
+                  field: "date_of_birth",
+                  transform: [{ function: name, params: { a: "1" } }],
+                },
+              ],
+            },
+          ],
+        },
+      });
+      expect(
+        summary.linkageKeys[0].elements[0].transforms[0].params,
+        name,
+      ).toEqual(["a: 1"]);
+    }
   });
 });

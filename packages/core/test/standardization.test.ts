@@ -25,11 +25,15 @@ import {
   canProduceMultipleValues,
   coalesceSubstitutesConstant,
   substringCollapsesParsedDateToConstant,
+  substringRunDropsEveryParsedDate,
+  LAYOUT_DETERMINED_FUNCTION_NAMES,
+  DATE_COLLAPSE_PROBES,
   CONSENT_VERDICT_PARAM_NAMES,
   stepCanEmptyRealizedValue,
   pipelineAlwaysDrops,
   parseDateInputDropsEveryRecord,
   STANDARDIZATION_FUNCTION_NAMES,
+  type FieldValue,
 } from "../src/standardization";
 import * as standardizationModule from "../src/standardization";
 import { ESC, PRINTABLE_ASCII, RLO } from "../src/displayEscapingFixtures";
@@ -1117,6 +1121,18 @@ describe("substringCollapsesParsedDateToConstant", () => {
   const anyVerdict = (steps: ReadonlyArray<TransformStep>) =>
     steps.some((_step, index) => verdictAt(steps, index));
 
+  test("the oracle corpus carries dates the predicate does not probe", () => {
+    // The wider-corpus claim above, as a check: were the probe set widened to
+    // the whole corpus, every differential below would compare the predicate to
+    // its own inputs and pass whatever it decided.
+    const probed = new Set(
+      DATE_COLLAPSE_PROBES.map(
+        (probe) => `${probe.month}/${probe.day}/${probe.year}`,
+      ),
+    );
+    expect(DATES.filter((date) => !probed.has(date)).length).toBeGreaterThan(0);
+  });
+
   test("the verdict matches whether the real slice is one constant (differential)", () => {
     // Every combination of an output format and a slice window, against the
     // shipped pipeline: the predicate says "collapses to a constant" exactly
@@ -1541,12 +1557,11 @@ describe("substringCollapsesParsedDateToConstant", () => {
     expect(verdictAt([parseDate("ACME-YYYYMMDD"), slice(1, 5)], 1)).toBe(true);
   });
 
-  test("a step that drops the collapsed value withholds the verdict", () => {
+  test("a step that drops the collapsed value AFTER the run withholds the verdict", () => {
     // An element that matches nothing is not one that matches every date. A
-    // dropping step BETWEEN the parse_date and the run empties the value before
-    // the window reads it; one AFTER the run drops the constant every record
-    // holds by then, which drops every record -- determinate with no probing,
-    // since there is only one value left to drop.
+    // dropping step after the run drops the constant every record holds by then,
+    // which drops every record -- determinate with no probing, since there is
+    // only one value left to drop.
     const literalRegion = parseDate("ACME-YYYYMMDD");
     const neverMatches: TransformStep = {
       function: "filter_regex",
@@ -1557,7 +1572,6 @@ describe("substringCollapsesParsedDateToConstant", () => {
       params: { values: ["ACME"] },
     };
     for (const steps of [
-      [literalRegion, neverMatches, slice(1, 4)],
       [literalRegion, slice(1, 4), neverMatches],
       [literalRegion, slice(1, 4), dropsTheConstant],
     ]) {
@@ -1574,6 +1588,49 @@ describe("substringCollapsesParsedDateToConstant", () => {
     ];
     expect(collapsedValue(rescued)).toBe("UNKNOWN");
     expect(anyVerdict(rescued)).toBe(true);
+    // A tail that expands the constant into candidates still keys every record,
+    // and on the same values, so the collapse stands. The header never reads
+    // this shape -- a declared fan-out outranks the collapse tier there -- but
+    // the predicate must not call it a drop.
+    const expanded = [
+      literalRegion,
+      slice(1, 4),
+      { function: "split_on", params: { delimiter: "M" } },
+    ];
+    expect(runPipeline(DATES[0], expanded)).toEqual(new Set(["AC", "E"]));
+    expect(anyVerdict(expanded)).toBe(true);
+  });
+
+  test("a value-dependent step that drops every probe takes the wider word", () => {
+    // A drop BETWEEN the parse_date and the run empties the value before the
+    // window reads it, and whether a real record is emptied there is the data's
+    // to decide -- the probes settle nothing. The consent direction on an
+    // undecided measurement is the wider breadth word, so the verdict stands
+    // rather than falling back to the milder truncation the last link looks like.
+    // Held against the runtime, which drops every date here: the over-claim is
+    // deliberate, and it is the only direction this residual runs in.
+    const steps = [
+      parseDate("ACME-YYYYMMDD"),
+      { function: "filter_regex", params: { pattern: "NOTHING-MATCHES-THIS" } },
+      slice(1, 4),
+    ];
+    for (const date of DATES) expect(runPipeline(date, steps)).toBeNull();
+    expect(anyVerdict(steps)).toBe(true);
+    // The same shape spelled with the other value-dependent dropper, naming
+    // every probe's rendered value outright.
+    const namesEveryProbe = [
+      parseDate("ACME-YYYYMMDD"),
+      {
+        function: "null_if",
+        params: {
+          values: DATES.map((date) =>
+            runPipeline(date, [parseDate("ACME-YYYYMMDD")]),
+          ),
+        },
+      },
+      slice(1, 4),
+    ];
+    expect(anyVerdict(namesEveryProbe)).toBe(true);
   });
 
   test("a drop the DATA decides is the limit the verdict keeps", () => {
@@ -1592,6 +1649,145 @@ describe("substringCollapsesParsedDateToConstant", () => {
     expect(runPipeline("04/17/2033", steps)).toBeNull();
     expect(runPipeline("12/31/2068", steps)).toBe("ACME");
     expect(anyVerdict(steps)).toBe(true);
+  });
+
+  test("naming a probe's rendered value does not buy the milder word", () => {
+    // The probe dates are baked into shipped public source, so an inviter can
+    // read one off and author a step naming exactly its rendered value. Were a
+    // dropped probe allowed to defeat the verdict, that one step would return the
+    // header to the truncation word while the pipeline still put every other date
+    // on "ACME". The surviving probes decide instead. The named values come from
+    // the shipped probe list, so no probe here is one this test assumed.
+    const literalRegion = parseDate("ACME-YYYYMMDD");
+    for (const probe of DATE_COLLAPSE_PROBES) {
+      const named = `ACME-${probe.year}${probe.month}${probe.day}`;
+      const asInput = `${probe.month}/${probe.day}/${probe.year}`;
+      const steps = [
+        literalRegion,
+        { function: "null_if", params: { values: [named] } },
+        slice(1, 4),
+      ];
+      expect(runPipeline(asInput, steps), named).toBeNull();
+      expect(runPipeline("03/04/2021", steps), named).toBe("ACME");
+      expect(anyVerdict(steps), named).toBe(true);
+    }
+    // A step naming a junk sentinel no probe renders drops none of them, so the
+    // verdict is measured exactly as it is without the step.
+    const sentinel = [
+      literalRegion,
+      { function: "null_if", params: { values: ["NOT-A-RENDERED-DATE"] } },
+      slice(1, 4),
+    ];
+    expect(collapsedValue(sentinel)).toBe("ACME");
+    expect(anyVerdict(sentinel)).toBe(true);
+    // ... and a dropped probe grants no collapse of its own: on a window that
+    // reads the date itself, the surviving probes still disagree, so the milder
+    // word stands.
+    const first = DATE_COLLAPSE_PROBES[0];
+    const readsTheDate = [
+      literalRegion,
+      {
+        function: "null_if",
+        params: { values: [`ACME-${first.year}${first.month}${first.day}`] },
+      },
+      slice(6, 8),
+    ];
+    expect(
+      runPipeline(`${first.month}/${first.day}/${first.year}`, readsTheDate),
+    ).toBeNull();
+    expect(runPipeline("03/04/2021", readsTheDate)).toBe("20210304");
+    expect(anyVerdict(readsTheDate)).toBe(false);
+  });
+
+  test("a run that reads no content and drops every probe is dead, not a collapse", () => {
+    // The composed window falls back out of the rendered layout, and every step
+    // between the parse_date and the run's end reads the layout rather than the
+    // value -- so what the probes did is what every date does. That is a
+    // value-INDEPENDENT drop, which pipelineAlwaysDrops reports and the collapse
+    // verdict declines.
+    for (const steps of [
+      [parseDate("ACME-YYYYMMDD"), slice(1, 4), slice(5, 2)],
+      [parseDate("ACME-YYYYMMDD"), { function: "to_upper_case" }, slice(20, 2)],
+      [parseDate("YYYYMMDD"), slice(1, 4), slice(1, 0)],
+    ]) {
+      for (const date of DATES)
+        expect(runPipeline(date, steps), JSON.stringify(steps)).toBeNull();
+      expect(anyVerdict(steps), JSON.stringify(steps)).toBe(false);
+      expect(pipelineAlwaysDrops(steps), JSON.stringify(steps)).toBe(true);
+    }
+    // A value-dependent step in the run withdraws the DEAD claim as well as the
+    // milder word: the data decides that drop, so the pipeline is not reported
+    // self-defeating.
+    const valueDependent = [
+      parseDate("ACME-YYYYMMDD"),
+      { function: "filter_regex", params: { pattern: "NOTHING-MATCHES-THIS" } },
+      slice(1, 4),
+    ];
+    expect(pipelineAlwaysDrops(valueDependent)).toBe(false);
+    // A rescuing `coalesce` after the dead run puts every record on its default,
+    // so the pipeline is not dead at all.
+    expect(
+      pipelineAlwaysDrops([
+        parseDate("ACME-YYYYMMDD"),
+        slice(1, 4),
+        slice(5, 2),
+        { function: "coalesce", params: { default: "UNKNOWN" } },
+      ]),
+    ).toBe(false);
+  });
+
+  test("every layout-determined function leaves the dates it is handed alike", () => {
+    // What holds the classification the dead claim rests on: a function listed
+    // there must map any two dates rendered under one output format to values of
+    // the same length that are null together, since that is what makes the
+    // probes' fate every date's. Driven through the shipped pipeline rather than
+    // read off the factories. One params shape per function, so this catches a
+    // listed function that starts reading content -- not one whose reading only
+    // some other params shape exposes, which stays the review call the constant's
+    // own doc records.
+    const OUTPUT_FORMATS = [
+      "ACME-YYYYMMDD",
+      "YYYY-MM-DD",
+      "YYYYMMDD",
+      "MM/DD/YY",
+      "DD.MM.YYYY",
+    ];
+    // Params for the listed functions that take them, chosen so the step does
+    // something rather than compiling to a pass-through or an always-null.
+    const PARAMS: Record<string, Array<Record<string, unknown>>> = {
+      substring: [
+        { start: 1, length: 4 },
+        { start: 5, length: 3 },
+        { start: -4, length: 2 },
+        { start: 1, length: -3 },
+      ],
+      pad_left: [{ length: 20, char: "0" }],
+      coalesce: [{ default: "FALLBACK" }],
+    };
+    // `coalesce` passes a value it is handed straight through, so its
+    // substituting branch is reached only behind a step that empties the value.
+    const PREFIX: Record<string, TransformStep[]> = {
+      coalesce: [slice(40, 2)],
+    };
+    const WIDE_DATES = [...DATES, "02/29/2024", "10/09/1999", "01/01/2000"];
+    for (const name of LAYOUT_DETERMINED_FUNCTION_NAMES) {
+      expect(STANDARDIZATION_FUNCTION_NAMES, name).toContain(name);
+      for (const params of PARAMS[name] ?? [undefined])
+        for (const outputFormat of OUTPUT_FORMATS) {
+          const steps = [
+            parseDate(outputFormat),
+            ...(PREFIX[name] ?? []),
+            { function: name, ...(params ? { params } : {}) },
+          ];
+          const outputs = WIDE_DATES.map((date) => runPipeline(date, steps));
+          const shape = (value: FieldValue) =>
+            typeof value === "string" ? value.length : value;
+          expect(
+            new Set(outputs.map(shape)).size,
+            `${name} ${JSON.stringify(params)} ${outputFormat}`,
+          ).toBe(1);
+        }
+    }
   });
 
   test("a step this build cannot run declines the verdict", () => {
@@ -1706,24 +1902,26 @@ describe("pipelineAlwaysDrops rescue equivalence", () => {
   // and through a rescue testing the declared default alone, and any pipeline
   // whose verdicts differ is reported.
   //
-  // Two changes make it red, both wanting a fresh look at the rescue. A second
-  // source of `dropped` -- a value-independent drop other than an always-dropping
-  // parse_date -- reaches the rescue from a position the weaker rescue below does
-  // not model. And allowlisting a function that sets `dropped` (parse_date today)
-  // withholds the position half from a coalesce that would otherwise rescue,
-  // turning a live pipeline into a dead one on the consent surface. Allowlisting
-  // a function that never sets `dropped` leaves this sweep green; that
-  // misclassification is the value-emptying classification test's to catch.
+  // Two changes make it red, both wanting a fresh look at the rescue. A THIRD
+  // source of `dropped` -- a value-independent drop the two below do not carry --
+  // would reach the rescue from a position the weaker rescue does not model. And
+  // allowlisting a function that sets `dropped` withholds the position half from
+  // a coalesce that would otherwise rescue, turning a live pipeline into a dead
+  // one on the consent surface. Allowlisting a function that never sets
+  // `dropped` leaves this sweep green; that misclassification is the
+  // value-emptying classification test's to catch.
   const FALLBACK_DEFAULT = "ZZZ_FALLBACK";
 
-  // The rescue with no position half: the declared default's shape alone. A local
-  // transcription rather than a call into core, since a differential against the
-  // shipped predicate would compare it to itself.
+  // The rescue with no position half: the declared default's shape alone. The
+  // rescue is what this compares, so the DROP sources are held equal -- the
+  // measured substring run is asked of core, whose reading of it is not what is
+  // under test, while the rest is a local transcription rather than a call into
+  // the shipped predicate, which would compare it to itself.
   const dropsUnderDefaultShapeRescue = (
     steps: ReadonlyArray<TransformStep>,
   ): boolean => {
     let dropped = false;
-    for (const step of steps) {
+    for (const [index, step] of steps.entries()) {
       if (step.function === "coalesce") {
         if (dropped && typeof step.params?.default === "string")
           dropped = false;
@@ -1731,8 +1929,9 @@ describe("pipelineAlwaysDrops rescue equivalence", () => {
       }
       if (dropped) continue;
       if (
-        step.function === "parse_date" &&
-        parseDateInputDropsEveryRecord(step.params)
+        (step.function === "parse_date" &&
+          parseDateInputDropsEveryRecord(step.params)) ||
+        substringRunDropsEveryParsedDate(steps, index)
       )
         dropped = true;
     }

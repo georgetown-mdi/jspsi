@@ -1029,14 +1029,16 @@ const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
  * `parse_date` that merely reformats between equivalent layouts -- routine
  * standardization, deliberately not flagged so the recommended setup stays clean).
  * It is also undefined when the element's pipeline matches NOTHING -- a
- * `parse_date` whose input format drops every record, unless a later `coalesce`
- * rescues it to a constant -- since that is a narrowing-to-empty, not a broadening,
- * and is surfaced separately by the dead-key advisory. `remove_affixes` is in that
- * routine set by deliberate decision: stripping titles and suffixes (Dr., Jr.) is a
- * BROADENING canonicalizer in the same family as accent and case folding -- it
- * makes superficially-different spellings match -- not a record-DROPPING narrower
- * like the flagged `filter_regex` / `null_if`, so it earns no marker despite
- * removing characters. It names any rule that materially changes which records
+ * `parse_date` whose input format drops every record, or a `substring` run whose
+ * composed window falls outside every layout such a step renders, unless a later
+ * `coalesce` rescues it to a constant -- since that is a narrowing-to-empty, not
+ * a broadening, and is surfaced separately by the dead-key advisory.
+ * `remove_affixes` is in that routine set by deliberate decision: stripping
+ * titles and suffixes (Dr., Jr.) is a BROADENING canonicalizer in the same
+ * family as accent and case folding -- it makes superficially-different
+ * spellings match -- not a record-DROPPING narrower like the flagged
+ * `filter_regex` / `null_if`, so it earns no marker despite removing
+ * characters. It names any rule that materially changes which records
  * match: where the direction is determinable from the terms it names the EFFECT
  * ("partial" for a truncation, or for a `parse_date` whose output layout drops a
  * date component its input carries and so matches on only part of the date; "any
@@ -1111,8 +1113,10 @@ const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
  *   same constant. That is a collapse, not a coarsening, so it is decided in the
  *   collapse tier above by measuring what the declared steps leave the window
  *   holding ({@link substringCollapsesParsedDateToConstant}) and shows "any
- *   date". Membership here would still be wrong for it: the verdict turns on the
- *   window as well as the steps ahead of it, which a name-only set cannot
+ *   date"; a window the run then slices back out of the layout altogether reads
+ *   nothing for any record and is the dead pipeline the tier above that
+ *   suppresses. Membership here would still be wrong for it: the verdict turns
+ *   on the window as well as the steps ahead of it, which a name-only set cannot
  *   express, and joining the set would suppress "partial" for every plain
  *   format. Staying out also stops a slice after a merely reformatting
  *   `parse_date` from showing NO marker, since that step earns none of its own.
@@ -1184,22 +1188,27 @@ const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
  * compound rather than re-cut: the header names ONE marker, and every re-ordering
  * that closes this case masks some other element's honest one.
  *
- * A second known limit, in the collapse tier rather than in the ranking, and a
- * narrower one than the tier's word alone suggests. The date collapse is
- * MEASURED: core compiles the steps between the `parse_date` and the end of the
- * substring run and runs them over probe dates
+ * A second known limit, in the collapse tier rather than in the ranking, and one
+ * that runs in the OVER-claiming direction alone. The date collapse is MEASURED:
+ * core compiles the steps between the `parse_date` and the end of the substring
+ * run and runs them over probe dates
  * ({@link substringCollapsesParsedDateToConstant}), so an intervening step that
  * leaves the window's characters where they sit -- a case fold, a trim, a
  * `remove_dashes` over a window it does not shift -- earns "any date" rather than
  * the milder "partial". What the measurement cannot settle is a value-DEPENDENT
  * drop: a `filter_regex` or `null_if` that passes the probes and drops a real
- * record, or one sitting BEFORE the `parse_date` where it reads the acceptor's
- * own values, leaves an element earning "any date" while the records it would
- * have collapsed are in fact dropped. Reading that from the terms would mean
- * assuming a drop the data decides, which is the same claim
- * {@link pipelineAlwaysDrops} declines for the same reason -- it would flag a
- * legitimate pipeline as dead. Both halves are held by tests driving the shipped
- * pipeline rather than by this note.
+ * record, one sitting BEFORE the `parse_date` where it reads the acceptor's own
+ * values, and one that drops every probe, each leave an element earning "any
+ * date" while records it would have collapsed are in fact dropped. Reading a
+ * drop off such a step instead would mean assuming what the data decides, the
+ * same claim {@link pipelineAlwaysDrops} declines for the same reason -- it would
+ * flag a legitimate pipeline as dead -- so the residual is kept on the side that
+ * understates nothing. What the inviter cannot do is buy the milder word by
+ * naming a probe: the probe dates ship in public source, so a dropped probe
+ * leaves the verdict to the survivors, and a run that drops them all takes the
+ * collapse word unless every one of its steps reads the layout rather than the
+ * value, which makes it the dead pipeline the tier above suppresses. Every half
+ * is held by tests driving the shipped pipeline rather than by this note.
  *
  * Every limit here sends the reader to a per-step detail row -- an `outputFormat`
  * above all, the format whose literal region a collapsing window reads. Those
@@ -1226,9 +1235,11 @@ function elementBreadthMarker(
   // not more -- the opposite of a broadening, and a narrowing-to-empty the separate
   // dead-key advisory surfaces -- so it earns no marker, whatever rule a later step
   // would otherwise name: a substring/phonetic/... after a dead `parse_date`
-  // null-propagates, so the record is dropped regardless. Defer to core's
-  // pipelineAlwaysDrops, which also accounts for a rescuing `coalesce`, so the
-  // marker cannot drift from the runtime.
+  // null-propagates, so the record is dropped regardless, and a substring run that
+  // slices its own window back out of the rendered layout reads nothing for any
+  // record while its last link still looks like a truncation. Defer to core's
+  // pipelineAlwaysDrops, which measures the second of those and accounts for a
+  // rescuing `coalesce`, so the marker cannot drift from the runtime.
   if (pipelineAlwaysDrops(element.transform)) return undefined;
   // A `parse_date` that leaves every record on one constant value collapses to the
   // maximal match breadth, so it is checked first and outranks every other rule the

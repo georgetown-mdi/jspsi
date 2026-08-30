@@ -1831,11 +1831,12 @@ describe("summarizeInvitation", () => {
     ).toBe("last name (partial)");
   });
 
-  test("withholds the collapse where the run's window leaves the layout", () => {
+  test("withholds every marker where the run's window leaves the layout", () => {
     // The first slice reads the literal region and the second composes out of
     // that four-character window, so the element matches no record at all.
     // Announcing the collapse at the first slice would name an element matching
-    // nothing as matching every date.
+    // nothing as matching every date, and the truncation word would name a slice
+    // of a value no record holds -- so the header shows the field alone.
     expect(
       headerFor([
         {
@@ -1845,7 +1846,24 @@ describe("summarizeInvitation", () => {
         { function: "substring", params: { start: 1, length: 4 } },
         { function: "substring", params: { start: 5, length: 2 } },
       ]),
-    ).toBe("last name (partial)");
+    ).toBe("last name");
+  });
+
+  test("keeps the collapse where an authored step names one probe date", () => {
+    // The dates the measurement probes ship in public source. A step naming what
+    // one of them renders to drops that probe, and the surviving probes still
+    // leave every other date on "ACME", so the header names the collapse rather
+    // than the milder word a withdrawn verdict would leave.
+    expect(
+      headerFor([
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "ACME-YYYYMMDD" },
+        },
+        { function: "null_if", params: { values: ["ACME-19710102"] } },
+        { function: "substring", params: { start: 1, length: 4 } },
+      ]),
+    ).toBe("last name (any date)");
   });
 
   test("shows no breadth marker for a parse_date whose input drops every record", () => {
