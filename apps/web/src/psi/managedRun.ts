@@ -305,9 +305,9 @@ export function remapLapsedRunFailure(
  *   {@link ManagedExchangeSpentError} and
  *   {@link ManagedExchangeCustodyUnreadableError}: recorded best-effort inside the
  *   critical section (the tier {@link managedInputFailureKind} reads off the
- *   rejection, the `storage` tier a failed rotation persist and an unreadable
- *   custody entry share, and the `handed-off` tier a copy an export gave away
- *   records).
+ *   rejection, the `storage` tier a failed rotation persist records, the
+ *   `custody-unreadable` tier an entry the run could not read records, and the
+ *   `handed-off` tier a copy an export gave away records).
  * - A core {@link LinkageTermsUnsatisfiableError} raised BEFORE the data exchange
  *   began: the benign `"terms-shortfall"` tier, stamped here because the refusal
  *   comes out of the pre-connection prepare rather than the input guard, which
@@ -381,13 +381,15 @@ export function rerunFailureLastRun(
 }
 
 /** The benign outcomes of a launch a surface classifies without attack framing: a
- * lapsed bound, a copy an export handed off, an unusable input, an input the
- * standing terms cannot be run against, a run already in progress elsewhere, or a
- * partner who never arrived. The first five are read before any connection; the
- * last is read when no connection was ever made. */
+ * lapsed bound, a copy an export handed off, a copy whose hand-off state could not
+ * be read at all, an unusable input, an input the standing terms cannot be run
+ * against, a run already in progress elsewhere, or a partner who never arrived. The
+ * first six are read before any connection; the last is read when no connection was
+ * ever made. */
 export type BenignRerunOutcome =
   | "expired"
   | "handed-off"
+  | "custody-unreadable"
   | "input"
   | "terms-shortfall"
   | "already-running"
@@ -410,6 +412,15 @@ export type BenignRerunOutcome =
  * that order: a copy an export gave away is not this device's to run whatever its
  * input file says, and the refusal happens before the file is read.
  *
+ * `"custody-unreadable"` is that same refusal failing to read the entry it decides
+ * on, and it is read off the error rather than left to the record's stamp because
+ * the failure that raises it takes the record's evidence with it: the stamp is
+ * best-effort like every other, and a local store that did not answer the run is
+ * what makes the caller's post-failure reload reject too, leaving it classifying
+ * against a record carrying no stamp at all. Read from the record alone it falls
+ * through to the retryable transport tier -- a retry offered for a permanent local
+ * problem, which is what the kind exists to prevent.
+ *
  * The two input states are split by what the operator can do about them, since
  * both are read before any connection and only one is worth offering the run again
  * for. `"input"` is the acquisition failure -- the file is missing, moved, or
@@ -429,20 +440,21 @@ export type BenignRerunOutcome =
  * pre-connection prepare, and the input guard's own column grading) carry it as
  * the same guard their bookkeeping counterpart applies
  * ({@link rerunFailureLastRun}), so the state a surface shows and the outcome the
- * record carries cannot disagree about a disclosure. `"handed-off"` is guarded
- * here alone -- that classifier records nothing for it -- and what holds the two
- * together instead is where its stamp is written: the critical section writes it
- * before the input guard and before any connection
- * ({@link ./managedExchangeRun.ts}), so the recorded outcome is on the same side
- * of the boundary as the state shown. The input-guard arm is gated whole rather
- * than on the kind it grades to, so a grading that gains a kind does not have to
- * re-derive the guard. None of these errors can be raised past the boundary today
- * (the spent check and the input guard both run before any connection, core
- * refuses an unsatisfiable shortfall inside the pre-connection prepare, and the
- * no-show is raised only by a wait that never opened a channel), and the guard is
- * what keeps that a check rather than a standing assumption: one delivered past
- * the boundary is not a benign outcome here, and falls through to the caller's
- * generic transport path.
+ * record carries cannot disagree about a disclosure. `"handed-off"` and
+ * `"custody-unreadable"` are guarded here alone -- that classifier records
+ * nothing for either -- and what holds them together with their stamps instead is
+ * where those are written: the critical section writes both before the input
+ * guard and before any connection ({@link ./managedExchangeRun.ts}), so the
+ * recorded outcome is on the same side of the boundary as the state shown. The
+ * input-guard arm is gated whole rather than on the kind it grades to, so a
+ * grading that gains a kind does not have to re-derive the guard. None of these
+ * errors can be raised past the boundary today (the custody read, the spent check
+ * it decides, and the input guard all run before any connection, core refuses an
+ * unsatisfiable shortfall inside the pre-connection prepare, and the no-show is
+ * raised only by a wait that never opened a channel), and the guard is what keeps
+ * that a check rather than a standing assumption: one delivered past the boundary
+ * is not a benign outcome here, and falls through to the caller's generic
+ * transport path.
  *
  * The guard binds the outcomes read here off THIS run's error, and nothing
  * further: a surface state derived instead from the record's stored bookkeeping
@@ -458,6 +470,11 @@ export function benignRerunOutcome(
   if (error instanceof ManagedExchangeExpiredError) return "expired";
   if (error instanceof ManagedExchangeSpentError && !dataExchangeStarted)
     return "handed-off";
+  if (
+    error instanceof ManagedExchangeCustodyUnreadableError &&
+    !dataExchangeStarted
+  )
+    return "custody-unreadable";
   if (error instanceof ManagedInputError && !dataExchangeStarted)
     return managedInputFailureKind(error.rejection);
   if (error instanceof LinkageTermsUnsatisfiableError && !dataExchangeStarted)

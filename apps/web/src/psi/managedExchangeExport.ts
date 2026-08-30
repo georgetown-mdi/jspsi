@@ -41,7 +41,7 @@
  * arbitrarily later, so each spends through one store step that re-reads the record
  * by id at CONFIRM time and writes the spent state only while no run of it is in
  * flight and the artifact it downloaded still carries the exchange's current secret
- * ({@link ManagedHandoffSupersededError} otherwise, carrying which refusal it was).
+ * ({@link ManagedHandoffRefusedError} otherwise, carrying which refusal it was).
  * A run rotates that secret at its handshake, and a run in any context -- this
  * surface, a second tab, the scheduled runtime -- can start and finish between the
  * download and the attestation, which leaves the operator attesting to an artifact
@@ -160,12 +160,12 @@ const HANDOFF_REFUSAL_FOR_OUTCOME: Record<
  * `"record-gone"`: the record is gone from the store, where there is no live copy
  * left to spend and nothing left to download either.
  */
-export class ManagedHandoffSupersededError extends Error {
+export class ManagedHandoffRefusedError extends Error {
   /** Which refusal this is, for the surface to phrase. */
   readonly refusal: ManagedHandoffRefusal;
   constructor(id: string, refusal: ManagedHandoffRefusal) {
     super(handoffRefusalMessage(id, refusal));
-    this.name = "ManagedHandoffSupersededError";
+    this.name = "ManagedHandoffRefusedError";
     this.refusal = refusal;
   }
 }
@@ -195,7 +195,7 @@ function handoffRefusalMessage(
  * an edit that leaves it alone (a label, a max-age policy) leaves the artifact
  * usable.
  *
- * @throws {ManagedHandoffSupersededError} if a run holds the run+rotate lock, the
+ * @throws {ManagedHandoffRefusedError} if a run holds the run+rotate lock, the
  *   stored secret has moved on, or the record is gone -- carrying which of the three
  *   it was. Nothing is written in any case.
  */
@@ -210,7 +210,7 @@ async function spendIfArtifactIsCurrent(
 ): Promise<void> {
   const outcome = await spend(exported.sharedSecret, spentAt.toISOString());
   if (outcome === "spent") return;
-  throw new ManagedHandoffSupersededError(
+  throw new ManagedHandoffRefusedError(
     id,
     HANDOFF_REFUSAL_FOR_OUTCOME[outcome],
   );
@@ -290,7 +290,7 @@ export interface ManagedMigrationDispatch {
   /** Spend the source as of `spentAt` (the operator's confirmation instant),
    * transitioning this device's copy to its visible spent state. Called only after
    * the operator confirms the file is saved; not called on a cancelled save. Rejects
-   * with {@link ManagedHandoffSupersededError}, spending nothing, when a run of the
+   * with {@link ManagedHandoffRefusedError}, spending nothing, when a run of the
    * record is in flight, when its secret has moved past the artifact this dispatch
    * downloaded, or when the record is no longer stored. */
   confirm: (spentAt: Date) => Promise<void>;
@@ -359,7 +359,7 @@ export interface ManagedCronExportDispatch {
   composed: ManagedCronExport;
   /** Spend the source as of `spentAt` (the operator's confirmation instant), under
    * the command-line hand-off. Called only after the operator confirms both files
-   * are saved. Rejects with {@link ManagedHandoffSupersededError}, spending nothing,
+   * are saved. Rejects with {@link ManagedHandoffRefusedError}, spending nothing,
    * when a run of the record is in flight, when its secret has moved past the files
    * this dispatch downloaded, or when the record is no longer stored. */
   confirm: (spentAt: Date) => Promise<void>;

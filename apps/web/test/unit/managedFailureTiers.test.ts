@@ -106,6 +106,19 @@ describe("deriveManagedFailureTier: tier per recorded benign state", () => {
     ).toBe("storage");
   });
 
+  test("a recorded unreadable custody entry is its own tier, not the storage one", () => {
+    // The two are both this device's own storage, and they leave different states
+    // behind: the persist failure rotated a secret it could not save, this one
+    // refused before the handshake and rotated nothing.
+    expect(
+      deriveManagedFailureTier(
+        record({ lastRun: failed("custody-unreadable") }),
+        undefined,
+        NOW,
+      ),
+    ).toBe("custody-unreadable");
+  });
+
   test("a transport drop is the transport (retry) tier, never attack framing", () => {
     expect(
       deriveManagedFailureTier(

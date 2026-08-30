@@ -120,21 +120,25 @@ export interface ManagedExchangeSchedule {
 export type ManagedExchangeRunOutcome =
   "succeeded" | "failed" | "desynced" | "missed";
 
-/** For a non-succeeded outcome, the kind of failure. Closed enum: the four benign
+/** For a non-succeeded outcome, the kind of failure. Closed enum: the five benign
  * pre-run problems -- an `"input"` problem (the file missing, unreadable, or gone
  * from under its handle), a `"terms-shortfall"` refusal (the file was read and
  * cannot satisfy every linkage key the standing terms declare), a `"consent"`
  * refusal (this run's outbound disclosure is not the set this exchange recorded
- * agreeing to send), and a `"handed-off"` refusal (an export gave this device's
- * copy away, so the run does not rotate a secret whose owner is elsewhere) -- are
- * detected before any connection and never routed through desync/attack framing.
- * Each is its own kind because each has its own remedy: putting the file back, a
- * conforming file or terms re-agreed with the partner, re-settling what the
- * exchange sends, and running the exchange where it was handed to. */
+ * agreeing to send), a `"handed-off"` refusal (an export gave this device's copy
+ * away, so the run does not rotate a secret whose owner is elsewhere), and a
+ * `"custody-unreadable"` refusal (the sibling entry recording whether the copy was
+ * handed off did not read, so the run does not rotate on custody it could not
+ * establish) -- are detected before any connection and never routed through
+ * desync/attack framing. Each is its own kind because each has its own remedy:
+ * putting the file back, a conforming file or terms re-agreed with the partner,
+ * re-settling what the exchange sends, running the exchange where it was handed to,
+ * and this browser's own stored copy becoming readable again. */
 export type ManagedExchangeFailureKind =
   | "auth"
   | "transport"
   | "storage"
+  | "custody-unreadable"
   | "input"
   | "terms-shortfall"
   | "consent"
@@ -252,6 +256,7 @@ export const lastRunSchema: ZodType<ManagedExchangeLastRun> = z.object({
       "auth",
       "transport",
       "storage",
+      "custody-unreadable",
       "input",
       "terms-shortfall",
       "consent",

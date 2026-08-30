@@ -7,7 +7,7 @@ import {
 import { describe, expect, test, vi } from "vitest";
 
 import {
-  ManagedHandoffSupersededError,
+  ManagedHandoffRefusedError,
   dispatchManagedCronExport,
   dispatchManagedMigration,
   exportManagedBackup,
@@ -250,10 +250,8 @@ describe("dispatchManagedMigration", () => {
       },
       (reason: unknown) => reason,
     );
-    expect(refusal).toBeInstanceOf(ManagedHandoffSupersededError);
-    expect((refusal as ManagedHandoffSupersededError).refusal).toBe(
-      "superseded",
-    );
+    expect(refusal).toBeInstanceOf(ManagedHandoffRefusedError);
+    expect((refusal as ManagedHandoffRefusedError).refusal).toBe("superseded");
     expect(deps.spent).toEqual([]);
   });
 
@@ -273,8 +271,8 @@ describe("dispatchManagedMigration", () => {
       },
       (reason: unknown) => reason,
     );
-    expect(refusal).toBeInstanceOf(ManagedHandoffSupersededError);
-    expect((refusal as ManagedHandoffSupersededError).refusal).toBe(
+    expect(refusal).toBeInstanceOf(ManagedHandoffRefusedError);
+    expect((refusal as ManagedHandoffRefusedError).refusal).toBe(
       "run-in-flight",
     );
     expect(deps.spent).toEqual([]);
@@ -295,10 +293,8 @@ describe("dispatchManagedMigration", () => {
       },
       (reason: unknown) => reason,
     );
-    expect(refusal).toBeInstanceOf(ManagedHandoffSupersededError);
-    expect((refusal as ManagedHandoffSupersededError).refusal).toBe(
-      "record-gone",
-    );
+    expect(refusal).toBeInstanceOf(ManagedHandoffRefusedError);
+    expect((refusal as ManagedHandoffRefusedError).refusal).toBe("record-gone");
     expect(deps.spent).toEqual([]);
   });
 
@@ -527,7 +523,7 @@ describe("dispatchManagedCronExport", () => {
     deps.stored.record = { ...rec, sharedSecret: generateSharedSecret() };
 
     await expect(dispatch.confirm(new Date())).rejects.toBeInstanceOf(
-      ManagedHandoffSupersededError,
+      ManagedHandoffRefusedError,
     );
     expect(deps.spent).toEqual([]);
   });
@@ -547,7 +543,7 @@ describe("dispatchManagedCronExport", () => {
       },
       (reason: unknown) => reason,
     );
-    expect((inFlight as ManagedHandoffSupersededError).refusal).toBe(
+    expect((inFlight as ManagedHandoffRefusedError).refusal).toBe(
       "run-in-flight",
     );
     expect(deps.spent).toEqual([]);
@@ -565,9 +561,7 @@ describe("dispatchManagedCronExport", () => {
       },
       (reason: unknown) => reason,
     );
-    expect((refusal as ManagedHandoffSupersededError).refusal).toBe(
-      "record-gone",
-    );
+    expect((refusal as ManagedHandoffRefusedError).refusal).toBe("record-gone");
     expect(deps.spent).toEqual([]);
   });
 

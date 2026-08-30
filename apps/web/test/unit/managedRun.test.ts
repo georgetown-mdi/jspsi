@@ -308,12 +308,14 @@ describe("runManagedRerun: a copy an export handed off", () => {
     ]);
   });
 
-  test("an unreadable sibling entry refuses the run as this device's storage failing", async () => {
+  test("an unreadable sibling entry refuses the run under its own kind", async () => {
     // A run that cannot read its custody does not proceed on the assumption the
-    // copy is still this device's. What the record then carries is the storage
-    // tier: the entry is unchanged at the next attempt, so the retryable
-    // transport fault an unclassified failure falls through to would offer the
-    // operator a retry for a permanent local problem.
+    // copy is still this device's. What the record then carries is the
+    // custody-unreadable kind: the entry is unchanged at the next attempt, so the
+    // retryable transport fault an unclassified failure falls through to would
+    // offer the operator a retry for a permanent local problem -- and the storage
+    // kind beside it would report a rotation that did not save, which this run
+    // never reached.
     stubGrantingWebLocks();
     handedOff.unreadable = unreadableSiblingEntry();
     const at = Date.parse("2026-07-14T12:00:00.000Z");
@@ -349,7 +351,7 @@ describe("runManagedRerun: a copy an export handed off", () => {
         {
           at: new Date(at).toISOString(),
           outcome: "failed",
-          failureKind: "storage",
+          failureKind: "custody-unreadable",
         },
       ],
     ]);
@@ -393,6 +395,25 @@ describe("benignRerunOutcome", () => {
     expect(benignRerunOutcome(new ManagedExchangeSpentError("id"), false)).toBe(
       "handed-off",
     );
+    expect(
+      benignRerunOutcome(
+        new ManagedExchangeCustodyUnreadableError("id", new Error("invalid")),
+        false,
+      ),
+    ).toBe("custody-unreadable");
+  });
+
+  test("an unreadable custody entry past the data-exchange boundary is not a benign outcome", () => {
+    // The refusal is raised inside the lock before the input guard, exactly as
+    // the hand-off one is, so it carries the same guard rather than resting on
+    // where it is raised: past the boundary its copy's claim that nothing left
+    // this device cannot be made.
+    expect(
+      benignRerunOutcome(
+        new ManagedExchangeCustodyUnreadableError("id", new Error("invalid")),
+        true,
+      ),
+    ).toBeUndefined();
   });
 
   test("a hand-off refusal past the data-exchange boundary is not a benign outcome", () => {
@@ -675,8 +696,8 @@ describe("rerunFailureLastRun: the runner's failure bookkeeping", () => {
       ),
     ).toBeUndefined();
     // The unread custody refusal beside it, for the same reason: the section
-    // stamped the storage tier, and a transport stamp over it would offer a retry
-    // for a local problem that reproduces.
+    // stamped the custody-unreadable tier, and a transport stamp over it would
+    // offer a retry for a local problem that reproduces.
     expect(
       rerunFailureLastRun(
         new ManagedExchangeCustodyUnreadableError("id", new Error("invalid")),

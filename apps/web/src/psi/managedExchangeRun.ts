@@ -32,8 +32,9 @@
  *   per run rather than a surface's mount-time reading, so a hand-off confirmed
  *   after a surface loaded -- or between two attempts at one scheduled window --
  *   stops the runs that follow it rather than only the ones that start after a
- *   reload. A reading that fails refuses the run on the same terms, as this
- *   device's own `storage` failure rather than a hand-off.
+ *   reload. A reading that fails refuses the run on the same terms, under its own
+ *   `custody-unreadable` kind: an unreadable local record, neither a hand-off nor
+ *   a rotation this device failed to save.
  *
  * - **Persist-before-success.** The rotated secret is written durably (a strict-
  *   durability transaction awaited to `complete`) BEFORE the data exchange begins.
@@ -50,7 +51,6 @@ import {
   RotationPersistError,
   failedRun,
   runRotationCriticalSection,
-  storageFailureRun,
   succeededRun,
 } from "./managedRunRotate";
 import {
@@ -88,12 +88,18 @@ export class ManagedExchangeSpentError extends Error {
  * sibling entry does not validate (a corrupted or app-upgrade-invalidated entry),
  * or its store did not answer. The run refuses for the reason a spent copy's does
  * -- custody that cannot be read is not custody this run may rotate on -- but the
- * fault is this device's storage rather than a hand-off, so it is raised as its
- * own type: the `storage` bookkeeping kind is what the record carries, and a
+ * fault is this device's own stored copy rather than a hand-off, so it is raised
+ * as its own type and carries the `custody-unreadable` bookkeeping kind: a
  * scheduled window ends here rather than re-attempting a reading that is
  * unchanged at the next attempt. An unclassified failure would instead fall
  * through to the retryable `transport` tier, offering the operator a retry for a
  * permanent local problem and spending the window's whole attempt budget on it.
+ *
+ * The kind is its own rather than the `storage` one a failed rotation persist
+ * writes, because the two states differ in what they leave behind: a persist
+ * failure rotated a secret it could not save, which can leave the two parties
+ * holding different ones and is recovered by re-inviting, while this refusal
+ * happens before the handshake and rotates nothing at all.
  */
 export class ManagedExchangeCustodyUnreadableError extends Error {
   constructor(id: string, cause: unknown) {
@@ -200,8 +206,8 @@ export interface ManagedExchangeRunResult<TExchange> {
  *   off; the `handed-off` `lastRun` is recorded best-effort before this
  *   propagates, and no input was read and no connection made.
  * @throws {ManagedExchangeCustodyUnreadableError} if the sibling entry holding
- *   that state cannot be read; the `storage` `lastRun` is recorded best-effort
- *   before this propagates, on the same no-input, no-connection terms.
+ *   that state cannot be read; the `custody-unreadable` `lastRun` is recorded
+ *   best-effort before this propagates, on the same no-input, no-connection terms.
  * @throws {ManagedInputError} if the input guard rejects (a missing file, a gone
  *   permission, or an unsatisfiable column shape); the benign `lastRun` for that
  *   rejection is recorded best-effort before this propagates, and no connection was
@@ -310,8 +316,9 @@ export async function runManagedExchange<TInput, THandshake, TExchange>(
  * A reading that fails refuses the run too, as the {@link
  * ManagedExchangeCustodyUnreadableError} it is: a run whose custody cannot be
  * read does not rotate on the assumption it is still this device's, and the
- * `storage` bookkeeping it records is what keeps this device's own storage fault
- * out of the retryable transport tier.
+ * `custody-unreadable` bookkeeping it records is what keeps an unreadable local
+ * record out of the retryable transport tier without reporting it as a rotation
+ * this device failed to save.
  *
  * @throws {ManagedExchangeSpentError} when the copy is spent.
  * @throws {ManagedExchangeCustodyUnreadableError} when the sibling entry cannot
@@ -325,7 +332,7 @@ async function refuseHandedOffCopy(
   try {
     local = await getManagedLocalState(id);
   } catch (error) {
-    await recordRefusal(id, storageFailureRun(now()));
+    await recordRefusal(id, failedRun(now(), "failed", "custody-unreadable"));
     throw new ManagedExchangeCustodyUnreadableError(id, error);
   }
   if (local?.spent === undefined) return;

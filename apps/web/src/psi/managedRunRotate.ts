@@ -109,13 +109,14 @@ export function missedRun(at: number): ManagedExchangeLastRun {
 }
 
 /**
- * Record a run that failed on this device's own storage: the rotation that could
- * not be persisted, or the custody reading the locked window could not complete
- * before it ({@link ./managedExchangeRun.ts}). This is structured
+ * Record a run whose rotation could not be persisted. This is structured
  * `failureKind: "storage"` bookkeeping precisely so the next handshake failure
  * surfaces through the benign Tier-1 framing (a recorded persist failure explains
  * a desync) rather than the attack framing -- see docs/MANAGED_EXCHANGE.md,
- * "Telling a desync from an attack".
+ * "Telling a desync from an attack". It is the one-sided persist and nothing else:
+ * a custody reading the locked window could not complete rotated no secret and so
+ * explains no desync, and records `"custody-unreadable"` instead
+ * ({@link ./managedExchangeRun.ts}).
  */
 export function storageFailureRun(at: number): ManagedExchangeLastRun {
   return {
@@ -129,8 +130,9 @@ export function storageFailureRun(at: number): ManagedExchangeLastRun {
  * the failure paths the runner classifies (an `auth`/`security` handshake
  * failure, a `transport` drop, a benign `input` problem, a `terms-shortfall`
  * refusal, a `consent` refusal, a `cancelled` run); the critical section itself
- * decides `succeededRun`, `storageFailureRun`, and the `failedRun` stamps
- * `refuseHandedOffCopy` writes ({@link ./managedExchangeRun.ts}). */
+ * decides `succeededRun`, `storageFailureRun`, and the `handed-off` and
+ * `custody-unreadable` stamps `refuseHandedOffCopy` writes
+ * ({@link ./managedExchangeRun.ts}). */
 export function failedRun(
   at: number,
   outcome: Exclude<ManagedExchangeLastRun["outcome"], "succeeded">,

@@ -223,9 +223,11 @@ describe("parseManagedExchangeRecord reader-rejects-unknown", () => {
       "auth",
       "transport",
       "storage",
+      "custody-unreadable",
       "input",
       "terms-shortfall",
       "consent",
+      "handed-off",
       "cancelled",
     ];
     for (const failureKind of kinds) {
