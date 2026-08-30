@@ -29,16 +29,14 @@ import {
   draftWithKeyEnabled,
   importedCitationDropCause,
   inviterExchangeDataSpec,
+  isDraftDrawnFromLinkageRuleSet,
   isOptInDraftKey,
+  linkageRuleSetReferenceForDraft,
   seedAdvancedInvite,
   setDraftMetadata,
   setDraftMetadataKeepingKeys,
   validateAdvancedInvite,
 } from "../../src/psi/advancedInvite.js";
-import {
-  isDraftDrawnFromLinkageRuleSet,
-  linkageRuleSetReferenceForDraft,
-} from "../../src/psi/linkageComparison.js";
 import {
   setColumnType,
   setColumnTypeForMatching,
