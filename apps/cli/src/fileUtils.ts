@@ -178,52 +178,63 @@ function warnIfWindowsAclOverPermissive(
   }
 }
 
-// macOS evaluates a file's extended (NFSv4) ACL independently of its POSIX mode
-// bits, so an ACE inherited from the parent directory grants another principal
-// access that `fchmod(0600)` does not remove -- leaving an artifact readable
-// despite an owner-only mode. Clear every ACE so the mode is the file's whole
-// access story: on an artifact psilink writes, no ACE is intended, and the
-// writers declare access through the mode alone. Node's `fs` exposes no ACL
-// API, so this shells out to macOS's own `chmod`, whose `-N` deletes the ACL.
-// The absolute `/bin/chmod` keeps the resolution off `PATH`. There is no `--`
-// separator: macOS's chmod has none and tries to open it as a file (measured
-// on the host, 2026-08-17). A relative operand is absolutized by prefixing
-// `process.cwd()` and nothing else -- no join, no normalization, no resolve,
-// so not one `..` segment is collapsed and not one separator is rewritten.
-// The lone exception is a working directory of `/`, whose own trailing
-// separator is dropped so the prefix emits `/name` rather than a `//name`
-// POSIX leaves to the implementation; every other cwd contributes its bytes
-// verbatim. The operand is therefore the writer's own path against the same
-// working directory, and the kernel resolves it exactly as it resolved the
-// writer's open -- `..` through a symlink included, which a lexical collapse
-// would aim at a different file. It also begins with `/` (cwd is absolute, and
-// the strip runs on darwin alone, so POSIX separators are given), so it cannot
-// land in the option position regardless of how any chmod build parses a
-// dash-leading operand. There is no shell: the operand is one `execFileSync`
-// argument.
-//
-// `symlinks` picks which entry the strip acts on, and each caller passes the one
-// that matches how its own write reached the file, so the ACL cleared always
-// belongs to the file the content lands in:
-//  - `"do-not-follow"` adds `-h`, which acts on the named entry. The temp-file
-//    writers take it: the temp path is psilink's own, opened `O_EXCL|O_NOFOLLOW`,
-//    so a symlink at it is a link planted in the create window -- following it
-//    would redirect the strip onto another file's ACL while the content goes to
-//    the temp file.
-//  - `"follow"` omits `-h`, so `chmod` resolves the path. The streaming writer
-//    takes it: its `destPath` is an operator-supplied output path opened without
-//    `O_NOFOLLOW`, and its `fchmod` acts on that descriptor, so a pre-existing
-//    symlink there is deliberately followed and the strip has to reach the same
-//    real file the rows do.
-//
-// A no-op off macOS: on Linux (the production/Docker target) a numeric `chmod`
-// already collapses the POSIX ACL mask, and Windows owner-only enforcement is
-// the `icacls` path. Callers place it where they enforce the mode -- on the
-// temp file before the atomic rename, on the stream's file before any row --
-// so nothing a call writes lands while a foreign ACE could still be in force.
-// `reportedPath` names the destination the operator knows in the failure
-// message, which is the temp file's destination rather than the temp file.
-function stripExtendedAcls(
+/**
+ * Delete every extended (NFSv4) ACL entry on `filePath`, so an owner-only mode
+ * is the file's whole access story. A no-op off macOS.
+ *
+ * macOS evaluates a file's extended (NFSv4) ACL independently of its POSIX mode
+ * bits, so an ACE inherited from the parent directory grants another principal
+ * access that `fchmod(0600)` does not remove -- leaving an artifact readable
+ * despite an owner-only mode. Clear every ACE so the mode is the file's whole
+ * access story: on an artifact psilink writes, no ACE is intended, and the
+ * writers declare access through the mode alone. Node's `fs` exposes no ACL
+ * API, so this shells out to macOS's own `chmod`, whose `-N` deletes the ACL.
+ * The absolute `/bin/chmod` keeps the resolution off `PATH`. There is no `--`
+ * separator: macOS's chmod has none and tries to open it as a file (measured
+ * on the host, 2026-08-17). A relative operand is absolutized by prefixing
+ * `process.cwd()` and nothing else -- no join, no normalization, no resolve,
+ * so not one `..` segment is collapsed and not one separator is rewritten.
+ * The lone exception is a working directory of `/`, whose own trailing
+ * separator is dropped so the prefix emits `/name` rather than a `//name`
+ * POSIX leaves to the implementation; every other cwd contributes its bytes
+ * verbatim. The operand is therefore the writer's own path against the same
+ * working directory, and the kernel resolves it exactly as it resolved the
+ * writer's open -- `..` through a symlink included, which a lexical collapse
+ * would aim at a different file. It also begins with `/` (cwd is absolute, and
+ * the strip runs on darwin alone, so POSIX separators are given), so it cannot
+ * land in the option position regardless of how any chmod build parses a
+ * dash-leading operand. There is no shell: the operand is one `execFileSync`
+ * argument.
+ *
+ * `symlinks` picks which entry the strip acts on, and each caller passes the one
+ * that matches how its own write reached the file, so the ACL cleared always
+ * belongs to the file the content lands in:
+ *  - `"do-not-follow"` adds `-h`, which acts on the named entry. The temp-file
+ *    writers take it: the temp path is psilink's own, opened `O_EXCL|O_NOFOLLOW`,
+ *    so a symlink at it is a link planted in the create window -- following it
+ *    would redirect the strip onto another file's ACL while the content goes to
+ *    the temp file.
+ *  - `"follow"` omits `-h`, so `chmod` resolves the path. The writers of an
+ *    operator-supplied path take it -- the streaming result CSV and the
+ *    `--log-file` descriptor -- because each opens without `O_NOFOLLOW` and acts
+ *    on the resolved descriptor, so a pre-existing symlink there is deliberately
+ *    followed and the strip has to reach the same real file the content does.
+ *
+ * A no-op off macOS: on Linux (the production/Docker target) a numeric `chmod`
+ * already collapses the POSIX ACL mask, and Windows owner-only enforcement is
+ * the `icacls` path. Callers place it where they enforce the mode -- on the
+ * temp file before the atomic rename, on the stream's file before any row, on
+ * the log descriptor's file before any line -- so nothing a call writes lands
+ * while a foreign ACE could still be in force. A failed strip throws, and each
+ * caller fails closed on it rather than writing content into a file whose ACL
+ * it could not clear.
+ *
+ * `reportedPath` names the destination the operator knows in the failure
+ * message: the temp-file writers pass theirs, so the message names it rather
+ * than the temp file, and a caller stripping the very file it writes leaves it
+ * at `filePath`.
+ */
+export function stripExtendedAcls(
   filePath: string,
   {
     symlinks,

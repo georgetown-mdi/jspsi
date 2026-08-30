@@ -17,11 +17,15 @@ warnings, and remediation commands; this document covers how each write is
 constructed. The same construction governs every owner-only artifact written in
 one shot -- the key file (`.psilink.key`), the signing identity, the
 self-attested exchange record and the private verification-keys file beside it
-(see [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md)), the dual-signed receipt, and the
-operator config `psilink.yaml` -- so it is specified once here and referenced
-from each. The result CSV is owner-only on the same principle but is streamed to
-its destination rather than written through that construction; its writer is
-specified in [Result CSV output](#result-csv-output). This document does not
+(see [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md)), the dual-signed receipt, the
+operator config `psilink.yaml`, and the credentials file that carries the
+operator's SMB password to `smbclient` for `doctor probe` -- so it is specified
+once here and referenced from each. Two owner-only artifacts are written on the
+same principle without taking that construction, and each is specified where it
+diverges: the result CSV, streamed to its destination rather than renamed onto
+it ([Result CSV output](#result-csv-output)), and the `--log-file` descriptor,
+opened in append mode and carrying the extended-ACL strip at that open
+([macOS extended-ACL strip](#macos-extended-acl-strip)). This document does not
 cover what the files contain or the threat model (see
 [SECURITY_DESIGN.md](../SECURITY_DESIGN.md)). Intended readers are security
 auditors and implementors.
@@ -133,20 +137,45 @@ content lands in:
 | --------- | ----- | --- |
 | Temp-file writers (`writeFileOwnerOnly`, `writeFileAtomic`) | `-h -N` | The path is psilink's own temp path, opened with `O_EXCL` and `O_NOFOLLOW`; a symlink at it is one planted in the create window. `-h` acts on the named entry, so following one cannot redirect the strip onto another file's ACL while the content goes to the temp file. |
 | Streamed result CSV (`createOwnerOnlyWriteStream`) | `-N` | The path is an operator-supplied output path, opened without `O_NOFOLLOW` and `fchmod`'d on the descriptor, so a pre-existing symlink there is deliberately followed (see [Result CSV output](#result-csv-output)). `chmod` resolves the path for the same reason: acting on the link node would clear an ACL that governs nothing while the rows landed in a target whose ACEs still stood. Because the strip re-resolves the path rather than acting on the already-`fchmod`'d descriptor -- Node's `fs` exposes no fd-based ACL API -- a destPath swapped between the `fchmod` and the strip aims the two at different files. |
+| `--log-file` descriptor (`configureLogFile`) | `-N` | The path is an operator-supplied flag value, opened `"a"` with neither `O_NOFOLLOW` nor `O_EXCL`, so a symlink there is followed and the lines land in its target. The strip resolves the path for the same reason the streamed CSV's does, and inherits the same known limitation: it re-resolves the path rather than acting on the open descriptor. |
 
 The strip covers every artifact this document's write construction produces --
 the key file, the signing identity, the exchange record and its verification
-keys, the dual-signed receipt, the operator config, and the result CSV -- and
-the exported public certificate as well. It runs at any mode, including that
-certificate's public `0644`, because an inherited ACE can grant access (write
-included) that the explicit mode withholds.
+keys, the dual-signed receipt, the operator config, the `doctor probe`
+credentials file, and the result CSV -- and the exported public certificate as
+well. It runs at any mode, including that certificate's public `0644`, because
+an inherited ACE can grant access (write included) that the explicit mode
+withholds. The credentials file is the case where the directory rather than the
+destination carries the ACE: it is written into a `mkdtemp` directory under the
+operator's `TMPDIR`, so an inheritable ACE set there reaches the password
+through it.
+
+The `--log-file` descriptor is stripped at its own open instead, between that
+open and the installation of the sink that writes the first line -- the same
+placement, the point where the file's mode is enforced. Its content is the run's
+diagnostics, which at `debug`/`trace` hold partner identity, linkage keys, and
+data categories. That strip runs on a file the open created and one it appends
+to alike, unlike the `0600` mode, which the open applies on creation only: the
+mode an operator leaves on a file they supplied is a value they can read and set,
+while an ACE grants access the mode cannot express on a file the run is about to
+write those diagnostics into.
 
 A failed strip is fail-closed, exactly as a failed `icacls` narrowing is on
 Windows: no content is written. The temp-file writers unlink the temp file on the
-way out, so nothing reaches the destination. The streamed CSV aborts before its
+way out, so nothing reaches the destination -- and for the `doctor probe`
+credentials file the run goes with it, its whole `mkdtemp` directory removed and
+the checks abandoned, rather than a password being delivered through a file whose
+ACL could not be cleared. The streamed CSV aborts before its
 truncate, so an existing destination keeps its rows; only a file that call itself
 created is left behind, empty and already `0600`, mirroring the Windows
 placeholder.
+
+The `--log-file` open is refused on the same terms. The descriptor is released
+and the diagnostic sink is never installed, so no line can reach the file: an
+existing one keeps its content and a file the open created is left behind empty
+and `0600`, as the streamed CSV's is. The command reports it as a usage error
+(exit 64) before any exchange work begins, carrying the strip's refusal as its
+cause, which is how that open reports a log file it cannot open at all.
 
 The refusal names the file and carries the underlying failure as its `cause`, so
 the display sink renders that failure as its own chain link. Which of two

@@ -16,7 +16,7 @@ import {
   UsageError,
 } from "@psilink/core";
 
-import { createOwnerOnlyWriteStream } from "../fileUtils";
+import { createOwnerOnlyWriteStream, stripExtendedAcls } from "../fileUtils";
 import { parseDurationFlag, parseFineDurationFlag } from "./duration";
 
 /**
@@ -496,6 +496,20 @@ function installLogSink(
  * operator-supplied flag value, not attacker-derived, so the open deliberately
  * does not apply the `O_NOFOLLOW`/`O_EXCL` hardening psilink's credential writers
  * use for paths it derives itself.
+ *
+ * On macOS the file's extended (NFSv4) ACL is cleared between that open and the
+ * sink installation, so no line is written while an ACE -- inherited from the
+ * parent directory on a file this open created, or already sitting on one it
+ * appends to -- could still grant another principal the access the `0600` mode
+ * denies. The strip resolves a symlink at the path, matching the open, which
+ * deliberately follows one. It runs on an existing file as well as a created
+ * one, unlike the `0o600` mode: the mode is the one the open applies at
+ * creation, while an ACE governs a file the run is about to write partner
+ * identity, linkage keys, and data categories into. A strip that fails is
+ * fail-closed like the owner-only writers' (`apps/cli/src/fileUtils.ts`): the
+ * descriptor is released and the run refused as a {@link UsageError} carrying
+ * the refusal as its cause, with an existing file's content untouched and a
+ * created one left empty. Elsewhere the strip is a no-op.
  */
 export function configureLogFile(logFilePath: string): LogSink {
   // Windows paths are accepted: fold backslashes to forward slashes on ingestion
@@ -523,6 +537,29 @@ export function configureLogFile(logFilePath: string): LogSink {
       `could not open log file ${normalized}: ` +
         (err instanceof Error ? err.message : String(err)),
     );
+  }
+
+  try {
+    // Between the open and the first line, the same place the owner-only writers
+    // put it: on macOS the 0600 mode leaves an inherited ACE in force, and this
+    // descriptor is where the run's diagnostics land. The strip follows a
+    // symlink at the path because the open does -- acting on the link node
+    // would clear an ACL governing nothing while the lines went to its target.
+    stripExtendedAcls(normalized, { symlinks: "follow" });
+  } catch (err) {
+    try {
+      fs.closeSync(fd);
+    } catch {
+      // Best-effort close of the descriptor the open above took; the refusal
+      // below is what the caller has to see.
+    }
+    // Reported through this function's own usage boundary, as its open failure
+    // is, so a refused log file exits 64 before any exchange work begins rather
+    // than escaping to the last-resort printer. The strip's refusal -- which
+    // names the file and carries the underlying failure -- rides as the cause.
+    throw new UsageError(`could not secure log file ${normalized}`, {
+      cause: err,
+    });
   }
 
   return installLogSink(
