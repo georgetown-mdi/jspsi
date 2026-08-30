@@ -86,6 +86,20 @@ async function openExportPanel(): Promise<void> {
   expect(exportToggle().element().getAttribute("aria-expanded")).toBe("true");
 }
 
+/** Budget for the export dispatch: the click resolves as soon as the handler
+ * starts, and the dispatch reads the record back out of IndexedDB before it
+ * composes anything, so the two anchor clicks -- synchronous once the dispatch
+ * reaches them -- land a store round trip after the click rather than with it.
+ * The phase is bounded here rather than left on `vi.waitFor`'s 1s default,
+ * which is no budget for a store round trip taken while this project's files run
+ * in parallel, beside the integration suites in CI. */
+const EXPORT_DISPATCH_TIMEOUT_MS = 10_000;
+/** Budget for the capture to read each downloaded blob back off its object URL,
+ * the phase after the anchors are clicked. It is waited on separately so a
+ * download that never fired and bytes that never came back name themselves apart,
+ * rather than arriving as one empty-capture assertion. */
+const DOWNLOAD_READ_BACK_TIMEOUT_MS = 10_000;
+
 /** Click the panel's download action and wait for both files' bytes to be read
  * back off their object URLs. */
 async function downloadBothFiles(
@@ -94,10 +108,13 @@ async function downloadBothFiles(
   await page
     .getByRole("button", { name: "Download psilink.yaml and .psilink.key" })
     .click();
-  await vi.waitFor(() => {
-    expect(captured).toHaveLength(2);
-    expect(captured.every((file) => file.text !== "")).toBe(true);
+  await vi.waitFor(() => expect(captured).toHaveLength(2), {
+    timeout: EXPORT_DISPATCH_TIMEOUT_MS,
   });
+  await vi.waitFor(
+    () => expect(captured.every((file) => file.text !== "")).toBe(true),
+    { timeout: DOWNLOAD_READ_BACK_TIMEOUT_MS },
+  );
 }
 
 beforeEach(async () => {
