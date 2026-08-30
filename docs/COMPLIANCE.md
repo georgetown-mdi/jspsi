@@ -1,7 +1,7 @@
 ---
 title: "PSI-Link Compliance"
 review_owner: "PSI-Link maintainers"
-last_reviewed: "2026-08-29"
+last_reviewed: "2026-08-30"
 ---
 
 # PSI-Link compliance
@@ -113,7 +113,15 @@ PSI-Link is software, not a service offering, and is not in scope for FedRAMP or
 
 ### FIPS 140
 
-A FIPS 140 question about PSI-Link is answered wrongly in both directions when three different statements are collapsed into one:
+The position in plain terms, ahead of the distinctions an assessor works through:
+
+- **No image PSI-Link publishes is FIPS 140-validated, and none is claimed to be.** What the project does claim is narrower, and the scope is the whole of the answer.
+- **What it claims.** A separate `-fips` container image embeds and uses a validated cryptographic module -- one CMVP validated for another vendor -- so on a host in FIPS mode that module is what performs the cryptographic operations protecting a recurring SFTP or filedrop exchange in transit. Embedding a validated module is not being one. The claim is that the module's code performs the operation -- measured at every container start for the five operations behind the wrap and its key -- and not that the operation runs in the module's approved mode, which for three of them it does not.
+- **What it claims for the default image and the browser application.** Nothing. Neither embeds such a module, and no statement here about a validated module is about either of them.
+- **What no image reaches.** PSI-Link encrypts nothing on disk; the private set intersection uses a scheme no NIST publication specifies and no certificate approves; and the protocol composed above the primitive calls is attested by no certificate.
+- **Whether that satisfies your agency is your agency's call.** A policy requiring a validated module running in an operational environment its certificate covers does not find one here: the certificate names six bare-metal environments and no container among them. What the project asks an authorizing official to accept instead is set out in [What an authorizing official is being asked to accept](#what-an-authorizing-official-is-being-asked-to-accept) rather than left to be inferred.
+
+The rest of this section is the evidence behind those five statements, and it opens on a distinction, because a FIPS 140 question about PSI-Link is answered wrongly in both directions when three different statements are collapsed into one:
 
 - an algorithm is **specified and approved by a NIST publication** -- [FIPS 186-5](https://doi.org/10.6028/NIST.FIPS.186-5), [FIPS 197](https://doi.org/10.6028/NIST.FIPS.197-upd1), [SP 800-38D](https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf), [SP 800-56A Rev. 3](https://doi.org/10.6028/NIST.SP.800-56Ar3), [SP 800-56C Rev. 2](https://doi.org/10.6028/NIST.SP.800-56Cr2), and [SP 800-186](https://doi.org/10.6028/NIST.SP.800-186) for the curve the elliptic-curve algorithms run over -- section 10 of FIPS 140-3 is what gives "approved" that meaning, admitting a security function specified in a FIPS, adopted in one, or listed in NIST SP 800-140C, with SP 800-140D playing that role for sensitive security parameter establishment methods;
 - a **module certificate** approves that algorithm, so a module performing it stays in its approved mode;
