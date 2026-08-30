@@ -509,8 +509,11 @@ The hand-off is the one of them a window can meet after starting cleanly, and it
 is why the spent state is read per ATTEMPT rather than per tick: the runner's own
 skip below reads it once when the wake begins, while the run path re-reads it
 inside the [run+rotate lock](#the-secret-is-a-linear-resource) at the start of
-every attempt. A hand-off confirmed while a window is open therefore stops the
-attempts that follow it instead of being re-attempted until the window closes.
+every attempt. A hand-off confirmed while a window is open therefore refuses that
+attempt outright rather than being re-attempted until the window closes; the
+refusal itself is non-retryable and counts no partner miss, but a window that
+already found the partner absent before it still folds to `"missed"` under the
+table below.
 
 The window's disposition folds every attempt it took, written once for the window
 rather than once per attempt:

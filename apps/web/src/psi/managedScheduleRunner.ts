@@ -558,9 +558,10 @@ function attemptProvesContact(
  * handshake because hammering an authentication failure is the one response to it
  * that is never right. The hand-off is the one of them a window can meet after
  * starting cleanly: the tick's own spent check reads the sibling state once,
- * while the run path re-reads it inside the lock on every attempt, so a hand-off
- * confirmed mid-window ends the window there instead of being re-attempted until
- * it closes.
+ * while the run path re-reads it inside the lock on every attempt. That refusal
+ * is non-retryable and counts no partner miss on its own, but a window that
+ * already found the partner absent before it still folds to `"missed"` (see
+ * {@link foldWindowDisposition}).
  *
  * `dataExchangeStarted` overrides all of it: past that boundary this run's
  * payload could already have reached the partner, and a re-attempt would
