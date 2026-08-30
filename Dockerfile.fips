@@ -127,10 +127,16 @@ ARG VITE_DEPLOYMENT_PROFILE
 ENV VITE_DEPLOYMENT_PROFILE=${VITE_DEPLOYMENT_PROFILE}
 RUN npm run build -w apps/web
 
-# Rebuild node_modules production-only (npm ci empties it first): the identical
-# lockfile-exact resolution minus devDependencies, ready to ship as-is.
+# The tree the runtime stage ships: the same lockfile-exact resolution as above
+# with the build's own dependencies left out. The explicit wipe is what makes it
+# production-only, `npm ci` emptying node_modules only when it is unscoped and
+# reifying in place under the -w scoping here; --omit=optional rides beside
+# --omit=dev because npm keeps a package flagged `devOptional`, which optional
+# peer edges make of apps/web's vite. Measurements, and the one optional edge
+# inside this scope, are in docs/spec/CONTAINER_IMAGES.md.
 RUN --mount=type=cache,target=/root/.npm \
-  npm ci --omit=dev -w packages/core -w apps/cli
+  rm -rf node_modules \
+  && npm ci --omit=dev --omit=optional -w packages/core -w apps/cli
 
 FROM nodebase
 
@@ -219,12 +225,12 @@ RUN chmod u-s,g-s \
 COPY openssl-fips-only.cnf /etc/psilink/fips-only.cnf
 
 WORKDIR /app
+# npm links the workspaces its install names, so the tree copied here carries
+# links to packages/core and apps/cli alone and both link targets are copied
+# below. A link to a workspace this image does not ship would dangle, and
+# image_smoke.yaml's symlink containment measurement refuses a dangling link
+# under /app.
 COPY --from=builder /build/node_modules node_modules
-# npm links every workspace declared in the root manifest into node_modules,
-# including packages/peerjs-broker, but this image never ships the broker's
-# source, so the copied link dangles and the containment gate below refuses
-# it. Un-forced so the build fails loudly if npm ever stops creating the link.
-RUN rm /app/node_modules/@psilink/peerjs-broker
 COPY --from=builder /build/packages/core/package.json packages/core/
 COPY --from=builder /build/packages/core/dist packages/core/dist/
 COPY --from=builder /build/apps/cli/package.json apps/cli/

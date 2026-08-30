@@ -22,9 +22,10 @@ Alpine mirror while the image is built. The Dockerfile's builder stage installs 
 `npm ci` against the committed `package-lock.json` -- which installs exactly the
 locked tree, verifying each registry package against the lockfile's integrity
 hash, and fails the build if a manifest and the lockfile disagree -- then, after
-building, re-runs `npm ci --omit=dev` for the production-only tree, and the
-runtime stage copies that `node_modules` unchanged. Every runtime dependency and
-transitive in the image is therefore the exact version in the committed
+building, empties `node_modules` and re-installs it as
+`rm -rf node_modules && npm ci --omit=dev --omit=optional -w packages/core -w apps/cli`,
+and the runtime stage copies that `node_modules` unchanged. Every runtime
+dependency and transitive in the image is therefore the exact version in the committed
 lockfile: a rebuild without a lockfile change cannot re-resolve a caret range,
 and the image ships the same tree CI tested. The release SBOM covers a wider
 scope than this install -- step 9 in [RELEASES.md](../RELEASES.md) runs
@@ -49,11 +50,18 @@ The structural invariants are enforced by `scripts/dockerfile-freeze.test.mjs`
 (run by `npm run test:scripts`, a CI static check), over both `Dockerfile` and
 the FIPS variant's `Dockerfile.fips` alike: every install is `npm ci`, the
 lockfile and the root `.npmrc` are copied into the builder before the first
-install, the shipped tree is the `--omit=dev` one, the runtime stage runs no npm
+install, the builder's last npm command empties `node_modules` and carries both
+`--omit=dev` and `--omit=optional`, the runtime stage runs no npm
 at all, every stage builds from the reviewed base digest or from another stage of
 the same file, each file's OS-package installs are exactly the reviewed set, and
 the copied layout keeps the workspace links and the PSI worker entry where the
 CLI resolves them.
+
+Every one of those is a property of the instructions rather than of the tree a
+build resolves. The test reads what the build is told to do, so the package set
+that ends up in the image is outside it -- which is why the command's shape is
+held part by part below, each part standing for a way the resolved tree and the
+instruction can disagree.
 
 Those invariants are read off `COPY` and `RUN`, so the test refuses every other
 instruction class outright, in either stage, rather than modeling it. `ADD` is
@@ -61,6 +69,46 @@ the one that names itself: it fetches a remote source and takes the same
 `--chown`/`--chmod` flags `COPY` does, so it can both pull in a build input the
 lockfile does not pin and land files with an ownership no assertion here reads. A
 build that needs another class extends the test's reviewed list in the same diff.
+
+**What makes the rebuilt tree production-only.** Both halves of the rebuild
+command answer a measurement. Driving the builder's installs against the
+committed lockfile over only the files the builder copies in -- outside the
+image, on npm 11.19.0 and Node 26.8.1 (linux/arm64), so the figures stand for
+the resolution rather than for a built image's own tree:
+
+| Install                                                                     | Top-level packages | `du -sh` |
+| --------------------------------------------------------------------------- | ------------------ | -------- |
+| `npm ci -w packages/core -w packages/peerjs-broker -w apps/cli -w apps/web`   | 634                | 517M     |
+| then `npm ci --omit=dev -w packages/core -w apps/cli` over that tree          | 553                | 449M     |
+| the same command into an emptied tree                                         | 123                | 146M     |
+| the same command into an emptied tree, plus `--omit=optional`                 | 101                | 98M      |
+
+The tree is emptied explicitly because `npm ci` empties `node_modules` only when
+it is unscoped. A marker directory placed in the tree survives
+`npm ci --omit=dev -w packages/core -w apps/cli` and does not survive the same
+command with the `-w` flags dropped: scoped, npm reifies in place and removes
+only what the scope reaches, leaving the build's own dependencies -- `eslint`
+among them -- where the first install put them.
+
+Emptying it is not sufficient on its own. npm omits a package the lockfile flags
+`dev` and keeps one it flags `devOptional`, and `vite` carries the second flag:
+`apps/web` declares it a devDependency while `@tanstack/react-start`,
+`@tanstack/router-plugin`, `@tanstack/start-plugin-core`, `@vitest/mocker` and
+`vitefu` each declare it an optional peer. `--omit=optional` is what leaves it,
+and `rolldown` and `esbuild` beneath it, out of the image.
+
+What that omission costs is one package: `cpu-features`, ssh2's optional native
+CPU-detection addon (with `buildcheck` and `nan` beneath it), the only optional
+edge inside the `packages/core` plus `apps/cli` scope. ssh2 declares it optional
+and runs without it -- driven on the omitted tree, ssh2 1.17.0 completes a
+handshake, authentication and remote exec over loopback with `cpu-features`
+unresolvable.
+
+No check measures the built image's `/app/node_modules` against that scope. The
+freeze test reads the instruction, and the runtime measurements below cover the
+writable set, symlink containment and the setuid inventory rather than the
+package set, so a package the resolved tree carries and this scope does not
+account for reaches the image unremarked.
 
 The `node:26-alpine` base image is digest-pinned in both stages to its
 multi-arch index digest, so the Node runtime and Alpine userland beneath the
@@ -146,8 +194,8 @@ published from the same release workflow under the default image's tags with
 why it exists, what may be claimed of it, and what stops working inside it are in
 [fips-variant-image.md](../notes/fips-variant-image.md). Everything above about
 the npm freeze applies to it unchanged -- same lockfile, same `npm ci`, same
-`--omit=dev` runtime tree, same freeze test. What follows is what it pins
-beyond that, and the second OS-package inventory that comes with it.
+production rebuild for the runtime tree, same freeze test. What follows is what
+it pins beyond that, and the second OS-package inventory that comes with it.
 
 **Six pins, five of them compared against the artifact inside the build.**
 

@@ -460,10 +460,22 @@ for (const { file, externalBases, osInstalls, image } of IMAGES) {
       expect(firstCi).toBeGreaterThan(npmrcCopy);
     });
 
-    it("ships a production-only tree: the builder's last npm command is npm ci --omit=dev", () => {
+    it("empties the tree and omits both dev and optional on the builder's last npm command", () => {
+      // A static parse reads the instruction, never the tree the build
+      // resolves, so this holds the shape of the command and claims nothing
+      // about which packages ship. Each of the three parts is what a measured
+      // install turned on: `npm ci` empties node_modules only when it is
+      // unscoped, and drops a package flagged `dev` while keeping one flagged
+      // `devOptional`, so a -w scoped `npm ci --omit=dev` with no wipe reads as
+      // a production install while shipping most of the build tree.
+      // docs/spec/CONTAINER_IMAGES.md carries the measurement and what remains
+      // unasserted here.
       const npmRuns = image.builderRuns.filter((run) => /\bnpm\b/.test(run));
       expect(npmRuns.length).toBeGreaterThan(0);
-      expect(npmRuns[npmRuns.length - 1]).toMatch(/\bnpm ci\b.*--omit=dev/);
+      const last = normalize(npmRuns[npmRuns.length - 1]);
+      expect(last).toMatch(/\brm -rf node_modules && npm ci\b/);
+      expect(last).toMatch(/\bnpm ci\b[^&|;]*\s--omit=dev(?=\s|$)/);
+      expect(last).toMatch(/\bnpm ci\b[^&|;]*\s--omit=optional(?=\s|$)/);
     });
 
     it("runs no npm in the runtime stage, so the copied tree is what ships", () => {
