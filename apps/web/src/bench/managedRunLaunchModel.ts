@@ -8,9 +8,10 @@
  * Two layers feed a surface state:
  *
  * - The benign states read from the launch error: a lapsed `expires`, a copy an
- *   export handed off, an input problem, a run already in progress elsewhere, or a
- *   partner who never arrived. These are unambiguous (no handshake ran), so they
- *   surface as their own plain, non-alarming copy directly from the error.
+ *   export handed off, a copy whose hand-off state could not be read, an input
+ *   problem, a run already in progress elsewhere, or a partner who never arrived.
+ *   These are unambiguous (no handshake ran), so they surface as their own plain,
+ *   non-alarming copy directly from the error.
  * - The RECORDED tiers, derived from the record's own structured bookkeeping (see
  *   {@link deriveManagedFailureTier}): a recorded persist failure, a custody entry
  *   the run could not read, a restore/import
@@ -146,8 +147,7 @@ function expiredFailure(expires: string): ManagedRunFailure {
  * It names no next step on this exchange's own surface, because reaching this state
  * is what settles the run surface onto the stored spent state
  * ({@link ./ManagedRunSurface.tsx}) -- which names the hand-off that spent the copy
- * and the recovery that hand-off actually has. Its copy is what remains true
- * wherever the state is shown as an alert instead. */
+ * and the recovery that hand-off actually has. */
 const HANDED_OFF_FAILURE: ManagedRunFailure = {
   kind: "handed-off",
   title: "This exchange was handed off",
@@ -466,10 +466,16 @@ function missedFailure(
  * device is read off the error only from before the boundary. The record cannot
  * stand in for it -- its `lastRun` is whatever the last write managed to stamp,
  * which is why the no-show copy is issued from the live error rather than from the
- * derived missed tier. The boundary guards the states read off the error and
- * nothing further: a `"consent"` or `"terms-shortfall"` tier read from the
+ * derived missed tier. A `"consent"` or `"terms-shortfall"` tier read from the
  * record's stored kind carries the guard the run that stamped it applied, so this
  * run's boundary does not gate that copy.
+ *
+ * The `"handed-off"` tier is the one derived tier the boundary does gate, because
+ * the surface reads that kind to settle onto the stored spent state
+ * ({@link ./ManagedRunSurface.tsx}), whose copy attests that THIS run stopped
+ * before reading the input file and before connecting. No stamp another run left
+ * licenses that claim, so past the boundary the derived hand-off gives way to the
+ * generic tier exactly as the error-read state does.
  *
  * A no-show is the one benign state that does not simply win: it is read against
  * the desync evidence the record already holds ({@link missedFailure}), because
@@ -487,11 +493,16 @@ export function classifyManagedRunFailure(
     return expiredFailure(error.expires);
   if (benign === "already-running") return ALREADY_RUNNING_FAILURE;
   if (benign === "handed-off") return HANDED_OFF_FAILURE;
+  if (benign === "custody-unreadable") return CUSTODY_UNREADABLE_FAILURE;
   if (benign === "input") return INPUT_FAILURE;
   if (benign === "terms-shortfall") return TERMS_SHORTFALL_FAILURE;
   if (benign === "missed") return missedFailure(records.atLaunch, local, now);
   const { afterRun } = records;
-  return tierFailure(deriveManagedFailureTier(afterRun, local, now), afterRun);
+  const tier = deriveManagedFailureTier(afterRun, local, now);
+  return tierFailure(
+    tier === "handed-off" && dataExchangeStarted ? "transport" : tier,
+    afterRun,
+  );
 }
 
 /**

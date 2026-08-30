@@ -166,13 +166,16 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
   });
 
   test("a run that met a handed-off copy refuses outright, with no way back offered", () => {
-    // The attended half of the hand-off refusal: the operator clicked Run on a
-    // surface that loaded before the hand-off. What they get is the refusal and
-    // where the exchange runs now -- no retry, no re-invite, and no override that
-    // would take the exchange back by pressing a button on a failed run.
+    // The attended half of the hand-off refusal, in the shape the real refusal
+    // leaves: the operator clicked Run on a surface that loaded before the
+    // hand-off, and the critical section stamped the kind before it threw
+    // (managedExchangeRun.ts). What they get is the refusal and where the
+    // exchange runs now -- no retry, no re-invite, and no override that would
+    // take the exchange back by pressing a button on a failed run. Reaching this
+    // kind is what settles the surface onto the spent state.
     const failure = classifyAgainstOneRecord(
       new ManagedExchangeSpentError("abc"),
-      record(),
+      record({ lastRun: failed("handed-off") }),
       { spent: { spentAt: "2026-07-13T09:00:00.000Z" } },
       NOW,
       false,
@@ -300,15 +303,49 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
     // arriving past the boundary must not reach that state either -- the spent
     // surface would attest a run that disclosed nothing where the phase cannot say
     // so.
-    const failure = classifyAgainstOneRecord(
+    //
+    // The record carries the stamp the real refusal writes before it throws, so
+    // both routes to the kind are driven: the refusal read off the error, and the
+    // tier derived from that standing stamp under a plain mid-exchange failure --
+    // which is what a run meets when its own bookkeeping write is swallowed, or
+    // when the post-failure reload rejects and the pre-run record stands in.
+    for (const error of [
       new ManagedExchangeSpentError("abc"),
+      new Error("data channel dropped"),
+    ]) {
+      const failure = classifyAgainstOneRecord(
+        error,
+        record({ lastRun: failed("handed-off") }),
+        { spent: { spentAt: "2026-07-13T09:00:00.000Z" } },
+        NOW,
+        true,
+      );
+      expect(failure.kind).toBe("transport");
+      expect(failure.message).not.toMatch(/nothing left this device/i);
+    }
+  });
+
+  test("a run that could not read its custody entry is that state from the error alone", () => {
+    // The record cannot carry this one: the store that failed the run's custody
+    // read is the store the post-failure reload asks next, so the reload rejects
+    // with it and the classification is left the pre-run record, carrying no
+    // stamp at all. Derived from that record alone the state is the retryable
+    // transport tier -- a retry offered for a local problem that answers the same
+    // way at every attempt, which is what this kind exists to prevent.
+    const failure = classifyAgainstOneRecord(
+      new ManagedExchangeCustodyUnreadableError("abc", new Error("invalid")),
       record(),
-      { spent: { spentAt: "2026-07-13T09:00:00.000Z" } },
+      undefined,
       NOW,
-      true,
+      false,
     );
-    expect(failure.kind).toBe("transport");
-    expect(failure.message).not.toMatch(/nothing left this device/i);
+    expect(failure.kind).toBe("custody-unreadable");
+    expect(failure.recovery).toBe("none");
+    expect(managedRunRetryable(failure)).toBe(false);
+    expect(managedRunReinvites(failure)).toBe(false);
+    expect(failure.message).toMatch(/could not read/i);
+    expect(failure.message).toMatch(/nothing left this device/i);
+    expect(failure.message).not.toMatch(/temporary connection problem/);
   });
 
   test("a linkage shortfall delivered past the data-exchange boundary takes the transport copy", () => {

@@ -1243,10 +1243,14 @@ function BackupPanel({
  * later visit -- so it must say what THAT hand-off left the operator with. A
  * migration copy is somewhere an import can bring back; a command-line hand-off
  * produced the CLI's two files, which the import flow does not accept, so the
- * exchange runs from those files and they are its backup of record. `spent` is
- * undefined only if the
- * sibling entry vanished between the load and this render, which costs the date, not
- * the state.
+ * exchange runs from those files and they are its backup of record.
+ *
+ * `spent` is undefined when the run-refusal transition reached this state without
+ * the stored entry in hand: the reload behind it reads the record and the sibling
+ * together, so either read rejecting costs both. That costs the hand-off's form
+ * and its date, so the copy names neither -- naming one would send an operator
+ * whose exchange went to the command line after a backup file that hand-off never
+ * produced.
  *
  * `refusedRun` is set when this surface arrived here from a run the hand-off
  * refused rather than from a load, and adds that run's own account above the
@@ -1259,15 +1263,27 @@ function SpentSurface({
   spent: ManagedSpentState | undefined;
   refusedRun?: boolean;
 }) {
-  const on =
-    spent === undefined ? "" : ` on ${dateLabel(new Date(spent.spentAt))}`;
   const refused = refusedRun ? (
     <p className={styles.small}>
       The run you started stopped before reading your file and before
       connecting, and nothing left this device.
     </p>
   ) : null;
-  return spent?.handoff === "command-line" ? (
+  if (spent === undefined)
+    return (
+      <>
+        <h1>This exchange was handed off</h1>
+        <p className={styles.sub}>
+          This browser&apos;s copy of this exchange was handed off, so it no
+          longer runs here. It runs where you handed it over to -- the device
+          you moved it to, or the machine running it from the command line.
+        </p>
+        {refused}
+        <SavedExchangesFoot />
+      </>
+    );
+  const on = ` on ${dateLabel(new Date(spent.spentAt))}`;
+  return spent.handoff === "command-line" ? (
     <>
       <h1>This exchange was handed off</h1>
       <p className={styles.sub}>

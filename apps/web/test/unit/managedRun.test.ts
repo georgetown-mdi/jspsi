@@ -395,6 +395,25 @@ describe("benignRerunOutcome", () => {
     expect(benignRerunOutcome(new ManagedExchangeSpentError("id"), false)).toBe(
       "handed-off",
     );
+    expect(
+      benignRerunOutcome(
+        new ManagedExchangeCustodyUnreadableError("id", new Error("invalid")),
+        false,
+      ),
+    ).toBe("custody-unreadable");
+  });
+
+  test("an unreadable custody entry past the data-exchange boundary is not a benign outcome", () => {
+    // The refusal is raised inside the lock before the input guard, exactly as
+    // the hand-off one is, so it carries the same guard rather than resting on
+    // where it is raised: past the boundary its copy's claim that nothing left
+    // this device cannot be made.
+    expect(
+      benignRerunOutcome(
+        new ManagedExchangeCustodyUnreadableError("id", new Error("invalid")),
+        true,
+      ),
+    ).toBeUndefined();
   });
 
   test("a hand-off refusal past the data-exchange boundary is not a benign outcome", () => {
