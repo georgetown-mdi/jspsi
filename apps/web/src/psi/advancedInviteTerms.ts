@@ -4,11 +4,13 @@ import {
   authoredLinkageFields,
   decideLinkageTermsVerdict,
   getDefaultLinkageTerms,
-  isDrawnFromLinkageRuleSet,
-  linkageRuleSetReferenceFor,
   referencedLinkageFieldNames,
 } from "@psilink/core";
 
+import {
+  isDraftDrawnFromLinkageRuleSet,
+  linkageRuleSetReferenceForDraft,
+} from "./linkageComparison";
 import { outputForDirection } from "./advancedInviteTypes";
 import { payloadSendForMetadata } from "./metadataEditing";
 
@@ -153,7 +155,7 @@ function stripFuzzy(key: LinkageKey): LinkageKey {
  * build can resolve -- and otherwise the rules the importing document claimed for the
  * set it named, which is all there is to check a name this build cannot resolve
  * against. The two chosen halves are composed under the document's own reference, and
- * `isDrawnFromLinkageRuleSet` judges fields and keys independently.
+ * `isDraftDrawnFromLinkageRuleSet` judges fields and keys independently.
  *
  * The substitution is what keeps psilink from re-emitting its OWN set's name over rules
  * that are not that set. A partner document is free to cite the built-in name over
@@ -223,7 +225,7 @@ export type ImportedCitationDropCause =
  * not) cannot disagree about the outgoing document.
  *
  * The keyless exclusion sits here rather than inside the predicate: keyless rules
- * are drawn from every set vacuously, so `isDrawnFromLinkageRuleSet` alone would
+ * are drawn from every set vacuously, so `isDraftDrawnFromLinkageRuleSet` alone would
  * re-emit a citation over a document carrying none of the keys it asserts
  * provenance for -- including one whose leftover imported field declarations
  * survive their keys. The draft reaches that state as an intermediate (disabling
@@ -237,7 +239,7 @@ function citationStands(
 ): boolean {
   return (
     rules.linkageKeys.length > 0 &&
-    isDrawnFromLinkageRuleSet(ruleSetForImportedCitation(cited), rules)
+    isDraftDrawnFromLinkageRuleSet(ruleSetForImportedCitation(cited), rules)
   );
 }
 
@@ -400,7 +402,7 @@ export function buildAdvancedTerms(draft: AdvancedInviteDraft): LinkageTerms {
   const importedCitation = draft.importedRuleSetCitation;
   const ruleSetReference =
     importedCitation === undefined
-      ? linkageRuleSetReferenceFor(terms)
+      ? linkageRuleSetReferenceForDraft(terms)
       : importedCitation.kind === "cited" &&
           citationStands(importedCitation.ruleSet, terms)
         ? importedCitation.ruleSet.reference
