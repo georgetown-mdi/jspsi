@@ -74,7 +74,7 @@ test("the agreed deduplicate pair maps to the per-side cardinality label", () =>
   expect(resolveFor(false, true)).toBe("one-to-many");
 });
 
-test("the both-sided pair is refused, naming many-to-many and the missing closure", () => {
+test("the both-sided pair is refused, naming many-to-many and what it awaits", () => {
   let thrown: unknown;
   try {
     resolveFor(true, true);
@@ -85,7 +85,9 @@ test("the both-sided pair is refused, naming many-to-many and the missing closur
   const message = (thrown as Error).message;
   // Names the pair it resolved ...
   expect(message).toMatch(/many-to-many/);
-  // ... the step that is actually missing, since the pairing itself is specified ...
+  // ... the step that makes such a table mean anything to either party, so an
+  // operator reads what the cardinality is waiting on rather than only that it
+  // is refused ...
   expect(message).toMatch(/transitive closure/);
   // ... and the remedy.
   expect(message).toMatch(/deduplicate to false on one of the two parties/);
