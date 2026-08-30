@@ -326,9 +326,9 @@ What the default account asks of you is bind-mount ownership. A bind mount keeps
 docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/work vdorie/psi-link exchange input.csv
 ```
 
-Something comes with that choice. The container then runs as an account the image knows nothing about, so the per-user signing identity -- what `psilink fingerprint` creates, under the home directory rather than the working directory -- has nowhere it can be written; add `--env HOME=/work` to put it in the mounted directory, where it also outlives `--rm`. Not when `/work` is the partner-synced folder, though: in a single-folder file-drop exchange that directory is one the partner writes into, and certificate-mode signing would be putting this party's long-lived P-256 private key there. Mount the synced folder separately from the working directory in that case, or point `HOME` at a mount only you can reach.
+The container then runs as an account the image knows nothing about, and `HOME` is not a question that arises. psilink chooses no path under the home directory for anything: it reaches for the home directory only to expand a `~` you wrote yourself, so an ephemeral or unset `HOME` changes no path psilink picks. It still resolves the ones you spell with a `~` against whatever home the container has, which in an ephemeral one is a different directory on every run -- so write those paths out in full. The signing identity, the one long-lived credential the CLI holds, is written and read only where you name it (see [Mounting the signing identity](#mounting-the-signing-identity)).
 
-**The console appliance takes the same route.** `serve` keeps the signing identity in the mounted data root rather than under the home directory, so `HOME` is not its question. Its one container-internal write outside the mounts is the directory a pasted SFTP credential is materialized to, which the image creates under root-owned `/run` for its own account; point `JOB_SFTP_CREDENTIAL_DIR` at a path the account you named can create instead:
+**The console appliance takes the same route.** `serve` keeps the signing identity in the mounted data root. Its one container-internal write outside the mounts is the directory a pasted SFTP credential is materialized to, which the image creates under root-owned `/run` for its own account; point `JOB_SFTP_CREDENTIAL_DIR` at a path the account you named can create instead:
 
 ```sh
 docker run --rm -p 127.0.0.1:3000:3000 \
@@ -585,6 +585,55 @@ The output must show `600`. If it does not, the CLI will emit a warning on load;
 
 The manual procedure for confirming the Windows owner-only writers still
 narrow ACLs correctly is in [TESTING.md](TESTING.md#verifying-windows-owner-only-file-protections).
+
+### Mounting the signing identity
+
+The signing identity is the CLI's other credential file, and it is not the key file: the shared secret rotates every exchange and must be written back, while the signing identity is a long-lived P-256 private key that must stay byte-for-byte stable, because a partner pins its fingerprint once and every later receipt verifies against it. Mount them differently.
+
+psilink resolves no location for it. Name the path with `signing.identity_file` in the configuration, or `--identity-file` on the command line; a certificate-mode exchange configured with neither is refused before it connects. See [CLI.md](CLI.md#where-the-signing-identity-lives).
+
+**Give it a mount of its own, and mount that read-only.** The identity is created once, by `psilink fingerprint`, which is the only command that writes it; an exchange and a `psilink verify-receipt` read the file and write neither it, its directory, nor anything beside it. That is the reason it does not go in the `/run/secrets` mount above: the rotating key file is what makes that mount read-write, and the identity has no reason to inherit the requirement.
+
+Provision it once, against a directory writable for that one command:
+
+```sh
+docker run --rm \
+  --mount type=bind,src=/data/signing,dst=/run/signing \
+  vdorie/psi-link fingerprint \
+  --identity-file /run/signing/psilink-signing-identity.json \
+  --identity "Agency A, a@agency-a.gov"
+```
+
+Then mount it read-only for every exchange thereafter, beside the read-write mount the key file needs, with `signing.identity_file: /run/signing/psilink-signing-identity.json` and `signing.receipt_output: /run/secrets/psilink-receipt.json` in the mounted `psilink.yaml`. Point the exchange record there too: the image's `WORKDIR` is `/work`, which this example mounts read-only, and a signed run's receipt and record both default to a path under the working directory -- a write that fails there is non-fatal and only warns, so leaving either at its default here would complete the exchange while landing neither.
+
+```sh
+docker run \
+  --mount type=bind,src=/data/config,dst=/work,readonly \
+  --mount type=bind,src=/data/secrets,dst=/run/secrets \
+  --mount type=bind,src=/data/signing,dst=/run/signing,readonly \
+  vdorie/psi-link exchange input.csv --key-file /run/secrets/.psilink.key \
+  --record-file /run/secrets/psilink-record.json
+```
+
+```yaml
+# Kubernetes: the signing identity is a second Secret volume, mounted read-only
+volumes:
+  - name: signing
+    secret:
+      secretName: psilink-signing-identity
+      defaultMode: 0600
+containers:
+  - name: psilink
+    volumeMounts:
+      - name: signing
+        mountPath: /run/signing
+        readOnly: true
+```
+
+Two more things, whichever platform you are on:
+
+- **Make the host directory durable, and back it up.** Losing the file means minting a new identity with a new fingerprint, which every partner must re-pin before your receipts verify again.
+- **Never put it in a directory the partner writes into.** In a file-drop exchange the rendezvous directory is exactly that, and a signing identity there hands the partner the private key that signs for you with every partner, not only the one you share the folder with.
 
 ## See also
 

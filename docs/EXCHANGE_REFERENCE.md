@@ -978,9 +978,21 @@ The receipt signing mode. `none` signs no receipt (only the unsigned self-attest
 ### `signing.identity_file`
 
 *Type:* string (path)  
-*Required:* no
+*Required:* yes under `certificate` mode; not otherwise
 
-Path to this party's signing identity file (the P-256 private key plus its self-signed certificate). Defaults to `~/.psilink/signing-identity.json` -- a per-user location, because one identity is reused across every exchange and partner. A leading `~` (or `~/`) is expanded to the home directory, so the value below works verbatim. The file is created lazily and owner-read-only by `psilink fingerprint` and is loaded thereafter; regenerate it deliberately with `psilink fingerprint --force` (which invalidates any fingerprint a partner has pinned). [`psilink verify-receipt`](CLI.md#a-verified-verdict-needs-both-certificates-anchored) reads the same field to anchor this party's own certificate in a stored dual-signed receipt.
+Path to this party's signing identity file (the P-256 private key plus its self-signed certificate). There is no default: the identity is a long-lived credential reused across every exchange and partner, so where it lives is the operator's custody decision and psilink resolves no location of its own. Give it the home a credential gets -- a mounted directory of its own, separate from the read-write one the rotating key file needs, so this one can be read-only:
+
+```yaml
+signing:
+  mode: certificate
+  identity_file: /run/signing/psilink-signing-identity.json
+```
+
+This is a local path, not an [`@`-file reference](CLI.md#configuration). A leading `~` (or `~/`) is expanded to the home directory, so an operator who names one is honoured exactly -- what psilink does not do is choose the home directory itself.
+
+The file is created owner-read-only by [`psilink fingerprint --identity-file`](CLI.md#where-the-signing-identity-lives), which is the one command that writes it; an exchange and [`psilink verify-receipt`](CLI.md#a-verified-verdict-needs-both-certificates-anchored) only read it, and write nothing beside it, so the directory can be mounted read-only for everything but that creating run. Regenerate the identity deliberately with `psilink fingerprint --force`, which invalidates any fingerprint a partner has pinned.
+
+Certificate mode with no `identity_file` is refused as a configuration error before the exchange runs (exit 64), naming both spellings of the path and `mode: none` as the way to run unsigned meanwhile. Like the partner-fingerprint requirement below, it is a cross-field rule rather than part of the `signing` block's schema, so a partially-authored config still parses. `psilink verify-receipt` refuses nothing: with no path configured it leaves this party's own certificate slot unanchored and grades the verdict `INCOMPLETE` at exit 0.
 
 ### `signing.partner_fingerprint`
 
@@ -994,7 +1006,7 @@ Certificate mode with no pin is refused as a configuration error before the exch
 ```yaml
 signing:
   mode: certificate
-  identity_file: ~/.psilink/signing-identity.json
+  identity_file: /run/signing/psilink-signing-identity.json
   partner_fingerprint: iWD-ZB69Oz6gOpaX_OoC7sD8ohIZj2lETC9qbl-IbPg
   receipt_output: ./receipts/agency-a-receipt.json
 ```

@@ -1672,6 +1672,16 @@ test("handler: the prepare-time guard completes before runProtocol on an sftp co
   }
 });
 
+/** A signing identity on disk bound to `bound`, for a certificate-mode config
+ * whose subject is some other gate: the handler refuses a block naming no
+ * identity file from the parsed config alone, ahead of everything in
+ * prepareForExchange, so a run meant to reach a gate inside it has to name one. */
+async function seedSigningIdentity(bound: string): Promise<string> {
+  const identityFile = path.join(dir, "signing-identity.json");
+  saveSigningIdentity(identityFile, await generateSigningIdentity(bound));
+  return identityFile;
+}
+
 test("handler: certificate mode with no partner pin exits 64 before runProtocol", async () => {
   // The gate is core's alone (assertCertificateModePinsPartner, raised inside
   // prepareForExchange), so this drives the REAL prepare rather than the
@@ -1685,7 +1695,10 @@ test("handler: certificate mode with no partner pin exits 64 before runProtocol"
     configFile,
     YAML.stringify({
       ...minimalSFTPConfig,
-      signing: { mode: "certificate" },
+      signing: {
+        mode: "certificate",
+        identityFile: await seedSigningIdentity("Test Party"),
+      },
     }),
   );
   saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
@@ -1736,7 +1749,11 @@ test("handler: certificate mode with an unnamed party exits 64 before runProtoco
     YAML.stringify({
       ...minimalSFTPConfig,
       linkageTerms: unnamedTerms,
-      signing: { mode: "certificate", partnerFingerprint: PARTNER_FINGERPRINT },
+      signing: {
+        mode: "certificate",
+        identityFile: await seedSigningIdentity("Test Party"),
+        partnerFingerprint: PARTNER_FINGERPRINT,
+      },
     }),
   );
   saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
@@ -1814,10 +1831,12 @@ test("handler: an unnamed party that signs nothing runs unchanged", async () => 
 // server first, and on an unpinned sftp config the first-use host-key step is
 // what would connect: its probe opens a real transport. So the preparation that
 // carries those refusals -- the linkage-satisfiability gate and the
-// outbound-consent surface -- runs ahead of that step, and the two checks below
-// hold that order rather than the comments beside either. Both stub
+// outbound-consent surface -- runs ahead of that step, and the checks below hold
+// that order rather than the comments beside either. A refusal the parsed
+// configuration alone decides, a certificate-mode run naming no signing
+// identity, runs ahead of the preparation in turn. All of them stub
 // establishHostKeyTrust (as the whole file does), so what they pin is the order
-// of the two STEPS; that the probe is what the second one opens is
+// of the STEPS; that the probe is what the host-key one opens is
 // hostKeyTrust.test.ts's.
 
 /** Write the sftp config, key file, and CSV the two ordering checks drive the
@@ -1900,6 +1919,60 @@ test("handler: an input that cannot satisfy the agreed terms exits 64 with no ho
     );
     expect(vi.mocked(establishHostKeyTrust)).not.toHaveBeenCalled();
     expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
+  } finally {
+    exitSpy.mockRestore();
+  }
+});
+
+test("handler: certificate mode naming no identity file is refused before either", async () => {
+  // A run the parsed configuration alone shows cannot finish, so it is refused
+  // ahead of BOTH steps: the preparation whose consent surface can stop for an
+  // answer, and the first-use host-key step whose probe connects and whose
+  // accepted pin is written into psilink.yaml. The config below is unpinned sftp
+  // and pins the partner's certificate, so the missing identity file is the only
+  // thing that makes it unrunnable. The host-key step is stubbed file-wide, so
+  // what the config-file assertion adds is that nothing else on the handler's
+  // path wrote it either.
+  fs.writeFileSync(
+    configFile,
+    YAML.stringify({
+      ...minimalSFTPConfig,
+      signing: { mode: "certificate", partnerFingerprint: PARTNER_FINGERPRINT },
+    }),
+  );
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  const input = path.join(dir, "in.csv");
+  fs.writeFileSync(input, "ssn\n123456789\n");
+  const configBytes = fs.readFileSync(configFile, "utf8");
+  const configMtimeMs = fs.statSync(configFile).mtimeMs;
+
+  vi.mocked(prepareForExchange).mockClear();
+  vi.mocked(confirmOutboundPayloadConsent).mockClear();
+  vi.mocked(establishHostKeyTrust).mockClear();
+  vi.mocked(runProtocol).mockReset();
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    await expect(
+      handler({
+        _: [],
+        $0: "psilink",
+        input,
+        "config-file": configFile,
+        "key-file": keyFile,
+        "log-level": "silent",
+      } as unknown as Arguments),
+    ).rejects.toThrow("exit:64");
+    expect(mockState.errors.join("\n")).toContain("names no signing identity");
+    expect(vi.mocked(prepareForExchange)).not.toHaveBeenCalled();
+    expect(vi.mocked(confirmOutboundPayloadConsent)).not.toHaveBeenCalled();
+    expect(vi.mocked(establishHostKeyTrust)).not.toHaveBeenCalled();
+    expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
+    expect(fs.readFileSync(configFile, "utf8")).toBe(configBytes);
+    expect(fs.statSync(configFile).mtimeMs).toBe(configMtimeMs);
   } finally {
     exitSpy.mockRestore();
   }

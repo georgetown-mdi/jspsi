@@ -1,6 +1,4 @@
 import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
 import {
   parseCertificate,
@@ -19,23 +17,17 @@ import { parseSensitiveJson } from "./sensitiveFile";
 // certificate). Kept in its OWN file, separate from the rotating key file
 // (`.psilink.key`): the shared secret rotates every exchange, whereas the signing
 // key must be stable for its whole life so a fingerprint a partner pinned once
-// keeps matching. The identity is reused across exchanges AND across partners,
-// so it defaults to a per-user location rather than the per-directory default
-// the key file and config use; an exchange in any working directory loads the
-// same identity, and a partner's pin stays valid everywhere. The path is
-// overridable (config `signing.identity_file` or `--identity-file`).
-
-/** Directory holding the per-user signing identity by default. */
-export const DEFAULT_SIGNING_IDENTITY_DIR = path.join(os.homedir(), ".psilink");
-
-/**
- * Default path for this party's signing identity file. Per-user (under the home
- * directory), not per-working-directory, because one signing identity is reused
- * across every exchange and partner; see the module note.
- */
-export function defaultSigningIdentityPath(): string {
-  return path.join(DEFAULT_SIGNING_IDENTITY_DIR, "signing-identity.json");
-}
+// keeps matching.
+//
+// The path is always the operator's: `signing.identity_file` or
+// `--identity-file`. This module resolves no location of its own, and no caller
+// may substitute one -- a key reused across every exchange and every partner is a
+// credential, and where a credential lives is a custody decision (a mounted
+// secrets directory, typically read-only) that psilink is in no position to make.
+// A location psilink chose would be wrong in exactly the cases that matter: an
+// ephemeral container home mints a fresh key with a fresh fingerprint on every
+// run, and a working directory a partner syncs into publishes the private key to
+// them. Every function here therefore takes the path it operates on.
 
 // The identity file read both loaders share, parsed only as far as JSON. A read
 // failure carries only a path and errno (no file content), safe to surface. The

@@ -769,7 +769,7 @@ describe("prepareForExchange: an unimplemented signing mode is refused", () => {
   test("mode: certificate prepares normally", () => {
     const prepared = prepareWithSigning({
       mode: "certificate",
-      identityFile: "~/.psilink/signing-identity.json",
+      identityFile: "/run/secrets/psilink-signing-identity.json",
       partnerFingerprint,
     });
     expect(prepared.rowCount).toBe(1);

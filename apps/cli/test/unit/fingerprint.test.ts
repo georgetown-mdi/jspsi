@@ -4,6 +4,8 @@ import path from "node:path";
 import type { Arguments } from "yargs";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
+  DISPLAY_TRUNCATION_MARKER,
+  MAX_TEXT_LENGTH,
   UsageError,
   computeCertificateFingerprint,
   generateSigningIdentity,
@@ -321,6 +323,122 @@ test("falls back to the config identity when --identity is absent", async () => 
   expect(warn).not.toHaveBeenCalled();
 });
 
+// --- the label bound into the certificate ------------------------------------
+
+/** A control character by code point, so the fixtures below stay printable
+ * ASCII in the source while carrying the byte under test. */
+const control = (code: number): string => String.fromCharCode(code);
+
+test.each([
+  ["a NUL", `Party${control(0x00)}A`],
+  ["a line feed", "Party\nA"],
+  ["a terminal escape", `Party ${control(0x1b)}[31mA`],
+  ["a DEL", `Party${control(0x7f)}A`],
+  ["a C1 byte", `Party${control(0x9b)}A`],
+])(
+  "refuses to bind an identity carrying %s, and writes no file",
+  async (_label, identityArg) => {
+    // The label is bound into a long-lived certificate the partner pins and
+    // DISPLAYS long after this run, and it reaches this command without passing
+    // through the linkage-terms schema that refuses these characters on every
+    // other route into the same field.
+    const idPath = path.join(dir, "id.json");
+    await expect(
+      resolveSigningIdentity({
+        identityPath: idPath,
+        identityArg,
+        force: false,
+        log: noopLog,
+      }),
+    ).rejects.toThrow(UsageError);
+    expect(fs.existsSync(idPath)).toBe(false);
+  },
+);
+
+test("the refusal names the shape rule and never echoes the label back", async () => {
+  const idPath = path.join(dir, "id.json");
+  let caught: unknown;
+  try {
+    await resolveSigningIdentity({
+      identityPath: idPath,
+      identityArg: `Party${control(0x07)}Secret-Looking-Value`,
+      force: false,
+      log: noopLog,
+    });
+  } catch (err) {
+    caught = err;
+  }
+  expect(caught).toBeInstanceOf(UsageError);
+  const message = (caught as Error).message;
+  expect(message).toContain("must not contain control characters");
+  expect(message).toContain("--identity");
+  expect(message).toContain("linkage_terms.identity");
+  expect(message).not.toContain("Secret-Looking-Value");
+});
+
+test("refuses a label longer than the bound the linkage terms hold", async () => {
+  const idPath = path.join(dir, "id.json");
+  await expect(
+    resolveSigningIdentity({
+      identityPath: idPath,
+      identityArg: "A".repeat(MAX_TEXT_LENGTH + 1),
+      force: false,
+      log: noopLog,
+    }),
+  ).rejects.toThrow(UsageError);
+  expect(fs.existsSync(idPath)).toBe(false);
+  // The bound itself is admissible, so what was added is the terms document's
+  // ceiling rather than a stricter rule smuggled in beside it.
+  const { action } = await resolveSigningIdentity({
+    identityPath: idPath,
+    identityArg: "A".repeat(MAX_TEXT_LENGTH),
+    force: false,
+    log: noopLog,
+  });
+  expect(action).toBe("Created");
+});
+
+test("a control-character label from the config is refused too", async () => {
+  // linkage_terms.identity is the other route into the same binding, so it takes
+  // the same rule: a config value the terms schema would refuse cannot enter a
+  // certificate through this command either.
+  const idPath = path.join(dir, "id.json");
+  await expect(
+    resolveSigningIdentity({
+      identityPath: idPath,
+      configIdentity: `Party${control(0x01)}A`,
+      force: false,
+      log: noopLog,
+    }),
+  ).rejects.toThrow(UsageError);
+  expect(fs.existsSync(idPath)).toBe(false);
+});
+
+test("a --force re-key carrying a bad label forward is refused", async () => {
+  // A re-key binds the EXISTING label into a new certificate, so the check is
+  // about what that certificate would carry rather than about how the value
+  // arrived; the remedy is a clean --identity, and the old file survives until
+  // one is given.
+  const idPath = path.join(dir, "id.json");
+  idFile.saveSigningIdentity(
+    idPath,
+    await generateSigningIdentity(`Party${control(0x00)}A`),
+  );
+  const before = fs.readFileSync(idPath, "utf8");
+  await expect(
+    resolveSigningIdentity({ identityPath: idPath, force: true, log: noopLog }),
+  ).rejects.toThrow(UsageError);
+  expect(fs.readFileSync(idPath, "utf8")).toBe(before);
+  const { action, identity } = await resolveSigningIdentity({
+    identityPath: idPath,
+    identityArg: "Party A",
+    force: true,
+    log: noopLog,
+  });
+  expect(action).toBe("Regenerated");
+  expect(identity.certificate.identity).toBe("Party A");
+});
+
 // --- creation-time divergence from linkage_terms.identity --------------------
 
 test("warns when the bound identity diverges from the config identity", async () => {
@@ -356,12 +474,19 @@ test("a control-character label is escaped where the warning is logged", async (
   // locally authored, so this is display hygiene rather than an injection
   // boundary -- but a label carrying a terminal escape must still not reach the
   // operator's terminal as one.
+  //
+  // Reached over an identity ALREADY on disk: a new binding carrying a control
+  // character is refused outright (below), while the certificate schema admits
+  // an existing one, so a loaded file is where such a label still reaches a sink.
   const idPath = path.join(dir, "id.json");
   const warn = vi.fn();
   const esc = String.fromCharCode(0x1b);
+  idFile.saveSigningIdentity(
+    idPath,
+    await generateSigningIdentity(`Party ${esc}[31mA`),
+  );
   await resolveSigningIdentity({
     identityPath: idPath,
-    identityArg: `Party ${esc}[31mA`,
     configIdentity: `Agency\nA`,
     force: false,
     log: { warn },
@@ -616,6 +741,220 @@ test("handler warns on a divergent load and still prints the bare value", async 
   expect(stderr).toContain("Party A");
   // The identity file is untouched by a load that warns.
   await expect(loadSigningIdentity(idPath)).resolves.toEqual(stored);
+});
+
+// --- handler: no identity path named -----------------------------------------
+
+/** Run the handler with `process.exit` stubbed to throw, collecting everything
+ * that reached stdout (including console.log, which vitest intercepts) and
+ * stderr. Runs from a directory holding no `psilink.yaml`, so no ambient config
+ * supplies a path. */
+async function runFingerprint(options: Record<string, unknown>): Promise<{
+  stdout: string;
+  stderr: string;
+  thrown: unknown;
+}> {
+  const { stdoutWrites, stderrWrites, restore } = captureStdio();
+  const logSpy = vi
+    .spyOn(console, "log")
+    .mockImplementation((...args: unknown[]) => {
+      stdoutWrites.push(args.map((a) => String(a)).join(" ") + "\n");
+    });
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  const cwd = process.cwd();
+  let thrown: unknown;
+  try {
+    process.chdir(dir);
+    await handler({
+      _: [],
+      $0: "psilink",
+      force: false,
+      ...options,
+    } as unknown as Arguments);
+  } catch (err) {
+    thrown = err;
+  } finally {
+    process.chdir(cwd);
+    exitSpy.mockRestore();
+    logSpy.mockRestore();
+    restore();
+  }
+  return {
+    stdout: stdoutWrites.join(""),
+    stderr: stderrWrites.join(""),
+    thrown,
+  };
+}
+
+test("handler refuses with nothing on stdout when no identity path is named", async () => {
+  // `FP=$(psilink fingerprint)` must capture an EMPTY value and a nonzero
+  // status, never a fingerprint minted at a location the operator did not
+  // choose. Stdout carries the command's one result, so the refusal has to leave
+  // it empty rather than explain itself there.
+  const { stdout, stderr, thrown } = await runFingerprint({
+    identity: "Party A",
+  });
+  expect((thrown as Error).message).toBe("exit:64");
+  expect(stdout).toBe("");
+  expect(stderr).toContain("no signing identity path is configured");
+});
+
+test("the refusal carries the whole remedy, unrendered by the display sanitizer", async () => {
+  // The guidance is load-bearing rather than cosmetic: a bare "name a path"
+  // invites a throwaway location whose loss forces a re-key coordinated with
+  // every partner. It renders through sanitizeErrorForDisplay, which truncates a
+  // long message, so each part is asserted where the operator actually reads it.
+  const { stderr } = await runFingerprint({ identity: "Party A" });
+  // Why psilink chooses none.
+  expect(stderr).toContain("psilink chooses none");
+  expect(stderr).toContain("reused across every exchange and every partner");
+  // Both spellings, with an example under a mount of the identity's own.
+  expect(stderr).toContain("--identity-file");
+  expect(stderr).toContain("signing.identity_file");
+  expect(stderr).toContain("/run/signing/psilink-signing-identity.json");
+  // What the directory has to be.
+  expect(stderr).toContain("writable for this creating run");
+  expect(stderr).toContain("read-only");
+  expect(stderr).toContain("durable");
+  expect(stderr).toContain("your partner syncs into");
+  // The static reuse line, which closes the message rather than probing for a
+  // file psilink no longer knows a location for.
+  expect(stderr).toContain("already hold an identity from an earlier release");
+  expect(stderr).toContain("re-pin");
+  // Nothing was truncated away, and no elision marker reached the operator.
+  expect(stderr).not.toContain(DISPLAY_TRUNCATION_MARKER);
+});
+
+test.each([
+  ["absent", undefined],
+  ["a path that does not exist", path.join(os.tmpdir(), "psilink-no-home")],
+])(
+  "a HOME that is %s changes nothing: still a refusal, still no file",
+  async (_label, home) => {
+    // The ephemeral-container defect stated as a check. With no configured path
+    // the home directory is not consulted, so its state cannot decide whether a
+    // key is minted -- and no key is minted either way.
+    const previousHome = process.env["HOME"];
+    const previousProfile = process.env["USERPROFILE"];
+    try {
+      if (home === undefined) {
+        delete process.env["HOME"];
+        delete process.env["USERPROFILE"];
+      } else {
+        process.env["HOME"] = home;
+        process.env["USERPROFILE"] = home;
+      }
+      const { stdout, stderr, thrown } = await runFingerprint({
+        identity: "Party A",
+      });
+      expect((thrown as Error).message).toBe("exit:64");
+      expect(stdout).toBe("");
+      expect(stderr).toContain("no signing identity path is configured");
+      if (home !== undefined) expect(fs.existsSync(home)).toBe(false);
+    } finally {
+      if (previousHome === undefined) delete process.env["HOME"];
+      else process.env["HOME"] = previousHome;
+      if (previousProfile === undefined) delete process.env["USERPROFILE"];
+      else process.env["USERPROFILE"] = previousProfile;
+    }
+    // Nothing was written into the working directory either -- refusing means
+    // creating nowhere, not falling back to somewhere visible.
+    expect(fs.readdirSync(dir)).toEqual([]);
+  },
+);
+
+test("--identity-file creates the identity exactly where it was named", async () => {
+  const idPath = path.join(dir, "named", "psilink-signing-identity.json");
+  const { stdout, thrown } = await runFingerprint({
+    identity: "Party A",
+    "identity-file": idPath,
+  });
+  expect(thrown).toBeUndefined();
+  const stored = await loadSigningIdentity(idPath);
+  if (stored === undefined) throw new Error("the identity was not persisted");
+  expect(stdout).toBe(
+    `${await computeCertificateFingerprint(stored.certificate)}\n`,
+  );
+});
+
+test("signing.identity_file in the config is honoured, and re-runs are stable", async () => {
+  // The mounted-credentials shape: the path lives in the config, the home
+  // directory is somewhere else and ephemeral, and a second run reports the
+  // fingerprint the first one minted rather than a new one.
+  const idPath = path.join(dir, "secrets", "psilink-signing-identity.json");
+  const cfg = path.join(dir, "config.yaml");
+  fs.writeFileSync(
+    cfg,
+    ["signing:", `  identity_file: ${idPath}`, "  mode: certificate"].join(
+      "\n",
+    ),
+  );
+  const ephemeralHome = (run: number): string =>
+    path.join(os.tmpdir(), `psilink-ephemeral-${path.basename(dir)}-${run}`);
+  const previousHome = process.env["HOME"];
+  try {
+    // A different, never-created home on each run, as a container restart
+    // gives: what makes the two fingerprints agree is the configured path.
+    process.env["HOME"] = ephemeralHome(1);
+    const first = await runFingerprint({
+      identity: "Party A",
+      "config-file": cfg,
+    });
+    process.env["HOME"] = ephemeralHome(2);
+    const second = await runFingerprint({ "config-file": cfg });
+    expect(first.thrown).toBeUndefined();
+    expect(second.thrown).toBeUndefined();
+    expect(second.stdout).toBe(first.stdout);
+    expect(first.stdout.trim()).toMatch(/^[A-Za-z0-9_-]{43}$/);
+  } finally {
+    if (previousHome === undefined) delete process.env["HOME"];
+    else process.env["HOME"] = previousHome;
+  }
+});
+
+test("--identity-file wins over signing.identity_file in the config", async () => {
+  const configPath = path.join(dir, "from-config.json");
+  const flagPath = path.join(dir, "from-flag.json");
+  const cfg = path.join(dir, "config.yaml");
+  fs.writeFileSync(cfg, `signing:\n  identity_file: ${configPath}\n`);
+  const { thrown } = await runFingerprint({
+    identity: "Party A",
+    "identity-file": flagPath,
+    "config-file": cfg,
+  });
+  expect(thrown).toBeUndefined();
+  expect(fs.existsSync(flagPath)).toBe(true);
+  expect(fs.existsSync(configPath)).toBe(false);
+});
+
+test("a ~-relative identity path the operator named is expanded, not refused", async () => {
+  // psilink never CHOOSES the home directory; an operator who names one is
+  // honoured exactly as they wrote it.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-home-"));
+  const previousHome = process.env["HOME"];
+  const previousProfile = process.env["USERPROFILE"];
+  try {
+    process.env["HOME"] = home;
+    process.env["USERPROFILE"] = home;
+    const { thrown } = await runFingerprint({
+      identity: "Party A",
+      "identity-file": "~/my-signing-identity.json",
+    });
+    expect(thrown).toBeUndefined();
+    expect(fs.existsSync(path.join(home, "my-signing-identity.json"))).toBe(
+      true,
+    );
+  } finally {
+    if (previousHome === undefined) delete process.env["HOME"];
+    else process.env["HOME"] = previousHome;
+    if (previousProfile === undefined) delete process.env["USERPROFILE"];
+    else process.env["USERPROFILE"] = previousProfile;
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });
 
 // --- handler: --export-certificate guard -------------------------------------

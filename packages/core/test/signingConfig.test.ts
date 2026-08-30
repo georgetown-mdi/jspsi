@@ -111,13 +111,13 @@ describe("ExchangeSpec signing block", () => {
       ...baseSpec,
       signing: {
         mode: "certificate",
-        identity_file: "~/.psilink/signing-identity.json",
+        identity_file: "/run/secrets/psilink-signing-identity.json",
         partner_fingerprint: FINGERPRINT,
       },
     });
     expect(spec.signing).toEqual({
       mode: "certificate",
-      identityFile: "~/.psilink/signing-identity.json",
+      identityFile: "/run/secrets/psilink-signing-identity.json",
       partnerFingerprint: FINGERPRINT,
     });
   });

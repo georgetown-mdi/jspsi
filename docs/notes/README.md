@@ -33,6 +33,7 @@ from a direction still open to a decision taken and built.
 | [rule-set-citation-verdict.md](rule-set-citation-verdict.md) | Resolved - built. |
 | [sftp-adapter-state-machine.md](sftp-adapter-state-machine.md) | Shipped. |
 | [shared-consent-summary.md](shared-consent-summary.md) | Shipped. |
+| [signing-identity-custody.md](signing-identity-custody.md) | Decided and built, by a 3-panelist design panel converging 3-0. |
 
 Each note carries the full status statement at its own top; this table is a pointer, not a restatement.
 

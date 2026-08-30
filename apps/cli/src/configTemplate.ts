@@ -237,10 +237,15 @@ export const OPTIONAL_SECTIONS = `# --- Optional sections (uncomment and edit to
 
 # signing: receipt signing and partner-certificate trust. mode is none or
 # certificate (third-party verifiable); the session-derived mode is not yet
-# implemented and an exchange configured with it is refused.
+# implemented and an exchange configured with it is refused. Under certificate
+# mode identity_file is required: the signing identity is a long-lived
+# credential, so you choose where it lives and psilink never does -- a mount of
+# its own is the usual home, read-only for every run except the one that creates
+# the file. Create it with
+# 'psilink fingerprint --identity-file <the path below>'.
 # signing:
 #   mode: none
-#   # identity_file: ~/.psilink/signing-identity.json   # created by 'psilink fingerprint'
+#   # identity_file: /run/signing/psilink-signing-identity.json
 #   # partner_fingerprint: <43-char base64url>          # pin the partner's certificate
 #   # receipt_output: ./receipts/exchange-receipt.json  # where the receipt file is written
 

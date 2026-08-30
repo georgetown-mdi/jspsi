@@ -66,8 +66,14 @@ export interface SigningConfig {
   mode: SigningMode;
   /**
    * Path to this party's signing identity file (private key + self-signed
-   * certificate). Owner-read-only; created and read by the CLI. Optional here:
-   * the CLI falls back to a documented default path when it is omitted.
+   * certificate). Owner-read-only; created and read by the CLI, which resolves
+   * no path of its own when this is omitted -- the identity is a credential, and
+   * where it lives is the operator's custody decision.
+   *
+   * Optional in the SHAPE, and required in `certificate` mode: that is a
+   * cross-field rule, kept out of the schema alongside the partner-fingerprint
+   * one below so a partially-authored config still parses, and enforced at the
+   * CLI's certificate-mode pre-flight instead.
    *
    * Stored verbatim. A leading `~` is NOT resolved here -- the config layer does
    * not resolve home directories (a host concern). Any CLI consumer that opens
@@ -108,13 +114,14 @@ const SigningConfigSchema: z.ZodType<SigningConfig> = z.object({
 
 /**
  * Schema for the optional `signing` block, exported so {@link ExchangeSpecSchema}
- * can embed it. Field-shape validation only: cross-field requirements (that
+ * can embed it. Field-shape validation only: cross-field requirements -- that
  * certificate mode needs a pinned partner fingerprint before a partner
- * certificate can be verified) are enforced at the pre-exchange gate and again at
- * the verification call site, so a partially-authored config -- no partner
- * fingerprint yet -- still parses wherever this schema is used. A reader that
- * needs only `identity_file`, such as `psilink fingerprint`, reads it from the
- * raw config text rather than through this schema, so it never needs the
+ * certificate can be verified, and that it needs an `identity_file` to sign with
+ * -- are enforced at the pre-exchange gate, with the partner-fingerprint
+ * requirement enforced again at the verification call site, so a
+ * partially-authored config still parses wherever this schema is used. A reader
+ * that needs only `identity_file`, such as `psilink fingerprint`, reads it from
+ * the raw config text rather than through this schema, so it never needs the
  * partner's fingerprint to exist.
  */
 export { SigningConfigSchema };

@@ -440,7 +440,9 @@ connection:
 
 ### Signing identity and the agreed terms
 
-Under `signing.mode: certificate` the run loads this party's signing identity before any credential, terms, or data are sent. A partner verifies a receipt against the identity in the agreed terms rather than the one the certificate carries, so an identity bound to anything other than the run's `linkage_terms.identity` -- or the `--identity` that replaces it for that run -- signs receipts the partner rejects. That configuration is refused where the identity is loaded: the run exits 64, naming both values and the two ways to reconcile them, before anything is sent. Reconcile them with [`psilink fingerprint --force --identity`](#signing-identity-fingerprint) naming the terms identity -- which changes the fingerprint your partner has pinned, so it needs a coordinated re-pin -- or by editing `linkage_terms.identity` to the bound value.
+Under `signing.mode: certificate` the run loads this party's signing identity from the path `signing.identity_file` names, before any credential, terms, or data are sent. A configuration that names none is refused earlier still, from the configuration alone -- before the run prepares your input or reaches the server -- and exits 64: psilink chooses no location for a signing identity, since it is a long-lived credential whose custody is yours (see [Where the signing identity lives](#where-the-signing-identity-lives)). Set `signing.identity_file` -- `/run/signing/psilink-signing-identity.json` is the usual shape, created there by `psilink fingerprint --identity-file` -- or run `signing.mode: none` unsigned. A path that is set but holds no identity file exits 64 too, naming that path.
+
+A partner verifies a receipt against the identity in the agreed terms rather than the one the certificate carries, so an identity bound to anything other than the run's `linkage_terms.identity` -- or the `--identity` that replaces it for that run -- signs receipts the partner rejects. That configuration is refused where the identity is loaded: the run exits 64, naming both values and the two ways to reconcile them, before anything is sent. Reconcile them with [`psilink fingerprint --force --identity`](#signing-identity-fingerprint) naming the terms identity -- which changes the fingerprint your partner has pinned, so it needs a coordinated re-pin -- or by editing `linkage_terms.identity` to the bound value.
 
 Such a run has no way to finish, and what it would leave behind is worse than a plain failure. The two sides swap signatures only after their data has crossed, and your partner rejects the certificate you present there. Which of you is left holding what turns on which party reached the rendezvous first, not on anything you configure: on the leg that signs first you end with no result and no receipt, keeping only the [exchange record](#when-the-receipt-swap-fails) of the disclosure you had already made, and on the leg that signs last you end with a receipt no verifier accepts -- your own [`psilink verify-receipt`](#verifying-the-signed-record) included. Either way your partner's run fails, and your data has already reached them.
 
@@ -624,16 +626,47 @@ By default each check prints a line on stderr -- `OK:`, `WARN:`, `FAIL:`, or `SK
 ## Signing identity fingerprint
 
 ```sh
-psilink fingerprint [--identity STRING] [--identity-file PATH] [--config-file PATH] [--force] [--export-certificate PATH]
+psilink fingerprint [--identity-file PATH] [--identity STRING] [--config-file PATH] [--force] [--export-certificate PATH]
 ```
 
 Print this party's signing certificate fingerprint, creating the signing identity on first use. That identity is the long-lived keypair and self-signed certificate behind a certificate-backed receipt: a partner pins the printed fingerprint once and every later receipt verifies against it (see [Receipt signing identities](SECURITY_DESIGN.md#receipt-signing-identities)). Share the value out-of-band, the way an SFTP host-key fingerprint is shared.
 
-The identity lives at `~/.psilink/signing-identity.json` by default; `--identity-file` overrides that path, as does `signing.identity_file` in the configuration named by `--config-file`. Creation is announced rather than silent. The identity string bound into the certificate -- the party's name, organization, and contact -- comes from `--identity`, or from `linkage_terms.identity` in the configuration when the flag is absent; once an identity exists, `--identity` is ignored unless `--force` is also given.
+Creation is announced rather than silent. The identity string bound into the certificate -- the party's name, organization, and contact -- comes from `--identity`, or from `linkage_terms.identity` in the configuration when the flag is absent; once an identity exists, `--identity` is ignored unless `--force` is also given. A label carrying a control character, or one past the length the linkage terms hold the same value to, is refused rather than bound: the value goes into a certificate a partner pins and reads back long after the run.
+
+### Where the signing identity lives
+
+You choose, and psilink never does. The path comes from `--identity-file`, or from `signing.identity_file` in the configuration named by `--config-file`; with neither, the command refuses and prints nothing on stdout, so a captured `FP=$(psilink fingerprint)` is empty and the status nonzero rather than a fingerprint minted somewhere you did not pick.
+
+Resolve it the way you resolve any other credential. The identity is a long-lived private key reused across every exchange and every partner, so give it a mounted directory of its own:
+
+```sh
+psilink fingerprint --identity-file /run/signing/psilink-signing-identity.json --identity "Agency A, a@agency-a.gov"
+```
+
+```yaml
+signing:
+  mode: certificate
+  identity_file: /run/signing/psilink-signing-identity.json
+```
+
+What the directory has to be:
+
+- **Its own, and not the one holding the key file.** The shared secret rotates every exchange and is written back, so its directory has to be writable; the identity has no reason to inherit that. Mounting them separately is what lets this one be read-only. See [Mounting the signing identity](DEPLOYMENT.md#mounting-the-signing-identity).
+- **Writable for the run that creates the file, read-only after.** Only `psilink fingerprint` writes the identity; an exchange and a `psilink verify-receipt` read it and write nothing beside it, so a read-only mount carries every run after the creating one.
+- **Durable, and yours alone.** Losing the file means minting a new identity with a new fingerprint, which every partner must re-pin before your receipts verify again.
+- **Never a directory your partner syncs into.** In a file-drop exchange the rendezvous directory is one the partner writes to; a signing identity there hands them the private key that signs for you with every partner, not just that one.
+
+A `~`-relative path is expanded, so naming one under your home directory works verbatim -- what psilink does not do is choose the home directory (or any other location) for you. In a container that home is typically ephemeral, and a key minted there is a fresh key with a fresh fingerprint on every run.
+
+If you already hold an identity file, name that one rather than creating a second: a new identity forces every partner to re-pin.
+
+### The identity bound into the certificate
 
 Bind the identity that matches `linkage_terms.identity` in your configuration. A partner verifies a receipt against the identity in the agreed terms rather than the one the presented certificate carries, so a certificate bound to any other string signs receipts the partner rejects. Binding one that diverges from the configured value warns and proceeds -- this command sends nothing, and editing `linkage_terms.identity` to match is the other way to reconcile them -- but bring the two into agreement before you share the fingerprint. An exchange under a divergent pair does not run at all: [`psilink exchange`](#signing-identity-and-the-agreed-terms) refuses it.
 
 The warning is not confined to the invocation that binds the identity: a later one that only reads the existing identity warns the same way, so a configuration edited after the identity was created still reports the divergence. It repeats while the two differ, and the fingerprint value on stdout is unaffected.
+
+### Regenerating and exporting
 
 `--force` regenerates the identity: a new key with a new fingerprint, which invalidates every fingerprint a partner has already pinned. They must re-pin before your receipts verify again, so treat it as a coordinated action rather than a retry.
 
@@ -689,7 +722,7 @@ The record carries two certificates, and the top-line `SIGNED RECEIPT VERIFIED` 
 
 There are two anchoring sources, and which you use depends on whether you were a party to the exchange:
 
-- **Your own signing identity** anchors your own slot, and you supply no fingerprint for it. The command reads the identity from `--identity-file`, else `signing.identity_file` in `--config-file`, else `~/.psilink/signing-identity.json`, and computes the fingerprint itself -- there is nothing to copy by hand, and nothing you could copy except off the record you are checking. Only the certificate half of that file is used: verifying signs nothing, so the private key stored beside the certificate is neither imported nor checked against it. The per-user default is read only while a certificate is still unanchored, so a run whose pins anchor both certificates never reaches for it. Naming the file with `--identity-file` asserts the record is one you signed, so an identity that matches neither certificate then fails the run; one found without being asked is reported instead and leaves the slot unanchored.
+- **Your own signing identity** anchors your own slot, and you supply no fingerprint for it. The command reads the identity from `--identity-file`, else `signing.identity_file` in `--config-file`, and computes the fingerprint itself -- there is nothing to copy by hand, and nothing you could copy except off the record you are checking. With neither, your own slot is simply left unanchored: psilink looks in no location of its own, and the verdict grades `INCOMPLETE` at exit 0 rather than refusing the run. Only the certificate half of that file is used: verifying signs nothing, so the private key stored beside the certificate is neither imported nor checked against it, and verify-receipt writes nothing beside it either, so the file can be read from a read-only mount. Naming the file with `--identity-file` asserts the record is one you signed, so an identity that matches neither certificate then fails the run; one the config named, which you did not name here, is reported instead and leaves the slot unanchored.
 - **A pinned fingerprint** anchors a party you know out-of-band. Repeat `--partner-fingerprint` to pin both signers, which is what a verifier who was party to no exchange does; a third value is refused, since the record holds only two certificates.
 
 Each value anchors at most one certificate, so pinning the same fingerprint twice anchors one slot and leaves the other for something else. Pinning your own fingerprint is redundant with your signing identity, which already anchors your slot: the two carry one digest, so they anchor one slot between them.

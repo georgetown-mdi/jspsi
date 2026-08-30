@@ -8,8 +8,8 @@ import {
   generateSigningIdentity,
   getLogger,
 } from "@psilink/core";
+import * as signingIdentityFile from "../../src/signingIdentityFile";
 import {
-  defaultSigningIdentityPath,
   loadSigningCertificate,
   loadSigningIdentity,
   saveSigningIdentity,
@@ -186,8 +186,19 @@ test.each([
   },
 );
 
-test("defaultSigningIdentityPath is per-user, not per-working-directory", () => {
-  const p = defaultSigningIdentityPath();
-  expect(p.startsWith(os.homedir())).toBe(true);
-  expect(p.endsWith(path.join(".psilink", "signing-identity.json"))).toBe(true);
+test("the module resolves no identity path of its own", () => {
+  // The identity is a credential: every path it is read from or written to is
+  // the operator's, so this module exports no resolver a caller could reach for
+  // when none was named. A reinstated default is what this catches.
+  const exported = Object.keys(signingIdentityFile);
+  expect(exported).toEqual(
+    expect.arrayContaining([
+      "loadSigningCertificate",
+      "loadSigningIdentity",
+      "saveSigningIdentity",
+    ]),
+  );
+  expect(
+    exported.filter((name) => /default|dir|path/i.test(name)),
+  ).toHaveLength(0);
 });
