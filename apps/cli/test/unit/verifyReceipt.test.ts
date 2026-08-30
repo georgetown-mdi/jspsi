@@ -54,39 +54,6 @@ import {
 
 const tmp = () => mkdtempSync(join(tmpdir(), "verify-receipt-"));
 
-// Hermetic: the handler's default identity path must never reach the real
-// ~/.psilink of the machine running the suite -- a signing identity there
-// would anchor a slot these tests assert unanchored.
-const missingIdentityDir = join(
-  tmpdir(),
-  `verify-receipt-no-identity-${process.pid}`,
-);
-const defaultIdentityFile = join(missingIdentityDir, "signing-identity.json");
-vi.mock("../../src/signingIdentityFile", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("../../src/signingIdentityFile")>();
-  return { ...actual, defaultSigningIdentityPath: () => defaultIdentityFile };
-});
-
-/** Put `contents` at the per-user default identity path for the duration of
- * `run`, which is otherwise kept empty for the tests that assert a slot
- * unanchored. `mode` is applied after the write so the process umask cannot
- * narrow a deliberately over-permissive fixture. */
-async function withDefaultIdentity<T>(
-  contents: string,
-  run: () => Promise<T>,
-  mode = 0o600,
-): Promise<T> {
-  fs.mkdirSync(missingIdentityDir, { recursive: true });
-  writeFileSync(defaultIdentityFile, contents, { mode });
-  fs.chmodSync(defaultIdentityFile, mode);
-  try {
-    return await run();
-  } finally {
-    fs.rmSync(defaultIdentityFile, { force: true });
-  }
-}
-
 // The handler installs a diagnostic sink and applies --log-level across every
 // logger; both are restored between tests.
 snapshotDiagnosticSinkAndLevel();
@@ -1667,69 +1634,141 @@ describe("handler", () => {
     expect(stderr).toContain("signing private key");
   });
 
-  test("pinning both signers reaches a verdict without reading the default identity file", async () => {
-    // A verifier that pins both signers anchors both slots and can use no
-    // identity of its own, so whatever sits at the per-user default path goes
-    // unread -- a file that cannot be parsed would otherwise warn on a run that
-    // never needed it.
-    const { signedPath, pin, ownFingerprint } = await exchangeArtifacts();
+  test("with no identity path named, the own slot is unanchored at exit 0", async () => {
+    // No --identity-file and no config, so nothing names this party's identity
+    // and psilink looks nowhere on its own. The verdict grades INCOMPLETE and
+    // names the slot; it is not a refusal, since a verification run reaches a
+    // verdict without an identity of its own.
+    const { signedPath, pin } = await exchangeArtifacts();
+    const { stdout, stderr, exits, exitCode } = await runVerify({
+      record: signedPath,
+      "log-level": "warn",
+      "partner-fingerprint": pin,
+    });
+    expect(exits).toEqual([]);
+    expect(stdout).toContain("SIGNED RECEIPT INCOMPLETE");
+    expect(stdout).toContain(
+      "Nothing outside the record anchors the initiator's certificate",
+    );
+    expect(stdout).toContain("name your own signing identity with");
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
+  });
+
+  test("with no identity path named, no signing identity file is read at all", async () => {
+    // The narrow reading of the above: not merely "no anchor found" but "no
+    // candidate location opened". A reinstated default -- under the home
+    // directory or anywhere else -- shows up here as a read of a file holding a
+    // private key that the operator never named.
+    const { signedPath, identityPath, pin } = await exchangeArtifacts();
     const readFile = vi.spyOn(fs, "readFileSync");
     try {
-      const { stdout, stderr, exits, exitCode } = await withDefaultIdentity(
-        "{ not an identity",
-        () =>
-          runVerify({
-            record: signedPath,
-            "log-level": "warn",
-            "partner-fingerprint": [pin, ownFingerprint],
-          }),
-      );
+      const { stdout, exits } = await runVerify({
+        record: signedPath,
+        "partner-fingerprint": pin,
+      });
       expect(exits).toEqual([]);
       expect(stdout).toContain("SIGNED RECEIPT INCOMPLETE");
-      expect(stdout).not.toContain("Nothing outside the record anchors");
-      expect(stderr).toBe("");
+      const opened = readFile.mock.calls.map(([target]) => String(target));
+      expect(opened).not.toContain(identityPath);
       expect(
-        readFile.mock.calls.some(([target]) => target === defaultIdentityFile),
-      ).toBe(false);
-      expect(exitCode).toBe(0);
+        opened.filter((p) => /signing-identity|\.psilink/.test(p)),
+      ).toEqual([]);
     } finally {
       readFile.mockRestore();
     }
   });
 
-  test("the default identity file still anchors a slot the pins leave open", async () => {
-    // The other side of reading it late: a party that pinned only its partner
-    // is anchored by the identity it never had to name.
-    const { signedPath, identityPath, pin } = await exchangeArtifacts();
-    const { stdout, exits, exitCode } = await withDefaultIdentity(
-      readFileSync(identityPath, "utf8"),
-      () => runVerify({ record: signedPath, "partner-fingerprint": pin }),
-    );
-    expect(exits).toEqual([]);
-    expect(stdout).toContain("is your own signing identity's certificate");
-    expect(stdout).not.toContain("Nothing outside the record anchors");
-    expect(exitCode).toBe(0);
-  });
-
-  test("a world-readable default identity file is reported on the late read", async () => {
-    if (process.platform === "win32") return;
-    // The read the fallback defers is still a read of a file holding a private
-    // key, so the permission nudge has to survive being deferred with it -- the
-    // operator never named this file, and this run is where they hear about it.
-    const { signedPath, identityPath, pin } = await exchangeArtifacts();
-    const { stdout, stderr, exits, exitCode } = await withDefaultIdentity(
-      readFileSync(identityPath, "utf8"),
-      () =>
-        runVerify({
+  test.each([
+    ["absent", undefined],
+    ["a path that does not exist", join(tmpdir(), "psilink-no-such-home")],
+  ])(
+    "a HOME that is %s changes nothing about the verdict",
+    async (_label, home) => {
+      // psilink resolves no identity out of the home directory, so neither an
+      // unset HOME nor one pointing nowhere can change what a run anchors. The
+      // ephemeral-container case is exactly this: a home that is not the
+      // operator's own must not be reached for at all.
+      const { signedPath, pin } = await exchangeArtifacts();
+      const previousHome = process.env["HOME"];
+      const previousProfile = process.env["USERPROFILE"];
+      try {
+        if (home === undefined) {
+          delete process.env["HOME"];
+          delete process.env["USERPROFILE"];
+        } else {
+          process.env["HOME"] = home;
+          process.env["USERPROFILE"] = home;
+        }
+        const { stdout, stderr, exits, exitCode } = await runVerify({
           record: signedPath,
           "log-level": "warn",
           "partner-fingerprint": pin,
-        }),
-      0o644,
+        });
+        expect(exits).toEqual([]);
+        expect(stdout).toContain("SIGNED RECEIPT INCOMPLETE");
+        expect(stdout).toContain(
+          "Nothing outside the record anchors the initiator's certificate",
+        );
+        expect(stderr).toBe("");
+        expect(exitCode).toBe(0);
+      } finally {
+        if (previousHome === undefined) delete process.env["HOME"];
+        else process.env["HOME"] = previousHome;
+        if (previousProfile === undefined) delete process.env["USERPROFILE"];
+        else process.env["USERPROFILE"] = previousProfile;
+      }
+    },
+  );
+
+  test("an identity on a read-only directory anchors the slot and is not written", async () => {
+    if (process.platform === "win32") return;
+    // The custody shape a credentials mount has: the file is read and nothing
+    // beside it is written, so the whole directory can be mounted read-only.
+    const { signedPath, identityPath, pin } = await exchangeArtifacts();
+    const readOnlyDir = tmp();
+    const mounted = join(readOnlyDir, "psilink-signing-identity.json");
+    writeFileSync(mounted, readFileSync(identityPath, "utf8"), { mode: 0o600 });
+    fs.chmodSync(mounted, 0o600);
+    const before = fs.readdirSync(readOnlyDir).sort();
+    fs.chmodSync(readOnlyDir, 0o500);
+    try {
+      const { stdout, exits, exitCode } = await runVerify({
+        record: signedPath,
+        "partner-fingerprint": pin,
+        "identity-file": mounted,
+      });
+      expect(exits).toEqual([]);
+      expect(stdout).toContain("is your own signing identity's certificate");
+      expect(exitCode).toBe(0);
+      expect(fs.readdirSync(readOnlyDir).sort()).toEqual(before);
+      expect(fs.readFileSync(mounted, "utf8")).toBe(
+        readFileSync(identityPath, "utf8"),
+      );
+    } finally {
+      fs.chmodSync(readOnlyDir, 0o700);
+    }
+  });
+
+  test("a world-readable identity named by the config is still reported", async () => {
+    if (process.platform === "win32") return;
+    // The config's identity_file is a path the operator wrote but did not pass
+    // on this command line, and reading it is still a read of a private key, so
+    // the permission nudge fires on that route too.
+    const { signedPath, identityPath, pin } = await exchangeArtifacts();
+    fs.chmodSync(identityPath, 0o644);
+    const configPath = writeYaml(
+      `signing:\n  mode: certificate\n  partner_fingerprint: ${pin}\n` +
+        `  identity_file: ${identityPath}\n`,
     );
+    const { stdout, stderr, exits, exitCode } = await runVerify({
+      record: signedPath,
+      "log-level": "warn",
+      "config-file": configPath,
+    });
     expect(exits).toEqual([]);
     expect(stdout).toContain("is your own signing identity's certificate");
-    expect(stderr).toContain(defaultIdentityFile);
+    expect(stderr).toContain(identityPath);
     expect(stderr).toContain("restrict to 0600");
     expect(stderr).toContain("signing private key");
     expect(exitCode).toBe(0);

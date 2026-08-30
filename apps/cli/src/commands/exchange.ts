@@ -5,6 +5,7 @@ import {
   parseExchangeSpec,
   describeDecodeError,
   getLogger,
+  OperatorConfigError,
   prepareForExchange,
   resolveExchangeInputs,
   sanitizeErrorForDisplay,
@@ -38,10 +39,7 @@ import { optionalIdentity } from "../partyIdentity";
 import { resolveRecordOutput } from "../recordFile";
 import { resolveReceiptOutput } from "../receiptFile";
 import { assertIdentityMatchesAgreedTerms } from "../signingIdentityDivergence";
-import {
-  defaultSigningIdentityPath,
-  loadSigningIdentity,
-} from "../signingIdentityFile";
+import { loadSigningIdentity } from "../signingIdentityFile";
 import { confirmOutboundPayloadConsent } from "../outboundPayloadConsent";
 import { parseSensitiveYaml } from "../sensitiveFile";
 import { resolveAtSignRefs, resolveExchangeSpecRefs } from "../util/atSignRefs";
@@ -789,6 +787,30 @@ export async function prepareDataset(
 }
 
 /**
+ * What a `certificate`-mode config that names no signing identity is told,
+ * before it connects.
+ *
+ * Fixed prose over this party's own config, so it names no partner-authored
+ * content and carries no path of its own beyond the illustrative one: psilink
+ * chooses no location for a signing identity, and a message that guessed at one
+ * would be the very default this refusal exists to remove. It names both
+ * spellings the operator writes the path in, an example under the container
+ * convention for a credentials mount, and the mode that makes the run legal
+ * without one -- the shape the unpinned-partner refusal beside it already takes.
+ */
+const SIGNING_IDENTITY_FILE_UNSET_REFUSAL =
+  "this exchange signs receipts (signing.mode: certificate) but names no " +
+  "signing identity, and psilink chooses no location for one: the identity is " +
+  "a long-lived credential reused across every exchange and every partner, so " +
+  "where it lives is yours to decide. Set signing.identity_file to that path " +
+  "-- a credentials mount is the usual home, for example " +
+  "/run/secrets/psilink-signing-identity.json -- and create the file there " +
+  "with 'psilink fingerprint --identity-file " +
+  "/run/secrets/psilink-signing-identity.json'. The run reads it and writes " +
+  'nothing to it, so a read-only mount is enough. Or set signing.mode to "none" ' +
+  "to run unsigned.";
+
+/**
  * Resolve the signed-receipt inputs from the exchange config's `signing` block,
  * loading this party's signing identity from disk. Resolves `null` (skip the
  * signing step, leaving the unsigned-record path unchanged) unless the block sets
@@ -800,7 +822,13 @@ export async function prepareDataset(
  * exchange.
  *
  * The identity-file path is the config's `signing.identity_file` (tilde-expanded
- * at use, as `psilink fingerprint` does), falling back to the per-user default.
+ * at use, as `psilink fingerprint` does) and nothing else: the signing identity
+ * is a credential, so where it lives is the operator's custody decision and no
+ * location is resolved on their behalf. A `certificate`-mode block that names
+ * none is refused here, joining the pre-flight family that already refuses an
+ * unpinned partner and an unnamed local party -- an {@link OperatorConfigError}
+ * for the same reason they are, and the same exit 64.
+ *
  * The pinned partner fingerprint is passed through verbatim, and this resolver
  * states no rule about its absence: a certificate-mode block with no pin is
  * refused by core's `assertCertificateModePinsPartner` inside
@@ -814,24 +842,27 @@ export async function prepareDataset(
  * an exchange that has already sent this party's data.
  *
  * @throws {UsageError} when `mode: certificate` is set but no signing identity
- *   exists at the resolved path, or the file is malformed/unreadable.
- * @throws {OperatorConfigError} when the loaded certificate is bound to an
- *   identity other than `termsIdentity`.
+ *   exists at the named path, or the file is malformed/unreadable.
+ * @throws {OperatorConfigError} when `mode: certificate` is set and
+ *   `signing.identity_file` names no path, or the loaded certificate is bound to
+ *   an identity other than `termsIdentity`.
  */
 export async function resolveSigningPersist(
   signing: SigningConfig | undefined,
   termsIdentity: string | undefined,
 ): Promise<SigningPersist | null> {
   if (signing === undefined || signing.mode !== "certificate") return null;
-  const identityPath = expandTilde(
-    signing.identityFile ?? defaultSigningIdentityPath(),
-  );
+  if (signing.identityFile === undefined)
+    throw new OperatorConfigError(SIGNING_IDENTITY_FILE_UNSET_REFUSAL);
+  const identityPath = expandTilde(signing.identityFile);
   const identity = await loadSigningIdentity(identityPath);
   if (identity === undefined)
     throw new UsageError(
       `signing is configured (mode: certificate) but no signing identity was ` +
-        `found at ${identityPath}; run 'psilink fingerprint' to create one, or ` +
-        `set signing.identity_file to the correct path`,
+        `found at ${identityPath}, the path signing.identity_file names; ` +
+        `create it there with 'psilink fingerprint --identity-file ` +
+        `${identityPath}', or point signing.identity_file at the file you ` +
+        `already hold`,
     );
   assertIdentityMatchesAgreedTerms(identity.certificate, termsIdentity);
   return {

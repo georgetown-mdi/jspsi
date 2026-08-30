@@ -6,8 +6,11 @@ import {
   computeCertificateFingerprint,
   generateSigningIdentity,
   getLogger,
+  MAX_TEXT_LENGTH,
   sanitizeErrorForDisplay,
   serializeCertificate,
+  TEXT_CONTROL_CHAR_MESSAGE,
+  TEXT_CONTROL_CHAR_PATTERN,
   UsageError,
 } from "@psilink/core";
 import type { SigningIdentity } from "@psilink/core";
@@ -17,7 +20,6 @@ import { expandTilde, FileExistsError, writeFileAtomic } from "../fileUtils";
 import { parseSensitiveYaml } from "../sensitiveFile";
 import { warnOnIdentityDivergence } from "../signingIdentityDivergence";
 import {
-  defaultSigningIdentityPath,
   loadSigningIdentity,
   saveSigningIdentity,
 } from "../signingIdentityFile";
@@ -37,6 +39,44 @@ import {
 // separate keygen step) keeps the CLI surface minimal while respecting the
 // pin-first ordering. Creation is announced, never silent; regeneration is a
 // deliberate, gated action (`--force`) because it invalidates pins.
+//
+// Where the identity is kept is the OPERATOR's decision, never this command's:
+// the file is a credential, and a location psilink picked would be an ephemeral
+// container home (a fresh key and a fresh fingerprint every run) or a folder a
+// partner syncs into (the private key handed over) as easily as the right place.
+// So a run given no path refuses and says how to name one, rather than creating
+// the identity somewhere the operator did not choose.
+
+/**
+ * What a run that names no identity path is told, in place of creating one.
+ *
+ * The guidance carries the whole remedy because a bare "name a path" invites a
+ * throwaway location: this file is the only thing that keeps a pinned
+ * fingerprint valid, and losing it costs a re-key coordinated with every
+ * partner. So it states why psilink picks no location, both spellings of the
+ * path, a mounted-credentials example, what the directory has to be (writable
+ * for this run, read-only afterwards, durable, and never partner-synced), and
+ * the reuse case that must not turn into a second identity.
+ *
+ * A single line, and one that ends in the message rather than in a probe: it
+ * renders through the display-boundary sanitizer, which escapes a newline and
+ * truncates past `COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH`, and psilink looks in no
+ * location to tell the operator whether an earlier identity is there -- looking
+ * is the behavior this refusal removes.
+ */
+const NO_IDENTITY_PATH_REFUSAL =
+  "no signing identity path is configured, and psilink chooses none: this is a " +
+  "long-lived credential reused across every exchange and every partner, so " +
+  "where it is kept is yours to decide. Name the path and re-run -- 'psilink " +
+  "fingerprint --identity-file /run/secrets/psilink-signing-identity.json', or " +
+  "signing.identity_file in the configuration. Its directory must be writable " +
+  "for this creating run; every run after it only reads the file, so a " +
+  "read-only credentials mount is right from then on. Choose somewhere " +
+  "durable, and never a directory your partner syncs into -- that would put " +
+  "your private signing key in their hands. If you already hold an identity " +
+  "from an earlier release, name THAT file rather than creating a second one: " +
+  "a new identity has a new fingerprint, and every partner has to re-pin it " +
+  "before your receipts verify again.";
 
 export function builder(cmd: Argv): Argv {
   return cmd
@@ -51,8 +91,10 @@ export function builder(cmd: Argv): Argv {
     .option("identity-file", {
       type: "string",
       describe:
-        "path to the signing identity file; overrides signing.identity_file " +
-        "in the config (default: ~/.psilink/signing-identity.json)",
+        "path to the signing identity file, created there if absent; " +
+        "overrides signing.identity_file in the config. Required unless the " +
+        "config sets that field -- psilink chooses no location for a " +
+        "credential (example: /run/secrets/psilink-signing-identity.json)",
     })
     .option("config-file", {
       type: "string",
@@ -135,6 +177,42 @@ export function readConfigHints(
   };
 }
 
+/**
+ * Hold an identity label to the shape a linkage-terms document holds its
+ * `identity` to, before it is bound into a certificate.
+ *
+ * The label reaches this command from `--identity` or `linkage_terms.identity`
+ * without passing through `LinkageTermsSchema`, which is where every other
+ * route into that field is bounded and refused a control character
+ * ({@link TEXT_CONTROL_CHAR_PATTERN}); the console's fingerprint route applies
+ * the same two rules at its own boundary. Unchecked here, the CLI would mint
+ * certificates carrying labels the terms document itself refuses -- and this one
+ * is not a transient: it is bound into a long-lived certificate, read back and
+ * DISPLAYED by whoever pinned the fingerprint, long after the run that chose it.
+ *
+ * Applied to the value actually being bound, whichever source supplied it, the
+ * binding carried forward by a `--force` re-key included: what a new certificate
+ * carries is what the check is about.
+ *
+ * Neither message echoes the label. The offending value is the operator's own
+ * text and naming it back adds nothing to a rule about its shape, which is the
+ * discipline the terms document's own refusals keep.
+ */
+function assertBindableIdentity(identity: string): void {
+  if (TEXT_CONTROL_CHAR_PATTERN.test(identity))
+    throw new UsageError(
+      "the identity to bind into the signing certificate cannot be used: " +
+        `${TEXT_CONTROL_CHAR_MESSAGE}. Supply one that carries none, through ` +
+        "--identity or linkage_terms.identity.",
+    );
+  if (identity.length > MAX_TEXT_LENGTH)
+    throw new UsageError(
+      "the identity to bind into the signing certificate is too long: it must " +
+        `be at most ${MAX_TEXT_LENGTH} characters, the bound the linkage ` +
+        "terms hold the same value to.",
+    );
+}
+
 /** The signing-identity action taken by {@link resolveSigningIdentity}. */
 export type SigningIdentityAction = "Created" | "Regenerated" | "Loaded";
 
@@ -162,7 +240,8 @@ export interface ResolveSigningIdentityInput {
  * loaded one alike (see {@link warnOnIdentityDivergence}). Returns the identity
  * and the action taken; never auto-creates at any path other than this one.
  *
- * @throws {UsageError} if no identity is available to bind a new key.
+ * @throws {UsageError} if no identity is available to bind a new key, or if the
+ *   one available fails {@link assertBindableIdentity}.
  * @internal exported for testing
  */
 export async function resolveSigningIdentity(
@@ -224,6 +303,7 @@ export async function resolveSigningIdentity(
         '--identity "Name, Organization, contact" or set ' +
         "linkage_terms.identity in the config",
     );
+  assertBindableIdentity(identityString);
   const identity = await generateSigningIdentity(identityString);
 
   // A genuine first creation (no file on disk at all) is exclusive, so two
@@ -356,9 +436,10 @@ export async function handler(argv: Arguments): Promise<void> {
     const exportCertificate = singleValue(argv, "export-certificate") as
       string | undefined;
     const hints = readConfigHints(configFileArg, configFileArg !== undefined);
-    const identityPath = expandTilde(
-      identityFileArg ?? hints.identityFile ?? defaultSigningIdentityPath(),
-    );
+    const namedIdentityFile = identityFileArg ?? hints.identityFile;
+    if (namedIdentityFile === undefined)
+      throw new UsageError(NO_IDENTITY_PATH_REFUSAL);
+    const identityPath = expandTilde(namedIdentityFile);
 
     const { identity, action } = await resolveSigningIdentity({
       identityPath,

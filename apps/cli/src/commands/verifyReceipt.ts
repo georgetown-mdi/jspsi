@@ -42,7 +42,6 @@ import type {
   RecordVerificationReport,
   ResultSizeStatus,
   RunBindingStatus,
-  SignedReceiptPartyReport,
   SignedReceiptVerdictGuidance,
   SignedReceiptVerdictParty,
   TermsHashStatus,
@@ -57,10 +56,7 @@ import {
 import { expandTilde } from "../fileUtils";
 import { keysPathFor } from "../recordFile";
 import { parseSensitiveJson, parseSensitiveYaml } from "../sensitiveFile";
-import {
-  defaultSigningIdentityPath,
-  loadSigningCertificate,
-} from "../signingIdentityFile";
+import { loadSigningCertificate } from "../signingIdentityFile";
 import {
   configureLogging,
   exitWithError,
@@ -150,7 +146,7 @@ export function builder(cmd: Argv): Argv {
       describe:
         "path to your signing identity file, whose certificate anchors your " +
         "own slot in the signed record; overrides signing.identity_file in " +
-        "--config-file (default: ~/.psilink/signing-identity.json)",
+        "--config-file. With neither, your own slot is left unanchored",
     })
     .option("config-file", {
       type: "string",
@@ -686,12 +682,6 @@ function guidanceLine(guidance: SignedReceiptVerdictGuidance): string {
   }
 }
 
-function parties(
-  report: DualSignedRecordVerificationReport,
-): SignedReceiptPartyReport[] {
-  return [report.initiator, report.responder];
-}
-
 /** Render the dual-signed record's verification report to output lines and an exit
  * code (0 unless a check definitively failed). @internal exported for testing */
 export function formatSignedRecordReport(
@@ -912,8 +902,8 @@ export function pinnedFingerprintFrom(
 /**
  * `signing.identity_file` from the config's signing block, so the party that ran
  * the exchange anchors its own slot from the same config the exchange used. A
- * non-string value is left to the default path rather than refused: unlike the
- * pin, nothing about this run turns on it, and the identity that is found is
+ * non-string value leaves the slot unanchored rather than being refused: unlike
+ * the pin, nothing about this run turns on it, and the identity that is found is
  * reported by what it anchors.
  */
 function signingIdentityPathFrom(
@@ -1056,15 +1046,14 @@ async function namedLocalIdentity(
 }
 
 /**
- * This party's own anchor from an identity file it did not name on the command
- * line: the config's `signing.identity_file`, or the default per-user path. Such
- * a file belongs to another exchange or another partner as easily as to this
- * one, so an unreadable or (when the config named it) absent file degrades to a
- * logged warning and leaves the slot unanchored.
+ * This party's own anchor from the config's `signing.identity_file` -- a file
+ * the operator did not name on THIS command line. Such a file belongs to another
+ * exchange or another partner as easily as to this one, so an unreadable or
+ * absent one degrades to a logged warning and leaves the slot unanchored, where
+ * the same file named with `--identity-file` would be a usage error.
  */
 async function foundLocalIdentity(
   identityPath: string,
-  from: "config" | "per-user default",
   log: { warn: (message: string) => void },
 ): Promise<LocalIdentityAnchor | undefined> {
   const target = expandTilde(identityPath);
@@ -1078,7 +1067,7 @@ async function foundLocalIdentity(
     );
     return undefined;
   }
-  if (resolved === undefined && from === "config")
+  if (resolved === undefined)
     log.warn(
       `the signing identity at ${target}, named by the configuration's ` +
         `signing.identity_file, does not exist, so it anchors no ` +
@@ -1088,72 +1077,22 @@ async function foundLocalIdentity(
 }
 
 /**
- * The identity file the operator chose for this run, if any. Choosing none is
- * what leaves the per-user default to be consulted, and is distinct from
- * choosing one that turned out to be unreadable or absent: neither yields an
- * anchor, and only the first looks anywhere else.
- */
-interface ChosenLocalIdentity {
-  /** The identity file the flag or the config named, when either did. */
-  file?: string;
-  /** Its anchor; absent when that file could not be read. */
-  anchor?: LocalIdentityAnchor;
-}
-
-/**
  * This party's own anchor from the identity file the operator chose:
- * `--identity-file` first, then the config's `signing.identity_file`.
+ * `--identity-file` first, then the config's `signing.identity_file`. With
+ * neither, the slot is simply left unanchored -- psilink resolves no identity
+ * path of its own, so there is nowhere else to look, and a verification run
+ * needs no identity to reach a verdict.
  */
 async function chosenLocalIdentity(
   identityFileArg: string | undefined,
   signing: ConfigSigningBlock | undefined,
   log: { warn: (message: string) => void },
-): Promise<ChosenLocalIdentity> {
+): Promise<LocalIdentityAnchor | undefined> {
   if (identityFileArg !== undefined)
-    return {
-      file: identityFileArg,
-      anchor: await namedLocalIdentity(identityFileArg),
-    };
+    return await namedLocalIdentity(identityFileArg);
   const configured = signingIdentityPathFrom(signing);
-  if (configured === undefined) return {};
-  return {
-    file: configured,
-    anchor: await foundLocalIdentity(configured, "config", log),
-  };
-}
-
-/**
- * Verify the dual-signed record, reading no more of this party's own identity
- * than the run's anchors need. An identity the operator chose is read up front,
- * since choosing one is a statement about this record either way. The per-user
- * default is consulted only while a slot is still unanchored, so a run whose
- * pins anchor both slots reaches its verdict without that file being read at
- * all.
- */
-async function verifySignedRecord(
-  record: DualSignedRecord,
-  inputs: Omit<DualSignedRecordVerificationInputs, "localIdentity">,
-  chosen: ChosenLocalIdentity,
-  log: { warn: (message: string) => void },
-): Promise<DualSignedRecordVerificationReport> {
-  const report = await verifyDualSignedRecord(record, {
-    ...inputs,
-    localIdentity: chosen.anchor,
-  });
-  const anchoredEverySlot = parties(report).every(
-    (party) => party.certificateAnchor !== "unanchored",
-  );
-  if (chosen.file !== undefined || anchoredEverySlot) return report;
-  const resolved = await foundLocalIdentity(
-    defaultSigningIdentityPath(),
-    "per-user default",
-    log,
-  );
-  if (resolved === undefined) return report;
-  return await verifyDualSignedRecord(record, {
-    ...inputs,
-    localIdentity: resolved,
-  });
+  if (configured === undefined) return undefined;
+  return await foundLocalIdentity(configured, log);
 }
 
 export async function handler(argv: Arguments): Promise<void> {
@@ -1299,18 +1238,14 @@ export async function handler(argv: Arguments): Promise<void> {
         localTerms,
         partnerTerms,
       );
-      const report = await verifySignedRecord(
-        signedRecord,
-        {
-          pinnedFingerprints: resolvePinnedFingerprints(
-            partnerFingerprintArgs,
-            signing,
-          ),
-          ...expectations,
-        },
-        await chosenLocalIdentity(identityFileArg, signing, log),
-        log,
-      );
+      const report = await verifyDualSignedRecord(signedRecord, {
+        pinnedFingerprints: resolvePinnedFingerprints(
+          partnerFingerprintArgs,
+          signing,
+        ),
+        ...expectations,
+        localIdentity: await chosenLocalIdentity(identityFileArg, signing, log),
+      });
       const rendered = formatSignedRecordReport(report, {
         ...supplied,
         // The note explaining a config that carries no terms belongs beside

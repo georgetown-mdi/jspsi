@@ -45,6 +45,8 @@ test("returns null when signing is absent (the unsigned path)", async () => {
 });
 
 test("returns null for the non-certificate modes", async () => {
+  // Neither signs, so neither needs an identity: the identity-file requirement
+  // below is certificate mode's alone.
   const none: SigningConfig = { mode: "none" };
   const session: SigningConfig = { mode: "session-derived" };
   await expect(resolveSigningPersist(none, "Party A")).resolves.toBeNull();
@@ -70,7 +72,7 @@ test("loads the identity and pin for certificate mode", async () => {
   });
 });
 
-test("certificate mode with no identity file is a usage error", async () => {
+test("certificate mode with no identity file at the named path is a usage error", async () => {
   const config: SigningConfig = {
     mode: "certificate",
     identityFile: path.join(dir, "does-not-exist.json"),
@@ -81,6 +83,50 @@ test("certificate mode with no identity file is a usage error", async () => {
   await expect(resolveSigningPersist(config, "Party A")).rejects.toThrow(
     /no signing identity was found/,
   );
+});
+
+// --- certificate mode naming no identity path --------------------------------
+// The pre-flight family's newest member: like the unpinned-partner and unnamed-
+// party refusals it fires before any credential, terms, or data are sent, as an
+// OperatorConfigError (exit 64) composed only of this operator's own content.
+
+test("certificate mode that names no identity file is refused, not defaulted", async () => {
+  const config: SigningConfig = { mode: "certificate" };
+  await expect(resolveSigningPersist(config, "Party A")).rejects.toThrow(
+    OperatorConfigError,
+  );
+});
+
+test("the refusal names both spellings, a mounted example, and the unsigned exit", async () => {
+  const config: SigningConfig = { mode: "certificate" };
+  const rendered = await resolveSigningPersist(config, "Party A").then(
+    () => "",
+    (err: unknown) => sanitizeErrorForDisplay(err),
+  );
+  expect(rendered).toContain("signing.mode: certificate");
+  expect(rendered).toContain("psilink chooses no location");
+  expect(rendered).toContain("signing.identity_file");
+  expect(rendered).toContain("--identity-file");
+  expect(rendered).toContain("/run/secrets/psilink-signing-identity.json");
+  expect(rendered).toContain("read-only mount");
+  expect(rendered).toContain('signing.mode to "none"');
+  // Read at the sink that caps a composed link, so the whole remedy is what the
+  // operator sees rather than the head of it.
+  expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
+});
+
+test("the refusal names no path of its own beyond the illustrative one", async () => {
+  // A message that guessed at a location -- a home directory, a working
+  // directory -- would reinstate the default this refusal exists to remove, and
+  // would send the operator to a path psilink does not read.
+  const config: SigningConfig = { mode: "certificate" };
+  const message = await resolveSigningPersist(config, "Party A").then(
+    () => "",
+    (err: unknown) => (err as Error).message,
+  );
+  const paths = new Set(message.match(/(~|\.)?\/[\w./-]+/g) ?? []);
+  expect([...paths]).toEqual(["/run/secrets/psilink-signing-identity.json"]);
+  expect(message).not.toContain(os.homedir());
 });
 
 test("certificate mode with no pin resolves (the run is refused before this seam)", async () => {
