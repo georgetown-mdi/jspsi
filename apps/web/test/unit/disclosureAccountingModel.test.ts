@@ -236,6 +236,24 @@ describe("a disclosure's facts", () => {
     expect(partner).toBe("Riverbend\\u202eSchools\\x1b[31m");
   });
 
+  test("state how the exchange ended, so a terminated run does not read as a completed one", async () => {
+    // The record is written once the exchange has disclosed, whether or not the
+    // signed-receipt swap after it completed (docs/spec/EXCHANGE_RECORD.md, When
+    // a record is owed). Both entries are real disclosures, and this row is what
+    // keeps a reader of the accounting from taking them for the same thing.
+    const completed = disclosureFacts(await disclosureRecord());
+    expect(factValues(completed, "How the exchange ended")).toEqual([
+      "Completed",
+    ]);
+
+    const terminated = disclosureFacts(
+      await disclosureRecord({ outcome: "receipt-swap-terminated" }),
+    );
+    expect(factValues(terminated, "How the exchange ended")).toEqual([
+      "Disclosed, then stopped before a signed receipt was exchanged",
+    ]);
+  });
+
   test("carry the labels the export's columns are named for", async () => {
     // The exported header is stated once so an empty accounting still has one; this
     // pins it against the facts a real record produces, so the two cannot drift.

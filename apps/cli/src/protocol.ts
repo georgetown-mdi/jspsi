@@ -6,6 +6,8 @@ import {
   getLogger,
   describeExchangeStages,
   runExchange,
+  exchangeRecordFromFailure,
+  exchangeRecordOwedButUnbuilt,
   countIsPartnerReported,
   buildOutputTable,
   authenticateConnection,
@@ -174,6 +176,26 @@ export const SIGNING_WITHOUT_RECORD_WARNING =
   "exchange record, and the record cannot be reconstructed after the " +
   "exchange. Keep the record (drop --no-record) if you retain receipts as " +
   "evidence, or drop the signing block if you do not.";
+
+/**
+ * What a run reports when it disclosed, terminated after that, and owed a
+ * self-attested record its build could not produce.
+ *
+ * The completed path reports the same loss as a missing artifact; this is the
+ * failing path's half, so a disclosure that occurred is never left with no record
+ * AND no notice. Core warns at the build with the cause, but on the operator log
+ * alone -- an unattended run discards it, and at `--log-level error` no one sees
+ * it at all -- so the machine stream carries the fact here.
+ *
+ * It names no destination: none was resolved, because nothing reached a write. It
+ * is deliberately not a persistence loss, whose exit code tells a supervisor not
+ * to re-run; this run failed and keeps its own exit code, and re-running is a
+ * decision its own error informs.
+ */
+export const TERMINATED_RECORD_UNBUILT_WARNING =
+  "no audit record could be built for this exchange, so none was written; " +
+  "the exchange had already disclosed when it failed, so that disclosure has " +
+  "no local record";
 
 /**
  * What the "terms agreed" line adds when the partner named nobody on a run that
@@ -1961,6 +1983,39 @@ export async function runProtocol(
           "(its signing block, certificate mode) before treating this as a " +
           "transport failure.",
       );
+
+    // The disclosure a terminated run already made outlives the failure that
+    // stopped it: a run past its payload exchange has sent and received its
+    // payloads, so core hands the self-attested record of that disclosure back
+    // on the error rather than discarding it (docs/spec/PROTOCOL.md,
+    // Self-attested record). It is written here on the same terms a completed
+    // run's is -- same destination, same owner-only pair -- because it is the
+    // same kind of artifact; what marks it as a terminated run's is the record's
+    // own outcome field, which travels with the file wherever it is copied.
+    // Skipped under --no-record, like every other record write.
+    const disclosedRecord = exchangeRecordFromFailure(err);
+    if (recordOutput !== undefined) {
+      // Reported on the stream but NOT as a persistence loss: that class is a
+      // COMPLETED run's lost local write, and its exit code exists to tell a
+      // supervisor not to re-run. This run failed and keeps its own exit code,
+      // which a persistence-loss stamp would overwrite with the opposite advice.
+      // Both losses take that same disposition: a record that could not be
+      // written, and one core could not build for a disclosure it made -- which
+      // core warns about on the operator log, a channel an unattended run
+      // discards, so the stream carries it too. The completed path reports the
+      // same pair through missingArtifacts above.
+      if (disclosedRecord !== undefined) {
+        const failure = writeExchangeRecord(
+          recordOutput,
+          disclosedRecord.record,
+          disclosedRecord.keys,
+          loggerName,
+        );
+        if (failure !== undefined) emit((e) => e.warning(failure));
+      } else if (exchangeRecordOwedButUnbuilt(err)) {
+        emit((e) => e.warning(TERMINATED_RECORD_UNBUILT_WARNING));
+      }
+    }
 
     // Core tags the rendezvous peer-wait and key-exchange handshake timeouts
     // (see markPeerWaitTimeout), so every fact this inference rests on is local

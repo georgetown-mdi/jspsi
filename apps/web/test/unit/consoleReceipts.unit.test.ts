@@ -949,7 +949,7 @@ describe("the receipts card's model", () => {
     // the intent at create time, so the card reports it as a problem rather than
     // an advisory: nothing about the partner or the network could make such a run
     // finish, and warning-and-proceeding would spend the operator's disclosure on
-    // a run that ends with nothing written on this side.
+    // a run that ends with no result and no receipt on this side.
     const unpinned = draft({
       mode: "certificate",
       ownFingerprint: OWN_FINGERPRINT,
@@ -1064,20 +1064,36 @@ describe("the receipts card's model", () => {
 
   test("the unpinned problem names the whole consequence, not just the receipt", () => {
     // Core refuses an absent pin inside the exchange, after the payloads have
-    // crossed, and every local artifact is written only once the exchange has
-    // returned -- so a run started that way would cost the operator their data
-    // disclosure and give them nothing back. That is why the card refuses it, and
-    // copy that named only the receipt would understate what is being refused.
+    // crossed, and the results and the receipt are written only once the exchange
+    // has returned -- so a run started that way would cost the operator their data
+    // disclosure and give them back only the record of it. That is why the card
+    // refuses it, and copy that named only the receipt would understate what is
+    // being refused.
     expect(NO_PARTNER_PIN_PROBLEM).toMatch(/gone to your partner/);
     expect(NO_PARTNER_PIN_PROBLEM).toMatch(/no results/);
-    expect(NO_PARTNER_PIN_PROBLEM).toMatch(/no exchange record/);
     expect(NO_PARTNER_PIN_PROBLEM).toMatch(/no receipt/);
+    // What it does keep is named too, so the copy neither overstates the loss nor
+    // leaves the operator to guess whether the disclosure was logged.
+    expect(NO_PARTNER_PIN_PROBLEM).toMatch(
+      /the exchange record of what you had already disclosed/,
+    );
+    // And it is placed where the operator can act on it. The console gates the
+    // record download on a succeeded run, so copy that said "you keep the record"
+    // and stopped would point at a button this run never shows: the file is in the
+    // run's folder in the mount, and goes when the run is discarded.
+    expect(NO_PARTNER_PIN_PROBLEM).toMatch(
+      /record\.json with that run's files in the mounted folder/,
+    );
+    expect(NO_PARTNER_PIN_PROBLEM).toMatch(
+      /rather than offered here for download/,
+    );
+    expect(NO_PARTNER_PIN_PROBLEM).toMatch(/discarding the run removes it/);
   });
 
   test("the unpinned problem states the initiator's extra disclosure", () => {
     // exchangeSignedReceipt has the initiator send its own {certificate,
-    // signature} frame before verifying the partner's, so "nothing is written on
-    // this side" is not the whole cost on the side that sends first: the partner
+    // signature} frame before verifying the partner's, so "no results and no
+    // receipt" is not the whole cost on the side that sends first: the partner
     // would hold this party's signed receipt when the run stopped. Which role this
     // side takes is not settled while authoring, so the copy is conditional -- and
     // it still says nothing about what the partner does with what it receives.

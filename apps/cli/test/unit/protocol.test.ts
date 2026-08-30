@@ -158,6 +158,13 @@ vi.mock("@psilink/core", async (importActual) => {
       trace: () => {},
     }),
     runExchange: vi.fn().mockImplementation(defaultRunExchange),
+    // The record a terminated run hands back on its error, and the predicate for
+    // the case where one was owed and its build threw. Core marks the error
+    // inside runExchange, which is mocked here, so both accessors are mocked
+    // alongside it; their defaults are the real ones' answers for an error
+    // carrying neither mark, which is every other test in this file.
+    exchangeRecordFromFailure: vi.fn().mockReturnValue(undefined),
+    exchangeRecordOwedButUnbuilt: vi.fn().mockReturnValue(false),
     describeExchangeStages: vi.fn().mockReturnValue([]),
     buildOutputTable: vi.fn().mockReturnValue({ headers: [], rows: [] }),
   };
@@ -227,6 +234,8 @@ import {
   parseExchangeRecord,
   parseVerificationKeys,
   runExchange,
+  exchangeRecordFromFailure,
+  exchangeRecordOwedButUnbuilt,
   PeerAbortError,
   ConnectionError,
   FrameSizeExceededError,
@@ -258,6 +267,7 @@ import {
   PEER_SILENCE_GUIDANCE,
   BOTH_SWEPT_GUIDANCE,
   SIGNING_WITHOUT_RECORD_WARNING,
+  TERMINATED_RECORD_UNBUILT_WARNING,
   entryHelloResidueGuidance,
   type RunProtocolResult,
   type SigningPersist,
@@ -266,6 +276,7 @@ import {
   reportPersistenceLoss,
   type EventStreamEmitter,
 } from "../../src/eventStream";
+import { keysPathFor, type RecordOutput } from "../../src/recordFile";
 import { openEventStreamWithFdWired } from "../eventStreamTestSupport";
 import { exitCodeForError, runOrExit } from "../../src/util/cli";
 import { loadKeyFile, saveKeyFile } from "../../src/keyFile";
@@ -433,6 +444,10 @@ afterEach(async () => {
   // for the next test.
   vi.mocked(runExchange).mockReset();
   vi.mocked(runExchange).mockImplementation(defaultRunExchange as never);
+  vi.mocked(exchangeRecordFromFailure).mockReset();
+  vi.mocked(exchangeRecordFromFailure).mockReturnValue(undefined);
+  vi.mocked(exchangeRecordOwedButUnbuilt).mockReset();
+  vi.mocked(exchangeRecordOwedButUnbuilt).mockReturnValue(false);
   mockState.dropDir = "";
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
@@ -750,7 +765,8 @@ test("authentication=null runs the exchange without authentication and without e
 // --- Self-attested record persistence via runProtocol ------------------------
 
 const sampleRecord: ExchangeRecord = {
-  version: "psilink-exchange-record/v5",
+  version: "psilink-exchange-record/v6",
+  outcome: "completed",
   createdAt: "2026-01-02T03:04:05.000Z",
   termsHash: "hQi6gjL9Z0RFtfz2TZVqXmUF1Cu8PaBFbClOJ9R8l_Q",
   localIdentity: "Party A",
@@ -2001,6 +2017,8 @@ function runSigningParty(
   keyFilePath: string,
   name: string,
   receiptFile: string,
+  recordOutput?: RecordOutput,
+  machineInterface: { eventStream?: boolean } = {},
 ): Promise<unknown> {
   return runProtocol(
     {
@@ -2013,10 +2031,10 @@ function runSigningParty(
     undefined,
     -1,
     name,
+    recordOutput,
     undefined,
     undefined,
-    undefined,
-    {},
+    machineInterface,
     signingPersistFixture(receiptFile),
   ) as unknown as Promise<unknown>;
 }
@@ -2198,6 +2216,208 @@ test(
     expect(
       mockState.warnings.some((m) => m.includes(NON_SIGNING_PARTNER_WARNING)),
     ).toBe(true);
+  },
+);
+
+// --- The record a terminated run leaves behind -------------------------------
+//
+// A run that reaches the signed-receipt swap has already disclosed, so core hands
+// the self-attested record of that disclosure back on the error it throws
+// (docs/spec/PROTOCOL.md, Self-attested record). This pins runProtocol's half:
+// the catch writes that record to the same destination a completed run's goes to,
+// under --no-record it writes nothing, and the record itself is what says the run
+// terminated.
+
+const terminatedAudit = {
+  record: {
+    ...sampleRecord,
+    outcome: "receipt-swap-terminated" as const,
+    receiptBinder: "YmluZGVy",
+  },
+  keys: sampleKeys,
+};
+
+test(
+  "a run that fails in the receipt swap still writes the record of what it disclosed",
+  { timeout: BOTH_ARMED_HANG_BACKSTOP_MS + 5_000 },
+  async () => {
+    const keyFileA = path.join(tmpDir, "a.key");
+    const keyFileB = path.join(tmpDir, "b.key");
+    saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+    saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
+    const recordA = path.join(tmpDir, "record-a.json");
+    const recordB = path.join(tmpDir, "record-b.json");
+
+    vi.mocked(runExchange).mockImplementation((async () => {
+      await awaitBothArmed();
+      throw new ReceiptVerificationError("simulated receipt pin mismatch");
+    }) as never);
+    vi.mocked(exchangeRecordFromFailure).mockReturnValue(terminatedAudit);
+
+    const [resultA, resultB] = await Promise.allSettled([
+      runSigningParty(keyFileA, "test-a", path.join(tmpDir, "receipt-a.json"), {
+        recordFile: recordA,
+      }),
+      runSigningParty(keyFileB, "test-b", path.join(tmpDir, "receipt-b.json"), {
+        recordFile: recordB,
+      }),
+    ]);
+    // The run still fails: keeping the record is not a rescue of the exchange.
+    expect(resultA.status).toBe("rejected");
+    expect(resultB.status).toBe("rejected");
+
+    for (const recordPath of [recordA, recordB]) {
+      const written = parseExchangeRecord(
+        JSON.parse(fs.readFileSync(recordPath, "utf8")),
+      );
+      expect(written).toEqual(terminatedAudit.record);
+      // What separates it from a completed run's record travels in the file.
+      expect(written.outcome).toBe("receipt-swap-terminated");
+      expect(
+        parseVerificationKeys(
+          JSON.parse(fs.readFileSync(keysPathFor(recordPath), "utf8")),
+        ),
+      ).toEqual(sampleKeys);
+    }
+    // No dual-signed receipt accompanies it: a terminated swap persists no
+    // partial artifact.
+    expect(fs.existsSync(path.join(tmpDir, "receipt-a.json"))).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, "receipt-b.json"))).toBe(false);
+  },
+);
+
+test(
+  "--no-record suppresses the terminated run's record as it does a completed run's",
+  { timeout: BOTH_ARMED_HANG_BACKSTOP_MS + 5_000 },
+  async () => {
+    const keyFileA = path.join(tmpDir, "a.key");
+    const keyFileB = path.join(tmpDir, "b.key");
+    saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+    saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
+
+    vi.mocked(runExchange).mockImplementation((async () => {
+      await awaitBothArmed();
+      throw new ReceiptVerificationError("simulated receipt pin mismatch");
+    }) as never);
+    vi.mocked(exchangeRecordFromFailure).mockReturnValue(terminatedAudit);
+
+    const [resultA, resultB] = await Promise.allSettled([
+      runSigningParty(keyFileA, "test-a", path.join(tmpDir, "receipt-a.json")),
+      runSigningParty(keyFileB, "test-b", path.join(tmpDir, "receipt-b.json")),
+    ]);
+    expect(resultA.status).toBe("rejected");
+    expect(resultB.status).toBe("rejected");
+    expect(
+      fs.readdirSync(tmpDir).filter((f) => f.startsWith("psilink-record-")),
+    ).toHaveLength(0);
+  },
+);
+
+// The other shape of the same loss on the failing path: the record was owed --
+// the run had disclosed -- and core could not build it, so there is nothing to
+// write and nothing to hand back. Core warns at the build, on the operator log
+// alone, which an unattended run discards; these two pin that the machine stream
+// carries the fact, and only when it is true.
+
+test(
+  "a terminated run whose record could not be built reports the loss on the stream",
+  { timeout: BOTH_ARMED_HANG_BACKSTOP_MS + 5_000 },
+  async () => {
+    const keyFileA = path.join(tmpDir, "a.key");
+    const keyFileB = path.join(tmpDir, "b.key");
+    saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+    saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
+    const recordA = path.join(tmpDir, "record-a.json");
+
+    vi.mocked(runExchange).mockImplementation((async () => {
+      await awaitBothArmed();
+      throw new ReceiptVerificationError("simulated receipt pin mismatch");
+    }) as never);
+    // The disclosure happened and the record for it did not build: no pair comes
+    // back on the error, and the predicate is what separates that from a failure
+    // that owed nothing.
+    vi.mocked(exchangeRecordFromFailure).mockReturnValue(undefined);
+    vi.mocked(exchangeRecordOwedButUnbuilt).mockReturnValue(true);
+    mockFd3Open();
+    try {
+      const [resultA, resultB] = await Promise.allSettled([
+        runSigningParty(
+          keyFileA,
+          "test-a",
+          path.join(tmpDir, "receipt-a.json"),
+          { recordFile: recordA },
+          { eventStream: true },
+        ),
+        runSigningParty(
+          keyFileB,
+          "test-b",
+          path.join(tmpDir, "receipt-b.json"),
+        ),
+      ]);
+      expect(resultA.status).toBe("rejected");
+      expect(resultB.status).toBe("rejected");
+    } finally {
+      vi.mocked(fs.fstatSync).mockRestore();
+    }
+
+    // Only party A ran under --event-stream, so every captured line is its own.
+    const lines = takeFd3Lines();
+    expect(
+      lines.filter((l) => l.type === "warning").map((l) => String(l.message)),
+    ).toContain(TERMINATED_RECORD_UNBUILT_WARNING);
+    // The run still fails on its own terms: the terminal event is the error, not
+    // the persistence-loss report a completed run's lost artifact takes.
+    expect(lines[lines.length - 1].type).toBe("error");
+    expect(process.exitCode).not.toBe(73);
+    // Nothing was written, which is what the warning says.
+    expect(fs.existsSync(recordA)).toBe(false);
+    expect(fs.existsSync(keysPathFor(recordA))).toBe(false);
+  },
+);
+
+test(
+  "a failure that owed no record stays silent on the stream",
+  { timeout: BOTH_ARMED_HANG_BACKSTOP_MS + 5_000 },
+  async () => {
+    const keyFileA = path.join(tmpDir, "a.key");
+    const keyFileB = path.join(tmpDir, "b.key");
+    saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+    saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
+    const recordA = path.join(tmpDir, "record-a.json");
+
+    // A failure raised before the payloads flowed: no disclosure to attest, so
+    // core marks the error neither way, which is what the mocked defaults stand
+    // for here.
+    vi.mocked(runExchange).mockImplementation((async () => {
+      await awaitBothArmed();
+      throw new Error("simulated failure before any payload crossed");
+    }) as never);
+    mockFd3Open();
+    try {
+      const [resultA, resultB] = await Promise.allSettled([
+        runSigningParty(
+          keyFileA,
+          "test-a",
+          path.join(tmpDir, "receipt-a.json"),
+          { recordFile: recordA },
+          { eventStream: true },
+        ),
+        runSigningParty(
+          keyFileB,
+          "test-b",
+          path.join(tmpDir, "receipt-b.json"),
+        ),
+      ]);
+      expect(resultA.status).toBe("rejected");
+      expect(resultB.status).toBe("rejected");
+    } finally {
+      vi.mocked(fs.fstatSync).mockRestore();
+    }
+
+    const lines = takeFd3Lines();
+    expect(
+      lines.filter((l) => l.type === "warning").map((l) => String(l.message)),
+    ).not.toContain(TERMINATED_RECORD_UNBUILT_WARNING);
   },
 );
 

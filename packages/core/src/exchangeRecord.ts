@@ -28,19 +28,20 @@ import type { LinkageTerms } from "./config/linkageTerms.js";
 import type { Algorithm, AssociationTable } from "./types.js";
 
 // The exchange record: a self-attested, unsigned disclosure-log entry each party
-// writes at the end of a successful exchange. It stands on its own as a record of
-// what was disclosed -- the governing data-sharing agreement, the algorithm, the
-// categories of data exchanged (payload column names/descriptions and the linkage
-// fields the match keyed on), both self-asserted identities, the timestamp, the
-// count of records this party exposed to the exchange, the result size when both
-// parties are entitled to it, and an optional self-facing pointer to where this
-// party filed its copy of the result and under what retention schedule -- so an
-// operator can populate a HIPAA accounting of disclosures or a FERPA disclosure
-// record without re-matching the original linkage-terms config. It carries
-// readable governance metadata but NO
-// protected data: no payload values, no linkage-field values, no matched
-// identifiers. The data exchanged is bound by privacy-preserving commitments, not
-// embedded.
+// writes once the exchange has disclosed -- whether or not the run gets through
+// the steps that follow, which the record's own `outcome` states
+// (docs/spec/EXCHANGE_RECORD.md, When a record is owed). It stands on its own as a
+// record of what was disclosed -- the governing data-sharing agreement, the
+// algorithm, the categories of data exchanged (payload column names/descriptions
+// and the linkage fields the match keyed on), both self-asserted identities, the
+// timestamp, the count of records this party exposed to the exchange, the result
+// size when both parties are entitled to it, and an optional self-facing pointer
+// to where this party filed its copy of the result and under what retention
+// schedule -- so an operator can populate a HIPAA accounting of disclosures or a
+// FERPA disclosure record without re-matching the original linkage-terms config.
+// It carries readable governance metadata but NO protected data: no payload
+// values, no linkage-field values, no matched identifiers. The data exchanged is
+// bound by privacy-preserving commitments, not embedded.
 //
 // It is explicitly NOT a signed or non-repudiable receipt and NOT evidence
 // against the partner. No private key is involved and no extra protocol round is
@@ -71,9 +72,12 @@ import type { Algorithm, AssociationTable } from "./types.js";
  * ran no check at all. So do {@link ExchangeRecord.localIdentity} and
  * {@link ExchangeRecord.partnerIdentity}: absent, each states that the party
  * supplied no name, where an earlier record could not have been written without
- * one and its silence would have meant a writer that dropped the field.
+ * one and its silence would have meant a writer that dropped the field. And so
+ * does {@link ExchangeRecord.outcome}, which every record states: an earlier
+ * record could only ever have been written for a run that finished, so reading
+ * one as a completed run would be reading a claim its writer never made.
  */
-export const EXCHANGE_RECORD_VERSION = "psilink-exchange-record/v5";
+export const EXCHANGE_RECORD_VERSION = "psilink-exchange-record/v6";
 
 /** The one recognized format version for v1 {@link VerificationKeys}. */
 export const EXCHANGE_KEYS_VERSION = "psilink-exchange-keys/v1";
@@ -409,7 +413,39 @@ export interface ExchangeRecordGovernance {
 }
 
 /**
- * A self-attested local disclosure-log entry for one successful exchange. It
+ * How far the run a record attests got. A record is owed from the moment the
+ * payload exchange completes -- the disclosure it attests has provably occurred
+ * by then -- so a run either got through the steps after that point or it did
+ * not, which is the whole set these two values divide.
+ *
+ * - `completed`: the run finished. A run that signed exchanged its receipt; a run
+ *   with no signing identity had none to exchange, and says so by carrying no
+ *   {@link ExchangeRecord.receiptBinder}.
+ * - `receipt-swap-terminated`: the disclosure occurred and the run then
+ *   terminated without this party holding a receipt for it. The signed-receipt
+ *   swap is the step it most often terminates in and the one the value is named
+ *   for, but the value covers the whole post-disclosure region -- a received
+ *   payload refused against what this party consented to receive terminates the
+ *   run before the swap and records the same value. The record still attests the
+ *   disclosure, which is what an accounting of disclosures is for. What it does
+ *   not state is WHY the run terminated (docs/spec/EXCHANGE_RECORD.md, When a
+ *   record is owed).
+ *
+ * Stated on every record rather than left to the absent-marks-terminated reading,
+ * because the alternative asks a compliance reader to infer a completed run from
+ * silence -- the same reason a no-payload direction is committed explicitly (see
+ * docs/spec/EXCHANGE_RECORD.md, Count-only records).
+ */
+export type ExchangeRecordOutcome = "completed" | "receipt-swap-terminated";
+
+/** Every {@link ExchangeRecordOutcome}, as the schema's accepted value set. */
+export const EXCHANGE_RECORD_OUTCOMES = [
+  "completed",
+  "receipt-swap-terminated",
+] as const satisfies readonly ExchangeRecordOutcome[];
+
+/**
+ * A self-attested local disclosure-log entry for one exchange that disclosed. It
  * records, in cleartext, that an exchange with the named partner occurred, under
  * which agreement, over what categories of data, and its size -- enough to stand
  * on its own as an audit artifact. It holds readable governance metadata and the
@@ -439,6 +475,10 @@ export interface ExchangeRecord {
   version: typeof EXCHANGE_RECORD_VERSION;
   /** Local wall-clock time the record was produced (ISO 8601). */
   createdAt: string;
+  /** How far the run this record attests got. Always present, so a reader never
+   * infers a completed run from a field's silence; see
+   * {@link ExchangeRecordOutcome}. */
+  outcome: ExchangeRecordOutcome;
   /** Base64url SHA-256 over the canonical encoding of both parties' terms. */
   termsHash: string;
   /** This party's self-asserted identity (from its linkage terms). Absent when
@@ -494,10 +534,13 @@ export interface ExchangeRecord {
    * verifier handed this record and a receipt separately can tell whether they
    * are the same run: both parties derive the identical value from the exchange's
    * session key, and a different run derives a different one. Present exactly
-   * when this run produced a signed receipt, so its absence states that no
-   * receipt belongs to this record -- which is why an unpaired receipt beside it
-   * is a mismatch and not merely unchecked. Carries no secret: it is a one-way
-   * HKDF output the signed receipt already publishes (see
+   * when the run DERIVED one, so its absence states that no receipt can belong to
+   * this record -- which is why an unpaired receipt beside it is a mismatch and
+   * not merely unchecked. A {@link outcome} of `receipt-swap-terminated` carries
+   * the binder while this party holds no receipt: the value is a true fact about
+   * the run, and the partner may hold a completed receipt bearing it, so dropping
+   * it would make a genuine receipt for this run unpairable. Carries no secret:
+   * it is a one-way HKDF output the signed receipt already publishes (see
    * `deriveReceiptBinder`). */
   receiptBinder?: string;
   commitments: ExchangeRecordCommitments;
@@ -722,9 +765,12 @@ const ExchangeRecordGovernanceSchema: z.ZodType<ExchangeRecordGovernance> = z
     },
   );
 
+const outcomeSchema = z.enum(EXCHANGE_RECORD_OUTCOMES);
+
 const ExchangeRecordSchema: z.ZodType<ExchangeRecord> = z.object({
   version: z.literal(EXCHANGE_RECORD_VERSION),
   createdAt: createdAtSchema,
+  outcome: outcomeSchema,
   termsHash: base64UrlSchema,
   localIdentity: identitySchema.optional(),
   partnerIdentity: identitySchema.optional(),
@@ -780,8 +826,8 @@ export type CommittedPayload = {
 };
 
 /**
- * The inputs needed to build an {@link ExchangeRecord}, gathered at the end of a
- * successful exchange. `localTerms`/`partnerTerms` supply the agreed-terms hash,
+ * The inputs needed to build an {@link ExchangeRecord}, gathered once the
+ * exchange has disclosed. `localTerms`/`partnerTerms` supply the agreed-terms hash,
  * the two identities, and most of the readable governance metadata (algorithm,
  * legal agreement, and matching basis -- read from `localTerms`); the payload
  * categories are instead read from the committed `localPayloadSent`/
@@ -817,12 +863,18 @@ export interface ExchangeRecordInputs {
   /** Local wall-clock timestamp (ISO 8601); supplied by the caller so the build
    * is otherwise deterministic and testable. */
   createdAt: string;
-  /** The signed receipt's per-exchange binder for this run, when the run produces
-   * one. Supply it exactly when the signed-receipt step runs -- the caller derives
-   * it once and passes the same value here and into the receipt content, so the
-   * two artifacts carry one shared per-run value. Omit it on every path that
-   * produces no receipt (no session key, or no signing identity), where the
-   * record's absent field is the honest statement that no receipt belongs to it. */
+  /** How far the run got. Required rather than defaulted to `completed`: a
+   * default is a claim of completion a caller could make by forgetting, and a
+   * false completion claim in a disclosure record is the one error this field
+   * exists to prevent. */
+  outcome: ExchangeRecordOutcome;
+  /** The signed receipt's per-exchange binder for this run, when the run derived
+   * one. Supply it whenever the derivation succeeded -- the caller derives it once
+   * and passes the same value here and into the receipt content, so the two
+   * artifacts carry one shared per-run value -- including for a run whose swap then
+   * terminated, whose partner may hold a receipt bearing it. Omit it on every path
+   * that derived none (no session key, or no signing identity), where the record's
+   * absent field is the honest statement that no receipt can belong to it. */
   receiptBinder?: string;
 }
 
@@ -984,7 +1036,7 @@ function governanceFromTerms(
 
 /**
  * Build the self-attested {@link ExchangeRecord} and its {@link VerificationKeys}
- * from the end-of-exchange inputs. Generates a fresh binding nonce and a fresh
+ * from the post-disclosure inputs. Generates a fresh binding nonce and a fresh
  * salt per commitment (unless `randomness` injects them), commits to each data
  * set, and hashes the agreed terms. No private key and no network round-trip.
  *
@@ -1030,6 +1082,10 @@ export async function buildExchangeRecord(
     // runExchange) rather than producing a record the parser would later reject
     // at round-trip.
     createdAt: createdAtSchema.parse(inputs.createdAt),
+    // Validated on build with the parser's own schema, as createdAt above: a
+    // caller reaching past the type with an unrecognized outcome throws here
+    // rather than writing a record the parser would later reject.
+    outcome: outcomeSchema.parse(inputs.outcome),
     termsHash,
     // Each identity is written only when its party supplied one: an absent field
     // says the party named itself none, and there is nothing else it could say.

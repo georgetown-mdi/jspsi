@@ -81,6 +81,7 @@ const partnerPayloadReceived: CommittedPayload = {
 const baseInputs: ExchangeRecordInputs = {
   localTerms: termsA,
   partnerTerms: termsB,
+  outcome: "completed",
   recordsExposed: 5,
   resultSize: 2,
   associationTable: [
@@ -969,8 +970,55 @@ describe("serialize / parse", () => {
 
   test("parseExchangeRecord rejects an unrecognized version", async () => {
     const { record } = await buildExchangeRecord(baseInputs, fixedRandomness);
-    const bumped = { ...record, version: "psilink-exchange-record/v6" };
+    const bumped = { ...record, version: "psilink-exchange-record/v7" };
     expect(() => parseExchangeRecord(bumped)).toThrow();
+  });
+
+  test("parseExchangeRecord refuses a record written before the run outcome", async () => {
+    // The v5 shape: no outcome, which a reader of this version would take as a
+    // record its writer never made a completion claim on. A v5 writer produced a
+    // record only for a run that finished, so reading its silence either way
+    // states something it did not -- refused on the version discriminant, like
+    // the shapes above.
+    const { record } = await buildExchangeRecord(baseInputs, fixedRandomness);
+    const v5 = { ...record, version: "psilink-exchange-record/v5" };
+    expect(() => parseExchangeRecord(v5)).toThrow();
+  });
+
+  test("a terminated run's record states its outcome and round-trips", async () => {
+    // The record a swap failure leaves behind: it carries the run's binder (the
+    // partner may hold a receipt bearing it) while stating that this party
+    // exchanged no receipt, so a reader tells it from a completed run's without
+    // consulting anything outside the artifact.
+    const binder = toBase64Url(salt(11));
+    const { record } = await buildExchangeRecord(
+      {
+        ...baseInputs,
+        outcome: "receipt-swap-terminated",
+        receiptBinder: binder,
+      },
+      fixedRandomness,
+    );
+    expect(record.outcome).toBe("receipt-swap-terminated");
+    expect(record.receiptBinder).toBe(binder);
+    const reparsed = parseExchangeRecord(
+      JSON.parse(serializeExchangeRecord(record)),
+    );
+    expect(reparsed).toEqual(record);
+    const completed = await buildExchangeRecord(baseInputs, fixedRandomness);
+    expect(completed.record.outcome).toBe("completed");
+  });
+
+  test("buildExchangeRecord refuses an outcome the format does not carry", async () => {
+    await expect(
+      buildExchangeRecord(
+        {
+          ...baseInputs,
+          outcome: "finished" as ExchangeRecordInputs["outcome"],
+        },
+        fixedRandomness,
+      ),
+    ).rejects.toThrow();
   });
 
   test("parseExchangeRecord refuses a record written before the run binder", async () => {

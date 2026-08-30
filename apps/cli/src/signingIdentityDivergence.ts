@@ -22,9 +22,10 @@ import type { CertificateBody } from "@psilink/core";
 // `psilink exchange` REFUSES. Driven end to end, a diverging run cannot leave
 // both parties holding a verifiable receipt on either handshake role: the
 // partner rejects this party's certificate at the swap, which runs only after
-// the payloads have crossed, and ends with no result, no exchange record, and no
-// receipt. This side ends the same way when it is the initiator, and when it is
-// the responder it exits zero over a receipt whose own slot no verifier accepts.
+// the payloads have crossed, and ends with no result and no receipt, keeping
+// only the exchange record of the disclosure already made. This side ends the
+// same way when it is the initiator, and when it is the responder it exits zero
+// over a receipt whose own slot no verifier accepts.
 // Which of the two an operator gets is decided by which party reaches the
 // rendezvous first, not by anything they configure. Both outcomes are settled
 // while the operator is still configuring, so the run is refused before any

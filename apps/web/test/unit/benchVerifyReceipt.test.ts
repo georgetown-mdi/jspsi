@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  EXCHANGE_RECORD_VERSION,
   SIGNED_RECEIPT_VERSION,
   buildExchangeRecord,
   computeCertificateFingerprint,
@@ -89,6 +90,7 @@ const associationTable: AssociationTable = [
 const RECEIPT_BINDER = "YmluZGVy";
 
 const baseInputs: ExchangeRecordInputs = {
+  outcome: "completed",
   localTerms: LOCAL_TERMS,
   partnerTerms: PARTNER_TERMS,
   recordsExposed: 2,
@@ -169,7 +171,7 @@ describe("parseRecordDocument", () => {
     expect(parsed.kind).toBe("unrecognized-version");
     if (parsed.kind === "unrecognized-version") {
       expect(parsed.message).toContain("does not recognize");
-      expect(parsed.message).toContain("psilink-exchange-record/v5");
+      expect(parsed.message).toContain(EXCHANGE_RECORD_VERSION);
     }
   });
 

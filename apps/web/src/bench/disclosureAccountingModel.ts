@@ -1,6 +1,6 @@
 /**
  * The pure derivation behind a managed exchange's accounting of disclosures: one
- * entry per completed run, each read off that run's self-attested exchange record,
+ * entry per run it filed, each read off that run's self-attested exchange record,
  * plus the CSV a compliance reader is handed. No React, no IndexedDB -- the
  * derivations and the exported bytes are unit-testable in Node.
  *
@@ -37,6 +37,7 @@ import type {
   Algorithm,
   Displayable,
   ExchangeRecord,
+  ExchangeRecordOutcome,
   RecordLinkageRuleSet,
 } from "@psilink/core";
 import type {
@@ -63,7 +64,7 @@ export interface DisclosureFact {
   note?: string;
 }
 
-/** One completed run's disclosure, as the accounting presents it. */
+/** One run's disclosure, as the accounting presents it. */
 export interface DisclosureEntryView {
   /** The run's own instant, verbatim from the record's `createdAt`: the ISO-8601
    * value, not the minute-resolution {@link when} the screen shows and the export's
@@ -102,6 +103,7 @@ export const DISCLOSURE_FACT_LABELS: ReadonlyArray<string> = [
   "Agreement",
   "Purpose of the disclosure",
   "What was disclosed",
+  "How the exchange ended",
   "Columns you sent",
   "Columns you received",
   "Matched on",
@@ -136,6 +138,16 @@ const RULE_SET_LABEL = "Rule set cited";
  * authored, not a field the writer left out. */
 const RULE_SET_ABSENT =
   "Not cited - the agreed terms' rules were authored rather than drawn from a named set";
+
+/** How each recorded `outcome` reads to an operator. A record is written once the
+ * exchange has disclosed, so both values describe a disclosure that happened; what
+ * separates them is whether the run finished. The terminated wording leads with the
+ * disclosure for that reason -- an entry a reader might otherwise take for a run
+ * that did nothing. */
+const OUTCOME_DISCLOSURE: Record<ExchangeRecordOutcome, Displayable> = {
+  completed: displayText`Completed`,
+  "receipt-swap-terminated": displayText`Disclosed, then stopped before a signed receipt was exchanged`,
+};
 
 /** What each `algorithm` disclosed, in plain language: the record's own reading of
  * the field (`psi` revealed matched identifiers, `psi-c` only a count). */
@@ -219,10 +231,10 @@ function ruleSetFact(
 /**
  * The facts of one disclosure, in the fixed order {@link DISCLOSURE_FACT_LABELS}
  * names: to whom, under what authority and for what purpose, what kind of
- * disclosure it was, the categories each way, the basis the match keyed on and the
- * rule set the terms cited it to, the records this party exposed, the result size
- * where it was recorded, and where the result was filed. Each is a field of the
- * run's exchange record.
+ * disclosure it was, how the run that made it ended, the categories each way, the
+ * basis the match keyed on and the rule set the terms cited it to, the records
+ * this party exposed, the result size where it was recorded, and where the result
+ * was filed. Each is a field of the run's exchange record.
  */
 export function disclosureFacts(
   record: ExchangeRecord,
@@ -245,6 +257,7 @@ export function disclosureFacts(
       NOT_RECORDED,
     ),
     fact("What was disclosed", ALGORITHM_DISCLOSURE[governance.algorithm]),
+    fact("How the exchange ended", OUTCOME_DISCLOSURE[record.outcome]),
     listFact(
       "Columns you sent",
       governance.payloadSent.map((column) => categoryLabel(column)),
@@ -342,7 +355,7 @@ function factCell(entry: DisclosureFact): string {
 
 /**
  * The accounting as CSV -- the form a compliance reader is handed: a header row,
- * then one row per completed run in run order (oldest first, as a disclosure log
+ * then one row per filed run in run order (oldest first, as a disclosure log
  * reads), each row the run instant followed by that run's facts. The values are
  * the display forms, so what the file carries is what the screen showed.
  *

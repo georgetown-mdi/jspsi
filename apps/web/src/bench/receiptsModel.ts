@@ -146,12 +146,17 @@ export const PARTNER_FINGERPRINT_PROBLEM =
  * The problem certificate mode reports with no partner fingerprint pinned, in
  * the terms the run measurably behaves in rather than softened ones. Core's
  * signature swap runs inside the exchange, after the payloads have crossed, and
- * an absent pin is a hard refusal there that terminates the run; every local
- * artifact -- the results and the exchange record as much as the receipt -- is
- * written only once the exchange has returned. So a run started this way would
- * put the operator's data in their partner's hands and leave them nothing at
- * all, which is a materially worse outcome than a missing receipt and has to be
- * said in those words.
+ * an absent pin is a hard refusal there that terminates the run; the results and
+ * the receipt are written only once the exchange has returned. So a run started
+ * this way would put the operator's data in their partner's hands and leave them
+ * nothing back but the exchange record of that disclosure, which is a materially
+ * worse outcome than a missing receipt and has to be said in those words.
+ *
+ * The copy places that record rather than implying the console hands it over: the
+ * run writes it into its own folder in the mounted data root, while the download
+ * the run screen offers is gated on a succeeded run (`recordAvailable` in
+ * jobManager), so on a terminated run the file is in the folder and not on the
+ * screen -- and discarding the run removes it with the rest of the folder.
  *
  * Nor would the refusal be symmetric across the two sides: the initiator sends
  * its own `{certificate, signature}` frame BEFORE it verifies the partner's,
@@ -179,12 +184,14 @@ export const NO_PARTNER_PIN_PROBLEM =
   "call, not the same email as the invitation. A run started without it would " +
   "fail late rather than early: it goes all the way to the point where the two " +
   "sides sign -- your data has already gone to your partner by then -- and " +
-  "stops there, with nothing written on this side: no results, no exchange " +
-  "record, and no receipt. Which side sends its signature first is settled when " +
-  "the two sides meet, so on a run where this side sends first, your partner " +
-  "would already have your signed receipt. To exchange before their fingerprint " +
-  "arrives, choose 'No receipt' now and switch to a certificate signature once " +
-  "you hold it.";
+  "stops there, leaving you no results and no receipt. What you are left with " +
+  "is the exchange record of what you had already disclosed, written as " +
+  "record.json with that run's files in the mounted folder rather than offered " +
+  "here for download; discarding the run removes it. Which side sends its " +
+  "signature first is settled when the two sides meet, so on a run where this " +
+  "side sends first, your partner would already have your signed receipt. To " +
+  "exchange before their fingerprint arrives, choose 'No receipt' now and " +
+  "switch to a certificate signature once you hold it.";
 
 /**
  * Why the card withholds the fingerprint request while this exchange states no

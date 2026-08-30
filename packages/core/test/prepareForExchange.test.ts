@@ -794,7 +794,8 @@ describe("prepareForExchange: certificate mode with no partner pin is refused", 
   test("an unpinned certificate-mode block is refused before connecting", () => {
     // The signature swap runs after the payloads have crossed and rejects any
     // certificate presented against an absent pin, so the run would disclose this
-    // party's data and then terminate with nothing written locally. An
+    // party's data and then terminate with no result and no receipt, leaving the
+    // operator only the record of that disclosure. An
     // OperatorConfigError for the reason the unimplemented-mode sibling is one:
     // the signing block is only ever this party's own config (and the CLI still
     // exits 64 through the base class).

@@ -109,6 +109,9 @@ export interface DisclosureRecordOverrides {
    * record that cites none is built from; the standing citation is what a suite
    * asks for by passing `true`, and an object plants the names it needs. */
   linkageRuleSet?: LinkageTerms["linkageRuleSet"] | true;
+  /** How far the run got. Defaults to the completed run every other fixture
+   * field describes; a suite asks for the record a terminated swap leaves. */
+  outcome?: ExchangeRecord["outcome"];
 }
 
 /** The rule set the citing fixture terms name: a field set and a key set, each
@@ -156,6 +159,7 @@ export async function disclosureRecord(
   };
   const built = await buildExchangeRecord({
     localTerms,
+    outcome: overrides.outcome ?? "completed",
     partnerTerms: partnerTermsFor(localTerms, overrides.partnerIdentity),
     recordsExposed: overrides.recordsExposed ?? 2,
     ...(overrides.resultSize === null
