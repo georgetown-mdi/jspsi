@@ -23,10 +23,12 @@ COPY lib lib
 # each registry package's integrity hash) and fails if a manifest disagrees with
 # it, so an image rebuild cannot drift from the tree CI tested. apps/web is in
 # scope with its dev deps because `vite build` (and the nitro plugin) are
-# devDependencies -- the runtime stage ships the self-contained .output/, not
-# these, so the dev deps never reach the shipped image. The root .npmrc copied in
-# above puts the install-script policy in force here as it is locally and in CI;
-# what that does and does not reach is in docs/spec/DEPENDENCY_PINS.md.
+# devDependencies; what keeps those out of the shipped image is the production
+# rebuild at the end of this stage rather than anything about this scope, the
+# runtime stage taking apps/web's self-contained .output/ and none of this tree.
+# The root .npmrc copied in above puts the install-script policy in force here as
+# it is locally and in CI; what that does and does not reach is in
+# docs/spec/DEPENDENCY_PINS.md.
 RUN --mount=type=cache,target=/root/.npm \
   npm ci -w packages/core -w packages/peerjs-broker -w apps/cli -w apps/web
 
@@ -81,10 +83,26 @@ RUN set -eu; \
   export VITE_PSILINK_VERSION; \
   npm run build -w apps/web
 
-# Rebuild node_modules production-only (npm ci empties it first): the identical
-# lockfile-exact resolution minus devDependencies, ready to ship as-is.
+# The tree the runtime stage ships: the same lockfile-exact resolution as above
+# with the build's own dependencies left out. Both halves of the command are
+# load-bearing, and each answers a measurement rather than an expectation -- the
+# numbers, and the npm the measurement ran on, are in
+# docs/spec/CONTAINER_IMAGES.md.
+#
+# The wipe is explicit because `npm ci` empties node_modules only when it is
+# unscoped. Under the -w scoping here it reifies in place instead, keeping every
+# package the install above put there that this scope does not name, dev
+# dependencies of this repository's own root included.
+#
+# --omit=optional rides beside --omit=dev because npm drops a package flagged
+# `dev` outright and keeps one flagged `devOptional`: optional peer edges reach
+# apps/web's vite -- with rolldown and esbuild under it -- so omitting dev alone
+# still installs the web build toolchain. The only optional edge inside this
+# scope is ssh2's `cpu-features` native addon, which ssh2 declares optional and
+# completes a handshake without.
 RUN --mount=type=cache,target=/root/.npm \
-  npm ci --omit=dev -w packages/core -w apps/cli
+  rm -rf node_modules \
+  && npm ci --omit=dev --omit=optional -w packages/core -w apps/cli
 
 FROM node:26-alpine@sha256:aadf416b2cdce311a8811ba3f0608a61b77dbf997500e2eafe781b51f6a0b019
 
@@ -116,12 +134,12 @@ RUN apk add --no-cache samba-client
 RUN chmod g-s /usr/sbin/unix_chkpwd
 
 WORKDIR /app
+# npm links the workspaces its install names, so the tree copied here carries
+# links to packages/core and apps/cli alone and both link targets are copied
+# below. A link to a workspace this image does not ship would dangle, and
+# image_smoke.yaml's symlink containment measurement refuses a dangling link
+# under /app; see docs/spec/CONTAINER_IMAGES.md.
 COPY --from=builder /build/node_modules node_modules
-# npm links every workspace declared in the root manifest into node_modules,
-# including packages/peerjs-broker, but this image never ships the broker's
-# source, so the copied link dangles and the containment gate below refuses
-# it. Un-forced so the build fails loudly if npm ever stops creating the link.
-RUN rm /app/node_modules/@psilink/peerjs-broker
 COPY --from=builder /build/packages/core/package.json packages/core/
 COPY --from=builder /build/packages/core/dist packages/core/dist/
 COPY --from=builder /build/apps/cli/package.json apps/cli/
