@@ -401,6 +401,39 @@ describe("the consent summary's date-collapse marker", () => {
     ).toEqual(["date of birth (any date)"]);
   });
 
+  test("a step the measurement cannot run shows the collapse, not the milder word", () => {
+    // A function name core does not recognize sits between the parse_date and the
+    // slice, so the measurement cannot compile the run. The header resolves that
+    // unknown breadth UP to "any date" rather than falling to the "pattern
+    // replacement"-style milder word the trailing step would otherwise name -- an
+    // inviter must not drop the marker by naming one step this build cannot run.
+    expect(
+      headerFor([
+        parseDate(LITERAL_REGION_FORMAT),
+        { function: "no_such_function" },
+        slice(1, 4),
+      ]),
+    ).toEqual(["date of birth (any date)"]);
+  });
+
+  test("a probe inflated past the value ceiling shows any date", () => {
+    // The round-2 ceiling evasion: a replace_regex expands the rendered probe past
+    // the per-value ceiling, so the measured run returns before it can read the
+    // window. Were the header to fall to "pattern replacement" there, an inviter
+    // could inflate one probe while every real date still collapsed onto one
+    // constant. The marker resolves up to "any date" instead.
+    expect(
+      headerFor([
+        parseDate(LITERAL_REGION_FORMAT),
+        {
+          function: "replace_regex",
+          params: { pattern: "ACME", replacement: "X".repeat(5000) },
+        },
+        slice(1, 4),
+      ]),
+    ).toEqual(["date of birth (any date)"]);
+  });
+
   test("naming a probe's rendered value does not withdraw the collapse", () => {
     // The probe dates ship in public source, so an inviter can author one step
     // naming exactly what one of them renders to. The header still names the

@@ -1790,19 +1790,61 @@ describe("substringCollapsesParsedDateToConstant", () => {
     }
   });
 
-  test("a step this build cannot run declines the verdict", () => {
+  test("a step this build cannot run takes the wider word, not the milder one", () => {
     // The function name is partner free text, so a name core does not recognize
-    // reaches the predicate. It compiles nothing and claims nothing rather than
-    // throwing on the consent surface.
-    const steps = [
+    // reaches the predicate. The measurement cannot compile it, so the window's
+    // breadth is unknown -- and on a consent surface an unknown breadth resolves
+    // UP to the collapse word, never down to the truncation the last link looks
+    // like. Were it to decline the verdict, an inviter would drop the marker from
+    // "any date" to "partial" by naming one step core cannot run.
+    const unknownInRun = [
       parseDate("ACME-YYYYMMDD"),
       { function: "no_such_function" },
       slice(1, 4),
     ];
-    expect(() => runPipeline(DATES[0], steps)).toThrow(
+    expect(() => runPipeline(DATES[0], unknownInRun)).toThrow(
       UnknownStandardizationFunctionError,
     );
-    expect(anyVerdict(steps)).toBe(false);
+    expect(anyVerdict(unknownInRun)).toBe(true);
+    // The same, with the unrecognized step in the TAIL after a run that already
+    // collapsed to one constant: the collapse stands rather than falling to the
+    // milder word because the tail could not be measured.
+    const unknownInTail = [
+      parseDate("ACME-YYYYMMDD"),
+      slice(1, 4),
+      { function: "no_such_function" },
+    ];
+    expect(verdictAt(unknownInTail, 1)).toBe(true);
+  });
+
+  test("a probe inflated past the value ceiling takes the wider word", () => {
+    // The round-2 evasion: a replace_regex expands a probe date past the per-value
+    // ceiling, so the measured run returns "unread" before it can read the window.
+    // The consent marker must resolve that up to the collapse word rather than to
+    // the reassuring "pattern replacement" the step would otherwise name, since an
+    // inviter could inflate one probe while every real date still collapses onto
+    // one constant. 5000 fill characters carry the rendered probe well over the
+    // 4096-character ceiling.
+    const inflated = [
+      parseDate("ACME-YYYYMMDD"),
+      {
+        function: "replace_regex",
+        params: { pattern: "ACME", replacement: "X".repeat(5000) },
+      },
+      slice(1, 4),
+    ];
+    // Every date really does collapse onto one constant here -- the slice reads
+    // fill the replacement supplied -- which is the breadth the marker must name.
+    // runPipeline does not enforce the ceiling (the exchange path does, and would
+    // refuse the over-length intermediate), so the collapse is visible directly.
+    for (const date of DATES) expect(runPipeline(date, inflated)).toBe("XXXX");
+    expect(anyVerdict(inflated)).toBe(true);
+    // A run measured clean still keeps its true milder word: a plain slice of the
+    // date itself reads distinct values across the probes, so the verdict declines
+    // the collapse and the header shows "partial" (see the differential above).
+    const cleanPartial = [parseDate("YYYYMMDD"), slice(1, 4)];
+    expect(collapsedValue(cleanPartial)).toBeUndefined();
+    expect(anyVerdict(cleanPartial)).toBe(false);
   });
 });
 

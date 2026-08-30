@@ -1207,8 +1207,14 @@ const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
  * naming a probe: the probe dates ship in public source, so a dropped probe
  * leaves the verdict to the survivors, and a run that drops them all takes the
  * collapse word unless every one of its steps reads the layout rather than the
- * value, which makes it the dead pipeline the tier above suppresses. Every half
- * is held by tests driving the shipped pipeline rather than by this note.
+ * value, which makes it the dead pipeline the tier above suppresses. Nor can the
+ * inviter buy it by making a probe UNMEASURABLE: a step that inflates a probe past
+ * the per-value ceiling, or a function name this build cannot compile or run,
+ * takes the collapse word rather than the milder one -- core resolves a
+ * can't-measure reading upward, so a `replace_regex` crafted to blow one probe
+ * over the ceiling while every real date still collapses shows "any date", not
+ * "pattern replacement". Every half is held by tests driving the shipped pipeline
+ * rather than by this note.
  *
  * Every limit here sends the reader to a per-step detail row -- an `outputFormat`
  * above all, the format whose literal region a collapsing window reads. Those
