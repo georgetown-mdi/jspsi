@@ -76,6 +76,13 @@ describe("the reasons around them", () => {
     expect(RUN_IN_FLIGHT_HANDOFF_REASON).toMatch(/schedule/);
   });
 
+  test("the run-in-flight reason invites the retry rather than only asking to wait", () => {
+    // The confirm control stays enabled through this refusal (the click-time
+    // recheck is the control, not the disabled prop), so the copy must say the
+    // retry is the way out rather than reading as a dead end.
+    expect(RUN_IN_FLIGHT_HANDOFF_REASON).toMatch(/hand off again/i);
+  });
+
   test("the refused import names the exchange the operator knows", () => {
     expect(handedOffImportReason("command-line", "Riverbend")).toContain(
       '"Riverbend"',

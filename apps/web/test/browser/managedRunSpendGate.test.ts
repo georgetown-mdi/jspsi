@@ -152,6 +152,10 @@ const supersededNotice = () =>
 const recordGoneNotice = () =>
   page.getByText(RECORD_GONE_HANDOFF_TITLE, { exact: true });
 
+// The dismiss label the record-gone refusal takes on both surfaces: neutral,
+// because there is no live copy left for "keep it here" to describe.
+const closeButton = () => page.getByRole("button", { name: "Close" });
+
 // The in-flight reading behind the gate is a poll of the record's run lock, so an
 // assertion on a state a lock change produces waits out one poll interval rather
 // than the locator default.
@@ -440,6 +444,12 @@ describe("a hand-off whose record is gone", () => {
         .toBeInTheDocument();
       await expect.element(supersededNotice()).not.toBeInTheDocument();
       await expect.element(migrationConfirm()).toBeDisabled();
+      // The dismiss label is neutral rather than "Keep it on this device": there
+      // is no live copy left here for that label to describe.
+      await expect.element(closeButton()).toBeInTheDocument();
+      await expect
+        .element(page.getByRole("button", { name: "Keep it on this device" }))
+        .not.toBeInTheDocument();
       expect((await getManagedLocalState(created.id))?.spent).toBeUndefined();
     } finally {
       downloads.restore();
@@ -461,6 +471,12 @@ describe("a hand-off whose record is gone", () => {
 
       await expect.element(recordGoneNotice()).toBeInTheDocument();
       await expect.element(cronConfirm()).toBeDisabled();
+      // The dismiss label is neutral rather than "Keep it in this browser": there
+      // is no live copy left here for that label to describe.
+      await expect.element(closeButton()).toBeInTheDocument();
+      await expect
+        .element(page.getByRole("button", { name: "Keep it in this browser" }))
+        .not.toBeInTheDocument();
       await expect
         .element(page.getByText("Handed off to the command line"))
         .not.toBeInTheDocument();
@@ -604,6 +620,10 @@ describe("a confirmation the run lock refuses at the write", () => {
       await expect
         .element(page.getByText("Handed off to the command line"))
         .not.toBeInTheDocument();
+      // The confirm control stays enabled through its own run-in-flight refusal --
+      // the poll never saw this run, so nothing in the surface's own state disables
+      // it -- and the wait copy above is what tells the operator to retry it.
+      await expect.element(cronConfirm()).toBeEnabled();
 
       // The files are still this exchange's -- this run rotated nothing -- so the
       // confirmation the refusal left intact hands them off once the lock is free.
@@ -652,6 +672,10 @@ describe("a confirmation the run lock refuses at the write", () => {
       await expect
         .element(page.getByText("Handed off to another device"))
         .not.toBeInTheDocument();
+      // The confirm control stays enabled through its own run-in-flight refusal --
+      // the poll never saw this run, so nothing in the surface's own state disables
+      // it -- and the wait copy above is what tells the operator to retry it.
+      await expect.element(migrationConfirm()).toBeEnabled();
 
       release();
       release = undefined;

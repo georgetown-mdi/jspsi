@@ -392,7 +392,9 @@ export function ManagedCronExportPanel({
                       setRefusal(undefined);
                     }}
                   >
-                    Keep it in this browser
+                    {refusal === "record-gone"
+                      ? "Close"
+                      : "Keep it in this browser"}
                   </Button>
                 </p>
               </>

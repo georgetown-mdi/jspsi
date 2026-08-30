@@ -776,7 +776,9 @@ export function ManagedRunSurface({ id }: { id: string }) {
                   setMigrationRefusal(undefined);
                 }}
               >
-                Keep it on this device
+                {migrationRefusal === "record-gone"
+                  ? "Close"
+                  : "Keep it on this device"}
               </Button>
             </p>
           </>

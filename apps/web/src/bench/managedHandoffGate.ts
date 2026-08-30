@@ -49,8 +49,8 @@ export const RUN_IN_FLIGHT_HANDOFF_TITLE = "Wait for this run to finish";
 export const RUN_IN_FLIGHT_HANDOFF_REASON =
   "This exchange is running right now -- in this browser, in another tab, or on " +
   "its schedule. A run changes its shared secret as soon as it connects to your " +
-  "partner, so a copy handed over now can already be out of date. Hand this " +
-  "exchange over once the run finishes.";
+  "partner, so a copy handed over now can already be out of date. When it " +
+  "finishes, choose hand off again.";
 
 /** The heading the superseded reason is shown under, at both hand-offs. It names
  * the state rather than the remedy, which differs by hand-off. */
