@@ -315,11 +315,12 @@ export function validateAdvancedInvite(
 
   // Canonical-encode dry run: the terms are hashed into the cross-party agreement
   // in this byte form, and a value outside the reproducible domain throws here
-  // rather than desyncing two parties. Run up front, with the two checks above,
-  // because every later message that could occupy the key list describes a fault
-  // the operator would fix without clearing this one -- and the schema mapping in
-  // particular reports a non-finite transform param as "Enable at least one
-  // linkage key." on a draft whose keys are all enabled.
+  // rather than desyncing two parties. Run up front so this message wins over the
+  // schema mapping and the linkage grading -- the schema mapping reports a
+  // non-finite transform param as "Enable at least one linkage key." on a draft
+  // whose keys are all enabled. The later shape gates (fan-out, deduplicate
+  // strategy, count-only) still overwrite errors.keys unconditionally; that
+  // changes only which message shows, never whether generation is refused.
   //
   // Where the offending value sits is asked of the encoder too, one transform at a
   // time, rather than read off the error: its message quotes the value and a path

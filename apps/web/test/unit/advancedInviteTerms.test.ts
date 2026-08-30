@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  canonicalString,
   getDefaultLinkageTerms,
   inferMetadata,
   safeParseLinkageTerms,
@@ -156,10 +157,10 @@ describe("no draft edit builds terms carrying an explicitly-undefined property",
       imported: draftFromTerms(parsed.data, seed),
     };
 
-    for (const [label, candidate] of Object.entries(edited))
-      expect([
-        label,
-        explicitUndefinedPaths(buildAdvancedTerms(candidate)),
-      ]).toEqual([label, []]);
+    for (const [label, candidate] of Object.entries(edited)) {
+      const terms = buildAdvancedTerms(candidate);
+      expect([label, explicitUndefinedPaths(terms)]).toEqual([label, []]);
+      expect(() => canonicalString(terms), label).not.toThrow();
+    }
   });
 });
