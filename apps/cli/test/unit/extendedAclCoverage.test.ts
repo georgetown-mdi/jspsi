@@ -19,6 +19,14 @@ import type { CommandResult } from "../../src/doctor/runner";
 import type { SmbProbeInput } from "../../src/doctor/smbEnvironment";
 import { snapshotDiagnosticSinkAndLevel } from "../loggingTestSupport";
 
+// The two hosts nothing can stand in for: on macOS the strip really runs and
+// really succeeds, and on a POSIX host that is not macOS it is never attempted
+// at all. Every other case below reaches its branch through `withPlatform`.
+const macOnly = test.skipIf(process.platform !== "darwin");
+const plainPosixOnly = test.skipIf(
+  process.platform === "darwin" || process.platform === "win32",
+);
+
 // The two owner-only artifacts written outside `fileUtils`' shared writers: the
 // `--log-file` descriptor, opened append and stripped in place, and the doctor's
 // smbclient credentials file, routed through `writeFileOwnerOnly`. The writers'
@@ -216,52 +224,58 @@ function probeDeps(onAuthFile?: (authFile: string) => void): ProbeDeps {
 }
 
 describe("the log file's extended ACL", () => {
-  test("a log file created under an inheriting directory carries no ACE", () => {
-    if (process.platform !== "darwin") return;
-    const aclDir = makeAclInheritingDir("log-dir");
+  macOnly(
+    "a log file created under an inheriting directory carries no ACE",
+    () => {
+      const aclDir = makeAclInheritingDir("log-dir");
 
-    // Pin the gap the strip closes: a plain 0600 create in this directory
-    // inherits the ACE, so the assertion below is about the strip and not about
-    // a directory that failed to hand its ACE down.
-    const control = path.join(aclDir, "control.log");
-    fs.closeSync(fs.openSync(control, "a", 0o600));
-    expect(readExtendedAcl(control)).not.toEqual([]);
+      // Pin the gap the strip closes: a plain 0600 create in this directory
+      // inherits the ACE, so the assertion below is about the strip and not about
+      // a directory that failed to hand its ACE down.
+      const control = path.join(aclDir, "control.log");
+      fs.closeSync(fs.openSync(control, "a", 0o600));
+      expect(readExtendedAcl(control)).not.toEqual([]);
 
-    const logPath = path.join(aclDir, "run.log");
-    const sink = configureLogFile(logPath);
-    logLibrary.setDefaultLevel(logLibrary.levels.INFO);
-    getLogger("acl-sites-created").info("partner identity line");
-    sink.close();
+      const logPath = path.join(aclDir, "run.log");
+      const sink = configureLogFile(logPath);
+      logLibrary.setDefaultLevel(logLibrary.levels.INFO);
+      getLogger("acl-sites-created").info("partner identity line");
+      sink.close();
 
-    expect(readExtendedAcl(logPath)).toEqual([]);
-    expect(fs.statSync(logPath).mode & 0o777).toBe(0o600);
-    expect(fs.readFileSync(logPath, "utf8")).toContain("partner identity line");
-  });
+      expect(readExtendedAcl(logPath)).toEqual([]);
+      expect(fs.statSync(logPath).mode & 0o777).toBe(0o600);
+      expect(fs.readFileSync(logPath, "utf8")).toContain(
+        "partner identity line",
+      );
+    },
+  );
 
-  test("an ACE already on an existing log file is cleared before a line is appended", () => {
-    // The log is opened in place rather than renamed over from a fresh inode, so
-    // an ACE sitting on the file the operator named is the case the strip has to
-    // reach -- and the run is about to append partner identity to it.
-    if (process.platform !== "darwin") return;
-    const logPath = path.join(dir, "existing.log");
-    fs.writeFileSync(logPath, "PRE-EXISTING LINE\n", { mode: 0o600 });
-    childProcess.execFileSync(
-      "/bin/chmod",
-      ["+a", "everyone allow read", logPath],
-      { stdio: "ignore" },
-    );
-    expect(readExtendedAcl(logPath)).not.toEqual([]);
+  macOnly(
+    "an ACE already on an existing log file is cleared before a line is appended",
+    () => {
+      // The log is opened in place rather than renamed over from a fresh inode, so
+      // an ACE sitting on the file the operator named is the case the strip has to
+      // reach -- and the run is about to append partner identity to it.
+      const logPath = path.join(dir, "existing.log");
+      fs.writeFileSync(logPath, "PRE-EXISTING LINE\n", { mode: 0o600 });
+      childProcess.execFileSync(
+        "/bin/chmod",
+        ["+a", "everyone allow read", logPath],
+        { stdio: "ignore" },
+      );
+      expect(readExtendedAcl(logPath)).not.toEqual([]);
 
-    const sink = configureLogFile(logPath);
-    logLibrary.setDefaultLevel(logLibrary.levels.INFO);
-    getLogger("acl-sites-existing").info("appended line");
-    sink.close();
+      const sink = configureLogFile(logPath);
+      logLibrary.setDefaultLevel(logLibrary.levels.INFO);
+      getLogger("acl-sites-existing").info("appended line");
+      sink.close();
 
-    expect(readExtendedAcl(logPath)).toEqual([]);
-    const contents = fs.readFileSync(logPath, "utf8");
-    expect(contents).toContain("PRE-EXISTING LINE");
-    expect(contents).toContain("appended line");
-  });
+      expect(readExtendedAcl(logPath)).toEqual([]);
+      const contents = fs.readFileSync(logPath, "utf8");
+      expect(contents).toContain("PRE-EXISTING LINE");
+      expect(contents).toContain("appended line");
+    },
+  );
 
   test("the strip follows a symlink at the log path, as the open does", () => {
     // No -h: the path is an operator-supplied flag value the open resolves, so
@@ -348,12 +362,11 @@ describe("the log file's extended ACL", () => {
     expect(closeSpy).toHaveBeenCalledWith(openedFd);
   });
 
-  test("no strip is attempted on the host's real platform", () => {
+  plainPosixOnly("no strip is attempted on the host's real platform", () => {
     // The gate is what separates the refusals above from an ordinary run: the
     // same call on the same host, differing only in what process.platform
     // reports. On Linux -- the production/Docker target -- the log file opens
     // and logging proceeds.
-    if (process.platform === "darwin" || process.platform === "win32") return;
     const commands = recordAclStripCommands();
     const logPath = path.join(dir, "linux.log");
 
@@ -368,39 +381,41 @@ describe("the log file's extended ACL", () => {
 });
 
 describe("the doctor credentials file's extended ACL", () => {
-  test("the credentials file carries no ACE under an inheriting TMPDIR", async () => {
-    // The credentials directory is `mkdtemp`'d under the operator's TMPDIR, so
-    // an inheritable ACE there reaches the password file through it.
-    if (process.platform !== "darwin") return;
-    const tmpRoot = makeAclInheritingDir("doctor-tmp");
-    const previousTmpdir = process.env.TMPDIR;
-    process.env.TMPDIR = tmpRoot;
-    let acl: string[] | undefined;
-    let controlAcl: string[] | undefined;
-    let mode: number | undefined;
-    try {
-      await runProbe(
-        INPUT,
-        probeDeps((authFile) => {
-          if (acl !== undefined) return;
-          // A plain create beside it pins that the directory really does hand
-          // its ACE down, so the assertion below is about the strip.
-          const control = path.join(path.dirname(authFile), "control");
-          fs.writeFileSync(control, "x", { mode: 0o600 });
-          controlAcl = readExtendedAcl(control);
-          acl = readExtendedAcl(authFile);
-          mode = fs.statSync(authFile).mode & 0o777;
-        }),
-      );
-    } finally {
-      if (previousTmpdir === undefined) delete process.env.TMPDIR;
-      else process.env.TMPDIR = previousTmpdir;
-    }
+  macOnly(
+    "the credentials file carries no ACE under an inheriting TMPDIR",
+    async () => {
+      // The credentials directory is `mkdtemp`'d under the operator's TMPDIR, so
+      // an inheritable ACE there reaches the password file through it.
+      const tmpRoot = makeAclInheritingDir("doctor-tmp");
+      const previousTmpdir = process.env.TMPDIR;
+      process.env.TMPDIR = tmpRoot;
+      let acl: string[] | undefined;
+      let controlAcl: string[] | undefined;
+      let mode: number | undefined;
+      try {
+        await runProbe(
+          INPUT,
+          probeDeps((authFile) => {
+            if (acl !== undefined) return;
+            // A plain create beside it pins that the directory really does hand
+            // its ACE down, so the assertion below is about the strip.
+            const control = path.join(path.dirname(authFile), "control");
+            fs.writeFileSync(control, "x", { mode: 0o600 });
+            controlAcl = readExtendedAcl(control);
+            acl = readExtendedAcl(authFile);
+            mode = fs.statSync(authFile).mode & 0o777;
+          }),
+        );
+      } finally {
+        if (previousTmpdir === undefined) delete process.env.TMPDIR;
+        else process.env.TMPDIR = previousTmpdir;
+      }
 
-    expect(controlAcl).not.toEqual([]);
-    expect(acl).toEqual([]);
-    expect(mode).toBe(0o600);
-  });
+      expect(controlAcl).not.toEqual([]);
+      expect(acl).toEqual([]);
+      expect(mode).toBe(0o600);
+    },
+  );
 
   test("the password goes through the owner-only writer's temp path and strip", async () => {
     // The credentials file is written through `writeFileOwnerOnly`, so the strip

@@ -450,7 +450,7 @@ function readExtendedAcl(filePath: string): string[] {
     .filter((line) => /^\d+:\s/.test(line));
 }
 
-describe("macOS extended ACL", () => {
+describe.skipIf(process.platform !== "darwin")("macOS extended ACL", () => {
   // A directory whose inheritable `everyone allow read` ACE every file created
   // inside it picks up -- the configuration that leaves a 0600 artifact
   // readable by another principal on macOS.
@@ -466,7 +466,6 @@ describe("macOS extended ACL", () => {
   }
 
   test("each writer clears an inherited non-owner ACE", async () => {
-    if (process.platform !== "darwin") return;
     const aclDir = makeAclInheritingDir("inheriting");
 
     // Pin the gap the writers close: a plain 0600 write into this directory
@@ -510,7 +509,6 @@ describe("macOS extended ACL", () => {
     // The stream writes the destination in place rather than renaming a fresh
     // temp inode over it, so a foreign ACE left on a pre-existing file is the
     // case the strip has to reach.
-    if (process.platform !== "darwin") return;
     const p = path.join(dir, "stale.csv");
     fs.writeFileSync(p, "stale,data\n");
     childProcess.execFileSync("/bin/chmod", ["+a", "everyone allow read", p], {
@@ -530,7 +528,6 @@ describe("macOS extended ACL", () => {
     // land in the link's target and the ACE that has to go is the target's --
     // the strip acting on the link node instead would report success while the
     // real file stayed readable by the inherited principal.
-    if (process.platform !== "darwin") return;
     const targetDir = makeAclInheritingDir("stream-target");
     const target = path.join(targetDir, "real-result.csv");
     fs.writeFileSync(target, "stale,data\n", { mode: 0o600 });
@@ -580,6 +577,8 @@ function withPlatform<T>(platform: string, body: () => T): T {
 // `O_NOFOLLOW` for the POSIX branch the stub would otherwise force them into.
 const stripFailsHere =
   process.platform !== "darwin" && process.platform !== "win32";
+
+const stripFailureOnly = test.skipIf(!stripFailsHere);
 
 // Either refusal the strip raises, since which one a host produces depends on
 // how its `chmod` fails: GNU `chmod` runs and exits nonzero on `-N`, which is
@@ -649,65 +648,85 @@ function failAclStripWith(failure: unknown): void {
 }
 
 describe("extended-ACL strip failure", () => {
-  test("writeFileOwnerOnly writes nothing and leaves no temp file", () => {
-    if (!stripFailsHere) return;
-    const dest = path.join(dir, "secret");
-    withPlatform("darwin", () => {
-      expect(() => writeFileOwnerOnly(dest, "secret-content")).toThrow(
-        STRIP_REFUSAL,
+  stripFailureOnly(
+    "writeFileOwnerOnly writes nothing and leaves no temp file",
+    () => {
+      const dest = path.join(dir, "secret");
+      withPlatform("darwin", () => {
+        expect(() => writeFileOwnerOnly(dest, "secret-content")).toThrow(
+          STRIP_REFUSAL,
+        );
+      });
+      expect(fs.existsSync(dest)).toBe(false);
+      expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual(
+        [],
       );
-    });
-    expect(fs.existsSync(dest)).toBe(false);
-    expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual([]);
-  });
+    },
+  );
 
-  test("writeFileOwnerOnly leaves an existing destination untouched", () => {
-    if (!stripFailsHere) return;
-    const dest = path.join(dir, "secret");
-    writeFileOwnerOnly(dest, "original");
-    withPlatform("darwin", () => {
-      expect(() => writeFileOwnerOnly(dest, "rotated")).toThrow(STRIP_REFUSAL);
-    });
-    expect(fs.readFileSync(dest, "utf8")).toBe("original");
-    expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual([]);
-  });
+  stripFailureOnly(
+    "writeFileOwnerOnly leaves an existing destination untouched",
+    () => {
+      const dest = path.join(dir, "secret");
+      writeFileOwnerOnly(dest, "original");
+      withPlatform("darwin", () => {
+        expect(() => writeFileOwnerOnly(dest, "rotated")).toThrow(
+          STRIP_REFUSAL,
+        );
+      });
+      expect(fs.readFileSync(dest, "utf8")).toBe("original");
+      expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual(
+        [],
+      );
+    },
+  );
 
-  test("writeFileOwnerOnly with exclusive writes nothing and leaves no temp file", () => {
-    // exclusive's final step is linkSync rather than renameSync (the
-    // signing-identity path), but the strip runs on the temp file before
-    // either commit step, so the failure has to close this out the same way.
-    if (!stripFailsHere) return;
-    const dest = path.join(dir, "identity");
-    withPlatform("darwin", () => {
-      expect(() =>
-        writeFileOwnerOnly(dest, "identity-content", { exclusive: true }),
-      ).toThrow(STRIP_REFUSAL);
-    });
-    expect(fs.existsSync(dest)).toBe(false);
-    expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual([]);
-  });
+  stripFailureOnly(
+    "writeFileOwnerOnly with exclusive writes nothing and leaves no temp file",
+    () => {
+      // exclusive's final step is linkSync rather than renameSync (the
+      // signing-identity path), but the strip runs on the temp file before
+      // either commit step, so the failure has to close this out the same way.
+      const dest = path.join(dir, "identity");
+      withPlatform("darwin", () => {
+        expect(() =>
+          writeFileOwnerOnly(dest, "identity-content", { exclusive: true }),
+        ).toThrow(STRIP_REFUSAL);
+      });
+      expect(fs.existsSync(dest)).toBe(false);
+      expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual(
+        [],
+      );
+    },
+  );
 
-  test("writeFileAtomic writes nothing and leaves no temp file", () => {
-    if (!stripFailsHere) return;
-    const dest = path.join(dir, "cert.json");
-    withPlatform("darwin", () => {
-      expect(() => writeFileAtomic(dest, "x")).toThrow(STRIP_REFUSAL);
-    });
-    expect(fs.existsSync(dest)).toBe(false);
-    expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual([]);
-  });
+  stripFailureOnly(
+    "writeFileAtomic writes nothing and leaves no temp file",
+    () => {
+      const dest = path.join(dir, "cert.json");
+      withPlatform("darwin", () => {
+        expect(() => writeFileAtomic(dest, "x")).toThrow(STRIP_REFUSAL);
+      });
+      expect(fs.existsSync(dest)).toBe(false);
+      expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual(
+        [],
+      );
+    },
+  );
 
-  test("createOwnerOnlyWriteStream refuses before truncating an existing file", () => {
-    if (!stripFailsHere) return;
-    const p = path.join(dir, "result.csv");
-    fs.writeFileSync(p, "original,content\n");
-    withPlatform("darwin", () => {
-      expect(() => createOwnerOnlyWriteStream(p)).toThrow(STRIP_REFUSAL);
-    });
-    // The strip runs before the truncate, so the operator's existing rows
-    // survive a refusal rather than being emptied by a write that never landed.
-    expect(fs.readFileSync(p, "utf8")).toBe("original,content\n");
-  });
+  stripFailureOnly(
+    "createOwnerOnlyWriteStream refuses before truncating an existing file",
+    () => {
+      const p = path.join(dir, "result.csv");
+      fs.writeFileSync(p, "original,content\n");
+      withPlatform("darwin", () => {
+        expect(() => createOwnerOnlyWriteStream(p)).toThrow(STRIP_REFUSAL);
+      });
+      // The strip runs before the truncate, so the operator's existing rows
+      // survive a refusal rather than being emptied by a write that never landed.
+      expect(fs.readFileSync(p, "utf8")).toBe("original,content\n");
+    },
+  );
 
   test("createOwnerOnlyWriteStream leaves a destination it created empty and owner-only", () => {
     // The other half of the case above: the open creates the destination before
@@ -728,24 +747,26 @@ describe("extended-ACL strip failure", () => {
     expect(fs.statSync(p).mode & 0o777).toBe(0o600);
   });
 
-  test("the same writes succeed on the host's real platform", async () => {
-    // The gate is what separates this from the refusals above: the same
-    // writers on the same host, differing only in what process.platform
-    // reports. On Linux -- the production/Docker target -- no strip is
-    // attempted and every writer completes.
-    if (!stripFailsHere) return;
-    const secret = path.join(dir, "secret");
-    writeFileOwnerOnly(secret, "x");
-    expect(fs.readFileSync(secret, "utf8")).toBe("x");
+  stripFailureOnly(
+    "the same writes succeed on the host's real platform",
+    async () => {
+      // The gate is what separates this from the refusals above: the same
+      // writers on the same host, differing only in what process.platform
+      // reports. On Linux -- the production/Docker target -- no strip is
+      // attempted and every writer completes.
+      const secret = path.join(dir, "secret");
+      writeFileOwnerOnly(secret, "x");
+      expect(fs.readFileSync(secret, "utf8")).toBe("x");
 
-    const cert = path.join(dir, "cert.json");
-    writeFileAtomic(cert, "x");
-    expect(fs.readFileSync(cert, "utf8")).toBe("x");
+      const cert = path.join(dir, "cert.json");
+      writeFileAtomic(cert, "x");
+      expect(fs.readFileSync(cert, "utf8")).toBe("x");
 
-    const csv = path.join(dir, "result.csv");
-    await writeAndClose(createOwnerOnlyWriteStream(csv), "a,b\n1,2\n");
-    expect(fs.readFileSync(csv, "utf8")).toBe("a,b\n1,2\n");
-  });
+      const csv = path.join(dir, "result.csv");
+      await writeAndClose(createOwnerOnlyWriteStream(csv), "a,b\n1,2\n");
+      expect(fs.readFileSync(csv, "utf8")).toBe("a,b\n1,2\n");
+    },
+  );
 });
 
 // --- extended-ACL strip: failure reporting -----------------------------------
@@ -1174,9 +1195,8 @@ function isOwnerOnly(filePath: string, owner: string): boolean {
   });
 }
 
-describe("Windows owner-only ACL", () => {
+describe.skipIf(process.platform !== "win32")("Windows owner-only ACL", () => {
   test("each owner-only writer grants Modify to the current user only", async () => {
-    if (process.platform !== "win32") return;
     const owner = currentWindowsUser();
 
     const secret = path.join(dir, "secret");
@@ -1195,7 +1215,6 @@ describe("Windows owner-only ACL", () => {
   });
 
   test("createOwnerOnlyWriteStream overwrite drops a foreign explicit ACE", async () => {
-    if (process.platform !== "win32") return;
     const owner = currentWindowsUser();
     const p = path.join(dir, "result.csv");
 
@@ -1219,7 +1238,6 @@ describe("Windows owner-only ACL", () => {
   });
 
   test("the load-time check warns on a loosened ACL and stays quiet on an owner-only file", () => {
-    if (process.platform !== "win32") return;
     const p = path.join(dir, "secret");
     writeFileOwnerOnly(p, "x");
 
