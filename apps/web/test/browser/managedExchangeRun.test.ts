@@ -25,6 +25,7 @@ import {
 import { ManagedInputError } from "@psi/managedInputGuard";
 import { RotationPersistError } from "@psi/managedRunRotate";
 import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
+import { deriveManagedFailureTier } from "@psi/managedFailureTiers";
 import { getManagedLocalState } from "@psi/managedLocalState";
 
 import type { NewManagedExchange } from "@psi/managedExchangeRecord";
@@ -667,13 +668,15 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     });
   });
 
-  test("a run whose custody reading fails refuses it as this device's storage", async () => {
+  test("a run whose custody reading fails refuses it under its own kind", async () => {
     // The sibling entry a corruption or an app upgrade invalidated, driven
     // through the real validating read: a run that cannot tell whether the copy
     // was handed off does not proceed on the assumption it was not. What it
-    // records is the storage tier -- the entry is unchanged at the next attempt,
-    // so the retryable transport fault would offer a retry, and a scheduled
-    // window would spend its whole attempt budget, on a permanent local problem.
+    // records is the custody-unreadable kind -- the entry is unchanged at the
+    // next attempt, so the retryable transport fault would offer a retry, and a
+    // scheduled window would spend its whole attempt budget, on a permanent local
+    // problem -- and what it must not record is the storage kind, which reports a
+    // rotation this run never reached.
     const created = await createManagedExchange(newExchange());
     await putRawLocalState(created.id, {
       spent: { spentAt: "not an instant" },
@@ -710,8 +713,15 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     expect(stored?.lastRun).toEqual({
       at: new Date(refusedAt).toISOString(),
       outcome: "failed",
-      failureKind: "storage",
+      failureKind: "custody-unreadable",
     });
+    // What the stamp resolves to at the next visit -- the reading an unattended
+    // run's refusal surfaces through, having classified no live error of its own.
+    // The sibling read the tier derivation would take fails on the same entry, so
+    // the derivation is given what a caller that could not read it holds.
+    expect(deriveManagedFailureTier(stored!, undefined, refusedAt)).toBe(
+      "custody-unreadable",
+    );
   });
 
   test("the spent state is read per run, not once per surface", async () => {

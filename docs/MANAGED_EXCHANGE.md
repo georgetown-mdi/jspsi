@@ -709,7 +709,18 @@ that finds this browser's copy spent stops before reading the input file and
 before connecting, so a hand-off confirmed while a run surface stood open, or
 between two attempts at one scheduled window, is not overtaken by the run that
 follows it. There is no override -- the exchange runs where the hand-off took
-it.
+it. An attended run refused that way leaves the surface on the handed-off state
+straight away, naming the hand-off that spent the copy and what it left behind,
+rather than an error the operator has to reload past.
+
+A run that cannot read that state at all refuses on the same terms and says so
+in its own words: this browser could not read the note it keeps beside the
+exchange, so the run stopped before reading the input file and before
+connecting. It is not reported as a rotation this device failed to save, and it
+offers no re-invite. Nothing rotated, so the two parties are not out of step
+and a fresh secret would replace one nothing moved; the note that did not read
+is what has to become readable, and running the exchange again meets the same
+note until it does.
 
 Ahead of that refusal, both hand-offs -- and the downloads that start them --
 are withheld while this tab is running the exchange, and while a run in any

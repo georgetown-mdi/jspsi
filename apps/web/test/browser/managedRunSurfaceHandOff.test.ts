@@ -123,11 +123,13 @@ describe("the hand-off confirm states what does not travel", () => {
 });
 
 describe("a run pressed after the hand-off landed", () => {
-  test("the attended run refuses and says where the exchange runs now", async () => {
+  test("the refusal settles the surface on the spent state, with no reload", async () => {
     // The surface reads the spent state when it loads, and this operator's
     // surface loaded before the hand-off was confirmed in another tab -- so the
     // Run button in front of them is live over a copy that is no longer theirs.
-    // The run path itself is what refuses; the surface only shows what it said.
+    // The run path itself is what refuses; what is pinned here is that the
+    // surface settles into the state that refusal left rather than standing on
+    // its run controls until something reloads it.
     const created = await createManagedExchange(
       newExchange({ inputFileHandle: await inputHandle() }),
     );
@@ -145,16 +147,26 @@ describe("a run pressed after the hand-off landed", () => {
     ).toBe("spent");
     await runButton.click();
 
-    // Matched on the alert's heading exactly: the message under it opens on the
-    // same subject, so a loose match resolves to both.
+    // The state the refusal left, on this render rather than the next load: the
+    // durable spent surface, naming the hand-off that spent the copy and what it
+    // left behind. Matched on the heading exactly, the prose under it opening on
+    // the same subject.
     await expect
       .element(page.getByText("This exchange was handed off", { exact: true }))
       .toBeInTheDocument();
-    // Refused outright: no retry offered on the failure, and nothing that would
-    // take the exchange back from where it was handed to.
     await expect
-      .element(page.getByText(/does not run here any more/))
+      .element(page.getByText(/handed this exchange to the command line/))
       .toBeInTheDocument();
+    // The run this operator started is accounted for beside it: they pressed Run,
+    // and the standing state alone cannot say what became of that run.
+    await expect
+      .element(page.getByText(/nothing left this device/))
+      .toBeInTheDocument();
+    // Nothing here offers the copy again: the run controls are gone with the load
+    // state, and no retry stands in their place.
+    await expect
+      .element(page.getByRole("button", { name: "Run exchange" }))
+      .not.toBeInTheDocument();
     await expect
       .element(page.getByRole("button", { name: "Try again" }))
       .not.toBeInTheDocument();

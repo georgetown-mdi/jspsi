@@ -12,7 +12,8 @@
  *   partner who never arrived. These are unambiguous (no handshake ran), so they
  *   surface as their own plain, non-alarming copy directly from the error.
  * - The RECORDED tiers, derived from the record's own structured bookkeeping (see
- *   {@link deriveManagedFailureTier}): a recorded persist failure, a restore/import
+ *   {@link deriveManagedFailureTier}): a recorded persist failure, a custody entry
+ *   the run could not read, a restore/import
  *   since the last success, a pre-connection disclosure refusal or linkage
  *   shortfall, a transport drop, or -- only when nothing else explains a
  *   failed-closed handshake -- the unexplained
@@ -102,6 +103,7 @@ export interface ManagedRunFailure {
     | "terms-shortfall"
     | "consent"
     | "handed-off"
+    | "custody-unreadable"
     | "already-running"
     | "missed"
     | "storage"
@@ -139,7 +141,13 @@ function expiredFailure(expires: string): ManagedRunFailure {
  * to take it back with: taking a handed-off exchange back is a deliberate act on
  * that exchange's own surface, not something a refused run decides on the
  * operator's behalf. Recovery is `"none"` -- nothing here is retried, and nothing
- * here is re-settled. */
+ * here is re-settled.
+ *
+ * It names no next step on this exchange's own surface, because reaching this state
+ * is what settles the run surface onto the stored spent state
+ * ({@link ./ManagedRunSurface.tsx}) -- which names the hand-off that spent the copy
+ * and the recovery that hand-off actually has. Its copy is what remains true
+ * wherever the state is shown as an alert instead. */
 const HANDED_OFF_FAILURE: ManagedRunFailure = {
   kind: "handed-off",
   title: "This exchange was handed off",
@@ -148,8 +156,29 @@ const HANDED_OFF_FAILURE: ManagedRunFailure = {
     "here any more. This run stopped before reading your file and before " +
     "connecting, and nothing left this device. The exchange runs where you " +
     "handed it over to -- the device you moved it to, or the machine running it " +
-    "from the command line. Open this exchange again to see which hand-off it " +
-    "was and what it left you with.",
+    "from the command line.",
+  recovery: "none",
+};
+
+/** The unreadable-custody state: the run could not read the local entry recording
+ * whether this device's copy was handed off, so it refused before reading the input
+ * file and before connecting rather than rotating on custody it could not
+ * establish. Deliberately not the storage state beside it, whose copy names a
+ * rotation that did not save and whose recovery is re-invite: nothing rotated here,
+ * so there is no desync to recover from and a fresh secret would replace one nothing
+ * moved. Recovery is `"none"` -- the entry that did not read is what has to become
+ * readable, which no affordance on this surface supplies, and the copy says so
+ * rather than offering a retry that meets the same entry. */
+const CUSTODY_UNREADABLE_FAILURE: ManagedRunFailure = {
+  kind: "custody-unreadable",
+  title: "Part of this exchange's stored copy could not be read",
+  message:
+    "This browser could not read the note it keeps beside this exchange - the " +
+    "one recording whether this copy was handed off somewhere else - so the " +
+    "run stopped before reading your file and before connecting. Nothing left " +
+    "this device, nothing here changed, and your partner was not contacted. A " +
+    "run does not go ahead without that note, so running this exchange again " +
+    "stops the same way until this browser can read it.",
   recovery: "none",
 };
 
@@ -252,7 +281,9 @@ const CONSENT_FAILURE: ManagedRunFailure = {
 /** The Tier-1 recorded persist-failure state: the last run rotated the secret but
  * could not save it, which can leave the two parties on different secrets. Plain,
  * specific copy naming re-invite -- no attack checklist (the record's own bookkeeping
- * explains the failure). */
+ * explains the failure). It is the one-sided persist alone: the other local-storage
+ * refusal a run can meet rotates nothing, and reads as
+ * {@link CUSTODY_UNREADABLE_FAILURE}. */
 const STORAGE_FAILURE: ManagedRunFailure = {
   kind: "storage",
   title: "The last run could not be saved",
@@ -352,6 +383,8 @@ function tierFailure(
       return CONSENT_FAILURE;
     case "handed-off":
       return HANDED_OFF_FAILURE;
+    case "custody-unreadable":
+      return CUSTODY_UNREADABLE_FAILURE;
     case "storage":
       return STORAGE_FAILURE;
     case "imported":
@@ -484,7 +517,8 @@ export function managedRunFailureFromRecord(
  * is re-invite (directly, or through the confirmation gate); a consent refusal and a
  * linkage shortfall are not retried either, because the same input settles the same
  * disclosure and falls the same way short of the same keys however many times it
- * runs; an in-progress run elsewhere is not this run's to retry until it
+ * runs; an unreadable custody entry is not retried, because the run reads the same
+ * entry every time; an in-progress run elsewhere is not this run's to retry until it
  * finishes; and a no-show is not retried on the spot, because what it waits on is
  * the partner being at their own machine. */
 export function managedRunRetryable(failure: ManagedRunFailure): boolean {

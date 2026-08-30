@@ -305,9 +305,9 @@ export function remapLapsedRunFailure(
  *   {@link ManagedExchangeSpentError} and
  *   {@link ManagedExchangeCustodyUnreadableError}: recorded best-effort inside the
  *   critical section (the tier {@link managedInputFailureKind} reads off the
- *   rejection, the `storage` tier a failed rotation persist and an unreadable
- *   custody entry share, and the `handed-off` tier a copy an export gave away
- *   records).
+ *   rejection, the `storage` tier a failed rotation persist records, the
+ *   `custody-unreadable` tier an entry the run could not read records, and the
+ *   `handed-off` tier a copy an export gave away records).
  * - A core {@link LinkageTermsUnsatisfiableError} raised BEFORE the data exchange
  *   began: the benign `"terms-shortfall"` tier, stamped here because the refusal
  *   comes out of the pre-connection prepare rather than the input guard, which

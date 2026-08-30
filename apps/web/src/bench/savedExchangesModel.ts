@@ -111,6 +111,8 @@ function tierStatus(tier: ManagedFailureTier, at: string): string {
       // The row already names the hand-off and its date beside this line, so the
       // status says what the run did rather than repeating the state.
       return `Last run stopped: this exchange was handed off (${at})`;
+    case "custody-unreadable":
+      return `Last run stopped before connecting (${at}); part of its stored copy could not be read`;
     case "storage":
       return `Last run could not be saved (${at}); re-invite to reconnect`;
     case "imported":

@@ -6,7 +6,7 @@ import { DisclosureSection } from "@components/DisclosureSection";
 import { triggerBlobDownload } from "@components/blobDownload";
 
 import {
-  ManagedHandoffSupersededError,
+  ManagedHandoffRefusedError,
   dispatchManagedCronExport,
 } from "@psi/managedExchangeExport";
 import {
@@ -72,7 +72,7 @@ const cronExportDeps = {
  *
  * That attestation can arrive long after the download, so the spend re-reads the
  * record and refuses files a run has rotated past, and refuses outright while a run
- * holds the run+rotate lock ({@link ManagedHandoffSupersededError} for both). The
+ * holds the run+rotate lock ({@link ManagedHandoffRefusedError} for both). The
  * panel's own withholding of the download and the confirmation runs off a poll of
  * that lock, so the refusal is rarely the operator's first news of a run; but the
  * refusal is what makes the guarantee, the two being separated by however long the
@@ -151,7 +151,7 @@ export function ManagedCronExportPanel({
         setDispatch(undefined);
         onHandedOff(composed.command);
       } catch (error) {
-        if (error instanceof ManagedHandoffSupersededError)
+        if (error instanceof ManagedHandoffRefusedError)
           setRefusal(error.refusal);
         else setFailed(true);
       } finally {

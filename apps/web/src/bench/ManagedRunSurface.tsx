@@ -13,7 +13,7 @@ import {
   routeConfirmationReply,
 } from "@psi/managedFailureConfirmation";
 import {
-  ManagedHandoffSupersededError,
+  ManagedHandoffRefusedError,
   dispatchManagedMigration,
   exportManagedBackup,
 } from "@psi/managedExchangeExport";
@@ -108,7 +108,9 @@ export function ManagedRunSurface({ id }: { id: string }) {
   // Run affordance, and what runs in its place depends on which export did it).
   // Spent is a load state, not a disabled button: no code path from a spent record
   // reaches the run controls or run(), the structural guard the migration invariant
-  // needs.
+  // needs. A run refused by the hand-off it met inside the run+rotate lock settles
+  // into that same state rather than waiting for the next load, so the surface a
+  // hand-off confirmed elsewhere left behind is the one the operator is looking at.
   const [loadFailure, setLoadFailure] = useState<
     "missing" | "unloadable" | "spent"
   >();
@@ -116,6 +118,10 @@ export function ManagedRunSurface({ id }: { id: string }) {
   // hand-off that wrote it are what the spent surface reads, and a migration's
   // recovery (import the artifact back) is not a command-line hand-off's.
   const [spent, setSpent] = useState<ManagedSpentState>();
+  // Whether the spent state above was reached by a run this surface started and the
+  // hand-off refused, rather than by a load that found it standing: only then does
+  // the spent surface owe the operator an account of that run.
+  const [spentByRefusedRun, setSpentByRefusedRun] = useState(false);
   const [backupMarker, setBackupMarker] = useState<ManagedBackupMarker>();
   // This exchange's accounting of disclosures as its own read classified it, one
   // value rather than an accounting beside flags: an unreadable accounting must
@@ -399,15 +405,29 @@ export function ManagedRunSurface({ id }: { id: string }) {
         // models the getter as a literal, hence the disable).
         // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
         if (controller.signal.aborted) return;
-        setFailure(
-          classifyManagedRunFailure(
-            error,
-            { atLaunch: launched, afterRun: reloaded ?? launched },
-            local,
-            Date.now(),
-            dataExchangeStarted,
-          ),
+        const failed = classifyManagedRunFailure(
+          error,
+          { atLaunch: launched, afterRun: reloaded ?? launched },
+          local,
+          Date.now(),
+          dataExchangeStarted,
         );
+        // A run the hand-off refused settles the surface into the spent state here,
+        // rather than leaving the run controls standing over a copy this device no
+        // longer owns until the operator reloads. It is taken from the CLASSIFIED
+        // state rather than the raw error, so the phase-boundary guard the
+        // classification carries decides it: a refusal that somehow arrived past
+        // the first peer-visible payload is not this benign state and keeps the
+        // generic failure surface. The reload beside it supplies the date and the
+        // hand-off the spent surface names, and a reload that did not answer costs
+        // those and not the state.
+        if (failed.kind === "handed-off") {
+          setSpent(local?.spent);
+          setSpentByRefusedRun(true);
+          setLoadFailure("spent");
+          return;
+        }
+        setFailure(failed);
       } finally {
         if (!controller.signal.aborted) setRunning(false);
         abortRef.current = undefined;
@@ -485,7 +505,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
         setMigrationDispatch(undefined);
         setMigrated(true);
       } catch (error) {
-        if (error instanceof ManagedHandoffSupersededError)
+        if (error instanceof ManagedHandoffRefusedError)
           setMigrationRefusal(error.refusal);
         else setExportFailed(true);
       } finally {
@@ -621,7 +641,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
             <SavedExchangesFoot />
           </>
         ) : loadFailure === "spent" ? (
-          <SpentSurface spent={spent} />
+          <SpentSurface spent={spent} refusedRun={spentByRefusedRun} />
         ) : record === undefined ? (
           <>
             <h1>Loading exchange</h1>
@@ -1226,10 +1246,27 @@ function BackupPanel({
  * exchange runs from those files and they are its backup of record. `spent` is
  * undefined only if the
  * sibling entry vanished between the load and this render, which costs the date, not
- * the state. */
-function SpentSurface({ spent }: { spent: ManagedSpentState | undefined }) {
+ * the state.
+ *
+ * `refusedRun` is set when this surface arrived here from a run the hand-off
+ * refused rather than from a load, and adds that run's own account above the
+ * durable copy: an operator who just pressed Run is owed what became of the run
+ * they started, which the standing state cannot say. */
+function SpentSurface({
+  spent,
+  refusedRun = false,
+}: {
+  spent: ManagedSpentState | undefined;
+  refusedRun?: boolean;
+}) {
   const on =
     spent === undefined ? "" : ` on ${dateLabel(new Date(spent.spentAt))}`;
+  const refused = refusedRun ? (
+    <p className={styles.small}>
+      The run you started stopped before reading your file and before
+      connecting, and nothing left this device.
+    </p>
+  ) : null;
   return spent?.handoff === "command-line" ? (
     <>
       <h1>This exchange was handed off</h1>
@@ -1238,6 +1275,7 @@ function SpentSurface({ spent }: { spent: ManagedSpentState | undefined }) {
         here. It runs from the psilink.yaml and .psilink.key you saved, on the
         machine you saved them to.
       </p>
+      {refused}
       <p className={styles.small}>
         Those two files are this exchange&apos;s backup of record. Keep them
         somewhere only you can read.
@@ -1251,6 +1289,7 @@ function SpentSurface({ spent }: { spent: ManagedSpentState | undefined }) {
         You exported this exchange to take over on another device{on}, so it can
         no longer run here. Import the backup to run it on this device again.
       </p>
+      {refused}
       <SavedExchangesFoot />
     </>
   );

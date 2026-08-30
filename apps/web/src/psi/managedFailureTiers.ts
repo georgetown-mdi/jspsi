@@ -13,8 +13,8 @@
  * at the next visit. The evidence is:
  *
  * - `lastRun.failureKind` -- the structured enum the runner and the critical section
- *   stamp (`auth` \| `transport` \| `storage` \| `input` \| `terms-shortfall` \|
- *   `consent` \| `handed-off` \| `cancelled`);
+ *   stamp (`auth` \| `transport` \| `storage` \| `custody-unreadable` \| `input` \|
+ *   `terms-shortfall` \| `consent` \| `handed-off` \| `cancelled`);
  * - a lapsed `expires` (its own state, detected before any connection; handled by the
  *   pre-connection check, mirrored here for a next-visit read);
  * - an import/restore since the last successful run -- the local `imported` sibling
@@ -67,10 +67,12 @@ import type { ManagedLocalState } from "./managedLocalStateShape";
  *   arriving: an attended run's own wait expiring, or an agreed window passing without
  *   a completed handshake (recovery: the next window's automatic retry, or running the
  *   exchange again once the partner is ready).
- * - `"storage"` -- a failure of this device's own storage the last run recorded: a
- *   rotation that did not persist, or the custody reading the locked window could
- *   not complete before it (recovery: re-invite; a one-sided persist failure may
- *   have desynced the two parties).
+ * - `"custody-unreadable"` -- the last run could not read the local entry recording
+ *   whether this device's copy was handed off, and refused before reading the input
+ *   or connecting (recovery: none here; nothing rotated and nothing desynced, and
+ *   every later run refuses the same way while that entry cannot be read).
+ * - `"storage"` -- a rotation the last run could not persist (recovery: re-invite; a
+ *   one-sided persist failure may have desynced the two parties).
  * - `"imported"` -- a restore-from-backup or migration import since the last
  *   successful run (recovery: re-invite; a restored copy can hold a secret the
  *   partnership has rotated past).
@@ -87,6 +89,7 @@ export type ManagedFailureTier =
   | "terms-shortfall"
   | "consent"
   | "handed-off"
+  | "custody-unreadable"
   | "missed"
   | "storage"
   | "imported"
@@ -153,9 +156,14 @@ export function deriveManagedFailureTier(
   // failure is the single-owner invariant holding rather than anything to recover
   // from here -- and nothing about it is a desync or an attack.
   if (lastRun.failureKind === "handed-off") return "handed-off";
-  // A recorded storage failure on the last run -- a persist that did not land, or
-  // a custody reading that did not complete: a one-sided persist may have desynced
-  // the parties, so the recovery is re-invite -- Tier 1, no attack checklist.
+  // A recorded custody reading that did not complete: the run refused before the
+  // handshake, so nothing rotated and nothing here is a desync signal. Held apart
+  // from the storage tier below, whose copy and re-invite recovery both rest on a
+  // rotation this device failed to save.
+  if (lastRun.failureKind === "custody-unreadable") return "custody-unreadable";
+  // A recorded persist failure on the last run: the rotation did not land, so a
+  // one-sided persist may have desynced the parties and the recovery is re-invite
+  // -- Tier 1, no attack checklist.
   if (lastRun.failureKind === "storage") return "storage";
 
   // A restore since the last success explains a failed-CLOSED handshake benignly: the
