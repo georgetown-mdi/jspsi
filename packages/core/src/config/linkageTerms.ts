@@ -1652,6 +1652,9 @@ export function assertBothSidedDeduplicateImplemented(
   )
     .filter(manyToManyIsImplementedForStrategy)
     .sort();
+  const oneSidedRemedy =
+    "deduplicate to false on one of the two parties to run a many-to-one " +
+    "match.";
   throw new UsageError(
     "the linkage strategy these terms name does not match a many-to-many " +
       "cardinality, which is what both parties setting deduplicate to true " +
@@ -1660,10 +1663,9 @@ export function assertBothSidedDeduplicateImplemented(
       "exchange is refused before matching begins rather than matched to less " +
       "than the terms declare. " +
       (pairing.length > 0
-        ? `Set linkage_strategy to ${pairing.join(" or ")} to run the pair, or `
-        : "") +
-      "set deduplicate to false on one of the two parties to run a " +
-      "many-to-one match.",
+        ? `Set linkage_strategy to ${pairing.join(" or ")} to run the pair, ` +
+          `or set ${oneSidedRemedy}`
+        : `Set ${oneSidedRemedy}`),
   );
 }
 

@@ -81,6 +81,14 @@ test("the agreed deduplicate pair maps to the per-side cardinality label", () =>
   expect(resolveFor(true, true)).toBe("many-to-many");
 });
 
+// The refusal's remedy is assembled from the strategy table, so which clauses it
+// carries varies with that table. Whichever way it comes out, every sentence past
+// the first begins as a sentence: the opening is lowercase by the convention the
+// errors are composed under, and a dropped clause must not leave the sentence
+// behind it starting on a lowercase verb.
+const sentencesAfterTheFirst = (message: string): Array<string> =>
+  message.split(". ").slice(1);
+
 test("the both-sided pair under single-pass is refused, naming the strategy", () => {
   let thrown: unknown;
   try {
@@ -90,6 +98,8 @@ test("the both-sided pair under single-pass is refused, naming the strategy", ()
   }
   expect(thrown).toBeInstanceOf(UsageError);
   const message = (thrown as Error).message;
+  for (const sentence of sentencesAfterTheFirst(message))
+    expect(sentence).toMatch(/^[A-Z]/);
   // What stands in the way is the STRATEGY, not the pair: the message says so,
   // and names the strategy to move to rather than telling the operator the
   // cardinality awaits an implementation.
@@ -195,6 +205,32 @@ test("the run boundary reads the strategy table rather than naming a strategy", 
     }),
   );
   expect(message).toMatch(/Set linkage_strategy to single-pass/);
+  // Restored, so the pair the shipped table admits still resolves.
+  expect(resolveFor(true, true)).toBe("many-to-many");
+});
+
+test("a build where no strategy pairs the cardinality states the remedy left", () => {
+  // Both entries driven the other way, which is the one shape that drops the
+  // strategy clause: what remains is the remedy that needs no strategy, and it
+  // stands as its own sentence rather than trailing the one before it.
+  const message = withManyToManyVerdict("cascade", false, () =>
+    withManyToManyVerdict("single-pass", false, () => {
+      let thrown: unknown;
+      try {
+        resolveFor(true, true);
+      } catch (err) {
+        thrown = err;
+      }
+      expect(thrown).toBeInstanceOf(UsageError);
+      return (thrown as Error).message;
+    }),
+  );
+  expect(message).not.toMatch(/Set linkage_strategy/);
+  expect(message).toMatch(
+    /Set deduplicate to false on one of the two parties to run a many-to-one match\.$/,
+  );
+  for (const sentence of sentencesAfterTheFirst(message))
+    expect(sentence).toMatch(/^[A-Z]/);
   // Restored, so the pair the shipped table admits still resolves.
   expect(resolveFor(true, true)).toBe("many-to-many");
 });
