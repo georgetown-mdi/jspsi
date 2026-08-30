@@ -267,11 +267,18 @@ Each path is recorded on the checklist line naming both shas:
   harmless.
 
 A head moved by a BASE SYNC -- a merge commit whose first parent is the attested
-sha and whose second parent is on origin/staging -- is outside all three paths,
-honestly: the attested-to-head diff is dominated by already-merged staging
-content, so the verifier can never HOLD across one, and a conflict resolution is
-branch-authored change no round has read. Its route is a round, not a mechanical
-path: re-run the branch's standing refutation contract in full at the merge head
+sha and whose second parent is on origin/staging -- is outside all three paths.
+The attested-to-head diff carries the whole merged staging range, so the verifier
+answers for what that range touched rather than for the merge, and a conflict
+resolution is branch-authored change no round has read. What it reports across
+one is measured rather than asserted here:
+`.claude/scripts/verify-nonexecutable-delta.test.mjs` builds real base-sync
+merges and pins each verdict -- a staging range that moved code VIOLATES, so does
+a line a conflict resolution invents over a range that did not, and a range that
+is itself only comments and markdown HOLDS. That last verdict says only that the
+merged range happened to be quiet, so the route does not branch on it: a base
+sync takes a round whatever the verifier reports. Re-run the branch's standing
+refutation contract in full at the merge head
 (`/light-review --role <role> --claims <file> --target <branch>`). The standing
 contract is the union of the claims the branch's role rounds have run -- each
 ledger row records its claims verbatim, so the union survives a lost claims

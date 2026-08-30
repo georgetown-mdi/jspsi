@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   chmodSync,
   mkdirSync,
@@ -898,6 +898,135 @@ describe("against a real git repository", () => {
     expect(byPath(collectVerdicts({ attested, head, git }))).toEqual({
       "src/has space.ts": "comment-only",
       "src/uni-é.ts": "executable-delta",
+    });
+  });
+
+  // The base-sync route in `.claude/commands/assess-review.md` (Step 4) is about
+  // what this verifier reports across a merge whose first parent is the attested
+  // sha and whose second is the staging tip, so these build that merge with real
+  // git rather than reasoning about it. The attested-to-head diff carries the
+  // whole merged staging range, so the verdict follows what that range touched:
+  // the merge is not itself a verdict.
+  describe("across a real base-sync merge", () => {
+    /** A commit's parents, in order: the first parent first. */
+    const parentsOf = (git, sha) =>
+      git(["rev-list", "--parents", "-n", "1", sha]).trim().split(" ").slice(1);
+
+    /**
+     * A repository whose `staging` branch holds one base commit, with `branch`
+     * cut from it carrying one branch-authored commit -- the sha a round
+     * attested. `base` is the file content that commit starts from.
+     */
+    function branchCutFromStaging(base) {
+      const fixture = makeFixture();
+      for (const [path, text] of Object.entries(base))
+        fixture.write(path, text);
+      fixture.commit("Base");
+      fixture.git(["branch", "-m", "staging"]);
+      fixture.git(["switch", "-q", "-c", "branch"]);
+      fixture.write("src/branch.ts", "export const b = 1;\n");
+      return { ...fixture, attested: fixture.commit("Branch work") };
+    }
+
+    it("reports an executable delta when the merged staging range moved code", () => {
+      const { git, write, commit, attested } = branchCutFromStaging({
+        "src/shared.ts": "export const a = 1;\n",
+        "docs/notes.md": "# Notes\n",
+      });
+
+      git(["switch", "-q", "staging"]);
+      write("src/shared.ts", "export const a = 2;\n");
+      write("docs/notes.md", "# Notes\n\nMore prose.\n");
+      const staging = commit("Staging moves on");
+
+      git(["switch", "-q", "branch"]);
+      git([
+        "merge",
+        "-q",
+        "--no-ff",
+        "-m",
+        "Merge staging into branch",
+        "staging",
+      ]);
+      const head = git(["rev-parse", "HEAD"]).trim();
+
+      expect(parentsOf(git, head)).toEqual([attested, staging]);
+      const verdicts = collectVerdicts({ attested, head, git });
+      expect(byPath(verdicts)).toEqual({
+        "src/shared.ts": "executable-delta",
+        "docs/notes.md": "exempt",
+      });
+      expect(summarize(verdicts)).toMatchObject({ holds: false, exitCode: 1 });
+    });
+
+    // A base sync can hold, so nothing may rest on it never holding: what
+    // decides is what the merged range touched, and a staging range that is
+    // itself only comments and markdown leaves the merge head's program
+    // identical to the attested one.
+    it("holds when the merged staging range is comments and markdown only", () => {
+      const { git, write, commit, attested } = branchCutFromStaging({
+        "src/shared.ts": "export const a = 1;\n",
+        "docs/notes.md": "# Notes\n",
+      });
+
+      git(["switch", "-q", "staging"]);
+      write("src/shared.ts", "// why this is one\nexport const a = 1;\n");
+      write("docs/notes.md", "# Notes\n\nRewritten wholesale.\n");
+      const staging = commit("Staging documents itself");
+
+      git(["switch", "-q", "branch"]);
+      git([
+        "merge",
+        "-q",
+        "--no-ff",
+        "-m",
+        "Merge staging into branch",
+        "staging",
+      ]);
+      const head = git(["rev-parse", "HEAD"]).trim();
+
+      expect(parentsOf(git, head)).toEqual([attested, staging]);
+      const verdicts = collectVerdicts({ attested, head, git });
+      expect(byPath(verdicts)).toEqual({
+        "src/shared.ts": "comment-only",
+        "docs/notes.md": "exempt",
+      });
+      expect(summarize(verdicts)).toMatchObject({ holds: true, exitCode: 0 });
+    });
+
+    it("reports the executable line a conflict resolution invents over a quiet range", () => {
+      const fixture = branchCutFromStaging({
+        "src/shared.ts": "// the shared note\nexport const a = 1;\n",
+      });
+      const { git, write, commit } = fixture;
+      write("src/shared.ts", "// the branch's own note\nexport const a = 1;\n");
+      const attested = commit("Reword the note");
+
+      git(["switch", "-q", "staging"]);
+      write("src/shared.ts", "// staging's own note\nexport const a = 1;\n");
+      const staging = commit("Reword it differently");
+
+      git(["switch", "-q", "branch"]);
+      const conflicted = spawnSync(
+        "git",
+        ["merge", "--no-ff", "-m", "Merge staging into branch", "staging"],
+        { cwd: fixture.dir, encoding: "utf8" },
+      );
+      expect(conflicted.status).toBe(1);
+      expect(conflicted.stdout).toMatch(/CONFLICT \(content\)/);
+
+      // Resolving is branch-authored change, and the resolution can carry a line
+      // neither side had. Here the merged range was itself only a comment, and
+      // the two-ref diff still reads the invented line.
+      write("src/shared.ts", "// the merged note\nexport const a = 2;\n");
+      const head = commit("Resolve the conflict");
+
+      expect(parentsOf(git, head)).toEqual([attested, staging]);
+      const verdicts = collectVerdicts({ attested, head, git });
+      expect(byPath(verdicts)).toEqual({
+        "src/shared.ts": "executable-delta",
+      });
+      expect(summarize(verdicts)).toMatchObject({ holds: false, exitCode: 1 });
     });
   });
 });
