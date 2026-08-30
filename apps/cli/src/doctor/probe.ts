@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { MAX_DIRECTORY_ENTRIES } from "../connection/listingGuard";
+import { writeFileOwnerOnly } from "../fileUtils";
 import type { CommandResult, CommandRunner } from "./runner";
 import { nodeCommandRunner } from "./runner";
 import type { SmbProbeInput } from "./smbEnvironment";
@@ -547,7 +548,13 @@ export async function runProbe(
   // The credentials file is the delivery channel for the password: an argv value
   // is readable by every process on the machine, and an environment variable by
   // anything that can read /proc. It is created inside an owner-only directory
-  // and removed on every exit path below.
+  // and removed on every exit path below. The password lands under the same
+  // write construction every other psilink credential takes: the 0600 mode set
+  // on the descriptor before any content, and on macOS the extended ACL cleared
+  // first -- a mkdtemp directory under the operator's TMPDIR hands an
+  // inheritable ACE down to what is created in it. A refused write takes the
+  // whole run with it, below, rather than delivering the password through a file
+  // that could not be secured.
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-doctor-"));
   const authFile = path.join(workDir, "auth");
   const lines = [
@@ -556,7 +563,7 @@ export async function runProbe(
     ...(input.domain === "" ? [] : [`domain=${input.domain}`]),
   ];
   try {
-    fs.writeFileSync(authFile, `${lines.join("\n")}\n`, { mode: 0o600 });
+    writeFileOwnerOnly(authFile, `${lines.join("\n")}\n`);
   } catch (err) {
     fs.rmSync(workDir, { recursive: true, force: true });
     throw err;
