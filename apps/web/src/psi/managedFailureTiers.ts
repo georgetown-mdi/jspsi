@@ -14,7 +14,7 @@
  *
  * - `lastRun.failureKind` -- the structured enum the runner and the critical section
  *   stamp (`auth` \| `transport` \| `storage` \| `input` \| `terms-shortfall` \|
- *   `consent` \| `cancelled`);
+ *   `consent` \| `handed-off` \| `cancelled`);
  * - a lapsed `expires` (its own state, detected before any connection; handled by the
  *   pre-connection check, mirrored here for a next-visit read);
  * - an import/restore since the last successful run -- the local `imported` sibling
@@ -59,12 +59,18 @@ import type { ManagedLocalState } from "./managedLocalStateShape";
  *   what this run would send is not the set the exchange recorded agreeing to send
  *   (recovery: re-confirm the disclosure; never a retry, since the same input refuses
  *   identically at the next window).
+ * - `"handed-off"` -- the last run met a copy an export had handed off and refused
+ *   before reading the input or connecting (recovery: none here; the exchange runs
+ *   wherever the hand-off took it, and every later run on this device refuses the
+ *   same way).
  * - `"missed"` -- the wait for the partner spent its whole budget with nobody
  *   arriving: an attended run's own wait expiring, or an agreed window passing without
  *   a completed handshake (recovery: the next window's automatic retry, or running the
  *   exchange again once the partner is ready).
- * - `"storage"` -- a recorded persist failure on the last run (recovery: re-invite;
- *   a one-sided persist failure may have desynced the two parties).
+ * - `"storage"` -- a failure of this device's own storage the last run recorded: a
+ *   rotation that did not persist, or the custody reading the locked window could
+ *   not complete before it (recovery: re-invite; a one-sided persist failure may
+ *   have desynced the two parties).
  * - `"imported"` -- a restore-from-backup or migration import since the last
  *   successful run (recovery: re-invite; a restored copy can hold a secret the
  *   partnership has rotated past).
@@ -80,6 +86,7 @@ export type ManagedFailureTier =
   | "input"
   | "terms-shortfall"
   | "consent"
+  | "handed-off"
   | "missed"
   | "storage"
   | "imported"
@@ -142,8 +149,13 @@ export function deriveManagedFailureTier(
   // out of the retryable transport bucket -- its remedy is re-confirming what this
   // exchange sends, which no amount of reconnecting supplies.
   if (lastRun.failureKind === "consent") return "consent";
-  // A recorded persist failure on the last run: a one-sided persist may have
-  // desynced the parties, so the recovery is re-invite -- Tier 1, no attack checklist.
+  // A recorded hand-off refusal: the copy this device held was given away, so the
+  // failure is the single-owner invariant holding rather than anything to recover
+  // from here -- and nothing about it is a desync or an attack.
+  if (lastRun.failureKind === "handed-off") return "handed-off";
+  // A recorded storage failure on the last run -- a persist that did not land, or
+  // a custody reading that did not complete: a one-sided persist may have desynced
+  // the parties, so the recovery is re-invite -- Tier 1, no attack checklist.
   if (lastRun.failureKind === "storage") return "storage";
 
   // A restore since the last success explains a failed-CLOSED handshake benignly: the

@@ -141,16 +141,18 @@ describe("dispatchManagedMigration", () => {
     spendIfCurrent: ReturnType<typeof vi.fn>;
     /** The spends the atomic step actually wrote; a refused one writes nothing. */
     spent: Array<string>;
-    /** What the confirm-time step finds in the store; the record itself until a test
-     * moves it, as a rotation or a delete in another context would. */
-    stored: { record: ManagedExchangeRecord | undefined };
+    /** What the confirm-time step finds in the store: the record itself until a test
+     * moves it, as a rotation or a delete in another context would, and whether a
+     * run holds the run+rotate lock the step takes before it reads anything. */
+    stored: { record: ManagedExchangeRecord | undefined; runInFlight: boolean };
   } {
     const order: Array<string> = [];
     const spent: Array<string> = [];
     const downloaded: Array<{ fileName: string; content: string }> = [];
-    const stored: { record: ManagedExchangeRecord | undefined } = {
-      record: rec,
-    };
+    const stored: {
+      record: ManagedExchangeRecord | undefined;
+      runInFlight: boolean;
+    } = { record: rec, runInFlight: false };
     return {
       downloaded,
       order,
@@ -171,16 +173,19 @@ describe("dispatchManagedMigration", () => {
         order.push("download");
         downloaded.push({ fileName, content });
       },
-      // The store's atomic spend, modelled: one step compares the stored secret and
-      // writes the spent state, so a refusal is what leaves nothing written.
+      // The store's spend, modelled: one step excludes a run in flight, compares the
+      // stored secret, and writes the spent state, so a refusal is what leaves
+      // nothing written. The run exclusion comes first because the real one does --
+      // it is the lock the step takes before it opens its transaction.
       spendIfCurrent: vi.fn(
         (_id: string, expectedSharedSecret: string, spentAt: string) => {
           order.push("spendIfCurrent");
+          if (stored.runInFlight)
+            return Promise.resolve<ManagedSpendOutcome>("run-in-flight");
           const current = stored.record;
-          if (
-            current === undefined ||
-            current.sharedSecret !== expectedSharedSecret
-          )
+          if (current === undefined)
+            return Promise.resolve<ManagedSpendOutcome>("gone");
+          if (current.sharedSecret !== expectedSharedSecret)
             return Promise.resolve<ManagedSpendOutcome>("superseded");
           spent.push(spentAt);
           return Promise.resolve<ManagedSpendOutcome>("spent");
@@ -239,20 +244,60 @@ describe("dispatchManagedMigration", () => {
     const dispatch = await dispatchManagedMigration(rec.id, deps);
     deps.stored.record = { ...rec, sharedSecret: generateSharedSecret() };
 
-    await expect(dispatch.confirm(new Date())).rejects.toBeInstanceOf(
-      ManagedHandoffSupersededError,
+    const refusal = await dispatch.confirm(new Date()).then(
+      () => {
+        throw new Error("the confirmation should have been refused");
+      },
+      (reason: unknown) => reason,
+    );
+    expect(refusal).toBeInstanceOf(ManagedHandoffSupersededError);
+    expect((refusal as ManagedHandoffSupersededError).refusal).toBe(
+      "superseded",
     );
     expect(deps.spent).toEqual([]);
   });
 
-  test("confirm refuses when the record is gone", async () => {
+  test("confirm refuses a run in flight as its own refusal", async () => {
+    // The refusal the currency check cannot make: the run holding the lock has
+    // rotated nothing yet, so the stored secret still matches the artifact -- and
+    // a spend taken there would be superseded by that run's own persist. Held
+    // apart from the superseded refusal because it ends when the run does.
+    const rec = record();
+    const deps = migrationDeps(rec);
+    const dispatch = await dispatchManagedMigration(rec.id, deps);
+    deps.stored.runInFlight = true;
+
+    const refusal = await dispatch.confirm(new Date()).then(
+      () => {
+        throw new Error("the confirmation should have been refused");
+      },
+      (reason: unknown) => reason,
+    );
+    expect(refusal).toBeInstanceOf(ManagedHandoffSupersededError);
+    expect((refusal as ManagedHandoffSupersededError).refusal).toBe(
+      "run-in-flight",
+    );
+    expect(deps.spent).toEqual([]);
+  });
+
+  test("confirm refuses a record that is gone as its own refusal", async () => {
+    // Held apart from the superseded refusal because the surfaces answer them
+    // differently: this record cannot be downloaded again, so the copy that names
+    // a fresh download would send the operator after one nothing can produce.
     const rec = record();
     const deps = migrationDeps(rec);
     const dispatch = await dispatchManagedMigration(rec.id, deps);
     deps.stored.record = undefined;
 
-    await expect(dispatch.confirm(new Date())).rejects.toBeInstanceOf(
-      ManagedHandoffSupersededError,
+    const refusal = await dispatch.confirm(new Date()).then(
+      () => {
+        throw new Error("the confirmation should have been refused");
+      },
+      (reason: unknown) => reason,
+    );
+    expect(refusal).toBeInstanceOf(ManagedHandoffSupersededError);
+    expect((refusal as ManagedHandoffSupersededError).refusal).toBe(
+      "record-gone",
     );
     expect(deps.spent).toEqual([]);
   });
@@ -357,9 +402,10 @@ describe("dispatchManagedCronExport", () => {
     spendIfCurrent: ReturnType<typeof vi.fn>;
     /** The spends the atomic step actually wrote; a refused one writes nothing. */
     spent: Array<{ spentAt: string; handoff: ManagedSpentHandoff }>;
-    /** What the confirm-time step finds in the store; the record itself until a test
-     * moves it, as a rotation or a delete in another context would. */
-    stored: { record: ManagedExchangeRecord | undefined };
+    /** What the confirm-time step finds in the store: the record itself until a test
+     * moves it, as a rotation or a delete in another context would, and whether a
+     * run holds the run+rotate lock the step takes before it reads anything. */
+    stored: { record: ManagedExchangeRecord | undefined; runInFlight: boolean };
   } {
     const order: Array<string> = [];
     const spent: Array<{ spentAt: string; handoff: ManagedSpentHandoff }> = [];
@@ -368,9 +414,10 @@ describe("dispatchManagedCronExport", () => {
       content: string;
       mimeType: string;
     }> = [];
-    const stored: { record: ManagedExchangeRecord | undefined } = {
-      record: rec,
-    };
+    const stored: {
+      record: ManagedExchangeRecord | undefined;
+      runInFlight: boolean;
+    } = { record: rec, runInFlight: false };
     return {
       downloaded,
       order,
@@ -386,8 +433,9 @@ describe("dispatchManagedCronExport", () => {
         order.push("download");
         downloaded.push({ fileName, content, mimeType });
       },
-      // The store's atomic spend, modelled as the migration's is: one step compares
-      // the stored secret and writes the spent state under its hand-off.
+      // The store's spend, modelled as the migration's is: one step excludes a run
+      // in flight, compares the stored secret, and writes the spent state under its
+      // hand-off.
       spendIfCurrent: vi.fn(
         (
           _id: string,
@@ -395,11 +443,12 @@ describe("dispatchManagedCronExport", () => {
           spentAt: string,
           handoff: ManagedSpentHandoff,
         ) => {
+          if (stored.runInFlight)
+            return Promise.resolve<ManagedSpendOutcome>("run-in-flight");
           const current = stored.record;
-          if (
-            current === undefined ||
-            current.sharedSecret !== expectedSharedSecret
-          )
+          if (current === undefined)
+            return Promise.resolve<ManagedSpendOutcome>("gone");
+          if (current.sharedSecret !== expectedSharedSecret)
             return Promise.resolve<ManagedSpendOutcome>("superseded");
           spent.push({ spentAt, handoff });
           return Promise.resolve<ManagedSpendOutcome>("spent");
@@ -479,6 +528,45 @@ describe("dispatchManagedCronExport", () => {
 
     await expect(dispatch.confirm(new Date())).rejects.toBeInstanceOf(
       ManagedHandoffSupersededError,
+    );
+    expect(deps.spent).toEqual([]);
+  });
+
+  test("confirm refuses a run in flight as its own refusal", async () => {
+    // The same exclusion the migration's confirm meets: a run of this record holds
+    // the run+rotate lock, so the two files on the operator's disk are handed over
+    // only once it is over.
+    const rec = record();
+    const deps = cronDeps(rec);
+    const dispatch = await dispatchManagedCronExport(rec.id, deps);
+    deps.stored.runInFlight = true;
+
+    const inFlight = await dispatch.confirm(new Date()).then(
+      () => {
+        throw new Error("the confirmation should have been refused");
+      },
+      (reason: unknown) => reason,
+    );
+    expect((inFlight as ManagedHandoffSupersededError).refusal).toBe(
+      "run-in-flight",
+    );
+    expect(deps.spent).toEqual([]);
+  });
+
+  test("confirm refuses a record that is gone as its own refusal", async () => {
+    const rec = record();
+    const deps = cronDeps(rec);
+    const dispatch = await dispatchManagedCronExport(rec.id, deps);
+    deps.stored.record = undefined;
+
+    const refusal = await dispatch.confirm(new Date()).then(
+      () => {
+        throw new Error("the confirmation should have been refused");
+      },
+      (reason: unknown) => reason,
+    );
+    expect((refusal as ManagedHandoffSupersededError).refusal).toBe(
+      "record-gone",
     );
     expect(deps.spent).toEqual([]);
   });

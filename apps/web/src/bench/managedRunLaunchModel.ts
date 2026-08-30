@@ -7,10 +7,10 @@
  *
  * Two layers feed a surface state:
  *
- * - The benign states read from the launch error: a lapsed `expires`, an input
- *   problem, a run already in progress elsewhere, or a partner who never arrived.
- *   These are unambiguous (no handshake ran), so they surface as their own plain,
- *   non-alarming copy directly from the error.
+ * - The benign states read from the launch error: a lapsed `expires`, a copy an
+ *   export handed off, an input problem, a run already in progress elsewhere, or a
+ *   partner who never arrived. These are unambiguous (no handshake ran), so they
+ *   surface as their own plain, non-alarming copy directly from the error.
  * - The RECORDED tiers, derived from the record's own structured bookkeeping (see
  *   {@link deriveManagedFailureTier}): a recorded persist failure, a restore/import
  *   since the last success, a pre-connection disclosure refusal or linkage
@@ -101,6 +101,7 @@ export interface ManagedRunFailure {
     | "input"
     | "terms-shortfall"
     | "consent"
+    | "handed-off"
     | "already-running"
     | "missed"
     | "storage"
@@ -130,6 +131,27 @@ function expiredFailure(expires: string): ManagedRunFailure {
     recovery: "reinvite",
   };
 }
+
+/** The benign hand-off state: an export gave this browser's copy of the exchange
+ * away, so the run refused before reading the input file and before connecting --
+ * the single-owner invariant holding rather than a failure to recover from. The
+ * copy names where the exchange runs instead in general terms and offers nothing
+ * to take it back with: taking a handed-off exchange back is a deliberate act on
+ * that exchange's own surface, not something a refused run decides on the
+ * operator's behalf. Recovery is `"none"` -- nothing here is retried, and nothing
+ * here is re-settled. */
+const HANDED_OFF_FAILURE: ManagedRunFailure = {
+  kind: "handed-off",
+  title: "This exchange was handed off",
+  message:
+    "This browser's copy of this exchange was handed off, so it does not run " +
+    "here any more. This run stopped before reading your file and before " +
+    "connecting, and nothing left this device. The exchange runs where you " +
+    "handed it over to -- the device you moved it to, or the machine running it " +
+    "from the command line. Open this exchange again to see which hand-off it " +
+    "was and what it left you with.",
+  recovery: "none",
+};
 
 /** The benign "already running elsewhere" state: another tab or a scheduled run holds
  * the single-writer lock. Not a failure of this run. */
@@ -328,6 +350,8 @@ function tierFailure(
       return TERMS_SHORTFALL_FAILURE;
     case "consent":
       return CONSENT_FAILURE;
+    case "handed-off":
+      return HANDED_OFF_FAILURE;
     case "storage":
       return STORAGE_FAILURE;
     case "imported":
@@ -429,6 +453,7 @@ export function classifyManagedRunFailure(
   if (benign === "expired" && error instanceof ManagedExchangeExpiredError)
     return expiredFailure(error.expires);
   if (benign === "already-running") return ALREADY_RUNNING_FAILURE;
+  if (benign === "handed-off") return HANDED_OFF_FAILURE;
   if (benign === "input") return INPUT_FAILURE;
   if (benign === "terms-shortfall") return TERMS_SHORTFALL_FAILURE;
   if (benign === "missed") return missedFailure(records.atLaunch, local, now);

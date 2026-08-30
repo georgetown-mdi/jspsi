@@ -261,6 +261,8 @@ const OUTCOME_UNCERTAIN =
  * {@link ../psi/managedExchangeRun.ts}). A failure whose recorded `failureKind` fires
  * at or before the persist provably precedes any data leaving this party:
  *
+ * - `"handed-off"` -- the run+rotate lock's own first act, refusing a copy an
+ *   export handed off before the input guard runs and before any connection.
  * - `"input"` -- the pre-connection input guard, before any connection.
  * - `"terms-shortfall"` -- the same guard, or core's own refusal inside the
  *   pre-connection prepare, on an input that cannot satisfy the agreed linkage
@@ -285,6 +287,7 @@ function disclosurePrecedesExchange(
   failureKind: ManagedExchangeLastRun["failureKind"],
 ): boolean {
   return (
+    failureKind === "handed-off" ||
     failureKind === "input" ||
     failureKind === "terms-shortfall" ||
     failureKind === "consent" ||
@@ -296,8 +299,8 @@ function disclosurePrecedesExchange(
 /**
  * The disclosure line for a non-succeeded run, mapped conservatively from the run's
  * outcome and `failureKind`. A run that never completed a handshake (`"missed"`,
- * `"desynced"`) or failed at or before the rotation persist (`"input"`,
- * `"terms-shortfall"`, `"consent"`, `"auth"`, `"storage"`) provably disclosed
+ * `"desynced"`) or failed at or before the rotation persist (`"handed-off"`,
+ * `"input"`, `"terms-shortfall"`, `"consent"`, `"auth"`, `"storage"`) provably disclosed
  * nothing -- no payload had left this party. A run that failed after the handshake
  * (`"transport"`, `"cancelled"`, or an unrecorded kind) may have failed
  * mid-data-exchange, so the line asserts neither way and points at the record file

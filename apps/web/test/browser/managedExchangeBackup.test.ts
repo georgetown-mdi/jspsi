@@ -36,6 +36,7 @@ import { failedRun } from "@psi/managedRunRotate";
 import { importManagedExchange } from "@psi/managedExchangeImport";
 import { managedRunFailureFromRecord } from "@bench/managedRunLaunchModel";
 import { savedExchangeRows } from "@bench/savedExchangesModel";
+import { withManagedExchangeLock } from "@psi/managedExchangeLock";
 
 import type {
   ManagedExchangeSchedule,
@@ -262,9 +263,62 @@ describe("a migration spends the source", () => {
 });
 
 describe("the spend is checked against the stored record in one step", () => {
-  // Against the real store: a hand-off is only ever spent while the record still
-  // carries the secret its files carry. These cases pin the check's semantics;
-  // the transaction interleaving itself is not driven here.
+  // Against the real store: a hand-off is only ever spent while no run of the
+  // record is in flight and it still carries the secret its files carry. These
+  // cases pin both conditions; the transaction interleaving itself is not driven
+  // here.
+
+  test("a run holding the run+rotate lock refuses the spend, writing nothing", async () => {
+    // The ordering no currency check can decide: the run has not rotated yet, so
+    // the stored secret is still the one the operator's files carry -- and would
+    // be superseded by that run's own persist the moment it lands. The exclusion
+    // is what refuses it, on the very lock the run holds.
+    const record = await createManagedExchange(newExchange());
+    let granted!: () => void;
+    const holding = new Promise<void>((resolve) => {
+      granted = resolve;
+    });
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const run = withManagedExchangeLock(record.id, async () => {
+      granted();
+      await released;
+    });
+    await holding;
+
+    try {
+      expect(
+        await spendManagedExchangeIfCurrent(
+          record.id,
+          record.sharedSecret,
+          "2026-07-14T13:00:00.000Z",
+        ),
+      ).toBe("run-in-flight");
+      // Nothing at all: no spent state, and no sibling entry conjured to hold one.
+      expect(await getManagedLocalState(record.id)).toBeUndefined();
+    } finally {
+      // Released even if the assertions throw, so a failing test cannot strand the
+      // exclusive lock for the rest of the page's life.
+      release();
+      await run;
+    }
+
+    // The refusal consumed nothing: this run rotated nothing, so the same copy
+    // spends once the lock is free.
+    expect(
+      await spendManagedExchangeIfCurrent(
+        record.id,
+        record.sharedSecret,
+        "2026-07-14T13:05:00.000Z",
+      ),
+    ).toBe("spent");
+    expect((await getManagedLocalState(record.id))?.spent).toEqual({
+      spentAt: "2026-07-14T13:05:00.000Z",
+    });
+  });
+
   test("a secret the store has rotated past refuses, writing nothing", async () => {
     const record = await createManagedExchange(newExchange());
     const downloadedSecret = record.sharedSecret;
@@ -332,7 +386,10 @@ describe("the spend is checked against the stored record in one step", () => {
     });
   });
 
-  test("a record already gone is superseded, and leaves no sibling entry behind", async () => {
+  test("a record already gone refuses as gone, and leaves no sibling entry behind", async () => {
+    // Reported as its own refusal rather than folded into the superseded one: the
+    // hand-off surfaces answer them differently, since a record that is not here
+    // cannot be downloaded again.
     const record = await createManagedExchange(newExchange());
     const downloadedSecret = record.sharedSecret;
     await deleteManagedExchange(record.id);
@@ -343,7 +400,7 @@ describe("the spend is checked against the stored record in one step", () => {
         downloadedSecret,
         "2026-07-14T13:00:00.000Z",
       ),
-    ).toBe("superseded");
+    ).toBe("gone");
 
     // No spent state stranded under an id with no record: there is no live copy
     // left to spend.

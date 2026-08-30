@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { managedExchangeRunLockHeld } from "@psi/managedExchangeRun";
+import { managedExchangeRunLockHeld } from "@psi/managedExchangeLock";
 
 /** How often the mounted surface re-reads the record's run lock. Web Locks raises no
  * change event, so the only reading available is a poll; this is short enough that a
@@ -32,12 +32,11 @@ export interface ManagedRunInFlight {
  * including the data exchange the lock is deliberately not held across.
  *
  * What this gates is presentation. The lock can be taken or released between the poll
- * and the click that follows it, so a hand-off that spends the secret re-checks its
- * own precondition where it writes (see `managedExchangeExport.ts`, the confirm-time
- * currency check); for a rotation that has persisted this only pre-empts a refusal;
- * while a run is still in flight the currency check cannot refuse yet, so this
- * reading is the sole cover for that window -- best-effort, and a click that slips
- * past it is accepted and then superseded by the run's rotation.
+ * and the click that follows it, so a hand-off that spends the secret decides its own
+ * precondition where it writes: the spend takes this same lock (`ifAvailable`) and
+ * re-reads the record inside it, so a click that slips past this reading is refused
+ * there rather than accepted. This reading only pre-empts that refusal, in the words
+ * the refusal itself is shown in.
  */
 export function useManagedRunInFlight(
   id: string,
@@ -47,9 +46,8 @@ export function useManagedRunInFlight(
 
   const recheckLock = useCallback(async (): Promise<boolean> => {
     // A query this browser will not answer leaves the gate open rather than shut:
-    // the reading is an affordance for rotations that have persisted, which the
-    // confirm-time currency check refuses; a run still in flight is covered by
-    // this reading alone.
+    // the reading is an affordance either way, since the spend behind the gate
+    // takes the lock itself and refuses what this could not see.
     const held = await managedExchangeRunLockHeld(id).catch(() => false);
     setLockHeld(held);
     return held;

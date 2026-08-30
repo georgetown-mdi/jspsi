@@ -1,14 +1,14 @@
 /**
  * The platform half of the managed (recurring) exchange's run+rotate critical
- * section: the Web Locks single-writer acquisition and the strict-durability,
- * field-scoped store write that the pure ordering logic in
+ * section: the single-writer window ({@link ./managedExchangeLock.ts}) and the
+ * strict-durability, field-scoped store write that the pure ordering logic in
  * {@link ./managedRunRotate.ts} drives. This is the seam the future managed-
  * exchange runner calls -- it passes its input-guard, handshake, and data-exchange
  * phases in and cannot get the ordering wrong: the input guard gates the handshake
  * (its result is the handshake's argument), and the data-exchange phase is a
  * callback this module invokes only after the durable persist resolves.
  *
- * Three invariants this module owns (normative in docs/MANAGED_EXCHANGE.md and
+ * Four invariants this module owns (normative in docs/MANAGED_EXCHANGE.md and
  * docs/spec/MANAGED_EXCHANGE_RECORD.md):
  *
  * - **Input guard before connection.** The input file is acquired and its columns
@@ -19,15 +19,21 @@
  *   `"terms-shortfall"` for columns the standing terms cannot be run against -- and
  *   re-raises with no connection attempted, never through desync/attack framing.
  *
- * - **Single-writer exclusion.** A Web Locks lock keyed to the record's id is held
- *   from "begin this run" through "rotated secret durably persisted", so a second
- *   same-origin context (a second tab, or a tab and a scheduled run) cannot double-
- *   rotate and desync the two parties. The lock is a same-profile liveness guard,
- *   auto-released when the holding context is destroyed; it is taken WITHOUT
- *   `steal: true` (a steal would defeat the single-writer property it exists to
- *   provide). It does not and cannot guard a second device or profile -- the
- *   durable single-owner property rests on migration-not-sync export semantics,
- *   not on the lock.
+ * - **Single-writer exclusion.** The Web Locks lock keyed to the record's id
+ *   ({@link ./managedExchangeLock.ts}) is held from "begin this run" through
+ *   "rotated secret durably persisted", so a second same-origin context (a second
+ *   tab, or a tab and a scheduled run) cannot double-rotate and desync the two
+ *   parties. The same lock is what a hand-off spend takes, so a spend and a run
+ *   exclude each other rather than observing each other.
+ *
+ * - **A handed-off copy does not run.** The first thing the locked window does is
+ *   re-read the record's sibling spent state and refuse a copy an export has
+ *   handed off, before the input is read and before any connection. It is a read
+ *   per run rather than a surface's mount-time reading, so a hand-off confirmed
+ *   after a surface loaded -- or between two attempts at one scheduled window --
+ *   stops the runs that follow it rather than only the ones that start after a
+ *   reload. A reading that fails refuses the run on the same terms, as this
+ *   device's own `storage` failure rather than a hand-off.
  *
  * - **Persist-before-success.** The rotated secret is written durably (a strict-
  *   durability transaction awaited to `complete`) BEFORE the data exchange begins.
@@ -44,96 +50,59 @@ import {
   RotationPersistError,
   failedRun,
   runRotationCriticalSection,
+  storageFailureRun,
   succeededRun,
 } from "./managedRunRotate";
 import {
   persistManagedExchangeRotation,
   recordManagedExchangeLastRun,
 } from "./managedExchangeStore";
+import { getManagedLocalState } from "./managedLocalState";
+import { withManagedExchangeLock } from "./managedExchangeLock";
 
 import type { ManagedExchangeLastRun } from "./managedExchangeRecord";
+import type { ManagedExchangeLockOptions } from "./managedExchangeLock";
+import type { ManagedLocalState } from "./managedLocalStateShape";
 import type { RotationWriteBack } from "./managedRunRotate";
 
-/** Namespace prefix for the Web Locks name, so a managed-exchange run lock cannot
- * collide with any other same-origin lock name. The record's id is appended. */
-const MANAGED_EXCHANGE_LOCK_PREFIX = "psilink-managed-exchange:";
-
-/** The Web Locks name for a managed record's run+rotate critical section. */
-export function managedExchangeLockName(id: string): string {
-  return `${MANAGED_EXCHANGE_LOCK_PREFIX}${id}`;
-}
-
 /**
- * Whether some same-origin context currently HOLDS the run+rotate lock for `id`.
- * `navigator.locks.query()` reports the whole origin's lock state rather than this
- * context's, so this is the only signal a surface has that another tab -- or the
- * scheduled runtime -- is mid-run on this record. It answers for this context's own
- * run too: the query does not distinguish holders.
- *
- * It is a point-in-time reading with no change event behind it, so a surface
- * rendering from it polls, and the lock can be taken or released between the reading
- * and whatever the reader does next. Gate PRESENTATION on it, never the correctness
- * of a write: a write re-checks its own precondition at the moment it writes (see
- * {@link ./managedExchangeExport.ts}, the confirm-time currency check).
+ * Raised when a run finds this device's copy of the record handed off: an export
+ * spent it, so the secret it would rotate belongs to whoever the hand-off gave it
+ * to. Refusing is the whole response -- rotating would leave the new owner's first
+ * run meeting a partner that has moved on, which nothing short of a re-invite
+ * recovers, and the run has no standing to decide that on the operator's behalf.
+ * Raised inside the run+rotate lock before the input is read, so a refused run has
+ * touched neither the operator's file nor the network.
  */
-export async function managedExchangeRunLockHeld(id: string): Promise<boolean> {
-  const name = managedExchangeLockName(id);
-  const snapshot = await globalThis.navigator.locks.query();
-  return snapshot.held?.some((lock) => lock.name === name) === true;
-}
-
-/**
- * Raised when the run+rotate lock for a record cannot be acquired without
- * waiting -- another same-origin context already holds it. The runner treats this
- * as "a run is already in progress on this device", not a failure of this run.
- * Only raised on the non-blocking (`ifAvailable`) acquisition path.
- */
-export class ManagedExchangeLockUnavailableError extends Error {
+export class ManagedExchangeSpentError extends Error {
   constructor(id: string) {
-    super(`a run is already in progress for managed exchange ${id}`);
-    this.name = "ManagedExchangeLockUnavailableError";
+    super(
+      `managed exchange ${id} was handed off, so this device's copy no longer runs it`,
+    );
+    this.name = "ManagedExchangeSpentError";
   }
 }
 
-/** How the run+rotate lock is acquired when a second context already holds it. */
-export interface ManagedExchangeLockOptions {
-  /**
-   * When `true`, do not queue behind a held lock: if another same-origin context
-   * holds it, fail immediately with {@link ManagedExchangeLockUnavailableError}
-   * rather than waiting. When `false` (the default), queue and run when the holder
-   * releases -- either is a valid single-writer discipline; the runner chooses per
-   * whether a scheduled run should wait out an attended one or defer to it.
-   */
-  ifAvailable?: boolean;
-}
-
 /**
- * Hold the run+rotate single-writer lock for `id` across `critical`, releasing it
- * when `critical` settles (the Web Locks API releases the lock when the callback's
- * promise resolves or rejects). The lock is taken WITHOUT `steal: true`: a steal
- * would let a second context wrench the lock away mid-run, defeating the single-
- * writer property. With `ifAvailable`, a lock held by another context yields a
- * `null` grant, which this raises as {@link ManagedExchangeLockUnavailableError}
- * rather than running `critical` unguarded.
- *
- * @throws {ManagedExchangeLockUnavailableError} if `ifAvailable` is set and the
- *   lock is already held.
+ * Raised when a run cannot read whether this device's copy was handed off: the
+ * sibling entry does not validate (a corrupted or app-upgrade-invalidated entry),
+ * or its store did not answer. The run refuses for the reason a spent copy's does
+ * -- custody that cannot be read is not custody this run may rotate on -- but the
+ * fault is this device's storage rather than a hand-off, so it is raised as its
+ * own type: the `storage` bookkeeping kind is what the record carries, and a
+ * scheduled window ends here rather than re-attempting a reading that is
+ * unchanged at the next attempt. An unclassified failure would instead fall
+ * through to the retryable `transport` tier, offering the operator a retry for a
+ * permanent local problem and spending the window's whole attempt budget on it.
  */
-export async function withManagedExchangeLock<T>(
-  id: string,
-  critical: () => Promise<T>,
-  options: ManagedExchangeLockOptions = {},
-): Promise<T> {
-  const name = managedExchangeLockName(id);
-  const request: LockOptions = { mode: "exclusive" };
-  if (options.ifAvailable === true) request.ifAvailable = true;
-  return globalThis.navigator.locks.request(name, request, async (lock) => {
-    // `ifAvailable` yields a null grant when the lock is held; without it the
-    // grant is guaranteed non-null (the request queued). Never a steal, so a
-    // granted lock is exclusively this run's until `critical` settles.
-    if (lock === null) throw new ManagedExchangeLockUnavailableError(id);
-    return critical();
-  });
+export class ManagedExchangeCustodyUnreadableError extends Error {
+  constructor(id: string, cause: unknown) {
+    super(
+      `managed exchange ${id} has an unreadable hand-off state, so this run does not rotate`,
+      { cause },
+    );
+    this.name = "ManagedExchangeCustodyUnreadableError";
+  }
 }
 
 /** The input, handshake, and data-exchange phases the runner supplies to
@@ -201,7 +170,11 @@ export interface ManagedExchangeRunResult<TExchange> {
  * not the caller's to uphold, and the lock is not held for the (potentially long)
  * data exchange.
  *
- * The input guard runs FIRST, before the handshake opens any connection: its
+ * The spent check runs first of all, inside the lock: a record an export handed off
+ * refuses with a {@link ManagedExchangeSpentError} that records the `handed-off`
+ * `lastRun`, before the input is read and before any connection.
+ *
+ * The input guard runs next, before the handshake opens any connection: its
  * result is the handshake's argument, so a runner structurally cannot reorder the
  * guard after the handshake. A benign {@link ManagedInputError} records the
  * `lastRun` kind {@link managedInputFailureKind} reads off its rejection inside the
@@ -223,6 +196,12 @@ export interface ManagedExchangeRunResult<TExchange> {
  *
  * @throws {ManagedExchangeLockUnavailableError} if `lock.ifAvailable` is set and a
  *   run is already in progress on this device.
+ * @throws {ManagedExchangeSpentError} if an export has handed this device's copy
+ *   off; the `handed-off` `lastRun` is recorded best-effort before this
+ *   propagates, and no input was read and no connection made.
+ * @throws {ManagedExchangeCustodyUnreadableError} if the sibling entry holding
+ *   that state cannot be read; the `storage` `lastRun` is recorded best-effort
+ *   before this propagates, on the same no-input, no-connection terms.
  * @throws {ManagedInputError} if the input guard rejects (a missing file, a gone
  *   permission, or an unsatisfiable column shape); the benign `lastRun` for that
  *   rejection is recorded best-effort before this propagates, and no connection was
@@ -243,6 +222,10 @@ export async function runManagedExchange<TInput, THandshake, TExchange>(
   const gate = await withManagedExchangeLock(
     record.id,
     async () => {
+      // A copy an export handed off is refused before anything else this window
+      // does: the sibling state is read here rather than trusted from whatever a
+      // caller loaded, so a hand-off confirmed since that load stops this run.
+      await refuseHandedOffCopy(record.id, now);
       // The input guard runs before the handshake opens any connection. A benign
       // input rejection records its classified kind inside the lock (this run's
       // record until the lock releases), then re-raises with no handshake attempted.
@@ -310,6 +293,57 @@ export async function runManagedExchange<TInput, THandshake, TExchange>(
   const lastRun = succeededRun(now());
   await recordLastRun(record.id, lastRun);
   return { exchange, lastRun };
+}
+
+/**
+ * Refuse this run when the record's sibling state says an export handed this
+ * device's copy off, recording the `handed-off` `lastRun` before it re-raises.
+ * Read inside the lock and before the input guard, so a run that meets a hand-off
+ * has read no input file and opened no connection.
+ *
+ * The bookkeeping is this section's own, like the input and storage tiers beside
+ * it: a scheduled run has nobody watching it, so the refusal is what the record
+ * carries afterwards rather than a line in a log the operator never sees. It is
+ * best-effort for the reason those are -- a failed bookkeeping write must not
+ * replace the refusal the runner classifies on.
+ *
+ * A reading that fails refuses the run too, as the {@link
+ * ManagedExchangeCustodyUnreadableError} it is: a run whose custody cannot be
+ * read does not rotate on the assumption it is still this device's, and the
+ * `storage` bookkeeping it records is what keeps this device's own storage fault
+ * out of the retryable transport tier.
+ *
+ * @throws {ManagedExchangeSpentError} when the copy is spent.
+ * @throws {ManagedExchangeCustodyUnreadableError} when the sibling entry cannot
+ *   be read.
+ */
+async function refuseHandedOffCopy(
+  id: string,
+  now: () => number,
+): Promise<void> {
+  let local: ManagedLocalState | undefined;
+  try {
+    local = await getManagedLocalState(id);
+  } catch (error) {
+    await recordRefusal(id, storageFailureRun(now()));
+    throw new ManagedExchangeCustodyUnreadableError(id, error);
+  }
+  if (local?.spent === undefined) return;
+  await recordRefusal(id, failedRun(now(), "failed", "handed-off"));
+  throw new ManagedExchangeSpentError(id);
+}
+
+/** Record a refusal's own bookkeeping, best-effort for the reason
+ * {@link refuseHandedOffCopy} gives. */
+async function recordRefusal(
+  id: string,
+  lastRun: ManagedExchangeLastRun,
+): Promise<void> {
+  try {
+    await recordLastRun(id, lastRun);
+  } catch {
+    // Swallowed: the refusal still reaches the runner.
+  }
 }
 
 /** The durable, field-scoped rotation write the ordering awaits before the data

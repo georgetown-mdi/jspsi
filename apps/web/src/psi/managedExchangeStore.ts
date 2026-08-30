@@ -19,8 +19,18 @@
  * unit-testable in a Node environment with no IndexedDB, and only this thin layer
  * needs a real browser (the app's Playwright project runs it against real
  * Chromium).
+ *
+ * One write here reaches past IndexedDB for a second platform primitive: the
+ * hand-off spend takes the record's run+rotate lock
+ * ({@link ./managedExchangeLock.ts}), the same lock a run holds, because a
+ * transaction cannot exclude a run that has not written yet (see
+ * {@link spendManagedExchangeIfCurrent}).
  */
 
+import {
+  ManagedExchangeLockUnavailableError,
+  withManagedExchangeLock,
+} from "./managedExchangeLock";
 import {
   applyManagedExchangeInputHandle,
   applyManagedExchangeLastRun,
@@ -659,22 +669,41 @@ export async function readRecordAndMarkBackedUp(
 
 /**
  * Spend this device's copy as of `spentAt` -- under `handoff`, or as the device
- * migration when it is omitted -- but ONLY while the stored record still carries
- * `expectedSharedSecret`, the secret the hand-off's downloaded files carry. The
- * read, the comparison, and the spent-state write all run inside one transaction
- * spanning the record and sibling stores, so nothing can land between the check and
- * the write: a rotation (whose own cross-store transaction advances the secret)
- * either commits before this transaction, and the check then sees the rotated secret
- * and refuses, or after it, and the spend it follows was decided against the secret
- * the operator's files actually carry. Split across two transactions the check would
- * be advisory -- a rotation landing in the gap would be invisible to it, and the
- * spend would hand a new owner a copy whose first run meets a partner that has moved
- * on.
+ * migration when it is omitted -- but ONLY while no run of this record is in flight
+ * and the stored record still carries `expectedSharedSecret`, the secret the
+ * hand-off's downloaded files carry.
  *
- * Resolves `"superseded"` -- having written nothing -- when the stored secret has
- * moved on or no record exists under `id`, where there is no live copy left to
- * spend. The secret is the identity that decides: it is what the hand-off files
- * carry and what a rotation moves, so an edit that leaves it alone (a label, a
+ * The two conditions cover the two orderings a hand-off can lose to a run, and each
+ * needs its own mechanism because a rotation that has landed and a run that has not
+ * rotated yet are different states of the store:
+ *
+ * - **A run in flight excludes the spend outright.** This step takes the record's
+ *   run+rotate lock ({@link ./managedExchangeLock.ts}) with `ifAvailable`, so a run
+ *   holding it refuses the spend as `"run-in-flight"` before the currency check runs
+ *   at all -- the check could only pass there, the run not having rotated yet, and
+ *   the spend would then be superseded by that run's own persist. Held the other way
+ *   round, a run that begins while this step holds the lock queues behind it (or, on
+ *   the `ifAvailable` scheduled path, defers the attempt as unattempted), and its
+ *   first act inside the lock is the re-read of the spent state this write just
+ *   left. So the spend and the run exclude each other rather than observing each
+ *   other, within the lock's scope: one browser profile on one machine.
+ * - **A rotation that already landed refuses the spend.** The read, the comparison,
+ *   and the spent-state write all run inside one transaction spanning the record and
+ *   sibling stores, so nothing can land between the check and the write: a rotation
+ *   (whose own cross-store transaction advances the secret) either commits before
+ *   this transaction, and the check then sees the rotated secret and refuses, or
+ *   after it, and the spend it follows was decided against the secret the operator's
+ *   files actually carry. Split across two transactions the check would be advisory
+ *   -- a rotation landing in the gap would be invisible to it, and the spend would
+ *   hand a new owner a copy whose first run meets a partner that has moved on.
+ *
+ * Resolves `"run-in-flight"`, `"superseded"`, or `"gone"` -- having written nothing
+ * -- when a run holds the lock, when the stored secret has moved on, and when no
+ * record exists under `id` at all. The three are reported apart rather than as one
+ * refusal because what the operator does about each differs: wait for the run,
+ * download the exchange again, or accept that there is nothing here left to hand
+ * over. The secret is the identity that decides the second: it is what the hand-off
+ * files carry and what a rotation moves, so an edit that leaves it alone (a label, a
  * max-age policy) leaves the downloaded copy spendable. Any backup marker is left
  * untouched -- present or absent, it is the export's business, not this write's.
  *
@@ -686,6 +715,27 @@ export async function spendManagedExchangeIfCurrent(
   expectedSharedSecret: string,
   spentAt: string,
   handoff?: ManagedSpentHandoff,
+): Promise<ManagedSpendOutcome> {
+  try {
+    return await withManagedExchangeLock(
+      id,
+      () => spendCurrentCopy(id, expectedSharedSecret, spentAt, handoff),
+      { ifAvailable: true },
+    );
+  } catch (error) {
+    if (error instanceof ManagedExchangeLockUnavailableError)
+      return "run-in-flight";
+    throw error;
+  }
+}
+
+/** The checked spend itself, run under the record's run+rotate lock: the cross-store
+ * transaction that compares the stored secret and writes the spent state. */
+async function spendCurrentCopy(
+  id: string,
+  expectedSharedSecret: string,
+  spentAt: string,
+  handoff: ManagedSpentHandoff | undefined,
 ): Promise<ManagedSpendOutcome> {
   const db = await openManagedExchangeDatabase();
   try {
@@ -699,16 +749,20 @@ export async function spendManagedExchangeIfCurrent(
       const local = transaction.objectStore(MANAGED_EXCHANGE_LOCAL_STORE_NAME);
       const read = records.get(id);
       const readLocal = local.get(id);
-      // Refusal is the default, so every way out of the step short of the write --
-      // a missing record, a moved secret -- resolves as the refusal rather than
-      // relying on each to say so.
+      // Refusal is the default, so every way out of the transaction short of the
+      // write -- a missing record, a moved secret -- resolves as a refusal rather
+      // than relying on each to say so. The missing record then names itself,
+      // because the two refusals leave the operator with different things to do.
       let outcome: ManagedSpendOutcome = "superseded";
       let failure: unknown;
       const applyWhenReady = () => {
         if (read.readyState !== "done" || readLocal.readyState !== "done")
           return;
         try {
-          if (read.result === undefined) return;
+          if (read.result === undefined) {
+            outcome = "gone";
+            return;
+          }
           const stored = parseManagedExchangeRecord(read.result);
           if (stored.sharedSecret !== expectedSharedSecret) return;
           markSpentOnLocalStore(local, id, readLocal.result, spentAt, handoff);
