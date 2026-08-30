@@ -8,6 +8,7 @@ import {
   prepareForExchange,
   runExchange,
   resolveLinkageCardinality,
+  assertBothSidedDeduplicateImplemented,
   assertDeduplicateImplemented,
   assertMatchedPairsWellFormed,
   matchedPairCount,
@@ -16,9 +17,13 @@ import {
 import { createMessagePipe } from "../src/connection/messageConnection";
 import {
   DEDUPLICATE_IMPLEMENTED_BY_STRATEGY,
+  MANY_TO_MANY_IMPLEMENTED_BY_STRATEGY,
   deriveAcceptedLinkageTerms,
+  manyToManyIsImplementedForStrategy,
   parseLinkageTerms,
+  validateCompatibility,
 } from "../src/config/linkageTerms";
+import { entityClusters } from "../src/entityClosure";
 import { inferMetadata } from "../src/config/metadata";
 import { mintExchangeFile } from "../src/config/exchangeFile";
 import { parseExchangeSpec } from "../src/config/exchangeSpec";
@@ -32,10 +37,11 @@ import type { CSVRow } from "../src/file";
 
 // The cardinality runExchange passes to the linkage strategies is derived from
 // the two parties' agreed `deduplicate` settings by resolveLinkageCardinality.
-// Both strategies run the one-sided cardinalities; the both-sided pair must be
-// refused BEFORE the PSI rounds with the actionable UsageError, never silently
-// collapsed onto one-to-one and never left to the generic mid-run cardinality
-// throw in link.ts.
+// Both strategies run the one-sided cardinalities and the cascade runs the
+// both-sided one; the pair single-pass cannot match must be refused BEFORE the
+// PSI rounds with the actionable UsageError, never silently collapsed onto a
+// narrower cardinality and never left to the generic mid-run cardinality throw in
+// link.ts.
 
 // --- resolveLinkageCardinality: the mapping -----------------------------------
 
@@ -68,41 +74,129 @@ const resolveFor = (
 test("the agreed deduplicate pair maps to the per-side cardinality label", () => {
   // The label is read from the CALLING party's own side, so the declaring party
   // resolves many-to-one and its partner one-to-many for the single mirrored
-  // procedure they run.
+  // procedure they run. The both-sided pair is its own mirror.
   expect(resolveFor(false, false)).toBe("one-to-one");
   expect(resolveFor(true, false)).toBe("many-to-one");
   expect(resolveFor(false, true)).toBe("one-to-many");
+  expect(resolveFor(true, true)).toBe("many-to-many");
 });
 
-test("the both-sided pair is refused, naming many-to-many and what it awaits", () => {
+test("the both-sided pair under single-pass is refused, naming the strategy", () => {
   let thrown: unknown;
   try {
-    resolveFor(true, true);
+    resolveFor(true, true, "single-pass");
   } catch (err) {
     thrown = err;
   }
   expect(thrown).toBeInstanceOf(UsageError);
   const message = (thrown as Error).message;
-  // Names the pair it resolved ...
-  expect(message).toMatch(/many-to-many/);
-  // ... the step that makes such a table mean anything to either party, so an
-  // operator reads what the cardinality is waiting on rather than only that it
-  // is refused ...
-  expect(message).toMatch(/transitive closure/);
-  // ... and the remedy.
-  expect(message).toMatch(/deduplicate to false on one of the two parties/);
+  // What stands in the way is the STRATEGY, not the pair: the message says so,
+  // and names the strategy to move to rather than telling the operator the
+  // cardinality awaits an implementation.
+  expect(message).toMatch(/linkage strategy these terms name/);
+  expect(message).toMatch(/does not match a many-to-many cardinality/);
+  expect(message).toMatch(/Set linkage_strategy to cascade to run the pair/);
+  expect(message).not.toMatch(/no exchange runs that cardinality/);
+  // Not the per-party guard's message either: that one answers `true` for
+  // single-pass, so it is not the seam this refusal comes from.
+  expect(message).not.toMatch(/deduplicated matching is not implemented/);
   // Not the generic mid-run throw from link.ts.
   expect(message).not.toMatch(/psi for cardinality/);
 });
 
-test("single-pass resolves the same labels the cascade does", () => {
-  // The strategy decides how a cardinality is matched, not which cardinalities
-  // resolve: both parties read one label off the agreed pair whichever strategy
-  // carries it, and only the both-sided pair is refused.
+test("single-pass resolves every label except the both-sided one", () => {
+  // The strategy decides how a cardinality is matched, and for the both-sided
+  // pair whether it is matched at all: single-pass carries the one-sided labels
+  // exactly as the cascade does, and one party's `deduplicate: true` under it
+  // stays runnable whichever way round the pair sits.
   expect(resolveFor(false, false, "single-pass")).toBe("one-to-one");
   expect(resolveFor(true, false, "single-pass")).toBe("many-to-one");
   expect(resolveFor(false, true, "single-pass")).toBe("one-to-many");
-  expect(() => resolveFor(true, true, "single-pass")).toThrow(/many-to-many/);
+  expect(() => resolveFor(true, true, "single-pass")).toThrow(
+    /linkage strategy these terms name/,
+  );
+});
+
+test("the both-sided strategy guard reads the pair, not one party's document", () => {
+  // The property that makes this a boundary of its own rather than a widening of
+  // `assertDeduplicateImplemented`: it fires on the agreed PAIR, so a single-pass
+  // party declaring `deduplicate: true` against a partner that does not is left
+  // alone -- the run it asks for is the one-sided one single-pass matches.
+  for (const [local, partner] of [
+    [false, false],
+    [true, false],
+    [false, true],
+  ] as const)
+    expect(() =>
+      assertBothSidedDeduplicateImplemented(
+        cardinalityTerms(local, "single-pass"),
+        cardinalityTerms(partner, "single-pass"),
+      ),
+    ).not.toThrow();
+  expect(() =>
+    assertBothSidedDeduplicateImplemented(
+      cardinalityTerms(true, "single-pass"),
+      cardinalityTerms(true, "single-pass"),
+    ),
+  ).toThrow(UsageError);
+  // The strategy that pairs it passes the same pair through.
+  expect(() =>
+    assertBothSidedDeduplicateImplemented(
+      cardinalityTerms(true),
+      cardinalityTerms(true),
+    ),
+  ).not.toThrow();
+});
+
+// The strategy table is where a strategy declares whether it pairs the both-sided
+// cardinality, and the run boundary reads it rather than naming a strategy. Driven
+// to the other verdict here so the read is shown rather than assumed, the shipped
+// table admitting only one of the two. Synchronous throughout, so no other test
+// observes the flipped entry.
+function withManyToManyVerdict<T>(
+  strategy: LinkageStrategy,
+  verdict: boolean,
+  read: () => T,
+): T {
+  const shipped = MANY_TO_MANY_IMPLEMENTED_BY_STRATEGY[strategy];
+  MANY_TO_MANY_IMPLEMENTED_BY_STRATEGY[strategy] = verdict;
+  try {
+    return read();
+  } finally {
+    MANY_TO_MANY_IMPLEMENTED_BY_STRATEGY[strategy] = shipped;
+  }
+}
+
+test("the run boundary reads the strategy table rather than naming a strategy", () => {
+  expect(MANY_TO_MANY_IMPLEMENTED_BY_STRATEGY).toStrictEqual({
+    cascade: true,
+    "single-pass": false,
+  });
+  for (const strategy of Object.keys(
+    MANY_TO_MANY_IMPLEMENTED_BY_STRATEGY,
+  ) as LinkageStrategy[])
+    expect(manyToManyIsImplementedForStrategy(strategy)).toBe(
+      MANY_TO_MANY_IMPLEMENTED_BY_STRATEGY[strategy],
+    );
+
+  // A cascade that stopped pairing the cardinality is refused on the same pair
+  // the shipped table resolves, and the remedy names whichever strategies do
+  // pair it -- here single-pass, the entry flipped the other way.
+  const message = withManyToManyVerdict("cascade", false, () =>
+    withManyToManyVerdict("single-pass", true, () => {
+      let thrown: unknown;
+      try {
+        resolveFor(true, true);
+      } catch (err) {
+        thrown = err;
+      }
+      expect(thrown).toBeInstanceOf(UsageError);
+      return (thrown as Error).message;
+    }),
+  );
+  expect(message).toMatch(/Set linkage_strategy to single-pass/);
+  // Restored, so the pair the shipped table admits still resolves.
+  expect(resolveFor(true, true)).toBe("many-to-many");
 });
 
 test("resolution is symmetric, so both parties derive the same verdict", () => {
@@ -115,6 +209,7 @@ test("resolution is symmetric, so both parties derive the same verdict", () => {
     "one-to-one": "one-to-one",
     "many-to-one": "one-to-many",
     "one-to-many": "many-to-one",
+    "many-to-many": "many-to-many",
   };
   const outcome = (
     a: boolean,
@@ -637,22 +732,237 @@ test("an accepted deduplicating invitation runs many-to-one end to end", async (
   expect(fulfilled(acceptor).audit?.record.resultSize).toBe(3);
 });
 
-// The refused pairs abort BOTH parties at the post-terms resolution, before any
-// PSI frame. Neither side is stranded awaiting a round the other never runs.
-test("a both-sided deduplicating pair is refused by both parties before the PSI rounds", async () => {
-  const [initiator, responder] = await runBothWithDeduplicate(true, true);
-  expectRefusedWith(initiator, /many-to-many/);
-  expectRefusedWith(responder, /many-to-many/);
+// Both files hold a duplicated value, so the deduplicating rules apply on BOTH
+// sides: "Carol" stands for a group of two on each, and the pairs it contributes
+// are the two groups' product. "Henry" is the unambiguous shared value beside it,
+// and "Alice" matches nothing -- so one run carries a multi-record cluster, a
+// single-pair cluster, and an unmatched record at once.
+const mutualRowsA: Array<CSVRow> = [
+  { first_name: "Alice" },
+  { first_name: "Carol" },
+  { first_name: "Carol" },
+  { first_name: "Henry" },
+];
+const mutualRowsB: Array<CSVRow> = [
+  { first_name: "Carol" },
+  { first_name: "Carol" },
+  { first_name: "Henry" },
+];
+
+test("an agreed both-sided pair runs end to end and groups both parties' rows", async () => {
+  const [initiator, responder] = await runBothWithDeduplicate(
+    true,
+    true,
+    "cascade",
+    { initiator: mutualRowsA, responder: mutualRowsB },
+  );
+  const a = fulfilled(initiator);
+  const b = fulfilled(responder);
+
+  // Each party keeps its own duplicates and attributes the matched value to every
+  // record holding it, so the "Carol" value contributes 2 x 2 = 4 pairs and
+  // "Henry" one. Both parties hold the one table, mirrored.
+  expect(a.associationTable).toStrictEqual([
+    [1, 1, 2, 2, 3],
+    [0, 1, 0, 1, 2],
+  ]);
+  expect(b.associationTable).toStrictEqual([
+    [0, 0, 1, 1, 2],
+    [1, 2, 1, 2, 3],
+  ]);
+
+  // The closure both parties run locally over that one table: the two-by-two
+  // block and the single pair beside it, each party reading its own side first.
+  expect(entityClusters(a.associationTable!)).toStrictEqual([
+    { localRows: [1, 2], partnerRows: [0, 1] },
+    { localRows: [3], partnerRows: [2] },
+  ]);
+  expect(entityClusters(b.associationTable!)).toStrictEqual([
+    { localRows: [0, 1], partnerRows: [1, 2] },
+    { localRows: [2], partnerRows: [3] },
+  ]);
+
+  // The result file is one row per PAIR, so a cluster of m of this party's
+  // records and n of the partner's writes m x n rows -- 4 for the block, 1 for
+  // the pair beside it, in this party's own row order.
+  expect(
+    buildOutputTable(
+      a.associationTable!,
+      mutualRowsA,
+      inferMetadata(["first_name"]),
+      a.partnerPayload,
+    ).rows,
+  ).toStrictEqual([
+    ["1", "0"],
+    ["1", "1"],
+    ["2", "0"],
+    ["2", "1"],
+    ["3", "2"],
+  ]);
+  expect(
+    buildOutputTable(
+      b.associationTable!,
+      mutualRowsB,
+      inferMetadata(["first_name"]),
+      b.partnerPayload,
+    ).rows,
+  ).toStrictEqual([
+    ["0", "1"],
+    ["0", "2"],
+    ["1", "1"],
+    ["1", "2"],
+    ["2", "3"],
+  ]);
+
+  // Both records attest the one figure, which is the pair count -- neither
+  // party's matched-record count (3 and 3) and neither party's cluster count (2).
+  expect(a.audit?.record.resultSize).toBe(5);
+  expect(b.audit?.record.resultSize).toBe(5);
+  expect(matchedPairCount(a.associationTable!)).toBe(5);
 });
 
-test("a both-sided pair is refused under single-pass too", async () => {
+test("the same two files match only the unambiguous value without the pair", async () => {
+  // Non-vacuity for the run above: with either party's `deduplicate` cleared the
+  // duplicated value is ambiguous on at least one side and drops out of the
+  // round, so only "Henry" matches. The grouping is what the agreed pair adds.
+  for (const [a, b] of [
+    [false, false],
+    [true, false],
+    [false, true],
+  ] as const) {
+    const [initiator, responder] = await runBothWithDeduplicate(
+      a,
+      b,
+      "cascade",
+      { initiator: mutualRowsA, responder: mutualRowsB },
+    );
+    expect(fulfilled(initiator).associationTable).toStrictEqual([[3], [2]]);
+    expect(fulfilled(responder).associationTable).toStrictEqual([[2], [3]]);
+  }
+});
+
+// The refused pair aborts BOTH parties at the post-terms resolution, before any
+// PSI frame. Neither side is stranded awaiting a round the other never runs.
+test("a both-sided pair under single-pass is refused by both parties before the rounds", async () => {
   const [initiator, responder] = await runBothWithDeduplicate(
     true,
     true,
     "single-pass",
+    { initiator: mutualRowsA, responder: mutualRowsB },
   );
-  expectRefusedWith(initiator, /many-to-many/);
-  expectRefusedWith(responder, /many-to-many/);
+  // What the refusal names is the strategy that does not pair the cardinality,
+  // and the strategy that does -- not the pair awaiting an implementation.
+  for (const result of [initiator, responder]) {
+    expectRefusedWith(result, /linkage strategy these terms name/);
+    expectRefusedWith(
+      result,
+      /Set linkage_strategy to cascade to run the pair/,
+    );
+  }
+});
+
+test("an acceptor declaring the setting in its own config runs the both-sided pair", async () => {
+  // The other route to the pair, and the only one an accepted invitation reaches:
+  // acceptance derives the accepting party's own `deduplicate` as false, so that
+  // party declares its own side afterwards, in its own configuration file. The
+  // config is minted and re-parsed exactly as a later invocation loads it, so
+  // what runs here is a persisted acceptance rather than an in-memory edit -- and
+  // the invitation's declaration rides along with it, still holding the inviting
+  // party to what it declared.
+  const inviterTerms = parseLinkageTerms({
+    ...termsBase,
+    identity: "A",
+    deduplicate: true,
+  });
+  const derived = deriveAcceptedLinkageTerms(inviterTerms, "B");
+  expect(derived.deduplicate).toBe(false);
+  const persisted = parseExchangeSpec(
+    parseYaml(
+      mintExchangeFile({
+        connection: { channel: "filedrop", path: "/mnt/share/drop" },
+        linkageTerms: parseLinkageTerms({ ...derived, deduplicate: true }),
+        expectedPartnerDeduplicate: inviterTerms.deduplicate,
+      }),
+    ),
+  );
+  expect(persisted.linkageTerms.deduplicate).toBe(true);
+  expect(persisted.expectedPartnerDeduplicate).toBe(true);
+
+  const acceptorPrepared = prepareForExchange(
+    { linkageTerms: persisted.linkageTerms },
+    "B",
+    mutualRowsB,
+    ["first_name"],
+  );
+  acceptorPrepared.expectedPartnerDeduplicate =
+    persisted.expectedPartnerDeduplicate;
+
+  const [connInviter, connAcceptor] = createMessagePipe();
+  const [inviter, acceptor] = await Promise.all([
+    runExchange(
+      connInviter,
+      "initiator",
+      prepareForExchange({ linkageTerms: inviterTerms }, "A", mutualRowsA, [
+        "first_name",
+      ]),
+      { psiLibrary },
+    ),
+    runExchange(connAcceptor, "responder", acceptorPrepared, { psiLibrary }),
+  ]);
+
+  // The same table the two authored configs produce: the pair is a property of
+  // the agreed values, not of how either party reached them.
+  expect(inviter.associationTable).toStrictEqual([
+    [1, 1, 2, 2, 3],
+    [0, 1, 0, 1, 2],
+  ]);
+  expect(acceptor.associationTable).toStrictEqual([
+    [0, 0, 1, 1, 2],
+    [1, 2, 1, 2, 3],
+  ]);
+  expect(inviter.audit?.record.resultSize).toBe(5);
+  expect(acceptor.audit?.record.resultSize).toBe(5);
+});
+
+test("both parties receive the output the both-sided pair produces", async () => {
+  // The grouping a deduplicating match produces exists only in the output, so
+  // every deduplicating party must receive it. Under the both-sided pair that is
+  // BOTH parties, and no check of its own carries the rule: each party's own
+  // schema refines `expects_output` on its own `deduplicate`, and the cross-party
+  // output check then forces the partner to share. The two together leave the
+  // pair no runnable shape in which either party goes unserved.
+  expect(() =>
+    parseLinkageTerms({
+      ...termsBase,
+      identity: "A",
+      deduplicate: true,
+      output: { expectsOutput: false, shareWithPartner: true },
+    }),
+  ).toThrow(/expectsOutput must be true when deduplicate is true/);
+
+  // Both deduplicating parties therefore expect output, and a party withholding
+  // the result from a partner that expects it is refused at the terms exchange
+  // rather than left to hand one party a multiplicity it cannot resolve.
+  const withholding = parseLinkageTerms({
+    ...termsBase,
+    identity: "A",
+    deduplicate: true,
+    output: { expectsOutput: true, shareWithPartner: false },
+  });
+  expect(
+    validateCompatibility(withholding, withholding).errors.length,
+  ).toBeGreaterThan(0);
+
+  // And on the shape that does run, both parties are handed the table the
+  // closure resolves.
+  const [initiator, responder] = await runBothWithDeduplicate(
+    true,
+    true,
+    "cascade",
+    { initiator: mutualRowsA, responder: mutualRowsB },
+  );
+  expect(fulfilled(initiator).associationTable).toBeDefined();
+  expect(fulfilled(responder).associationTable).toBeDefined();
 });
 
 test("the same many-to-one pair under single-pass produces the cascade's table", async () => {

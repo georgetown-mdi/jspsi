@@ -1507,9 +1507,11 @@ export function deduplicateIsImplementedForStrategy(
  * {@link DEDUPLICATE_IMPLEMENTED_BY_STRATEGY} is stopped at: refusing the pair here
  * puts the answer where the operator is still configuring, rather than mid-round
  * against terms that asked for a group, and keeps the strategy's own guard as the
- * second, fail-closed half rather than the first. What IS refused today is the
- * `(true, true)` pair, which `resolveLinkageCardinality` answers separately -- a
- * cardinality no strategy pairs past, rather than a strategy that cannot pair one.
+ * second, fail-closed half rather than the first. The combination that IS refused
+ * today is the agreed `(true, true)` pair under a strategy that pairs no
+ * both-sided cardinality, which this guard cannot express: it reads one party's
+ * document, where that pair is a property of BOTH. Its own boundary is
+ * {@link assertBothSidedDeduplicateImplemented}.
  *
  * Applied where a document is authored or minted, at the local prepare step
  * (`prepareForExchange`), where a received invitation is accepted
@@ -1547,6 +1549,121 @@ export function assertDeduplicateImplemented(terms: LinkageTerms): void {
       "rather than honored, so the exchange is refused before matching " +
       "begins. Set linkage_strategy to cascade or single-pass to run a " +
       "deduplicating match, or set deduplicate to false.",
+  );
+}
+
+/**
+ * Which linkage strategies pair the BOTH-sided deduplicating cardinality, one
+ * entry per strategy. The cascade does, applying the "many" rule to each party so
+ * a matched value contributes the two groups' product; `single-pass` does not --
+ * its seam holds the resolved table to a length taken from the half that keeps its
+ * distinctness, and a both-sided multiplicity leaves neither half holding it
+ * (docs/spec/PROTOCOL.md, Deduplicating cardinalities: many-to-X matching).
+ *
+ * Separate from {@link DEDUPLICATE_IMPLEMENTED_BY_STRATEGY} because the two answer
+ * different questions: that table asks whether a strategy honors one party's
+ * `deduplicate: true` at all, and this asks whether it pairs the cardinality the
+ * agreed PAIR resolves to when both parties declare it. Single-pass answers `true`
+ * to the first and `false` to the second, which is exactly why the both-sided
+ * refusal cannot be expressed through the per-party guard.
+ *
+ * A total table over {@link LinkageStrategy} for the same reason as its sibling: a
+ * strategy added to the union states its own verdict here or the build fails.
+ * Typed `boolean` rather than the literal values so each reader's gate gives a
+ * genuine runtime branch.
+ *
+ * @internal exported for the tests that drive its readers over every strategy.
+ */
+export const MANY_TO_MANY_IMPLEMENTED_BY_STRATEGY: Record<
+  LinkageStrategy,
+  boolean
+> = {
+  cascade: true,
+  "single-pass": false,
+};
+
+/**
+ * Whether an exchange on `strategy` pairs the both-sided deduplicating
+ * cardinality.
+ *
+ * The one predicate behind both readers of that verdict:
+ * {@link assertBothSidedDeduplicateImplemented} refuses the agreed pair it returns
+ * `false` for, and the strategy's own fail-closed half reads it at the seam that
+ * would otherwise pair it (`singlePassResolves`, `link.ts`). Stating it twice
+ * would let the strategy start pairing a cardinality the run boundary still
+ * refused, or the reverse -- a silent divergence, since each side's own tests keep
+ * passing.
+ */
+export function manyToManyIsImplementedForStrategy(
+  strategy: LinkageStrategy,
+): boolean {
+  return MANY_TO_MANY_IMPLEMENTED_BY_STRATEGY[strategy];
+}
+
+/**
+ * Refuse the agreed `(true, true)` pair on a linkage strategy that does not pair
+ * the both-sided cardinality it resolves to, before any matching begins.
+ *
+ * The both-sided sibling of {@link assertDeduplicateImplemented}, and the seam
+ * that guard cannot be: `deduplicate` is per-party, so a per-party reading
+ * answers `true` for a single-pass party whose own `deduplicate: true` is
+ * perfectly runnable -- it is one-sided until the partner's document arrives.
+ * Only the agreed pair settles which cardinality the run resolves, so only a
+ * check over BOTH documents can refuse the combination the strategy will not
+ * pair, and a one-sided deduplicating run under the same strategy is left alone.
+ *
+ * Called from `resolveLinkageCardinality` (`exchange.ts`) after the terms
+ * exchange and before the first round. Symmetric in the pair -- it reads both
+ * documents' strategies and refuses if EITHER fails to carry the cardinality --
+ * so a refused pair aborts both parties at the same point rather than starting a
+ * round one side would refuse. `linkageStrategy` is a mandatory-consistency term,
+ * so an honest pair carries one value and the two readings coincide; reading both
+ * keeps the symmetry where the consistency check has not run.
+ *
+ * It sits beside {@link assertDeduplicateImplemented} rather than in `exchange.ts`
+ * for the reason that guard does: importing the run module from here would close
+ * an import cycle.
+ *
+ * The message names the STRATEGY rather than the pair, because the pair is what
+ * runs: the cascade pairs it and resolves into the entity clusters specified in
+ * docs/spec/PROTOCOL.md, and what stands between this operator and that run is
+ * the strategy the two parties agreed. The strategies to move to are read off
+ * {@link MANY_TO_MANY_IMPLEMENTED_BY_STRATEGY} rather than written out, so a
+ * strategy that later pairs the cardinality is named the moment its entry says
+ * so, and a build where none does still states the remedy that remains.
+ *
+ * Plain {@link UsageError}, deliberately NOT an `OperatorConfigError`, for the
+ * same reason as its sibling: this check reads the PARTNER's document as well as
+ * this party's, so the fault is not unconditionally this operator's own content.
+ * The message carries only fixed literals and the strategy names of a schema enum.
+ */
+export function assertBothSidedDeduplicateImplemented(
+  localTerms: LinkageTerms,
+  partnerTerms: LinkageTerms,
+): void {
+  if (!(localTerms.deduplicate && partnerTerms.deduplicate)) return;
+  if (
+    manyToManyIsImplementedForStrategy(localTerms.linkageStrategy) &&
+    manyToManyIsImplementedForStrategy(partnerTerms.linkageStrategy)
+  )
+    return;
+  const pairing = (
+    Object.keys(MANY_TO_MANY_IMPLEMENTED_BY_STRATEGY) as Array<LinkageStrategy>
+  )
+    .filter(manyToManyIsImplementedForStrategy)
+    .sort();
+  throw new UsageError(
+    "the linkage strategy these terms name does not match a many-to-many " +
+      "cardinality, which is what both parties setting deduplicate to true " +
+      "resolves to: each party's records may then group the other's, and the " +
+      "strategy this exchange runs pairs one side's grouping only. The " +
+      "exchange is refused before matching begins rather than matched to less " +
+      "than the terms declare. " +
+      (pairing.length > 0
+        ? `Set linkage_strategy to ${pairing.join(" or ")} to run the pair, or `
+        : "") +
+      "set deduplicate to false on one of the two parties to run a " +
+      "many-to-one match.",
   );
 }
 

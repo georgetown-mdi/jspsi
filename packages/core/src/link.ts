@@ -29,7 +29,10 @@ import {
   type PartnerIndexGrouping,
   type PartnerIndexRules,
 } from "./utils/partnerIndices";
-import { COUNT_ONLY_SHAPE_REFUSALS } from "./config/linkageTerms";
+import {
+  COUNT_ONLY_SHAPE_REFUSALS,
+  manyToManyIsImplementedForStrategy,
+} from "./config/linkageTerms";
 import { InternalConsistencyError, UsageError } from "./errors";
 import { receiveCountReport, sendCountReport } from "./protocolSetup";
 
@@ -346,6 +349,11 @@ function multiplicitySides(cardinality: LinkageCardinality): MultiplicitySides {
 // under a both-sided multiplicity neither half keeps it and the sender holds no
 // local bound on the table's size, so the pair is refused rather than paired.
 // Exhaustive for the same reason as above.
+//
+// The both-sided verdict is READ from the strategy table the agreed-terms refusal
+// reads (config/linkageTerms.ts) rather than restated here, so this fail-closed
+// half and that boundary cannot drift apart: a strategy entry that starts saying
+// it pairs the cardinality stops being refused at both points at once.
 function singlePassResolves(cardinality: LinkageCardinality): boolean {
   switch (cardinality) {
     case "one-to-one":
@@ -353,7 +361,7 @@ function singlePassResolves(cardinality: LinkageCardinality): boolean {
     case "one-to-many":
       return true;
     case "many-to-many":
-      return false;
+      return manyToManyIsImplementedForStrategy("single-pass");
   }
 }
 
@@ -421,9 +429,8 @@ export function attributableRoundMatches(
  * ({@link ./entityClosure.entityClusters}), and the table this returns is held to
  * the block shape that closure rests on before it leaves here
  * ({@link ./entityClosure.assertBlockDiagonalClosure}). exchange.ts resolves the
- * cardinality from the two agreed `deduplicate` settings and refuses that pair
- * before the rounds begin, so a production caller reaches here with one of the
- * other three.
+ * cardinality from the two agreed `deduplicate` settings, so an exchange whose
+ * parties both declare it reaches this strategy with that label.
  *
  * @param protocol - Exchange protocol settings; only `cardinality` is used
  *   here, and it is this party's own resolved label (see
@@ -1107,7 +1114,9 @@ export interface SinglePassSessionBounds {
  * cascade pairs it: this strategy's seam hands the sender a table it holds to a
  * length taken from the half that keeps its distinctness, and a both-sided
  * multiplicity leaves neither half distinct (see {@link singlePassResolves}).
- * exchange.ts refuses that pair before the run (`resolveLinkageCardinality`); this
+ * exchange.ts refuses an agreed both-sided pair on this strategy before the run
+ * (`assertBothSidedDeduplicateImplemented`, reached from
+ * `resolveLinkageCardinality`), naming the strategy that stands in the way; this
  * is the strategy's own fail-closed half, which holds for a direct caller too.
  *
  * @param bounds - The authenticated session state every derived bound reads; see

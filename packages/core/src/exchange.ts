@@ -5,6 +5,7 @@ import {
   isDisclosedToPartner,
 } from "./config/metadata.js";
 import {
+  assertBothSidedDeduplicateImplemented,
   assertCountOnlyTermsShape,
   assertDeduplicateImplemented,
 } from "./config/linkageTerms.js";
@@ -89,10 +90,11 @@ import { partnerPinIsPresent } from "./config/signing.js";
 import type { SigningConfig, SigningMode } from "./config/signing.js";
 import type { DualSignedRecord, ReceiptContent } from "./signedReceipt.js";
 
-// The deduplicating-strategy refusal is defined beside the accept path it also
-// guards (config/linkageTerms.ts), which cannot import this module without
-// closing a cycle, and re-exported here at the run boundary that applies it.
-export { assertDeduplicateImplemented };
+// The deduplicating-strategy refusals are defined beside the accept path the
+// per-party one also guards (config/linkageTerms.ts), which cannot import this
+// module without closing a cycle, and re-exported here at the run boundary that
+// applies them.
+export { assertBothSidedDeduplicateImplemented, assertDeduplicateImplemented };
 
 /**
  * The subset of an exchange specification that governs data preparation.
@@ -739,41 +741,31 @@ export function assertPresentedDeduplicateMatchesInvitation(
  * own side, a `deduplicate: true` party being the "many" one, so the two parties
  * hold mirror labels for the single procedure they run (docs/spec/PROTOCOL.md,
  * Deduplicating cardinalities): `(true, false)` gives the declaring party
- * `many-to-one` and its partner `one-to-many`, and `(false, false)` gives
- * `one-to-one`, which is its own mirror.
+ * `many-to-one` and its partner `one-to-many`, while `(false, false)` and
+ * `(true, true)` are each their own mirror.
  *
- * `(true, true)` is refused. Its round-level pairing follows from the per-side
- * rules -- both sides keep their within-dataset duplicates and every candidate
- * pair is accepted -- and the transitive closure that resolves such a table into
- * entity clusters, which is what makes it actionable for either party, is
- * specified and runs locally over the cascade's own output
- * (docs/spec/PROTOCOL.md, The `many-to-many` entity closure). What is not enabled
- * is the pair itself: no consent surface, no strategy pair, and no run boundary
- * carries it, and single-pass matches no both-sided cardinality at all. So it is
- * refused here, before the rounds begin, rather than run through surfaces that
- * were built for the other three.
+ * `(true, true)` resolves to `many-to-many`, which is its own mirror: both sides
+ * keep their within-dataset duplicates, every candidate pair a round produces is
+ * accepted, and the transitive closure that resolves the resulting table into
+ * entity clusters -- what makes it actionable for either party -- runs locally
+ * over the cascade's own output (docs/spec/PROTOCOL.md, The `many-to-many` entity
+ * closure). What that pair still needs from the agreed terms is a strategy that
+ * matches it, which {@link assertBothSidedDeduplicateImplemented} holds it to:
+ * the cascade pairs it and `single-pass` does not.
  *
  * Every refusal here is a symmetric function of the agreed pair -- each party
- * asserts over BOTH documents and the `(true, true)` test is symmetric in them --
- * so a refused pair aborts both parties at this same point rather than starting a
- * round one side would refuse.
+ * asserts over BOTH documents, and the both-sided strategy test reads both
+ * documents' strategies -- so a refused pair aborts both parties at this same
+ * point rather than starting a round one side would refuse.
  */
 export function resolveLinkageCardinality(
   localTerms: LinkageTerms,
   partnerTerms: LinkageTerms,
-): Exclude<LinkageCardinality, "many-to-many"> {
+): LinkageCardinality {
   assertDeduplicateImplemented(localTerms);
   assertDeduplicateImplemented(partnerTerms);
-  if (localTerms.deduplicate && partnerTerms.deduplicate)
-    throw new UsageError(
-      "both parties' linkage terms set deduplicate to true, which resolves to " +
-        "a many-to-many match. Its pairing rules and the transitive closure " +
-        "that resolves a both-sided multiplicity into entity clusters -- what " +
-        "makes such a table mean anything to either party -- are specified, " +
-        "but no exchange runs that cardinality yet, so it is refused before " +
-        "matching begins. Set deduplicate to false on one of the two parties " +
-        "to run a many-to-one match.",
-    );
+  assertBothSidedDeduplicateImplemented(localTerms, partnerTerms);
+  if (localTerms.deduplicate && partnerTerms.deduplicate) return "many-to-many";
   if (localTerms.deduplicate) return "many-to-one";
   if (partnerTerms.deduplicate) return "one-to-many";
   return "one-to-one";
@@ -1682,10 +1674,10 @@ export async function runExchange(
 
   // Resolve the matching cardinality from both parties' agreed deduplicate
   // settings as the first step after the terms exchange: the resolution is
-  // symmetric, so a refusal (many-to-many, or a deduplicating term under
-  // single-pass) aborts BOTH parties at this same point -- before the bootstrap
-  // frame and the PSI rounds -- rather than desyncing the lockstep. See
-  // resolveLinkageCardinality.
+  // symmetric, so a refusal (a deduplicating term under a strategy that honors
+  // none, or the both-sided pair under one that pairs no many-to-many) aborts
+  // BOTH parties at this same point -- before the bootstrap frame and the PSI
+  // rounds -- rather than desyncing the lockstep. See resolveLinkageCardinality.
   const cardinality = resolveLinkageCardinality(linkageTerms, partnerTerms);
 
   // Resolve which disclosure this exchange runs from both parties' agreed terms, at
