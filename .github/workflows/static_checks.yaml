@@ -237,6 +237,18 @@ jobs:
       # to is no longer there.
       - name: Disclosure accounting recovery
         run: npm run check:disclosure-recovery
+      # EXCHANGE_RECORD_VERSION is an internal development counter, cycled freely
+      # because no published artifact carries any of its literals, and first
+      # publication ships it reset to psilink-exchange-record/v1. The reset is
+      # taken at that release rather than earlier: re-using a previously-cycled
+      # value mid-development would let an old same-numbered development artifact
+      # parse as the current version and fail on its field set instead of taking
+      # the clean version refusal. This holds both ends of that -- the literal is
+      # not the reset value below the release marker apps/cli/package.json
+      # carries, and is at and above it -- and retires itself once the release
+      # that took the reset is recorded in the check.
+      - name: Exchange record format reset
+        run: npm run check:exchange-record-reset
       # A run that configures no STUN server discloses the running host's public
       # address to the WebRTC library's built-in default, and three surfaces name
       # that endpoint to an operator -- the CLI's warning, the web app's

@@ -26,14 +26,11 @@
 //
 // Two parts, each read from the tree alone:
 //
-//   A. THE RECORD VERSION PIN. EXCHANGE_RECORD_VERSION's literal, read out of
-//      packages/core/src/exchangeRecord.ts, against RECORD_VERSION_PIN below.
-//      Read from the source rather than the built package because this check
-//      runs before any build, and a check that silently skipped on a missing
-//      dist/ would be inert exactly when it is needed. The pin lives in this
-//      file rather than a ledger beside it so that recording a new value is an
-//      edit to the check itself -- the diff a reviewer sees, and the moment the
-//      decision is taken.
+//   A. THE RECORD VERSION PIN. EXCHANGE_RECORD_VERSION's literal, read through
+//      lib/exchangeRecordVersion.mjs, against RECORD_VERSION_PIN below. The pin
+//      lives in this file rather than a ledger beside it so that recording a new
+//      value is an edit to the check itself -- the diff a reviewer sees, and the
+//      moment the decision is taken.
 //
 //   B. THE RECOVERY PATH'S PRESENCE. Part A defers a decision to a recovery path;
 //      a tree that lost that path would pass part A while deferring to nothing.
@@ -71,12 +68,16 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  RECORD_VERSION_SOURCE,
+  declaredRecordVersion,
+} from "./lib/exchangeRecordVersion.mjs";
+
+export { RECORD_VERSION_SOURCE, declaredRecordVersion };
+
 /** The exchange-record version the recovery path has been driven against. Moving
  * it here is how the decision this check defers is recorded as taken. */
 export const RECORD_VERSION_PIN = "psilink-exchange-record/v6";
-
-/** Where the record version literal is declared. */
-export const RECORD_VERSION_SOURCE = "packages/core/src/exchangeRecord.ts";
 
 /** The entry points the recovery from a version-invalidated accounting is built
  * on, per file. Named functions rather than a surface description: a declaration
@@ -90,17 +91,6 @@ export const RECOVERY_ENTRY_POINTS = {
     "resetDisclosureAccounting",
   ],
 };
-
-/**
- * The exchange-record version literal declared in the given source, or
- * `undefined` when the declaration is not a quoted string this can read.
- */
-export function declaredRecordVersion(source) {
-  const match = /export const EXCHANGE_RECORD_VERSION\s*=\s*"([^"]*)"/.exec(
-    source,
-  );
-  return match === null ? undefined : match[1];
-}
 
 /**
  * The recovery entry points a source does not declare, as `{file, name}` pairs;
