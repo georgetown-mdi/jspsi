@@ -158,6 +158,7 @@ describe("the check as CI runs it", () => {
       copyFileSync(resolve(repoRoot, relative), destination);
     };
     place("scripts/check-disclosure-recovery.mjs");
+    place("scripts/lib/exchangeRecordVersion.mjs");
     place(RECORD_VERSION_SOURCE);
     for (const file of Object.keys(RECOVERY_ENTRY_POINTS))
       if (file !== omitted) place(file);

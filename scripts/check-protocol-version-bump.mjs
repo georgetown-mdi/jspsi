@@ -78,9 +78,21 @@ import { readFileSync, readdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { RELEASE_MANIFEST, manifestVersion } from "./lib/releaseManifest.mjs";
+import {
+  PRE_PUBLICATION_RELEASE,
+  RELEASE_MANIFEST,
+  isPublishedRelease,
+  manifestVersion,
+  parseReleaseVersion,
+} from "./lib/releaseManifest.mjs";
 
-export { RELEASE_MANIFEST, manifestVersion };
+export {
+  PRE_PUBLICATION_RELEASE,
+  RELEASE_MANIFEST,
+  isPublishedRelease,
+  manifestVersion,
+  parseReleaseVersion,
+};
 
 /** The source the build's PROTOCOL_VERSION literal is read from. */
 export const PROTOCOL_VERSION_SOURCE = "packages/core/src/protocolSetup.ts";
@@ -94,17 +106,6 @@ export const PINS_FILE = "scripts/protocol-version-pins.json";
 /** The paragraph stating the rule, named by every failure this check reports. */
 export const SPEC_PARAGRAPH =
   'docs/spec/PROTOCOL.md, "Wire-format deltas: existing frames only, and no version bump"';
-
-// The release below which the rule does not bind. The v0.1.0 tag and the
-// CHANGELOG heading beside it name a proof-of-concept whose tree predates the
-// current protocol outright -- no packages/core, no PROTOCOL_VERSION, no
-// CHANGELOG -- so it deployed no peer the version reconcile can meet, which is
-// what the spec paragraph's "no deployed peers" rests on. The next release of
-// any number is the first that can, so the floor is that release rather than a
-// 1.0 milestone: a marker that waits for 1.0 would read a published 0.2.0 as
-// pre-publication, which is the silent miss rather than the loud false alarm.
-// Moving this floor means moving the rule, so it moves with the spec paragraph.
-export const PRE_PUBLICATION_RELEASE = "0.1.0";
 
 /**
  * The vectors files pinning what PROTOCOL_VERSION covers: the content of the
@@ -191,36 +192,6 @@ export const UNCOVERED_VECTORS = [
       "the invitation-token `version` (docs/spec/FILE_SYNC.md), which covers the invitation encoding and the rendezvous derivation these pin.",
   },
 ];
-
-/**
- * The `major.minor.patch` triple a release version names, or undefined when the
- * value is not in that shape. A prerelease or build suffix is read as the
- * release it qualifies: a published `0.2.0-rc.1` deploys peers exactly as
- * `0.2.0` does.
- */
-export function parseReleaseVersion(version) {
-  const match = /^(\d+)\.(\d+)\.(\d+)(?:[-+][0-9A-Za-z.-]+)?$/.exec(
-    typeof version === "string" ? version : "",
-  );
-  return match === null
-    ? undefined
-    : [Number(match[1]), Number(match[2]), Number(match[3])];
-}
-
-/**
- * Whether the release version names a published deployment, or undefined when
- * the version is not in a shape this can read. Undefined is not "no": a caller
- * that cannot read the marker fails rather than treating the rule as inert.
- */
-export function isPublishedRelease(version) {
-  const parsed = parseReleaseVersion(version);
-  if (parsed === undefined) return undefined;
-  const floor = parseReleaseVersion(PRE_PUBLICATION_RELEASE);
-  for (let i = 0; i < parsed.length; i += 1) {
-    if (parsed[i] !== floor[i]) return parsed[i] > floor[i];
-  }
-  return false;
-}
 
 /**
  * The PROTOCOL_VERSION a source file declares, or undefined when its `export
