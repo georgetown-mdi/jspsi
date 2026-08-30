@@ -85,7 +85,9 @@ describe("no draft edit builds terms carrying an explicitly-undefined property",
     if (typeof value !== "object" || value === null) return [];
     if (Array.isArray(value))
       return value.flatMap((entry, index) =>
-        explicitUndefinedPaths(entry, `${at}[${index}]`),
+        entry === undefined
+          ? [`${at}[${index}]`]
+          : explicitUndefinedPaths(entry, `${at}[${index}]`),
       );
     return Object.entries(value).flatMap(([property, child]) =>
       child === undefined
@@ -99,6 +101,9 @@ describe("no draft edit builds terms carrying an explicitly-undefined property",
     expect(explicitUndefinedPaths({ a: { b: [{ c: undefined }] } })).toEqual([
       "$.a.b[0].c",
     ]);
+    expect(
+      explicitUndefinedPaths({ a: [undefined, { b: undefined }] }),
+    ).toEqual(["$.a[0]", "$.a[1].b"]);
     expect(explicitUndefinedPaths({ a: { b: 1 } })).toEqual([]);
   });
 
