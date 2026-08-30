@@ -18,10 +18,12 @@ import {
   couplingViolations,
   findSigningWorkflow,
   parseSignerIdentity,
+  parseSignerWorkflow,
   publishSequenceViolations,
   publishedCertificatePair,
   refPatternForTagFilter,
   releaseSigningReport,
+  signerWorkflows,
   tagFilters,
   unescapeRegexLiteral,
 } from "./check-release-signing.mjs";
@@ -37,9 +39,11 @@ const RELEASE_WORKFLOW = ".github/workflows/release.yaml";
 const releaseWorkflowSource = readRoot(RELEASE_WORKFLOW);
 const releasesDocSource = readRoot(RELEASES_DOC);
 
-// The committed identity, read rather than transcribed: a fixture that carried
-// its own copy would keep passing after the published one moved.
+// The committed identity and attestation signer, read rather than transcribed:
+// a fixture that carried its own copy would keep passing after the published
+// one moved.
 const [IDENTITY] = certificateFlags(releasesDocSource).identities;
+const [SIGNER_WORKFLOW] = signerWorkflows(releasesDocSource);
 const TAG_FILTER = "v[0-9]+.[0-9]+.[0-9]+";
 
 const buildStep = (id, push) =>
@@ -118,7 +122,11 @@ const orderedSteps = [
   attestStep("build_fips"),
 ];
 
-const doc = ({ identity = IDENTITY, issuer = ACTIONS_OIDC_ISSUER } = {}) =>
+const doc = ({
+  identity = IDENTITY,
+  issuer = ACTIONS_OIDC_ISSUER,
+  signerWorkflow = SIGNER_WORKFLOW,
+} = {}) =>
   [
     "## Verifying a Release",
     "",
@@ -127,6 +135,14 @@ const doc = ({ identity = IDENTITY, issuer = ACTIONS_OIDC_ISSUER } = {}) =>
     `  --certificate-identity-regexp '${identity}' \\`,
     `  --certificate-oidc-issuer ${issuer} \\`,
     "  vdorie/psi-link:X.Y.Z",
+    "```",
+    "",
+    "### Build provenance",
+    "",
+    "```sh",
+    "gh attestation verify oci://docker.io/vdorie/psi-link@sha256:... \\",
+    "  --repo georgetown-mdi/jspsi \\",
+    `  --signer-workflow ${signerWorkflow}`,
     "```",
     "",
   ].join("\n");
@@ -272,20 +288,23 @@ describe("the tag trigger a workflow declares", () => {
   });
 });
 
-describe("the coupling between the published command and the signer", () => {
+describe("the coupling between the published commands and the signer", () => {
   it("passes a document and a workflow naming one signer", () => {
     expect(coupling()).toEqual([]);
   });
 
-  it("fails a workflow renamed out from under the published identity", () => {
-    // The rename half of the drift: the document keeps publishing the old path
-    // while Fulcio writes the new one into every certificate.
-    const [violation, ...rest] = coupling({
+  it("fails a workflow renamed out from under the published commands", () => {
+    // The rename half of the drift, which costs both published commands: the
+    // document keeps naming the old path while GitHub writes the new one into
+    // every certificate and every attestation.
+    const violations = coupling({
       workflowPath: ".github/workflows/publish.yaml",
     });
-    expect(rest).toEqual([]);
-    expect(violation).toContain("publish.yaml");
-    expect(violation).toContain(RELEASE_WORKFLOW);
+    expect(violations).toHaveLength(2);
+    for (const violation of violations) {
+      expect(violation).toContain("publish.yaml");
+      expect(violation).toContain(RELEASE_WORKFLOW);
+    }
   });
 
   it("fails a tag trigger widened out from under it", () => {
@@ -392,6 +411,56 @@ describe("the coupling between the published command and the signer", () => {
       }),
     });
     expect(violation).toContain("--certificate-oidc-issuer");
+  });
+});
+
+describe("the attestation command the document publishes", () => {
+  it("reads the workflow the committed command names", () => {
+    expect(signerWorkflows(releasesDocSource)).toEqual([SIGNER_WORKFLOW]);
+    expect(parseSignerWorkflow(SIGNER_WORKFLOW)).toEqual({
+      workflowPath: RELEASE_WORKFLOW,
+    });
+  });
+
+  it("reads no value from a document publishing no such command", () => {
+    expect(signerWorkflows("### Build provenance\n")).toEqual([]);
+  });
+
+  it("fails a command naming a workflow other than the signer", () => {
+    // The drift the signature rules cannot see: the attestation command names
+    // a workflow of its own, so it keeps pointing at the old path through a
+    // rename the cosign identity was corrected for.
+    const [violation, ...rest] = coupling({
+      docSource: doc({
+        signerWorkflow: SIGNER_WORKFLOW.replace("release.yaml", "publish.yaml"),
+      }),
+    });
+    expect(rest).toEqual([]);
+    expect(violation).toContain("publish.yaml");
+    expect(violation).toContain(RELEASE_WORKFLOW);
+  });
+
+  it("fails a document that names no signer workflow at all", () => {
+    const [violation, ...rest] = coupling({
+      docSource: doc().replace(/^ *--signer-workflow.*\n/m, ""),
+    });
+    expect(rest).toEqual([]);
+    expect(violation).toContain("--signer-workflow");
+    expect(violation).toContain(RELEASE_WORKFLOW);
+  });
+
+  it("fails a value that is not an owner/repo/workflow-path triple", () => {
+    for (const value of [
+      "release.yaml",
+      "georgetown-mdi/jspsi",
+      SIGNER_WORKFLOW.replace("jspsi/", "jspsi//"),
+    ]) {
+      const [violation, ...rest] = coupling({
+        docSource: doc({ signerWorkflow: value }),
+      });
+      expect(rest).toEqual([]);
+      expect(violation).toContain("triple");
+    }
   });
 });
 

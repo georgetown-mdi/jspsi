@@ -18,7 +18,14 @@
 // release time, with the tag already pushed and the image already published.
 // This check is the pull-request half.
 //
-// Five rules:
+// The build-provenance attestation the same document publishes a command for
+// carries the coupling a second time: `gh attestation verify --signer-workflow`
+// names the workflow file whose run produced the attestation, so a rename
+// leaves that command reporting no matching attestation for an image every
+// release attests. Nothing measures that at release time -- GitHub holds the
+// attestation and no step reads it back -- so here is the only half there is.
+//
+// Six rules:
 //
 //   1. The signing workflow and docs/RELEASES.md publish ONE identity pattern
 //      and ONE issuer between them, and the issuer is GitHub Actions'.
@@ -41,6 +48,10 @@
 //      step: a verify step stripped of the pair -- or pointed at another
 //      identity -- would otherwise pass both while running a command no partner
 //      runs. This rule is what holds each self-verify step to that command.
+//   6. Every `--signer-workflow` docs/RELEASES.md publishes names that same
+//      workflow path, and the document publishes at least one: without it the
+//      attestation command's `--repo` is satisfied by an attestation any
+//      workflow in this repository produced.
 //
 // What this check cannot see:
 //   - Whether the identity is the one a run actually produces. It holds the
@@ -48,8 +59,10 @@
 //     wrong together is agreement. What Fulcio puts in the certificate was
 //     driven rather than inferred, and is recorded in
 //     docs/notes/cosign-keyless-signing.md.
-//   - The `<owner>/<repo>` segment, which nothing in the tree derives. A fork
-//     publishing this document unchanged reads as agreeing.
+//   - The `<owner>/<repo>` segment of either published command, which nothing
+//     in the tree derives. A fork publishing this document unchanged reads as
+//     agreeing, and the two commands' copies of that segment are not compared
+//     against each other.
 //   - Rule 3 compares text under a stated correspondence rather than modelling
 //     GitHub's filter-pattern semantics: over the character class it accepts
 //     (letters, digits, `_`, `-`, `/`, `.`, `+`, `[`, `]`), a filter and a
@@ -97,6 +110,11 @@ const DIGEST_REFERENCE = /steps\.([A-Za-z_][\w-]*)\.outputs\.digest/g;
 const IDENTITY_FLAG = /--certificate-identity-regexp\s+'([^']*)'/g;
 const ISSUER_FLAG = /--certificate-oidc-issuer\s+(\S+)/g;
 
+// The workflow a `gh attestation verify` command names, as
+// `<owner>/<repo>/<workflow path>`. Unquoted where the document publishes it,
+// so the value runs to the first space the way the issuer's does.
+const SIGNER_WORKFLOW_FLAG = /--signer-workflow\s+(\S+)/g;
+
 // The whole published shape in one pass: anchored at both ends, over
 // github.com, with the ref segment split off at `@refs/tags/`.
 const IDENTITY_SHAPE = /^\^https:\/\/github\\\.com\/(.+?)@refs\/tags\/(.+)\$$/;
@@ -127,6 +145,26 @@ export function certificateFlags(source) {
   const values = (pattern) =>
     [...source.matchAll(pattern)].map((match) => match[1]);
   return { identities: values(IDENTITY_FLAG), issuers: values(ISSUER_FLAG) };
+}
+
+/**
+ * Every `--signer-workflow` value a source carries, in order.
+ */
+export function signerWorkflows(source) {
+  return [...source.matchAll(SIGNER_WORKFLOW_FLAG)].map((match) => match[1]);
+}
+
+/**
+ * The workflow path a `--signer-workflow` value names, or a `{problem}` phrase
+ * naming why it names none. Its owner and repository segments go unread, for
+ * the reason the header gives.
+ */
+export function parseSignerWorkflow(value) {
+  const segments = value.split("/");
+  if (segments.length < 3 || segments.includes("")) {
+    return { problem: "is not an <owner>/<repo>/<workflow path> triple" };
+  }
+  return { workflowPath: segments.slice(2).join("/") };
 }
 
 /**
@@ -431,10 +469,10 @@ export function publishSequenceViolations(source, file, published = {}) {
 }
 
 /**
- * Every way the published verification command and the workflow that produces
- * the signature it checks are out of step. Empty means the document, the
- * workflow's self-verify step, the workflow's path and its tag trigger all name
- * one signer.
+ * Every way the published verification commands and the workflow that produces
+ * the signature and attestation they check are out of step. Empty means the
+ * document's signature and attestation commands, the workflow's self-verify
+ * step, the workflow's path and its tag trigger all name one signer.
  */
 export function couplingViolations({
   workflowPath,
@@ -477,6 +515,26 @@ export function couplingViolations({
   if (issuers.length === 0) {
     violations.push(
       `Neither ${RELEASES_DOC} nor ${workflowPath} pins \`--certificate-oidc-issuer\`. Both \`--certificate-\` arguments are required: an identity pattern alone is satisfied by a certificate any issuer minted.`,
+    );
+  }
+
+  const signers = [...new Set(signerWorkflows(docSource))];
+  if (signers.length === 0) {
+    violations.push(
+      `${RELEASES_DOC} publishes no \`--signer-workflow\`, so nothing holds its attestation command to ${workflowPath}. Either the document stopped naming the workflow that attests -- leaving a command \`--repo\` alone satisfies, for an attestation any workflow in this repository produced -- or that command has moved and this rule is measuring nothing.`,
+    );
+  }
+  for (const signer of signers) {
+    const named = parseSignerWorkflow(signer);
+    if (named.problem !== undefined) {
+      violations.push(
+        `${RELEASES_DOC} publishes \`--signer-workflow ${signer}\`, which ${named.problem}, so this check cannot tell which workflow it names.`,
+      );
+      continue;
+    }
+    if (named.workflowPath === workflowPath) continue;
+    violations.push(
+      `${RELEASES_DOC} publishes \`--signer-workflow ${signer}\`, naming the workflow \`${named.workflowPath}\`, but the workflow that attests the release images is \`${workflowPath}\`. The attestation records the path of the workflow whose run produced it, so the published command reports no matching attestation for an image every release attests.`,
     );
   }
 
@@ -588,11 +646,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     console.error("Release signing check failed:\n");
     for (const violation of violations) console.error(`  ${violation}`);
     console.error(
-      `\nThe signature a release produces and the command ${RELEASES_DOC} publishes pin one identity, which is the signing workflow's path plus its tag trigger. Change one and change all of them in the same edit.`,
+      `\nThe signature and attestation a release produces and the commands ${RELEASES_DOC} publishes for them name one signer, which is the signing workflow's path plus its tag trigger. Change one and change all of them in the same edit.`,
     );
     process.exit(1);
   }
   console.log(
-    `Release signing check passed: ${workflowPath} verifies each image it publishes against \`${identity}\`, the identity ${RELEASES_DOC} publishes, and signs, verifies and attests each pushed image before the next build.`,
+    `Release signing check passed: ${workflowPath} verifies each image it publishes against \`${identity}\`, the identity ${RELEASES_DOC} publishes, and signs, verifies and attests each pushed image before the next build. The attestation command ${RELEASES_DOC} publishes names the same workflow.`,
   );
 }

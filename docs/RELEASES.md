@@ -288,7 +288,7 @@ Both subjects are recorded as `docker.io/vdorie/psi-link`, the same reference th
 Notes on the command:
 
 - It needs the [GitHub CLI](https://cli.github.com/) (`gh`), not Cosign. `cosign verify-attestation` reads attestations Cosign attached to the image in the registry; this one is held by GitHub, and `gh` fetches it from there rather than from Docker Hub.
-- `--signer-workflow` is what makes the check specific: `--repo` alone is satisfied by any attestation this repository produced, from any workflow in it.
+- `--signer-workflow` is what makes the check specific: `--repo` alone is satisfied by any attestation this repository produced, from any workflow in it. Its value is the release workflow's own path, so a rename would otherwise leave this command reporting no matching attestation for an image the release did attest; `npm run check:release-signing` holds the path published here to that workflow on every pull request, as it does the signature identity above.
 - The attested subject is the multi-platform manifest list, which is what the release publishes and what the digest above resolves to. A per-architecture digest read out of that index is not itself an attested subject.
 
 What the attestation is and is not evidence of, for an agency assessment, is in [COMPLIANCE.md#release-integrity](COMPLIANCE.md#release-integrity).
