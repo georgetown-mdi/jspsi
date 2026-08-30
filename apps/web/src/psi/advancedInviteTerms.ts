@@ -230,8 +230,8 @@ export type ImportedCitationDropCause =
  * provenance for -- including one whose leftover imported field declarations
  * survive their keys. The draft reaches that state as an intermediate (disabling
  * every key), and the built terms can leave the browser from there via the terms
- * export, so exclude it here -- the same exclusion `linkageRuleSetReferenceFor`
- * makes on the derived branch.
+ * export, so exclude it here -- the same exclusion
+ * `linkageRuleSetReferenceForDraft` makes on the derived branch.
  */
 function citationStands(
   cited: BuiltInLinkageRuleSet,

@@ -85,6 +85,26 @@ function comparableForm<TValue>(value: TValue): TValue {
   }
 }
 
+/** `rules` in the form the structure-level compares take them: the
+ * {@link comparableForm} prune applied per declared field and per key, over the
+ * two rule arrays core compares and nothing else.
+ *
+ * Per entry rather than over the whole structure, because the callers hand these
+ * compares an entire terms document: pruned in one call, a single value the prune
+ * cannot read -- in a key, in a field, or anywhere else in the document -- costs
+ * every clean rule beside it its prune, and so costs a document departing from the
+ * built-in set in nothing but the spread its citation. Per entry, an unreadable
+ * rule is the only one compared unpruned, which core answers as it answers any
+ * value it cannot encode. */
+function comparableRules(
+  rules: Pick<LinkageTerms, "linkageFields" | "linkageKeys">,
+): Pick<LinkageTerms, "linkageFields" | "linkageKeys"> {
+  return {
+    linkageFields: rules.linkageFields.map((field) => comparableForm(field)),
+    linkageKeys: rules.linkageKeys.map((key) => comparableForm(key)),
+  };
+}
+
 /** `key` in the byte form the editor matches a draft key to an offer under: the
  * canonical encoding of the key as {@link comparableForm} states it, or `null`
  * when the key cannot be canonically encoded at all. */
@@ -105,7 +125,7 @@ export function isDraftDrawnFromLinkageRuleSet(
   ruleSet: BuiltInLinkageRuleSet,
   rules: Pick<LinkageTerms, "linkageFields" | "linkageKeys">,
 ): boolean {
-  return isDrawnFromLinkageRuleSet(ruleSet, comparableForm(rules));
+  return isDrawnFromLinkageRuleSet(ruleSet, comparableRules(rules));
 }
 
 /** The citation the draft-built `rules` are entitled to: the built-in rule set's
@@ -113,5 +133,5 @@ export function isDraftDrawnFromLinkageRuleSet(
 export function linkageRuleSetReferenceForDraft(
   rules: Pick<LinkageTerms, "linkageFields" | "linkageKeys">,
 ): LinkageRuleSetReference | undefined {
-  return linkageRuleSetReferenceFor(comparableForm(rules));
+  return linkageRuleSetReferenceFor(comparableRules(rules));
 }

@@ -36,6 +36,10 @@ import {
   validateAdvancedInvite,
 } from "../../src/psi/advancedInvite.js";
 import {
+  isDraftDrawnFromLinkageRuleSet,
+  linkageRuleSetReferenceForDraft,
+} from "../../src/psi/linkageComparison.js";
+import {
   setColumnType,
   setColumnTypeForMatching,
 } from "../../src/psi/metadataEditing.js";
@@ -796,6 +800,51 @@ describe("a key stating its optional properties as undefined is the same key", (
       },
     });
     expect(isOptInDraftKey(key)).toBe(false);
+  });
+
+  test("a value the prune cannot read leaves every rule beside it pruned", () => {
+    // The rule-set compares are handed a whole terms document, so a value the
+    // prune cannot read can sit outside the rules they compare. Read as one
+    // structure, that value would cost every key in the document its prune and
+    // the document its citation -- over a property the compare never asks about.
+    const built = buildAdvancedTerms(withUndefinedOptionals(guidedDraft()));
+    Object.defineProperty(built, "identity", {
+      enumerable: true,
+      get() {
+        throw new Error("unreadable");
+      },
+    });
+    // The premises: the document cannot be read as a whole, and core's compare
+    // answers `false` for its keys, so the citation here is the prune's answer
+    // rather than one reached without it.
+    expect(() => Object.entries(built)).toThrow();
+    expect(isDrawnFromLinkageRuleSet(DEFAULT_LINKAGE_RULE_SET, built)).toBe(
+      false,
+    );
+
+    expect(
+      isDraftDrawnFromLinkageRuleSet(DEFAULT_LINKAGE_RULE_SET, built),
+    ).toBe(true);
+    expect(linkageRuleSetReferenceForDraft(built)).toEqual(
+      DEFAULT_LINKAGE_RULE_SET.reference,
+    );
+  });
+
+  test("a key the prune cannot read is answered for the document, not thrown on", () => {
+    // The other half: the unreadable rule is compared as it stands, and core
+    // answers a document carrying one exactly as it answers rules it cannot
+    // encode -- not drawn from the set, entitled to no citation.
+    const built = buildAdvancedTerms(withUndefinedOptionals(guidedDraft()));
+    Object.defineProperty(built.linkageKeys[0], "swap", {
+      enumerable: true,
+      get() {
+        throw new Error("unreadable");
+      },
+    });
+    expect(
+      isDraftDrawnFromLinkageRuleSet(DEFAULT_LINKAGE_RULE_SET, built),
+    ).toBe(false);
+    expect(linkageRuleSetReferenceForDraft(built)).toBeUndefined();
   });
 });
 
