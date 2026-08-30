@@ -431,6 +431,13 @@ describe("direct exchange confirm and run", () => {
       .element(page.getByRole("button", { name: "Start over" }))
       .toBeInTheDocument();
 
+    // A settled failed run confirms this recovery until its record ask lands, and
+    // advertises the dialog while it does. This appliance answers that it holds no
+    // record, so the wait is for that answer -- pressing ahead of it would be
+    // pressing the confirming form.
+    await expect
+      .element(page.getByRole("button", { name: "Start over" }))
+      .not.toHaveAttribute("aria-haspopup");
     await page.getByRole("button", { name: "Start over" }).click();
 
     // Start over returns to the file step AND discards the failed job, freeing the

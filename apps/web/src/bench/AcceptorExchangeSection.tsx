@@ -1,8 +1,5 @@
 import { useEffect, useRef } from "react";
 
-import { Button } from "@mantine/core";
-import { Link } from "@tanstack/react-router";
-
 import { invitationUsable } from "./inviterModel";
 
 import {
@@ -10,6 +7,7 @@ import {
   DonePanel,
   DownloadRow,
   FailureAlert,
+  FailureRecoveryButton,
   NoResultFileInset,
   RECONNECTING_HEADING,
   ReattachedRunNotice,
@@ -18,13 +16,16 @@ import {
   SERVER_JOB_KEEP_OPEN_BODY,
   SERVER_JOB_PEER_WINDOW_BODY,
   recoveredExchangeHeading,
+  untakenRecordConfirm,
 } from "./BenchRunSurface";
 import { DiagnosticLogPanel } from "./DiagnosticLogPanel";
 import { ReceiptDownload } from "./ReceiptDownload";
+import { RecordDownload } from "./RecordDownload";
 import { RecurringHandoff } from "./RecurringHandoff";
 import { StatusPanel } from "./StatusPanel";
 import { reattachedRunState } from "./reattachedRunState";
 import styles from "./bench.module.css";
+import { useJobExchangeRecordOffer } from "./useJobExchangeRecordOffer";
 
 import type { AcceptableInvitation } from "@psi/acceptInvitation";
 import type { ExchangeRun } from "./exchangeRun";
@@ -103,10 +104,19 @@ export function AcceptorExchangeSection({
   onAbandon: () => void;
 }) {
   const phase = outputs !== undefined ? "done" : "running";
-  // The run reached a terminal, which is what the two appliance-artifact
+  // The run reached a terminal, which is what the three appliance-artifact
   // panels below key on: each states its artifact's standing once the run is
   // past producing it.
   const settled = phase === "done" || failure !== undefined;
+
+  // Where this run's exchange record stands on the appliance -- the one ask that
+  // both offers the record and decides whether the failure recoveries, each of
+  // which DELETEs the run's folder, confirm before doing so.
+  const recordOffer = useJobExchangeRecordOffer(
+    serverJob ? jobId : undefined,
+    settled && outputs?.record === undefined,
+  );
+  const recordConfirm = untakenRecordConfirm(recordOffer);
 
   // A busy (409) create at start re-attached this surface to an exchange the
   // appliance already held (a second tab, a navigate-away-and-back, or an orphaned
@@ -182,9 +192,11 @@ export function AcceptorExchangeSection({
       {failure !== undefined && (
         <FailureAlert failure={failure}>
           {retryable && (
-            <Button color="red" variant="light" mt="sm" onClick={onTryAgain}>
-              Try again
-            </Button>
+            <FailureRecoveryButton
+              label="Try again"
+              onAct={onTryAgain}
+              recordConfirm={recordConfirm}
+            />
           )}
           {/* The acceptor cannot mint a fresh invitation, so the fresh-start
               recovery is a link to the quick path, where a new invitation is
@@ -195,24 +207,22 @@ export function AcceptorExchangeSection({
           {!retryable &&
             (failure.category === "security" ||
               failure.category === "exchange") && (
-              <Button
-                component={Link}
+              <FailureRecoveryButton
+                label="Start over with a fresh invitation"
+                onAct={onAbandon}
                 to="/quick"
-                color="red"
-                variant="light"
-                mt="sm"
-                onClick={() => onAbandon()}
-              >
-                Start over with a fresh invitation
-              </Button>
+                recordConfirm={recordConfirm}
+              />
             )}
           {/* A prepare-time fault in this party's own settings: the acceptor
               fixes it on the confirm-columns step with every input intact, so
               the recovery returns there rather than re-running as-is. */}
           {failure.category === "config" && (
-            <Button color="red" variant="light" mt="sm" onClick={onFixColumns}>
-              Back to your columns
-            </Button>
+            <FailureRecoveryButton
+              label="Back to your columns"
+              onAct={onFixColumns}
+              recordConfirm={recordConfirm}
+            />
           )}
         </FailureAlert>
       )}
@@ -269,6 +279,7 @@ export function AcceptorExchangeSection({
           )}
         </>
       )}
+      <RecordDownload offer={recordOffer} />
       {serverJob && jobId !== undefined && (
         <>
           <ReceiptDownload jobId={jobId} settled={settled} />

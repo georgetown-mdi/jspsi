@@ -12,6 +12,16 @@ import "@mantine/core/styles.css";
 import { decodeInvitation } from "@psilink/core";
 
 import {
+  PENDING_RECORD_CONFIRM_BODY,
+  UNKNOWN_RECORD_CONFIRM_BODY,
+  UNTAKEN_RECORD_CONFIRM_BODY,
+} from "@bench/BenchRunSurface";
+import {
+  RECORD_UNANSWERED_LEAD,
+  TERMINATED_RECORD_KEYS_NOTICE,
+  TERMINATED_RECORD_LEAD,
+} from "@bench/RecordDownload";
+import {
   SWEEP_CONFIRMATION_LABEL,
   SWEEP_CONTROL_LABEL,
 } from "@bench/runDiagnosticsModel";
@@ -92,6 +102,19 @@ interface StubOptions {
   /** The receipt pair the job's status route reports. Unset, the status body
    * carries neither field, which is what a run that signed nothing answers. */
   receipt?: { requested: boolean; available: boolean };
+  /** The exchange record the job's status route reports. Unset, the body reports
+   * `recordAvailable: false`, which is what a run that owes no record answers. */
+  record?: { createdAt: string; outcome: string };
+  /** When true the job's status route answers 503 to every GET, which is what an
+   * ask that establishes NOTHING looks like from the seat: the record ask
+   * exhausts its bounded re-asks and resolves `unanswered`. DELETE is unaffected,
+   * so a discard the seat commits is still observable. */
+  statusFault?: boolean;
+  /** When true the job's status route holds every GET open until `releaseStatus()`
+   * is called, which is what an ask still IN FLIGHT looks like from the seat: the
+   * record ask has neither answered nor given up. DELETE is unaffected, so a
+   * discard the seat commits in that window is still observable. */
+  holdStatus?: boolean;
 }
 
 /** The same-origin job API, stubbed at the global fetch seam. Unmatched URLs fall
@@ -104,6 +127,7 @@ function stubJobApi(options: StubOptions = {}): {
   emitEvent: (event: object) => void;
   closeEvents: () => void;
   resolveProbe: () => void;
+  releaseStatus: () => void;
 } {
   const captured: Array<CapturedRequest> = [];
   const encoder = new TextEncoder();
@@ -116,6 +140,12 @@ function stubJobApi(options: StubOptions = {}): {
     releaseProbe = resolve;
   });
   let firstProbeHeld = false;
+  // The gate every held status GET (holdStatus) awaits, so a test can stand the
+  // seat in the window where its record ask has been put and not yet answered.
+  let releaseStatus: (() => void) | undefined;
+  const statusGate = new Promise<void>((resolve) => {
+    releaseStatus = resolve;
+  });
   let listing: unknown = options.listing ?? {
     configured: true,
     files: [CLIENTS_FILE],
@@ -217,18 +247,27 @@ function stubJobApi(options: StubOptions = {}): {
       if (url === "/api/jobs/job-7") {
         if ((init?.method ?? "GET") === "DELETE")
           return Promise.resolve(new Response(null, { status: 204 }));
-        return Promise.resolve(
+        if (options.statusFault === true)
+          return Promise.resolve(new Response(null, { status: 503 }));
+        const respond = () =>
           jsonResponse({
             status: jobStatus,
-            recordAvailable: false,
+            ...(options.record !== undefined
+              ? {
+                  recordAvailable: true,
+                  recordCreatedAt: options.record.createdAt,
+                  recordOutcome: options.record.outcome,
+                }
+              : { recordAvailable: false }),
             ...(options.receipt !== undefined
               ? {
                   receiptRequested: options.receipt.requested,
                   receiptAvailable: options.receipt.available,
                 }
               : {}),
-          }),
-        );
+          });
+        if (options.holdStatus === true) return statusGate.then(respond);
+        return Promise.resolve(respond());
       }
       if (url === "/api/jobs/job-7/cancel")
         return Promise.resolve(new Response(null, { status: 200 }));
@@ -251,6 +290,7 @@ function stubJobApi(options: StubOptions = {}): {
       sse?.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`)),
     closeEvents: () => sse?.close(),
     resolveProbe: () => releaseProbe?.(),
+    releaseStatus: () => releaseStatus?.(),
   };
 }
 
@@ -341,6 +381,20 @@ async function turnLocklessRendezvousOn() {
   const lockless = page.getByLabelText("Lockless rendezvous");
   await userEvent.selectOptions(lockless, "on");
   await expect.element(lockless).toHaveValue("on");
+}
+
+/**
+ * Wait until the failure recovery labelled `label` is the straight-through form.
+ *
+ * A settled failed run's recoveries confirm while their record ask is in flight
+ * and advertise the dialog they open, so on an appliance that answers that it
+ * holds no record this waits for that answer to land: a press before it would be a
+ * press on the confirming form, and would remove nothing.
+ */
+async function awaitStraightThroughRecovery(label: string): Promise<void> {
+  await expect
+    .element(page.getByRole("button", { name: label }))
+    .not.toHaveAttribute("aria-haspopup");
 }
 
 describe("console inviter file picker states", () => {
@@ -1021,6 +1075,7 @@ describe("console inviter run teardown and abandonment", () => {
       )
       .toBeInTheDocument();
 
+    await awaitStraightThroughRecovery("Start over with a fresh invitation");
     await page
       .getByRole("button", { name: "Start over with a fresh invitation" })
       .click();
@@ -1057,6 +1112,7 @@ describe("console inviter run teardown and abandonment", () => {
       .element(page.getByRole("button", { name: "Try again" }))
       .toBeInTheDocument();
 
+    await awaitStraightThroughRecovery("Try again");
     await page.getByRole("button", { name: "Try again" }).click();
 
     // The retry DELETEs the terminal job before POSTing the recreate: under
@@ -1706,5 +1762,199 @@ describe("console inviter receipt on a failed run", () => {
     expect(
       page.getByRole("link", { name: /Download signed receipt/ }).query(),
     ).toBeNull();
+  });
+});
+
+// A run that disclosed and then terminated reaches this seat as a FAILURE, where
+// the completion downloads render nothing at all -- so the record of that
+// disclosure is offered only if something asks the appliance for it. These pin the
+// offer against that terminal, and pin the recovery beside it against destroying
+// the record without saying so.
+describe("console inviter exchange record on a terminated run", () => {
+  const CREATED_AT = "2026-07-08T14:32:00.000Z";
+  const RECORD_STAMP = "2026-07-08T14-32-00-000Z";
+
+  /** Create the invitation, reach the running run, then end it in a retryable
+   * transport terminal -- the failure whose recovery is Try again, which discards
+   * the run's folder on the appliance. */
+  async function runToExchangeFailure(
+    api: ReturnType<typeof stubJobApi>,
+  ): Promise<void> {
+    await reachReviewCreate();
+    await page.getByRole("button", { name: "Create the invitation" }).click();
+    await vi.waitFor(() =>
+      expect(api.captured.some((r) => r.url === "/api/jobs/job-7/events")).toBe(
+        true,
+      ),
+    );
+    api.emitEvent({ v: 1, type: "stage", id: "confirming protocol" });
+    api.setJobStatus("failed");
+    api.emitEvent({
+      v: 1,
+      type: "error",
+      category: "exchange",
+      message: "the exchange stopped before it finished",
+    });
+    api.closeEvents();
+    await expect
+      .element(page.getByRole("button", { name: "Try again" }))
+      .toBeInTheDocument();
+  }
+
+  test("offers the record the appliance holds, stamped from its own createdAt", async () => {
+    const api = stubJobApi({
+      sftp: { configured: true, host: "dr.example.gov", port: 2222 },
+      record: { createdAt: CREATED_AT, outcome: "receipt-swap-terminated" },
+    });
+    app.render(createElement(InviterBench));
+    await runToExchangeFailure(api);
+
+    await expect
+      .element(page.getByText(TERMINATED_RECORD_LEAD))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByRole("link", {
+          name: `Download record (safe to share): psilink-record-${RECORD_STAMP}.json`,
+        }),
+      )
+      .toBeInTheDocument();
+    // The keys half is offered, and offered honestly: this run wrote no result
+    // file, so there is nothing for the salts beside the record to open.
+    await expect
+      .element(
+        page.getByRole("link", {
+          name: `Download verification keys (keep private): psilink-record-${RECORD_STAMP}.keys.json`,
+        }),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText(TERMINATED_RECORD_KEYS_NOTICE))
+      .toBeInTheDocument();
+  });
+
+  test("the retry confirms before it destroys the record, and cancelling keeps the run", async () => {
+    const api = stubJobApi({
+      sftp: { configured: true, host: "dr.example.gov", port: 2222 },
+      record: { createdAt: CREATED_AT, outcome: "receipt-swap-terminated" },
+    });
+    app.render(createElement(InviterBench));
+    await runToExchangeFailure(api);
+    // Wait for the ask to land, so the press below is the confirming form.
+    await expect
+      .element(page.getByText(TERMINATED_RECORD_LEAD))
+      .toBeInTheDocument();
+
+    await page.getByRole("button", { name: "Try again" }).click();
+    await expect
+      .element(page.getByText(UNTAKEN_RECORD_CONFIRM_BODY))
+      .toBeInTheDocument();
+    // Nothing has been removed while the operator is still deciding.
+    expect(api.captured.some((r) => r.method === "DELETE")).toBe(false);
+
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await flushPendingUpdates();
+    expect(api.captured.some((r) => r.method === "DELETE")).toBe(false);
+    await expect
+      .element(
+        page.getByRole("link", { name: /Download record \(safe to share\)/ }),
+      )
+      .toBeInTheDocument();
+  });
+
+  test("an ask that never answered confirms too, without claiming a record", async () => {
+    // The appliance stopped answering about this run, so the seat cannot say
+    // whether a record is standing -- and a run that got this far may well have
+    // written one. The retry DELETEs the folder either way, so it confirms on
+    // the silence, under copy that claims only what the silence supports.
+    const api = stubJobApi({
+      sftp: { configured: true, host: "dr.example.gov", port: 2222 },
+      statusFault: true,
+    });
+    app.render(createElement(InviterBench));
+    await runToExchangeFailure(api);
+    // The ask paces its bounded re-asks over several seconds; this lead is the
+    // seat saying it has given up on them, which is the state under test.
+    await expect
+      .element(page.getByText(RECORD_UNANSWERED_LEAD), { timeout: 20_000 })
+      .toBeInTheDocument();
+
+    await page.getByRole("button", { name: "Try again" }).click();
+    await expect
+      .element(page.getByText(UNKNOWN_RECORD_CONFIRM_BODY))
+      .toBeInTheDocument();
+    // The confirm does not assert a record exists, since nothing established
+    // one -- and nothing is removed while the operator is deciding.
+    expect(page.getByText(UNTAKEN_RECORD_CONFIRM_BODY).query()).toBeNull();
+    expect(api.captured.some((r) => r.method === "DELETE")).toBe(false);
+
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await flushPendingUpdates();
+    expect(api.captured.some((r) => r.method === "DELETE")).toBe(false);
+    await expect
+      .element(page.getByText(RECORD_UNANSWERED_LEAD))
+      .toBeInTheDocument();
+  }, 30_000);
+
+  test("the retry confirms while the record ask is still in flight", async () => {
+    // Between the failure alert appearing and the ask landing, the seat knows no
+    // more than an exhausted ask does -- and on the failure this exists for, an
+    // appliance that has stopped answering, that window is the whole of the ask's
+    // bound. The retry DELETEs the folder throughout it, so it confirms, saying
+    // that the asking is what has not finished.
+    const api = stubJobApi({
+      sftp: { configured: true, host: "dr.example.gov", port: 2222 },
+      holdStatus: true,
+    });
+    app.render(createElement(InviterBench));
+    await runToExchangeFailure(api);
+
+    // The recovery advertises the dialog it opens, which is how this test presses
+    // the confirming form without racing the ask it is holding open.
+    await expect
+      .element(page.getByRole("button", { name: "Try again" }))
+      .toHaveAttribute("aria-haspopup", "dialog");
+    await page.getByRole("button", { name: "Try again" }).click();
+    await expect
+      .element(page.getByText(PENDING_RECORD_CONFIRM_BODY))
+      .toBeInTheDocument();
+    // Neither settled account of the record is claimed: nothing has stopped
+    // answering, and nothing said a record is standing.
+    expect(page.getByText(UNKNOWN_RECORD_CONFIRM_BODY).query()).toBeNull();
+    expect(page.getByText(UNTAKEN_RECORD_CONFIRM_BODY).query()).toBeNull();
+    expect(api.captured.some((r) => r.method === "DELETE")).toBe(false);
+
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await flushPendingUpdates();
+    expect(api.captured.some((r) => r.method === "DELETE")).toBe(false);
+    api.releaseStatus();
+  });
+
+  test("a run that failed before disclosing offers nothing and retries straight through", async () => {
+    // No record is owed and none was written, so the appliance reports none: the
+    // panel renders nothing, and the recovery costs the operator nothing it has
+    // not already seen, so it does not interrupt them.
+    const api = stubJobApi({
+      sftp: { configured: true, host: "dr.example.gov", port: 2222 },
+    });
+    app.render(createElement(InviterBench));
+    await runToExchangeFailure(api);
+    // Wait for the ask to have LANDED, not merely to have been sent: an ask still
+    // in flight confirms, so a press before the answer would be exercising that
+    // state rather than this one.
+    await awaitStraightThroughRecovery("Try again");
+
+    expect(page.getByText(TERMINATED_RECORD_LEAD).query()).toBeNull();
+    expect(
+      page
+        .getByRole("link", { name: /Download record \(safe to share\)/ })
+        .query(),
+    ).toBeNull();
+
+    await page.getByRole("button", { name: "Try again" }).click();
+    expect(page.getByText(UNTAKEN_RECORD_CONFIRM_BODY).query()).toBeNull();
+    await vi.waitFor(() =>
+      expect(api.captured.some((r) => r.method === "DELETE")).toBe(true),
+    );
   });
 });

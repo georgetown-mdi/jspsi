@@ -1,12 +1,28 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  COMPLETED_RECORD_NOTICE,
+  RECORD_UNANSWERED_LEAD,
+  RECORD_UNANSWERED_NOTICE,
+  TERMINATED_RECORD_KEYS_NOTICE,
+  TERMINATED_RECORD_LEAD,
+  TERMINATED_RECORD_NOTICE,
+} from "@bench/RecordDownload";
+import {
+  PENDING_RECORD_CONFIRM_BODY,
+  UNKNOWN_RECORD_CONFIRM_BODY,
+  UNKNOWN_RECORD_CONFIRM_TITLE,
+  UNTAKEN_RECORD_CONFIRM_BODY,
+  UNTAKEN_RECORD_CONFIRM_TITLE,
+  completionOutcome,
+  untakenRecordConfirm,
+} from "@bench/BenchRunSurface";
+import {
   RECEIPT_MISSING_LEAD,
   RECEIPT_MISSING_NOTICE,
   RECEIPT_UNANSWERED_LEAD,
   RECEIPT_UNANSWERED_NOTICE,
 } from "@bench/ReceiptDownload";
-import { completionOutcome } from "@bench/BenchRunSurface";
 
 import type { RunOutputs } from "@bench/runOutputs";
 
@@ -87,5 +103,157 @@ describe("the missing-receipt copy", () => {
     expect(RECEIPT_UNANSWERED_NOTICE).toContain("keep the run");
     expect(RECEIPT_UNANSWERED_NOTICE).not.toContain(RECEIPT_MISSING_LEAD);
     expect(RECEIPT_UNANSWERED_NOTICE).not.toContain("holds none");
+  });
+});
+
+describe("the exchange-record copy", () => {
+  test("the terminated lead leads with the disclosure, not the failure", () => {
+    // The alert above already says the run stopped. What the operator would not
+    // otherwise know -- and what the record is FOR -- is that data had already
+    // crossed, so the lead must not read as one more restatement of the failure.
+    expect(TERMINATED_RECORD_LEAD).toContain("already exchanged data");
+    expect(TERMINATED_RECORD_LEAD).toContain("record of that disclosure");
+  });
+
+  test("the terminated notice names the accounting use and the destruction", () => {
+    // Two things the operator can act on: what the file is good for, and that
+    // every control on this surface removes it.
+    expect(TERMINATED_RECORD_NOTICE).toContain("disclosure accounting");
+    expect(TERMINATED_RECORD_NOTICE).toContain("Download it now");
+    expect(TERMINATED_RECORD_NOTICE).toContain("removes this run's files");
+    expect(TERMINATED_RECORD_NOTICE).toContain("still happened");
+    // It stands on the run seats and on the compact recovery panel, whose controls
+    // are worded differently, so it names no control by its label.
+    expect(TERMINATED_RECORD_NOTICE).not.toMatch(/"Try again"|"Discard"/);
+  });
+
+  test("the terminated keys notice states what the pair cannot do", () => {
+    // A terminated run wrote no result file, and all three of the record's
+    // commitments re-supply from one, so the keys beside it open nothing. The pair
+    // otherwise looks exactly like a completed run's, which is why this is said at
+    // the download rather than left to be discovered.
+    expect(TERMINATED_RECORD_KEYS_NOTICE).toContain("nothing");
+    expect(TERMINATED_RECORD_KEYS_NOTICE).toContain("to open");
+    expect(TERMINATED_RECORD_KEYS_NOTICE).toContain("result");
+    // What it does NOT do is write the record off: it still states the disclosure
+    // and still pairs with a receipt the partner holds.
+    expect(TERMINATED_RECORD_KEYS_NOTICE).toContain("still states what");
+    expect(TERMINATED_RECORD_KEYS_NOTICE).toContain("keys private");
+    // And the completed run's copy must not carry the limitation, which does not
+    // hold for it.
+    expect(COMPLETED_RECORD_NOTICE).not.toContain("nothing to open");
+  });
+
+  test("the unanswered copy states the silence conditionally", () => {
+    // There is no "a record was requested" field to state an absence against --
+    // whether one is owed depends on how far the run got -- so the copy states the
+    // condition rather than asserting a record exists, and names what to avoid
+    // meanwhile.
+    expect(RECORD_UNANSWERED_LEAD).toContain("stopped answering");
+    expect(RECORD_UNANSWERED_NOTICE).toContain("stopped asking");
+    expect(RECORD_UNANSWERED_NOTICE).toContain("If this run got as far as");
+    expect(RECORD_UNANSWERED_NOTICE).toContain("reload");
+    expect(RECORD_UNANSWERED_NOTICE).toContain("keep the run");
+  });
+
+  test("the untaken-record confirm names the loss and the way to avoid it", () => {
+    // The confirm fires on a recovery the operator has already pressed, so it
+    // earns its interruption only by naming what that press destroys and where the
+    // file still is.
+    expect(UNTAKEN_RECORD_CONFIRM_TITLE).toContain("exchange record");
+    expect(UNTAKEN_RECORD_CONFIRM_BODY).toContain("exchanged data before it");
+    expect(UNTAKEN_RECORD_CONFIRM_BODY).toContain("removes the run");
+    expect(UNTAKEN_RECORD_CONFIRM_BODY).toContain(
+      "neither party can recreate it",
+    );
+    expect(UNTAKEN_RECORD_CONFIRM_BODY).toContain("Download it");
+  });
+
+  test("the unknown-record confirm claims only what the silence supports", () => {
+    // This one fires where nothing established a record at all, so it must not
+    // borrow the copy that asserts one. It names the silence, the same
+    // irreversibility, and the one move that turns the unknown back into an
+    // answer.
+    expect(UNKNOWN_RECORD_CONFIRM_TITLE).toContain("possible exchange record");
+    expect(UNKNOWN_RECORD_CONFIRM_BODY).toContain("stopped answering");
+    expect(UNKNOWN_RECORD_CONFIRM_BODY).toContain("cannot say whether");
+    expect(UNKNOWN_RECORD_CONFIRM_BODY).toContain(
+      "neither party can recreate it",
+    );
+    expect(UNKNOWN_RECORD_CONFIRM_BODY).toContain("Reload this page");
+    expect(UNKNOWN_RECORD_CONFIRM_BODY).not.toContain("this appliance holds");
+  });
+
+  test("the pending confirm says the asking is still running", () => {
+    // Nothing has stopped answering while the ask is in flight, and the answer is
+    // on its way to this page: the copy must not borrow the exhausted ask's
+    // account of the silence, nor send the operator to a reload that would only
+    // start the asking over.
+    expect(PENDING_RECORD_CONFIRM_BODY).toContain("still asking");
+    expect(PENDING_RECORD_CONFIRM_BODY).toContain("cannot yet say whether");
+    expect(PENDING_RECORD_CONFIRM_BODY).toContain(
+      "neither party can recreate it",
+    );
+    expect(PENDING_RECORD_CONFIRM_BODY).toContain("Wait for the answer");
+    expect(PENDING_RECORD_CONFIRM_BODY).not.toContain("stopped answering");
+    expect(PENDING_RECORD_CONFIRM_BODY).not.toContain("Reload this page");
+    expect(PENDING_RECORD_CONFIRM_BODY).not.toContain("this appliance holds");
+  });
+});
+
+describe("untakenRecordConfirm", () => {
+  const downloads = {
+    recordUrl: "/api/jobs/job-1/record",
+    recordFileName: "psilink-record.json",
+    keysUrl: "/api/jobs/job-1/keys",
+    keysFileName: "psilink-record.keys.json",
+  };
+
+  test("confirms over a record the appliance says it holds", () => {
+    expect(
+      untakenRecordConfirm({
+        kind: "available",
+        outcome: "receipt-swap-terminated",
+        downloads,
+      }),
+    ).toEqual({
+      title: UNTAKEN_RECORD_CONFIRM_TITLE,
+      body: UNTAKEN_RECORD_CONFIRM_BODY,
+    });
+  });
+
+  test("confirms over an ask that never answered, under its own copy", () => {
+    // An exhausted ask established nothing, and a run that got as far as
+    // exchanging data owes a record whether or not the appliance said so -- so
+    // the silence still buys a confirm, just not the one that asserts a record.
+    expect(untakenRecordConfirm({ kind: "unanswered" })).toEqual({
+      title: UNKNOWN_RECORD_CONFIRM_TITLE,
+      body: UNKNOWN_RECORD_CONFIRM_BODY,
+    });
+  });
+
+  test("confirms while the ask is still in flight, saying so", () => {
+    // The window between a failure alert appearing and its record ask landing is
+    // the whole of the ask's bound on the failure this exists for -- an appliance
+    // that stopped answering -- and every recovery in that window DELETEs the
+    // run's folder. An unresolved ask has established no less than an exhausted
+    // one, so it confirms too, under copy about the asking rather than a silence.
+    expect(untakenRecordConfirm({ kind: "asking" })).toEqual({
+      title: UNKNOWN_RECORD_CONFIRM_TITLE,
+      body: PENDING_RECORD_CONFIRM_BODY,
+    });
+  });
+
+  test("does not confirm over the appliance's own not-available answer", () => {
+    // `none` is the one definitive absence there is: the appliance answered and
+    // holds no record, which is what a run that failed before disclosing looks
+    // like. Interrupting there would spend the confirm on nothing.
+    expect(untakenRecordConfirm({ kind: "none" })).toBeUndefined();
+  });
+
+  test("does not confirm where the seat put no ask at all", () => {
+    // A browser run has no appliance job, so its recoveries destroy no record
+    // anywhere and nothing was ever asked about one.
+    expect(untakenRecordConfirm(undefined)).toBeUndefined();
   });
 });

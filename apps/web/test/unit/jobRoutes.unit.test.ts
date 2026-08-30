@@ -36,6 +36,7 @@ import {
 } from "../utils/jobFixtures";
 
 import type { JobCreateIntent, JobInputFileReference } from "@jobs/intent";
+import type { ExchangeRecordOutcome } from "@psilink/core";
 import type { JobManager as JobManagerType } from "@jobs/jobManager";
 
 const roots: Array<string> = [];
@@ -129,10 +130,42 @@ function createRequest(body: unknown, headers: Record<string, string> = {}) {
   });
 }
 
-/** A record body with the given createdAt, matching the shape the status route
- * reads. */
-function recordJson(createdAt: string): string {
-  return JSON.stringify({ createdAt, summary: "test" });
+/** A record body with the given createdAt and outcome, matching the shape the
+ * status route reads. Every record carries an outcome, so the default is the
+ * completed run's and a terminated run's is stated at the call site. */
+function recordJson(
+  createdAt: string,
+  outcome: ExchangeRecordOutcome = "completed",
+): string {
+  return JSON.stringify({ createdAt, outcome, summary: "test" });
+}
+
+/**
+ * The status each half of the record pair's download answers for `id`, driven
+ * through its own route under its own URL.
+ *
+ * The two downloads and the status body's `recordAvailable` stand on one gate, so
+ * a test that pinned the status field alone would not see a change that split the
+ * downloads off from it and started serving a record the status body calls
+ * unavailable.
+ */
+async function recordPairStatuses(
+  id: string,
+): Promise<{ record: number; keys: number }> {
+  const statusOf = async (
+    route: Parameters<typeof handlersOf>[0],
+    segment: string,
+  ): Promise<number> =>
+    (
+      (await handlersOf(route).GET({
+        request: jobRequest(`http://localhost/api/jobs/${id}/${segment}`),
+        params: { jobId: id },
+      })) as Response
+    ).status;
+  return {
+    record: await statusOf(RecordRoute, "record"),
+    keys: await statusOf(KeysRoute, "keys"),
+  };
 }
 
 /**
@@ -587,7 +620,11 @@ describe("record and keys routes serve the exchange-record pair after success", 
     expect(keysResp.status).toBe(404);
   });
 
-  test("record and keys are 404 before the job succeeds", async () => {
+  test("record and keys are 404 while the run is still going, pair on disk or not", async () => {
+    // The CLI writes the pair near the end of a run, so a mid-run read could take
+    // a half-written state for the run's answer. Planting a complete pair under a
+    // live child does not open the routes: settling is what they gate on, and it
+    // is a separate claim from the files being there.
     enableJobApi();
     vi.stubEnv("STUB_DELAY_MS", "5000");
     const created = (await handlersOf(CreateRoute).POST({
@@ -595,16 +632,29 @@ describe("record and keys routes serve the exchange-record pair after success", 
       params: {},
     })) as Response;
     const { id } = (await created.json()) as { id: string };
-    const recordResp = (await handlersOf(RecordRoute).GET({
-      request: jobRequest(`http://localhost/api/jobs/${id}/record`),
-      params: { jobId: id },
-    })) as Response;
-    expect(recordResp.status).toBe(404);
-    const keysResp = (await handlersOf(KeysRoute).GET({
-      request: jobRequest(`http://localhost/api/jobs/${id}/keys`),
-      params: { jobId: id },
-    })) as Response;
-    expect(keysResp.status).toBe(404);
+    for (const stage of ["nothing written", "pair planted"]) {
+      if (stage === "pair planted") {
+        const workdir = path.join(process.env.JOB_DATA_ROOT!, id);
+        fs.writeFileSync(
+          path.join(workdir, JOB_FILE_NAMES.record),
+          recordJson(CREATED_AT),
+        );
+        fs.writeFileSync(
+          path.join(workdir, JOB_FILE_NAMES.recordKeys),
+          JSON.stringify({ salts: {} }),
+        );
+      }
+      const recordResp = (await handlersOf(RecordRoute).GET({
+        request: jobRequest(`http://localhost/api/jobs/${id}/record`),
+        params: { jobId: id },
+      })) as Response;
+      expect(recordResp.status, stage).toBe(404);
+      const keysResp = (await handlersOf(KeysRoute).GET({
+        request: jobRequest(`http://localhost/api/jobs/${id}/keys`),
+        params: { jobId: id },
+      })) as Response;
+      expect(keysResp.status, stage).toBe(404);
+    }
   });
 
   test("record and keys are 404 when the API is disabled", async () => {
@@ -781,18 +831,16 @@ describe("status route reports record availability", () => {
     expect(body.recordCreatedAt).toBeUndefined();
   });
 
-  test("a failed run's record stays in the run's folder and is not offered", async () => {
+  test("a run that disclosed and then terminated is offered its record", async () => {
     // A run that terminated after its payloads crossed writes the exchange record
     // of that disclosure and still exits non-zero, so the record pair is on disk
-    // under a FAILED job. Both console surfaces gate on the job having succeeded,
-    // so neither hands that record over. This is the fact the signing card's
-    // unpinned-partner copy states to the operator -- the file is in the run's
-    // folder in the mount, not on the screen (apps/web/src/bench/receiptsModel.ts,
-    // NO_PARTNER_PIN_PROBLEM, whose wording is pinned in consoleReceipts.unit) --
-    // so a relaxed gate here would leave that copy quietly wrong.
+    // under a FAILED job. It is the disclosure-accounting artifact that run's
+    // operator needs, and the console's own recovery controls DELETE the folder it
+    // sits in, so the appliance offers it rather than holding it back on the run's
+    // exit code.
     const id = await createFinishedJob("failed", {
       STUB_EXIT_CODE: "1",
-      STUB_RECORD_JSON: recordJson(CREATED_AT),
+      STUB_RECORD_JSON: recordJson(CREATED_AT, "receipt-swap-terminated"),
     });
     // The helper pushes the data root last, so the run's folder is under it.
     const dataRoot = roots[roots.length - 1];
@@ -808,16 +856,78 @@ describe("status route reports record availability", () => {
       status: string;
       recordAvailable: boolean;
       recordCreatedAt?: string;
+      recordOutcome?: string;
     };
     expect(body.status).toBe("failed");
-    expect(body.recordAvailable).toBe(false);
-    expect(body.recordCreatedAt).toBeUndefined();
+    expect(body.recordAvailable).toBe(true);
+    expect(body.recordCreatedAt).toBe(CREATED_AT);
+    // The outcome travels with the availability: a terminated record's
+    // commitments re-supply from a result file the run never wrote, so a surface
+    // that could not tell the two apart would offer the pair as a completed run's.
+    expect(body.recordOutcome).toBe("receipt-swap-terminated");
 
     const download = (await handlersOf(RecordRoute).GET({
       request: jobRequest(`http://localhost/api/jobs/${id}/record`),
       params: { jobId: id },
     })) as Response;
-    expect(download.status).toBe(404);
+    expect(download.status).toBe(200);
+    expect(JSON.parse(await download.text())).toMatchObject({
+      createdAt: CREATED_AT,
+      outcome: "receipt-swap-terminated",
+    });
+
+    // The keys are served under the same gate, so the pair is never split.
+    const keys = (await handlersOf(KeysRoute).GET({
+      request: jobRequest(`http://localhost/api/jobs/${id}/keys`),
+      params: { jobId: id },
+    })) as Response;
+    expect(keys.status).toBe(200);
+  });
+
+  test("a run that failed before disclosing offers no record", async () => {
+    // A failure before the payload exchange returns owes no record and writes
+    // none, so nothing is on disk to offer -- the absence is the file's, not a
+    // status test standing in for it.
+    const id = await createFinishedJob("failed", { STUB_EXIT_CODE: "1" });
+    const dataRoot = roots[roots.length - 1];
+    expect(fs.existsSync(path.join(dataRoot, id, JOB_FILE_NAMES.record))).toBe(
+      false,
+    );
+
+    const status = (await handlersOf(JobRoute).GET({
+      request: jobRequest(`http://localhost/api/jobs/${id}`),
+      params: { jobId: id },
+    })) as Response;
+    const body = (await status.json()) as {
+      recordAvailable: boolean;
+      recordCreatedAt?: string;
+      recordOutcome?: string;
+    };
+    expect(body.recordAvailable).toBe(false);
+    expect(body.recordCreatedAt).toBeUndefined();
+    expect(body.recordOutcome).toBeUndefined();
+
+    expect(await recordPairStatuses(id)).toEqual({ record: 404, keys: 404 });
+  });
+
+  test("a record carrying no recognized outcome reads as unavailable", async () => {
+    // Every record the appliance's own CLI writes states its outcome, so one that
+    // does not is not a record this appliance can describe. It is refused here
+    // rather than offered under a completed run's framing.
+    const id = await createSucceededJob({
+      STUB_OUTPUT_FILE: "id\n1\n",
+      STUB_RECORD_JSON: JSON.stringify({
+        createdAt: CREATED_AT,
+        outcome: "who-knows",
+      }),
+    });
+    const response = (await handlersOf(JobRoute).GET({
+      request: jobRequest(`http://localhost/api/jobs/${id}`),
+      params: { jobId: id },
+    })) as Response;
+    const body = (await response.json()) as { recordAvailable: boolean };
+    expect(body.recordAvailable).toBe(false);
+    expect(await recordPairStatuses(id)).toEqual({ record: 404, keys: 404 });
   });
 
   test("a malformed record file reads as unavailable (defensive parse)", async () => {
@@ -838,6 +948,7 @@ describe("status route reports record availability", () => {
     };
     expect(body.recordAvailable).toBe(false);
     expect(body.recordCreatedAt).toBeUndefined();
+    expect(await recordPairStatuses(id)).toEqual({ record: 404, keys: 404 });
   });
 
   test("a record missing createdAt reads as unavailable", async () => {
@@ -851,6 +962,7 @@ describe("status route reports record availability", () => {
     })) as Response;
     const body = (await response.json()) as { recordAvailable: boolean };
     expect(body.recordAvailable).toBe(false);
+    expect(await recordPairStatuses(id)).toEqual({ record: 404, keys: 404 });
   });
 
   test("the status body carries no restored key", async () => {

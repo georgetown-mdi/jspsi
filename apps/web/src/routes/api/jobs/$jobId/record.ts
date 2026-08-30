@@ -4,17 +4,19 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import { JOB_RESPONSE_HEADERS, jobEmptyResponse } from "@jobs/gate";
 import { gateJobRoute, validateJobIdParam } from "@jobs/routeSupport";
-import { jobFileExists } from "@jobs/workdir";
 
 /**
  * `GET /api/jobs/:jobId/record` -- serve the job's self-attested exchange record.
  *
- * A near-exact mirror of the result route: feature-gated, id-validated, and served
- * only after the job succeeded, from the job's server-chosen record path inside
- * its workdir (never derived from client input). A job that has not succeeded, or
- * whose record is missing, is 404. The download name the browser saves is set by
- * the driver's `download` attribute; the Content-Disposition name here is a
- * stable fallback.
+ * Feature-gated, id-validated, and served from the job's server-chosen record path
+ * inside its workdir (never derived from client input). The gate is the status
+ * route's own record availability, so the two cannot disagree about what is
+ * offered: the run has settled and the readable pair is on disk. That includes a
+ * run that disclosed and then terminated, whose record is precisely the
+ * disclosure-accounting artifact its operator needs; a failure before the
+ * disclosure owes no record, writes none, and is 404 here on the same rule. The
+ * download name the browser saves is set by the driver's `download` attribute; the
+ * Content-Disposition name here is a stable fallback.
  */
 export const Route = createFileRoute("/api/jobs/$jobId/record")({
   server: {
@@ -27,8 +29,7 @@ export const Route = createFileRoute("/api/jobs/$jobId/record")({
 
         const view = gate.manager.getJobView(jobId);
         if (view === null) return jobEmptyResponse(404);
-        if (view.status !== "succeeded") return jobEmptyResponse(404);
-        if (!jobFileExists(view.recordPath)) return jobEmptyResponse(404);
+        if (!view.recordAvailable) return jobEmptyResponse(404);
 
         const body = await fsp.readFile(view.recordPath);
         return new Response(body, {

@@ -14,7 +14,7 @@ import {
   createWorkdir,
   generateJobId,
   jobFileExists,
-  readRecordCreatedAt,
+  readRecordSummary,
   removeWorkdir,
   resolveWorkdir,
   resolveWorkdirFile,
@@ -50,6 +50,7 @@ import type {
   JobInputFileReference,
   JobSigningPaths,
 } from "./intent";
+import type { ExchangeRecordOutcome } from "@psilink/core";
 import type { JobHandoff } from "./handoff";
 import type { JobSftpServerEntry } from "./sftpServer";
 import type { RendezvousLeg } from "./jobRendezvous";
@@ -185,6 +186,12 @@ export interface JobView {
   resultAvailable: boolean;
   recordAvailable: boolean;
   recordCreatedAt?: string;
+  /** What the available record says became of the run that wrote it, present
+   * exactly when {@link recordAvailable} is true. A terminated run's record
+   * attests the same disclosure a completed run's does but has no result file
+   * behind its commitments, so a surface reads this to say what it is offering
+   * rather than presenting the two alike. */
+  recordOutcome?: ExchangeRecordOutcome;
   /** Whether this run's intent asked for a diagnostic log, whether or not the
    * CLI has opened the file yet. It is what separates a run that will never have
    * a log from one whose log has not appeared, so a client watching for the file
@@ -1077,12 +1084,14 @@ export class JobManager {
    *   synthesize a failure terminal.
    *
    * The exit decides the OUTCOME; the terminal event decides the STATUS, which is
-   * what the result, record, and keys routes gate on. A persistence loss with the
-   * CLI's own `result` terminal is therefore `succeeded` and serves its artifacts
-   * -- the exchange completed and the result file is on disk -- while the loss is
-   * carried on `terminal.outcome` and named by the run's warnings. With no
-   * terminal event at all the console saw no artifact announced, so the status
-   * stays `failed` and nothing is offered, exactly as for any other broken stream.
+   * what the result route gates on -- the record and keys routes read it only for
+   * the settled-versus-running distinction {@link liveRecordAvailability} draws.
+   * A persistence loss with the CLI's own `result` terminal is therefore
+   * `succeeded` and serves its result -- the exchange completed and the file is on
+   * disk -- while the loss is carried on `terminal.outcome` and named by the run's
+   * warnings. With no terminal event at all the console saw no result announced,
+   * so the status stays `failed` and none is offered, exactly as for any other
+   * broken stream; a record pair that run wrote is offered on its own existence.
    *
    * This is the only slot-release point besides the pre-spawn create failure: it
    * fires on the child's `close` (or a spawn `error`), so a killed child is
@@ -1306,21 +1315,46 @@ export class JobManager {
 
 /**
  * The record pair's availability for a live record, offered all-or-nothing: the
- * job succeeded, both the record and keys files exist, and the record's
- * `createdAt` parses. This is the same rule the status route applied when it read
- * the in-memory record directly, lifted here so the view shares it.
+ * run has settled, both the record and keys files exist, and the record parses
+ * into a `createdAt` and an `outcome`.
+ *
+ * The gate is the record's own EXISTENCE rather than the run having succeeded,
+ * because that is what tracks the question the record answers. A record is owed
+ * from the moment the payload exchange returns, so a run that disclosed and then
+ * terminated writes one to the same destination a completed run's takes
+ * (docs/spec/EXCHANGE_RECORD.md, When a record is owed) -- and it is exactly the
+ * disclosure-accounting artifact the operator of that run needs. A failure BEFORE
+ * that point owes none and writes none, so it still offers nothing here, without a
+ * status test standing in for the fact.
+ *
+ * Settling is a separate claim from the file being there, and it is why the run
+ * status is still read: the CLI writes the pair near the end of a run, so an ask
+ * mid-run could read a half-written state as the run's answer. Once the run is
+ * terminal the pair is on disk or it never will be.
+ *
+ * `recordOutcome` travels with the availability so a surface can say what the
+ * record it is offering is for. A terminated record attests the same disclosure a
+ * completed one does, but its commitments re-supply from a result file the run
+ * never wrote, so nothing beside it can be opened; a surface that offered the two
+ * identically would make a claim the record does not.
  */
-function liveRecordAvailability(
-  record: JobRecord,
-):
+function liveRecordAvailability(record: JobRecord):
   | { recordAvailable: false }
-  | { recordAvailable: true; recordCreatedAt: string } {
-  if (record.status !== "succeeded") return { recordAvailable: false };
+  | {
+      recordAvailable: true;
+      recordCreatedAt: string;
+      recordOutcome: ExchangeRecordOutcome;
+    } {
+  if (record.status === "running") return { recordAvailable: false };
   if (!jobFileExists(record.recordPath) || !jobFileExists(record.keysPath))
     return { recordAvailable: false };
-  const recordCreatedAt = readRecordCreatedAt(record.recordPath);
-  if (recordCreatedAt === null) return { recordAvailable: false };
-  return { recordAvailable: true, recordCreatedAt };
+  const summary = readRecordSummary(record.recordPath);
+  if (summary === null) return { recordAvailable: false };
+  return {
+    recordAvailable: true,
+    recordCreatedAt: summary.createdAt,
+    recordOutcome: summary.outcome,
+  };
 }
 
 /**

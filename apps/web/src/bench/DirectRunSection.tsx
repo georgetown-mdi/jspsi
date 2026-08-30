@@ -1,12 +1,11 @@
 import { useEffect, useRef } from "react";
 
-import { Button } from "@mantine/core";
-
 import {
   AnotherExchangeFoot,
   DonePanel,
   DownloadRow,
   FailureAlert,
+  FailureRecoveryButton,
   NoResultFileInset,
   RECONNECTING_HEADING,
   ReattachedRunNotice,
@@ -15,14 +14,17 @@ import {
   SERVER_JOB_KEEP_OPEN_BODY,
   SERVER_JOB_PEER_WINDOW_BODY,
   recoveredExchangeHeading,
+  untakenRecordConfirm,
 } from "./BenchRunSurface";
 import { DiagnosticLogPanel } from "./DiagnosticLogPanel";
 import { ReceiptDownload } from "./ReceiptDownload";
+import { RecordDownload } from "./RecordDownload";
 import { RecurringHandoff } from "./RecurringHandoff";
 import { StatusPanel } from "./StatusPanel";
 import { awaitingPartner } from "./exchangeRun";
 import { reattachedRunState } from "./reattachedRunState";
 import styles from "./bench.module.css";
+import { useJobExchangeRecordOffer } from "./useJobExchangeRecordOffer";
 
 import type { ExchangeRun } from "./exchangeRun";
 import type { JobRunStatus } from "@psi/serverJobExchangeDriver";
@@ -83,10 +85,18 @@ export function DirectRunSection({
   onAbandon: () => void;
 }) {
   const done = outputs !== undefined;
-  // The run reached a terminal, which is what the two appliance-artifact
+  // The run reached a terminal, which is what the three appliance-artifact
   // panels below key on: each states its artifact's standing once the run is
   // past producing it.
   const settled = done || failure !== undefined;
+  // Where this run's exchange record stands on the appliance -- the one ask that
+  // both offers the record and decides whether the failure recoveries, each of
+  // which DELETEs the run's folder, confirm before doing so.
+  const recordOffer = useJobExchangeRecordOffer(
+    jobId,
+    settled && outputs?.record === undefined,
+  );
+  const recordConfirm = untakenRecordConfirm(recordOffer);
   const awaiting = awaitingPartner(run);
   // A retryable failure is a transport/exchange fault; the terms mismatch is a
   // config failure, which -- like a security failure -- is not retried as-is but
@@ -154,14 +164,18 @@ export function DirectRunSection({
       {failure !== undefined && (
         <FailureAlert failure={failure}>
           {retryable && (
-            <Button color="red" variant="light" mt="sm" onClick={onTryAgain}>
-              Try again
-            </Button>
+            <FailureRecoveryButton
+              label="Try again"
+              onAct={onTryAgain}
+              recordConfirm={recordConfirm}
+            />
           )}
           {offersStartOver && (
-            <Button color="red" variant="light" mt="sm" onClick={onStartOver}>
-              Start over
-            </Button>
+            <FailureRecoveryButton
+              label="Start over"
+              onAct={onStartOver}
+              recordConfirm={recordConfirm}
+            />
           )}
         </FailureAlert>
       )}
@@ -213,6 +227,7 @@ export function DirectRunSection({
           )}
         </>
       )}
+      <RecordDownload offer={recordOffer} />
       {jobId !== undefined && (
         <>
           <ReceiptDownload jobId={jobId} settled={settled} />
