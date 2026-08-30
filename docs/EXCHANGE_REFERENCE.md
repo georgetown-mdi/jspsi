@@ -178,13 +178,7 @@ The partner may still be the one with `expects_output: false`. Where it is, the 
 
 #### Choosing linkage keys for a both-sided match
 
-A cluster is the set of records that shared one value under one linkage key, so a cluster is only as good as the key that formed it. A key that is not near-unique where it is present groups records that are not one individual, and the result hands that grouping to both parties as a single entity. What to weigh when authoring [`linkage_keys`](#linkage_termslinkage_keys) for a both-sided match:
-
-- A cluster forms on the most precise key any of its members matched under, and a weaker key later in the list cannot widen a cluster an earlier key already formed. Adding one never regroups what a precise key decided.
-- A key whose value names a household, a site, or an episode rather than an individual produces exactly the cluster it describes -- everyone at the address, everyone at the clinic -- and the result states that as an entity grouping.
-- The cluster size distribution is the diagnostic you read off your own result, needing nothing from your partner. Clusters that are mostly one-to-one mean the run matched as a near-one-to-one exchange; a cluster spanning a large share of either dataset is the signature of a key that identified a group rather than a person.
-
-The rules behind these, and the closure they follow from, are in [`docs/spec/PROTOCOL.md`](spec/PROTOCOL.md#the-many-to-many-entity-closure).
+A cluster is the set of records that shared one value under one linkage key, so a cluster is only as good as the key that formed it: a key that is not near-unique where it is present groups records that are not one individual, and the result hands that grouping to both parties as a single entity. The rules for authoring [`linkage_keys`](#linkage_termslinkage_keys) under a both-sided match, and the closure they follow from, are in [`docs/spec/PROTOCOL.md`](spec/PROTOCOL.md#the-many-to-many-entity-closure).
 
 ### `expected_partner_deduplicate`
 
