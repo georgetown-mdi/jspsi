@@ -120,7 +120,7 @@ export function bumpViolations(declared, sources) {
   const violations = [];
   if (declared === undefined) {
     violations.push(
-      `${RECORD_VERSION_SOURCE}: EXCHANGE_RECORD_VERSION's declaration did not read as a quoted string literal -- the extraction pattern rotted; fix scripts/check-disclosure-recovery.mjs rather than dropping the check.`,
+      `${RECORD_VERSION_SOURCE}: EXCHANGE_RECORD_VERSION's declaration did not read as a quoted string literal -- the extraction pattern rotted; fix scripts/lib/exchangeRecordVersion.mjs rather than dropping the check.`,
     );
   } else if (declared !== RECORD_VERSION_PIN) {
     violations.push(

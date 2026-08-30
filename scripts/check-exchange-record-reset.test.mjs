@@ -379,8 +379,19 @@ describe("the check's registration", () => {
     expect(releases).toContain(RESET_RECORD_VERSION);
     expect(releases).toContain("npm run check:exchange-record-reset");
     expect(releases).toContain("RESET_TAKEN_AT_RELEASE");
-    // The two artifact classes a downward move leaves misread, by name.
-    expect(releases).toContain("psilink-managed-exchanges");
+    // The two artifact classes a downward move leaves misread, by name. The
+    // web-store names are extracted from the constants the store actually
+    // opens, so a rename there fails here instead of leaving the guidance
+    // naming a database that no longer exists.
+    const store = readRoot("apps/web/src/psi/managedExchangeStore.ts");
+    const dbName = store.match(/MANAGED_EXCHANGE_DB_NAME = "([^"]+)"/)?.[1];
+    const storeName = store.match(
+      /MANAGED_EXCHANGE_DISCLOSURE_STORE_NAME = "([^"]+)"/,
+    )?.[1];
+    expect(dbName).toBeTruthy();
+    expect(storeName).toBeTruthy();
+    expect(releases).toContain(dbName);
+    expect(releases).toContain(storeName);
     expect(releases).toContain("psilink-record-");
   });
 });
