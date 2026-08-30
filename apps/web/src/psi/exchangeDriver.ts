@@ -42,10 +42,12 @@ export interface ExchangeDriverEvents<
   /** A non-fatal, operator-relevant notice raised mid-run -- the server-job
    * driver forwards each relay `warning` event's message here (e.g. the CLI's
    * cross-party host-key divergence notice, which the operator must be able to
-   * see), and the in-browser driver raises the transport's own (its clean close
-   * ending on the ceiling rather than on the peer's delivery signal). Optional:
-   * a consumer with no warning surface omits it and a driver then drops the
-   * message. Never a terminal -- the run continues to exactly one
+   * see), and the in-browser driver raises what {@link runExchangeLifecycle}
+   * does: the resolved-cardinality and pair-table notices at the post-terms,
+   * pre-round seam, and the transport's own clean-close notice ending on the
+   * ceiling rather than on the peer's delivery signal. Optional: a consumer
+   * with no warning surface omits it and a driver then drops the message.
+   * Never a terminal -- the run continues to exactly one
    * `onResult`/`onError`, though a notice raised while tearing down arrives
    * after it. */
   onWarning?: (message: string) => void;
