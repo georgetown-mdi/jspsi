@@ -29,6 +29,8 @@
  * `none`, which renders as nothing rather than as a claim the run has none.
  */
 
+import { EXCHANGE_RECORD_OUTCOMES } from "@psilink/core";
+
 import { delayUntilAborted } from "@psi/delayUntilAborted";
 
 import { recordFileStamp } from "@bench/runOutputs";
@@ -104,9 +106,7 @@ interface JobStatusFields {
  * the record can be used for, so a body carrying an unrecognized one answers
  * nothing rather than defaulting to either meaning. */
 function recordOutcomeOf(value: unknown): ExchangeRecordOutcome | undefined {
-  return value === "completed" || value === "receipt-swap-terminated"
-    ? value
-    : undefined;
+  return EXCHANGE_RECORD_OUTCOMES.find((outcome) => outcome === value);
 }
 
 /**

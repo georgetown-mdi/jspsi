@@ -15,9 +15,12 @@ import {
   RECEIPT_UNANSWERED_NOTICE,
 } from "@bench/ReceiptDownload";
 import {
+  UNKNOWN_RECORD_CONFIRM_BODY,
+  UNKNOWN_RECORD_CONFIRM_TITLE,
   UNTAKEN_RECORD_CONFIRM_BODY,
   UNTAKEN_RECORD_CONFIRM_TITLE,
   completionOutcome,
+  untakenRecordConfirm,
 } from "@bench/BenchRunSurface";
 
 import type { RunOutputs } from "@bench/runOutputs";
@@ -163,5 +166,63 @@ describe("the exchange-record copy", () => {
       "neither party can recreate it",
     );
     expect(UNTAKEN_RECORD_CONFIRM_BODY).toContain("Download it");
+  });
+
+  test("the unknown-record confirm claims only what the silence supports", () => {
+    // This one fires where nothing established a record at all, so it must not
+    // borrow the copy that asserts one. It names the silence, the same
+    // irreversibility, and the one move that turns the unknown back into an
+    // answer.
+    expect(UNKNOWN_RECORD_CONFIRM_TITLE).toContain("possible exchange record");
+    expect(UNKNOWN_RECORD_CONFIRM_BODY).toContain("stopped answering");
+    expect(UNKNOWN_RECORD_CONFIRM_BODY).toContain("cannot say whether");
+    expect(UNKNOWN_RECORD_CONFIRM_BODY).toContain(
+      "neither party can recreate it",
+    );
+    expect(UNKNOWN_RECORD_CONFIRM_BODY).toContain("Reload this page");
+    expect(UNKNOWN_RECORD_CONFIRM_BODY).not.toContain("this appliance holds");
+  });
+});
+
+describe("untakenRecordConfirm", () => {
+  const downloads = {
+    recordUrl: "/api/jobs/job-1/record",
+    recordFileName: "psilink-record.json",
+    keysUrl: "/api/jobs/job-1/keys",
+    keysFileName: "psilink-record.keys.json",
+  };
+
+  test("confirms over a record the appliance says it holds", () => {
+    expect(
+      untakenRecordConfirm({
+        kind: "available",
+        outcome: "receipt-swap-terminated",
+        downloads,
+      }),
+    ).toEqual({
+      title: UNTAKEN_RECORD_CONFIRM_TITLE,
+      body: UNTAKEN_RECORD_CONFIRM_BODY,
+    });
+  });
+
+  test("confirms over an ask that never answered, under its own copy", () => {
+    // An exhausted ask established nothing, and a run that got as far as
+    // exchanging data owes a record whether or not the appliance said so -- so
+    // the silence still buys a confirm, just not the one that asserts a record.
+    expect(untakenRecordConfirm({ kind: "unanswered" })).toEqual({
+      title: UNKNOWN_RECORD_CONFIRM_TITLE,
+      body: UNKNOWN_RECORD_CONFIRM_BODY,
+    });
+  });
+
+  test("does not confirm over the appliance's own not-available answer", () => {
+    // `none` is the one definitive absence there is: the appliance answered and
+    // holds no record, which is what a run that failed before disclosing looks
+    // like. Interrupting there would spend the confirm on nothing.
+    expect(untakenRecordConfirm({ kind: "none" })).toBeUndefined();
+  });
+
+  test("does not confirm while the ask has not resolved", () => {
+    expect(untakenRecordConfirm(undefined)).toBeUndefined();
   });
 });

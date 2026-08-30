@@ -14,6 +14,7 @@ import {
   SERVER_JOB_KEEP_OPEN_BODY,
   SERVER_JOB_PEER_WINDOW_BODY,
   recoveredExchangeHeading,
+  untakenRecordConfirm,
 } from "./BenchRunSurface";
 import { DiagnosticLogPanel } from "./DiagnosticLogPanel";
 import { ReceiptDownload } from "./ReceiptDownload";
@@ -95,7 +96,7 @@ export function DirectRunSection({
     jobId,
     settled && outputs?.record === undefined,
   );
-  const untakenRecord = recordOffer?.kind === "available";
+  const recordConfirm = untakenRecordConfirm(recordOffer);
   const awaiting = awaitingPartner(run);
   // A retryable failure is a transport/exchange fault; the terms mismatch is a
   // config failure, which -- like a security failure -- is not retried as-is but
@@ -166,14 +167,14 @@ export function DirectRunSection({
             <FailureRecoveryButton
               label="Try again"
               onAct={onTryAgain}
-              confirmUntakenRecord={untakenRecord}
+              recordConfirm={recordConfirm}
             />
           )}
           {offersStartOver && (
             <FailureRecoveryButton
               label="Start over"
               onAct={onStartOver}
-              confirmUntakenRecord={untakenRecord}
+              recordConfirm={recordConfirm}
             />
           )}
         </FailureAlert>

@@ -10,6 +10,7 @@ import { dateTimeLabel } from "./inviterModel";
 import styles from "./bench.module.css";
 
 import type { NoResultFileOutputs, RunOutputs } from "./runOutputs";
+import type { JobExchangeRecordOffer } from "@psi/jobExchangeRecord";
 import type { ReactNode } from "react";
 import type { RunFailure } from "./useInviterExchange";
 
@@ -434,6 +435,70 @@ export const UNTAKEN_RECORD_CONFIRM_BODY =
   "and neither party can recreate it. Download it from the exchange-record " +
   "panel on this page first if you need the accounting entry.";
 
+/** The title the confirm heads with when the ask never answered. It asks about a
+ * record it cannot say is there, because that is all an unanswered ask
+ * established -- the alternative is a title that asserts one. */
+export const UNKNOWN_RECORD_CONFIRM_TITLE =
+  "Leave a possible exchange record behind?";
+
+/**
+ * What that confirm says. It names the silence rather than the record: the ask
+ * ended without the appliance ever saying whether this run wrote one, so what the
+ * operator is deciding is whether to remove a run that MAY hold the record of a
+ * disclosure. Pointed at the one thing that turns the unknown back into an answer,
+ * matching the standing notice on the record panel itself
+ * ({@link ./RecordDownload}).
+ */
+export const UNKNOWN_RECORD_CONFIRM_BODY =
+  "This appliance stopped answering whether this run wrote a record of a " +
+  "disclosure, so this page cannot say whether one is standing here. Going on " +
+  "removes the run and anything it wrote with it, and neither party can " +
+  "recreate it. Reload this page to ask again first if you need the accounting " +
+  "entry.";
+
+/** The heading and body of one untaken-record confirm. */
+export interface UntakenRecordConfirm {
+  title: string;
+  body: string;
+}
+
+/**
+ * The confirm a control that discards the run owes over this record offer, or
+ * undefined where it owes none and can act straight through.
+ *
+ * Two of the three answers an ask can carry are worth interrupting for, and they
+ * are not the same interruption. `available` is a record the operator has been
+ * offered and the discard destroys. `unanswered` is an ask that ended having
+ * established nothing ({@link @psi/jobExchangeRecord}) -- and a run that got as
+ * far as exchanging data owes a record whether or not the appliance said so, so
+ * treating the silence as an absence would let the one discard that cannot be
+ * undone through on the strength of no answer at all. It confirms, under copy
+ * that claims only what the silence supports.
+ *
+ * `none` is the appliance answering, and it is the only definitive
+ * not-available answer there is: a run that failed before disclosing owes no
+ * record and wrote none, so the discard costs nothing the operator has not
+ * already seen and is not worth interrupting. An offer that has not resolved
+ * takes the same exit, since the seats ask the moment the run settles and hold
+ * the answer -- what is unresolved there is an ask still in flight, not a
+ * question never put.
+ */
+export function untakenRecordConfirm(
+  offer: JobExchangeRecordOffer | undefined,
+): UntakenRecordConfirm | undefined {
+  if (offer?.kind === "available")
+    return {
+      title: UNTAKEN_RECORD_CONFIRM_TITLE,
+      body: UNTAKEN_RECORD_CONFIRM_BODY,
+    };
+  if (offer?.kind === "unanswered")
+    return {
+      title: UNKNOWN_RECORD_CONFIRM_TITLE,
+      body: UNKNOWN_RECORD_CONFIRM_BODY,
+    };
+  return undefined;
+}
+
 /**
  * One recovery a failure surface offers -- Try again, Start over, Back to your
  * columns -- with the confirm the console's discard hazard calls for.
@@ -442,10 +507,10 @@ export const UNTAKEN_RECORD_CONFIRM_BODY =
  * the run's whole folder is DELETEd so the single slot frees, which is
  * irreversible and appliance-only. On most failures that costs nothing the
  * operator has not already seen, so the control acts straight through and stays as
- * cheap as it looks. Where the run left an exchange record standing untaken
- * ({@link ./RecordDownload}), it does not: the record attests a disclosure that
- * happened and cannot be recreated, so the recovery confirms first -- the same
- * trade the completion path makes ({@link AnotherExchangeFoot}).
+ * cheap as it looks. Where the run may have left an exchange record standing
+ * untaken ({@link untakenRecordConfirm}), it does not: the record attests a
+ * disclosure that happened and cannot be recreated, so the recovery confirms first
+ * -- the same trade the completion path makes ({@link AnotherExchangeFoot}).
  *
  * `to` carries the recoveries that leave the bench rather than re-running in place
  * (the acceptor's fresh-invitation link); the confirm's own commit button then
@@ -455,7 +520,7 @@ export function FailureRecoveryButton({
   label,
   onAct,
   to,
-  confirmUntakenRecord,
+  recordConfirm,
 }: {
   label: string;
   /** Fires once the operator has committed to the recovery -- immediately when
@@ -464,9 +529,9 @@ export function FailureRecoveryButton({
   /** The route the recovery navigates to, for a recovery that leaves this seat.
    * Omitted for one that acts in place. */
   to?: "/quick";
-  /** Whether this run has an exchange record the operator has been offered and the
-   * recovery would destroy. */
-  confirmUntakenRecord: boolean;
+  /** The confirm this run's record offer calls for, or undefined where the
+   * recovery destroys no record the seat can name or suspect. */
+  recordConfirm: UntakenRecordConfirm | undefined;
 }) {
   const [confirming, setConfirming] = useState(false);
   const commit = (marginTop: string | undefined) =>
@@ -491,7 +556,7 @@ export function FailureRecoveryButton({
         {label}
       </Button>
     );
-  if (!confirmUntakenRecord) return commit("sm");
+  if (recordConfirm === undefined) return commit("sm");
   return (
     <>
       <Button
@@ -505,11 +570,11 @@ export function FailureRecoveryButton({
       <Modal
         opened={confirming}
         onClose={() => setConfirming(false)}
-        title={UNTAKEN_RECORD_CONFIRM_TITLE}
+        title={recordConfirm.title}
         centered
         transitionProps={{ duration: 0 }}
       >
-        <p>{UNTAKEN_RECORD_CONFIRM_BODY}</p>
+        <p>{recordConfirm.body}</p>
         <Group mt="md">
           <Button variant="default" onClick={() => setConfirming(false)}>
             Cancel

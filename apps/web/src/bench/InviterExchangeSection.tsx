@@ -20,6 +20,7 @@ import {
   SERVER_JOB_KEEP_OPEN_BODY,
   SERVER_JOB_PEER_WINDOW_BODY,
   recoveredExchangeHeading,
+  untakenRecordConfirm,
 } from "./BenchRunSurface";
 import { DiagnosticLogPanel } from "./DiagnosticLogPanel";
 import { ReceiptDownload } from "./ReceiptDownload";
@@ -125,7 +126,7 @@ export function InviterExchangeSection({
     serverJob ? jobId : undefined,
     settled && outputs?.record === undefined,
   );
-  const untakenRecord = recordOffer?.kind === "available";
+  const recordConfirm = untakenRecordConfirm(recordOffer);
 
   // A busy (409) create at start re-attached this surface to an exchange the
   // appliance already held (a second tab, a navigate-away-and-back, or an orphaned
@@ -207,14 +208,14 @@ export function InviterExchangeSection({
             <FailureRecoveryButton
               label="Try again"
               onAct={onTryAgain}
-              confirmUntakenRecord={untakenRecord}
+              recordConfirm={recordConfirm}
             />
           )}
           {offersStartOver && (
             <FailureRecoveryButton
               label="Start over with a fresh invitation"
               onAct={onStartOver}
-              confirmUntakenRecord={untakenRecord}
+              recordConfirm={recordConfirm}
             />
           )}
         </FailureAlert>

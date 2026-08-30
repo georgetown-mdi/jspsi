@@ -12,18 +12,22 @@ import "@mantine/core/styles.css";
 import { decodeInvitation } from "@psilink/core";
 
 import {
+  RECORD_UNANSWERED_LEAD,
+  TERMINATED_RECORD_KEYS_NOTICE,
+  TERMINATED_RECORD_LEAD,
+} from "@bench/RecordDownload";
+import {
   SWEEP_CONFIRMATION_LABEL,
   SWEEP_CONTROL_LABEL,
 } from "@bench/runDiagnosticsModel";
 import {
-  TERMINATED_RECORD_KEYS_NOTICE,
-  TERMINATED_RECORD_LEAD,
-} from "@bench/RecordDownload";
+  UNKNOWN_RECORD_CONFIRM_BODY,
+  UNTAKEN_RECORD_CONFIRM_BODY,
+} from "@bench/BenchRunSurface";
 import { InviterBench } from "@bench/InviterBench";
 import { RECEIPT_MISSING_LEAD } from "@bench/ReceiptDownload";
 import { RETAIN_MODE_BILATERAL_NOTICE } from "@bench/exchangeFilesModel";
 import { SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT } from "@bench/filedropRendezvousChoice";
-import { UNTAKEN_RECORD_CONFIRM_BODY } from "@bench/BenchRunSurface";
 import styles from "@bench/bench.module.css";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
@@ -100,6 +104,11 @@ interface StubOptions {
   /** The exchange record the job's status route reports. Unset, the body reports
    * `recordAvailable: false`, which is what a run that owes no record answers. */
   record?: { createdAt: string; outcome: string };
+  /** When true the job's status route answers 503 to every GET, which is what an
+   * ask that establishes NOTHING looks like from the seat: the record ask
+   * exhausts its bounded re-asks and resolves `unanswered`. DELETE is unaffected,
+   * so a discard the seat commits is still observable. */
+  statusFault?: boolean;
 }
 
 /** The same-origin job API, stubbed at the global fetch seam. Unmatched URLs fall
@@ -225,6 +234,8 @@ function stubJobApi(options: StubOptions = {}): {
       if (url === "/api/jobs/job-7") {
         if ((init?.method ?? "GET") === "DELETE")
           return Promise.resolve(new Response(null, { status: 204 }));
+        if (options.statusFault === true)
+          return Promise.resolve(new Response(null, { status: 503 }));
         return Promise.resolve(
           jsonResponse({
             status: jobStatus,
@@ -1819,6 +1830,40 @@ describe("console inviter exchange record on a terminated run", () => {
       )
       .toBeInTheDocument();
   });
+
+  test("an ask that never answered confirms too, without claiming a record", async () => {
+    // The appliance stopped answering about this run, so the seat cannot say
+    // whether a record is standing -- and a run that got this far may well have
+    // written one. The retry DELETEs the folder either way, so it confirms on
+    // the silence, under copy that claims only what the silence supports.
+    const api = stubJobApi({
+      sftp: { configured: true, host: "dr.example.gov", port: 2222 },
+      statusFault: true,
+    });
+    app.render(createElement(InviterBench));
+    await runToExchangeFailure(api);
+    // The ask paces its bounded re-asks over several seconds; this lead is the
+    // seat saying it has given up on them, which is the state under test.
+    await expect
+      .element(page.getByText(RECORD_UNANSWERED_LEAD), { timeout: 20_000 })
+      .toBeInTheDocument();
+
+    await page.getByRole("button", { name: "Try again" }).click();
+    await expect
+      .element(page.getByText(UNKNOWN_RECORD_CONFIRM_BODY))
+      .toBeInTheDocument();
+    // The confirm does not assert a record exists, since nothing established
+    // one -- and nothing is removed while the operator is deciding.
+    expect(page.getByText(UNTAKEN_RECORD_CONFIRM_BODY).query()).toBeNull();
+    expect(api.captured.some((r) => r.method === "DELETE")).toBe(false);
+
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await flushPendingUpdates();
+    expect(api.captured.some((r) => r.method === "DELETE")).toBe(false);
+    await expect
+      .element(page.getByText(RECORD_UNANSWERED_LEAD))
+      .toBeInTheDocument();
+  }, 30_000);
 
   test("a run that failed before disclosing offers nothing and retries straight through", async () => {
     // No record is owed and none was written, so the appliance reports none: the

@@ -1084,12 +1084,14 @@ export class JobManager {
    *   synthesize a failure terminal.
    *
    * The exit decides the OUTCOME; the terminal event decides the STATUS, which is
-   * what the result, record, and keys routes gate on. A persistence loss with the
-   * CLI's own `result` terminal is therefore `succeeded` and serves its artifacts
-   * -- the exchange completed and the result file is on disk -- while the loss is
-   * carried on `terminal.outcome` and named by the run's warnings. With no
-   * terminal event at all the console saw no artifact announced, so the status
-   * stays `failed` and nothing is offered, exactly as for any other broken stream.
+   * what the result route gates on -- the record and keys routes read it only for
+   * the settled-versus-running distinction {@link liveRecordAvailability} draws.
+   * A persistence loss with the CLI's own `result` terminal is therefore
+   * `succeeded` and serves its result -- the exchange completed and the file is on
+   * disk -- while the loss is carried on `terminal.outcome` and named by the run's
+   * warnings. With no terminal event at all the console saw no result announced,
+   * so the status stays `failed` and none is offered, exactly as for any other
+   * broken stream; a record pair that run wrote is offered on its own existence.
    *
    * This is the only slot-release point besides the pre-spawn create failure: it
    * fires on the child's `close` (or a spawn `error`), so a killed child is

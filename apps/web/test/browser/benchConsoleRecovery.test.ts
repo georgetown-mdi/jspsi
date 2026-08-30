@@ -9,7 +9,9 @@ import { createElement } from "react";
 // Load Mantine's stylesheet so components render with their real geometry.
 import "@mantine/core/styles.css";
 
+import { DISCARD_CONFIRM_BODY } from "@bench/RecoveredExchangePanel";
 import { InviterBench } from "@bench/InviterBench";
+import { UNTAKEN_RECORD_CONFIRM_BODY } from "@bench/BenchRunSurface";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 
@@ -596,6 +598,43 @@ describe("console strand recovery panel", () => {
         }),
       )
       .toBeInTheDocument();
+  });
+
+  test("the discard confirm names the record the panel is offering", async () => {
+    // The generic confirm names the exchange and its results, and a stopped run
+    // has no results -- so on a run that disclosed it would warn about nothing
+    // while removing the one artifact that cannot be recreated.
+    persistAttachment("job-fail");
+    const api = stubRecoveryApi({
+      jobId: "job-fail",
+      status: "failed",
+      record: {
+        createdAt: "2026-07-08T14:32:00.000Z",
+        outcome: "receipt-swap-terminated",
+      },
+    });
+    app.render(createElement(InviterBench));
+
+    // Press only once the ask has landed, so the confirm under test is the
+    // record-aware one rather than a race with the generic copy.
+    await expect
+      .element(
+        page.getByRole("link", {
+          name: "Download record (safe to share): psilink-record-2026-07-08T14-32-00-000Z.json",
+        }),
+      )
+      .toBeInTheDocument();
+    await page.getByRole("button", { name: "Discard" }).click();
+
+    await expect
+      .element(page.getByText(UNTAKEN_RECORD_CONFIRM_BODY))
+      .toBeInTheDocument();
+    expect(page.getByText(DISCARD_CONFIRM_BODY).query()).toBeNull();
+    expect(
+      api.captured.some(
+        (r) => r.url === "/api/jobs/job-fail" && r.method === "DELETE",
+      ),
+    ).toBe(false);
   });
 
   test("the stopped render offers no graduation disclosure", async () => {

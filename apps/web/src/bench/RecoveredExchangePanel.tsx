@@ -30,6 +30,7 @@ import {
   NoResultFileInset,
   RunWarningsAlert,
   recoveredExchangeHeading,
+  untakenRecordConfirm,
 } from "./BenchRunSurface";
 import { DiagnosticLogPanel } from "./DiagnosticLogPanel";
 import { ReceiptDownload } from "./ReceiptDownload";
@@ -104,6 +105,19 @@ function recoveryLead(
       : `This appliance stopped ${origin} before it finished, so there are no results to download. The reason is shown below; discard it to remove its files from this appliance.`;
 }
 
+/** The title over the panel's discard confirm where nothing beyond the exchange
+ * and its results is at stake. */
+export const DISCARD_CONFIRM_TITLE = "Discard this exchange?";
+
+/** What that confirm says: the removal is appliance-only and irreversible, and it
+ * covers a run still going. It names no artifact beyond the results, which is why
+ * a record standing on this panel takes {@link untakenRecordConfirm}'s copy
+ * instead. */
+export const DISCARD_CONFIRM_BODY =
+  "Discarding removes this exchange and any results from this appliance, and " +
+  "stops it if it is still running. This cannot be undone -- download anything " +
+  "you need first.";
+
 /**
  * The console's strand-recovery surface: a self-contained way back to the one
  * exchange the appliance holds, mounted on an idle bench entry and the console
@@ -128,7 +142,8 @@ function recoveryLead(
  * this on a schedule" graduation hand-off on any run that is not stopped
  * (self-gated away when the hand-off is unavailable), "Stop this exchange" while
  * running, and "Discard" (behind a confirm, since it is an irreversible removal
- * of appliance-only data) always.
+ * of appliance-only data -- naming the exchange record instead of the results
+ * where the run may have left one standing) always.
  *
  * Unmounting the panel aborts only its own stream consumption -- it carries no
  * cancel intent, so the appliance's run keeps going and the panel is the way back
@@ -279,6 +294,11 @@ export function RecoveredExchangePanel() {
     attachment?.jobId,
     !running && outputs?.record === undefined,
   );
+  // Discard is this panel's only destructive control and it removes the workdir
+  // the record sits in, so where that ask found (or could not rule out) a record,
+  // the confirm says which artifact is at stake instead of the generic wording
+  // below, which names only the exchange and its results.
+  const recordConfirm = untakenRecordConfirm(recordOffer);
 
   if (attachment == null || run === undefined) return null;
 
@@ -357,15 +377,11 @@ export function RecoveredExchangePanel() {
       <Modal
         opened={confirming}
         onClose={() => setConfirming(false)}
-        title="Discard this exchange?"
+        title={recordConfirm?.title ?? DISCARD_CONFIRM_TITLE}
         centered
         transitionProps={{ duration: 0 }}
       >
-        <p>
-          Discarding removes this exchange and any results from this appliance,
-          and stops it if it is still running. This cannot be undone -- download
-          anything you need first.
-        </p>
+        <p>{recordConfirm?.body ?? DISCARD_CONFIRM_BODY}</p>
         <Group mt="md">
           <Button variant="default" onClick={() => setConfirming(false)}>
             Cancel
