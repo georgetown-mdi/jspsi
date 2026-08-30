@@ -28,12 +28,24 @@ import type {
  * rule-set citation -- a partner-visible provenance claim lost over a property
  * that says nothing.
  *
- * So the prune is meant to live on this side of the boundary, where the values
- * are drafts rather than documents: the editor's membership compares are
- * expected to route through here rather than reaching for core's strict
- * predicate directly, so the prune is applied uniformly across the class.
- * Nothing currently enforces that routing -- a direct import of core's predicate
- * would silently skip the prune.
+ * So the prune lives on this side of the boundary, where the values are drafts
+ * rather than documents: the editor's membership compares route through here
+ * rather than reaching for core's strict predicate directly, so the prune is
+ * applied uniformly across the class. A `no-restricted-imports` ban in
+ * `apps/web/eslint.config.js` holds them here, refusing an import of
+ * `encodeForComparison`, `isOptInLinkageKey`, `isDrawnFromLinkageRuleSet`, or
+ * `linkageRuleSetReferenceFor` from `@psilink/core` anywhere under
+ * `apps/web/src` but this module, where a direct import would silently skip the
+ * prune. It reads static import and re-export specifiers -- a named import, a
+ * rename, a namespace binding and a blanket re-export alike -- so a predicate
+ * reached through a runtime `import()` is past it;
+ * `scripts/eslint-linkage-comparison-ban.test.mjs` pins the shapes it refuses.
+ *
+ * The ban carves out no exception beyond this module because it needs none: the
+ * prune returns a value it drops nothing from by reference, so a parsed document
+ * asked through these wrappers is the same value core would have been handed
+ * directly. They are the whole import surface the ban leaves, and the
+ * `advancedInvite` barrel the bench imports re-exports all four.
  */
 
 /**

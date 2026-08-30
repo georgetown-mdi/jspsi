@@ -8,7 +8,16 @@ function scopeToDir(dir, configs) {
     const files = config.files
       ? config.files.map((f) => `${dir}/${f}`)
       : [`${dir}/**/*.{ts,tsx,js,jsx}`];
-    return { ...config, files };
+    // A block's own `ignores` are relative to its config file exactly as `files`
+    // are, so they are scoped with them: left bare, the exemption a block carves
+    // out of its own `files` matches nothing here and the block applies to the
+    // file it was written to spare.
+    if (!config.ignores) return { ...config, files };
+    return {
+      ...config,
+      files,
+      ignores: config.ignores.map((f) => `${dir}/${f}`),
+    };
   });
 }
 

@@ -16,7 +16,9 @@
  *   substitute.
  * - {@link ./linkageComparison} -- the rule-set membership compares taken over
  *   draft-side values, each pruning the explicitly-`undefined` optional
- *   properties core's strict canonical equality cannot read.
+ *   properties core's strict canonical equality cannot read. A lint ban keeps
+ *   the rest of `apps/web/src` off core's own predicates, so these four are the
+ *   whole surface for those questions.
  */
 
 export type {
@@ -71,4 +73,9 @@ export {
   validateAdvancedInvite,
 } from "./advancedInviteValidation";
 
-export { isOptInDraftKey } from "./linkageComparison";
+export {
+  encodeKeyForComparison,
+  isDraftDrawnFromLinkageRuleSet,
+  isOptInDraftKey,
+  linkageRuleSetReferenceForDraft,
+} from "./linkageComparison";

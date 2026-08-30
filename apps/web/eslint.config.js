@@ -14,6 +14,38 @@ const sensitiveYamlParseBan = {
     "Parse config/credential or imported documents through @psilink/core's sensitive-file chokepoint (parseSensitiveYaml / parseSensitiveJson), not a raw YAML parser (it leaks source into errors).",
 };
 
+// The raw-YAML-parser import ban (shared by the src block and the linkage-compare
+// block below, for the same replace-not-merge reason).
+const rawYamlParserImportBan = {
+  name: "yaml",
+  importNames: ["parse", "parseDocument", "parseAllDocuments"],
+  message:
+    "Do not import yaml's raw parsers in the web app; route parsing through @psilink/core's parseSensitiveYaml / parseSensitiveJson (the shared sensitive-file chokepoint). yaml's `stringify` is allowed.",
+};
+
+// Hold the draft-side rule-set membership compares at the one chokepoint that
+// prunes explicitly-`undefined` optional properties first, src/psi/linkageComparison.ts
+// (exempted below, since it is the module that calls core). Core answers these
+// questions by byte equality under the canonical encoding, which rejects an explicit
+// `undefined` where it accepts an absent property -- and a draft is live objects the
+// editor rebuilds, where a spread restates an unset property as `undefined`. So a
+// direct import of core's predicate reads a key that says exactly what the offer says
+// as a non-match, dropping its opt-in badge on the bench and its rule-set citation
+// from the built terms: a partner-visible provenance claim lost over a property that
+// says nothing. The failure is silent at the call site, which is why the routing is a
+// rule rather than a note in the module.
+const linkageComparisonChokepointBan = {
+  name: "@psilink/core",
+  importNames: [
+    "encodeForComparison",
+    "isDrawnFromLinkageRuleSet",
+    "isOptInLinkageKey",
+    "linkageRuleSetReferenceFor",
+  ],
+  message:
+    "Ask rule-set membership about a draft through src/psi/linkageComparison.ts (encodeKeyForComparison / isOptInDraftKey / isDraftDrawnFromLinkageRuleSet / linkageRuleSetReferenceForDraft, re-exported from @psi/advancedInvite), not core's strict predicates: those compare by canonical byte equality, which reads an explicitly-`undefined` optional property -- what a draft rebuild spreads in -- as a difference and silently drops the key's opt-in badge and the terms' rule-set citation.",
+};
+
 // Confine reads of an acquired CSV's `rawRows` to the enumerated file-intake, draft,
 // and coverage/preview consumers. The console acquires only a server-side profile
 // (row count, date format, column samples) and never the rows, so its acquired shape
@@ -139,16 +171,28 @@ export default [
       "no-restricted-imports": [
         "error",
         {
-          paths: [
-            {
-              name: "yaml",
-              importNames: ["parse", "parseDocument", "parseAllDocuments"],
-              message:
-                "Do not import yaml's raw parsers in the web app; route parsing through @psilink/core's parseSensitiveYaml / parseSensitiveJson (the shared sensitive-file chokepoint). yaml's `stringify` is allowed.",
-            },
-          ],
+          paths: [rawYamlParserImportBan],
           // Re-carried from the boundary block above, which this block would
           // otherwise replace for src/ (flat config replaces a rule's options).
+          patterns: crossWorkspaceImportBans.web,
+        },
+      ],
+    },
+  },
+  {
+    // The linkage-compare chokepoint ban, everywhere under src/ but the chokepoint
+    // itself. A block of its own rather than an `ignores` on the block above,
+    // because that block carries rules linkageComparison.ts must keep (the
+    // sensitive-parse ban, the warning-sink ban, the contrast-scope rule); this one
+    // re-carries only the two import groups, so the chokepoint file falls back to
+    // the block above for those.
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: ["src/psi/linkageComparison.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [rawYamlParserImportBan, linkageComparisonChokepointBan],
           patterns: crossWorkspaceImportBans.web,
         },
       ],
