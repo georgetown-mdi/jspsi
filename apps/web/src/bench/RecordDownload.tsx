@@ -1,7 +1,7 @@
 import { DownloadRow } from "./BenchRunSurface";
 import styles from "./bench.module.css";
 
-import type { JobExchangeRecordOffer } from "@psi/jobExchangeRecord";
+import type { JobExchangeRecordOfferState } from "./useJobExchangeRecordOffer";
 
 /**
  * The lead the seat shows over a record whose run disclosed and then stopped. It
@@ -111,11 +111,13 @@ export const RECORD_UNANSWERED_NOTICE =
 export function RecordDownload({
   offer,
 }: {
-  /** Where this run's record stands, or undefined while the seat has not asked
-   * (or has nothing to ask about), which renders nothing. */
-  offer: JobExchangeRecordOffer | undefined;
+  /** Where this run's record stands. An ask still in flight renders nothing, as
+   * does undefined -- a seat with nothing to ask about: the panel states where the
+   * record stands, and neither of those knows yet. */
+  offer: JobExchangeRecordOfferState | undefined;
 }) {
-  if (offer === undefined || offer.kind === "none") return null;
+  if (offer === undefined || offer.kind === "none" || offer.kind === "asking")
+    return null;
   const unanswered = offer.kind === "unanswered";
   const terminated =
     offer.kind === "available" && offer.outcome !== "completed";

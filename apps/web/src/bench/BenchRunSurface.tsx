@@ -10,7 +10,7 @@ import { dateTimeLabel } from "./inviterModel";
 import styles from "./bench.module.css";
 
 import type { NoResultFileOutputs, RunOutputs } from "./runOutputs";
-import type { JobExchangeRecordOffer } from "@psi/jobExchangeRecord";
+import type { JobExchangeRecordOfferState } from "./useJobExchangeRecordOffer";
 import type { ReactNode } from "react";
 import type { RunFailure } from "./useInviterExchange";
 
@@ -456,6 +456,18 @@ export const UNKNOWN_RECORD_CONFIRM_BODY =
   "recreate it. Reload this page to ask again first if you need the accounting " +
   "entry.";
 
+/**
+ * What that confirm says while the ask is still running. Same unknown, different
+ * reason for it and a different way out: nothing has stopped answering yet, and
+ * the answer is coming to this page on its own, so it points at waiting rather
+ * than at a reload that would start the asking over.
+ */
+export const PENDING_RECORD_CONFIRM_BODY =
+  "This page is still asking whether this run wrote a record of a disclosure, " +
+  "so it cannot yet say whether one is standing here. Going on removes the run " +
+  "and anything it wrote with it, and neither party can recreate it. Wait for " +
+  "the answer first if you need the accounting entry.";
+
 /** The heading and body of one untaken-record confirm. */
 export interface UntakenRecordConfirm {
   title: string;
@@ -463,28 +475,29 @@ export interface UntakenRecordConfirm {
 }
 
 /**
- * The confirm a control that discards the run owes over this record offer, or
+ * The confirm a control that discards the run owes in this record-ask state, or
  * undefined where it owes none and can act straight through.
  *
- * Two of the three answers an ask can carry are worth interrupting for, and they
- * are not the same interruption. `available` is a record the operator has been
- * offered and the discard destroys. `unanswered` is an ask that ended having
- * established nothing ({@link @psi/jobExchangeRecord}) -- and a run that got as
- * far as exchanging data owes a record whether or not the appliance said so, so
- * treating the silence as an absence would let the one discard that cannot be
- * undone through on the strength of no answer at all. It confirms, under copy
- * that claims only what the silence supports.
+ * Only one state buys the straight-through control, and it is the appliance's own
+ * `none`: the one definitive not-available answer there is, since a run that failed
+ * before disclosing owes no record and wrote none. The discard then costs nothing
+ * the operator has not already seen and is not worth interrupting. A seat that puts
+ * no ask at all -- a browser run, with no appliance job to discard a record from --
+ * is undefined here and takes the same exit.
  *
- * `none` is the appliance answering, and it is the only definitive
- * not-available answer there is: a run that failed before disclosing owes no
- * record and wrote none, so the discard costs nothing the operator has not
- * already seen and is not worth interrupting. An offer that has not resolved
- * takes the same exit, since the seats ask the moment the run settles and hold
- * the answer -- what is unresolved there is an ask still in flight, not a
- * question never put.
+ * Every other state confirms, because a run that got as far as exchanging data owes
+ * a record whether or not the appliance has said so, and the discard cannot be
+ * undone. They are not all the same interruption. `available` is a record the
+ * operator has been offered and the discard destroys. `unanswered` is an ask that
+ * ended having established nothing ({@link @psi/jobExchangeRecord}), and `asking`
+ * is one still running ({@link ./useJobExchangeRecordOffer}) -- the state a settled
+ * failed run sits in from the moment its alert appears until the ask lands, which
+ * on an appliance that has stopped answering is the whole of the ask's bound. Both
+ * confirm under copy claiming only what an unanswered ask supports, differing in
+ * what they tell the operator to do about it.
  */
 export function untakenRecordConfirm(
-  offer: JobExchangeRecordOffer | undefined,
+  offer: JobExchangeRecordOfferState | undefined,
 ): UntakenRecordConfirm | undefined {
   if (offer?.kind === "available")
     return {
@@ -495,6 +508,11 @@ export function untakenRecordConfirm(
     return {
       title: UNKNOWN_RECORD_CONFIRM_TITLE,
       body: UNKNOWN_RECORD_CONFIRM_BODY,
+    };
+  if (offer?.kind === "asking")
+    return {
+      title: UNKNOWN_RECORD_CONFIRM_TITLE,
+      body: PENDING_RECORD_CONFIRM_BODY,
     };
   return undefined;
 }
@@ -515,6 +533,11 @@ export function untakenRecordConfirm(
  * `to` carries the recoveries that leave the bench rather than re-running in place
  * (the acceptor's fresh-invitation link); the confirm's own commit button then
  * navigates, so the confirmed and unconfirmed forms land in the same place.
+ *
+ * The two forms carry the same label, so the confirming one advertises
+ * `aria-haspopup="dialog"`: a control that opens a dialog rather than acting says
+ * so, and which form is standing is then something the page states rather than
+ * something only a press discovers.
  */
 export function FailureRecoveryButton({
   label,
@@ -563,6 +586,7 @@ export function FailureRecoveryButton({
         color="red"
         variant="light"
         mt="sm"
+        aria-haspopup="dialog"
         onClick={() => setConfirming(true)}
       >
         {label}

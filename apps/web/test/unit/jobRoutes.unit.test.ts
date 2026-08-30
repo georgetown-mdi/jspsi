@@ -141,6 +141,34 @@ function recordJson(
 }
 
 /**
+ * The status each half of the record pair's download answers for `id`, driven
+ * through its own route under its own URL.
+ *
+ * The two downloads and the status body's `recordAvailable` stand on one gate, so
+ * a test that pinned the status field alone would not see a change that split the
+ * downloads off from it and started serving a record the status body calls
+ * unavailable.
+ */
+async function recordPairStatuses(
+  id: string,
+): Promise<{ record: number; keys: number }> {
+  const statusOf = async (
+    route: Parameters<typeof handlersOf>[0],
+    segment: string,
+  ): Promise<number> =>
+    (
+      (await handlersOf(route).GET({
+        request: jobRequest(`http://localhost/api/jobs/${id}/${segment}`),
+        params: { jobId: id },
+      })) as Response
+    ).status;
+  return {
+    record: await statusOf(RecordRoute, "record"),
+    keys: await statusOf(KeysRoute, "keys"),
+  };
+}
+
+/**
  * Enable the API, seed the global manager with one pointed at the stub CLI
  * (carrying its scenario through childEnv, since the route path's sanitized child
  * env drops ambient STUB_* vars), create a job, and resolve its id once it has
@@ -879,13 +907,7 @@ describe("status route reports record availability", () => {
     expect(body.recordCreatedAt).toBeUndefined();
     expect(body.recordOutcome).toBeUndefined();
 
-    for (const route of [RecordRoute, KeysRoute]) {
-      const download = (await handlersOf(route).GET({
-        request: jobRequest(`http://localhost/api/jobs/${id}/record`),
-        params: { jobId: id },
-      })) as Response;
-      expect(download.status).toBe(404);
-    }
+    expect(await recordPairStatuses(id)).toEqual({ record: 404, keys: 404 });
   });
 
   test("a record carrying no recognized outcome reads as unavailable", async () => {
@@ -905,6 +927,7 @@ describe("status route reports record availability", () => {
     })) as Response;
     const body = (await response.json()) as { recordAvailable: boolean };
     expect(body.recordAvailable).toBe(false);
+    expect(await recordPairStatuses(id)).toEqual({ record: 404, keys: 404 });
   });
 
   test("a malformed record file reads as unavailable (defensive parse)", async () => {
@@ -925,6 +948,7 @@ describe("status route reports record availability", () => {
     };
     expect(body.recordAvailable).toBe(false);
     expect(body.recordCreatedAt).toBeUndefined();
+    expect(await recordPairStatuses(id)).toEqual({ record: 404, keys: 404 });
   });
 
   test("a record missing createdAt reads as unavailable", async () => {
@@ -938,6 +962,7 @@ describe("status route reports record availability", () => {
     })) as Response;
     const body = (await response.json()) as { recordAvailable: boolean };
     expect(body.recordAvailable).toBe(false);
+    expect(await recordPairStatuses(id)).toEqual({ record: 404, keys: 404 });
   });
 
   test("the status body carries no restored key", async () => {

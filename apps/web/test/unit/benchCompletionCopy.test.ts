@@ -9,12 +9,7 @@ import {
   TERMINATED_RECORD_NOTICE,
 } from "@bench/RecordDownload";
 import {
-  RECEIPT_MISSING_LEAD,
-  RECEIPT_MISSING_NOTICE,
-  RECEIPT_UNANSWERED_LEAD,
-  RECEIPT_UNANSWERED_NOTICE,
-} from "@bench/ReceiptDownload";
-import {
+  PENDING_RECORD_CONFIRM_BODY,
   UNKNOWN_RECORD_CONFIRM_BODY,
   UNKNOWN_RECORD_CONFIRM_TITLE,
   UNTAKEN_RECORD_CONFIRM_BODY,
@@ -22,6 +17,12 @@ import {
   completionOutcome,
   untakenRecordConfirm,
 } from "@bench/BenchRunSurface";
+import {
+  RECEIPT_MISSING_LEAD,
+  RECEIPT_MISSING_NOTICE,
+  RECEIPT_UNANSWERED_LEAD,
+  RECEIPT_UNANSWERED_NOTICE,
+} from "@bench/ReceiptDownload";
 
 import type { RunOutputs } from "@bench/runOutputs";
 
@@ -182,6 +183,22 @@ describe("the exchange-record copy", () => {
     expect(UNKNOWN_RECORD_CONFIRM_BODY).toContain("Reload this page");
     expect(UNKNOWN_RECORD_CONFIRM_BODY).not.toContain("this appliance holds");
   });
+
+  test("the pending confirm says the asking is still running", () => {
+    // Nothing has stopped answering while the ask is in flight, and the answer is
+    // on its way to this page: the copy must not borrow the exhausted ask's
+    // account of the silence, nor send the operator to a reload that would only
+    // start the asking over.
+    expect(PENDING_RECORD_CONFIRM_BODY).toContain("still asking");
+    expect(PENDING_RECORD_CONFIRM_BODY).toContain("cannot yet say whether");
+    expect(PENDING_RECORD_CONFIRM_BODY).toContain(
+      "neither party can recreate it",
+    );
+    expect(PENDING_RECORD_CONFIRM_BODY).toContain("Wait for the answer");
+    expect(PENDING_RECORD_CONFIRM_BODY).not.toContain("stopped answering");
+    expect(PENDING_RECORD_CONFIRM_BODY).not.toContain("Reload this page");
+    expect(PENDING_RECORD_CONFIRM_BODY).not.toContain("this appliance holds");
+  });
 });
 
 describe("untakenRecordConfirm", () => {
@@ -215,6 +232,18 @@ describe("untakenRecordConfirm", () => {
     });
   });
 
+  test("confirms while the ask is still in flight, saying so", () => {
+    // The window between a failure alert appearing and its record ask landing is
+    // the whole of the ask's bound on the failure this exists for -- an appliance
+    // that stopped answering -- and every recovery in that window DELETEs the
+    // run's folder. An unresolved ask has established no less than an exhausted
+    // one, so it confirms too, under copy about the asking rather than a silence.
+    expect(untakenRecordConfirm({ kind: "asking" })).toEqual({
+      title: UNKNOWN_RECORD_CONFIRM_TITLE,
+      body: PENDING_RECORD_CONFIRM_BODY,
+    });
+  });
+
   test("does not confirm over the appliance's own not-available answer", () => {
     // `none` is the one definitive absence there is: the appliance answered and
     // holds no record, which is what a run that failed before disclosing looks
@@ -222,7 +251,9 @@ describe("untakenRecordConfirm", () => {
     expect(untakenRecordConfirm({ kind: "none" })).toBeUndefined();
   });
 
-  test("does not confirm while the ask has not resolved", () => {
+  test("does not confirm where the seat put no ask at all", () => {
+    // A browser run has no appliance job, so its recoveries destroy no record
+    // anywhere and nothing was ever asked about one.
     expect(untakenRecordConfirm(undefined)).toBeUndefined();
   });
 });
