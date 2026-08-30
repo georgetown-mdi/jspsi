@@ -117,11 +117,12 @@ const SigningConfigSchema: z.ZodType<SigningConfig> = z.object({
  * can embed it. Field-shape validation only: cross-field requirements -- that
  * certificate mode needs a pinned partner fingerprint before a partner
  * certificate can be verified, and that it needs an `identity_file` to sign with
- * -- are enforced at the pre-exchange gate and again at the verification call
- * site, so a partially-authored config still parses wherever this schema is
- * used. A reader that needs only `identity_file`, such as `psilink fingerprint`,
- * reads it from the raw config text rather than through this schema, so it never
- * needs the partner's fingerprint to exist.
+ * -- are enforced at the pre-exchange gate, with the partner-fingerprint
+ * requirement enforced again at the verification call site, so a
+ * partially-authored config still parses wherever this schema is used. A reader
+ * that needs only `identity_file`, such as `psilink fingerprint`, reads it from
+ * the raw config text rather than through this schema, so it never needs the
+ * partner's fingerprint to exist.
  */
 export { SigningConfigSchema };
 

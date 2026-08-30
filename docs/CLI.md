@@ -626,7 +626,7 @@ By default each check prints a line on stderr -- `OK:`, `WARN:`, `FAIL:`, or `SK
 ## Signing identity fingerprint
 
 ```sh
-psilink fingerprint --identity-file PATH [--identity STRING] [--config-file PATH] [--force] [--export-certificate PATH]
+psilink fingerprint [--identity-file PATH] [--identity STRING] [--config-file PATH] [--force] [--export-certificate PATH]
 ```
 
 Print this party's signing certificate fingerprint, creating the signing identity on first use. That identity is the long-lived keypair and self-signed certificate behind a certificate-backed receipt: a partner pins the printed fingerprint once and every later receipt verifies against it (see [Receipt signing identities](SECURITY_DESIGN.md#receipt-signing-identities)). Share the value out-of-band, the way an SFTP host-key fingerprint is shared.
