@@ -60,6 +60,11 @@ HKDF.
   Amazon Linux 2023 has no `node` account, the Node runtime here coming from a
   tarball rather than a package, so the variant creates one at the same uid and
   gid an operator is told to chown a bind mount to.
+- **The base moves by hand, not by Dependabot**, which the default image's does
+  not: its digest, its release snapshot and the certified provider's NVR pins
+  have to name one Amazon Linux release together, and a move obliges
+  re-measurement -- neither of which a mechanical bump can carry
+  ([below](#why-the-base-is-held-out-of-dependabot)).
 
 ## What was rejected, and why
 
@@ -503,6 +508,52 @@ sufficient on its own:
   [CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md#iv-construction-and-sp-800-38d-conformance),
   so the route rejected here trades a conformant construction for an approved
   service rather than closing a conformance gap.
+
+## Why the base is held out of Dependabot
+
+The two images this repository publishes take opposite postures toward automatic
+base-image bumps, and the difference is the coupling above rather than a
+different appetite for churn. The default image's `node:26-alpine` digest is a
+single value: a mechanical pull request moving it, with the freeze test's
+mirrored literal reconciled on the same branch, is a complete change and lands
+as one. The variant's Amazon Linux base is not a single value. Its digest, the
+release snapshot every `dnf` transaction resolves against, and the certified
+provider's NVR pins have to name one release between them, and the tool that
+would open the pull request compares tag components -- which carry neither that
+coupling nor the chronology behind it, so a mechanically filed bump can name an
+*older* release than the one already pinned and still read as an upgrade.
+
+So `.github/dependabot.yml` ignores `amazonlinux` outright, and the base moves
+as a coordinated, human-reviewed change worked through
+[the procedure in DEPENDENCY_PINS.md](../spec/DEPENDENCY_PINS.md#bumping-the-fips-base-image).
+Three things make that the cheap posture rather than an expensive one:
+
+- **The pinning mechanism is unaffected.** The digest freeze in
+  `scripts/dockerfile-freeze.test.mjs` is what holds this base, and it holds it
+  the same whether a pull request arrives or not. What the ignore entry removes
+  is a filing, not a control.
+- **The build refuses the failure mode the filing would introduce.** A digest
+  moved on its own reddens the `nodebase` stage's release assertion, and a
+  package layer that drifted under the certificate pins reddens the `rpm -qf`
+  and `openssl list` assertions. The coordinated bump is what a green build
+  requires, so automating the first step of it buys nothing a person then has to
+  finish.
+- **A base move carries a re-measurement obligation a pull request cannot
+  discharge.** The figures this note and
+  [CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#the-fips-reference-builds-inventory)
+  state about the package closure -- its size, its count, its GPL-3.0 breadth,
+  and the vulnerability comparison that chose this certificate over the
+  alternative -- were measured against one snapshot by hand, and are archived
+  outside this repository. Nothing in the tree re-derives them and no check
+  reddens when they go stale, so the obligation travels with whoever takes the
+  bump. Which measurements a move disturbs is enumerated in the same procedure.
+
+The cost is that nothing files a reminder. What surfaces a base worth moving to
+is the release workflow's OS-layer scan over the built variant, which gates
+every publish, plus an advisory or a certificate-lifecycle event read by hand;
+the variant leg's pull-request-time scan is scoped out while its pinned rootfs
+carries findings no pin movement can reach, so that gate is at release rather
+than continuous.
 
 ## What it costs
 
