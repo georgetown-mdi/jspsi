@@ -253,6 +253,7 @@ import {
   AEAD_ENVELOPE_VERSION,
   sanitizeErrorForDisplay,
   sanitizeForDisplay,
+  describeResolvedRunShape,
   DISPLAY_TRUNCATION_MARKER,
 } from "@psilink/core";
 import type {
@@ -260,6 +261,7 @@ import type {
   DualSignedRecord,
   ExchangeRecord,
   PartnerPayload,
+  ResolvedRunShape,
   VerificationKeys,
 } from "@psilink/core";
 import {
@@ -760,6 +762,129 @@ test("authentication=null runs the exchange without authentication and without e
     ),
   ]);
   // No assertion on key files: no rotation occurs when auth is null.
+}, 20_000);
+
+// --- The resolved run shape, named at the pre-round seam ---------------------
+
+// A runExchange that fires the pre-round seam with one resolved shape and then
+// finishes like the default. Both parties get it -- runProtocol's rendering is
+// per-party -- so each renders the shape handed to it, and only the party under
+// --event-stream puts its lines on fd 3.
+function runExchangeConfirming(runShape: ResolvedRunShape) {
+  return async (
+    _conn: unknown,
+    _role: unknown,
+    _prepared: unknown,
+    options: {
+      onProtocolConfirmed?: (
+        partnerTerms: unknown,
+        resolvedRole: unknown,
+        shape: ResolvedRunShape,
+      ) => void;
+    },
+  ): Promise<unknown> => {
+    options.onProtocolConfirmed?.(
+      { identity: "Party B" },
+      "receiver",
+      runShape,
+    );
+    return await defaultRunExchange();
+  };
+}
+
+test("names a deduplicating cardinality and warns on an over-bound projection", async () => {
+  // 3,163 records a side projects 10,004,569 pairs, past the advisory bound. The
+  // run continues -- nothing refuses on a projection -- so both notices must
+  // reach the operator while the run is still going: on stderr, and on the
+  // machine-interface stream a supervisor or a console seat reads instead of it.
+  const runShape: ResolvedRunShape = {
+    cardinality: "many-to-many",
+    localRecordCount: 3163,
+    partnerRecordCount: 3163,
+  };
+  const { cardinalityNotice, pairTableAdvisory } =
+    describeResolvedRunShape(runShape);
+  vi.mocked(runExchange).mockImplementation(
+    runExchangeConfirming(runShape) as never,
+  );
+  mockFd3Open();
+  try {
+    await Promise.all([
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-a",
+        undefined,
+        undefined,
+        undefined,
+        { eventStream: true },
+      ),
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-b",
+      ),
+    ]);
+  } finally {
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+
+  // Composed by core and rendered here unchanged, so the CLI and the browser
+  // seats cannot drift into two wordings of the one fact.
+  expect(mockState.warnings).toContain(cardinalityNotice);
+  expect(mockState.warnings).toContain(pairTableAdvisory);
+  expect(pairTableAdvisory).toContain("10,004,569");
+
+  // Both ride the warning event, ahead of the terminal one, and in the order
+  // they were raised.
+  const lines = takeFd3Lines();
+  expect(lines.map((l) => l.type)).toEqual([
+    "stages",
+    "warning",
+    "warning",
+    "metrics",
+    "result",
+  ]);
+  expect(lines[1].message).toBe(cardinalityNotice);
+  expect(lines[2].message).toBe(pairTableAdvisory);
+}, 20_000);
+
+test("leaves the pre-round seam silent on a one-to-one run", async () => {
+  // The cardinality that adds no multiplicity is the one every consent surface
+  // already describes, so naming it here would be noise on the ordinary run.
+  vi.mocked(runExchange).mockImplementation(
+    runExchangeConfirming({
+      cardinality: "one-to-one",
+      localRecordCount: 3163,
+      partnerRecordCount: 3163,
+    }) as never,
+  );
+  await Promise.all([
+    runProtocol(
+      { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
+      null,
+      minimalPrepared,
+      undefined,
+      -1,
+      "test-a",
+    ),
+    runProtocol(
+      { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
+      null,
+      minimalPrepared,
+      undefined,
+      -1,
+      "test-b",
+    ),
+  ]);
+
+  expect(mockState.warnings).toStrictEqual([]);
 }, 20_000);
 
 // --- Self-attested record persistence via runProtocol ------------------------

@@ -8,6 +8,7 @@ import {
   OperatorConfigError,
   StandardizationTermsError,
   UsageError,
+  describeResolvedRunShape,
   runExchange,
 } from "@psilink/core";
 
@@ -32,8 +33,11 @@ import type Peer from "peerjs";
 import type {
   AuthResult,
   ExchangeResult,
+  LinkageTerms,
   MessageConnection,
   PreparedExchange,
+  ResolvedRunShape,
+  RunExchangeOptions,
 } from "@psilink/core";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
@@ -871,5 +875,141 @@ describe("runExchangeLifecycle", () => {
     expect(mockedOpen).not.toHaveBeenCalled();
     expect(s.onError).not.toHaveBeenCalled();
     expect(s.onResult).not.toHaveBeenCalled();
+  });
+
+  // --- The resolved run shape, named at the pre-round seam -------------------
+
+  /** Drive core's pre-round seam with one resolved shape, then end the run the
+   * way `outcome` says. The shape is what `runExchange` hands a front end after
+   * the terms exchange and before the first round. */
+  function runExchangeConfirming(
+    runShape: ResolvedRunShape,
+    outcome: "resolve" | "reject" = "resolve",
+  ) {
+    return ((
+      _conn: unknown,
+      _role: unknown,
+      _prepared: unknown,
+      options: RunExchangeOptions,
+    ): Promise<ExchangeResult> => {
+      options.onProtocolConfirmed?.({} as LinkageTerms, "receiver", runShape);
+      return outcome === "reject"
+        ? Promise.reject(new ConnectionError("connection closed", "closed"))
+        : Promise.resolve({} as ExchangeResult);
+    }) as never;
+  }
+
+  const OVER_BOUND_SHAPE: ResolvedRunShape = {
+    cardinality: "many-to-many",
+    localRecordCount: 3163,
+    partnerRecordCount: 3163,
+  };
+
+  test("raises the run's resolved-shape notices ahead of its own terminal", async () => {
+    // The operator has to be able to read what the terms resolved to while the
+    // run is still going, so these arrive at the seam that produced them rather
+    // than with the result. Core composes both strings; this seat only routes
+    // them to the notice slot its transport warnings already take.
+    const { mc } = makeFakeMc();
+    mockedOpen.mockResolvedValue(mc);
+    const { acquired } = makeResources();
+    const acquire: Acquire = () => Promise.resolve(acquired);
+    const s = seams();
+    const { cardinalityNotice, pairTableAdvisory } =
+      describeResolvedRunShape(OVER_BOUND_SHAPE);
+    const order: Array<string> = [];
+    s.onWarning.mockImplementation((message: string) => order.push(message));
+    s.onResult.mockImplementation(() => order.push("<result>"));
+    mockedRunExchange.mockImplementation(
+      runExchangeConfirming(OVER_BOUND_SHAPE),
+    );
+
+    await runExchangeLifecycle({
+      acquire,
+      exchangeRole: "initiator",
+      signal: new AbortController().signal,
+      ...s,
+    });
+
+    expect(order).toEqual([cardinalityNotice, pairTableAdvisory, "<result>"]);
+  });
+
+  test("raises the pre-round notices on a run that then fails", async () => {
+    // The success gate on the teardown notice must not reach these: a run whose
+    // shape the operator has to read is exactly as likely to be the one that
+    // fails, and the seam fired long before the failure.
+    const { mc } = makeFakeMc();
+    mockedOpen.mockResolvedValue(mc);
+    const { acquired } = makeResources();
+    const acquire: Acquire = () => Promise.resolve(acquired);
+    const s = seams();
+    const { cardinalityNotice, pairTableAdvisory } =
+      describeResolvedRunShape(OVER_BOUND_SHAPE);
+    mockedRunExchange.mockImplementation(
+      runExchangeConfirming(OVER_BOUND_SHAPE, "reject"),
+    );
+
+    await runExchangeLifecycle({
+      acquire,
+      exchangeRole: "initiator",
+      signal: new AbortController().signal,
+      ...s,
+    });
+
+    expect(s.onWarning.mock.calls).toEqual([
+      [cardinalityNotice],
+      [pairTableAdvisory],
+    ]);
+    expect(s.onError).toHaveBeenCalledTimes(1);
+  });
+
+  test("raises no notice for a one-to-one run within the advisory bound", async () => {
+    const { mc } = makeFakeMc();
+    mockedOpen.mockResolvedValue(mc);
+    const { acquired } = makeResources();
+    const acquire: Acquire = () => Promise.resolve(acquired);
+    const s = seams();
+    mockedRunExchange.mockImplementation(
+      runExchangeConfirming({
+        cardinality: "one-to-one",
+        localRecordCount: 3163,
+        partnerRecordCount: 3163,
+      }),
+    );
+
+    await runExchangeLifecycle({
+      acquire,
+      exchangeRole: "initiator",
+      signal: new AbortController().signal,
+      ...s,
+    });
+
+    expect(s.onResult).toHaveBeenCalledTimes(1);
+    expect(s.onWarning).not.toHaveBeenCalled();
+  });
+
+  test("raises the cardinality alone when the projection is within the bound", async () => {
+    const { mc } = makeFakeMc();
+    mockedOpen.mockResolvedValue(mc);
+    const { acquired } = makeResources();
+    const acquire: Acquire = () => Promise.resolve(acquired);
+    const s = seams();
+    const shape: ResolvedRunShape = {
+      cardinality: "one-to-many",
+      localRecordCount: 3163,
+      partnerRecordCount: 3163,
+    };
+    mockedRunExchange.mockImplementation(runExchangeConfirming(shape));
+
+    await runExchangeLifecycle({
+      acquire,
+      exchangeRole: "initiator",
+      signal: new AbortController().signal,
+      ...s,
+    });
+
+    expect(s.onWarning.mock.calls).toEqual([
+      [describeResolvedRunShape(shape).cardinalityNotice],
+    ]);
   });
 });

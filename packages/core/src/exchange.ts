@@ -43,6 +43,7 @@ import {
   withholdsSenderAssociationTable,
 } from "./link.js";
 import type { LinkageCardinality } from "./link.js";
+import type { ResolvedRunShape } from "./pairTableProjection.js";
 import { InProcessPsiEngine } from "./psiEngine.js";
 import {
   partyFansOut,
@@ -1412,10 +1413,19 @@ export interface RunExchangeOptions {
    * Called once after the confirming-protocol stage completes, before the
    * first PSI key stage begins. Useful for surfacing partner identity and
    * resolved role without waiting for the full exchange to finish.
+   *
+   * `runShape` carries what the agreed terms resolved to at this same seam --
+   * the matching cardinality and the two record counts its derived pair table
+   * grows with -- so a front end can name the run's cardinality and project that
+   * table before the first round. Nothing here refuses or warns on either: the
+   * pair-table advisory is a front end's discretion (docs/spec/PROTOCOL.md, The
+   * both-sided expansion has no ceiling of its own), and
+   * {@link describeResolvedRunShape} is the shared composition each seat renders.
    */
   onProtocolConfirmed?: (
     partnerTerms: LinkageTerms,
     resolvedRole: PsiRole,
+    runShape: ResolvedRunShape,
   ) => void;
   /**
    * Zero-setup `--save` intent for this party. `undefined` (the default) keeps
@@ -1732,7 +1742,11 @@ export async function runExchange(
     rowCount,
     partnerRecordCount,
   );
-  onProtocolConfirmed(partnerTerms, resolvedRole);
+  onProtocolConfirmed(partnerTerms, resolvedRole, {
+    cardinality,
+    localRecordCount: rowCount,
+    partnerRecordCount,
+  });
 
   const isReceiver = resolvedRole === "receiver";
   const linkageKeyIterables = linkageTerms.linkageKeys.map(

@@ -10,6 +10,7 @@ import {
   exchangeRecordOwedButUnbuilt,
   countIsPartnerReported,
   buildOutputTable,
+  describeResolvedRunShape,
   authenticateConnection,
   assertSharedSecretReadyForHandshake,
   deriveAbortToken,
@@ -1663,7 +1664,7 @@ export async function runProtocol(
               "exchange; it was dropped per the fail-soft contract and " +
               "cross-party host-key reconciliation was skipped for it",
           ),
-        onProtocolConfirmed: (partnerTerms, resolvedRole) => {
+        onProtocolConfirmed: (partnerTerms, resolvedRole, runShape) => {
           // identity is partner-controlled free text with no consistency check
           // (a mutually-distrusting party sets it), so escape it before it
           // reaches the operator's terminal/logs. A partner that supplied none
@@ -1692,6 +1693,27 @@ export async function runProtocol(
             emit((e) => e.warning(UNNAMED_PARTNER_ACCOUNTING_NOTE));
           } else log.info(...line);
           log.info("role:", resolvedRole);
+
+          // What the agreed terms actually resolved to, named here because
+          // nothing earlier states it: the consent surfaces show each party's
+          // DECLARED deduplicate, and the cardinality the pair resolves to --
+          // which decides whose duplicates match and how many rows the result
+          // carries -- is settled only now. Both notices take the warning
+          // channel rather than the info line beside the role: each names a
+          // consequence for the operator's own result, and the machine-interface
+          // warning event is the only one of these sinks a supervisor that
+          // discards stderr (or a console seat watching the run) reads at all --
+          // the same unattended-supervisor reason the unnamed-partner note above
+          // rides it. Composed by core so the CLI and the browser seats cannot
+          // drift; both strings are first-party prose over integers core formats
+          // itself, so neither carries partner-authored text into the sinks.
+          const { cardinalityNotice, pairTableAdvisory } =
+            describeResolvedRunShape(runShape);
+          for (const notice of [cardinalityNotice, pairTableAdvisory]) {
+            if (notice === undefined) continue;
+            log.warn(notice);
+            emit((e) => e.warning(notice));
+          }
         },
       },
     );

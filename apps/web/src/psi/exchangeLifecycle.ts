@@ -2,6 +2,7 @@ import {
   ConnectionError,
   LinkageTermsUnsatisfiableError,
   OperatorConfigError,
+  describeResolvedRunShape,
   getLogger,
   runExchange,
 } from "@psilink/core";
@@ -312,11 +313,14 @@ export interface RunExchangeLifecycleOptions<
     category: ExchangeErrorCategory;
     error: unknown;
   }) => void;
-  /** A non-fatal, operator-relevant notice raised mid-run -- today only the
-   * clean close ending on any exit that carries no delivery signal rather than
-   * on the peer's close ({@link CLOSE_OUTCOME_WARNINGS}), and only on a run that
-   * reported its result. Optional: an owner with no warning surface omits it and
-   * the notice is dropped. Never a terminal; the run still ends in exactly one
+  /** A non-fatal, operator-relevant notice raised mid-run. Two sources, arriving
+   * at opposite ends of the run: what the agreed terms resolved to, raised at
+   * the post-terms, pre-round seam and composed by core
+   * ({@link describeResolvedRunShape}); and the clean close ending on any exit
+   * that carries no delivery signal rather than on the peer's close
+   * ({@link CLOSE_OUTCOME_WARNINGS}), which is raised only on a run that reported
+   * its result. Optional: an owner with no warning surface omits it and the
+   * notice is dropped. Never a terminal; the run still ends in exactly one
    * `onResult`/`onError`, and a notice raised during teardown arrives after
    * that one. */
   onWarning?: (message: string) => void;
@@ -394,6 +398,13 @@ export async function runExchangeLifecycle<
   const emitWarning = ifLive((message: string) => {
     if (reportedResult) onWarning?.(message);
   });
+  // The mid-run notice sink, which takes the live gate alone. The success
+  // terminal above is specific to the teardown seam: a notice raised at the
+  // pre-round seam speaks for the run the operator is watching, and gating it on
+  // a result the run has not reached yet would hold it until after the exchange
+  // it describes -- or drop it on the run that failed, which is exactly the run
+  // whose resolved shape the operator has to read.
+  const emitRunNotice = ifLive((message: string) => onWarning?.(message));
 
   let acquired: AcquiredExchange;
   try {
@@ -531,6 +542,20 @@ export async function runExchangeLifecycle<
         defaultSpawnPsiCryptoWorker,
       ),
       onStage: emitStage,
+      // What the agreed terms resolved to, named for the operator after the
+      // terms exchange and before the first round: a deduplicating cardinality
+      // and, where the both-sided one projects a pair table past the advisory
+      // bound, what each side contributes to that projection. Core composes both
+      // and raises neither -- the advisory is a front end's discretion
+      // (docs/spec/PROTOCOL.md, The both-sided expansion has no ceiling of its
+      // own) -- so this seat renders them through the same notice slot its
+      // transport warnings take, and the owning hook escapes what it folds.
+      onProtocolConfirmed: (_partnerTerms, _resolvedRole, runShape) => {
+        const { cardinalityNotice, pairTableAdvisory } =
+          describeResolvedRunShape(runShape);
+        for (const notice of [cardinalityNotice, pairTableAdvisory])
+          if (notice !== undefined) emitRunNotice(notice);
+      },
     });
     // The privacy-sensitive exchange has succeeded here. A failure building the
     // local results file is an "output" failure, never an "exchange" one, so the

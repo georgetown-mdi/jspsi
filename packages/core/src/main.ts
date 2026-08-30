@@ -190,6 +190,7 @@ export {
   keyTypeFromBlob,
 } from "./utils/sshHostKey.js";
 export * from "./exchange";
+export * from "./pairTableProjection";
 export * from "./exchangeRecord";
 export * from "./partyIdentityDisplay";
 export * from "./signedReceipt";
