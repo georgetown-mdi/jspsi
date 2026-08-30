@@ -326,7 +326,7 @@ What the default account asks of you is bind-mount ownership. A bind mount keeps
 docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/work vdorie/psi-link exchange input.csv
 ```
 
-The container then runs as an account the image knows nothing about, and `HOME` is not a question that arises. psilink chooses no path under the home directory for anything: it resolves a `~`-relative path you wrote yourself and reaches for the home directory nowhere else, so an ephemeral or unset `HOME` changes no command's behavior. The signing identity, the one long-lived credential the CLI holds, is written and read only where you name it (see [Mounting the signing identity](#mounting-the-signing-identity)).
+The container then runs as an account the image knows nothing about, and `HOME` is not a question that arises. psilink chooses no path under the home directory for anything: it reaches for the home directory only to expand a `~` you wrote yourself, so an ephemeral or unset `HOME` changes no path psilink picks. It still resolves the ones you spell with a `~` against whatever home the container has, which in an ephemeral one is a different directory on every run -- so write those paths out in full. The signing identity, the one long-lived credential the CLI holds, is written and read only where you name it (see [Mounting the signing identity](#mounting-the-signing-identity)).
 
 **The console appliance takes the same route.** `serve` keeps the signing identity in the mounted data root. Its one container-internal write outside the mounts is the directory a pasted SFTP credential is materialized to, which the image creates under root-owned `/run` for its own account; point `JOB_SFTP_CREDENTIAL_DIR` at a path the account you named can create instead:
 

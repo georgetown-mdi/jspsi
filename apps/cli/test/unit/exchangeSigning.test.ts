@@ -85,6 +85,78 @@ test("certificate mode with no identity file at the named path is a usage error"
   );
 });
 
+test("the not-found refusal names the configured path once", async () => {
+  const identityFile = path.join(dir, "does-not-exist.json");
+  const message = await resolveSigningPersist(
+    { mode: "certificate", identityFile },
+    "Party A",
+  ).then(
+    () => "",
+    (err: unknown) => (err as Error).message,
+  );
+  expect(message.split(identityFile)).toHaveLength(2);
+  // The remedy refers back to the one mention rather than repeating it.
+  expect(message).toContain("--identity-file <that path>");
+});
+
+test("a long configured path leaves the remedy inside the display cap", async () => {
+  // signing.identity_file is bounded only by the schema's min(1), while the
+  // composed message truncates at COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH: every
+  // character of path the refusal spends twice is one the remedy loses. The
+  // components stay under NAME_MAX so the read fails ENOENT (an absent file)
+  // rather than on the name's length.
+  const identityFile = path.join(
+    dir,
+    ...Array.from({ length: 5 }, () => "d".repeat(100)),
+    "psilink-signing-identity.json",
+  );
+  expect(identityFile.length).toBeGreaterThan(
+    COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH / 2,
+  );
+  const rendered = await resolveSigningPersist(
+    { mode: "certificate", identityFile },
+    "Party A",
+  ).then(
+    () => "",
+    (err: unknown) => sanitizeErrorForDisplay(err),
+  );
+  expect(rendered).toContain("point signing.identity_file at the file you");
+  expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
+});
+
+// --- read-only custody on the exchange path ----------------------------------
+
+test("the exchange path reads an identity on a read-only directory and writes nothing", async () => {
+  if (process.platform === "win32") return;
+  // The custody property CLI.md, EXCHANGE_REFERENCE.md, SECURITY_DESIGN.md, and
+  // DEPLOYMENT.md all publish, and the whole reason the identity gets a mount of
+  // its own: an exchange reads the file and writes neither it, its directory,
+  // nor anything beside it. verify-receipt's half of the same claim is pinned in
+  // verifyReceipt.test.ts; this is the exchange half.
+  const mount = fs.mkdtempSync(path.join(dir, "mount-"));
+  const identityPath = path.join(mount, "psilink-signing-identity.json");
+  saveSigningIdentity(identityPath, identity, { exclusive: true });
+  const listing = fs.readdirSync(mount).sort();
+  const bytes = fs.readFileSync(identityPath, "utf8");
+  const mtimeMs = fs.statSync(identityPath).mtimeMs;
+  fs.chmodSync(mount, 0o500);
+  try {
+    const resolved = await resolveSigningPersist(
+      { mode: "certificate", identityFile: identityPath },
+      "Party A",
+    );
+    expect(resolved).not.toBeNull();
+    expect(resolved!.identity).toEqual(identity);
+    // The artifacts rather than an EACCES: a run with the privilege to ignore
+    // the mode still has to leave the directory and the file as it found them.
+    expect(fs.readdirSync(mount).sort()).toEqual(listing);
+    expect(fs.readFileSync(identityPath, "utf8")).toBe(bytes);
+    expect(fs.statSync(identityPath).mtimeMs).toBe(mtimeMs);
+  } finally {
+    fs.chmodSync(mount, 0o700);
+  }
+});
+
 // --- certificate mode naming no identity path --------------------------------
 // The pre-flight family's newest member: like the unpinned-partner and unnamed-
 // party refusals it fires before any credential, terms, or data are sent, as an
@@ -107,7 +179,7 @@ test("the refusal names both spellings, a mounted example, and the unsigned exit
   expect(rendered).toContain("psilink chooses no location");
   expect(rendered).toContain("signing.identity_file");
   expect(rendered).toContain("--identity-file");
-  expect(rendered).toContain("/run/secrets/psilink-signing-identity.json");
+  expect(rendered).toContain("/run/signing/psilink-signing-identity.json");
   expect(rendered).toContain("read-only mount");
   expect(rendered).toContain('signing.mode to "none"');
   // Read at the sink that caps a composed link, so the whole remedy is what the
@@ -125,7 +197,7 @@ test("the refusal names no path of its own beyond the illustrative one", async (
     (err: unknown) => (err as Error).message,
   );
   const paths = new Set(message.match(/(~|\.)?\/[\w./-]+/g) ?? []);
-  expect([...paths]).toEqual(["/run/secrets/psilink-signing-identity.json"]);
+  expect([...paths]).toEqual(["/run/signing/psilink-signing-identity.json"]);
   expect(message).not.toContain(os.homedir());
 });
 

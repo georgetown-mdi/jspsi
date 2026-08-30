@@ -812,10 +812,10 @@ test("the refusal carries the whole remedy, unrendered by the display sanitizer"
   // Why psilink chooses none.
   expect(stderr).toContain("psilink chooses none");
   expect(stderr).toContain("reused across every exchange and every partner");
-  // Both spellings, with a mounted-credentials example.
+  // Both spellings, with an example under a mount of the identity's own.
   expect(stderr).toContain("--identity-file");
   expect(stderr).toContain("signing.identity_file");
-  expect(stderr).toContain("/run/secrets/psilink-signing-identity.json");
+  expect(stderr).toContain("/run/signing/psilink-signing-identity.json");
   // What the directory has to be.
   expect(stderr).toContain("writable for this creating run");
   expect(stderr).toContain("read-only");

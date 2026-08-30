@@ -440,7 +440,7 @@ connection:
 
 ### Signing identity and the agreed terms
 
-Under `signing.mode: certificate` the run loads this party's signing identity from the path `signing.identity_file` names, before any credential, terms, or data are sent. A configuration that names none is refused there and exits 64: psilink chooses no location for a signing identity, since it is a long-lived credential whose custody is yours (see [Where the signing identity lives](#where-the-signing-identity-lives)). Set `signing.identity_file` -- `/run/secrets/psilink-signing-identity.json` is the usual shape, created there by `psilink fingerprint --identity-file` -- or run `signing.mode: none` unsigned. A path that is set but holds no identity file exits 64 too, naming that path.
+Under `signing.mode: certificate` the run loads this party's signing identity from the path `signing.identity_file` names, before any credential, terms, or data are sent. A configuration that names none is refused earlier still, from the configuration alone -- before the run prepares your input or reaches the server -- and exits 64: psilink chooses no location for a signing identity, since it is a long-lived credential whose custody is yours (see [Where the signing identity lives](#where-the-signing-identity-lives)). Set `signing.identity_file` -- `/run/signing/psilink-signing-identity.json` is the usual shape, created there by `psilink fingerprint --identity-file` -- or run `signing.mode: none` unsigned. A path that is set but holds no identity file exits 64 too, naming that path.
 
 A partner verifies a receipt against the identity in the agreed terms rather than the one the certificate carries, so an identity bound to anything other than the run's `linkage_terms.identity` -- or the `--identity` that replaces it for that run -- signs receipts the partner rejects. That configuration is refused where the identity is loaded: the run exits 64, naming both values and the two ways to reconcile them, before anything is sent. Reconcile them with [`psilink fingerprint --force --identity`](#signing-identity-fingerprint) naming the terms identity -- which changes the fingerprint your partner has pinned, so it needs a coordinated re-pin -- or by editing `linkage_terms.identity` to the bound value.
 
@@ -637,21 +637,22 @@ Creation is announced rather than silent. The identity string bound into the cer
 
 You choose, and psilink never does. The path comes from `--identity-file`, or from `signing.identity_file` in the configuration named by `--config-file`; with neither, the command refuses and prints nothing on stdout, so a captured `FP=$(psilink fingerprint)` is empty and the status nonzero rather than a fingerprint minted somewhere you did not pick.
 
-Resolve it the way you resolve any other credential. The identity is a long-lived private key reused across every exchange and every partner, so a mounted credentials directory is its home:
+Resolve it the way you resolve any other credential. The identity is a long-lived private key reused across every exchange and every partner, so give it a mounted directory of its own:
 
 ```sh
-psilink fingerprint --identity-file /run/secrets/psilink-signing-identity.json --identity "Agency A, a@agency-a.gov"
+psilink fingerprint --identity-file /run/signing/psilink-signing-identity.json --identity "Agency A, a@agency-a.gov"
 ```
 
 ```yaml
 signing:
   mode: certificate
-  identity_file: /run/secrets/psilink-signing-identity.json
+  identity_file: /run/signing/psilink-signing-identity.json
 ```
 
 What the directory has to be:
 
-- **Writable for the run that creates the file, read-only after.** Only `psilink fingerprint` writes the identity; an exchange and a `psilink verify-receipt` read it and write nothing beside it, so a read-only mount carries them both.
+- **Its own, and not the one holding the key file.** The shared secret rotates every exchange and is written back, so its directory has to be writable; the identity has no reason to inherit that. Mounting them separately is what lets this one be read-only. See [Mounting the signing identity](DEPLOYMENT.md#mounting-the-signing-identity).
+- **Writable for the run that creates the file, read-only after.** Only `psilink fingerprint` writes the identity; an exchange and a `psilink verify-receipt` read it and write nothing beside it, so a read-only mount carries every run after the creating one.
 - **Durable, and yours alone.** Losing the file means minting a new identity with a new fingerprint, which every partner must re-pin before your receipts verify again.
 - **Never a directory your partner syncs into.** In a file-drop exchange the rendezvous directory is one the partner writes to; a signing identity there hands them the private key that signs for you with every partner, not just that one.
 

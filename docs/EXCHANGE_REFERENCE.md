@@ -980,12 +980,12 @@ The receipt signing mode. `none` signs no receipt (only the unsigned self-attest
 *Type:* string (path)  
 *Required:* yes under `certificate` mode; not otherwise
 
-Path to this party's signing identity file (the P-256 private key plus its self-signed certificate). There is no default: the identity is a long-lived credential reused across every exchange and partner, so where it lives is the operator's custody decision and psilink resolves no location of its own. Give it the home a credential gets -- a mounted credentials directory, `/run/secrets` being the container convention:
+Path to this party's signing identity file (the P-256 private key plus its self-signed certificate). There is no default: the identity is a long-lived credential reused across every exchange and partner, so where it lives is the operator's custody decision and psilink resolves no location of its own. Give it the home a credential gets -- a mounted directory of its own, separate from the read-write one the rotating key file needs, so this one can be read-only:
 
 ```yaml
 signing:
   mode: certificate
-  identity_file: /run/secrets/psilink-signing-identity.json
+  identity_file: /run/signing/psilink-signing-identity.json
 ```
 
 This is a local path, not an [`@`-file reference](CLI.md#configuration). A leading `~` (or `~/`) is expanded to the home directory, so an operator who names one is honoured exactly -- what psilink does not do is choose the home directory itself.
@@ -1006,7 +1006,7 @@ Certificate mode with no pin is refused as a configuration error before the exch
 ```yaml
 signing:
   mode: certificate
-  identity_file: /run/secrets/psilink-signing-identity.json
+  identity_file: /run/signing/psilink-signing-identity.json
   partner_fingerprint: iWD-ZB69Oz6gOpaX_OoC7sD8ohIZj2lETC9qbl-IbPg
   receipt_output: ./receipts/agency-a-receipt.json
 ```
