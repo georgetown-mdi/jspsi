@@ -25,6 +25,7 @@ import {
   canProduceMultipleValues,
   coalesceSubstitutesConstant,
   substringCollapsesParsedDateToConstant,
+  CONSENT_VERDICT_PARAM_NAMES,
   stepCanEmptyRealizedValue,
   pipelineAlwaysDrops,
   parseDateInputDropsEveryRecord,
@@ -1073,30 +1074,53 @@ describe("coalesceSubstitutesConstant", () => {
 // --- substringCollapsesParsedDateToConstant ----------------------------------
 
 describe("substringCollapsesParsedDateToConstant", () => {
-  // Two dates whose year, month, and day differ in EVERY digit: 1971 vs 2068 in
-  // all four year digits, 01 vs 12 in both month digits, 02 vs 31 in both day
-  // digits. So a window reading even one character the DATE supplied renders
-  // differently for the two, and one reading only the format's own characters
-  // renders identically -- which makes "the two outputs are equal" exactly the
-  // property the predicate claims, and the sweep below an exact differential
-  // rather than a corpus-bounded sample.
-  const DATES = ["01/02/1971", "12/31/2068"];
+  // The oracle corpus. Its first two dates differ in EVERY digit of every
+  // rendered component -- 1971 against 2068 in all four year digits, 01 against
+  // 12 in both month digits, 02 against 31 in both day digits -- so a window
+  // reading even one character the DATE supplied renders differently for them,
+  // and one reading only the format's own characters renders identically. That
+  // makes "every output is the same non-null value" exactly the property the
+  // predicate claims. The corpus is deliberately WIDER than the probe set the
+  // predicate measures over, so a probe set too narrow to discriminate is a
+  // failure here rather than an agreement with itself.
+  const DATES = [
+    "01/02/1971",
+    "12/31/2068",
+    "05/13/1990",
+    "11/24/2007",
+    "03/04/2021",
+    "07/28/1985",
+  ];
   const parseDate = (
     outputFormat: unknown,
     inputFormat: unknown = "MM/DD/YYYY",
-  ) => ({
+  ): TransformStep => ({
     function: "parse_date",
     params: { inputFormat, outputFormat },
   });
-  const slice = (start: unknown, length: unknown) => ({
+  const slice = (start: unknown, length: unknown): TransformStep => ({
     function: "substring",
     params: { start, length },
   });
+  // What the shipped pipeline does with the whole corpus: the value every date
+  // leaves behind, or undefined where they differ or any date is dropped.
+  const collapsedValue = (
+    steps: ReadonlyArray<TransformStep>,
+  ): string | undefined => {
+    const outputs = DATES.map((date) => runPipeline(date, [...steps]));
+    const first = outputs[0];
+    if (typeof first !== "string") return undefined;
+    return outputs.every((output) => output === first) ? first : undefined;
+  };
+  const verdictAt = (steps: ReadonlyArray<TransformStep>, index: number) =>
+    substringCollapsesParsedDateToConstant(steps, index);
+  const anyVerdict = (steps: ReadonlyArray<TransformStep>) =>
+    steps.some((_step, index) => verdictAt(steps, index));
 
   test("the verdict matches whether the real slice is one constant (differential)", () => {
     // Every combination of an output format and a slice window, against the
     // shipped pipeline: the predicate says "collapses to a constant" exactly
-    // where the two dates leave the same non-null value behind.
+    // where every date leaves the same non-null value behind.
     const OUTPUT_FORMATS = [
       // A literal region ahead of the date, the motivating shape.
       "ACME-YYYYMMDD",
@@ -1147,13 +1171,12 @@ describe("substringCollapsesParsedDateToConstant", () => {
     for (const outputFormat of OUTPUT_FORMATS)
       for (const [start, length] of WINDOWS) {
         const steps = [parseDate(outputFormat), slice(start, length)];
-        const outputs = DATES.map((date) => runPipeline(date, steps));
-        const collapses = outputs[0] !== null && outputs[0] === outputs[1];
-        if (collapses) collapsed.push(outputFormat);
+        const value = collapsedValue(steps);
+        if (value !== undefined) collapsed.push(outputFormat);
         expect(
-          substringCollapsesParsedDateToConstant(steps[1], [steps[0]]),
-          `${outputFormat} [${start}, ${length}] -> ${JSON.stringify(outputs)}`,
-        ).toBe(collapses);
+          verdictAt(steps, 1),
+          `${outputFormat} [${start}, ${length}] -> ${JSON.stringify(value)}`,
+        ).toBe(value !== undefined);
       }
     // Not vacuous, and not carried by the tokenless format alone: a layout that
     // does render the date still has windows that read none of it.
@@ -1181,69 +1204,45 @@ describe("substringCollapsesParsedDateToConstant", () => {
     ] as Array<[unknown, unknown]>) {
       const steps = [literalRegion, slice(start, length)];
       for (const date of DATES) expect(runPipeline(date, steps)).toBeNull();
-      expect(
-        substringCollapsesParsedDateToConstant(steps[1], [steps[0]]),
-        `${JSON.stringify([start, length])}`,
-      ).toBe(false);
+      expect(verdictAt(steps, 1), `${JSON.stringify([start, length])}`).toBe(
+        false,
+      );
     }
     for (const bound of [null, "1", [], {}, true])
       expect(
-        substringCollapsesParsedDateToConstant(slice(bound, 3), [
-          literalRegion,
-        ]),
+        verdictAt([literalRegion, slice(bound, 3)], 1),
         JSON.stringify(bound),
       ).toBe(false);
   });
 
-  test("the verdict is a property of the pair, not of either step alone", () => {
+  test("the verdict is a property of the position, not of either step alone", () => {
     const literalRegion = parseDate("ACME-YYYYMMDD");
     const firstFour = slice(1, 4);
-    expect(
-      substringCollapsesParsedDateToConstant(firstFour, [literalRegion]),
-    ).toBe(true);
+    expect(verdictAt([literalRegion, firstFour], 1)).toBe(true);
     // Only a substring reads a window; no other function is the sliced step.
     for (const fn of STANDARDIZATION_FUNCTION_NAMES.filter(
       (name) => name !== "substring",
     ))
-      expect(
-        substringCollapsesParsedDateToConstant({ function: fn }, [
-          literalRegion,
-        ]),
-        fn,
-      ).toBe(false);
-    // The position matters at both ends: with no parse_date ahead of it the
-    // window slices whatever the identifier composed, and a step BETWEEN the two
-    // can move or rewrite the characters the window would read, so the layout no
-    // longer establishes the collapse.
-    expect(substringCollapsesParsedDateToConstant(firstFour, [])).toBe(false);
-    expect(
-      substringCollapsesParsedDateToConstant(firstFour, [
-        literalRegion,
-        { function: "to_upper_case" },
-      ]),
-    ).toBe(false);
+      expect(verdictAt([literalRegion, { function: fn }], 1), fn).toBe(false);
+    // With no parse_date ahead of it the window slices whatever the identifier
+    // composed, so the layout establishes nothing.
+    expect(verdictAt([firstFour], 0)).toBe(false);
     // A step BEFORE the parse_date is unconstrained: it can change whether a
     // value parses, never the layout a parsed date renders to.
     expect(
-      substringCollapsesParsedDateToConstant(firstFour, [
-        { function: "to_upper_case" },
-        literalRegion,
-      ]),
+      verdictAt([{ function: "to_upper_case" }, literalRegion, firstFour], 2),
     ).toBe(true);
     // The nearest parse_date is the one that laid out the value: a plain layout
     // in front of the literal-region one does not withdraw the collapse, and the
     // reverse order does not confer it.
     expect(
-      substringCollapsesParsedDateToConstant(firstFour, [
-        parseDate("YYYYMMDD"),
-        literalRegion,
-      ]),
+      verdictAt([parseDate("YYYYMMDD"), literalRegion, firstFour], 2),
     ).toBe(true);
     expect(
-      substringCollapsesParsedDateToConstant(firstFour, [
-        literalRegion,
-        parseDate("YYYYMMDD", "YYYYMMDD"),
-      ]),
+      verdictAt(
+        [literalRegion, parseDate("YYYYMMDD", "YYYYMMDD"), firstFour],
+        2,
+      ),
     ).toBe(false);
   });
 
@@ -1255,17 +1254,12 @@ describe("substringCollapsesParsedDateToConstant", () => {
     for (const inputFormat of ["MM/DD", 7] as unknown[]) {
       const steps = [parseDate("ACME-YYYYMMDD", inputFormat), firstFour];
       for (const date of DATES) expect(runPipeline(date, steps)).toBeNull();
-      expect(
-        substringCollapsesParsedDateToConstant(firstFour, [steps[0]]),
-        JSON.stringify(inputFormat),
-      ).toBe(false);
+      expect(verdictAt(steps, 1), JSON.stringify(inputFormat)).toBe(false);
     }
     // An ABSENT input format is not a dead one: the factory falls back to the
     // complete default layout, so the window still lands in the literal region.
     const absentInput = parseDate("ACME-YYYYMMDD", null);
-    expect(
-      substringCollapsesParsedDateToConstant(firstFour, [absentInput]),
-    ).toBe(true);
+    expect(verdictAt([absentInput, firstFour], 1)).toBe(true);
     expect(runPipeline(DATES[0], [absentInput, firstFour])).toBe("ACME");
   });
 
@@ -1281,23 +1275,20 @@ describe("substringCollapsesParsedDateToConstant", () => {
         [-2, 2],
       ] as Array<[number, number]>) {
         const steps = [parseDate(outputFormat), slice(start, length)];
-        const outputs = DATES.map((date) => runPipeline(date, steps));
-        expect(outputs[0] === outputs[1], JSON.stringify(outputFormat)).toBe(
-          false,
-        );
         expect(
-          substringCollapsesParsedDateToConstant(steps[1], [steps[0]]),
+          collapsedValue(steps),
           JSON.stringify(outputFormat),
-        ).toBe(false);
+        ).toBeUndefined();
+        expect(verdictAt(steps, 1), JSON.stringify(outputFormat)).toBe(false);
       }
   });
 
-  test("a contiguous run of substrings composes into the window it reads (differential)", () => {
+  test("a run of substrings is read as the one window it ends on (differential)", () => {
     // Each link slices a contiguous range of the link before it, so a run of
     // substrings after a parse_date reads ONE window of the rendered layout. Every
     // chain below goes through the shipped pipeline: the predicate at the LAST
-    // link says "collapses to a constant" exactly where the two dates leave the
-    // same non-null value behind, whatever the chain's intermediate windows did.
+    // link says "collapses to a constant" exactly where every date leaves the same
+    // non-null value behind, whatever the chain's intermediate windows did.
     const OUTPUT_FORMATS = [
       // The motivating shape: a literal region the composed window can land in.
       "ACME-YYYYMMDD",
@@ -1432,16 +1423,15 @@ describe("substringCollapsesParsedDateToConstant", () => {
           parseDate(outputFormat),
           ...chain.map(([start, length]) => slice(start, length)),
         ];
-        const outputs = DATES.map((date) => runPipeline(date, steps));
-        const collapses = outputs[0] !== null && outputs[0] === outputs[1];
-        if (collapses) collapsedBy.push({ outputFormat, links: chain.length });
+        const value = collapsedValue(steps);
+        if (value !== undefined)
+          collapsedBy.push({ outputFormat, links: chain.length });
+        // The whole element is asked, exactly as the consent header asks it: no
+        // link of the run may announce a collapse the run does not deliver.
         expect(
-          substringCollapsesParsedDateToConstant(
-            steps[steps.length - 1],
-            steps.slice(0, -1),
-          ),
-          `${outputFormat} ${JSON.stringify(chain)} -> ${JSON.stringify(outputs)}`,
-        ).toBe(collapses);
+          anyVerdict(steps),
+          `${outputFormat} ${JSON.stringify(chain)} -> ${JSON.stringify(value)}`,
+        ).toBe(value !== undefined);
       }
     // Not vacuous: chains collapse over more than one layout that does render a
     // date, and at both chain lengths, while plenty of them do not collapse.
@@ -1463,24 +1453,37 @@ describe("substringCollapsesParsedDateToConstant", () => {
     // one window at a time would see a truncation, while the run reads "ACME"
     // out of every date. The verdict belongs to the link the run ends at.
     const steps = [parseDate("ACME-YYYYMMDD"), slice(1, 13), slice(1, 4)];
-    expect(DATES.map((date) => runPipeline(date, steps))).toEqual([
-      "ACME",
-      "ACME",
+    expect(collapsedValue(steps)).toBe("ACME");
+    expect(steps.map((_step, index) => verdictAt(steps, index))).toEqual([
+      false,
+      false,
+      true,
     ]);
-    expect(
-      steps.map((step, index) =>
-        substringCollapsesParsedDateToConstant(step, steps.slice(0, index)),
-      ),
-    ).toEqual([false, false, true]);
   });
 
-  test("a step other than a substring between the two keeps the milder verdict", () => {
-    // The stated limit this predicate carries. Each step below leaves the
-    // characters the window reads exactly where the layout put them, so the
-    // runtime still puts every record on one constant -- but whether a given
-    // function preserves a given layout is a per-function, per-format property,
-    // and the walk ends at the first non-substring instead of deciding it. This
-    // pins the understatement so a change to EITHER half fails a test.
+  test("a mid-run collapse the run then slices out of range is not announced", () => {
+    // The first link reads the literal region, so a verdict taken THERE says
+    // "any date"; the second link then composes out of that four-character
+    // window and reads nothing, so the element matches no record at all. A
+    // verdict is taken only where the run ends, which is what parts the two.
+    const steps = [parseDate("ACME-YYYYMMDD"), slice(1, 4), slice(5, 2)];
+    for (const date of DATES) expect(runPipeline(date, steps)).toBeNull();
+    expect(steps.map((_step, index) => verdictAt(steps, index))).toEqual([
+      false,
+      false,
+      false,
+    ]);
+    // The truncated element -- the same first link with nothing after it -- is
+    // the collapse the mid-run verdict would have been reporting.
+    expect(anyVerdict(steps.slice(0, 2))).toBe(true);
+  });
+
+  test("a value-preserving step between the two keeps the verdict", () => {
+    // Each step below leaves the characters the window reads exactly where the
+    // runtime leaves them, so every record still ends on one constant. A rule
+    // that ended its walk at the first non-substring would call each of these a
+    // truncation while the runtime collapsed -- which is the reading measuring
+    // the steps replaces.
     const intervening: TransformStep[] = [
       { function: "to_upper_case" },
       { function: "to_lower_case" },
@@ -1494,26 +1497,201 @@ describe("substringCollapsesParsedDateToConstant", () => {
       { function: "replace_separators_with_spaces" },
       { function: "null_if", params: { values: ["no such value"] } },
       { function: "filter_regex", params: { pattern: "ACME" } },
+      { function: "coalesce", params: { default: "FALLBACK" } },
+      { function: "pad_left", params: { length: 20, char: "0" } },
+      { function: "replace_regex", params: { pattern: "E", replacement: "3" } },
     ];
     for (const step of intervening) {
       const steps = [parseDate("ACME-YYYYMMDD"), step, slice(1, 4)];
-      const outputs = DATES.map((date) => runPipeline(date, steps));
-      expect(outputs[0], step.function).not.toBeNull();
-      expect(outputs[0], step.function).toBe(outputs[1]);
-      expect(
-        substringCollapsesParsedDateToConstant(steps[2], steps.slice(0, 2)),
-        step.function,
-      ).toBe(false);
+      expect(collapsedValue(steps), step.function).not.toBeUndefined();
+      expect(verdictAt(steps, 2), step.function).toBe(true);
     }
-    // The walk ends at the first non-substring whichever side of the run it sits,
-    // so a chain broken in the middle is not composed either.
+    // Several links after the intervening step compose the same way a run
+    // directly after the parse_date does.
     expect(
-      substringCollapsesParsedDateToConstant(slice(1, 4), [
-        parseDate("ACME-YYYYMMDD"),
-        slice(1, 13),
-        { function: "to_upper_case" },
-      ]),
-    ).toBe(false);
+      verdictAt(
+        [
+          parseDate("ACME-YYYYMMDD"),
+          { function: "remove_dashes" },
+          slice(1, 12),
+          slice(1, 4),
+        ],
+        3,
+      ),
+    ).toBe(true);
+  });
+
+  test("whether a step preserves the window is a property of the window too", () => {
+    // Why a function-name allowlist cannot decide this. `remove_dashes` closes
+    // the gap the format's own separator held, so a four-character window still
+    // reads only the format's characters while a five-character one pulls the
+    // year's first digit into it -- the same function, opposite verdicts.
+    const dashRemoved = (start: number, length: number) => [
+      parseDate("ACME-YYYYMMDD"),
+      { function: "remove_dashes" },
+      slice(start, length),
+    ];
+    expect(collapsedValue(dashRemoved(1, 4))).toBe("ACME");
+    expect(verdictAt(dashRemoved(1, 4), 2)).toBe(true);
+    expect(collapsedValue(dashRemoved(1, 5))).toBeUndefined();
+    expect(verdictAt(dashRemoved(1, 5), 2)).toBe(false);
+    // Without the step the fifth character is the format's own dash, so the
+    // wider window collapses; the step is what moves the verdict, not the window
+    // alone.
+    expect(verdictAt([parseDate("ACME-YYYYMMDD"), slice(1, 5)], 1)).toBe(true);
+  });
+
+  test("a step that drops the collapsed value withholds the verdict", () => {
+    // An element that matches nothing is not one that matches every date. A
+    // dropping step BETWEEN the parse_date and the run empties the value before
+    // the window reads it; one AFTER the run drops the constant every record
+    // holds by then, which drops every record -- determinate with no probing,
+    // since there is only one value left to drop.
+    const literalRegion = parseDate("ACME-YYYYMMDD");
+    const neverMatches: TransformStep = {
+      function: "filter_regex",
+      params: { pattern: "NOTHING-MATCHES-THIS" },
+    };
+    const dropsTheConstant: TransformStep = {
+      function: "null_if",
+      params: { values: ["ACME"] },
+    };
+    for (const steps of [
+      [literalRegion, neverMatches, slice(1, 4)],
+      [literalRegion, slice(1, 4), neverMatches],
+      [literalRegion, slice(1, 4), dropsTheConstant],
+    ]) {
+      for (const date of DATES) expect(runPipeline(date, steps)).toBeNull();
+      expect(anyVerdict(steps), JSON.stringify(steps)).toBe(false);
+    }
+    // A `coalesce` after the drop puts every record back on one constant, so the
+    // collapse stands: the tail is run, not assumed.
+    const rescued = [
+      literalRegion,
+      slice(1, 4),
+      { function: "null_if", params: { values: ["ACME"] } },
+      { function: "coalesce", params: { default: "UNKNOWN" } },
+    ];
+    expect(collapsedValue(rescued)).toBe("UNKNOWN");
+    expect(anyVerdict(rescued)).toBe(true);
+  });
+
+  test("a drop the DATA decides is the limit the verdict keeps", () => {
+    // The stated limit, pinned so a change to either half is visible. A
+    // `null_if` naming one rendered date that no probe renders passes the
+    // measurement, so the element still earns "any date" -- while the record
+    // holding that date is dropped rather than collapsed. Reading that from the
+    // terms would mean assuming a drop the data decides. Widening the probe set
+    // to cover this date narrows the limit and turns this red, which is the
+    // reading it is here to make visible.
+    const steps = [
+      parseDate("ACME-YYYYMMDD"),
+      { function: "null_if", params: { values: ["ACME-20330417"] } },
+      slice(1, 4),
+    ];
+    expect(runPipeline("04/17/2033", steps)).toBeNull();
+    expect(runPipeline("12/31/2068", steps)).toBe("ACME");
+    expect(anyVerdict(steps)).toBe(true);
+  });
+
+  test("a step this build cannot run declines the verdict", () => {
+    // The function name is partner free text, so a name core does not recognize
+    // reaches the predicate. It compiles nothing and claims nothing rather than
+    // throwing on the consent surface.
+    const steps = [
+      parseDate("ACME-YYYYMMDD"),
+      { function: "no_such_function" },
+      slice(1, 4),
+    ];
+    expect(() => runPipeline(DATES[0], steps)).toThrow(
+      UnknownStandardizationFunctionError,
+    );
+    expect(anyVerdict(steps)).toBe(false);
+  });
+});
+
+// --- CONSENT_VERDICT_PARAM_NAMES ---------------------------------------------
+
+describe("CONSENT_VERDICT_PARAM_NAMES", () => {
+  // What holds the table to real verdicts: every param it lists is moved here,
+  // and the predicate that reads it must move with it. The cases are driven from
+  // the shipped constant, so a name added there without one is a failure rather
+  // than a silently unheld entry. The other direction -- a NEW verdict param
+  // arriving with no entry in the constant -- no test can see; it is the review
+  // call the constant's own doc records.
+  const parseDate = (outputFormat: string): TransformStep => ({
+    function: "parse_date",
+    params: { inputFormat: "MM/DD/YYYY", outputFormat },
+  });
+  const slicedLiteralRegion = (
+    outputFormat: string,
+    start: number,
+    length: number,
+  ): boolean =>
+    substringCollapsesParsedDateToConstant(
+      [
+        parseDate(outputFormat),
+        { function: "substring", params: { start, length } },
+      ],
+      1,
+    );
+  const emptyingStep: TransformStep = {
+    function: "null_if",
+    params: { values: ["ACME"] },
+  };
+  const coalesceWithDefault = (declared: unknown): boolean =>
+    coalesceSubstitutesConstant(
+      { function: "coalesce", params: { default: declared } },
+      [emptyingStep],
+    );
+
+  // Each case declares two values for its param whose verdicts must differ.
+  const VERDICT_MOVES: Record<
+    string,
+    Record<string, () => [boolean, boolean]>
+  > = {
+    parse_date: {
+      inputFormat: () => [
+        parseDateInputDropsEveryRecord({ inputFormat: "MM/DD" }),
+        parseDateInputDropsEveryRecord({ inputFormat: "MM/DD/YYYY" }),
+      ],
+      outputFormat: () => [
+        slicedLiteralRegion("ACME-YYYYMMDD", 1, 4),
+        slicedLiteralRegion("YYYYMMDD", 1, 4),
+      ],
+    },
+    substring: {
+      start: () => [
+        slicedLiteralRegion("ACME-YYYYMMDD", 1, 4),
+        slicedLiteralRegion("ACME-YYYYMMDD", 6, 4),
+      ],
+      length: () => [
+        slicedLiteralRegion("ACME-YYYYMMDD", 1, 4),
+        slicedLiteralRegion("ACME-YYYYMMDD", 1, 6),
+      ],
+    },
+    coalesce: {
+      default: () => [
+        coalesceWithDefault("SUBSTITUTED"),
+        coalesceWithDefault(7),
+      ],
+    },
+  };
+
+  test("every listed param moves the verdict that reads it", () => {
+    expect(Object.keys(VERDICT_MOVES).sort()).toEqual(
+      Object.keys(CONSENT_VERDICT_PARAM_NAMES).sort(),
+    );
+    for (const [functionName, params] of Object.entries(
+      CONSENT_VERDICT_PARAM_NAMES,
+    )) {
+      const moves = VERDICT_MOVES[functionName];
+      expect(Object.keys(moves).sort(), functionName).toEqual(
+        [...params].sort(),
+      );
+      for (const [param, move] of Object.entries(moves))
+        expect(move(), `${functionName}.${param}`).toEqual([true, false]);
+    }
   });
 });
 

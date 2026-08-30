@@ -12,7 +12,10 @@ import {
 } from "../src/config/linkageTerms.js";
 
 import type { ConnectionEndpoint } from "../src/config/invitation.js";
-import type { LinkageStrategy } from "../src/config/linkageTerms.js";
+import type {
+  LinkageStrategy,
+  TransformStep,
+} from "../src/config/linkageTerms.js";
 
 // A linkable column set (ssn + names + dob give satisfiable keys) that ALSO
 // carries columns the inferred metadata discloses: `notes` infers as an `other`
@@ -324,5 +327,109 @@ describe("the consent summary's fan-out register", () => {
       /each able to match independently/,
     );
     expect(TRANSFORM_FUNCTION_GLOSSARY.split_on).not.toMatch(/refuses/);
+  });
+});
+
+describe("the consent summary's date-collapse marker", () => {
+  const metadata = inferMetadata(LINKAGE_ONLY_COLUMNS);
+  const baseTerms = getDefaultLinkageTerms("Inviter", metadata);
+  const LITERAL_REGION_FORMAT = "ACME-YYYYMMDD";
+  // One key over the date field, carrying whatever transform a case declares.
+  const termsWith = (transform: TransformStep[]) => ({
+    ...baseTerms,
+    linkageKeys: [
+      { name: "date", elements: [{ field: "date_of_birth", transform }] },
+    ],
+  });
+  const headerFor = (transform: TransformStep[]) =>
+    summarizeInvitation({ linkageTerms: termsWith(transform) }).linkageKeys[0]
+      .headerFields;
+  const paramsFor = (transform: TransformStep[]) =>
+    summarizeInvitation({ linkageTerms: termsWith(transform) }).linkageKeys[0]
+      .elements[0].transforms[0].params;
+  const parseDate = (outputFormat: string): TransformStep => ({
+    function: "parse_date",
+    params: { inputFormat: "MM/DD/YYYY", outputFormat },
+  });
+  const slice = (start: number, length: number): TransformStep => ({
+    function: "substring",
+    params: { start, length },
+  });
+
+  test("a value-preserving step between the parse_date and the slice keeps the collapse", () => {
+    // The header reads the whole element, so a step that leaves the window's
+    // characters where the layout put them no longer returns the marker to the
+    // milder truncation word while every record still lands on "ACME".
+    expect(
+      headerFor([
+        parseDate(LITERAL_REGION_FORMAT),
+        { function: "to_upper_case" },
+        slice(1, 4),
+      ]),
+    ).toEqual(["date of birth (any date)"]);
+    expect(headerFor([parseDate(LITERAL_REGION_FORMAT), slice(1, 4)])).toEqual([
+      "date of birth (any date)",
+    ]);
+  });
+
+  test("a run whose composed window leaves the layout announces no collapse", () => {
+    // The first link reads the literal region and the second slices out of that
+    // window, so the element matches no record at all. Announcing "any date" for
+    // it would name an element that matches nothing as matching every date.
+    expect(
+      headerFor([parseDate(LITERAL_REGION_FORMAT), slice(1, 4), slice(5, 2)]),
+    ).toEqual(["date of birth (partial)"]);
+  });
+
+  test("a plain reformatting keeps no marker", () => {
+    // Routine canonicalization between equivalent full layouts, deliberately
+    // unflagged, and the slice that reads the date itself is the milder word.
+    expect(headerFor([parseDate("YYYY-MM-DD")])).toEqual(["date of birth"]);
+    expect(headerFor([parseDate("YYYY-MM-DD"), slice(1, 4)])).toEqual([
+      "date of birth (partial)",
+    ]);
+  });
+
+  test("the outputFormat row survives a params record padded past the display cap", () => {
+    // The same party authors the transform a stated limit understates and the
+    // params record beside it. Twenty filler entries ahead of the format would
+    // push it into the overflow marker were the rows shown in declaration order.
+    const filler = Object.fromEntries(
+      Array.from({ length: 20 }, (_, i) => [`filler${i}`, `value${i}`]),
+    );
+    const params = paramsFor([
+      {
+        function: "parse_date",
+        params: {
+          ...filler,
+          inputFormat: "MM/DD/YYYY",
+          outputFormat: LITERAL_REGION_FORMAT,
+        },
+      },
+      slice(1, 4),
+    ]);
+    expect(params.slice(0, 2)).toEqual([
+      "inputFormat: MM/DD/YYYY",
+      `outputFormat: ${LITERAL_REGION_FORMAT}`,
+    ]);
+    expect(params[params.length - 1]).toBe("... 6 more");
+  });
+
+  test("an over-long value ahead of the outputFormat does not spend its row", () => {
+    // The second suppression route: a value long enough to be truncated where it
+    // is rendered. Each row is bounded on its own, and the verdict-bearing rows
+    // lead, so nothing a partner declares is rendered ahead of the format.
+    const params = paramsFor([
+      {
+        function: "parse_date",
+        params: {
+          flood: "F".repeat(4000),
+          outputFormat: LITERAL_REGION_FORMAT,
+        },
+      },
+      slice(1, 4),
+    ]);
+    expect(params[0]).toBe(`outputFormat: ${LITERAL_REGION_FORMAT}`);
+    expect(params[1]).toMatch(/^flood: F+\.\.\.\[truncated\]$/);
   });
 });

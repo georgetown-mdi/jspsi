@@ -385,48 +385,6 @@ export function dateFormatComponents(
   return components;
 }
 
-// The width each OUTPUT-format token emits, and by omission which tokens are
-// substituted at all: parseDateFactory replaces YYYY/MM/DD only, so a YY in an
-// output format is literal text (the reading dateFormatComponents gives it) and
-// falls through to its own two characters below. Every substituted value has a
-// fixed width -- the year is four digits whichever token parsed it (a \d{4}
-// capture, or resolveTwoDigitYear's four-digit resolution), and month and day are
-// padStart(2, "0") -- so a rendered date's layout is a property of the format
-// alone, not of the date. Held to the factory by a differential test rather than
-// by this comment.
-const DATE_OUTPUT_SUBSTITUTION_WIDTHS: Readonly<
-  Partial<Record<DateFormatToken, number>>
-> = { YYYY: 4, MM: 2, DD: 2 };
-
-/** Where a rendered `parse_date` output puts the date's own characters. */
-interface DateOutputLayout {
-  /** Characters the format emits for every date it renders. */
-  length: number;
-  /** The half-open `[start, end)` index ranges the substituted date components
-   * fill. Every index outside them carries a character of the format itself, the
-   * same for every record. */
-  componentSpans: ReadonlyArray<{ start: number; end: number }>;
-}
-
-// Walk an output format into the layout its rendered dates share. Positions come
-// from the same greedy tokenizer the factory's own parse uses, so the spans
-// cannot drift from the substitution the factory performs.
-function dateOutputLayout(outputFormat: string): DateOutputLayout {
-  const componentSpans: Array<{ start: number; end: number }> = [];
-  let position = 0;
-  for (const segment of tokenizeDateFormat(outputFormat)) {
-    const substituted =
-      segment.token === undefined
-        ? undefined
-        : DATE_OUTPUT_SUBSTITUTION_WIDTHS[segment.token];
-    const width = substituted ?? segment.text.length;
-    if (substituted !== undefined)
-      componentSpans.push({ start: position, end: position + width });
-    position += width;
-  }
-  return { length: position, componentSpans };
-}
-
 /**
  * The output layout a `parse_date` step emits when it declares no usable
  * `outputFormat`. It carries every date component, so the default drops nothing.
@@ -437,6 +395,25 @@ function dateOutputLayout(outputFormat: string): DateOutputLayout {
  * than to a restated literal.
  */
 export const DEFAULT_DATE_OUTPUT_FORMAT = "YYYYMMDD";
+
+// The characters a `parse_date` step emits for one date: the output format with
+// EVERY occurrence of each substituted token replaced by its (padded) component
+// value, in the fixed order all YYYY, then all MM, then all DD
+// (docs/spec/PROTOCOL.md). The factory renders through this, and so does the
+// terms-level collapse verdict below, which renders probe dates to measure what a
+// later step reads out of them -- so a layout the verdict measures is the one the
+// runtime actually emits.
+function renderDateOutput(
+  outputFormat: string,
+  year: string,
+  month: string,
+  day: string,
+): string {
+  return outputFormat
+    .replaceAll("YYYY", year)
+    .replaceAll("MM", month)
+    .replaceAll("DD", day);
+}
 
 // Parse `input_format` -> YAML camelizes keys but not values, so format
 // string tokens YYYY / YY / MM / DD stay as written; delimiter characters are
@@ -499,10 +476,7 @@ function parseDateFactory(params: Params): StandardizingFn {
 
     if (!isCalendarDateValid(year, month, day)) return null;
 
-    return outputFormat
-      .replaceAll("YYYY", year)
-      .replaceAll("MM", month)
-      .replaceAll("DD", day);
+    return renderDateOutput(outputFormat, year, month, day);
   };
 }
 
@@ -3075,109 +3049,202 @@ function substringWindow(
   return to > from ? { start: from, end: to } : undefined;
 }
 
-// The single window a run of consecutive `substring` steps reads out of a value
-// of `valueLength` characters, in that value's own coordinates, or undefined
-// where the run reads nothing. Each link slices a CONTIGUOUS range of the
-// previous link's output, so composing is arithmetic: resolve the link against
-// the length the run holds at that point, then map its bounds forward by the
-// start the run has already advanced to. A link that reads nothing empties the
-// value, which the next link null-propagates, so the whole run reads nothing.
-function composeSubstringWindows(
-  steps: ReadonlyArray<TransformStep>,
-  valueLength: number,
-): { start: number; end: number } | undefined {
-  let composed = { start: 0, end: valueLength };
-  for (const step of steps) {
-    const window = substringWindow(step.params, composed.end - composed.start);
-    if (window === undefined) return undefined;
-    composed = {
-      start: composed.start + window.start,
-      end: composed.start + window.end,
-    };
+// The dates {@link substringCollapsesParsedDateToConstant} measures a pipeline
+// over. Chosen so that the first two differ in EVERY digit of every rendered
+// component -- 1971 against 2068 in all four year digits, 01 against 12 in both
+// month digits, 02 against 31 in both day digits -- which is what makes "the
+// windows agree" the property the verdict claims rather than a coincidence of
+// one sample: a window reading any character the date supplied differs between
+// those two wherever the layout put it. The other two add digit variety for a
+// step that rewrites characters rather than moving them. Every year is inside
+// the `YY` pivot window (1969-2068, {@link TWO_DIGIT_YEAR_PIVOT}) and every date
+// is a real calendar date, so each probe is a value the factory can actually
+// emit whichever input format parsed it.
+const DATE_COLLAPSE_PROBES: ReadonlyArray<{
+  year: string;
+  month: string;
+  day: string;
+}> = [
+  { year: "1971", month: "01", day: "02" },
+  { year: "2068", month: "12", day: "31" },
+  { year: "1990", month: "05", day: "13" },
+  { year: "2007", month: "11", day: "24" },
+];
+
+// The single value `compiled` leaves one rendered date on, or undefined where
+// the run gives no reading of one.
+//
+// Three shapes decline rather than answer. A step that leaves the value over the
+// per-step ceiling refuses the whole exchange at run time
+// ({@link MAX_TRANSFORMED_VALUE_LENGTH}), so no marker it would earn is ever
+// shown; a run ending on several candidates is a fan-out, which the consent
+// header ranks above this verdict anyway; and a run ending on nothing is a drop,
+// the opposite of a collapse.
+function runMeasuredSteps(
+  rendered: string,
+  compiled: ReadonlyArray<CompiledStep>,
+): string | undefined {
+  let current: FieldValue = rendered;
+  for (const step of compiled) {
+    current = applyStep(current, step);
+    if (valueOverCeiling(current) !== undefined) return undefined;
   }
-  return composed;
+  return typeof current === "string" && current !== "" ? current : undefined;
+}
+
+// Whether the pipeline's remaining steps still yield a value for the one
+// constant every record holds by then. No probing: with a single value left
+// there is nothing for the data to decide, so a step that drops it drops every
+// record.
+function collapsedValueSurvives(
+  collapsed: string,
+  compiled: ReadonlyArray<CompiledStep>,
+): boolean {
+  let current: FieldValue = collapsed;
+  for (const step of compiled) {
+    current = applyStep(current, step);
+    if (valueOverCeiling(current) !== undefined) return false;
+  }
+  if (current === null) return false;
+  return typeof current === "string" ? current !== "" : current.size > 0;
 }
 
 /**
- * Whether the `substring` step at a given position slices a rendered
- * `parse_date` output where the format carries only its OWN characters -- a
- * literal region (`ACME-YYYYMMDD`) or a bare separator -- so every record that
- * survives the parse leaves the step holding the same constant. It is the
- * maximal match breadth, not the truncation the step's name suggests: the sliced
+ * Whether the `substring` at `index` of `steps` leaves every record that
+ * survives an earlier `parse_date` holding the SAME constant -- the maximal
+ * match breadth, not the truncation the step's name suggests. The motivating
+ * shape is a window sliced wholly inside an output format's literal region
+ * (`ACME-YYYYMMDD` read as `ACME`) or onto a bare separator, where the sliced
  * value carries no character the date supplied.
  *
- * Determinate from the terms because a rendered date's layout is fixed by the
- * output format alone ({@link dateOutputLayout}: substituted components have
- * fixed widths, and every other index is a character of the format). Three
- * conditions, all necessary:
+ * MEASURED, not derived from the step names: the steps between the `parse_date`
+ * and the run are compiled and RUN over {@link DATE_COLLAPSE_PROBES}, and the
+ * verdict is that every probe leaves the run holding one identical, non-empty
+ * value. Whether a step preserves what a window reads is a property of the
+ * function AND of the window -- `remove_dashes` collapses a four-character
+ * window of `ACME-YYYYMMDD` but not a five-character one -- so a name allowlist
+ * of "layout-preserving" functions decides it wrongly in both directions, and a
+ * layout-preservation table is a second reading of behavior the factories
+ * already define. Running the shipped steps is the reading that cannot drift
+ * from them, the same reason {@link coalesceSubstitutesConstant} reads a step's
+ * params and position rather than its name.
  *
- * - Every step between this one and a `parse_date` is itself a `substring`. The
- *   whole contiguous run, this step included, composes into ONE window of the
- *   rendered layout ({@link composeSubstringWindows}), since each link slices a
- *   contiguous range of the link before it. Any other function ends the walk and
- *   no verdict is given: a step that rewrites or reorders characters puts the
- *   window somewhere the layout no longer settles. A step BEFORE the `parse_date`
- *   is unconstrained -- it can only change whether a value parses, never the
- *   layout it renders to.
+ * Four conditions, all necessary:
+ *
+ * - `index` is the END of a maximal run of consecutive `substring` steps. A
+ *   verdict taken at a link INSIDE a run announces a collapse the run's later
+ *   links can slice back out of range, which would name an element that matches
+ *   nothing as matching every date; the value a run leaves is the value its last
+ *   link leaves.
+ * - Some `parse_date` runs ahead of that run. The NEAREST one laid out the value
+ *   the run reads; steps before it are unconstrained, since they can only change
+ *   whether a value parses, never the layout a parsed date renders to.
  * - That `parse_date`'s input format can parse a date at all
  *   ({@link parseDateInputDropsEveryRecord}); one that cannot supplies no value
- *   to slice.
- * - The composed window is non-empty (substringFactory's coercion, applied
- *   against the rendered length so a negative start resolves too) and overlaps
- *   none of the layout's component spans. Bounds that read nothing drop every
- *   record, which is a narrowing rather than a collapse, and a window straddling
- *   a literal and a token still reads part of the date, so it truncates.
+ *   to slice, which is a narrowing the dead-key advisory surfaces.
+ * - The collapsed value survives the REST of the pipeline. Every record holds
+ *   the same value by then, so what the remaining steps do to it is determinate
+ *   with no probing at all: a later step that drops that one value drops every
+ *   record, and an element matching nothing is not one matching every date.
  *
- * A known understatement, not a claim of completeness: many intervening steps
- * leave the characters the window would read exactly where they sit -- a case
- * fold over a date of digits and separators, a trim of a layout with no outer
- * whitespace, a `filter_regex` or `null_if` that passes the value through -- and
- * the runtime then collapses while this predicate stays silent, so the consent
- * header shows the milder truncation word. Whether a given function preserves a
- * given layout is a per-function, per-format property, not one this name-blind
- * walk can settle. The shape is ledgered on `invitationSummary.ts`'s
- * `elementBreadthMarker`, held by a test that drives it through the pipeline
- * rather than asserted here, and compensated by the terms' `outputFormat` detail
- * row, which shows the format whose literal region the window reads.
+ * The measurement is bounded by the terms the schema already bounds: the steps
+ * up to the run's end run once per probe and the rest of the pipeline once, on
+ * values held to the same per-step ceiling the runtime enforces. Steps it cannot
+ * run at all -- a function name this build does not recognize, a pattern that
+ * fails to compile -- decline the verdict rather than guess it.
  *
- * `precedingSteps` are the steps that run before `step` in the same pipeline,
- * required rather than defaulted: like {@link coalesceSubstitutesConstant}, the
- * verdict is a property of the position, not of the step alone.
+ * The limits it keeps, both value-DEPENDENT drops the terms cannot settle. A
+ * `filter_regex` or `null_if` between the `parse_date` and the run is measured
+ * over the probes alone, so one that passes them and drops a real record leaves
+ * the verdict standing; and one BEFORE the `parse_date` reads the acceptor's own
+ * values, which the terms do not carry, so it is not measured at all. Either can
+ * leave an element earning "any date" while it in fact drops the records it
+ * would have collapsed. That is the same residual {@link pipelineAlwaysDrops}
+ * declines to claim, for the same reason: assuming a value-dependent drop from
+ * the terms would flag a legitimate pipeline as dead.
  *
  * Shared so the consent header's collapse marker in `invitationSummary.ts` turns
- * on core's own tokenization rather than a restated one that could drift from the
- * factory.
+ * on core's own steps rather than a restated reading of them.
  */
 export function substringCollapsesParsedDateToConstant(
-  step: TransformStep,
-  precedingSteps: ReadonlyArray<TransformStep>,
+  steps: ReadonlyArray<TransformStep>,
+  index: number,
 ): boolean {
-  if (step.function !== "substring") return false;
-  let chainStart = precedingSteps.length;
-  while (
-    chainStart > 0 &&
-    precedingSteps[chainStart - 1].function === "substring"
-  )
-    chainStart -= 1;
-  if (chainStart === 0) return false;
-  const parseDateStep = precedingSteps[chainStart - 1];
-  if (parseDateStep.function !== "parse_date") return false;
+  if (steps[index]?.function !== "substring") return false;
+  if (steps[index + 1]?.function === "substring") return false;
+  let runStart = index;
+  while (runStart > 0 && steps[runStart - 1].function === "substring")
+    runStart -= 1;
+  let parseDateIndex = runStart - 1;
+  while (parseDateIndex >= 0 && steps[parseDateIndex].function !== "parse_date")
+    parseDateIndex -= 1;
+  if (parseDateIndex < 0) return false;
+  const parseDateStep = steps[parseDateIndex];
   if (parseDateInputDropsEveryRecord(parseDateStep.params)) return false;
   const rawOutputFormat = parseDateStep.params?.outputFormat;
-  const layout = dateOutputLayout(
+  const outputFormat =
     typeof rawOutputFormat === "string"
       ? rawOutputFormat
-      : DEFAULT_DATE_OUTPUT_FORMAT,
-  );
-  const sliced = composeSubstringWindows(
-    [...precedingSteps.slice(chainStart), step],
-    layout.length,
-  );
-  if (sliced === undefined) return false;
-  return !layout.componentSpans.some(
-    (span) => span.start < sliced.end && sliced.start < span.end,
-  );
+      : DEFAULT_DATE_OUTPUT_FORMAT;
+  let collapsed: string | undefined;
+  try {
+    // Only the steps up to the run's end are measured over the probes; the rest
+    // of the pipeline is compiled at all only once a collapse is established, so
+    // an element that collapses nowhere costs one pass over each of its runs
+    // rather than one over its whole tail.
+    const compiled = compileSteps([
+      ...steps.slice(parseDateIndex + 1, index + 1),
+    ]);
+    for (const probe of DATE_COLLAPSE_PROBES) {
+      const measured = runMeasuredSteps(
+        renderDateOutput(outputFormat, probe.year, probe.month, probe.day),
+        compiled,
+      );
+      if (measured === undefined) return false;
+      if (collapsed === undefined) collapsed = measured;
+      else if (measured !== collapsed) return false;
+    }
+    if (collapsed === undefined) return false;
+    return collapsedValueSurvives(
+      collapsed,
+      compileSteps([...steps.slice(index + 1)]),
+    );
+  } catch {
+    // A step this build cannot compile or run gives no reading of what the
+    // window holds, and the consent header names only what it can establish.
+    return false;
+  }
 }
+
+/**
+ * The transform params a CONSENT VERDICT reads, by function name: the values
+ * that decide what the always-visible breadth marker says about an element,
+ * rather than ones that only describe the step. A consent surface shows these
+ * ahead of a step's other declared params, so neither the number of entries a
+ * partner declares nor what it puts in them can displace the row a marker's
+ * stated limits send the reader to.
+ *
+ * Each entry is the params some predicate here reads. `parse_date`'s two formats
+ * decide {@link parseDateInputDropsEveryRecord} and the layout
+ * {@link substringCollapsesParsedDateToConstant} measures; `substring`'s bounds
+ * decide the window that measurement slices; `coalesce`'s `default` decides
+ * {@link coalesceSubstitutesConstant}. A function whose marker turns on its NAME
+ * alone (`phonetic`, `replace_regex`, `pad_left`, and the rest) has no entry: no
+ * param of it can move a verdict, so none needs the guaranteed row.
+ *
+ * Held to those predicates by a test that moves each listed param and requires
+ * the verdict to move with it, so a name listed here names a real verdict. What
+ * that cannot see is the other direction -- a NEW verdict param arriving with no
+ * entry here -- which is a review call, as the coercion table beside
+ * {@link describeTransformCoercions} carries the same shape of gap.
+ */
+export const CONSENT_VERDICT_PARAM_NAMES: Readonly<
+  Record<string, ReadonlyArray<string>>
+> = {
+  parse_date: ["inputFormat", "outputFormat"],
+  substring: ["start", "length"],
+  coalesce: ["default"],
+};
 
 /**
  * Whether a transform/standardization pipeline produces NO value for every
