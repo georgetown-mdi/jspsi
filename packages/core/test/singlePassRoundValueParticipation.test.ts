@@ -35,8 +35,8 @@ import {
 // refuses before a round begins, so no replay of it runs under those sides.
 // psiLinkManyToOne.test.ts ("single-pass refuses many-to-many"), psiLink.test.ts
 // ("many-to-many pairs in the cascade and is refused by single-pass") and
-// linkageCardinality.test.ts ("single-pass resolves the same labels the cascade
-// does") carry that.
+// linkageCardinality.test.ts ("single-pass resolves every label except the
+// both-sided one") carry that.
 //
 // A row holding one value twice is in the corpus defensively rather than as a
 // reachable shape: a local cell realizes a ReadonlySet, and a partner's ragged cell

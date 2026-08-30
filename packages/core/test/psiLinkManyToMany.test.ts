@@ -25,9 +25,11 @@ import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
 // product, so every run here drives both parties and asserts they reconstruct the
 // same pair set.
 //
-// `many-to-many` is its own mirror, so both parties carry the one label. No
-// exchange resolves it from agreed terms (`resolveLinkageCardinality` refuses the
-// both-sided pair), which is why every case here calls linkViaPSI directly.
+// `many-to-many` is its own mirror, so both parties carry the one label. An
+// exchange resolves it from the agreed pair (`resolveLinkageCardinality`) and the
+// runs it produces are driven in linkageCardinality.test.ts; every case here calls
+// linkViaPSI directly, which is what lets a partner's frames deviate at the seam
+// under test.
 
 const psiLibrary = await PSI();
 

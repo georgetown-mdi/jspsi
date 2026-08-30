@@ -489,10 +489,10 @@ describe("reconstructCommittedData round-trips a deduplicating cardinality", () 
   });
 
   test("a fan on each side at once reopens every commitment", async () => {
-    // Not a cardinality any exchange resolves today (many-to-many is refused at
-    // the pairing rules), but the re-supply path is shape-driven: the local half
-    // repeats AND the partner half repeats, and neither collapse may disturb the
-    // other.
+    // The both-sided shape, which the cascade produces for an agreed
+    // many-to-many pair: the local half repeats AND the partner half repeats, and
+    // neither collapse may disturb the other. The re-supply path is shape-driven,
+    // so it is driven here on the shape rather than through a run.
     const partnerPayload: PartnerPayload = {
       columns: ["note"],
       rowIndices: [0, 2],

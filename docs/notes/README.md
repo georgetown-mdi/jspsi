@@ -17,7 +17,7 @@ from a direction still open to a decision taken and built.
 | [console-announce-and-focus.md](console-announce-and-focus.md) | Decided and built, by a 3-panelist design panel deciding 2-1. |
 | [cosign-keyless-signing.md](cosign-keyless-signing.md) | Decided and built. |
 | [cross-workspace-test-material.md](cross-workspace-test-material.md) | Decided and built. |
-| [deduplicate-matching-semantics.md](deduplicate-matching-semantics.md) | Specified, and run end to end under both linkage strategies for the one-sided cardinalities. |
+| [deduplicate-matching-semantics.md](deduplicate-matching-semantics.md) | Specified, and run end to end: the one-sided cardinalities under both linkage strategies, the both-sided one under `cascade`. |
 | [default-linkage-rule-set.md](default-linkage-rule-set.md) | Decided and built. |
 | [fan-out-matching-resolution.md](fan-out-matching-resolution.md) | Built under `single-pass`; the cascade realization stays open work. |
 | [fips-provider-surface.md](fips-provider-surface.md) | Measurement, plus two decisions taken on it; whether to pursue a FIPS claim at all remains open. |

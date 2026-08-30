@@ -12,12 +12,12 @@
  * `deduplicate` is applied: the cascade matches the per-side rules the resolved
  * cardinality names, and the payload frame, the result file, and the exchange
  * record carry the multiplicity with it. What stays refused is narrower than the
- * setting -- the `many-to-many` pair, and a deduplicating term under
- * `single-pass` -- and is refused as those pairs rather than as the setting
- * (`assertDeduplicateImplemented` and `resolveLinkageCardinality`, `exchange.ts`,
- * plus the CLI invite mint boundary), so this flag does not carry them. Fuzzy
- * expansion is not applied, and its not-applying is a silent no-op rather than a
- * refusal.
+ * setting -- the agreed both-sided pair under `single-pass`, which pairs no
+ * `many-to-many` -- and is refused as that combination rather than as the setting
+ * (`assertBothSidedDeduplicateImplemented`, reached from
+ * `resolveLinkageCardinality`), so this flag does not carry it: one party's
+ * `deduplicate: true` runs under either strategy. Fuzzy expansion is not applied,
+ * and its not-applying is a silent no-op rather than a refusal.
  *
  * Flip a flag to `true` when the exchange wires the feature in (tracked on the
  * product board); the editor control unlocks, the clamp and import refusal stop

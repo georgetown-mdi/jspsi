@@ -559,8 +559,11 @@ export interface InvitationSummary {
    * Read alongside {@link deduplicate}, like `fansOut` and `fanOutApplied`: this
    * flag answers what the strategy would do with a deduplicating term, whether or
    * not these terms declare one. The one refusal it does NOT carry is the
-   * both-sided pair, which is a property of the agreed PAIR and unreadable from
-   * an invitation alone.
+   * both-sided pair under a strategy that pairs no `many-to-many`, which is a
+   * property of the agreed PAIR and unreadable from an invitation alone --
+   * acceptance derives this party's own `deduplicate` as false, so no accepted
+   * invitation resolves that pair without the accepting party declaring it in
+   * its own configuration afterwards.
    */
   deduplicateApplied: boolean;
   /**

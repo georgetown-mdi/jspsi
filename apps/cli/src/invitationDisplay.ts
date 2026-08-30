@@ -769,7 +769,11 @@ export function displayInvitation(params: {
   // either of them at the same level and for the same invitation: the setting is
   // the inviting party's own, since acceptance derives this party's side as false
   // (deriveAcceptedLinkageTerms) rather than adopting the invitation's, and the
-  // note also carries what a deduplicating run still widens on this side.
+  // note also carries what a deduplicating run still widens on this side. The
+  // derivation is what scopes these sentences to a ONE-SIDED run: an exchange
+  // grouping both parties' records takes each of them declaring its own side in
+  // its own configuration file, which is the route the direction note names, and
+  // is nothing an acceptance of this invitation produces on its own.
   //
   // Gated on the applied flag as well as the setting: an invitation whose
   // strategy matches no deduplicating cardinality is refused at acceptance
