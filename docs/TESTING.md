@@ -386,12 +386,12 @@ body that returns before its first assertion instead -- `if (process.platform
 counted as coverage and there is no skip for the reporter to see.
 
 `scripts/platform-gate-skips.test.mjs` (run by `npm run test:scripts`, a CI
-static check) is what holds that, walking every test module rather than a
-maintained list. It fails on a gate that returns early when the platform is
-`linux` or `darwin` -- the hosts the suites are actually run on, CI being
-`ubuntu-latest` throughout -- and reports a gate it cannot evaluate rather than
-passing it over. Its reach and what it deliberately leaves standing are in its
-own header.
+static check) is what holds that, reading every test module the checkout carries
+rather than a maintained list. It fails on a gate that returns early when the
+platform is `linux` or `darwin` -- the hosts the suites are actually run on, CI
+being `ubuntu-latest` throughout -- and reports a gate it cannot evaluate rather
+than passing it over. Its reach and what it deliberately leaves standing are in
+its own header.
 
 ## Shared test material
 
