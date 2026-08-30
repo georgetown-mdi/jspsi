@@ -113,6 +113,41 @@ const FAN_OUT_MESSAGE_BODY =
   "on several values per record is authored from the command line, and runs " +
   "under single-pass linkage only.";
 
+/** Shown when the value the built terms cannot canonically encode sits in an
+ * enabled key element's transform -- the one such value this editor authors, since
+ * the element editor offers `substring` and `pad_left` and writes their numeric
+ * params into the draft beside the inline error rather than withholding them.
+ *
+ * The terms schema does not catch it: a transform param value is `z.unknown()`
+ * there, so an integer past the safe range parses cleanly and only the encoder
+ * refuses it. A non-finite one does raise a schema issue, but on the `linkageKeys`
+ * path, which the generic mapping collapses to "Enable at least one linkage key."
+ * on a draft whose keys are all enabled -- so this message has to be set ahead of
+ * that mapping to be the one the operator reads.
+ *
+ * Names neither the key nor the parameter: an imported key's names are
+ * partner-influenceable, the same reason {@link UNSUPPLYABLE_KEY_MESSAGE} names no
+ * field, and the element editor marks the offending input where the operator fixes
+ * it. */
+const UNENCODABLE_KEY_TRANSFORM_MESSAGE =
+  "A linkage key's transform carries a parameter that cannot be recorded in the " +
+  "exact form both parties agree on, such as a number too large to store " +
+  "precisely. Open that key and correct that transform's parameters, or remove " +
+  "the step.";
+
+/** Shown when the built terms cannot be canonically encoded and the offending
+ * value is not in any enabled key's transform -- the residual the editor's own
+ * controls and the import path have no way to author, since every other term is a
+ * string, a boolean, or an enum the schema types, and a linkage field's constraints
+ * carry only strings, booleans, and string lists.
+ *
+ * Deliberately not "reset to defaults": the fault is one value, and discarding the
+ * operator's whole authored draft is not a remedy for it. */
+const UNENCODABLE_TERMS_MESSAGE =
+  "These terms carry a value that cannot be recorded in the exact form both " +
+  "parties agree on. Import them again from a corrected document, or rebuild the " +
+  "key list from your columns.";
+
 /** The control each count-only shape rule reports against. Every rule but the
  * payload one is a property of the matching arrangement the key list holds, which
  * is also where the fan-out and satisfiability messages land. */
@@ -165,6 +200,23 @@ const DEDUPLICATE_STRATEGY_MESSAGE =
   'match. Choose another Linkage strategy, or clear "Allow several of your ' +
   'records to match one partner record".';
 
+/** Whether `value` survives the canonical encoding the cross-party agreement is
+ * hashed in. Asked of a whole terms document and of one element transform at a
+ * time, so the message the editor shows locates the fault by the encoder's own
+ * answer rather than by parsing the error it threw. A rejection that is not a
+ * {@link CanonicalEncodingError} is re-thrown: the encoder converts every
+ * traversal failure to one (a throwing getter included), so anything else is a
+ * broken contract rather than an un-encodable value. */
+function isCanonicallyEncodable(value: unknown): boolean {
+  try {
+    canonicalString(value);
+    return true;
+  } catch (err) {
+    if (err instanceof CanonicalEncodingError) return false;
+    throw err;
+  }
+}
+
 /**
  * What to do about a linkage shortfall, chosen by which shortfall holds -- the
  * split the acceptor's launch gate keeps (`acceptorLaunchBlockedReason`), and for
@@ -196,11 +248,11 @@ function shortfallRemedy(verdict: LinkageTermsVerdict): string {
  * bounds (not part of the terms), a not-yet-passed legal-agreement expiry (the
  * schema checks format, not that the date is still current -- the exchange
  * rejects an already-passed date later, so refuse it up front), at least one
- * column-satisfiable linkage key, a
- * canonical-encode dry run (the byte form both parties hash; refuse a value that
- * cannot encode rather than fail cross-party), and the two pairings the schema
- * admits and the run refuses (a declared fan-out step, and a deduplicating term
- * under a linkage strategy that matches one value per record).
+ * column-satisfiable linkage key, a canonical-encode dry run (the byte form both
+ * parties hash; refuse a value that cannot encode rather than fail cross-party,
+ * naming the transform it sits in where it sits in one), and the two pairings the
+ * schema admits and the run refuses (a declared fan-out step, and a deduplicating
+ * term under a linkage strategy that matches one value per record).
  *
  * Schema errors are mapped back to the offending control by their issue path --
  * the editor re-derives the control because the referential-integrity refines
@@ -259,6 +311,31 @@ export function validateAdvancedInvite(
     // dangle, so block with the accurate message rather than the misleading no-keys
     // one the schema-failure mapping would otherwise produce.
     errors.keys = UNSUPPLYABLE_KEY_MESSAGE;
+  }
+
+  // Canonical-encode dry run: the terms are hashed into the cross-party agreement
+  // in this byte form, and a value outside the reproducible domain throws here
+  // rather than desyncing two parties. Run up front so this message wins over the
+  // schema mapping and the linkage grading -- the schema mapping reports a
+  // non-finite transform param as "Enable at least one linkage key." on a draft
+  // whose keys are all enabled. The later shape gates (fan-out, deduplicate
+  // strategy, count-only) still overwrite errors.keys unconditionally; that
+  // changes only which message shows, never whether generation is refused.
+  //
+  // Where the offending value sits is asked of the encoder too, one transform at a
+  // time, rather than read off the error: its message quotes the value and a path
+  // that can carry a partner-chosen param name, neither of which is surfaceable.
+  const encodable = isCanonicallyEncodable(terms);
+  if (!encodable && errors.keys === undefined) {
+    errors.keys = terms.linkageKeys.some((key) =>
+      key.elements.some(
+        (element) =>
+          element.transform !== undefined &&
+          !isCanonicallyEncodable(element.transform),
+      ),
+    )
+      ? UNENCODABLE_KEY_TRANSFORM_MESSAGE
+      : UNENCODABLE_TERMS_MESSAGE;
   }
 
   // The "non-receiving-party-cannot-receive" rule, enforced live: sending payload
@@ -352,23 +429,6 @@ export function validateAdvancedInvite(
       errors.keys =
         `These terms cannot be run against your file: ${summarizeLinkageShortfall(verdict)}. ` +
         shortfallRemedy(verdict);
-    }
-  }
-
-  // Canonical-encode dry run: the terms are hashed into the cross-party agreement
-  // in this byte form, and a value outside the reproducible domain throws here
-  // rather than desyncing two parties. The editor authors no transform params (the
-  // only partner-reachable un-encodable value), so this is defense-in-depth.
-  let encodable = true;
-  try {
-    canonicalString(terms);
-  } catch (err) {
-    if (err instanceof CanonicalEncodingError) {
-      encodable = false;
-      if (errors.keys === undefined)
-        errors.keys = "These terms cannot be encoded; reset to defaults.";
-    } else {
-      throw err;
     }
   }
 
