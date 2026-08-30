@@ -7,6 +7,7 @@ import {
   getDefaultLinkageTerms,
   getDefaultStandardization,
   inferMetadata,
+  isDrawnFromLinkageRuleSet,
   isOptInLinkageKey,
   mintExchangeFile,
   prepareForExchange,
@@ -26,12 +27,18 @@ import {
   buildAdvancedTerms,
   draftFromTerms,
   draftWithKeyEnabled,
+  importedCitationDropCause,
   inviterExchangeDataSpec,
+  isOptInDraftKey,
   seedAdvancedInvite,
   setDraftMetadata,
   setDraftMetadataKeepingKeys,
   validateAdvancedInvite,
 } from "../../src/psi/advancedInvite.js";
+import {
+  isDraftDrawnFromLinkageRuleSet,
+  linkageRuleSetReferenceForDraft,
+} from "../../src/psi/linkageComparison.js";
 import {
   setColumnType,
   setColumnTypeForMatching,
@@ -44,7 +51,7 @@ import type {
   AdvancedInviteSeed,
 } from "../../src/psi/advancedInvite.js";
 
-import type { CSVRow, LinkageTerms, Metadata } from "@psilink/core";
+import type { CSVRow, LinkageKey, LinkageTerms, Metadata } from "@psilink/core";
 
 /**
  * The guided path's opt-in matchable types: a column of a type no built-in key
@@ -725,6 +732,119 @@ describe("a key stating its optional properties as undefined is the same key", (
     expect(zip).toHaveLength(1);
     expect(zip[0].enabled).toBe(false);
     expect(zip[0].key.elements.every((el) => el.name === undefined)).toBe(true);
+  });
+
+  test("the offers in the list keep their marker, with no edit in between", () => {
+    const spread = withUndefinedOptionals(
+      withKeyEnabled(guidedDraft(), ZIP_KEY),
+    );
+    // The premise: core's compare -- byte equality under the canonical encoding,
+    // which the explicit `undefined` puts the key outside of -- answers `false`
+    // for every one of these, so the marker the list renders is the prune's
+    // answer rather than one it would have reached anyway.
+    expect(spread.keys.some((entry) => isOptInLinkageKey(entry.key))).toBe(
+      false,
+    );
+    expect(
+      spread.keys
+        .filter((entry) => isOptInDraftKey(entry.key))
+        .map((entry) => entry.key.name),
+    ).toEqual([PHONE_KEY, ZIP_KEY]);
+  });
+
+  test("the built terms keep the citation, with no edit in between", () => {
+    // The provenance claim the partner reads: a draft that departed from the
+    // built-in set in nothing but the spread still cites it.
+    const built = buildAdvancedTerms(withUndefinedOptionals(guidedDraft()));
+    expect(isDrawnFromLinkageRuleSet(DEFAULT_LINKAGE_RULE_SET, built)).toBe(
+      false,
+    );
+    expect(built.linkageRuleSet).toEqual(DEFAULT_LINKAGE_RULE_SET.reference);
+  });
+
+  test("an imported document's citation is re-emitted over the same rules", () => {
+    // The imported branch decides the citation against the set the DOCUMENT
+    // cited, so it is its own compare and answers for its own draft.
+    const metadata = inferMetadata(COLUMNS);
+    const seed: AdvancedInviteSeed = {
+      terms: getDefaultLinkageTerms("Inviter", metadata),
+      metadata,
+      columns: COLUMNS,
+    };
+    const document = getDefaultLinkageTerms("Author", metadata);
+    expect(document.linkageRuleSet).toBeDefined();
+
+    const imported = withUndefinedOptionals(
+      draftFromTerms(document, seed, 3600, ROWS),
+    );
+    expect(buildAdvancedTerms(imported).linkageRuleSet).toEqual(
+      document.linkageRuleSet,
+    );
+    // And the editor names no drop cause, so the notice beside the list agrees
+    // with the document it would emit.
+    expect(importedCitationDropCause(imported)).toBeUndefined();
+  });
+
+  test("a key the prune cannot read is answered, not thrown on", () => {
+    // The prune reads every enumerable property, so a getter that throws reaches
+    // it before the encoder's own boundary guard -- and the list asks this while
+    // rendering. The key is judged as core judges one it cannot encode.
+    const key: LinkageKey = {
+      name: ZIP_KEY,
+      elements: [{ field: "zip_code" }],
+    };
+    Object.defineProperty(key, "swap", {
+      enumerable: true,
+      get() {
+        throw new Error("unreadable");
+      },
+    });
+    expect(isOptInDraftKey(key)).toBe(false);
+  });
+
+  test("a value the prune cannot read leaves every rule beside it pruned", () => {
+    // The rule-set compares are handed a whole terms document, so a value the
+    // prune cannot read can sit outside the rules they compare. Read as one
+    // structure, that value would cost every key in the document its prune and
+    // the document its citation -- over a property the compare never asks about.
+    const built = buildAdvancedTerms(withUndefinedOptionals(guidedDraft()));
+    Object.defineProperty(built, "identity", {
+      enumerable: true,
+      get() {
+        throw new Error("unreadable");
+      },
+    });
+    // The premises: the document cannot be read as a whole, and core's compare
+    // answers `false` for its keys, so the citation here is the prune's answer
+    // rather than one reached without it.
+    expect(() => Object.entries(built)).toThrow();
+    expect(isDrawnFromLinkageRuleSet(DEFAULT_LINKAGE_RULE_SET, built)).toBe(
+      false,
+    );
+
+    expect(
+      isDraftDrawnFromLinkageRuleSet(DEFAULT_LINKAGE_RULE_SET, built),
+    ).toBe(true);
+    expect(linkageRuleSetReferenceForDraft(built)).toEqual(
+      DEFAULT_LINKAGE_RULE_SET.reference,
+    );
+  });
+
+  test("a key the prune cannot read is answered for the document, not thrown on", () => {
+    // The other half: the unreadable rule is compared as it stands, and core
+    // answers a document carrying one exactly as it answers rules it cannot
+    // encode -- not drawn from the set, entitled to no citation.
+    const built = buildAdvancedTerms(withUndefinedOptionals(guidedDraft()));
+    Object.defineProperty(built.linkageKeys[0], "swap", {
+      enumerable: true,
+      get() {
+        throw new Error("unreadable");
+      },
+    });
+    expect(
+      isDraftDrawnFromLinkageRuleSet(DEFAULT_LINKAGE_RULE_SET, built),
+    ).toBe(false);
+    expect(linkageRuleSetReferenceForDraft(built)).toBeUndefined();
   });
 });
 

@@ -4,16 +4,15 @@ import {
   authoredLinkageFields,
   canonicalString,
   columnValues,
-  encodeForComparison,
   getDefaultLinkageTerms,
   getDefaultStandardization,
   inferDateFormat,
   inferMetadata,
-  isOptInLinkageKey,
   optInLinkageKeys,
   referencedLinkageFieldNames,
 } from "@psilink/core";
 
+import { encodeKeyForComparison, isOptInDraftKey } from "./linkageComparison";
 import { buildAdvancedTerms } from "./advancedInviteTerms";
 import { directionForOutput } from "./advancedInviteTypes";
 import { normalizeForEditor } from "./metadataEditing";
@@ -588,65 +587,6 @@ function reconcileStandardization(
   return [...kept, ...additions];
 }
 
-/**
- * `value` with every explicitly-`undefined` property dropped, recursively, and
- * every other value returned by reference.
- *
- * An optional property set to `undefined` states the same linkage key an absent
- * one does, and every surface reads the two the same way, but only the absent
- * form is inside the canonical domain: {@link encodeForComparison} answers `null`
- * for the explicit form. Unpruned, such a key matches no offer -- so a draft
- * whose keys all carry the property (a spread of the whole list is all it takes)
- * would arrive entirely off, the operator's built-in set and their own chosen
- * offer together.
- *
- * Only a plain object or an array is rebuilt, and only where the prune removed
- * something, so a key outside the canonical domain for any OTHER reason -- a
- * transform param beyond the safe integer range, a non-plain object, a
- * symbol-keyed property -- reaches the encoder as it stands and stays
- * incomparable.
- */
-function withoutUndefinedProperties(value: unknown): unknown {
-  if (typeof value !== "object" || value === null) return value;
-  if (Array.isArray(value)) {
-    const prunedEntries = value.map(withoutUndefinedProperties);
-    return prunedEntries.some((entry, at) => entry !== value[at])
-      ? prunedEntries
-      : value;
-  }
-  const prototype = Object.getPrototypeOf(value) as object | null;
-  if (prototype !== Object.prototype && prototype !== null) return value;
-  if (Object.getOwnPropertySymbols(value).length > 0) return value;
-  const pruned: Record<string, unknown> = {};
-  let dropped = false;
-  for (const [property, child] of Object.entries(value)) {
-    if (child === undefined) {
-      dropped = true;
-      continue;
-    }
-    const prunedChild = withoutUndefinedProperties(child);
-    dropped ||= prunedChild !== child;
-    pruned[property] = prunedChild;
-  }
-  return dropped ? pruned : value;
-}
-
-/** `key` in the byte form {@link reconcileKeys} matches a draft key to an offer
- * under: the canonical encoding of the key with its explicitly-`undefined`
- * optional properties dropped (see {@link withoutUndefinedProperties}), or
- * `null` when the key cannot be canonically encoded at all. */
-function encodeKeyForComparison(key: LinkageKey): string | null {
-  try {
-    return encodeForComparison(withoutUndefinedProperties(key));
-  } catch {
-    // The prune reads every enumerable property, so a getter that throws escapes
-    // here rather than into the encoder's own boundary guard. A key that cannot
-    // be read is incomparable, the answer encodeForComparison gives a key it
-    // cannot encode.
-    return null;
-  }
-}
-
 /** Reconcile the draft's keys against a freshly-derived offer
  * ({@link offerableDraftKeys}): keep the order and enabled flag of keys that
  * remain offered (replacing the key object with the fresh template), then append
@@ -727,11 +667,10 @@ function reconcileKeys(
   const fresh = offerable.filter(
     (entry) => !matched.has(entry) && !reoffered.has(entry),
   );
-  for (const entry of fresh)
-    if (!isOptInLinkageKey(entry.key)) kept.push(entry);
+  for (const entry of fresh) if (!isOptInDraftKey(entry.key)) kept.push(entry);
   return placeOfferedKeys(
     kept,
-    fresh.filter((entry) => isOptInLinkageKey(entry.key)),
+    fresh.filter((entry) => isOptInDraftKey(entry.key)),
   );
 }
 

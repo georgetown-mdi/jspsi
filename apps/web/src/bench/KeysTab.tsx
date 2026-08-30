@@ -15,7 +15,6 @@ import {
   APPLIED_SETTINGS,
   AlgorithmSchema,
   LinkageStrategySchema,
-  isOptInLinkageKey,
   sanitizeForDisplay,
 } from "@psilink/core";
 
@@ -28,6 +27,7 @@ import {
 import {
   buildAdvancedTerms,
   importedCitationDropNotice,
+  isOptInDraftKey,
 } from "@psi/advancedInvite";
 
 import { ExpertKeyEditor } from "@components/ExpertKeyEditor";
@@ -177,7 +177,7 @@ export function KeysTab({
   );
   const keyCount = editor.draft.keys.length;
   const offersOptInKey = editor.draft.keys.some((entry) =>
-    isOptInLinkageKey(entry.key),
+    isOptInDraftKey(entry.key),
   );
   return (
     <>
@@ -213,7 +213,7 @@ export function KeysTab({
                     >
                       {badge.label}
                     </span>
-                    {isOptInLinkageKey(entry.key) && (
+                    {isOptInDraftKey(entry.key) && (
                       <span
                         className={`${styles.keyBadge} ${styles.keyBadgeOptIn}`}
                       >

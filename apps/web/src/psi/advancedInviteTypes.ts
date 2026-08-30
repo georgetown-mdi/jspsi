@@ -84,7 +84,7 @@ export type ImportedRuleSetCitation =
  * The list holds both what the built-in rule set offers and what
  * `optInLinkageKeys` offers beside it, which is why an entry carries no mark of
  * its own: the two are the same thing to every operation over the list, and a
- * surface that must tell them apart asks `isOptInLinkageKey` about the key rather
+ * surface that must tell them apart asks `isOptInDraftKey` about the key rather
  * than reading a flag a rename or an import could falsify. */
 export interface DraftKey {
   key: LinkageKey;

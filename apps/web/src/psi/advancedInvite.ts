@@ -1,6 +1,6 @@
 /**
  * The pure data model behind the inviter's authoring bench, split by concern
- * across three siblings and re-exported here as the bench's single import surface.
+ * across five siblings and re-exported here as the bench's single import surface.
  * No React, no I/O.
  *
  * - {@link ./advancedInviteTypes} -- the shared draft/seed types and the
@@ -14,6 +14,9 @@
  *   messages, and the two notices that refuse nothing: an imported rule-set
  *   citation the rebuild drops, and a declared default value the run will not
  *   substitute.
+ * - {@link ./linkageComparison} -- the rule-set membership compares taken over
+ *   draft-side values, each pruning the explicitly-`undefined` optional
+ *   properties core's strict canonical equality cannot read.
  */
 
 export type {
@@ -67,3 +70,5 @@ export {
   inertCoalesceNotice,
   validateAdvancedInvite,
 } from "./advancedInviteValidation";
+
+export { isOptInDraftKey } from "./linkageComparison";
