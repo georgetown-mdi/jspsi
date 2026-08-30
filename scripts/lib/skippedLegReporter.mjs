@@ -14,6 +14,11 @@
 // are legitimate is a per-suite question (the CLI's SFTP matrix legs skip the
 // backends they are not running), so failing on one belongs with whatever
 // declares the prerequisite, not here.
+//
+// It can only name a skip vitest was told about, so a test body that returns
+// early instead reports PASSED and reaches nothing here.
+// `scripts/platform-gate-skips.test.mjs` is what keeps a platform gate from
+// being written that way.
 
 /** Named tests past this cap are summarized as a count. */
 export const DEFAULT_NAME_LIMIT = 40;

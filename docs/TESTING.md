@@ -377,6 +377,22 @@ It reports and never fails: which skips are legitimate is a per-suite question
 matrix together is the coverage -- so failing on one belongs with whatever
 declares the prerequisite, as above.
 
+### A platform gate is a skip, not an early return
+
+A test that cannot run on this host declares that with `test.skipIf` /
+`describe.skipIf`, so vitest counts the leg and the reporter above names it. A
+body that returns before its first assertion instead -- `if (process.platform
+!== "darwin") return;` -- still reports PASSED, so a leg that never ran is
+counted as coverage and there is no skip for the reporter to see.
+
+`scripts/platform-gate-skips.test.mjs` (run by `npm run test:scripts`, a CI
+static check) is what holds that, walking every test module rather than a
+maintained list. It fails on a gate that returns early when the platform is
+`linux` or `darwin` -- the hosts the suites are actually run on, CI being
+`ubuntu-latest` throughout -- and reports a gate it cannot evaluate rather than
+passing it over. Its reach and what it deliberately leaves standing are in its
+own header.
+
 ## Shared test material
 
 A helper that only tests use lives in the test tree that uses it --
