@@ -130,11 +130,10 @@ export function ManagedRunSurface({ id }: { id: string }) {
   const [accountingReads, setAccountingReads] = useState(0);
   const [exportBusy, setExportBusy] = useState(false);
   const [exportFailed, setExportFailed] = useState(false);
-  // A hand-off the store refused, and which refusal it was: a run rotated past the
-  // artifact this screen downloaded, or the record is gone from this browser
-  // entirely. Its own state, not exportFailed: neither is cleared by retrying the
-  // attestation, so the confirmation stays refused until the operator leaves this
-  // screen.
+  // A hand-off the store refused, and which refusal it was: a run held the
+  // run+rotate lock at the click, a run rotated past the artifact this screen
+  // downloaded, or the record is gone from this browser entirely. Its own state,
+  // not exportFailed, because none of the three is an error tier.
   const [migrationRefusal, setMigrationRefusal] =
     useState<ManagedHandoffRefusal>();
   // A dispatched migration whose download fired but whose spend awaits the operator
@@ -161,6 +160,14 @@ export function ManagedRunSurface({ id }: { id: string }) {
     id,
     running,
   );
+  // A run holds the migration back: the polled reading, or the spend's own refusal
+  // at a click the poll's last reading was too old to hold back.
+  const runHoldsMigration = runInFlight || migrationRefusal === "run-in-flight";
+  // The refusals no retry can clear -- the downloaded artifact is out of date, or
+  // the record it came from is gone -- as against the run one, which ends with the
+  // run.
+  const staleMigration =
+    migrationRefusal !== undefined && migrationRefusal !== "run-in-flight";
   const [outputs, setOutputs] = useState<RunOutputs>();
   const [finishedAt, setFinishedAt] = useState<Date>();
   const [failure, setFailure] = useState<ManagedRunFailure>();
@@ -458,17 +465,21 @@ export function ManagedRunSurface({ id }: { id: string }) {
 
   // The operator attested the downloaded migration file is saved: spend the source
   // (this device's copy transitions to the spent load state on the next visit). The
-  // spend itself refuses an artifact the record has rotated past, so this classifies
-  // that refusal rather than guarding against it.
+  // spend itself refuses a run in flight and an artifact the record has rotated
+  // past, so this classifies those refusals rather than guarding against them.
   function confirmMigration() {
     const dispatch = migrationDispatch;
-    if (dispatch === undefined || exportBusy || runInFlight) return;
+    if (dispatch === undefined || exportBusy || runInFlight || staleMigration)
+      return;
     setExportBusy(true);
     setExportFailed(false);
+    setMigrationRefusal(undefined);
     void (async () => {
       try {
         // The gate above renders from a poll, so a run started since the last
         // reading is still news here; re-reading also puts the reason on screen.
+        // A run this reading still misses is refused by the spend itself, which
+        // takes the run's own lock.
         if (await recheckLock()) return;
         await dispatch.confirm(new Date());
         setMigrationDispatch(undefined);
@@ -729,12 +740,12 @@ export function ManagedRunSurface({ id }: { id: string }) {
               it, keep the exchange here for now, export the accounting as CSV,
               and then move it.
             </p>
-            {runInFlight && (
+            {runHoldsMigration && (
               <Alert color="yellow" title={RUN_IN_FLIGHT_HANDOFF_TITLE} mb="md">
                 {RUN_IN_FLIGHT_HANDOFF_REASON}
               </Alert>
             )}
-            {migrationRefusal !== undefined && (
+            {staleMigration && (
               <Alert
                 color="yellow"
                 title={
@@ -753,7 +764,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
               <Button
                 onClick={confirmMigration}
                 loading={exportBusy}
-                disabled={runInFlight || migrationRefusal !== undefined}
+                disabled={runInFlight || staleMigration}
               >
                 I saved the file; hand off this exchange
               </Button>{" "}

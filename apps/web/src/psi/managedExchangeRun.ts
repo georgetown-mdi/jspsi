@@ -1,14 +1,14 @@
 /**
  * The platform half of the managed (recurring) exchange's run+rotate critical
- * section: the Web Locks single-writer acquisition and the strict-durability,
- * field-scoped store write that the pure ordering logic in
+ * section: the single-writer window ({@link ./managedExchangeLock.ts}) and the
+ * strict-durability, field-scoped store write that the pure ordering logic in
  * {@link ./managedRunRotate.ts} drives. This is the seam the future managed-
  * exchange runner calls -- it passes its input-guard, handshake, and data-exchange
  * phases in and cannot get the ordering wrong: the input guard gates the handshake
  * (its result is the handshake's argument), and the data-exchange phase is a
  * callback this module invokes only after the durable persist resolves.
  *
- * Three invariants this module owns (normative in docs/MANAGED_EXCHANGE.md and
+ * Four invariants this module owns (normative in docs/MANAGED_EXCHANGE.md and
  * docs/spec/MANAGED_EXCHANGE_RECORD.md):
  *
  * - **Input guard before connection.** The input file is acquired and its columns
@@ -19,15 +19,12 @@
  *   `"terms-shortfall"` for columns the standing terms cannot be run against -- and
  *   re-raises with no connection attempted, never through desync/attack framing.
  *
- * - **Single-writer exclusion.** A Web Locks lock keyed to the record's id is held
- *   from "begin this run" through "rotated secret durably persisted", so a second
- *   same-origin context (a second tab, or a tab and a scheduled run) cannot double-
- *   rotate and desync the two parties. The lock is a same-profile liveness guard,
- *   auto-released when the holding context is destroyed; it is taken WITHOUT
- *   `steal: true` (a steal would defeat the single-writer property it exists to
- *   provide). It does not and cannot guard a second device or profile -- the
- *   durable single-owner property rests on migration-not-sync export semantics,
- *   not on the lock.
+ * - **Single-writer exclusion.** The Web Locks lock keyed to the record's id
+ *   ({@link ./managedExchangeLock.ts}) is held from "begin this run" through
+ *   "rotated secret durably persisted", so a second same-origin context (a second
+ *   tab, or a tab and a scheduled run) cannot double-rotate and desync the two
+ *   parties. The same lock is what a hand-off spend takes, so a spend and a run
+ *   exclude each other rather than observing each other.
  *
  * - **A handed-off copy does not run.** The first thing the locked window does is
  *   re-read the record's sibling spent state and refuse a copy an export has
@@ -59,50 +56,11 @@ import {
   recordManagedExchangeLastRun,
 } from "./managedExchangeStore";
 import { getManagedLocalState } from "./managedLocalState";
+import { withManagedExchangeLock } from "./managedExchangeLock";
 
 import type { ManagedExchangeLastRun } from "./managedExchangeRecord";
+import type { ManagedExchangeLockOptions } from "./managedExchangeLock";
 import type { RotationWriteBack } from "./managedRunRotate";
-
-/** Namespace prefix for the Web Locks name, so a managed-exchange run lock cannot
- * collide with any other same-origin lock name. The record's id is appended. */
-const MANAGED_EXCHANGE_LOCK_PREFIX = "psilink-managed-exchange:";
-
-/** The Web Locks name for a managed record's run+rotate critical section. */
-export function managedExchangeLockName(id: string): string {
-  return `${MANAGED_EXCHANGE_LOCK_PREFIX}${id}`;
-}
-
-/**
- * Whether some same-origin context currently HOLDS the run+rotate lock for `id`.
- * `navigator.locks.query()` reports the whole origin's lock state rather than this
- * context's, so this is the only signal a surface has that another tab -- or the
- * scheduled runtime -- is mid-run on this record. It answers for this context's own
- * run too: the query does not distinguish holders.
- *
- * It is a point-in-time reading with no change event behind it, so a surface
- * rendering from it polls, and the lock can be taken or released between the reading
- * and whatever the reader does next. Gate PRESENTATION on it, never the correctness
- * of a write: a write re-checks its own precondition at the moment it writes (see
- * {@link ./managedExchangeExport.ts}, the confirm-time currency check).
- */
-export async function managedExchangeRunLockHeld(id: string): Promise<boolean> {
-  const name = managedExchangeLockName(id);
-  const snapshot = await globalThis.navigator.locks.query();
-  return snapshot.held?.some((lock) => lock.name === name) === true;
-}
-
-/**
- * Raised when the run+rotate lock for a record cannot be acquired without
- * waiting -- another same-origin context already holds it. The runner treats this
- * as "a run is already in progress on this device", not a failure of this run.
- * Only raised on the non-blocking (`ifAvailable`) acquisition path.
- */
-export class ManagedExchangeLockUnavailableError extends Error {
-  constructor(id: string) {
-    super(`a run is already in progress for managed exchange ${id}`);
-    this.name = "ManagedExchangeLockUnavailableError";
-  }
-}
 
 /**
  * Raised when a run finds this device's copy of the record handed off: an export
@@ -120,47 +78,6 @@ export class ManagedExchangeSpentError extends Error {
     );
     this.name = "ManagedExchangeSpentError";
   }
-}
-
-/** How the run+rotate lock is acquired when a second context already holds it. */
-export interface ManagedExchangeLockOptions {
-  /**
-   * When `true`, do not queue behind a held lock: if another same-origin context
-   * holds it, fail immediately with {@link ManagedExchangeLockUnavailableError}
-   * rather than waiting. When `false` (the default), queue and run when the holder
-   * releases -- either is a valid single-writer discipline; the runner chooses per
-   * whether a scheduled run should wait out an attended one or defer to it.
-   */
-  ifAvailable?: boolean;
-}
-
-/**
- * Hold the run+rotate single-writer lock for `id` across `critical`, releasing it
- * when `critical` settles (the Web Locks API releases the lock when the callback's
- * promise resolves or rejects). The lock is taken WITHOUT `steal: true`: a steal
- * would let a second context wrench the lock away mid-run, defeating the single-
- * writer property. With `ifAvailable`, a lock held by another context yields a
- * `null` grant, which this raises as {@link ManagedExchangeLockUnavailableError}
- * rather than running `critical` unguarded.
- *
- * @throws {ManagedExchangeLockUnavailableError} if `ifAvailable` is set and the
- *   lock is already held.
- */
-export async function withManagedExchangeLock<T>(
-  id: string,
-  critical: () => Promise<T>,
-  options: ManagedExchangeLockOptions = {},
-): Promise<T> {
-  const name = managedExchangeLockName(id);
-  const request: LockOptions = { mode: "exclusive" };
-  if (options.ifAvailable === true) request.ifAvailable = true;
-  return globalThis.navigator.locks.request(name, request, async (lock) => {
-    // `ifAvailable` yields a null grant when the lock is held; without it the
-    // grant is guaranteed non-null (the request queued). Never a steal, so a
-    // granted lock is exclusively this run's until `critical` settles.
-    if (lock === null) throw new ManagedExchangeLockUnavailableError(id);
-    return critical();
-  });
 }
 
 /** The input, handshake, and data-exchange phases the runner supplies to

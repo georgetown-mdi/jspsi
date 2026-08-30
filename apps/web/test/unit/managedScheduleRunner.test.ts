@@ -12,10 +12,6 @@ import {
   tickManagedSchedules,
 } from "@psi/managedScheduleRunner";
 import {
-  ManagedExchangeLockUnavailableError,
-  ManagedExchangeSpentError,
-} from "@psi/managedExchangeRun";
-import {
   applyManagedExchangeLastRun,
   applyManagedExchangeLocalEdits,
   applyManagedExchangeScheduleAdvance,
@@ -28,6 +24,8 @@ import {
   reconstructRecordFromArtifact,
 } from "@psi/managedExchangeArtifact";
 import { ManagedExchangeExpiredError } from "@psi/managedExpiry";
+import { ManagedExchangeLockUnavailableError } from "@psi/managedExchangeLock";
+import { ManagedExchangeSpentError } from "@psi/managedExchangeRun";
 import { ManagedInputError } from "@psi/managedInputGuard";
 import { PartnerNoShowError } from "@psi/waitForConnection";
 import { RotationPersistError } from "@psi/managedRunRotate";

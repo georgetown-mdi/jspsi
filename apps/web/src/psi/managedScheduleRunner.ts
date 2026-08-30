@@ -51,14 +51,12 @@ import {
   PartnerNoShowError,
 } from "./waitForConnection";
 import {
-  ManagedExchangeLockUnavailableError,
-  ManagedExchangeSpentError,
-} from "./managedExchangeRun";
-import {
   advanceManagedScheduleAfterWindow,
   catchUpManagedSchedule,
 } from "./managedSchedule";
 import { ManagedExchangeExpiredError } from "./managedExpiry";
+import { ManagedExchangeLockUnavailableError } from "./managedExchangeLock";
+import { ManagedExchangeSpentError } from "./managedExchangeRun";
 import { ManagedInputError } from "./managedInputGuard";
 import { RotationPersistError } from "./managedRunRotate";
 import { parseStoredInstant } from "./managedExchangeRecord";
@@ -534,8 +532,9 @@ function attemptProvesContact(
  * Read a failed attempt as a window verdict.
  *
  * The single-writer lock being held elsewhere is the one failure that is not
- * this window's to account for at all: another context is running this very
- * record, so the window records neither an attempt nor a miss
+ * this window's to account for at all: another context holds this very record --
+ * running it, or spending it on a hand-off, which takes the same lock to exclude
+ * a run -- so the window records neither an attempt nor a miss
  * (`"unattempted"`), and this runner defers rather than contending for the lock
  * it was refused.
  *

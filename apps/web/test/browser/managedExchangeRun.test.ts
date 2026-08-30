@@ -6,10 +6,12 @@ import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
 
 import {
   ManagedExchangeLockUnavailableError,
-  ManagedExchangeSpentError,
   managedExchangeLockName,
-  runManagedExchange,
   withManagedExchangeLock,
+} from "@psi/managedExchangeLock";
+import {
+  ManagedExchangeSpentError,
+  runManagedExchange,
 } from "@psi/managedExchangeRun";
 import {
   clearManagedExchanges,

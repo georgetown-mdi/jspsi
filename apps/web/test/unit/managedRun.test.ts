@@ -20,13 +20,11 @@ import {
   runManagedRerun,
 } from "@psi/managedRun";
 import {
-  ManagedExchangeLockUnavailableError,
-  ManagedExchangeSpentError,
-} from "@psi/managedExchangeRun";
-import {
   ManagedInputError,
   managedInputFailureKind,
 } from "@psi/managedInputGuard";
+import { ManagedExchangeLockUnavailableError } from "@psi/managedExchangeLock";
+import { ManagedExchangeSpentError } from "@psi/managedExchangeRun";
 import { PartnerNoShowError } from "@psi/waitForConnection";
 import { RotationPersistError } from "@psi/managedRunRotate";
 import { recordManagedExchangeLastRun } from "@psi/managedExchangeStore";

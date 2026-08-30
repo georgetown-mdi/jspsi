@@ -45,7 +45,6 @@ import {
   managedExchangeLapsed,
 } from "./managedExpiry";
 import {
-  ManagedExchangeLockUnavailableError,
   ManagedExchangeSpentError,
   runManagedExchange,
 } from "./managedExchangeRun";
@@ -54,6 +53,7 @@ import {
   managedInputFailureKind,
 } from "./managedInputGuard";
 import { RotationPersistError, failedRun, missedRun } from "./managedRunRotate";
+import { ManagedExchangeLockUnavailableError } from "./managedExchangeLock";
 import { PartnerNoShowError } from "./waitForConnection";
 import { hasRecoveryHint } from "./authenticateExchange";
 import { recordManagedExchangeLastRun } from "./managedExchangeStore";
@@ -62,10 +62,8 @@ import type {
   ManagedExchangeLastRun,
   ManagedExchangeRecord,
 } from "./managedExchangeRecord";
-import type {
-  ManagedExchangeLockOptions,
-  ManagedExchangeRunResult,
-} from "./managedExchangeRun";
+import type { ManagedExchangeLockOptions } from "./managedExchangeLock";
+import type { ManagedExchangeRunResult } from "./managedExchangeRun";
 
 /** The handshake result a re-run's handshake phase yields: the rotated secret the
  * persist-before-success write advances, plus whatever the data-exchange phase

@@ -638,6 +638,11 @@ of the same origin cannot both enter it: the second waits or is refused, so a
 scheduled run and an operator-opened tab -- or two tabs -- on one device cannot
 fork the secret by racing a run.
 
+A hand-off's confirmation takes the same lock before it spends this device's copy,
+so a hand-off and a run exclude each other as two runs do. Whichever takes the lock
+first wins the ordering: a confirmation meeting a run is refused and told to wait,
+and a run meeting a confirmation waits for it and then finds the copy handed off.
+
 On the scheduled path that refusal lasts as long as the run window does. Each
 attempt holds the lock across its whole wait for the partner, and the next
 attempt begins as soon as the last one's wait ends, so a runner occupying a
@@ -712,16 +717,16 @@ other context holds the [single-writer
 lock](#cross-tab-single-writer-locking-web-locks), which is how a second tab's
 run or a scheduled one reaches them. The surface names the run as the reason;
 the hand-offs return when this tab's run ends or, for another context, when its
-lock releases at the rotation persist. That wait is a courtesy, and the refusal
-covers exactly the rotations that have persisted: the confirmation re-checks
-the stored secret where it writes, so a rotation that has landed refuses the
-spend whatever the surface showed. A run still in flight has not yet rotated
-the stored secret, so the confirmation cannot refuse there -- the withholding
-above is the only cover for that window, and it is a best-effort reading: a
-spend it fails to withhold is accepted and then superseded when the run's
-rotation lands. Closing that window structurally -- the spend and the run
-excluding each other rather than observing each other -- is deliberate
-follow-on work, not a property this flow provides.
+lock releases at the rotation persist.
+
+That withholding is a reading of the lock taken every so often, so it can miss a
+run that starts between two readings. Nothing rests on it: confirming a hand-off
+takes the run's own lock before it spends anything, and a run holding that lock
+refuses the confirmation in the same words the withholding uses. Waiting is the
+whole remedy -- confirm again once the run is over, and the exchange hands over
+unless that run rotated the secret, which is the refusal above and its own
+remedy. A confirmation that spends and a run that rotates therefore exclude each
+other rather than racing, in either order.
 
 The artifact is a **plaintext credential file in the operator's custody**.
 Passphrase encryption is deliberately not done: the record must be usable with

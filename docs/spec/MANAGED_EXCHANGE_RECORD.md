@@ -832,16 +832,29 @@ record, in a separate origin-local store keyed by the record `id`, and are
   context, or a re-invite -- refuses the spend instead of recording one, since what
   would be handed over is a copy the partnership has already moved past, and a record
   gone from the store refuses on its own terms: there is no live copy left to spend,
-  and none to download again either, so the two refusals are reported apart and say
+  and none to download again either, so those refusals are reported apart and say
   different things.
-  Stated limit: the second horn is reachable, not hypothetical -- a run still in
-  flight at the attestation has not yet rotated the stored secret, so the check passes
-  and that run's rotation then supersedes the handed-over copy; the surfaces'
-  run-in-flight withholding covers that window as a best-effort reading only. The run
-  path's refusal above closes the other direction (a run that starts after a spend),
-  not this one: the spend itself takes no lock, so a spend and a run in flight still
-  observe each other rather than excluding each other, and closing that direction
-  structurally is follow-on work rather than a property this store step provides.
+
+  **A run in flight is excluded rather than checked.** That transaction decides a
+  rotation that has already landed; a run still in flight has landed nothing for it
+  to read -- the secret has not rotated yet, so the check would pass, and that run's
+  own persist would then supersede the copy just handed over. So the spend takes the
+  record's [run+rotate lock](#the-secret-is-a-linear-resource) with `ifAvailable`
+  before it opens the transaction at all, and refuses while a run holds it, reporting
+  a refusal of its own. The exclusion runs both ways from one lock: a run that begins
+  while the spend holds it waits for the spend to finish (or, on the `ifAvailable`
+  scheduled path, defers the attempt as `"unattempted"`), and then re-reads the spent
+  state that spend wrote as its first act inside the lock, which is the refusal
+  above. Spend and run are therefore mutually excluded rather than observing each
+  other, and neither order leaves a handed-over copy behind a rotation.
+
+  Stated limit: that exclusion is the Web Locks lock's, so it binds the contexts of
+  one browser profile on one machine -- which is the whole scenario, both hand-off
+  surfaces and both run paths of a record being that profile's, the record itself
+  being origin-local to it. What it does not cover is what no lock could: a copy held
+  under another profile, browser, or machine, which can only have got there through
+  an export the operator took. Bounding that is migration-not-sync and operator
+  cooperation (see [Single-owner invariant](#single-owner-invariant)), not this step.
   The spent state carries no secret material and no epoch.
 
   **Revive by import is the migration spend's recovery, and only its.** The

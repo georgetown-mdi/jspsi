@@ -38,18 +38,22 @@
  * produced, so it fails the export instead.
  *
  * Both spending intents defer their spend to an operator attestation that can arrive
- * arbitrarily later, so each spends through one atomic store step that re-reads the
- * record by id at CONFIRM time and writes the spent state only while the artifact it
- * downloaded still carries the exchange's current secret
- * ({@link ManagedHandoffSupersededError} otherwise). A run rotates that secret at its
- * handshake, and a run in any context -- this surface, a second tab, the scheduled
- * runtime -- can start and finish between the download and the attestation, which
- * leaves the operator attesting to an artifact whose secret the partnership has moved
- * past. Spending on that attestation would hand the new owner a copy whose first run
- * meets a partner that has moved on. The check is the same read-fresh-by-id the export
- * step takes, for the same reason: what a caller holds in hand is never what decides,
- * and it is bound to the write for the reason the export's mark is bound to its read
- * -- a check the write can outrun decides nothing.
+ * arbitrarily later, so each spends through one store step that re-reads the record
+ * by id at CONFIRM time and writes the spent state only while no run of it is in
+ * flight and the artifact it downloaded still carries the exchange's current secret
+ * ({@link ManagedHandoffSupersededError} otherwise, carrying which refusal it was).
+ * A run rotates that secret at its handshake, and a run in any context -- this
+ * surface, a second tab, the scheduled runtime -- can start and finish between the
+ * download and the attestation, which leaves the operator attesting to an artifact
+ * whose secret the partnership has moved past. Spending on that attestation would
+ * hand the new owner a copy whose first run meets a partner that has moved on. The
+ * check is the same read-fresh-by-id the export step takes, for the same reason:
+ * what a caller holds in hand is never what decides, and it is bound to the write
+ * for the reason the export's mark is bound to its read -- a check the write can
+ * outrun decides nothing. A run still in flight is the ordering that check cannot
+ * see (it has rotated nothing yet), so the step excludes it on the run's own lock
+ * instead of checking it: see {@link ./managedExchangeStore.ts},
+ * `spendManagedExchangeIfCurrent`.
  *
  * The seams (the marking intents' fresh read-serialize-and-mark, the command-line
  * export's non-marking read by id, the download, the currency-checked spend) are
@@ -102,12 +106,13 @@ export interface ManagedExportDeps {
 /** The platform seams a migration export drives: the backup seams, and the
  * currency-checked spend that transitions the source to its visible spent state. */
 export interface ManagedMigrationDeps extends ManagedExportDeps {
-  /** Spend the record for `id` as of `spentAt` (the handoff date), but only while
-   * the stored record still carries `expectedSharedSecret` -- the check and the
-   * write are one atomic store step, resolving `"superseded"` and writing nothing
-   * when it does not. Run at confirm time, never at dispatch: the attestation is
-   * measured against the record the store holds then, not against the dispatch's
-   * own snapshot of it. */
+  /** Spend the record for `id` as of `spentAt` (the handoff date), but only while no
+   * run of it is in flight and the stored record still carries
+   * `expectedSharedSecret` -- the run exclusion, the check, and the write are one
+   * store step, which writes nothing and names the refusal when either condition
+   * fails. Run at confirm time, never at dispatch: the attestation is measured
+   * against the record the store holds then, not against the dispatch's own snapshot
+   * of it. */
   spendIfCurrent: (
     id: string,
     expectedSharedSecret: string,
@@ -115,16 +120,37 @@ export interface ManagedMigrationDeps extends ManagedExportDeps {
   ) => Promise<ManagedSpendOutcome>;
 }
 
-/** Why a hand-off confirmation was refused. The two are carried apart because the
- * operator's way out of them differs: `"superseded"` leaves a live record here to
- * download again, while `"record-gone"` leaves nothing here at all -- a surface
- * that folded them would send the second operator after a download nothing can
+/** Why a hand-off confirmation was refused. The three are carried apart because the
+ * operator's way out of them differs: `"run-in-flight"` is over when the run is,
+ * `"superseded"` leaves a live record here to download again, while `"record-gone"`
+ * leaves nothing here at all -- a surface that folded them would tell an operator to
+ * wait out a run that never ends, or send them after a download nothing can
  * produce. */
-export type ManagedHandoffRefusal = "superseded" | "record-gone";
+export type ManagedHandoffRefusal =
+  "run-in-flight" | "superseded" | "record-gone";
+
+/** The refusal each non-spending outcome of the store's checked spend is reported
+ * as. Exhaustive over the outcomes that write nothing, so an outcome added to the
+ * store without a refusal to phrase it fails to compile rather than reaching a
+ * surface as the superseded one. */
+const HANDOFF_REFUSAL_FOR_OUTCOME: Record<
+  Exclude<ManagedSpendOutcome, "spent">,
+  ManagedHandoffRefusal
+> = {
+  "run-in-flight": "run-in-flight",
+  superseded: "superseded",
+  gone: "record-gone",
+};
 
 /**
  * Raised when a hand-off confirmation is refused, carrying which refusal it was so
  * the surfaces can name the way out that exists.
+ *
+ * `"run-in-flight"`: a run of this exchange holds the run+rotate lock, so the spend
+ * was excluded rather than checked -- the secret it would hand over is one the run
+ * may rotate before the operator's files are anyone's to use. Nothing is spent, and
+ * the remedy is to confirm again once the run is over (which the currency check then
+ * decides, the run having rotated the secret or not).
  *
  * `"superseded"`: the exchange's stored secret is no longer the one the downloaded
  * artifact carries, so the copy the operator is attesting to has been superseded --
@@ -138,27 +164,40 @@ export class ManagedHandoffSupersededError extends Error {
   /** Which refusal this is, for the surface to phrase. */
   readonly refusal: ManagedHandoffRefusal;
   constructor(id: string, refusal: ManagedHandoffRefusal) {
-    super(
-      refusal === "record-gone"
-        ? `managed exchange ${id} is no longer stored, so there is no copy left to hand off`
-        : `the downloaded hand-off artifact for managed exchange ${id} no longer carries its current secret`,
-    );
+    super(handoffRefusalMessage(id, refusal));
     this.name = "ManagedHandoffSupersededError";
     this.refusal = refusal;
   }
 }
 
+/** The refusal's own message, exhaustive over the refusals so a new one cannot
+ * inherit another's sentence. */
+function handoffRefusalMessage(
+  id: string,
+  refusal: ManagedHandoffRefusal,
+): string {
+  switch (refusal) {
+    case "run-in-flight":
+      return `a run of managed exchange ${id} is in flight, so its copy was not handed off`;
+    case "record-gone":
+      return `managed exchange ${id} is no longer stored, so there is no copy left to hand off`;
+    case "superseded":
+      return `the downloaded hand-off artifact for managed exchange ${id} no longer carries its current secret`;
+  }
+}
+
 /**
- * Spend the source on the operator's attestation, through the one atomic store step
- * that spends only while `exported` -- the record the dispatch actually serialized --
- * is still what the store holds, and raise the refusal when it is not. The secret is
- * the identity that decides: it is what the artifact hands over and what a rotation
- * moves, and an edit that leaves it alone (a label, a max-age policy) leaves the
- * artifact usable.
+ * Spend the source on the operator's attestation, through the one store step that
+ * spends only while no run of the record is in flight and `exported` -- the record
+ * the dispatch actually serialized -- is still what the store holds, and raise the
+ * refusal it reports when it is not. The secret is the identity that decides the
+ * currency half: it is what the artifact hands over and what a rotation moves, and
+ * an edit that leaves it alone (a label, a max-age policy) leaves the artifact
+ * usable.
  *
- * @throws {ManagedHandoffSupersededError} if the stored secret has moved on, or the
- *   record is gone -- carrying which of the two it was. Nothing is written in
- *   either case.
+ * @throws {ManagedHandoffSupersededError} if a run holds the run+rotate lock, the
+ *   stored secret has moved on, or the record is gone -- carrying which of the three
+ *   it was. Nothing is written in any case.
  */
 async function spendIfArtifactIsCurrent(
   id: string,
@@ -173,7 +212,7 @@ async function spendIfArtifactIsCurrent(
   if (outcome === "spent") return;
   throw new ManagedHandoffSupersededError(
     id,
-    outcome === "gone" ? "record-gone" : "superseded",
+    HANDOFF_REFUSAL_FOR_OUTCOME[outcome],
   );
 }
 
@@ -251,9 +290,9 @@ export interface ManagedMigrationDispatch {
   /** Spend the source as of `spentAt` (the operator's confirmation instant),
    * transitioning this device's copy to its visible spent state. Called only after
    * the operator confirms the file is saved; not called on a cancelled save. Rejects
-   * with {@link ManagedHandoffSupersededError}, spending nothing, when the record's
-   * secret has moved past the artifact this dispatch downloaded or the record is no
-   * longer stored. */
+   * with {@link ManagedHandoffSupersededError}, spending nothing, when a run of the
+   * record is in flight, when its secret has moved past the artifact this dispatch
+   * downloaded, or when the record is no longer stored. */
   confirm: (spentAt: Date) => Promise<void>;
 }
 
@@ -321,8 +360,8 @@ export interface ManagedCronExportDispatch {
   /** Spend the source as of `spentAt` (the operator's confirmation instant), under
    * the command-line hand-off. Called only after the operator confirms both files
    * are saved. Rejects with {@link ManagedHandoffSupersededError}, spending nothing,
-   * when the record's secret has moved past the files this dispatch downloaded or
-   * the record is no longer stored. */
+   * when a run of the record is in flight, when its secret has moved past the files
+   * this dispatch downloaded, or when the record is no longer stored. */
   confirm: (spentAt: Date) => Promise<void>;
 }
 
