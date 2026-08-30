@@ -6,6 +6,7 @@ import {
   fetchJobExchangeRecordOffer,
   jobRecordDownloads,
 } from "@psi/jobExchangeRecord";
+import { untakenRecordConfirm } from "@bench/BenchRunSurface";
 
 import type { JobExchangeRecordOffer } from "@psi/jobExchangeRecord";
 
@@ -81,34 +82,54 @@ describe("fetchJobExchangeRecordOffer", () => {
     ).resolves.toEqual({ kind: "none" });
   });
 
-  test("all three fields must answer together", async () => {
-    // The appliance offers the pair all-or-nothing, so a partial body is not a
-    // half-offer: it is no offer. An unrecognized outcome is refused for the same
-    // reason -- the seat would have to guess which framing to put on the download.
+  test("a body denying availability is a plain none, whatever else it carries", async () => {
+    // `recordAvailable` is the only field this reader trusts to deny the record --
+    // absent, or anything but the literal `true`, reads as the appliance's own
+    // not-available answer regardless of the rest of the body.
     for (const body of [
       {},
-      { recordAvailable: true },
-      { recordAvailable: true, recordCreatedAt: CREATED_AT },
-      { recordAvailable: true, recordOutcome: "completed" },
       {
         recordAvailable: "yes",
         recordCreatedAt: CREATED_AT,
         recordOutcome: "completed",
       },
+      null,
+      "not the status body",
+    ])
+      await expect(offerFor(body)).resolves.toEqual({ kind: "none" });
+  });
+
+  test("a body asserting availability with an unreadable pair is unanswered, not none", async () => {
+    // The appliance said it HOLDS a record, so a missing or unparseable detail
+    // beside that assertion cannot be folded into the straight-through-discard
+    // state: doing so would let an unrecognized field license destroying a record
+    // the appliance just said is standing.
+    for (const body of [
+      { recordAvailable: true },
+      { recordAvailable: true, recordCreatedAt: CREATED_AT },
+      { recordAvailable: true, recordOutcome: "completed" },
       {
         recordAvailable: true,
         recordCreatedAt: 1,
         recordOutcome: "completed",
       },
-      {
-        recordAvailable: true,
-        recordCreatedAt: CREATED_AT,
-        recordOutcome: "who-knows",
-      },
-      null,
-      "not the status body",
     ])
-      await expect(offerFor(body)).resolves.toEqual({ kind: "none" });
+      await expect(offerFor(body)).resolves.toEqual({ kind: "unanswered" });
+  });
+
+  test("an outcome this client bundle does not recognize confirms a discard rather than licensing one", async () => {
+    // Version skew -- a stale cached bundle, or a data root a differently
+    // versioned CLI wrote -- names an outcome this reader cannot map. The
+    // appliance still asserted it holds the record, so the ask ends unanswered,
+    // and the doctrine line this pins is what that state buys downstream: the
+    // failure surface's discard confirms rather than acting straight through.
+    const offer = await offerFor({
+      recordAvailable: true,
+      recordCreatedAt: CREATED_AT,
+      recordOutcome: "who-knows",
+    });
+    expect(offer).toEqual({ kind: "unanswered" });
+    expect(untakenRecordConfirm(offer)).toBeDefined();
   });
 
   test("an ask that fails or is refused is unanswered, not a run without a record", async () => {

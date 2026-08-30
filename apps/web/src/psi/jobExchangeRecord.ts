@@ -112,14 +112,23 @@ function recordOutcomeOf(value: unknown): ExchangeRecordOutcome | undefined {
 /**
  * Where this job's record stands, read off `GET /api/jobs/:jobId` in one ask.
  *
- * The three fields are read strictly and together, matching the appliance's own
- * all-or-nothing rule: only a literal `true` availability alongside a string
- * `createdAt` and a recognized `outcome` is an offer, so a readable body that
- * omits one, carries the wrong type, or is not this endpoint's status body at all
- * falls to `none`.
+ * `none` is read from `recordAvailable`, and only from it: the appliance denying
+ * availability (false or absent) is the one definitive not-available answer there
+ * is, so a body shaped anything else for that field -- absent, wrong type, or
+ * anything but the literal `true` -- falls to `none` alongside it.
+ *
+ * A body asserting `recordAvailable === true` is the appliance saying it holds the
+ * record, and that assertion is trusted even where the rest of the body is not: a
+ * missing or non-string `recordCreatedAt`, or a `recordOutcome` this client
+ * bundle does not recognize -- version skew between a cached bundle and a
+ * differently-versioned appliance is the case this guards -- answers `unanswered`
+ * rather than `none`, because folding an assertion of availability into the
+ * straight-through-discard state would let an unparseable detail license
+ * destroying a record the appliance just said it holds.
  *
  * An ask that came back with no readable body at all -- a fetch that threw, a
- * non-2xx, a body that would not parse -- is `unanswered` rather than `none`, and
+ * non-2xx, a body that would not parse or is not this endpoint's status body at
+ * all -- is likewise `unanswered` rather than `none`, and
  * {@link askJobExchangeRecordOffer} is what decides whether to ask again.
  */
 export async function fetchJobExchangeRecordOffer(
@@ -132,13 +141,10 @@ export async function fetchJobExchangeRecordOffer(
     const body: unknown = await response.json();
     if (body === null || typeof body !== "object") return { kind: "none" };
     const status = body as JobStatusFields;
+    if (status.recordAvailable !== true) return { kind: "none" };
     const outcome = recordOutcomeOf(status.recordOutcome);
-    if (
-      status.recordAvailable !== true ||
-      typeof status.recordCreatedAt !== "string" ||
-      outcome === undefined
-    )
-      return { kind: "none" };
+    if (typeof status.recordCreatedAt !== "string" || outcome === undefined)
+      return { kind: "unanswered" };
     return {
       kind: "available",
       outcome,
