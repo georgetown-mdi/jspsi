@@ -114,8 +114,9 @@ function recordOutcomeOf(value: unknown): ExchangeRecordOutcome | undefined {
  *
  * `none` is read from `recordAvailable`, and only from it: the appliance denying
  * availability (false or absent) is the one definitive not-available answer there
- * is, so a body shaped anything else for that field -- absent, wrong type, or
- * anything but the literal `true` -- falls to `none` alongside it.
+ * is, so a 200 whose body does not assert `recordAvailable: true` -- absent, wrong
+ * type, or the body not being this endpoint's status object at all -- reads as
+ * that denial and falls to `none` alongside it.
  *
  * A body asserting `recordAvailable === true` is the appliance saying it holds the
  * record, and that assertion is trusted even where the rest of the body is not: a
@@ -127,8 +128,7 @@ function recordOutcomeOf(value: unknown): ExchangeRecordOutcome | undefined {
  * destroying a record the appliance just said it holds.
  *
  * An ask that came back with no readable body at all -- a fetch that threw, a
- * non-2xx, a body that would not parse or is not this endpoint's status body at
- * all -- is likewise `unanswered` rather than `none`, and
+ * non-2xx, or a body that would not parse as JSON -- is likewise `unanswered`, and
  * {@link askJobExchangeRecordOffer} is what decides whether to ask again.
  */
 export async function fetchJobExchangeRecordOffer(

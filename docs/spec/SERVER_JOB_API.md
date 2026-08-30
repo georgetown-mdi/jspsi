@@ -84,6 +84,8 @@ The job id is a server-generated v4 UUID; the client never supplies it. Every id
 - **Settling is a separate claim from the file being there, and both are required.** The CLI writes the pair near the end of a run, so a mid-run read could take a half-written state for the run's answer; a complete pair sitting in a running job's workdir does not open the routes.
 - **A record that carries no recognized `outcome` reads as unavailable.** Every record this appliance's own CLI writes states one, so a file without it is not a record the appliance can describe -- and describing it is load-bearing, per `recordOutcome` below.
 
+That gate has a limit: the status body does not distinguish a run that wrote no record from a record the appliance cannot describe, so a version-skewed data root -- a CLI writing an `outcome` value this server bundle does not know -- reads as no record. A client's own classification of `recordAvailable: false` guards only the body it receives, not what is actually on disk.
+
 `recordCreatedAt` is the record's own timestamp and `recordOutcome` its own outcome, both present exactly when `recordAvailable` is true. A client derives the download filenames from the timestamp, matching the in-browser exchange path, and reads the outcome to say what it is offering: a terminated record's commitments re-supply from a result file that run never wrote, so the keys beside it have nothing to open ([EXCHANGE_RECORD.md](EXCHANGE_RECORD.md#when-a-record-is-owed)) -- a client that offered the two alike would make a claim the record does not.
 
 Because the CLI's record write is non-fatal (a disk failure after a successful exchange is warned, not thrown), a job can be `resultAvailable: true` with `recordAvailable: false`.
