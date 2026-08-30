@@ -23,14 +23,26 @@ import type { CSVRow } from "../src/file";
 // front end is the resolved shape, and what this module owes is one composition
 // every seat renders.
 
+// The entitlements default to the ordinary run -- this party receives the result
+// and its partner reads its own half of the table -- so a test naming one of them
+// is a test about that configuration.
 const shape = (
   cardinality: ResolvedRunShape["cardinality"],
   localRecordCount: number,
   partnerRecordCount: number,
+  entitlements: Partial<
+    Pick<
+      ResolvedRunShape,
+      "localExpectsOutput" | "partnerAssociationTableWithheld"
+    >
+  > = {},
 ): ResolvedRunShape => ({
   cardinality,
   localRecordCount,
   partnerRecordCount,
+  localExpectsOutput: true,
+  partnerAssociationTableWithheld: false,
+  ...entitlements,
 });
 
 // --- The projection ----------------------------------------------------------
@@ -124,6 +136,82 @@ test("a one-sided cardinality names which party keeps its duplicates", () => {
   expect(one).not.toMatch(/you keep your/);
 });
 
+test("names no result file of this party's where the terms give it none", () => {
+  // The contradiction this closes: the cardinality label says nothing about who
+  // receives the result, and only the declaring "many" party is required to
+  // expect output -- so a "one" party with expects_output false is one a notice
+  // naming "your result file" would send to a file the run never writes for it.
+  const withheldFromUs = describeResolvedRunShape(
+    shape("one-to-many", 10, 10, { localExpectsOutput: false }),
+  ).cardinalityNotice!;
+  expect(withheldFromUs).toContain("you receive no result from this run");
+  expect(withheldFromUs).toContain("your partner's result file");
+  expect(withheldFromUs).not.toContain("Your result file");
+
+  // And the entitled reading of the same cardinality still names it.
+  const heldByUs = describeResolvedRunShape(
+    shape("one-to-many", 10, 10),
+  ).cardinalityNotice!;
+  expect(heldByUs).toContain(
+    "Your result file carries one row per matched pair",
+  );
+  expect(heldByUs).not.toContain("you receive no result");
+});
+
+test("attributes a both-sided run's pairs to whichever party the terms entitle", () => {
+  // Same mechanism as the one-sided reading above, held at the branch that
+  // carries the largest table: the entitlement is a field of the resolved shape,
+  // so this branch reads it rather than resting its copy on the schema refinement
+  // that makes a deduplicating party expect output.
+  const withheldFromUs = describeResolvedRunShape(
+    shape("many-to-many", 10, 10, { localExpectsOutput: false }),
+  ).cardinalityNotice!;
+  expect(withheldFromUs).toContain("you receive no result from this run");
+  expect(withheldFromUs).toContain("your partner's result file");
+  expect(withheldFromUs).not.toContain("Your result file");
+
+  const heldByUs = describeResolvedRunShape(
+    shape("many-to-many", 10, 10),
+  ).cardinalityNotice!;
+  expect(heldByUs).toContain(
+    "Your result file carries one row per matched pair",
+  );
+});
+
+test("claims no partner disclosure where the run withholds the partner's half", () => {
+  // The single-pass blind-helper configuration: the "one" party is the resolved
+  // sender, expects no output, and discloses no payload, so its half of the table
+  // is suppressed entirely and it reads neither the group sizes nor its own
+  // membership (docs/spec/PROTOCOL.md, The disclosure delta a deduplicating match
+  // pays). Telling the "many" party its partner learns the group sizes there
+  // overstates what the run discloses.
+  const withheld = describeResolvedRunShape(
+    shape("many-to-one", 10, 10, { partnerAssociationTableWithheld: true }),
+  ).cardinalityNotice!;
+  expect(withheld).toContain("withholds your partner's half");
+  expect(withheld).toContain("learns neither which of its own records matched");
+  expect(withheld).not.toContain("your partner learns how many");
+
+  // Every other many-to-one configuration does disclose it, which is the delta
+  // the cardinality pays and the reason the notice exists.
+  const disclosed = describeResolvedRunShape(
+    shape("many-to-one", 10, 10),
+  ).cardinalityNotice!;
+  expect(disclosed).toContain("your partner learns how many of yours share");
+  expect(disclosed).not.toContain("withholds");
+});
+
+test("the advisory claims no result file for a party that may hold none", () => {
+  // The advisory rides the same shape, so it takes the same rule: it names the
+  // run's cost without asserting which party ends up writing the file.
+  const advisory = describeResolvedRunShape(
+    shape("many-to-many", 3163, 3164),
+  ).pairTableAdvisory!;
+  expect(advisory).toContain("expect a large result and a long run");
+  expect(advisory).not.toContain("your result file");
+  expect(advisory).not.toContain("the result file");
+});
+
 test("raises no advisory under the bound and names both contributions above it", () => {
   const under = describeResolvedRunShape(shape("many-to-many", 3000, 3000));
   expect(under.cardinalityNotice).toContain("many-to-many");
@@ -172,20 +260,36 @@ const termsBase = {
   linkageKeys: [{ name: "firstName", elements: [{ field: "firstName" }] }],
 };
 
+// `overrides` carries the terms a configuration under test differs by -- the
+// output entitlement pair and the linkage strategy -- which the two parties must
+// still mirror between them, `validateCompatibility` refusing an unmirrored pair
+// at the terms exchange.
 function preparedFor(
   identity: string,
   rows: Array<CSVRow>,
   deduplicate: boolean,
+  overrides: Record<string, unknown> = {},
 ): PreparedExchange {
   return prepareForExchange(
     {
-      linkageTerms: parseLinkageTerms({ ...termsBase, identity, deduplicate }),
+      linkageTerms: parseLinkageTerms({
+        ...termsBase,
+        identity,
+        deduplicate,
+        ...overrides,
+      }),
     },
     identity,
     rows,
     ["first_name"],
   );
 }
+
+/** The mirrored `output` pair of a one-sided exchange: only the party this is
+ * `true` for receives the result, which is what makes the other one a helper. */
+const outputFor = (expectsOutput: boolean) => ({
+  output: { expectsOutput, shareWithPartner: !expectsOutput },
+});
 
 /**
  * One party's view of the run: every `onStage` id and the resolved shape the
@@ -257,11 +361,15 @@ test("hands the resolved shape to the front end before the first round", async (
     cardinality: "many-to-many",
     localRecordCount: 4,
     partnerRecordCount: 6,
+    localExpectsOutput: true,
+    partnerAssociationTableWithheld: false,
   });
   expect(captureB.runShape).toStrictEqual({
     cardinality: "many-to-many",
     localRecordCount: 6,
     partnerRecordCount: 4,
+    localExpectsOutput: true,
+    partnerAssociationTableWithheld: false,
   });
 
   // Before the first PSI key round, so a front end can render it while the
@@ -302,6 +410,76 @@ test("a one-sided run names its own side of the cardinality at the seam", async 
   ).toBeUndefined();
 });
 
+test("a non-receiving party's own seam says so, on the cascade", async () => {
+  // The "one" party is the helper here: it contributes its records, receives no
+  // table of its own, and its notice must not promise it a result file. The
+  // cascade withholds no half from anyone, so the "many" party's notice keeps the
+  // disclosure sentence -- the withholding gate is single-pass's alone.
+  const [resultA, captureA, resultB, captureB] = await runBoth(
+    preparedFor("A", paddedRows("Henry", "Anna", 4), true, outputFor(true)),
+    preparedFor("B", paddedRows("Henry", "Bruno", 6), false, outputFor(false)),
+  );
+
+  expect(captureA.runShape).toStrictEqual({
+    cardinality: "many-to-one",
+    localRecordCount: 4,
+    partnerRecordCount: 6,
+    localExpectsOutput: true,
+    partnerAssociationTableWithheld: false,
+  });
+  expect(captureB.runShape).toStrictEqual({
+    cardinality: "one-to-many",
+    localRecordCount: 6,
+    partnerRecordCount: 4,
+    localExpectsOutput: false,
+    partnerAssociationTableWithheld: false,
+  });
+
+  // What the run then does with each party's result is what the helper's notice
+  // has to agree with: a table for the entitled party, none for the helper.
+  expect(resultA.associationTable).toStrictEqual([[0], [0]]);
+  expect(resultB.associationTable).toBeUndefined();
+  expect(
+    describeResolvedRunShape(captureB.runShape!).cardinalityNotice,
+  ).toContain("you receive no result from this run");
+  expect(
+    describeResolvedRunShape(captureA.runShape!).cardinalityNotice,
+  ).toContain("your partner learns how many of yours share");
+});
+
+test("a single-pass blind helper is named as reading nothing back", async () => {
+  // The one configuration in which the "many" party's partner learns nothing: the
+  // "one" party is the resolved sender, expects no output, and discloses no
+  // payload (its only column is a linkage column), so the receiver suppresses its
+  // half of the table entirely. Only the "many" side's seam carries the fact --
+  // the helper's own partner is the entitled one and reads its table as usual.
+  const singlePass = { linkageStrategy: "single-pass" };
+  const [, captureA, resultB, captureB] = await runBoth(
+    preparedFor("A", paddedRows("Henry", "Anna", 4), true, {
+      ...singlePass,
+      ...outputFor(true),
+    }),
+    preparedFor("B", paddedRows("Henry", "Bruno", 6), false, {
+      ...singlePass,
+      ...outputFor(false),
+    }),
+  );
+
+  expect(captureA.runShape).toStrictEqual({
+    cardinality: "many-to-one",
+    localRecordCount: 4,
+    partnerRecordCount: 6,
+    localExpectsOutput: true,
+    partnerAssociationTableWithheld: true,
+  });
+  expect(captureB.runShape?.partnerAssociationTableWithheld).toBe(false);
+  expect(resultB.associationTable).toBeUndefined();
+
+  const many = describeResolvedRunShape(captureA.runShape!).cardinalityNotice!;
+  expect(many).toContain("withholds your partner's half");
+  expect(many).not.toContain("your partner learns how many");
+});
+
 test("an over-bound projection warns and the run completes", async () => {
   // 3,163 x 3,163 = 10,004,569 projected pairs, past the 10,000,000 bound. The
   // exchange runs to a result regardless: nothing in the run path refuses on the
@@ -317,6 +495,8 @@ test("an over-bound projection warns and the run completes", async () => {
     cardinality: "many-to-many",
     localRecordCount: rows,
     partnerRecordCount: rows,
+    localExpectsOutput: true,
+    partnerAssociationTableWithheld: false,
   });
   const advisory = describeResolvedRunShape(
     captureA.runShape!,

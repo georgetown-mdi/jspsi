@@ -767,10 +767,14 @@ test("authentication=null runs the exchange without authentication and without e
 // --- The resolved run shape, named at the pre-round seam ---------------------
 
 // A runExchange that fires the pre-round seam with one resolved shape and then
-// finishes like the default. Both parties get it -- runProtocol's rendering is
+// finishes like the default, or with `settled` where the configuration under test
+// ends somewhere else. Both parties get it -- runProtocol's rendering is
 // per-party -- so each renders the shape handed to it, and only the party under
 // --event-stream puts its lines on fd 3.
-function runExchangeConfirming(runShape: ResolvedRunShape) {
+function runExchangeConfirming(
+  runShape: ResolvedRunShape,
+  settled?: Record<string, unknown>,
+) {
   return async (
     _conn: unknown,
     _role: unknown,
@@ -788,7 +792,8 @@ function runExchangeConfirming(runShape: ResolvedRunShape) {
       "receiver",
       runShape,
     );
-    return await defaultRunExchange();
+    const byDefault = await defaultRunExchange();
+    return settled ?? byDefault;
   };
 }
 
@@ -801,6 +806,8 @@ test("names a deduplicating cardinality and warns on an over-bound projection", 
     cardinality: "many-to-many",
     localRecordCount: 3163,
     partnerRecordCount: 3163,
+    localExpectsOutput: true,
+    partnerAssociationTableWithheld: false,
   };
   const { cardinalityNotice, pairTableAdvisory } =
     describeResolvedRunShape(runShape);
@@ -863,6 +870,8 @@ test("leaves the pre-round seam silent on a one-to-one run", async () => {
       cardinality: "one-to-one",
       localRecordCount: 3163,
       partnerRecordCount: 3163,
+      localExpectsOutput: true,
+      partnerAssociationTableWithheld: false,
     }) as never,
   );
   await Promise.all([
@@ -885,6 +894,42 @@ test("leaves the pre-round seam silent on a one-to-one run", async () => {
   ]);
 
   expect(mockState.warnings).toStrictEqual([]);
+}, 20_000);
+
+test("tells a non-receiving party what the run's completion tells it too", async () => {
+  // The contradiction this closes, end to end on one seat: only the declaring
+  // "many" party is required to expect output, so the "one" party of a
+  // one-to-many run can legitimately receive none, and a pre-round notice naming
+  // its result file meets the same run's completion line ("you receive no
+  // result, so no result file was written") minutes later.
+  vi.mocked(runExchange).mockImplementation(
+    runExchangeConfirming(
+      {
+        cardinality: "one-to-many",
+        localRecordCount: 4,
+        partnerRecordCount: 6,
+        localExpectsOutput: false,
+        partnerAssociationTableWithheld: false,
+      },
+      // What core hands a party its terms give no output: no association table,
+      // which is what the completion line below reads.
+      { associationTable: undefined, partnerPayload: {} },
+    ) as never,
+  );
+  const output = path.join(tmpDir, "no-output-party.csv");
+
+  await runBothHalves(output);
+
+  const notice = mockState.warnings.find((line) =>
+    line.includes("one-to-many"),
+  );
+  expect(notice).toContain("you receive no result from this run");
+  expect(notice).not.toContain("Your result file");
+  // The two lines the one run puts in front of the same operator agree.
+  expect(
+    mockState.infos.some((line) => line.includes("you receive no result")),
+  ).toBe(true);
+  expect(fs.existsSync(output)).toBe(false);
 }, 20_000);
 
 // --- Self-attested record persistence via runProtocol ------------------------

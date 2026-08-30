@@ -27,7 +27,11 @@ import log from "loglevel";
 // @ts-ignore this is really there
 import PSI from "@openmined/psi.js/psi_wasm_web";
 
-import { loadPsiBackend, runExchange } from "@psilink/core";
+import {
+  describeResolvedRunShape,
+  loadPsiBackend,
+  runExchange,
+} from "@psilink/core";
 
 import { buildRunOutputs } from "@bench/runOutputs";
 
@@ -107,15 +111,17 @@ export interface ManagedRunDriverConfig {
    * instead ({@link ./managedRun.ts}, `rerunFailureLastRun`). Absent, both flows
    * keep their default budget. */
   peerWaitTimeoutMs?: number;
-  /** A non-fatal, operator-relevant notice raised mid-run. Two are raised, and a
-   * caller that treats them as one thing gets one of them wrong: the clean close
-   * ending on an exit that carries no delivery signal rather than on the peer's
-   * close ({@link CLOSE_OUTCOME_WARNINGS}), which speaks to whoever is watching
-   * the run, and {@link DISCLOSURE_NOT_FILED_WARNING}, which reports that this
-   * browser holds no record of what the run disclosed. Optional: a caller with no
-   * notice surface omits it and both are dropped. Never a terminal -- the run
-   * still settles exactly once, and a notice raised by the teardown's close
-   * arrives after it, since neither teardown is awaited. */
+  /** A non-fatal, operator-relevant notice raised mid-run. Three sources, and a
+   * caller that treats them as one thing gets some of them wrong: what the agreed
+   * terms resolved to, raised at the post-terms, pre-round seam and composed by
+   * core ({@link describeResolvedRunShape}); the clean close ending on an exit
+   * that carries no delivery signal rather than on the peer's close
+   * ({@link CLOSE_OUTCOME_WARNINGS}), which speaks to whoever is watching the run;
+   * and {@link DISCLOSURE_NOT_FILED_WARNING}, which reports that this browser
+   * holds no record of what the run disclosed. Optional: a caller with no notice
+   * surface omits it and all are dropped. Never a terminal -- the run still
+   * settles exactly once, and a notice raised by the teardown's close arrives
+   * after it, since neither teardown is awaited. */
   onWarning?: (message: string) => void;
 }
 
@@ -136,6 +142,9 @@ export interface ManagedRunDriverConfig {
  * signal raises the matching notice through `onWarning`, so a re-run's operator
  * learns their partner may never have taken the final frame -- the same notice
  * vocabulary the one-shot lifecycle raises, behind this wiring's own emit gate.
+ * What the agreed terms resolved to takes the same slot from the other end of the
+ * run, at the pre-round seam, so a re-run whose standing terms resolve to a
+ * deduplicating cardinality names it wherever this seat's notices land.
  */
 export function runManagedExchangeInBrowser(
   config: ManagedRunDriverConfig,
@@ -155,6 +164,16 @@ export function runManagedExchangeInBrowser(
     const warning = CLOSE_OUTCOME_WARNINGS[outcome];
     if (warning === undefined || !builtOutputs || signal.aborted) return;
     onWarning?.(warning);
+  };
+
+  // The pre-round notice sink, which takes the live gate alone. The outputs gate
+  // above belongs to the close: a notice raised before the first round speaks for
+  // the run itself, so holding it until the outputs exist would put it after the
+  // exchange it describes, and dropping it on a run that failed would lose it on
+  // exactly the run whose resolved shape has to be readable afterwards.
+  const emitRunNotice = (message: string) => {
+    if (signal.aborted) return;
+    onWarning?.(message);
   };
 
   return runManagedRerun<ManagedRerunInput, ManagedRerunCarried, RunOutputs>(
@@ -287,6 +306,21 @@ export function runManagedExchangeInBrowser(
               psiEngineFactory: createBrowserPsiEngineFactory(
                 defaultSpawnPsiCryptoWorker,
               ),
+              // What the agreed terms resolved to, raised for this seat as it is
+              // for every other: an unattended re-run is where an unnoticed
+              // widening of the match matters most, since nobody is watching the
+              // run and the terms it resolves from are a standing record rather
+              // than something authored this morning. Core composes both strings
+              // and raises neither, the advisory being a front end's discretion
+              // (docs/spec/PROTOCOL.md, The both-sided expansion has no ceiling
+              // of its own), so they take this wiring's own notice slot and the
+              // caller decides what an unattended run does with them.
+              onProtocolConfirmed: (_partnerTerms, _resolvedRole, runShape) => {
+                const { cardinalityNotice, pairTableAdvisory } =
+                  describeResolvedRunShape(runShape);
+                for (const notice of [cardinalityNotice, pairTableAdvisory])
+                  if (notice !== undefined) emitRunNotice(notice);
+              },
             },
           );
           const outputs = buildRunOutputs(result, carried.prepared, urls);

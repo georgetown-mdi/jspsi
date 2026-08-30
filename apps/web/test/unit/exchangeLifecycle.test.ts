@@ -903,6 +903,8 @@ describe("runExchangeLifecycle", () => {
     cardinality: "many-to-many",
     localRecordCount: 3163,
     partnerRecordCount: 3163,
+    localExpectsOutput: true,
+    partnerAssociationTableWithheld: false,
   };
 
   test("raises the run's resolved-shape notices ahead of its own terminal", async () => {
@@ -974,6 +976,8 @@ describe("runExchangeLifecycle", () => {
         cardinality: "one-to-one",
         localRecordCount: 3163,
         partnerRecordCount: 3163,
+        localExpectsOutput: true,
+        partnerAssociationTableWithheld: false,
       }),
     );
 
@@ -998,6 +1002,8 @@ describe("runExchangeLifecycle", () => {
       cardinality: "one-to-many",
       localRecordCount: 3163,
       partnerRecordCount: 3163,
+      localExpectsOutput: true,
+      partnerAssociationTableWithheld: false,
     };
     mockedRunExchange.mockImplementation(runExchangeConfirming(shape));
 
