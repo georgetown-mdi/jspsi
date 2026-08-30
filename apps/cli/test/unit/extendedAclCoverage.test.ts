@@ -312,7 +312,7 @@ describe("the log file's extended ACL", () => {
     if (process.platform === "win32") return;
     const logPath = path.join(dir, "kept.log");
     fs.writeFileSync(logPath, "PRE-EXISTING LINE\n", { mode: 0o600 });
-    failAclStripWith(capturedChmodRefusal(["-N", logPath]));
+    failAclStripWith(capturedChmodRefusal(["-N", path.join(dir, "absent")]));
 
     expect(() =>
       withPlatform("darwin", () => configureLogFile(logPath)),
