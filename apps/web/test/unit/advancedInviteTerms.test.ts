@@ -1,7 +1,31 @@
 import { describe, expect, test } from "vitest";
 
-import { gradeAuthoredKeys } from "../../src/psi/advancedInviteTerms.js";
-import { seedAdvancedInvite } from "../../src/psi/advancedInviteDraft.js";
+import {
+  getDefaultLinkageTerms,
+  inferMetadata,
+  safeParseLinkageTerms,
+} from "@psilink/core";
+
+import {
+  addElement,
+  addKey,
+  draftFromTerms,
+  draftWithFieldAdded,
+  draftWithKeyEnabled,
+  moveElement,
+  removeElement,
+  removeKey,
+  seedAdvancedInvite,
+  setDraftMetadata,
+  setDraftMetadataKeepingKeys,
+} from "../../src/psi/advancedInviteDraft.js";
+import {
+  buildAdvancedTerms,
+  gradeAuthoredKeys,
+} from "../../src/psi/advancedInviteTerms.js";
+import { setColumnType } from "../../src/psi/metadataEditing.js";
+
+import type { AdvancedInviteDraft } from "../../src/psi/advancedInviteTypes.js";
 
 const ALL_COLUMNS = ["ssn", "ssn4", "first_name", "last_name", "dob"];
 
@@ -40,5 +64,97 @@ describe("gradeAuthoredKeys", () => {
     expect(fitness).toEqual(
       needsSsn.map((needs) => (needs ? "unsatisfiable" : "satisfiable")),
     );
+  });
+});
+
+describe("no draft edit builds terms carrying an explicitly-undefined property", () => {
+  // The canonical encoding the cross-party agreement is hashed in rejects a
+  // property stated as `undefined` where it accepts an absent one, so a draft
+  // carrying that shape builds terms the Generate gate refuses. The rule-set
+  // compares prune it (linkageComparison) because a draft is live JavaScript
+  // objects; the BUILD does not, and this is why it need not: no draft-editing
+  // operation produces one, so the built terms never carry one.
+  //
+  // Reach: the exported draft-editing helpers plus the import, which is where a
+  // rebuild would arrive silently. The expert editor's own key, alias, transform,
+  // and fuzzy handlers pass their own callbacks (each clearing an optional with
+  // `delete`), so they are covered by review and by the encode gate, not here.
+
+  /** Every path in `value` whose property is present and stated as `undefined`. */
+  function explicitUndefinedPaths(value: unknown, at = "$"): Array<string> {
+    if (typeof value !== "object" || value === null) return [];
+    if (Array.isArray(value))
+      return value.flatMap((entry, index) =>
+        explicitUndefinedPaths(entry, `${at}[${index}]`),
+      );
+    return Object.entries(value).flatMap(([property, child]) =>
+      child === undefined
+        ? [`${at}.${property}`]
+        : explicitUndefinedPaths(child, `${at}.${property}`),
+    );
+  }
+
+  test("the helper finds the shape it is looking for", () => {
+    // Without this the sweep below could pass by finding nothing anywhere.
+    expect(explicitUndefinedPaths({ a: { b: [{ c: undefined }] } })).toEqual([
+      "$.a.b[0].c",
+    ]);
+    expect(explicitUndefinedPaths({ a: { b: 1 } })).toEqual([]);
+  });
+
+  test("every draft-editing operation and the import build encodable terms", () => {
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const lastKey = draft.keys.length - 1;
+    const withNewKey = addKey(draft, "first_name");
+    const withTwoElements = addElement(
+      withNewKey,
+      withNewKey.keys.length - 1,
+      "last_name",
+    );
+
+    const metadata = inferMetadata(ALL_COLUMNS);
+    const document = getDefaultLinkageTerms("Author", metadata);
+    const parsed = safeParseLinkageTerms(
+      JSON.parse(JSON.stringify(document)) as unknown,
+    );
+    if (!parsed.success) throw new Error("the exported document did not parse");
+
+    const edited: Record<string, AdvancedInviteDraft> = {
+      seeded: draft,
+      keyEnabled: draftWithKeyEnabled(draft, lastKey, true),
+      keyDisabled: draftWithKeyEnabled(draft, lastKey, false),
+      keyAdded: withNewKey,
+      keyRemoved: removeKey(withTwoElements, 0),
+      elementAdded: withTwoElements,
+      elementMoved: moveElement(
+        withTwoElements,
+        withTwoElements.keys.length - 1,
+        0,
+        1,
+      ),
+      elementRemoved: removeElement(
+        withTwoElements,
+        withTwoElements.keys.length - 1,
+        1,
+      ),
+      fieldAdded: draftWithFieldAdded(draft, "first_name"),
+      retyped: setDraftMetadata(
+        draft,
+        setColumnType(draft.metadata, "dob", "other").metadata,
+        [],
+      ),
+      retypedKeepingKeys: setDraftMetadataKeepingKeys(
+        draft,
+        setColumnType(draft.metadata, "ssn4", "other").metadata,
+        [],
+      ),
+      imported: draftFromTerms(parsed.data, seed),
+    };
+
+    for (const [label, candidate] of Object.entries(edited))
+      expect([
+        label,
+        explicitUndefinedPaths(buildAdvancedTerms(candidate)),
+      ]).toEqual([label, []]);
   });
 });

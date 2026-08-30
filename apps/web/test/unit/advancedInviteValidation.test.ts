@@ -2,10 +2,13 @@ import { describe, expect, test } from "vitest";
 
 import {
   APPLIED_SETTINGS,
+  CanonicalEncodingError,
   DEDUPLICATE_IMPLEMENTED_BY_STRATEGY,
   FAN_OUT_FUNCTION_NAMES,
   MAX_INVITATION_LIFETIME_SECONDS,
   authoredLinkageFields,
+  canonicalString,
+  safeParseLinkageTerms,
 } from "@psilink/core";
 
 import {
@@ -261,6 +264,162 @@ describe("the strategy gate on a deduplicating term", () => {
     expect(result.errors.output).toMatch(/Allow several of your records/);
     // Against the output pair alone: the key list is not where this reports.
     expect(result.errors.keys).toBeUndefined();
+  });
+});
+
+describe("the canonical-encode gate (the byte form both parties hash)", () => {
+  // The terms are hashed into the cross-party agreement in their canonical form,
+  // so a value outside that domain has to be refused at authoring rather than at
+  // the exchange. What these pin is which message the refusal carries: the gate
+  // predates them and already blocked, but it named nothing and offered only
+  // "reset to defaults" -- discarding the operator's whole draft over one value.
+  const now = new Date("2026-01-01T00:00:00Z");
+
+  /** `draft` with `transform` on the first element of its first key, enabled. */
+  function withFirstElementTransform(
+    draft: AdvancedInviteDraft,
+    transform: Array<TransformStep>,
+  ): AdvancedInviteDraft {
+    return {
+      ...draft,
+      keys: draft.keys.map((entry, index) =>
+        index === 0
+          ? {
+              ...entry,
+              enabled: true,
+              key: {
+                ...entry.key,
+                elements: entry.key.elements.map((element, position) =>
+                  position === 0 ? { ...element, transform } : element,
+                ),
+              },
+            }
+          : entry,
+      ),
+    };
+  }
+
+  test("names the transform for a param the element editor itself can author", () => {
+    // The element editor offers `substring`, and its NumberInput writes an
+    // out-of-range value into the draft beside the inline error rather than
+    // withholding it -- so this is the operator's own controls, not an import.
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const authored = withFirstElementTransform(draft, [
+      { function: "substring", params: { start: 2 ** 53, length: 4 } },
+    ]);
+    // The premises: the terms schema admits the value (a transform param is
+    // `z.unknown()` there), and the encoder is what refuses it -- so the message
+    // below is this gate's answer rather than one the schema would have given.
+    const terms = buildAdvancedTerms(authored);
+    expect(safeParseLinkageTerms(terms).success).toBe(true);
+    expect(() => canonicalString(terms)).toThrow(CanonicalEncodingError);
+
+    const result = validateAdvancedInvite(authored, seed, now);
+    expect(result.canGenerate).toBe(false);
+    expect(result.terms).toBeUndefined();
+    expect(result.errors.keys).toMatch(/transform carries a parameter/);
+    expect(result.errors.keys).toMatch(/correct that transform's parameters/);
+    // The remedy it must not be: discarding everything the operator authored.
+    expect(result.errors.keys).not.toMatch(/reset to defaults/);
+  });
+
+  test("names the transform for a non-finite param the schema does reject", () => {
+    // A non-finite param IS a schema issue, but on the linkageKeys path, which the
+    // generic mapping collapses to "Enable at least one linkage key." -- wrong on a
+    // draft whose keys are all enabled. The gate runs ahead of that mapping so the
+    // accurate message is the one that survives.
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const infinite = withFirstElementTransform(draft, [
+      { function: "substring", params: { start: Number.POSITIVE_INFINITY } },
+    ]);
+    expect(safeParseLinkageTerms(buildAdvancedTerms(infinite)).success).toBe(
+      false,
+    );
+    const result = validateAdvancedInvite(infinite, seed, now);
+    expect(result.canGenerate).toBe(false);
+    expect(result.errors.keys).toMatch(/transform carries a parameter/);
+    expect(result.errors.keys).not.toMatch(/Enable at least one linkage key/);
+  });
+
+  test("a disabled key's un-encodable transform does not block Generate", () => {
+    // A disabled key is dropped from the built terms, so it is encoded by nothing
+    // and blocks nothing -- the same rule the fan-out gate keeps.
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const parked = {
+      ...draft,
+      keys: draft.keys.map((entry, index) =>
+        index === draft.keys.length - 1
+          ? {
+              ...entry,
+              enabled: false,
+              key: {
+                ...entry.key,
+                elements: entry.key.elements.map((element, position) =>
+                  position === 0
+                    ? {
+                        ...element,
+                        transform: [
+                          { function: "substring", params: { start: 2 ** 53 } },
+                        ],
+                      }
+                    : element,
+                ),
+              },
+            }
+          : entry,
+      ),
+    };
+    const result = validateAdvancedInvite(parked, seed, now);
+    expect(result.errors.keys).toBeUndefined();
+    expect(result.canGenerate).toBe(true);
+  });
+
+  test("an un-encodable value outside every transform names a remedy of its own", () => {
+    // The residual: a draft whose enabled keys state an optional property as an
+    // explicit `undefined` -- the shape a spread rebuild produces, which the
+    // rule-set compares prune (linkageComparison) and the canonical encoding
+    // rejects. No control in this editor writes it (each clears an optional with
+    // `delete`) and a parsed document cannot carry it, so it takes the message for
+    // a fault this editor cannot locate rather than the transform one.
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const spread: AdvancedInviteDraft = {
+      ...draft,
+      keys: draft.keys.map((entry) => ({
+        ...entry,
+        key: {
+          ...entry.key,
+          swap: entry.key.swap,
+          elements: entry.key.elements.map((element) => ({
+            ...element,
+            transform: element.transform,
+          })),
+        },
+      })),
+    };
+    // The premise: these keys really are outside the canonical domain, so the
+    // refusal below is this shape's and not something else in the draft.
+    const terms = buildAdvancedTerms(spread);
+    expect(() => canonicalString(terms)).toThrow(CanonicalEncodingError);
+
+    const result = validateAdvancedInvite(spread, seed, now);
+    expect(result.canGenerate).toBe(false);
+    expect(result.errors.keys).toMatch(/cannot be recorded in the exact form/);
+    expect(result.errors.keys).toMatch(
+      /rebuild the key list from your columns/,
+    );
+    expect(result.errors.keys).not.toMatch(/reset to defaults/);
+  });
+
+  test("a transform param the descriptors do not judge still generates", () => {
+    // The gate is the encoder's, not the authoring descriptors': a param value
+    // core tolerates at runtime (a `coalesce` default that is not text runs as a
+    // pass-through) encodes, so it keeps generating and is left to the notice
+    // that names it. A descriptor-shaped gate would refuse it instead.
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const tolerated = withFirstElementTransform(draft, [
+      { function: "coalesce", params: { default: 7 } },
+    ]);
+    expect(validateAdvancedInvite(tolerated, seed, now).canGenerate).toBe(true);
   });
 });
 
