@@ -197,12 +197,14 @@ async function runUnattendedAttempt(
         onDataExchangeStart: attempt.onDataExchangeStart,
       },
       onWarning: (message) => {
-        // Two notices reach this sink and are not one thing. The close-outcome
+        // Four notices reach this sink and are not one thing. The close-outcome
         // notice speaks to an operator watching the run and is dropped. Every
-        // other notice -- today the disclosure that could not be filed, whose
-        // remedy an unattended run has no way to offer -- goes to the
-        // diagnostic log, folded through the same display boundary a seat's
-        // surface uses so it is escaped exactly once.
+        // other notice -- the resolved-cardinality notice and the pair-table
+        // advisory, both raised at the post-terms, pre-round seam and composed
+        // by core, plus the disclosure that could not be filed, whose remedy an
+        // unattended run has no way to offer -- goes to the diagnostic log,
+        // folded through the same display boundary a seat's surface uses so it
+        // is escaped exactly once.
         if (droppableUnattendedNotice(message)) return;
         for (const notice of appendSanitizedRunWarning([], message))
           log.warn(UNATTENDED_RUN_NOTICE_PREFIX, notice);

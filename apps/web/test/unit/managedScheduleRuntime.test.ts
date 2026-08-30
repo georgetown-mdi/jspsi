@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import log from "loglevel";
 
+import { describeResolvedRunShape } from "@psilink/core";
+
 import {
   DISCLOSURE_NOT_FILED_WARNING,
   runManagedExchangeInBrowser,
@@ -20,8 +22,8 @@ import type { ManagedScheduleTickSeams } from "../../src/psi/managedScheduleRunn
 
 /**
  * The browser half of the unattended runner: what it hands the run driver, what
- * it does with the two notices the driver raises, and the host loop that wakes
- * the tick. The driver itself is mocked -- the run it performs is
+ * it does with the notices the driver raises, and the host loop that wakes the
+ * tick. The driver itself is mocked -- the run it performs is
  * managedRunDriver's own suite -- so what is asserted here is the wiring's
  * choices, which are the ones that make a scheduled run the SAME run an attended
  * one is: the same entry point, the same fail-fast single-writer lock, and the
@@ -137,7 +139,7 @@ describe("what a scheduled attempt hands the run driver", () => {
   });
 });
 
-describe("the two notices an unattended run can raise", () => {
+describe("the notices an unattended run can raise", () => {
   test("are not one thing: the close outcome is droppable, the unfiled disclosure is not", () => {
     const closeOutcomes = Object.values(CLOSE_OUTCOME_WARNINGS).filter(
       (warning): warning is string => warning !== undefined,
@@ -174,6 +176,45 @@ describe("the two notices an unattended run can raise", () => {
     expect(String(warn.mock.calls[0][1])).toContain(
       "could not be saved to this exchange's accounting",
     );
+    warn.mockRestore();
+  });
+
+  test("carry the run's resolved shape, both notices, to the diagnostic log", async () => {
+    // The unattended seat is the one where a widening of the match goes
+    // unnoticed: nobody is watching, and the terms it resolves from are a
+    // standing record rather than something authored this morning. So the
+    // pre-round notices must leave a line behind rather than being swallowed by
+    // the drop policy above -- which they are not named into, dropping being a
+    // positive match. Asked with the strings core actually composes, since the
+    // sink's whole decision is which notice it was handed.
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => undefined);
+    const { cardinalityNotice, pairTableAdvisory } = describeResolvedRunShape({
+      cardinality: "many-to-many",
+      localRecordCount: 3163,
+      partnerRecordCount: 3164,
+      localExpectsOutput: true,
+      partnerAssociationTableWithheld: false,
+    });
+    mockedRun.mockImplementation((config) => {
+      config.onWarning?.(cardinalityNotice!);
+      config.onWarning?.(pairTableAdvisory!);
+      return Promise.resolve(
+        undefined as unknown as Awaited<
+          ReturnType<typeof runManagedExchangeInBrowser>
+        >,
+      );
+    });
+
+    await browserScheduleTickSeams(new AbortController().signal).runAttempt(
+      attempt(),
+    );
+
+    // Verbatim: the display boundary the sink folds them through escapes what
+    // needs it, and first-party ASCII prose needs none.
+    expect(warn.mock.calls.map((call) => String(call[1]))).toEqual([
+      cardinalityNotice,
+      pairTableAdvisory,
+    ]);
     warn.mockRestore();
   });
 });

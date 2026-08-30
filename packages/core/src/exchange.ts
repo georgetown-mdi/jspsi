@@ -43,6 +43,7 @@ import {
   withholdsSenderAssociationTable,
 } from "./link.js";
 import type { LinkageCardinality } from "./link.js";
+import type { ResolvedRunShape } from "./pairTableProjection.js";
 import { InProcessPsiEngine } from "./psiEngine.js";
 import {
   partyFansOut,
@@ -1412,10 +1413,21 @@ export interface RunExchangeOptions {
    * Called once after the confirming-protocol stage completes, before the
    * first PSI key stage begins. Useful for surfacing partner identity and
    * resolved role without waiting for the full exchange to finish.
+   *
+   * `runShape` carries what the agreed terms resolved to at this same seam --
+   * the matching cardinality, the two record counts its derived pair table grows
+   * with, and the entitlements deciding which party holds that table and what the
+   * other one reads of the match -- so a front end can name the run's cardinality
+   * and project that table before the first round. Nothing here refuses or warns
+   * on either: the pair-table advisory is a front end's discretion
+   * (docs/spec/PROTOCOL.md, The both-sided expansion has no ceiling of its own),
+   * and {@link describeResolvedRunShape} is the shared composition each seat
+   * renders.
    */
   onProtocolConfirmed?: (
     partnerTerms: LinkageTerms,
     resolvedRole: PsiRole,
+    runShape: ResolvedRunShape,
   ) => void;
   /**
    * Zero-setup `--save` intent for this party. `undefined` (the default) keeps
@@ -1732,9 +1744,50 @@ export async function runExchange(
     rowCount,
     partnerRecordCount,
   );
-  onProtocolConfirmed(partnerTerms, resolvedRole);
-
   const isReceiver = resolvedRole === "receiver";
+
+  // Single-pass association-table withholding, derived from symmetric
+  // authenticated session state so both parties reach the same verdict: when the
+  // resolved SENDER is a non-receiving helper (expectsOutput false) disclosing no
+  // payload, it needs nothing back, so the receiver suppresses its
+  // association-table half entirely and the sender skips awaiting it -- keeping a
+  // genuinely blind helper blind to its own membership. The sender's properties
+  // come from whichever side we are: our own when we are the sender, the partner's
+  // (read off the terms exchange) when we are the receiver. A missing partner flag
+  // (undefined -- a non-conforming peer that did not advertise it) defaults to
+  // "discloses payload", so it never blinds a helper that needs its table. Only
+  // consulted on the single-pass path (see withholdsSenderAssociationTable and
+  // link.ts).
+  const senderExpectsOutput = isReceiver
+    ? partnerTerms.output.expectsOutput
+    : linkageTerms.output.expectsOutput;
+  const senderDisclosesPayload = isReceiver
+    ? (partnerDisclosesPayload ?? true)
+    : localDisclosesPayload;
+  const withholdSenderTable = withholdsSenderAssociationTable(
+    senderExpectsOutput,
+    senderDisclosesPayload,
+  );
+
+  // The seam a front end names the run's resolved shape from. It carries the two
+  // entitlements as well as the cardinality because the copy composed from it
+  // speaks about a result file and about what the partner reads, and neither
+  // follows from the cardinality: this party's own entitlement is the same
+  // predicate that decides whether it is handed an association table at all
+  // (heldResult, below), and the partner reads nothing of the match where its own
+  // half is the withheld one -- the single-pass blind-helper case above, which the
+  // cascade never reaches.
+  onProtocolConfirmed(partnerTerms, resolvedRole, {
+    cardinality,
+    localRecordCount: rowCount,
+    partnerRecordCount,
+    localExpectsOutput: linkageTerms.output.expectsOutput,
+    partnerAssociationTableWithheld:
+      linkageTerms.linkageStrategy === "single-pass" &&
+      isReceiver &&
+      withholdSenderTable,
+  });
+
   const linkageKeyIterables = linkageTerms.linkageKeys.map(
     (key, keyIndex) =>
       new StandardizedKeyIterable(key, dataset, rowCount, isReceiver, keyIndex),
@@ -1761,29 +1814,6 @@ export async function runExchange(
   const elementBounds = psiElementBounds(
     isReceiver ? partnerSize : localSize,
     isReceiver ? localSize : partnerSize,
-  );
-
-  // Single-pass association-table withholding, derived from symmetric
-  // authenticated session state so both parties reach the same verdict: when the
-  // resolved SENDER is a non-receiving helper (expectsOutput false) disclosing no
-  // payload, it needs nothing back, so the receiver suppresses its
-  // association-table half entirely and the sender skips awaiting it -- keeping a
-  // genuinely blind helper blind to its own membership. The sender's properties
-  // come from whichever side we are: our own when we are the sender, the partner's
-  // (read off the terms exchange) when we are the receiver. A missing partner flag
-  // (undefined -- a non-conforming peer that did not advertise it) defaults to
-  // "discloses payload", so it never blinds a helper that needs its table. Only
-  // consulted on the single-pass path (see withholdsSenderAssociationTable and
-  // link.ts).
-  const senderExpectsOutput = isReceiver
-    ? partnerTerms.output.expectsOutput
-    : linkageTerms.output.expectsOutput;
-  const senderDisclosesPayload = isReceiver
-    ? (partnerDisclosesPayload ?? true)
-    : localDisclosesPayload;
-  const withholdSenderTable = withholdsSenderAssociationTable(
-    senderExpectsOutput,
-    senderDisclosesPayload,
   );
 
   // Single-pass is allowlisted; any other value (including the default) runs the

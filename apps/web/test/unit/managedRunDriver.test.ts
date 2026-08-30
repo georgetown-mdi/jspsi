@@ -4,7 +4,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import log from "loglevel";
 
-import { runExchange } from "@psilink/core";
+import { describeResolvedRunShape, runExchange } from "@psilink/core";
 
 import {
   DISCLOSURE_NOT_FILED_WARNING,
@@ -31,9 +31,13 @@ import type { DataConnection } from "peerjs";
 import type Peer from "peerjs";
 
 import type {
+  ExchangeResult,
   HandshakeRole,
+  LinkageTerms,
   MessageConnection,
   RendezvousRole,
+  ResolvedRunShape,
+  RunExchangeOptions,
 } from "@psilink/core";
 import type { PeerCloseOutcome } from "../../src/psi/waitForPeerClose.js";
 import type { RunOutputs } from "@bench/runOutputs";
@@ -603,6 +607,94 @@ describe("the peer-wait bound", () => {
       signal: controller.signal,
       timeoutMs: 90_000,
     });
+  });
+});
+
+describe("naming what the agreed terms resolved to", () => {
+  /** Drive core's pre-round seam with one resolved shape, then finish the run.
+   * `runExchange` is mocked here, so this is where the seam a real run fires
+   * after the terms exchange comes from. */
+  function exchangeConfirming(runShape: ResolvedRunShape) {
+    mockedRunExchange.mockImplementationOnce(
+      (
+        _conn: unknown,
+        _role: unknown,
+        _prepared: unknown,
+        options: {
+          onProtocolConfirmed?: RunExchangeOptions["onProtocolConfirmed"];
+        },
+      ) => {
+        options.onProtocolConfirmed?.({} as LinkageTerms, "receiver", runShape);
+        return Promise.resolve({} as ExchangeResult);
+      },
+    );
+  }
+
+  const OVER_BOUND_SHAPE: ResolvedRunShape = {
+    cardinality: "many-to-many",
+    localRecordCount: 3163,
+    partnerRecordCount: 3164,
+    localExpectsOutput: true,
+    partnerAssociationTableWithheld: false,
+  };
+
+  test("raises both notices to the caller's notice slot", async () => {
+    // The seat this covers has nobody watching, so the notice is the whole
+    // signal: a standing set of terms resolving to a deduplicating cardinality --
+    // or projecting a pair table past the advisory bound -- would otherwise widen
+    // the run with nothing said. Composed by core, so this seat and the attended
+    // one cannot drift into two wordings of the one fact.
+    const { mc } = makeParkedCloseMc();
+    mockedOpen.mockResolvedValue(mc);
+    acquireResources();
+    exchangeConfirming(OVER_BOUND_SHAPE);
+    const onWarning = vi.fn();
+    const { cardinalityNotice, pairTableAdvisory } =
+      describeResolvedRunShape(OVER_BOUND_SHAPE);
+
+    await runDriver(new AbortController().signal, onWarning);
+
+    expect(onWarning.mock.calls).toEqual([
+      [cardinalityNotice],
+      [pairTableAdvisory],
+    ]);
+  });
+
+  test("raises nothing for a one-to-one run within the bound", async () => {
+    // The cardinality that adds no multiplicity is the one every consent surface
+    // already describes, so naming it here would be noise on the ordinary run --
+    // and an unattended seat's noise is a log line nobody asked for.
+    const { mc } = makeParkedCloseMc();
+    mockedOpen.mockResolvedValue(mc);
+    acquireResources();
+    exchangeConfirming({
+      cardinality: "one-to-one",
+      localRecordCount: 3163,
+      partnerRecordCount: 3164,
+      localExpectsOutput: true,
+      partnerAssociationTableWithheld: false,
+    });
+    const onWarning = vi.fn();
+
+    await runDriver(new AbortController().signal, onWarning);
+
+    expect(onWarning).not.toHaveBeenCalled();
+  });
+
+  test("drops the notices on a run the operator already stopped", async () => {
+    // The live gate every seam of this wiring takes: a cancelled run's notices
+    // are noise, and the caller's surface may be gone.
+    const { mc } = makeParkedCloseMc();
+    mockedOpen.mockResolvedValue(mc);
+    acquireResources();
+    exchangeConfirming(OVER_BOUND_SHAPE);
+    const onWarning = vi.fn();
+    const controller = new AbortController();
+    controller.abort();
+
+    await runDriver(controller.signal, onWarning);
+
+    expect(onWarning).not.toHaveBeenCalled();
   });
 });
 
