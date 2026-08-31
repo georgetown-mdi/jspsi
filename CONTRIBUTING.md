@@ -21,7 +21,7 @@ PSI-Link is organized as an npm workspaces monorepo. The workspaces and the supp
 | Path             | Description                                                                                |
 | ---------------- | ------------------------------------------------------------------------------------------ |
 | `packages/core/` | Shared library: PSI primitive, exchange orchestration, file-sync transport, config schemas |
-| `packages/peerjs-broker/` | The PeerJS-compatible WebRTC signaling broker: vendored server source plus a standalone entry point (`npm start -w packages/peerjs-broker`). Ships TypeScript source with no build step; the web app bundles it into its server |
+| `packages/peerjs-broker/` | The PeerJS-compatible WebRTC signaling broker: vendored server source plus a standalone entry point (`npm start -w packages/peerjs-broker`). Ships TypeScript source with no build step of its own, reading `@psilink/core` from that workspace's `dist/`; the web app bundles it into its server |
 | `apps/cli/`      | Node.js CLI (`psilink`), built with Rollup, distributed as a Docker image                  |
 | `apps/web/`      | TanStack Start (React/SSR) web app; serves the peer-coordination broker above at `/api`    |
 | `docs/`          | Documentation, three tiers: `docs/` overview (conceptual/operational), `docs/spec/` technical, `docs/notes/` design records |
@@ -45,7 +45,7 @@ The OpenMined PSI module is vendored at `lib/openmined-psi.js-2.0.6-seclink.3.tg
 git clone git@github.com:georgetown-mdi/jspsi.git psilink
 cd psilink
 npm install
-npm run build -w packages/core   # core must be built before the apps
+npm run build -w packages/core   # core must be built before the apps and the broker
 ```
 
 For work that spans `packages/core` and the web app, run the dev loop from the repository root:
@@ -62,7 +62,7 @@ No additional environment variables are required for local development or the te
 ## Building
 
 ```sh
-npm run build -w packages/core   # must build before the apps; rebuild after any core change
+npm run build -w packages/core   # must build before the apps and the broker; rebuild after any core change
 npm run build -w apps/cli        # -> apps/cli/dist/; Docker image built separately (docs/RELEASES.md)
 npm run build -w apps/web
 ```

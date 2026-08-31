@@ -35,8 +35,10 @@ on:
       # real build, for this list as a whole rather than this entry alone. The
       # two PR gates keep the broad packages/peerjs-broker/** glob, so an edit
       # there is still built and tested -- it just does not redeploy an
-      # unchanged server.
+      # unchanged server. src/diagnostics.ts sits outside contrib but is
+      # imported by contrib/instance.ts, so it is in the deployed graph.
       - "packages/peerjs-broker/src/contrib/**"
+      - "packages/peerjs-broker/src/diagnostics.ts"
       - "packages/peerjs-broker/package.json"
       - "packages/peerjs-broker/tsconfig.json"
       - ".github/actions/setup/**"
