@@ -311,9 +311,15 @@ describe("signaling diagnostics sink", () => {
   });
 
   test("a clock stepped backwards keeps shedding until it has caught back up", async () => {
-    const broker = await startBroker();
+    // Mocked before construction: the sink snapshots windowStartedAt
+    // synchronously inside attachSignalingDiagnostics, which construction calls,
+    // so mocking after would leave that snapshot on the real clock while every
+    // step below runs on the controlled one -- a gap of even one millisecond
+    // between them is enough to put windowStartedAt ahead of startedAt and break
+    // the "still inside the window" assertions.
     const startedAt = Date.now();
     const clock = vi.spyOn(Date, "now").mockReturnValue(startedAt);
+    const broker = await startBroker();
 
     for (let sent = 0; sent <= DIAGNOSTICS_PER_RATE_LIMIT_WINDOW; sent += 1)
       broker.wss.emit(
@@ -355,6 +361,39 @@ describe("signaling diagnostics sink", () => {
     const [line] = brokerLines();
     expect(line).toContain("[unattributed]");
     expect(line).toContain("raised under no known source");
+
+    // The slot it spent is a slot it used: the rest of the budget writes, and
+    // the report past it is shed rather than admitted on a slot a dropped
+    // diagnostic had already charged.
+    for (let sent = 1; sent < DIAGNOSTICS_PER_RATE_LIMIT_WINDOW; sent += 1)
+      broker.wss.emit(
+        "error",
+        new Error(`parse failure ${sent}`),
+        "client-frame",
+      );
+    expect(brokerLines()).toHaveLength(DIAGNOSTICS_PER_RATE_LIMIT_WINDOW);
+
+    broker.wss.emit("error", new Error("past the budget"), "client-frame");
+    expect(brokerLines()).toHaveLength(DIAGNOSTICS_PER_RATE_LIMIT_WINDOW + 1);
+    expect(brokerLines().at(-1)).toContain("rate limited");
+  });
+
+  test("a report whose source is an unrecognized string is written unattributed", async () => {
+    const broker = await startBroker();
+
+    // A string is exactly as untyped a source as the non-string shape above --
+    // one that names nothing this sink knows must render under the same tag,
+    // not carry its own bytes into it.
+    broker.wss.emit(
+      "error",
+      new Error("raised under an unrecognized string source"),
+      "not-a-real-source",
+    );
+
+    const [line] = brokerLines();
+    expect(line).toContain("[unattributed]");
+    expect(line).toContain("raised under an unrecognized string source");
+    expect(line).not.toContain("not-a-real-source");
 
     // The slot it spent is a slot it used: the rest of the budget writes, and
     // the report past it is shed rather than admitted on a slot a dropped

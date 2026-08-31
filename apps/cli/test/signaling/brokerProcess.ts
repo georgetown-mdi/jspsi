@@ -83,9 +83,11 @@ export function startBrokerProcess(): Promise<BrokerProcess> {
     const fail = (reason: string): void =>
       settle(() => {
         stopChild(child);
-        // The child's stderr is the only diagnosis a failed start leaves; it is
-        // this repository's own code, not partner-controlled, so it is safe to
-        // surface verbatim.
+        // The child's stderr is the only diagnosis a failed start leaves. It can
+        // carry peer-derived text (a parse failure quotes the peer's opening
+        // bytes), but the diagnostics sink escapes it at a 256-character cap and
+        // rate-limits it before it reaches stderr, so surfacing it verbatim here
+        // is still safe.
         reject(
           new Error(
             `${reason}${stderr.trim() === "" ? "" : `\n${stderr.trim()}`}`,
