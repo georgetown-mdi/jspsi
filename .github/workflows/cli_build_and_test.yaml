@@ -83,6 +83,15 @@ jobs:
       # native leg below and on each hardened-sshd matrix leg would buy nothing.
       - name: Backend-agnostic integration tests (CLI)
         run: npm run test:integration:backend-agnostic -w apps/cli
+      # The cross-runtime suite: the CLI built above meeting a party assembled
+      # from the web app's own exchange modules over one file-drop directory. It
+      # is a web-workspace script because only that workspace may import
+      # apps/web/src, but the drift it catches lands as readily on this side of
+      # the wire, so it runs on this workflow's path filter as well as on the web
+      # app's own (.github/workflows/eb_build_and_test.yaml). It stands up no
+      # server and no browser.
+      - name: CLI/web cross-runtime interop
+        run: npm run test:interop -w apps/web
       # A second leg runs the same suite against a native OpenSSH sshd, so the
       # adapter is also exercised against a real server. sshd ships on the Ubuntu
       # runner, but its build fatally checks for the privilege-separation

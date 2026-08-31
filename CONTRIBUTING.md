@@ -88,10 +88,14 @@ npm run test:integration:webrtc -w apps/cli  # WebRTC transport over loopback we
 npm run test:integration:backend-agnostic -w apps/cli  # the integration files no SFTP backend differentiates
 npm run test:integration -w apps/web
 npm run test:browser     -w apps/web         # cross-impl vectors + live exchange, real Chromium
+npm run test:interop     -w apps/web         # a real psilink process and a web party, one live exchange
 ```
 
-The native SFTP backends and hardened profiles, why the WebRTC and
-backend-agnostic suites are projects of their own, the console sentinel, the
+The interop suite drives the built CLI, so run `npm run build -w apps/cli` first;
+it skips itself otherwise.
+
+The native SFTP backends and hardened profiles, why the WebRTC, backend-agnostic,
+and interop suites are projects of their own, the console sentinel, the
 warm-server inner loop, and the browser-suite plumbing are in
 [docs/TESTING.md](docs/TESTING.md).
 
