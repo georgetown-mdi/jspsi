@@ -1242,6 +1242,10 @@ The year may be written with the four-digit `YYYY` token or the two-digit `YY` t
 
 A `parse_date` step whose `input_format` cannot supply a complete date -- for example `MM/DD`, which carries no year -- drops every record rather than reformatting it, so a linkage key whose element transform relies on it can never match. This holds for any data, so it is settled before the exchange runs rather than surfacing only as an empty result afterward: an exchange is refused unless every agreed linkage key is satisfiable and live, so one key dead this way stops the run whatever the other keys can still do. The remedy is out of band -- agree terms over the keys and fields both files can supply, and run under those. The CLI reports the refusal before any connection or credential, and the web acceptor's confirm-columns step flags the key.
 
+A `substring` step whose declared window reads nothing is dead the same way, and is refused the same way. A `start` or `length` left out, a `start` of `0`, and a `length` of `0` each slice an empty string out of a value of any length, so every record drops. A window that merely overshoots the values a particular file carries -- a `start` past the end of every short value -- is not this: whether it reads anything is the data's answer, so it is left to the coverage warnings rather than refused.
+
+The browser editor applies the same grading to both shapes when an invitation is CREATED, badging the key and holding Generate shut, so a key that matches nothing does not reach a partner as an invitation minted there.
+
 #### Null-producing (filter) functions
 
 | Function | Description | Parameters |

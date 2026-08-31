@@ -434,12 +434,38 @@ export function validateAdvancedInvite(
 
   // Every authored cleaning step must be well-formed before Generate -- the same
   // launch gate the acceptor applies (acceptorLaunchBlockedReason's step-validity
-  // clause). A step left
-  // mid-edit (a cleared substring.start) or a malformed/over-length raw pattern would
-  // otherwise reach the exchange, where core runs it as a silent full-field exclusion
-  // or throws at compile. Now that raw patterns are ungated for per-party cleaning,
-  // this gate is load-bearing rather than defensive. Gated in this tested boundary (not
-  // only the component wrapper) so it cannot be bypassed.
+  // clause). A step left mid-edit (a cleared substring.start) or a
+  // malformed/over-length raw pattern would otherwise reach the exchange, where
+  // core runs it as a silent full-field exclusion or throws at compile. Raw
+  // patterns being ungated for per-party cleaning is what makes this gate
+  // load-bearing rather than defensive. Gated in this tested boundary (not only
+  // the component wrapper) so it cannot be bypassed.
+  //
+  // Scoped to draft.standardization deliberately: a linkage-key element transform
+  // does NOT take this descriptor gate. The descriptors are the authoring
+  // surface's own typing, stricter than what core runs, and an element transform
+  // arrives by a second door -- an imported partner document, whose params the
+  // operator cannot edit one by one. A descriptor-shaped refusal there would
+  // hard-block a document core runs benignly: a `coalesce` whose `default` is not
+  // text and a `null_if` whose value is not a string are each a pass-through at
+  // runtime, costing no match. So on a key element the encoder is the gate, not
+  // the descriptors.
+  //
+  // What that stance does not extend to is a param the pipeline drops on
+  // value-INDEPENDENTLY, which is not a tolerated shape but a key that matches
+  // nothing for BOTH parties -- and the mint is the last point either of them
+  // holds a control over it, since the terms are hashed into the agreement and
+  // the acceptor cannot edit them. Those are refused, in core rather than here:
+  // `pipelineAlwaysDrops` grades such an element dead, so the linkage grading
+  // above blocks Generate, the mint and the run boundary refuse the same terms,
+  // and the key list carries its "won't match" badge -- one refusal covering the
+  // authored draft and the imported document alike. Its measured instance is a
+  // `substring` whose declared window reads nothing at any value length (an
+  // absent, zero, or non-integer bound), which the terms schema admits and the
+  // factory nulls every row for. Every window core grades dead is one these
+  // descriptors also reject, so the element editor marks the offending param
+  // inline while the badge names the key: held by a test rather than by this
+  // note, in advancedInviteValidation.test.ts.
   if (
     !draft.standardization.every((transformation) =>
       (transformation.steps ?? []).every(isStepValid),

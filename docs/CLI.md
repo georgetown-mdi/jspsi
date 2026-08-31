@@ -279,7 +279,7 @@ The rule is one: acceptance stops unless the input can satisfy **every** linkage
 Three shapes reach that stop, and the error names whichever applies:
 
 - **The input cannot produce a key's fields** -- the columns the key needs are absent, or carry a type the terms' cleaning cannot bind. The error names the unsatisfied fields and the keys they cost. The remedy is a CSV covering those field types, or new terms.
-- **A linkage key's own cleaning can never produce a value** -- a `parse_date` whose `input_format` omits a component, so it drops every record regardless of the data. The key is named even though its columns are present: it passes the column check yet would contribute nothing, so the fix is a corrected invitation from the partner, not a different CSV.
+- **A linkage key's own cleaning can never produce a value** -- a `parse_date` whose `input_format` omits a component, or a `substring` whose declared window reads nothing out of a value of any length, so it drops every record regardless of the data. The key is named even though its columns are present: it passes the column check yet would contribute nothing, so the fix is a corrected invitation from the partner, not a different CSV.
 - **The invitation's terms declare no linkage key at all** -- there is nothing to match on, so acceptance stops the same way.
 
 A further check covers what the input would send rather than what it can match:

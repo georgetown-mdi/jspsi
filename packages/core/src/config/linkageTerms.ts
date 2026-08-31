@@ -838,8 +838,13 @@ const TransformStepSchema: z.ZodType<TransformStep> = TransformStepBaseSchema
   // slices as intended -- substringFactory drops it to an all-null fn, so the
   // step silently excludes every row rather than erroring. Reject a present
   // non-integer bound at parse instead, mirroring the descriptor schema's own
-  // `int` requirement. An absent bound is left alone: the factory ignores it the
-  // same way, so it is a no-op step, not a malformed one.
+  // `int` requirement. An ABSENT bound drops every row just the same, and is
+  // deliberately admitted here rather than rejected: it is refused one layer up,
+  // by the dead-pipeline grading (`pipelineAlwaysDrops` via
+  // `substringWindowDropsEveryValue`), which reaches every degenerate window
+  // this shape-level refine cannot express -- a `start` of 0, a `length` of 0 --
+  // and locates the offender by key rather than costing the whole document its
+  // parse.
   .refine(
     (step) => {
       if (step.function !== "substring") return true;

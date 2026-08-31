@@ -28,6 +28,7 @@ import {
   InvitationTermDivergenceError,
 } from "../src/exchange";
 import { UsageError } from "../src/errors";
+import { pipelineAlwaysDrops } from "../src/standardization";
 import {
   DISPLAY_TRUNCATION_MARKER,
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
@@ -772,7 +773,8 @@ test("a non-string parse_date format still validates, so the runtime factory han
 // --- substring integer bounds (partner-controlled non-integer footgun) --------
 // substring slices by numeric `start` / `length`; a non-integer bound never
 // slices as intended (the factory drops it to an all-null fn, silently excluding
-// every row). The refine rejects a present non-integer bound at validation.
+// every row). The refine rejects a present non-integer bound at validation; the
+// degenerate windows it does not express are refused by the dead-key grading.
 
 const substringTerms = (params: Record<string, unknown>) => ({
   ...base,
@@ -815,11 +817,34 @@ test("integer substring bounds parse and are preserved", () => {
   });
 });
 
-test("absent substring bounds validate; the factory ignores the no-op step", () => {
-  expect(safeParseLinkageTerms(substringTerms({})).success).toBe(true);
-  expect(safeParseLinkageTerms(substringTerms({ start: 3 })).success).toBe(
-    true,
-  );
+test("a degenerate substring window validates here and is refused by the dead-pipeline grading", () => {
+  // These are not no-op steps: the factory reads no window for any value and
+  // nulls every row, exactly as a present non-integer bound does. They pass this
+  // shape-level refine because the refusal that reaches all of them -- an absent
+  // bound, a `start` of 0, a `length` of 0 -- lives in the dead-key grading,
+  // which names the offending key instead of costing the document its parse.
+  for (const params of [
+    {},
+    { start: 3 },
+    { length: 5 },
+    { start: 0, length: 5 },
+    { start: 3, length: 0 },
+  ]) {
+    const result = safeParseLinkageTerms(substringTerms(params));
+    expect(result.success, JSON.stringify(params)).toBe(true);
+    if (!result.success) continue;
+    expect(
+      pipelineAlwaysDrops(result.data.linkageKeys[0].elements[0].transform),
+      JSON.stringify(params),
+    ).toBe(true);
+  }
+  // Not vacuous: a window that reads something parses and is not graded dead.
+  const live = safeParseLinkageTerms(substringTerms({ start: 3, length: 5 }));
+  expect(live.success).toBe(true);
+  if (!live.success) return;
+  expect(
+    pipelineAlwaysDrops(live.data.linkageKeys[0].elements[0].transform),
+  ).toBe(false);
 });
 
 // --- transform regex pattern-length bound (source sanity pre-filter) --
