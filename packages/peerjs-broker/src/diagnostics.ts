@@ -164,7 +164,8 @@ function createSignalingDiagnosticsReporter(): (
       // the moment the window turned over, which would need a timer. A flood
       // that stops and is never followed by another diagnostic leaves its final
       // count unwritten; the notice below has already told the operator that
-      // shedding began, so what is lost is the total, not the fact.
+      // shedding began, so the fact survives, but the total and the identity
+      // of any class starved after that notice are both lost with it.
       if (shed > 0)
         log.warn(
           displayText`peerjs signaling diagnostics resumed: ${shed} suppressed while rate limited (${shedDetail})`,
