@@ -122,6 +122,43 @@ describe("require-agent-model hook", () => {
     expect(status).toBe(2);
   });
 
+  // The platform discards a fork's `model` and runs it on the parent's, so the
+  // requirement has nothing to bite on there: the spawn the hook must let through
+  // is the bare one, and the spawn it must still stop is every other bare spawn.
+  it("exempts a fork, whose model the platform discards", () => {
+    const dir = makeProject({ worker: "opus" });
+    dirs.push(dir);
+    for (const tool_input of [
+      { subagent_type: "fork", prompt: "x" },
+      { subagent_type: "fork", model: "", prompt: "x" },
+      { subagent_type: "fork", model: "sonnet", prompt: "x" },
+    ]) {
+      const { status } = runHook({ tool_name: "Agent", tool_input }, dir);
+      expect(status, JSON.stringify(tool_input)).toBe(0);
+    }
+    const { status, stderr } = runHook(
+      {
+        tool_name: "Agent",
+        tool_input: { subagent_type: "general-purpose", prompt: "x" },
+      },
+      dir,
+    );
+    expect(status).toBe(2);
+    expect(stderr).toContain("spawn of 'general-purpose'");
+  });
+
+  it("reads the exemption as an exact subagent_type, not a substring", () => {
+    const dir = makeProject({ worker: "opus" });
+    dirs.push(dir);
+    for (const subagent_type of ["forked-reviewer", "Fork", "fork "]) {
+      const { status } = runHook(
+        { tool_name: "Agent", tool_input: { subagent_type, prompt: "x" } },
+        dir,
+      );
+      expect(status, subagent_type).toBe(2);
+    }
+  });
+
   it("blocks a bare spawn that names no subagent_type", () => {
     const dir = makeProject({ worker: "opus" });
     dirs.push(dir);

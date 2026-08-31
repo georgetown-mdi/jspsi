@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // PreToolUse hook: refuse a Bash command that would delete an agent worktree
-// under .claude/worktrees/, or anything inside one this session does not own.
+// under .claude/worktrees/, or anything inside one this session is not working in.
 //
 // Why this exists: a spawned agent ran `rm -rf` across two live sibling
 // worktrees mid-session and destroyed the uncommitted work in both. Nothing else
@@ -9,16 +9,16 @@
 // that was never committed has no branch, no stash, and no reflog behind it.
 //
 // What it refuses:
-//   - a path inside a worktree this session does not own
+//   - a path inside a worktree this session is neither standing in nor owns
 //   - a worktree taken whole, this session's own included, or the root they all
 //     live under
 //   - a path that CONTAINS live worktrees, the `rm -rf /workspace` shape, which
 //     names no worktree at all
-//   - a `git clean` that would delete INSIDE a worktree this session does not
-//     own -- its force coming from a flag or from a `clean.requireForce` git
-//     resolves to false, which lifts git's own requirement -- and one whose force
-//     (a flag and that config counted together) reaches a doubled `-ff` plus -d
-//     in a directory that merely holds worktrees
+//   - a `git clean` that would delete INSIDE a worktree this session is neither
+//     standing in nor owns -- its force coming from a flag or from a
+//     `clean.requireForce` git resolves to false, which lifts git's own
+//     requirement -- and one whose force (a flag and that config counted together)
+//     reaches a doubled `-ff` plus -d in a directory that merely holds worktrees
 //   - a single-force `git clean` with -d in a directory that merely holds
 //     worktrees while any directory under the guarded root no longer resolves as
 //     a repository: git skips a repository, not a path, so an ORPHANED tree --
@@ -28,54 +28,58 @@
 //   - `git worktree remove --force`, which takes a tree git's own refusal would
 //     have held on to
 //
-// WHICH TREE A SESSION OWNS is read from the agent id the event carries, not from
-// the directory the session is sitting in. The harness gives an isolated agent a
-// worktree named after that id (`.claude/worktrees/agent-<agent_id>`, recorded as
-// `worktreePath` in the harness's own subagent metadata), while a session's Bash
-// cwd persists across calls and `cd` is unguarded -- so ownership taken from cwd
-// hands a session that once cd'ed into a sibling tree that tree's trust for the
-// rest of the run, and an everyday `cd <sibling> && rm -rf src` walks past this
-// hook. A session the event gives no agent id owns NOTHING, and every tree is
-// guarded from it: that is the right answer for the orchestrator session working
-// in the primary tree. cwd still resolves relative paths; it no longer confers
-// trust. When the id names no tree the session recognises, the refusal says so
-// rather than leaving a fail-closed refusal unexplained.
+// WHICH TREE A SESSION MAY DELETE INSIDE is answered twice over, because neither
+// answer alone is right. The first is the agent id the event carries: the harness
+// gives an isolated agent a worktree named after that id
+// (`.claude/worktrees/agent-<agent_id>`, recorded as `worktreePath` in the
+// harness's own subagent metadata), so that tree is its own wherever it is
+// standing. The second is the tree it IS standing in -- the worktree containing
+// the directory this call's operands resolve against, which a `cd` earlier on the
+// same line moves exactly as it moves that resolution. A session standing in a
+// tree is doing its work there, and clearing its own probes, screenshots and
+// review artifacts is that work: refusing it fired on a cleanup far more often
+// than on a loss, which teaches agents to read this hook's refusals as noise.
+// Neither answer buys the tree ITSELF -- a tree taken whole, and the root they all
+// live under, are refused before either is consulted, and that is the loss this
+// hook was built for. A session standing outside every tree has only what its id
+// names, and one the event gives no agent id has nothing: that is the right answer
+// for the orchestrator session working in the primary tree, from which every tree
+// stays guarded. When neither answer names a tree, the refusal says so rather than
+// leaving a fail-closed refusal unexplained.
 //
-// A TREE HANDED TO A SESSION IS NOT A TREE IT OWNS, and that is the model rather
-// than an oversight. A session pointed at an existing tree -- a spawn briefed to
-// work in one, whose own id names a tree that was never created, or a session
-// that entered one -- is refused inside it exactly as it is inside any other tree
-// its id does not name. Recognising the hand-over would need a record of it
-// written by the spawning side and keyed to the session being guarded, and there
-// is no such record to read. The harness records a worktree path only for a spawn
-// it GAVE a tree to, which is the id-named tree above, and records nothing about
-// a tree a spawn was merely pointed at -- re-verify by reading its per-spawn
-// metadata, the `agent-<id>.meta.json` beside the session transcript, where the
-// path is present for an isolated spawn and absent for every other. The spawning
-// call itself carries no identity for the session it creates, so a record keyed
-// to that session cannot be written from there either. And the one thing naming a
-// handed tree is prose in the brief the guarded session carries, which is that
-// session's own claim rather than a record about it. So recognising a hand-over is
-// a mechanism to build rather than a field to read, and none is built here. What
-// the model costs is a session that cannot delete its own leftovers in the tree it
-// was handed, which is why scratch belongs outside the tree and why the procedure
-// below exists for what is already inside one.
+// WHAT STANDING IN A TREE DOES NOT SETTLE is whether the session belongs there,
+// and nothing readable settles it. The harness records a worktree path only for a
+// spawn it GAVE a tree to, and records nothing about a tree a spawn was merely
+// pointed at -- re-verify by reading its per-spawn metadata, the
+// `agent-<id>.meta.json` beside the session transcript, where the path is present
+// for an isolated spawn and absent for every other. The spawning call carries no
+// identity for the session it creates, so a record keyed to that session cannot be
+// written from there either, and the one thing naming a handed tree is prose in
+// that session's own brief. So a session handed a tree, a session that walked into
+// one, and a session that cd'ed into a sibling on this very line are one event
+// here, and each may clear that tree's CONTENTS. What that costs is the
+// `cd <sibling> && rm -rf src` shape, which this hook no longer refuses; what it
+// buys is the fix-round shape -- a spawn pointed at an existing branch worktree --
+// cleaning up after itself. Every tree the session is not standing in, and every
+// tree taken whole, are guarded from all of them alike.
 //
-// A TREE NOBODY OWNS IS CLEARED WITHOUT A DELETION. An untracked leftover in one
-// -- a probe, a build artifact, a file a finished or killed session left -- is
-// stashed in place rather than removed: `git -C <tree> stash push -u -- <path>`
-// takes that path off disk while the content stays in the repository's stash,
-// which is shared across worktrees and outlives the tree. That is the answer to
-// both consequences of the ownership model above: it clears the untracked file
-// that holds `require-clean-tree-for-review.mjs`, and it leaves the tree retirable
-// by the plain `git worktree remove` this hook allows, which git holds back while
-// a tree carries modified or untracked files -- an ignored one does not hold it.
+// A TREE NOBODY IS STANDING IN IS CLEARED WITHOUT A DELETION. An untracked
+// leftover in a stranded tree -- a probe, a build artifact, a file a finished or
+// killed session left -- is stashed in place rather than removed:
+// `git -C <tree> stash push -u -- <path>` takes that path off disk while the
+// content stays in the repository's stash, which is shared across worktrees and
+// outlives the tree. That is the answer for a tree no session is working in: it
+// clears the untracked file that holds `require-clean-tree-for-review.mjs` back,
+// and it leaves the tree retirable by the plain `git worktree remove` this hook
+// allows, which git holds back while a tree carries modified or untracked files
+// -- an ignored one does not hold it.
 // Every step of that is driven against real git in the test beside this file
 // rather than asserted here.
 //
 // What it deliberately allows:
-//   - anything strictly inside this session's own tree (`rm -rf node_modules`,
-//     `rm dist/bundle.js`) -- ordinary work on a tree the session owns
+//   - anything strictly inside the tree this session is standing in or owns
+//     (`rm -rf node_modules`, `rm dist/bundle.js`, `rm probe.test.ts`) --
+//     ordinary work on the tree the work is happening in
 //   - `git worktree remove` without --force: git's own refusal on a tree with
 //     uncommitted work is the guard, so only the --force spelling that defeats
 //     that refusal is blocked. That plain spelling is how a finished tree is
@@ -91,7 +95,14 @@
 //
 // The commands read as deletions are rm, rmdir, unlink, shred, mv, find with a
 // deleting action, and those same commands reached through xargs in a pipeline,
-// plus the two git spellings above.
+// plus the two git spellings above. Of the words on such a line, only the ones
+// that command REMOVES are read as targets -- an mv destination, a find
+// expression's pattern or -exec command word, and every operand of a stage that
+// deletes nothing all name paths the line does not take away. A find primary
+// that runs a command of its own is read twice over, because find hands that
+// command its arguments unchanged: the tree find walks by the start-point rule,
+// and the paths standing in the -exec by the rules of the command they are
+// handed to.
 //
 // TWO QUESTIONS ARE PUT TO REAL GIT rather than modelled from its on-disk layout
 // or its configuration precedence: whether a directory under the guarded root
@@ -149,13 +160,33 @@
 //   - A `cd` MOVES THE DIRECTORY paths resolve against only when it stands as
 //     its own command, and a symlink pointing into a worktree is not resolved
 //     (removing the link does not follow it anyway).
-//   - RELATIVE-OPERAND DRIFT DETECTION DEPENDS ON THE HARNESS SUPPLYING THE
-//     SHELL'S CURRENT DIRECTORY in the event's cwd. A relative deletion aimed at
-//     a tree the session cd'ed into earlier is caught only when that drifted cwd
-//     is what the event reports; whether the harness reports the drifted shell
-//     cwd or a stale session cwd was not driven at this ref (the test supplies
-//     cwd rather than observing what the harness sends). An absolute operand is
-//     unaffected.
+//   - ONLY THE OPERANDS A DELETING COMMAND REMOVES ARE READ, so a worktree path
+//     that merely appears elsewhere on the line is not a deletion of it: an `mv`
+//     destination, a `find` expression's `-name` pattern or `-exec` command word
+//     (the paths that command is handed are read as its own), and every operand
+//     of a stage that deletes nothing all pass unread. An `mv`
+//     or a redirect that OVERWRITES a file inside a tree passes with them, as
+//     `cp` always has -- what this hook guards is a tree taken away, not a file
+//     rewritten. `xargs` is the one exception: its targets arrive from an earlier
+//     stage at runtime, so in a pipeline feeding one, every operand is a
+//     candidate.
+//   - STANDING IN A TREE IS TAKEN FOR WORKING IN IT, so `cd <sibling> && rm -rf
+//     src` is allowed where the same deletion aimed at that path from outside is
+//     refused. That is the model above rather than an oversight, and it is
+//     bounded: no `cd` reaches the tree itself, the root they all live under, or
+//     any tree other than the one the shell ends up in.
+//   - WHICH TREE THE SHELL IS STANDING IN COMES FROM THE WORKING DIRECTORY THE
+//     CALL ITSELF CARRIES, and not from a `cd` this line spells. That directory
+//     persists between calls, so a session whose directory was left inside a tree
+//     by some earlier call stands in that tree here, and every deletion of that
+//     tree's CONTENTS is allowed on a line carrying no `cd` at all -- standing is
+//     a place the session is in, not a step it takes on the guarded line. A `cd`
+//     on the line moves it from wherever it already stood, for the pipelines
+//     after that `cd`. Whether the harness reports a drifted shell cwd or a stale
+//     session cwd was not driven at this ref (the test supplies cwd rather than
+//     observing what the harness sends), so a session whose cwd has drifted into
+//     a tree may read as standing outside it -- which refuses a cleanup rather
+//     than allowing a loss.
 //   - A GIT DIRECTORY REDIRECT IS READ ONLY IN THE LITERAL FORMS MEASURED HERE:
 //     `-C` (composed left to right against the one before it, as real git
 //     composes it), `--work-tree`, and `GIT_WORK_TREE` set either as a leading
@@ -267,14 +298,14 @@ function block(reason) {
       "deleting one destroys it unrecoverably -- there is no branch, stash, or reflog " +
       "behind it. Leave another session's tree alone, and retire a finished tree with " +
       "`git worktree remove <path>` (no --force), which refuses while the tree still has " +
-      "uncommitted work. Only in a tree this session was handed -- pointed at by its own " +
-      "spawn brief, the fix-round shape -- is an untracked leftover cleared without a " +
-      "deletion: `git -C <tree> stash push -u -- <path>` takes that path off disk, keeps " +
-      "its content in the repository's stash, and leaves the tree retirable by that plain " +
-      "remove. A tree this session was not handed is another live session's workplace: a " +
-      "stash there rips files out from under its owner mid-run, so it gets no cleanup of " +
-      "any kind. If the path is not a registered worktree at all, say so to the " +
-      "maintainer rather than deleting it some other way. This hook reads a plain command " +
+      "uncommitted work. In a STRANDED tree -- one no session is working in, waiting to " +
+      "be retired -- an untracked leftover is cleared without a deletion: " +
+      "`git -C <tree> stash push -u -- <path>` takes that path off disk, keeps its " +
+      "content in the repository's stash, and leaves the tree retirable by that plain " +
+      "remove. A tree another session is working in gets no cleanup of any kind: a stash " +
+      "there rips files out from under it mid-run. If the path is not a registered " +
+      "worktree at all, say so to the maintainer rather than deleting it some other " +
+      "way. This hook reads a plain command " +
       "line and nothing more -- the limits listed in its header are real, so rephrasing " +
       "around this refusal defeats it and destroys the tree anyway.\n",
   );
@@ -451,13 +482,32 @@ function owns(path, ownTrees) {
   return ownTrees.some((tree) => isInside(path, tree));
 }
 
-// Why a refusal stands even though the session may be sitting in the tree it
-// names: ownership comes from the agent id, so this says which tree that id
-// bought, and a fail-closed refusal is diagnosable from the message alone.
-function ownershipNote(ownTrees) {
-  return ownTrees.length === 0
+// The single worktree a shell is standing in, or null when its directory is
+// outside every tree (the worktrees root itself included, which is no tree).
+function standingTreeOf(directory) {
+  return worktreeContext(directory)?.tree ?? null;
+}
+
+function standsIn(path, standingTree) {
+  return standingTree !== null && isInside(path, standingTree);
+}
+
+// Which tree the refused session may work in, so a refusal is diagnosable from
+// the message alone. Both answers are named when they differ -- a session
+// standing in one tree while its agent id names another may work in either, and
+// a message reporting one of them sends it to the wrong place. With neither, the
+// message has to say that no tree was named rather than leave the fail-closed
+// refusal unexplained.
+function ownershipNote(ownTrees, standingTree) {
+  const [owned] = ownTrees.filter((tree) => tree !== standingTree);
+  if (standingTree !== null) {
+    return owned === undefined
+      ? ` -- this session is working in '${standingTree}'`
+      : ` -- this session is working in '${standingTree}' and owns '${owned}'`;
+  }
+  return owned === undefined
     ? " -- this session owns no agent worktree"
-    : ` -- this session owns only '${ownTrees[0]}'`;
+    : ` -- this session owns only '${owned}'`;
 }
 
 // The live worktree roots that deleting `target` would carry off with it.
@@ -475,8 +525,10 @@ function rootsUnder(target, knownRoots) {
   );
 }
 
-// Why deleting `target` is refused, or null when it may proceed.
-function deletionVerdict(target, ownTrees, knownRoots) {
+// Why deleting `target` is refused, or null when it may proceed. A tree taken
+// whole and the root they all live under are settled before the standing tree is
+// consulted, so working in a tree never buys the tree itself.
+function deletionVerdict(target, ownTrees, knownRoots, standingTree) {
   const context = worktreeContext(target);
   if (context === null) {
     const [root] = rootsUnder(target, knownRoots);
@@ -488,12 +540,16 @@ function deletionVerdict(target, ownTrees, knownRoots) {
     return `'${target}' is the root every agent worktree lives under`;
   }
   if (target === context.tree) {
-    return owns(target, ownTrees)
-      ? `'${target}' is this session's own worktree, taken whole`
-      : `'${target}' is another session's worktree, taken whole${ownershipNote(ownTrees)}`;
+    if (owns(target, ownTrees)) {
+      return `'${target}' is this session's own worktree, taken whole`;
+    }
+    if (standsIn(target, standingTree)) {
+      return `'${target}' is the worktree this session is working in, taken whole`;
+    }
+    return `'${target}' is another session's worktree, taken whole${ownershipNote(ownTrees, standingTree)}`;
   }
-  if (owns(target, ownTrees)) return null;
-  return `'${target}' is inside '${context.tree}', an agent worktree this session does not own${ownershipNote(ownTrees)}`;
+  if (owns(target, ownTrees) || standsIn(target, standingTree)) return null;
+  return `'${target}' is inside '${context.tree}', an agent worktree this session is not working in${ownershipNote(ownTrees, standingTree)}`;
 }
 
 // Tokens that are argument syntax rather than operands, so they are never
@@ -504,12 +560,23 @@ function isPathOperand(token) {
   );
 }
 
+// The `find` primaries that run a command of their own.
+const EXEC_PRIMARY = /^-(exec|execdir|ok|okdir)$/;
+
+// What ends such a primary within a single stage: a `+`, or the bare `\` a `\;`
+// terminator leaves behind -- the stage splitting above takes a `;` byte whether
+// the shell escaped it or not, so only the escape reaches here, and a quoted
+// `';'` leaves nothing at all, ending the primary at the end of the stage.
+function endsExec(token) {
+  return token === "+" || /^\\+$/.test(token);
+}
+
 function deletesPaths(command) {
   if (DELETING_COMMANDS.has(command.name)) return true;
   if (command.name === "find") {
     return (
       command.args.includes("-delete") ||
-      (command.args.some((arg) => /^-(exec|execdir|ok|okdir)$/.test(arg)) &&
+      (command.args.some((arg) => EXEC_PRIMARY.test(arg)) &&
         command.args.some((arg) => DELETING_COMMANDS.has(commandName(arg))))
     );
   }
@@ -517,6 +584,103 @@ function deletesPaths(command) {
     return command.args.some((arg) => DELETING_COMMANDS.has(commandName(arg)));
   }
   return false;
+}
+
+// `find` removes what it walks, so its targets are its START POINTS: the run of
+// path operands that begins at the first one, ending at the expression that
+// follows them. A leading option (`find -L <tree> ...`) is stepped over rather
+// than read as the end of the list, and an operand inside the expression is
+// never one of them: a `-name` pattern and an `-exec` command word name nothing
+// find removes, while the paths an `-exec` hands a deleting command are read as
+// that command's own.
+function startPoints(args) {
+  const points = [];
+  for (const arg of args) {
+    if (isPathOperand(arg)) points.push(arg);
+    else if (points.length > 0) break;
+  }
+  return points;
+}
+
+// What a `find` primary's own command removes: find hands that command the
+// arguments standing between its command word and the terminator unchanged, so a
+// path written there is one the line takes away even though find never walked it
+// (`find /tmp -maxdepth 0 -exec rm -rf <tree> +` names no worktree among its
+// start points). The arguments are read by the rules of the command they belong
+// to, so an `mv` destination inside an `-exec` is no more a removal than one on
+// a stage of its own, and the `{}` find substitutes is not a literal path.
+function execTargets(args) {
+  const targets = [];
+  for (const [index, arg] of args.entries()) {
+    if (!EXEC_PRIMARY.test(arg)) continue;
+    const word = args[index + 1];
+    if (word === undefined || !DELETING_COMMANDS.has(commandName(word))) {
+      continue;
+    }
+    const end = args.findIndex((token, at) => at > index && endsExec(token));
+    targets.push(
+      ...removalTargets({
+        name: commandName(word),
+        args: args.slice(index + 2, end < 0 ? args.length : end),
+      }),
+    );
+  }
+  return targets;
+}
+
+// Where a flag names the destination `mv` writes to: the index of the operand
+// holding it, or null when the flag carries it inside its own token. Undefined
+// when no flag names one at all, which leaves the destination the last operand.
+// A short `-t` is read the way getopt reads it whatever it is bundled with, so
+// `mv -vt DIR src` and `mv -fvtDIR src` name a destination exactly as `mv -t DIR
+// src` does: the letters after that `t` are the directory when there are any,
+// and the next argument is it when there are none.
+function destinationOperand(args) {
+  for (const [index, arg] of args.entries()) {
+    if (arg === "--target-directory") return index + 1;
+    if (arg.startsWith("--target-directory=")) return null;
+    if (!/^-[^-]/.test(arg)) continue;
+    const bundled = arg.indexOf("t", 1);
+    if (bundled < 0) continue;
+    return bundled === arg.length - 1 ? index + 1 : null;
+  }
+  return undefined;
+}
+
+// `mv` removes its SOURCES and writes its destination, so the destination -- the
+// last operand, or the one a `-t` names -- is not a path it takes away. What that
+// leaves unread is an mv that OVERWRITES a file in a tree, which is outside this
+// hook's subject exactly as `cp` and a `>` redirect are: neither takes the tree,
+// and neither is read here.
+function moveSources(args) {
+  const destination = destinationOperand(args);
+  const operands = args.filter(
+    (arg, index) => isPathOperand(arg) && index !== destination,
+  );
+  return destination === undefined ? operands.slice(0, -1) : operands;
+}
+
+// The paths a deleting command actually removes.
+function removalTargets(command) {
+  if (command.name === "find") {
+    return [...startPoints(command.args), ...execTargets(command.args)];
+  }
+  if (command.name === "mv") return moveSources(command.args);
+  return command.args.filter(isPathOperand);
+}
+
+// The candidate targets of a pipeline: the operands its deleting commands remove,
+// and nothing else on the line. `xargs` is the one shape whose targets are not on
+// its own stage -- `find <tree> -print0 | xargs -0 rm -rf` names the tree in the
+// stage that reads it -- so there, and only there, every operand in the pipeline
+// is a candidate.
+function removalOperands(commands) {
+  const deleting = commands.filter(deletesPaths);
+  if (deleting.length === 0) return [];
+  if (deleting.some((command) => command.name === "xargs")) {
+    return commands.flatMap((command) => command.args).filter(isPathOperand);
+  }
+  return deleting.flatMap(removalTargets);
 }
 
 // git global options that consume a following token as their value, so the
@@ -650,19 +814,22 @@ function gitCleanVerdict(
   knownRoots,
   configSettings,
   environment,
+  standingTree,
 ) {
   if (isDryRun(args)) return null;
   const flagForce = forceCount(args);
   const context = worktreeContext(directory);
   if (context !== null) {
-    if (owns(directory, ownTrees)) return null;
+    if (owns(directory, ownTrees) || standsIn(directory, standingTree)) {
+      return null;
+    }
     if (
       flagForce === 0 &&
       !forceRequirementLifted(directory, configSettings, flagForce, environment)
     ) {
       return null;
     }
-    return `'git clean' would delete inside '${directory}', an agent worktree this session does not own${ownershipNote(ownTrees)}`;
+    return `'git clean' would delete inside '${directory}', an agent worktree this session is not working in${ownershipNote(ownTrees, standingTree)}`;
   }
   const cleansDirectories = args.some(
     (arg) => arg === "--directories" || /^-[a-ce-z]*d/.test(arg),
@@ -712,7 +879,14 @@ function gitDirectory(git, cwd, environment) {
   return workTree === null ? chdir : resolve(chdir, workTree);
 }
 
-function gitVerdict(args, cwd, ownTrees, knownRoots, environment) {
+function gitVerdict(
+  args,
+  cwd,
+  ownTrees,
+  knownRoots,
+  environment,
+  standingTree,
+) {
   const git = gitInvocation(args);
   const directory = gitDirectory(git, cwd, environment);
   if (git.subcommand === "clean") {
@@ -723,6 +897,7 @@ function gitVerdict(args, cwd, ownTrees, knownRoots, environment) {
       knownRoots,
       git.configSettings,
       environment,
+      standingTree,
     );
   }
   if (git.subcommand !== "worktree" || git.args[0] !== "remove") return null;
@@ -777,6 +952,10 @@ function main() {
   let cwd = sessionCwd;
   const exported = new Map();
   for (const pipeline of splitPipelines(command)) {
+    // The tree the shell stands in when this pipeline runs, which a `cd` in an
+    // earlier one moves exactly as it moves what a relative operand resolves
+    // against.
+    const standingTree = standingTreeOf(cwd);
     const commands = splitStages(pipeline)
       .map((stage) => invocation(tokenize(stage)))
       .filter((entry) => entry !== null);
@@ -788,22 +967,18 @@ function main() {
         ownTrees,
         knownRoots,
         new Map([...exported, ...entry.environment]),
+        standingTree,
       );
       if (reason) block(reason);
     }
-    // Once any stage of a pipeline deletes, every operand in it is a candidate
-    // target: `find <tree> -print0 | xargs -0 rm -rf` names the tree in the
-    // stage that reads it, not the stage that deletes it.
-    if (commands.some(deletesPaths)) {
-      for (const token of commands.flatMap((entry) => entry.args)) {
-        if (!isPathOperand(token)) continue;
-        const reason = deletionVerdict(
-          resolve(cwd, token),
-          ownTrees,
-          knownRoots,
-        );
-        if (reason) block(reason);
-      }
+    for (const token of removalOperands(commands)) {
+      const reason = deletionVerdict(
+        resolve(cwd, token),
+        ownTrees,
+        knownRoots,
+        standingTree,
+      );
+      if (reason) block(reason);
     }
     if (commands.length === 1) {
       for (const [name, value] of exportedAssignments(commands[0])) {

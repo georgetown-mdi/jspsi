@@ -6,6 +6,27 @@
 // model, with no error and no tell. That leak is exactly what this hook forbids --
 // every spawn must choose its model, either inline or through a pinned definition.
 //
+// ONE SUBAGENT TYPE IS EXEMPT: `fork`. A fork inherits the parent session and runs
+// on the parent's model, and the platform DISCARDS a `model` passed with it, so the
+// inheritance this hook exists to stop is the documented and unavoidable behavior of
+// that spawn rather than a leak an author could have closed. Requiring a model there
+// refuses a correct call and teaches nothing: the value it demands changes no
+// outcome. So a fork passes with whatever it carries, and the tier check does not
+// run on it either -- validating a string the platform discards is theater, and this
+// hook has nothing to say about a model that was never a choice.
+//
+// Dated basis: 2026-08-31, the Agent tool's own parameter contract -- `"fork"` forks
+// yourself, "the fork inherits your full conversation context and always runs on
+// your model -- a `model` override is ignored". This is a dated platform-behavior
+// exemption, not eternal law.
+//
+// Re-verification method: from a session on one tier, spawn a fork passing `model`
+// set to a DIFFERENT tier, and read `message.model` on the fork's first assistant
+// turn in its transcript (`agent-<id>.jsonl` beside the session transcript). The
+// exemption holds while that resolves to the PARENT's tier. If it ever resolves to
+// the passed tier, a fork's model is a real choice again: delete the exemption
+// below, its test, and this note.
+//
 // Fail-open scaffolding follows block-protected-push.mjs: JSON event on stdin, exit
 // 0 allows, exit 2 blocks and feeds stderr back to Claude. An unexpected failure
 // falls through to exit 0 -- EXCEPT the bare-spawn path (no explicit model), which
@@ -16,6 +37,9 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 const TIERS = new Set(["opus", "sonnet", "haiku", "fable"]);
+
+// The subagent type whose model the platform discards; see the header's dated basis.
+const INHERITING_SUBAGENT_TYPE = "fork";
 
 function block(reason) {
   process.stderr.write(`Blocked by require-agent-model hook: ${reason}.\n`);
@@ -68,6 +92,9 @@ function main() {
   }
   if (event.tool_name !== "Agent") process.exit(0);
 
+  const subagentType = event?.tool_input?.subagent_type;
+  if (subagentType === INHERITING_SUBAGENT_TYPE) process.exit(0);
+
   const model = event?.tool_input?.model;
   if (typeof model === "string" && model.length > 0) {
     // Explicit-model spawn: validate the tier and never touch the filesystem.
@@ -102,7 +129,6 @@ function main() {
     );
   }
 
-  const subagentType = event?.tool_input?.subagent_type;
   if (typeof subagentType === "string" && pinned.has(subagentType)) {
     process.exit(0);
   }

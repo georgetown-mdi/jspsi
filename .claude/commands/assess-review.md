@@ -194,9 +194,7 @@ there is the one the brief describes.
   implementer that its own scratch -- measurement files, repro probes, one-off
   scripts, build-output experiments -- goes to `/tmp`, never inside the branch
   worktree: an untracked leftover there blocks
-  `require-clean-tree-for-review.mjs` on the branch's next round, and a fix
-  implementer spawned into that worktree does not own it, so
-  `block-worktree-deletions.mjs` refuses to let it clean the leftover up.
+  `require-clean-tree-for-review.mjs` on the branch's next round.
 - **A small fix travels as its exact edit.** For a fix under roughly 20 lines,
   the brief carries the edit itself -- the file, the old text, the new text, and
   the test to run -- and the spawn is a `sonnet` implementer applying it. Writing
