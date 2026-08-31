@@ -102,7 +102,7 @@ describe("fetchJobExchangeRecordOffer", () => {
   });
 
   test("a record the appliance holds and cannot describe is its own answer", async () => {
-    // The version-skew case this reader's own `none` used to swallow: a record
+    // The version-skew case, distinct from a plain `none` denial: a record
     // file IS in the run's folder, written by a psilink the appliance does not
     // recognize, and nothing downloads (the routes 404 under the same gate). The
     // seat must not read that as the absence of a record, because the controls
