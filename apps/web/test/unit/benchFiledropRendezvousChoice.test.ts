@@ -67,11 +67,13 @@ describe("the invitation endpoint a console filedrop mints", () => {
     // The endpoint the console composes has to decode on the partner's side, and
     // core refuses a filedrop endpoint whose halves resolve alike -- so this is
     // the check that the console's two locators reach a real mint distinct, rather
-    // than a restatement of the rule.
+    // than a restatement of the rule. Minted with the retain declaration core
+    // requires beside a split pair, as a console mint of this rendezvous carries.
     const decoded = await decodeInvitation(
       await encodeInvitation({
         ...BASE_TOKEN,
         connectionEndpoint: filedropEndpointForRendezvous(SPLIT),
+        inviterRetainsFiles: true,
       }),
     );
     expect(decoded.connectionEndpoint).toEqual({
@@ -83,7 +85,9 @@ describe("the invitation endpoint a console filedrop mints", () => {
 
   test("core refuses a mint whose two locators resolve alike", async () => {
     // The refusal the boot-time name check exists to keep an operator from
-    // meeting here, where it names nothing they can act on.
+    // meeting here, where it names nothing they can act on. Matched on the
+    // distinctness message and minted with the retain declaration, so the split
+    // pair's own mint rule cannot stand in for the refusal under test.
     await expect(
       encodeInvitation({
         ...BASE_TOKEN,
@@ -91,8 +95,9 @@ describe("the invitation endpoint a console filedrop mints", () => {
           ...SPLIT,
           outboundLocator: "from-partner",
         }),
+        inviterRetainsFiles: true,
       }),
-    ).rejects.toThrow();
+    ).rejects.toThrow(/must differ/);
   });
 
   test("no mount, or a mount with no locator, mints nothing", () => {

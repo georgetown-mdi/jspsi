@@ -454,16 +454,21 @@ export interface InvitationToken {
    * bilateral flag is not negotiating one; see docs/spec/FILE_SYNC.md
    * ("Bilateral configuration: detect and fail, never negotiate").
    *
-   * psilink's mint paths carry it only as `true`, and only from a configuration
-   * that has retain mode on. Absence is "nothing declared", not "delete mode": a
-   * mint path may have no settled connection to read (an offline invite whose
-   * connection block is still a placeholder scaffold), the channel may have no
-   * retain mode at all (`webrtc`), or the token may predate this field. A `false`
-   * from a foreign implementation decodes and states nothing, which is what both
-   * acceptance surfaces render for it -- the `retainedFiles` entry of
-   * `consentFacts.ts` carries why the negative is not a claim either. The one
-   * `false` the schema refuses outright sits beside a split-directory endpoint,
-   * whose shape ({@link endpointRequiresRetainedFiles}) contradicts it.
+   * Absence is "nothing declared", not "delete mode": a mint path may have no
+   * settled connection to read (an offline invite whose connection block is still
+   * a placeholder scaffold), the channel may have no retain mode at all
+   * (`webrtc`), or the token may predate this field. A `false` from a foreign
+   * implementation decodes and states nothing, which is what both acceptance
+   * surfaces render for it -- the `retainedFiles` entry of `consentFacts.ts`
+   * carries why the negative is not a claim either.
+   *
+   * Two pairings {@link InvitationTokenSchema} refuses outright, at encode and at
+   * decode alike, each stating a mode no run of the token could be in: a `true`
+   * beside a `webrtc` endpoint, and a `false` beside a split-directory endpoint
+   * whose shape ({@link endpointRequiresRetainedFiles}) contradicts it. A third
+   * rule binds a MINT alone -- see {@link MintedInvitationTokenSchema}, which is
+   * why "psilink emits the declaration wherever the endpoint's shape requires
+   * retention" is a check rather than a claim made here.
    *
    * `lockless_rendezvous` is equally bilateral and equally fast-failing and is
    * deliberately NOT carried: nothing about it changes what an acceptor consents
@@ -619,6 +624,45 @@ const InvitationTokenSchema: z.ZodType<InvitationToken> =
       },
     );
 
+/**
+ * {@link InvitationTokenSchema} plus the one rule that binds a MINT and not a
+ * decode: a token carrying a split `inboundPath`/`outboundPath` endpoint must
+ * declare `inviterRetainsFiles: true`.
+ *
+ * Every connection built from that endpoint runs in retain mode
+ * ({@link endpointRequiresRetainedFiles}), so an invitation emitting one while
+ * leaving the retention undeclared offers the partner a permanent transcript that
+ * only the locator's shape reveals -- and any artifact composed from the
+ * declaration rather than from the shape (an accept kit's file-handling
+ * disclosure among them) then states nothing. This is the executable form of that
+ * invariant, at the single seam every mint path reaches, so no producer has to
+ * restate it as a gate of its own.
+ *
+ * Mint-only, and deliberately NOT a tightening of
+ * {@link InvitationTokenSchema}: an omitted declaration beside a split endpoint
+ * remains a valid token to DECODE, because absence means "nothing declared" and
+ * every psilink read path derives the retention from the endpoint's shape rather
+ * than from the declaration (`summarizeInvitation` ORs
+ * {@link endpointRequiresRetainedFiles} into its retained-files disclosure, and
+ * the accept paths seed the retain trio from the same predicate). Refusing it at
+ * decode would reject, on a public protocol surface, a foreign token psilink
+ * already handles and displays correctly.
+ */
+const MintedInvitationTokenSchema: z.ZodType<InvitationToken> =
+  InvitationTokenSchema.refine(
+    (token) =>
+      !endpointRequiresRetainedFiles(token.connectionEndpoint) ||
+      token.inviterRetainsFiles === true,
+    {
+      message:
+        "inviterRetainsFiles must be true on an invitation carrying a " +
+        "connection endpoint with the inbound_path/outbound_path pair; a " +
+        "split directory puts every connection built from it in retain mode, " +
+        "so the invitation must declare the retention it hands the acceptor",
+      path: ["inviterRetainsFiles"],
+    },
+  );
+
 // --- Lifetime policy ---------------------------------------------------------
 
 /**
@@ -695,13 +739,19 @@ export const MAX_ENCODED_INVITATION_LENGTH = 64 * 1024;
  * detection. The checksum provides no security guarantee; the key exchange handles
  * authentication.
  *
+ * This is the mint seam every psilink invitation is emitted through, so it
+ * validates against {@link MintedInvitationTokenSchema} -- strictly stronger than
+ * the schema {@link decodeInvitation} parses, by the split-endpoint retain
+ * declaration it requires. Producing a token psilink would not itself emit is
+ * refused here rather than at each caller's own gate.
+ *
  * Uses `btoa`/`atob` and `globalThis.crypto.subtle.digest`
  * (Node.js 19+ / all modern browsers).
  *
  * @throws {Error} if `expires` is set to a time that is not in the future, or if
  *   the encoded token exceeds {@link MAX_ENCODED_INVITATION_LENGTH} (a token that
  *   could not be decoded; fires only on a programming error, not a real config).
- * @throws {ZodError} if the token fails schema validation.
+ * @throws {ZodError} if the token fails {@link MintedInvitationTokenSchema}.
  * @throws {NestingDepthExceededError|NodeCountExceededError} if the token's
  *   `transform.params` is too deeply nested or too wide for the bounded camelCase
  *   pre-pass `InvitationLinkageTermsSchema` runs while validating (the same
@@ -721,7 +771,7 @@ export async function encodeInvitation(
   // schema's fields are encoded" a structural guarantee rather than one that
   // rests on TypeScript. (Endpoint sub-schemas are strict, so a credential on
   // the endpoint is already rejected, not merely stripped.)
-  const validated = InvitationTokenSchema.parse(token);
+  const validated = MintedInvitationTokenSchema.parse(token);
   if (
     validated.expires !== undefined &&
     new Date(validated.expires) <= new Date()
