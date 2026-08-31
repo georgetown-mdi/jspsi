@@ -684,7 +684,8 @@ each of those pins is, and how the current values were resolved, is in
 follows is the procedure that keeps them together.
 
 **No mechanical arrival signal, by configuration.** The docker ecosystem block
-in `.github/dependabot.yml` ignores `amazonlinux`, so nothing opens a pull
+in `.github/dependabot.yml` ignores `amazonlinux`, so once that entry sits on the
+branch Dependabot reads its configuration from (below), nothing opens a pull
 request when the tag is rebuilt onto a newer rootfs. The four values below have
 to name one release between them and the move carries a re-measurement
 obligation besides, none of which a version comparison over tag components can
@@ -696,6 +697,23 @@ treatments are deliberately different, and
 [Bumping the default base image](#bumping-the-default-base-image) is the other
 one. Why the split was taken is in
 [fips-variant-image.md](../notes/fips-variant-image.md#why-the-base-is-held-out-of-dependabot).
+
+**Which branch that entry is read from.** Dependabot resolves
+`.github/dependabot.yml` from the repository's default branch (`main`) rather
+than from the branch an update targets, so an entry merged to `staging`
+suppresses nothing until a release promotion carries it to `main`. Observed
+2026-08-31, with the `amazonlinux` entry on `staging` and `main`'s copy of the
+file carrying none: a docker-ecosystem run triggered by hand showed
+`"ignore-conditions": []` in its update-job definition and filed a bump of this
+base's digest against `staging` (PR #1166). The same default-branch evaluation
+governs Dependabot's security alerts, which
+[RELEASES.md](../RELEASES.md#4-review-and-audit-dependencies) records for
+triage. What settles the reading: the first docker-ecosystem run after a
+promotion carries the entry to `main` shows an `ignore-conditions` entry naming
+`amazonlinux` instead of an empty list. While the list reads empty the entry is
+inert and an `amazonlinux` pull request that arrives is closed unmerged -- what
+the entry removes is a filing, and the digest freeze plus the procedure below is
+what holds the base either way.
 
 **What surfaces a base worth moving to**, in the absence of a filed bump:
 
