@@ -144,17 +144,20 @@ export function installCapturedLogsInterceptor(): void {
  * concurrent calls do not affect each other's observable output.
  * If `fn` rejects, captured logs are discarded and the rejection propagates.
  * Limitations: messages below loglevel's current threshold are never delivered to
- * `methodFactory` (loglevel assigns `noop` directly) and will not be captured; a
- * named logger created before the interceptor is installed binds to the pre-install
- * factory and bypasses capture -- call `installCapturedLogsInterceptor` from test
- * setup, ahead of any logger, to close that creation-order gap (the CLI integration
- * suite does, so its loggers are captured regardless of creation order). Separately,
- * a diagnostic sink installed via `setDiagnosticSink` (the CLI's stderr / `--log-file`
- * routing) is consulted at emit time DOWNSTREAM of this interceptor, so while such a
- * sink is active `setLogPrefixer` routes to it and never reaches the captured factory
- * -- output is not captured here. Do not pair `withCapturedLogs` with a command
- * handler that installs a sink; drive the inner seam directly, as the integration
- * suite does. */
+ * `methodFactory` (loglevel assigns `noop` directly) and will not be captured. A
+ * `getLoggerForVerbosity` logger never sets a level more verbose than the current
+ * root, so a `.debug()` line stays unreachable at `verbose: 1` until the root itself
+ * is raised (e.g. `logLibrary.setLevel("trace")`) before the logger is constructed.
+ * Separately, a named logger created before the interceptor is installed binds to
+ * the pre-install factory and bypasses capture -- call `installCapturedLogsInterceptor`
+ * from test setup, ahead of any logger, to close that creation-order gap (the CLI
+ * integration suite does, so its loggers are captured regardless of creation order).
+ * Separately still, a diagnostic sink installed via `setDiagnosticSink` (the CLI's
+ * stderr / `--log-file` routing) is consulted at emit time DOWNSTREAM of this
+ * interceptor, so while such a sink is active `setLogPrefixer` routes to it and
+ * never reaches the captured factory -- output is not captured here. Do not pair
+ * `withCapturedLogs` with a command handler that installs a sink; drive the inner
+ * seam directly, as the integration suite does. */
 export function withCapturedLogs<T>(
   fn: () => Promise<T>,
   levelFilter?: (level: string) => boolean,
