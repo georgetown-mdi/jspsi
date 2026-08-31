@@ -6,6 +6,7 @@ import {
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
   DEFAULT_MAX_DISPLAY_LENGTH,
   DISPLAY_TRUNCATION_MARKER,
+  redactPrivateKeyMaterial,
   sanitizeErrorForDisplay,
 } from "@psilink/core";
 
@@ -220,6 +221,91 @@ describe("observePeerAnswer reads what answered the port", () => {
     expect(await observePeerAnswer(endpoint, 150)).toEqual({
       kind: "unobserved",
     });
+  });
+});
+
+// A peer answering the port with PEM-shaped bytes. The strip runs over the whole
+// retained read and the excerpt bound is applied to what it leaves, so every
+// consumer is handed the same treated bytes rather than each remembering the
+// call. The clip is what makes that order load-bearing -- a marker it cut in half
+// matches neither redaction rule -- so the marker's three placements relative to
+// the bound are driven separately, over real sockets like the reads above.
+describe("the excerpt is redacted before it is clipped", () => {
+  const HTTP_HEAD = "HTTP/1.0 200 OK\r\n\r\n";
+  const BEGIN_MARKER = "-----BEGIN OPENSSH PRIVATE KEY-----";
+  const END_MARKER = "-----END OPENSSH PRIVATE KEY-----";
+  const KEY_BODY = "b3BlbnNzaC1rZXktdjEAAAAABG5vbmU";
+  const REDACTION = "[redacted private key]";
+
+  /** What the read retains of `answer`, as the classification leaves it. */
+  const excerptOf = async (answer: string): Promise<string> => {
+    expect(answer.length).toBeLessThan(PEER_ANSWER_READ_MAX_BYTES);
+    const endpoint = await peerAnswering((socket) => socket.end(answer));
+    const observed = await observePeerAnswer(endpoint, BUDGET_MS);
+    expect(observed.kind).toBe("non-ssh");
+    return observed.kind === "non-ssh" ? observed.excerpt : "";
+  };
+
+  test("a whole block inside the excerpt is replaced", async () => {
+    const answer = `${HTTP_HEAD}${BEGIN_MARKER}\r\n${KEY_BODY}\r\n${END_MARKER}\r\n`;
+    expect(answer.length).toBeLessThanOrEqual(PEER_EXCERPT_MAX_BYTES);
+    expect(await excerptOf(answer)).toBe(`${HTTP_HEAD}${REDACTION}\r\n`);
+  });
+
+  test("a block whose body runs past the excerpt is replaced from its marker", async () => {
+    // The fail-closed dangling rule: a BEGIN with no END within the read, which
+    // is what a real key answered onto this port looks like from here.
+    const answer = `${HTTP_HEAD}${BEGIN_MARKER}\r\n${"A".repeat(300)}`;
+    expect(await excerptOf(answer)).toBe(`${HTTP_HEAD}${REDACTION}`);
+  });
+
+  test("a marker straddling the clip leaves no fragment behind", async () => {
+    // The marker starts half its own length before the bound, so the clip taken
+    // first would cut it in two and hand a consumer a fragment neither rule
+    // matches.
+    const preamble = "X".repeat(
+      PEER_EXCERPT_MAX_BYTES - Math.floor(BEGIN_MARKER.length / 2),
+    );
+    expect(preamble.length).toBeLessThan(PEER_EXCERPT_MAX_BYTES);
+    expect(preamble.length + BEGIN_MARKER.length).toBeGreaterThan(
+      PEER_EXCERPT_MAX_BYTES,
+    );
+    const excerpt = await excerptOf(
+      `${preamble}${BEGIN_MARKER}\r\n${KEY_BODY}`,
+    );
+    expect(excerpt.startsWith(preamble)).toBe(true);
+    // What the clip cuts is the replacement rather than the marker, so nothing
+    // of the block reaches the bound at all.
+    expect(REDACTION.startsWith(excerpt.slice(preamble.length))).toBe(true);
+    expect(excerpt).not.toContain("BEGIN");
+    expect(excerpt).not.toContain(KEY_BODY);
+    // A consumer's own pass finds nothing left to strip: the treatment travels
+    // with the excerpt rather than being owed by whoever holds it next.
+    expect(redactPrivateKeyMaterial(excerpt)).toBe(excerpt);
+  });
+
+  test("a marker starting past the clip leaves the excerpt the bytes it was", async () => {
+    const preamble = "X".repeat(PEER_EXCERPT_MAX_BYTES * 2);
+    const excerpt = await excerptOf(
+      `${preamble}${BEGIN_MARKER}\r\n${KEY_BODY}`,
+    );
+    expect(excerpt).toBe("X".repeat(PEER_EXCERPT_MAX_BYTES));
+  });
+
+  test("the composed chain carries the stripped excerpt as it stands", async () => {
+    const excerpt = await excerptOf(
+      `${HTTP_HEAD}${BEGIN_MARKER}\r\n${KEY_BODY}`,
+    );
+    const text = rendered(
+      explainPeerIdentificationFailure(
+        new Error("Connection lost before handshake"),
+        { kind: "non-ssh", shape: "http", excerpt },
+        { host: "sftp.example.test", port: 22 },
+      ),
+    );
+    expect(text).toContain(REDACTION);
+    expect(text).not.toContain(KEY_BODY);
+    expect(text).not.toContain("BEGIN");
   });
 });
 

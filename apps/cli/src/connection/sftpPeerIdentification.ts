@@ -22,8 +22,9 @@
 // What the operator is told rests on THAT read rather than on the rejection's
 // text: the message fragment only decides whether to look, and a peer that turns
 // out to be a healthy SSH server is left with the rejection it already had. The
-// excerpt is bytes an untrusted party chose, so it rides a display link of its
-// own (see explainPeerIdentificationFailure).
+// excerpt is bytes an untrusted party chose, so it is redacted of private-key
+// material where it is produced (see classifyPeerAnswer) and rides a display
+// link of its own (see explainPeerIdentificationFailure).
 
 import net from "node:net";
 
@@ -76,6 +77,10 @@ export const PEER_ANSWER_READ_MAX_BYTES = 512;
  * Sized so an excerpt of printable bytes renders whole within one display link,
  * and so an excerpt of bytes that each escape to four characters spends only its
  * own link when it does not.
+ *
+ * The private-key strip runs over the whole retained read before this clip
+ * (see {@link classifyPeerAnswer}), so the bound is applied to text already
+ * redacted and never the other way round.
  */
 export const PEER_EXCERPT_MAX_BYTES = 128;
 
@@ -91,7 +96,10 @@ export type PeerAnswer =
   /** The peer sent an SSH identification string: it is an SSH server, and the
    * dial failed for some other reason. */
   | { kind: "identified" }
-  /** The peer sent bytes that are not an SSH identification string. */
+  /** The peer sent bytes that are not an SSH identification string. `excerpt`
+   * is what its first bytes carried, redacted and then clipped by
+   * {@link classifyPeerAnswer}, so every consumer holds the same treated bytes.
+   */
   | { kind: "non-ssh"; shape: PeerAnswerShape; excerpt: string }
   /** The peer accepted the connection and then closed or reset it having sent
    * nothing at all. */
@@ -163,6 +171,19 @@ const isTlsAlertRecord = (bytes: Uint8Array): boolean =>
  * escapes each one to a `\xHH` an operator can read back, where a utf8 decode
  * would collapse every invalid sequence to one replacement character and lose
  * the bytes that identify what answered.
+ *
+ * The excerpt is redacted of private-key material over the WHOLE retained read
+ * and clipped afterwards, which is the order {@link redactPrivateKeyMaterial}
+ * is written for: a clip taken first can cut a `BEGIN ... PRIVATE KEY` marker in
+ * half, leaving a fragment neither the block rule nor the dangling rule matches,
+ * so a consumer redacting the clipped excerpt would strip nothing. Redacting
+ * here rather than at each consumer is also what makes the two routes carry the
+ * same bytes -- the composed cause chain and the `--json` diagnosis line -- and
+ * gives a later consumer the treatment without having to know to ask for it.
+ *
+ * Classification reads the RAW text: a peer that planted a marker ahead of a
+ * real identification string would otherwise have the fail-closed dangling rule
+ * swallow that string and turn an SSH server into a non-SSH answer.
  */
 function classifyPeerAnswer(bytes: Uint8Array): PeerAnswer {
   if (bytes.length === 0) return { kind: "closed-unanswered" };
@@ -176,7 +197,7 @@ function classifyPeerAnswer(bytes: Uint8Array): PeerAnswer {
   return {
     kind: "non-ssh",
     shape,
-    excerpt: text.slice(0, PEER_EXCERPT_MAX_BYTES),
+    excerpt: redactPrivateKeyMaterial(text).slice(0, PEER_EXCERPT_MAX_BYTES),
   };
 }
 
@@ -257,7 +278,8 @@ export function observePeerAnswer(
  * {@link PeerAnswer} arms that say something about the peer, without the two
  * that say nothing (`identified` and `unobserved` compose no diagnostic at all).
  * Carried on the raised error so a caller classifies on structure rather than on
- * the composed sentence.
+ * the composed sentence. `excerpt` is the producer's, private-key material
+ * already stripped from it, so a consumer emits it as it stands.
  */
 export type PeerIdentificationDiagnosis =
   | { kind: "non-ssh"; shape: PeerAnswerShape; excerpt: string }
@@ -344,9 +366,11 @@ const READ_PROVENANCE =
  * untrusted party CHOSE, and the configured endpoint is copied out of an
  * operator config or a partner's invitation under no length bound, so a link
  * shared with first-party text would let either delete the step the operator has
- * to act on. Fragments are composed RAW and redacted where they are
- * interpolated; the display sink escapes the rendered chain exactly once (see
- * CONTRIBUTING.md, Operator-facing escaping).
+ * to act on. Fragments are composed RAW and redacted before they are bounded:
+ * the endpoint here, where it is interpolated, and the peer's excerpt at its
+ * producer, which is why this interpolates it as it stands. The display sink
+ * escapes the rendered chain exactly once (see CONTRIBUTING.md, Operator-facing
+ * escaping).
  *
  * @internal
  */
@@ -396,8 +420,7 @@ export function explainPeerIdentificationFailure(
             `identifies itself late, reads this way too.`,
           READ_PROVENANCE,
           endpointDetail,
-          `first bytes the peer sent: ` +
-            redactPrivateKeyMaterial(answer.excerpt),
+          `first bytes the peer sent: ${answer.excerpt}`,
         ],
         error,
       ),

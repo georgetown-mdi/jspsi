@@ -5,7 +5,6 @@ import {
   HOST_KEY_FINGERPRINT_REGEX,
   UsageError,
   redactAndSanitizeForDisplay,
-  redactPrivateKeyMaterial,
 } from "@psilink/core";
 import type { PresentedHostKey, SFTPConnectionConfig } from "@psilink/core";
 import type { PeerIdentificationDiagnosis } from "../connection/sftpPeerIdentification";
@@ -204,13 +203,12 @@ function probeJsonLine(presented: PresentedHostKey): string {
  * success line, and `diagnosis` is the discriminant -- the success line carries
  * no such key, so the two shapes can never be read for one another.
  *
- * The excerpt is bytes an untrusted party chose, and it takes the two passes the
- * human route takes over the same bytes. It is bounded at composition (see
- * `PEER_EXCERPT_MAX_BYTES` in connection/sftpPeerIdentification), redacted of
- * private-key material where it is interpolated here exactly as
- * explainPeerIdentificationFailure redacts it, and emitted through
- * {@link asciiSafeJsonLine}, which leaves every byte of the LINE printable
- * ASCII.
+ * The excerpt is bytes an untrusted party chose. It arrives redacted of
+ * private-key material and bounded, both done where it is produced (see
+ * `classifyPeerAnswer` and `PEER_EXCERPT_MAX_BYTES` in
+ * connection/sftpPeerIdentification), so this route carries the same bytes the
+ * human one does and emits them through {@link asciiSafeJsonLine}, which leaves
+ * every byte of the LINE printable ASCII.
  *
  * Those escapes are the JSON encoding's own, so what a consumer parses back is
  * the peer's bytes unchanged: this is not a display boundary, and a consumer
@@ -228,7 +226,7 @@ export function probeDiagnosisJsonLine(
       : {
           diagnosis: "non_ssh",
           shape: diagnosis.shape,
-          excerpt: redactPrivateKeyMaterial(diagnosis.excerpt),
+          excerpt: diagnosis.excerpt,
         },
   );
 }
