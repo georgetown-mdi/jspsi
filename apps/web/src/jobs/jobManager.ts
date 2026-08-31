@@ -172,6 +172,23 @@ export interface BufferedEvent {
 export type JobStatus = "running" | "succeeded" | "failed" | "cancelled";
 
 /**
+ * Why the exchange-record pair is not being offered for a job, stated rather than
+ * left to a bare negative.
+ *
+ * The three are not one answer, because what a client may safely do with them
+ * differs. `no-record` is the appliance's DEFINITIVE denial -- nothing is at the
+ * record path -- and it is the only one that licenses a console control to destroy
+ * the workdir without asking. `undescribable-record` is a record file sitting in
+ * the workdir that this bundle cannot offer: its `outcome` is not one this bundle
+ * knows (a data root a differently-versioned CLI wrote), it does not parse into a
+ * `createdAt` and an `outcome` at all, or the verification-keys half beside it is
+ * missing, so the pair cannot be served whole. `not-settled` is a run still going,
+ * whose pair the CLI writes near the end.
+ */
+export type RecordUnavailableReason =
+  "not-settled" | "no-record" | "undescribable-record";
+
+/**
  * The uniform view the status and download routes consume, built from the live
  * in-memory {@link JobRecord}. There is at most one exchange, held in memory only;
  * a restart forgets it, so there is no restored view.
@@ -192,6 +209,11 @@ export interface JobView {
    * behind its commitments, so a surface reads this to say what it is offering
    * rather than presenting the two alike. */
   recordOutcome?: ExchangeRecordOutcome;
+  /** Why the pair is withheld, present exactly when {@link recordAvailable} is
+   * false. A client reads it to tell the appliance's definitive denial from a
+   * record it holds and cannot describe, which are the same negative to a reader
+   * of the boolean alone. */
+  recordUnavailableReason?: RecordUnavailableReason;
   /** Whether this run's intent asked for a diagnostic log, whether or not the
    * CLI has opened the file yet. It is what separates a run that will never have
    * a log from one whose log has not appeared, so a client watching for the file
@@ -1337,19 +1359,29 @@ export class JobManager {
  * completed one does, but its commitments re-supply from a result file the run
  * never wrote, so nothing beside it can be opened; a surface that offered the two
  * identically would make a claim the record does not.
+ *
+ * A withheld pair carries {@link RecordUnavailableReason}, which is what separates
+ * the absence of a record from a record on disk this bundle cannot describe. The
+ * appliance's own answer is the only definitive denial a client has, and a client
+ * that read the two alike would destroy a disclosure record on the strength of an
+ * outcome value it could not name.
  */
 function liveRecordAvailability(record: JobRecord):
-  | { recordAvailable: false }
+  | { recordAvailable: false; recordUnavailableReason: RecordUnavailableReason }
   | {
       recordAvailable: true;
       recordCreatedAt: string;
       recordOutcome: ExchangeRecordOutcome;
     } {
-  if (record.status === "running") return { recordAvailable: false };
-  if (!jobFileExists(record.recordPath) || !jobFileExists(record.keysPath))
-    return { recordAvailable: false };
+  const withheld = (recordUnavailableReason: RecordUnavailableReason) => ({
+    recordAvailable: false as const,
+    recordUnavailableReason,
+  });
+  if (record.status === "running") return withheld("not-settled");
+  if (!jobFileExists(record.recordPath)) return withheld("no-record");
   const summary = readRecordSummary(record.recordPath);
-  if (summary === null) return { recordAvailable: false };
+  if (summary === null || !jobFileExists(record.keysPath))
+    return withheld("undescribable-record");
   return {
     recordAvailable: true,
     recordCreatedAt: summary.createdAt,

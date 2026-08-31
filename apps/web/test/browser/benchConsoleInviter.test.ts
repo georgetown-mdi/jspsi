@@ -12,7 +12,9 @@ import "@mantine/core/styles.css";
 import { decodeInvitation } from "@psilink/core";
 
 import {
+  NO_RECORD_CONFIRM_BODY,
   PENDING_RECORD_CONFIRM_BODY,
+  UNDESCRIBABLE_RECORD_CONFIRM_BODY,
   UNKNOWN_RECORD_CONFIRM_BODY,
   UNTAKEN_RECORD_CONFIRM_BODY,
 } from "@bench/BenchRunSurface";
@@ -20,6 +22,7 @@ import {
   RECORD_UNANSWERED_LEAD,
   TERMINATED_RECORD_KEYS_NOTICE,
   TERMINATED_RECORD_LEAD,
+  UNDESCRIBABLE_RECORD_LEAD,
 } from "@bench/RecordDownload";
 import {
   SWEEP_CONFIRMATION_LABEL,
@@ -102,9 +105,13 @@ interface StubOptions {
   /** The receipt pair the job's status route reports. Unset, the status body
    * carries neither field, which is what a run that signed nothing answers. */
   receipt?: { requested: boolean; available: boolean };
-  /** The exchange record the job's status route reports. Unset, the body reports
-   * `recordAvailable: false`, which is what a run that owes no record answers. */
+  /** The exchange record the job's status route reports. Unset, the body denies
+   * availability under `recordUnavailable` below. */
   record?: { createdAt: string; outcome: string };
+  /** Why the status route says it is withholding the record pair, for a body that
+   * denies availability. The default is the appliance's definitive denial, which
+   * is what a run that owes no record answers. */
+  recordUnavailable?: string;
   /** When true the job's status route answers 503 to every GET, which is what an
    * ask that establishes NOTHING looks like from the seat: the record ask
    * exhausts its bounded re-asks and resolves `unanswered`. DELETE is unaffected,
@@ -225,6 +232,7 @@ function stubJobApi(options: StubOptions = {}): {
             jsonResponse({
               status: options.conflict?.status ?? "running",
               recordAvailable: false,
+              recordUnavailableReason: options.recordUnavailable ?? "no-record",
             });
           if (options.conflict.holdProbe === true && !firstProbeHeld) {
             firstProbeHeld = true;
@@ -258,7 +266,11 @@ function stubJobApi(options: StubOptions = {}): {
                   recordCreatedAt: options.record.createdAt,
                   recordOutcome: options.record.outcome,
                 }
-              : { recordAvailable: false }),
+              : {
+                  recordAvailable: false,
+                  recordUnavailableReason:
+                    options.recordUnavailable ?? "no-record",
+                }),
             ...(options.receipt !== undefined
               ? {
                   receiptRequested: options.receipt.requested,
@@ -1928,6 +1940,84 @@ describe("console inviter exchange record on a terminated run", () => {
     await flushPendingUpdates();
     expect(api.captured.some((r) => r.method === "DELETE")).toBe(false);
     api.releaseStatus();
+  });
+
+  test("a record the appliance cannot read confirms, and links no download", async () => {
+    // A data root a differently-versioned psilink wrote: a record file is in the
+    // run's folder and the appliance cannot describe it, so it withholds both
+    // halves of the pair. The seat must not read that denial as the absence of a
+    // record -- the retry beside it removes the folder the file sits in.
+    const api = stubJobApi({
+      sftp: { configured: true, host: "dr.example.gov", port: 2222 },
+      recordUnavailable: "undescribable-record",
+    });
+    app.render(createElement(InviterBench));
+    await runToExchangeFailure(api);
+
+    await expect
+      .element(page.getByText(UNDESCRIBABLE_RECORD_LEAD))
+      .toBeInTheDocument();
+    // The routes answer 404 for a pair the appliance cannot read whole, so the
+    // panel that follows the status body links neither half.
+    expect(
+      page
+        .getByRole("link", { name: /Download record \(safe to share\)/ })
+        .query(),
+    ).toBeNull();
+    expect(
+      page.getByRole("link", { name: /Download verification keys/ }).query(),
+    ).toBeNull();
+
+    await page.getByRole("button", { name: "Try again" }).click();
+    await expect
+      .element(page.getByText(UNDESCRIBABLE_RECORD_CONFIRM_BODY))
+      .toBeInTheDocument();
+    // Not the copy that offers a download, since none is standing here.
+    expect(page.getByText(UNTAKEN_RECORD_CONFIRM_BODY).query()).toBeNull();
+    expect(api.captured.some((r) => r.method === "DELETE")).toBe(false);
+
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await flushPendingUpdates();
+    expect(api.captured.some((r) => r.method === "DELETE")).toBe(false);
+    await expect
+      .element(page.getByText(UNDESCRIBABLE_RECORD_LEAD))
+      .toBeInTheDocument();
+  });
+
+  test("a confirm open when the ask lands states the answer instead of vanishing", async () => {
+    // The ask is in flight for the first seconds of a settled failed run, so it
+    // can answer while the operator is reading the confirm it opened. Unmounting
+    // the dialog there would take the question off the screen mid-read and leave a
+    // pressed recovery that did nothing.
+    const api = stubJobApi({
+      sftp: { configured: true, host: "dr.example.gov", port: 2222 },
+      holdStatus: true,
+    });
+    app.render(createElement(InviterBench));
+    await runToExchangeFailure(api);
+
+    await expect
+      .element(page.getByRole("button", { name: "Try again" }))
+      .toHaveAttribute("aria-haspopup", "dialog");
+    await page.getByRole("button", { name: "Try again" }).click();
+    await expect
+      .element(page.getByText(PENDING_RECORD_CONFIRM_BODY))
+      .toBeInTheDocument();
+
+    // The appliance answers: no record, which is the state that owes no confirm
+    // at all on a fresh press.
+    api.releaseStatus();
+    await expect
+      .element(page.getByText(NO_RECORD_CONFIRM_BODY))
+      .toBeInTheDocument();
+    expect(page.getByText(PENDING_RECORD_CONFIRM_BODY).query()).toBeNull();
+    // The recovery is still the operator's to take or leave: the answer landing
+    // does not commit the press they had not yet confirmed.
+    expect(api.captured.some((r) => r.method === "DELETE")).toBe(false);
+
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await flushPendingUpdates();
+    expect(api.captured.some((r) => r.method === "DELETE")).toBe(false);
   });
 
   test("a run that failed before disclosing offers nothing and retries straight through", async () => {

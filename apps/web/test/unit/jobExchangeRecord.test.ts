@@ -76,18 +76,69 @@ describe("fetchJobExchangeRecordOffer", () => {
 
   test("a run the appliance holds no record for leaves the seat nothing to say", async () => {
     // A failure before the disclosure owes no record and wrote none. The seat
-    // renders nothing rather than stating an absence it cannot name.
+    // renders nothing rather than stating an absence it cannot name, and the
+    // recovery beside it acts straight through: this is the one definitive
+    // not-available answer there is.
+    const offer = await offerFor({
+      status: "failed",
+      recordAvailable: false,
+      recordUnavailableReason: "no-record",
+    });
+    expect(offer).toEqual({ kind: "none" });
+    expect(untakenRecordConfirm(offer)).toBeUndefined();
+  });
+
+  test("a run still going is not an answer about a record it may yet write", async () => {
+    // The pair is written near the end of a run, so the appliance's mid-run
+    // denial says nothing about what this run will owe. It renders as nothing,
+    // as the settled absence does.
     await expect(
-      offerFor({ status: "failed", recordAvailable: false }),
+      offerFor({
+        status: "running",
+        recordAvailable: false,
+        recordUnavailableReason: "not-settled",
+      }),
     ).resolves.toEqual({ kind: "none" });
+  });
+
+  test("a record the appliance holds and cannot describe is its own answer", async () => {
+    // The version-skew case, distinct from a plain `none` denial: a record
+    // file IS in the run's folder, written by a psilink the appliance does not
+    // recognize, and nothing downloads (the routes 404 under the same gate). The
+    // seat must not read that as the absence of a record, because the controls
+    // beside it destroy the folder it sits in.
+    const offer = await offerFor({
+      status: "failed",
+      recordAvailable: false,
+      recordUnavailableReason: "undescribable-record",
+    });
+    expect(offer).toEqual({ kind: "undescribable" });
+    expect(untakenRecordConfirm(offer)).toBeDefined();
+  });
+
+  test("a withheld reason this bundle cannot read confirms rather than licenses", async () => {
+    // The same skew one level down: an appliance withholding the pair for
+    // something this bundle cannot name has not denied the record, so the reader
+    // treats it as an ask that answered nothing -- the rule an unrecognized
+    // `recordOutcome` already takes.
+    const offer = await offerFor({
+      status: "failed",
+      recordAvailable: false,
+      recordUnavailableReason: "quarantined-record",
+    });
+    expect(offer).toEqual({ kind: "unanswered" });
+    expect(untakenRecordConfirm(offer)).toBeDefined();
   });
 
   test("a body denying availability is a plain none, whatever else it carries", async () => {
     // `recordAvailable` is the only field this reader trusts to deny the record --
     // absent, or anything but the literal `true`, reads as the appliance's own
-    // not-available answer regardless of the rest of the body.
+    // not-available answer regardless of the rest of the body. With no reason
+    // beside it (an appliance that predates the field) that denial reads exactly
+    // as it always did.
     for (const body of [
       {},
+      { recordAvailable: false },
       {
         recordAvailable: "yes",
         recordCreatedAt: CREATED_AT,
@@ -168,7 +219,7 @@ describe("the record ask's bound on an appliance that stops answering", () => {
               recordCreatedAt: CREATED_AT,
               recordOutcome: "receipt-swap-terminated",
             }
-          : {}),
+          : { recordUnavailableReason: "no-record" }),
       }),
       { status: 200, headers: { "Content-Type": "application/json" } },
     );

@@ -435,6 +435,25 @@ export const UNTAKEN_RECORD_CONFIRM_BODY =
   "and neither party can recreate it. Download it from the exchange-record " +
   "panel on this page first if you need the accounting entry.";
 
+/** The title the confirm heads with over a record the appliance holds and cannot
+ * read. It names the file rather than the record's contents, which is the part
+ * that is established. */
+export const UNDESCRIBABLE_RECORD_CONFIRM_TITLE =
+  "Leave the unreadable exchange record behind?";
+
+/**
+ * What that confirm says. The appliance offers no download for such a file, so the
+ * confirm cannot point at the panel's own download as the untaken-record one does;
+ * it points at the file where it sits instead. It claims only the file's presence,
+ * not what the record states, since that is precisely what could not be read.
+ */
+export const UNDESCRIBABLE_RECORD_CONFIRM_BODY =
+  "This appliance holds a file for this run that it cannot read as an exchange " +
+  "record, so this page can neither say what it records nor offer it for " +
+  "download. Going on removes the run and that file with it, and neither party " +
+  "can recreate it. Copy it out of this run's folder in this console's working " +
+  "directory first if you need the accounting entry.";
+
 /** The title the confirm heads with when the ask never answered. It asks about a
  * record it cannot say is there, because that is all an unanswered ask
  * established -- the alternative is a title that asserts one. */
@@ -468,6 +487,22 @@ export const PENDING_RECORD_CONFIRM_BODY =
   "and anything it wrote with it, and neither party can recreate it. Wait for " +
   "the answer first if you need the accounting entry.";
 
+/** The title the confirm heads with once the ask has landed on the appliance's own
+ * denial while the dialog is open. The record is settled and there is none, so the
+ * question is only about the recovery the operator already pressed. */
+export const NO_RECORD_CONFIRM_TITLE = "Go on and remove this run?";
+
+/**
+ * What that confirm says. It is the copy for a dialog the operator opened over an
+ * unresolved ask that has since answered: the answer is stated, the interruption
+ * is closed out rather than vanishing under the reader, and the removal is still
+ * named for what it is.
+ */
+export const NO_RECORD_CONFIRM_BODY =
+  "This appliance has answered: it holds no exchange record for this run, so " +
+  "there is none to leave behind. Going on removes the run and its files from " +
+  "this appliance, which cannot be undone.";
+
 /** The heading and body of one untaken-record confirm. */
 export interface UntakenRecordConfirm {
   title: string;
@@ -488,13 +523,16 @@ export interface UntakenRecordConfirm {
  * Every other state confirms, because a run that got as far as exchanging data owes
  * a record whether or not the appliance has said so, and the discard cannot be
  * undone. They are not all the same interruption. `available` is a record the
- * operator has been offered and the discard destroys. `unanswered` is an ask that
- * ended having established nothing ({@link @psi/jobExchangeRecord}), and `asking`
- * is one still running ({@link ./useJobExchangeRecordOffer}) -- the state a settled
- * failed run sits in from the moment its alert appears until the ask lands, which
- * on an appliance that has stopped answering is the whole of the ask's bound. Both
- * confirm under copy claiming only what an unanswered ask supports, differing in
- * what they tell the operator to do about it.
+ * operator has been offered and the discard destroys. `undescribable` is a record
+ * file the appliance holds and cannot read, which it therefore offers nowhere --
+ * the one state where the confirm is the only warning the operator gets.
+ * `unanswered` is an ask that ended having established nothing
+ * ({@link @psi/jobExchangeRecord}), and `asking` is one still running
+ * ({@link ./useJobExchangeRecordOffer}) -- the state a settled failed run sits in
+ * from the moment its alert appears until the ask lands, which on an appliance
+ * that has stopped answering is the whole of the ask's bound. Both confirm under
+ * copy claiming only what an unanswered ask supports, differing in what they tell
+ * the operator to do about it.
  */
 export function untakenRecordConfirm(
   offer: JobExchangeRecordOfferState | undefined,
@@ -503,6 +541,11 @@ export function untakenRecordConfirm(
     return {
       title: UNTAKEN_RECORD_CONFIRM_TITLE,
       body: UNTAKEN_RECORD_CONFIRM_BODY,
+    };
+  if (offer?.kind === "undescribable")
+    return {
+      title: UNDESCRIBABLE_RECORD_CONFIRM_TITLE,
+      body: UNDESCRIBABLE_RECORD_CONFIRM_BODY,
     };
   if (offer?.kind === "unanswered")
     return {
@@ -538,6 +581,12 @@ export function untakenRecordConfirm(
  * `aria-haspopup="dialog"`: a control that opens a dialog rather than acting says
  * so, and which form is standing is then something the page states rather than
  * something only a press discovers.
+ *
+ * An open confirm outlives the state that opened it. The ask that decides the copy
+ * is in flight for the first seconds of a settled failed run, so it can land while
+ * the operator is reading the dialog it opened: the dialog stays mounted and states
+ * the answer that arrived, rather than vanishing mid-read and leaving a pressed
+ * recovery that did nothing.
  */
 export function FailureRecoveryButton({
   label,
@@ -579,7 +628,14 @@ export function FailureRecoveryButton({
         {label}
       </Button>
     );
-  if (recordConfirm === undefined) return commit("sm");
+  if (recordConfirm === undefined && !confirming) return commit("sm");
+  // The dialog is open and the ask it was opened over has since answered that
+  // there is no record: it closes out the interruption on that answer instead of
+  // unmounting under the operator.
+  const confirm = recordConfirm ?? {
+    title: NO_RECORD_CONFIRM_TITLE,
+    body: NO_RECORD_CONFIRM_BODY,
+  };
   return (
     <>
       <Button
@@ -594,11 +650,11 @@ export function FailureRecoveryButton({
       <Modal
         opened={confirming}
         onClose={() => setConfirming(false)}
-        title={recordConfirm.title}
+        title={confirm.title}
         centered
         transitionProps={{ duration: 0 }}
       >
-        <p>{recordConfirm.body}</p>
+        <p>{confirm.body}</p>
         <Group mt="md">
           <Button variant="default" onClick={() => setConfirming(false)}>
             Cancel

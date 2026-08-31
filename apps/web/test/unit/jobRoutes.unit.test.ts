@@ -798,37 +798,74 @@ describe("the diagnostic log route serves only a workdir-contained log", () => {
 describe("status route reports record availability", () => {
   const CREATED_AT = "2026-07-08T14:32:00.000Z";
 
+  /** The record fields the status route reports for `id`, driven through the
+   * route. The withheld reason is read beside the boolean everywhere, since the
+   * two together are the answer a client acts on: the boolean alone reports a
+   * record the appliance holds and cannot describe exactly as it reports one that
+   * was never written. */
+  async function recordStatusOf(id: string): Promise<{
+    status: string;
+    resultAvailable: boolean;
+    recordAvailable: boolean;
+    recordCreatedAt?: string;
+    recordOutcome?: string;
+    recordUnavailableReason?: string;
+  }> {
+    const response = (await handlersOf(JobRoute).GET({
+      request: jobRequest(`http://localhost/api/jobs/${id}`),
+      params: { jobId: id },
+    })) as Response;
+    expect(response.status).toBe(200);
+    return (await response.json()) as Awaited<
+      ReturnType<typeof recordStatusOf>
+    >;
+  }
+
   test("recordAvailable true with the record's createdAt when the pair is on disk", async () => {
     const id = await createSucceededJob({
       STUB_OUTPUT_FILE: "id\n1\n",
       STUB_RECORD_JSON: recordJson(CREATED_AT),
     });
-    const response = (await handlersOf(JobRoute).GET({
-      request: jobRequest(`http://localhost/api/jobs/${id}`),
-      params: { jobId: id },
-    })) as Response;
-    const body = (await response.json()) as {
-      resultAvailable: boolean;
-      recordAvailable: boolean;
-      recordCreatedAt?: string;
-    };
+    const body = await recordStatusOf(id);
     expect(body.resultAvailable).toBe(true);
     expect(body.recordAvailable).toBe(true);
     expect(body.recordCreatedAt).toBe(CREATED_AT);
+    // An offered pair is not withheld at all, so the field that says why one is
+    // withheld is absent rather than carrying a stale reason beside it.
+    expect(body.recordUnavailableReason).toBeUndefined();
   });
 
   test("recordAvailable false and no createdAt when the record was never written", async () => {
     const id = await createSucceededJob({ STUB_OUTPUT_FILE: "id\n1\n" });
-    const response = (await handlersOf(JobRoute).GET({
-      request: jobRequest(`http://localhost/api/jobs/${id}`),
-      params: { jobId: id },
-    })) as Response;
-    const body = (await response.json()) as {
-      recordAvailable: boolean;
-      recordCreatedAt?: string;
-    };
+    const body = await recordStatusOf(id);
     expect(body.recordAvailable).toBe(false);
     expect(body.recordCreatedAt).toBeUndefined();
+    // The definitive denial: nothing is at the record path, which is the one
+    // answer a console control may destroy the workdir on without asking.
+    expect(body.recordUnavailableReason).toBe("no-record");
+  });
+
+  test("a running job's pair is withheld as not settled, not as absent", async () => {
+    // The CLI writes the pair near the end of a run, so a mid-run read says
+    // nothing about whether this run will owe a record -- and reporting it as the
+    // absence of one would be a claim the appliance cannot make yet.
+    const root = tempDataRoot("routes-running-record");
+    roots.push(root);
+    vi.stubEnv("JOB_DATA_ROOT", root);
+    const manager = new JobManager({
+      dataRoot: root,
+      binaryPath: STUB_CLI_PATH,
+      jobRendezvousDir: rvzRoot(),
+      childEnv: { STUB_FD3_EVENTS: JSON.stringify([]), STUB_DELAY_MS: "5000" },
+    });
+    (globalThis as { jobManagerInstance?: JobManager }).jobManagerInstance =
+      manager;
+    const id = await manager.createJob(validIntent());
+
+    const body = await recordStatusOf(id);
+    expect(body.status).toBe("running");
+    expect(body.recordAvailable).toBe(false);
+    expect(body.recordUnavailableReason).toBe("not-settled");
   });
 
   test("a run that disclosed and then terminated is offered its record", async () => {
@@ -848,16 +885,7 @@ describe("status route reports record availability", () => {
       true,
     );
 
-    const status = (await handlersOf(JobRoute).GET({
-      request: jobRequest(`http://localhost/api/jobs/${id}`),
-      params: { jobId: id },
-    })) as Response;
-    const body = (await status.json()) as {
-      status: string;
-      recordAvailable: boolean;
-      recordCreatedAt?: string;
-      recordOutcome?: string;
-    };
+    const body = await recordStatusOf(id);
     expect(body.status).toBe("failed");
     expect(body.recordAvailable).toBe(true);
     expect(body.recordCreatedAt).toBe(CREATED_AT);
@@ -894,26 +922,22 @@ describe("status route reports record availability", () => {
       false,
     );
 
-    const status = (await handlersOf(JobRoute).GET({
-      request: jobRequest(`http://localhost/api/jobs/${id}`),
-      params: { jobId: id },
-    })) as Response;
-    const body = (await status.json()) as {
-      recordAvailable: boolean;
-      recordCreatedAt?: string;
-      recordOutcome?: string;
-    };
+    const body = await recordStatusOf(id);
     expect(body.recordAvailable).toBe(false);
     expect(body.recordCreatedAt).toBeUndefined();
     expect(body.recordOutcome).toBeUndefined();
+    expect(body.recordUnavailableReason).toBe("no-record");
 
     expect(await recordPairStatuses(id)).toEqual({ record: 404, keys: 404 });
   });
 
-  test("a record carrying no recognized outcome reads as unavailable", async () => {
+  test("a record carrying no recognized outcome is held back as undescribable", async () => {
     // Every record the appliance's own CLI writes states its outcome, so one that
-    // does not is not a record this appliance can describe. It is refused here
-    // rather than offered under a completed run's framing.
+    // does not -- a data root a differently-versioned CLI wrote -- is not a record
+    // this appliance can describe. It is refused at the downloads rather than
+    // offered under a completed run's framing, and the status body says the file
+    // is nonetheless there, so a console control that removes the workdir asks
+    // first instead of reading the denial as an absence.
     const id = await createSucceededJob({
       STUB_OUTPUT_FILE: "id\n1\n",
       STUB_RECORD_JSON: JSON.stringify({
@@ -921,47 +945,60 @@ describe("status route reports record availability", () => {
         outcome: "who-knows",
       }),
     });
-    const response = (await handlersOf(JobRoute).GET({
-      request: jobRequest(`http://localhost/api/jobs/${id}`),
-      params: { jobId: id },
-    })) as Response;
-    const body = (await response.json()) as { recordAvailable: boolean };
+    const dataRoot = roots[roots.length - 1];
+    expect(fs.existsSync(path.join(dataRoot, id, JOB_FILE_NAMES.record))).toBe(
+      true,
+    );
+
+    const body = await recordStatusOf(id);
     expect(body.recordAvailable).toBe(false);
+    expect(body.recordUnavailableReason).toBe("undescribable-record");
+    // Withheld, not offered: the appliance serves no pair it cannot read whole,
+    // and the two routes stay on the status field's own gate.
     expect(await recordPairStatuses(id)).toEqual({ record: 404, keys: 404 });
   });
 
-  test("a malformed record file reads as unavailable (defensive parse)", async () => {
+  test("a record whose keys half is missing is undescribable, not absent", async () => {
+    // The pair is served all-or-nothing, so a record without its keys cannot be
+    // offered -- but the record itself is on disk, and destroying the workdir
+    // unasked over a half pair loses the same disclosure entry.
+    const id = await createSucceededJob({
+      STUB_OUTPUT_FILE: "id\n1\n",
+      STUB_RECORD_JSON: recordJson(CREATED_AT),
+    });
+    const dataRoot = roots[roots.length - 1];
+    fs.rmSync(path.join(dataRoot, id, JOB_FILE_NAMES.recordKeys));
+
+    const body = await recordStatusOf(id);
+    expect(body.recordAvailable).toBe(false);
+    expect(body.recordCreatedAt).toBeUndefined();
+    expect(body.recordUnavailableReason).toBe("undescribable-record");
+    expect(await recordPairStatuses(id)).toEqual({ record: 404, keys: 404 });
+  });
+
+  test("a malformed record file reads as undescribable (defensive parse)", async () => {
     // The record write landed a non-JSON body; the status route must not throw,
-    // and must treat the record as unavailable rather than serving a bad stamp.
+    // and must treat the record as unavailable rather than serving a bad stamp --
+    // while still reporting the file it could not read as being there.
     const id = await createSucceededJob({
       STUB_OUTPUT_FILE: "id\n1\n",
       STUB_RECORD_JSON: "}{ not json",
     });
-    const response = (await handlersOf(JobRoute).GET({
-      request: jobRequest(`http://localhost/api/jobs/${id}`),
-      params: { jobId: id },
-    })) as Response;
-    expect(response.status).toBe(200);
-    const body = (await response.json()) as {
-      recordAvailable: boolean;
-      recordCreatedAt?: string;
-    };
+    const body = await recordStatusOf(id);
     expect(body.recordAvailable).toBe(false);
     expect(body.recordCreatedAt).toBeUndefined();
+    expect(body.recordUnavailableReason).toBe("undescribable-record");
     expect(await recordPairStatuses(id)).toEqual({ record: 404, keys: 404 });
   });
 
-  test("a record missing createdAt reads as unavailable", async () => {
+  test("a record missing createdAt reads as undescribable", async () => {
     const id = await createSucceededJob({
       STUB_OUTPUT_FILE: "id\n1\n",
       STUB_RECORD_JSON: JSON.stringify({ summary: "no timestamp" }),
     });
-    const response = (await handlersOf(JobRoute).GET({
-      request: jobRequest(`http://localhost/api/jobs/${id}`),
-      params: { jobId: id },
-    })) as Response;
-    const body = (await response.json()) as { recordAvailable: boolean };
+    const body = await recordStatusOf(id);
     expect(body.recordAvailable).toBe(false);
+    expect(body.recordUnavailableReason).toBe("undescribable-record");
     expect(await recordPairStatuses(id)).toEqual({ record: 404, keys: 404 });
   });
 

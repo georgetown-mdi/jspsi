@@ -16,11 +16,16 @@ import {
   SINGLE_PASS_DISCLOSURE_TITLE,
 } from "@psi/linkageStrategyChoice";
 
+import {
+  UNDESCRIBABLE_RECORD_CONFIRM_BODY,
+  UNTAKEN_RECORD_CONFIRM_BODY,
+} from "@bench/BenchRunSurface";
 import { BenchLobby } from "@bench/BenchLobby";
 import { DIRECT_LINKAGE_STRATEGY_AGREEMENT_NOTICE } from "@bench/directExchangeModel";
 import { DirectExchangeBench } from "@bench/DirectExchangeBench";
 import { RETAIN_MODE_BILATERAL_NOTICE } from "@bench/exchangeFilesModel";
 import { SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT } from "@bench/filedropRendezvousChoice";
+import { UNDESCRIBABLE_RECORD_LEAD } from "@bench/RecordDownload";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 
@@ -98,6 +103,13 @@ interface StubOptions {
   /** The body `GET /api/jobs/:id/handoff` serves (the recurring-run hand-off); a 404
    * when unset, so the panel renders nothing. */
   handoff?: unknown;
+  /** The exchange record the job's status route reports. Unset, the body denies
+   * availability under `recordUnavailable` below. */
+  record?: { createdAt: string; outcome: string };
+  /** Why the status route says it is withholding the record pair, for a body that
+   * denies availability. The default is the appliance's definitive denial, which
+   * is what a run that owes no record answers. */
+  recordUnavailable?: string;
 }
 
 /** The same-origin job API, stubbed at the global fetch seam. Unmatched URLs fall
@@ -222,7 +234,17 @@ function stubJobApi(options: StubOptions = {}): {
         return Promise.resolve(
           jsonResponse({
             status: options.jobStatus ?? "running",
-            recordAvailable: false,
+            ...(options.record !== undefined
+              ? {
+                  recordAvailable: true,
+                  recordCreatedAt: options.record.createdAt,
+                  recordOutcome: options.record.outcome,
+                }
+              : {
+                  recordAvailable: false,
+                  recordUnavailableReason:
+                    options.recordUnavailable ?? "no-record",
+                }),
           }),
         );
       }
@@ -987,6 +1009,98 @@ describe("direct exchange host-key probe (direct ceremony)", () => {
     await expect
       .element(page.getByLabelText("Server identity fingerprint"))
       .toHaveValue(PROBE_FINGERPRINT);
+  });
+});
+
+// The Direct seat's own recoveries, which DELETE the run's folder on the
+// appliance. The record ask behind them is this seat's own call site, with its own
+// enabling gate, so its states are driven here rather than inferred from the
+// invitation seats'.
+describe("direct-exchange recoveries against the run's exchange record", () => {
+  const CREATED_AT = "2026-07-08T14:32:00.000Z";
+  const RECORD_STAMP = "2026-07-08T14-32-00-000Z";
+
+  /** Run the direct exchange and end it in a terms-mismatch (config) terminal --
+   * a non-retryable failure whose recovery is Start over, which discards the run's
+   * folder on the appliance. */
+  async function runToConfigFailure(
+    api: ReturnType<typeof stubJobApi>,
+  ): Promise<void> {
+    app.render(createElement(DirectExchangeBench));
+    await reachConfirm();
+    await page.getByRole("checkbox").click();
+    await page.getByRole("button", { name: "Run the exchange" }).click();
+    await vi.waitFor(() =>
+      expect(api.captured.some((r) => r.url === "/api/jobs/job-7/events")).toBe(
+        true,
+      ),
+    );
+    api.emitEvent({
+      v: 1,
+      type: "error",
+      category: "config",
+      message: "linkage terms do not match the partner's inferred terms",
+    });
+    api.closeEvents();
+    await expect
+      .element(page.getByRole("button", { name: "Start over" }))
+      .toBeInTheDocument();
+  }
+
+  test("offers the record the appliance holds and confirms before destroying it", async () => {
+    const api = stubJobApi({
+      sftp: CONFIGURED_SFTP,
+      jobStatus: "failed",
+      record: { createdAt: CREATED_AT, outcome: "receipt-swap-terminated" },
+    });
+    await runToConfigFailure(api);
+
+    await expect
+      .element(
+        page.getByRole("link", {
+          name: `Download record (safe to share): psilink-record-${RECORD_STAMP}.json`,
+        }),
+      )
+      .toBeInTheDocument();
+
+    await page.getByRole("button", { name: "Start over" }).click();
+    await expect
+      .element(page.getByText(UNTAKEN_RECORD_CONFIRM_BODY))
+      .toBeInTheDocument();
+    expect(api.captured.some((r) => r.method === "DELETE")).toBe(false);
+
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await flushPendingUpdates();
+    expect(api.captured.some((r) => r.method === "DELETE")).toBe(false);
+  });
+
+  test("a record the appliance cannot read confirms, and links no download", async () => {
+    const api = stubJobApi({
+      sftp: CONFIGURED_SFTP,
+      jobStatus: "failed",
+      recordUnavailable: "undescribable-record",
+    });
+    await runToConfigFailure(api);
+
+    await expect
+      .element(page.getByText(UNDESCRIBABLE_RECORD_LEAD))
+      .toBeInTheDocument();
+    expect(
+      page
+        .getByRole("link", { name: /Download record \(safe to share\)/ })
+        .query(),
+    ).toBeNull();
+
+    await page.getByRole("button", { name: "Start over" }).click();
+    await expect
+      .element(page.getByText(UNDESCRIBABLE_RECORD_CONFIRM_BODY))
+      .toBeInTheDocument();
+    expect(page.getByText(UNTAKEN_RECORD_CONFIRM_BODY).query()).toBeNull();
+    expect(api.captured.some((r) => r.method === "DELETE")).toBe(false);
+
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await flushPendingUpdates();
+    expect(api.captured.some((r) => r.method === "DELETE")).toBe(false);
   });
 });
 

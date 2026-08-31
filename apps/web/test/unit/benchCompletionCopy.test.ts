@@ -7,9 +7,13 @@ import {
   TERMINATED_RECORD_KEYS_NOTICE,
   TERMINATED_RECORD_LEAD,
   TERMINATED_RECORD_NOTICE,
+  UNDESCRIBABLE_RECORD_LEAD,
+  UNDESCRIBABLE_RECORD_NOTICE,
 } from "@bench/RecordDownload";
 import {
   PENDING_RECORD_CONFIRM_BODY,
+  UNDESCRIBABLE_RECORD_CONFIRM_BODY,
+  UNDESCRIBABLE_RECORD_CONFIRM_TITLE,
   UNKNOWN_RECORD_CONFIRM_BODY,
   UNKNOWN_RECORD_CONFIRM_TITLE,
   UNTAKEN_RECORD_CONFIRM_BODY,
@@ -156,6 +160,21 @@ describe("the exchange-record copy", () => {
     expect(RECORD_UNANSWERED_NOTICE).toContain("keep the run");
   });
 
+  test("the undescribable copy states the file, not what it records", () => {
+    // The appliance holds a file it cannot read as a record, so the panel may
+    // claim its presence and nothing else -- and since no download stands under
+    // this copy, it has to say where the file is and that going on removes it.
+    expect(UNDESCRIBABLE_RECORD_LEAD).toContain("cannot read as an exchange");
+    expect(UNDESCRIBABLE_RECORD_NOTICE).toContain("working directory");
+    expect(UNDESCRIBABLE_RECORD_NOTICE).toContain("No download is offered");
+    expect(UNDESCRIBABLE_RECORD_NOTICE).toContain("removes this run's files");
+    // What it must not do is assert the run's disclosure the way the offered
+    // record's copy does: that reading is exactly what failed.
+    expect(UNDESCRIBABLE_RECORD_NOTICE).not.toContain(
+      "what this run disclosed",
+    );
+  });
+
   test("the untaken-record confirm names the loss and the way to avoid it", () => {
     // The confirm fires on a recovery the operator has already pressed, so it
     // earns its interruption only by naming what that press destroys and where the
@@ -182,6 +201,20 @@ describe("the exchange-record copy", () => {
     );
     expect(UNKNOWN_RECORD_CONFIRM_BODY).toContain("Reload this page");
     expect(UNKNOWN_RECORD_CONFIRM_BODY).not.toContain("this appliance holds");
+  });
+
+  test("the undescribable confirm points at the file, having no download to point at", () => {
+    // The other confirm that names a record points the operator at the panel's
+    // download; there is none here, so this one has to name where the file sits.
+    // And it claims only that a file is there -- not what it records, which is
+    // the part the appliance could not read.
+    expect(UNDESCRIBABLE_RECORD_CONFIRM_TITLE).toContain("exchange record");
+    expect(UNDESCRIBABLE_RECORD_CONFIRM_BODY).toContain("cannot read");
+    expect(UNDESCRIBABLE_RECORD_CONFIRM_BODY).toContain(
+      "neither party can recreate it",
+    );
+    expect(UNDESCRIBABLE_RECORD_CONFIRM_BODY).toContain("working directory");
+    expect(UNDESCRIBABLE_RECORD_CONFIRM_BODY).not.toContain("Download it");
   });
 
   test("the pending confirm says the asking is still running", () => {
@@ -219,6 +252,17 @@ describe("untakenRecordConfirm", () => {
     ).toEqual({
       title: UNTAKEN_RECORD_CONFIRM_TITLE,
       body: UNTAKEN_RECORD_CONFIRM_BODY,
+    });
+  });
+
+  test("confirms over a record the appliance holds and cannot read", () => {
+    // Nothing downloads in this state, so the confirm is the only place the
+    // operator is told a record file is standing in the folder they are about to
+    // remove. Reading the appliance's denial as an absence here is the loss this
+    // state exists to prevent.
+    expect(untakenRecordConfirm({ kind: "undescribable" })).toEqual({
+      title: UNDESCRIBABLE_RECORD_CONFIRM_TITLE,
+      body: UNDESCRIBABLE_RECORD_CONFIRM_BODY,
     });
   });
 

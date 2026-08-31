@@ -59,6 +59,33 @@ export const COMPLETED_RECORD_NOTICE =
   "record from this appliance along with the results.";
 
 /**
+ * The lead the seat shows over a record file the appliance holds and cannot read
+ * as a record. It states the file's presence, which is the part that is
+ * established, and not what it says, which is the part that is not.
+ */
+export const UNDESCRIBABLE_RECORD_LEAD =
+  "This appliance holds a file for this run that it cannot read as an exchange " +
+  "record.";
+
+/**
+ * What the seat says under that lead. The appliance withholds the download rather
+ * than serving a pair it cannot vouch for, so the copy stands in place of a
+ * download row: it says where the file is, why nothing is offered here, and that
+ * every control on this surface removes it. It names the reasons the appliance can
+ * have -- an outcome a differently-versioned psilink wrote, or a pair it cannot
+ * read whole -- because that is what tells the operator which build to open it
+ * with.
+ */
+export const UNDESCRIBABLE_RECORD_NOTICE =
+  "A record file sits in this run's folder in this console's working directory, " +
+  "and this psilink build cannot read it: it may state an outcome this build " +
+  "does not know, or be missing the verification keys written beside it. No " +
+  "download is offered here, because this page cannot say what the file " +
+  "records. The file itself is untouched where it sits, and a psilink build " +
+  "that recognizes it can read it. Keep this run until you have it -- every way " +
+  "on from here removes this run's files from this appliance, that one included.";
+
+/**
  * The lead the seat shows when the appliance stopped answering about a run's
  * record. It states what happened to the asking rather than the record: an
  * unanswered ask never said whether this run has one.
@@ -78,6 +105,31 @@ export const RECORD_UNANSWERED_NOTICE =
   "exchanging data, the record of that disclosure is with the run's files on " +
   "this appliance -- reload this page to ask again, and keep the run until you " +
   "have the file, because every way on from here removes it.";
+
+/** The states this panel renders: the ones an ask can end in that leave the seat
+ * something to say. `none` and an ask still in flight render nothing at all. */
+type RenderedRecordOffer = Extract<
+  JobExchangeRecordOfferState,
+  { kind: "available" | "undescribable" | "unanswered" }
+>;
+
+/** The lead and notice each rendered state shows, kept together so the two lines
+ * of one state cannot be paired with another's. */
+function recordPanelCopy(offer: RenderedRecordOffer): {
+  lead: string;
+  notice: string;
+} {
+  if (offer.kind === "unanswered")
+    return { lead: RECORD_UNANSWERED_LEAD, notice: RECORD_UNANSWERED_NOTICE };
+  if (offer.kind === "undescribable")
+    return {
+      lead: UNDESCRIBABLE_RECORD_LEAD,
+      notice: UNDESCRIBABLE_RECORD_NOTICE,
+    };
+  return offer.outcome === "completed"
+    ? { lead: COMPLETED_RECORD_LEAD, notice: COMPLETED_RECORD_NOTICE }
+    : { lead: TERMINATED_RECORD_LEAD, notice: TERMINATED_RECORD_NOTICE };
+}
 
 /**
  * The self-attested exchange record a console server-job run produced, offered on
@@ -104,6 +156,11 @@ export const RECORD_UNANSWERED_NOTICE =
  * so where the download is rather than leaving the pair to read as a completed
  * run's.
  *
+ * A record the appliance holds and cannot describe renders too, with no download:
+ * the appliance withholds a pair it cannot read whole, and a panel that stayed
+ * silent would leave the operator with a confirm naming a file no surface admits
+ * is there.
+ *
  * The offer comes from the caller's own ask ({@link ./useJobExchangeRecordOffer}),
  * which the seat also reads to decide whether its recovery controls confirm before
  * discarding -- one ask, two consumers.
@@ -118,26 +175,14 @@ export function RecordDownload({
 }) {
   if (offer === undefined || offer.kind === "none" || offer.kind === "asking")
     return null;
-  const unanswered = offer.kind === "unanswered";
   const terminated =
     offer.kind === "available" && offer.outcome !== "completed";
+  const copy = recordPanelCopy(offer);
   return (
     <section className={styles.callout} aria-labelledby="exchange-record-title">
       <h2 id="exchange-record-title">Exchange record</h2>
-      <p className={styles.calloutLead}>
-        {unanswered
-          ? RECORD_UNANSWERED_LEAD
-          : terminated
-            ? TERMINATED_RECORD_LEAD
-            : COMPLETED_RECORD_LEAD}
-      </p>
-      <p className={styles.small}>
-        {unanswered
-          ? RECORD_UNANSWERED_NOTICE
-          : terminated
-            ? TERMINATED_RECORD_NOTICE
-            : COMPLETED_RECORD_NOTICE}
-      </p>
+      <p className={styles.calloutLead}>{copy.lead}</p>
+      <p className={styles.small}>{copy.notice}</p>
       {offer.kind === "available" && (
         <>
           <DownloadRow
