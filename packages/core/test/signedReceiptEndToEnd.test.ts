@@ -12,6 +12,7 @@ import {
   ConnectionError,
   createMessagePipe,
 } from "../src/connection/messageConnection";
+import { OperatorConfigError } from "../src/errors";
 import {
   ReceiptVerificationError,
   SIGNED_RECEIPT_VERSION,
@@ -276,14 +277,16 @@ test("an unnamed party refuses at terms agreement rather than signing", async ()
 /**
  * What a frame a party put on the wire is, by the field that identifies it: the
  * terms frames and the bare decision frame the terms exchange sends, the abort
- * that ends a refused run, the payload frame, and `opaque` for everything else --
- * which is what a PSI round's binary message classifies as. Asserting the whole
- * sequence therefore pins what did NOT go out as much as what did.
+ * that ends a refused run, the payload frame, the signature swap's receipt frame,
+ * and `opaque` for everything else -- which is what a PSI round's binary message
+ * classifies as. Asserting the whole sequence therefore pins what did NOT go out
+ * as much as what did.
  */
 function frameKind(frame: unknown): string {
   if (typeof frame !== "object" || frame === null) return "opaque";
   if ("hasData" in frame) return "payload";
   if ("linkageTerms" in frame) return "terms";
+  if ("certificate" in frame) return "receipt";
   if ("decision" in frame)
     return (frame as { decision: unknown }).decision === "abort"
       ? "abort"
@@ -455,128 +458,139 @@ test("a fingerprint-pin mismatch terminates the exchange fail-closed", async () 
 // --- A certificate bound away from its own agreed-terms identity -------------
 
 describe("a party whose certificate is bound away from its agreed terms", () => {
-  // The measured premise behind the CLI's refusal of such a configuration
-  // (apps/cli/src/signingIdentityDivergence.ts). The partner authorizes a
-  // presented certificate against the AGREED-TERMS identity, so a party signing
-  // under a certificate bound to anything else cannot leave the pair holding a
-  // verifiable receipt -- and what it IS left holding depends on which handshake
-  // role it drew, which no configuration of its own decides. Both roles are
-  // driven here so that premise is a check rather than a claim.
+  // A certificate is authorized against the AGREED-TERMS identity, so a party
+  // signing under one bound to anything else cannot leave the pair holding a
+  // verifiable receipt. What it would otherwise be left with depends on which
+  // handshake role it drew, which no configuration of its own decides: signing
+  // first its frame is refused, signing last it is handed a receipt no verifier
+  // accepts as though the run had succeeded. Both roles are driven here, against
+  // the same swap-time refusal of this party's own configuration.
   //
   // The certificate is identityA/identityB throughout, bound to "Initiator Co" /
   // "Responder Co"; only the terms identity the diverging party runs under moves.
   const RENAMED = "Renamed In The Config";
 
-  test("as the initiator, both parties end with nothing", async () => {
-    const [connInitiator, connResponder] = createMessagePipe();
-    // The initiator's terms say RENAMED while its certificate says "Initiator
-    // Co". Its partner pins the right fingerprint and authorizes it against the
-    // terms, which is what fails.
-    const initiator = runExchange(
-      connInitiator,
-      "initiator",
-      prepared(RENAMED, both, clientRows),
-      {
-        psiLibrary,
-        signingIdentity: identityA,
-        partnerFingerprint: fingerprintB,
-        sessionKey,
-      },
-    ).then(
-      () => {
-        throw new Error("expected the initiator's leg to reject, not return");
-      },
-      (reason: unknown) => reason,
-    );
-    const responderOutcome = await runExchange(
-      connResponder,
-      "responder",
-      prepared("Responder Co", both, serverRows),
-      {
-        psiLibrary,
-        signingIdentity: identityB,
-        partnerFingerprint: fingerprintA,
-        sessionKey,
-      },
-    ).then(
-      () => {
-        throw new Error("expected the responder to reject the divergent cert");
-      },
-      (reason: unknown) => reason,
-    );
-    // The responder verifies before it sends, so it discloses no signature of
-    // its own and writes nothing: the run raises rather than returning a result.
-    expect(responderOutcome).toBeInstanceOf(ReceiptVerificationError);
-    expect((responderOutcome as Error).message).toMatch(/not trusted/);
-    // The diverging initiator sent its frame first and then parks on a terminal
-    // frame that never comes; the swap sends no abort of its own, so what
-    // releases the park is the transport. This pipe's release is the local close
-    // below, which is why the class asserted is the one a deliberate close
-    // raises rather than the peer-close or file-sync abort-marker diagnostic a
-    // production transport would deliver -- the load-bearing half is that the
-    // leg REJECTS, on a released park, having returned nothing.
-    await connInitiator.close();
-    await connResponder.close();
-    // Rejecting is what leaves this side with nothing: an ExchangeResult is the
-    // only carrier of the association table, the audit record, and the receipt,
-    // and every local artifact is written after runExchange returns.
-    const initiatorOutcome = await initiator;
-    expect(initiatorOutcome).toBeInstanceOf(ConnectionError);
-    expect((initiatorOutcome as ConnectionError).kind).toBe("closed");
-  });
+  for (const divergingRole of ["initiator", "responder"] as const) {
+    test(`as the ${divergingRole}, it refuses before its certificate reaches the wire`, async () => {
+      const divergesFirst = divergingRole === "initiator";
+      const [rawInitiator, rawResponder] = createMessagePipe();
+      const initiatorSide = recording(rawInitiator);
+      const responderSide = recording(rawResponder);
 
-  test("as the responder, it exits over a receipt no verifier accepts", async () => {
-    const [connInitiator, connResponder] = createMessagePipe();
-    // Roles swapped: the diverging party signs LAST, so it verifies its
-    // partner's frame (which passes) and sends its own before the partner can
-    // reject it. Nothing in the swap checks a party's own certificate against
-    // its own agreed terms, so this side runs to completion.
-    const initiatorOutcome = runExchange(
-      connInitiator,
-      "initiator",
-      prepared("Initiator Co", both, clientRows),
-      {
-        psiLibrary,
-        signingIdentity: identityA,
-        partnerFingerprint: fingerprintB,
-        sessionKey,
-      },
-    ).then(
-      () => {
-        throw new Error("expected the initiator to reject the divergent cert");
-      },
-      (reason: unknown) => reason,
-    );
-    const responderResult = await runExchange(
-      connResponder,
-      "responder",
-      prepared(RENAMED, both, serverRows),
-      {
-        psiLibrary,
-        signingIdentity: identityB,
-        partnerFingerprint: fingerprintA,
-        sessionKey,
-      },
-    );
-    // It holds a result, an audit record, and a receipt: everything a success
-    // leaves behind, and it returns as a success does.
-    expect(responderResult.associationTable).toBeDefined();
-    expect(responderResult.audit).toBeDefined();
-    const receipt = responderResult.signedReceipt;
-    expect(receipt).toBeDefined();
-    // The receipt is worthless: its own slot's certificate does not authorize
-    // the identity this party agreed terms under, which is the check every
-    // verifier applies -- so it fails wherever it is presented, including
-    // verify-receipt on the machine that wrote it.
+      const initiator = runExchange(
+        initiatorSide.conn,
+        "initiator",
+        prepared(divergesFirst ? RENAMED : "Initiator Co", both, clientRows),
+        {
+          psiLibrary,
+          signingIdentity: identityA,
+          partnerFingerprint: fingerprintB,
+          sessionKey,
+        },
+      ).then(
+        () => {
+          throw new Error("expected the initiator's leg to reject, not return");
+        },
+        (reason: unknown) => reason,
+      );
+      const responder = runExchange(
+        responderSide.conn,
+        "responder",
+        prepared(divergesFirst ? "Responder Co" : RENAMED, both, serverRows),
+        {
+          psiLibrary,
+          signingIdentity: identityB,
+          partnerFingerprint: fingerprintA,
+          sessionKey,
+        },
+      ).then(
+        () => {
+          throw new Error("expected the responder's leg to reject, not return");
+        },
+        (reason: unknown) => reason,
+      );
+
+      const diverging = divergesFirst ? initiatorSide : responderSide;
+      const raised = await (divergesFirst ? initiator : responder);
+      // Its own configuration is what failed, and the refusal names both values
+      // that disagree: an operator is told which name to change, and a caller
+      // branching on the type is not told the peer failed a trust boundary.
+      expect(raised).toBeInstanceOf(OperatorConfigError);
+      expect(raised).not.toBeInstanceOf(ReceiptVerificationError);
+      expect((raised as Error).message).toContain(RENAMED);
+      expect((raised as Error).message).toContain(
+        divergesFirst ? "Initiator Co" : "Responder Co",
+      );
+      // The timing, read off the wire: the check sits at the swap, so this
+      // party's payload had crossed -- and its certificate and signature had
+      // not. The role that would otherwise have signed last never presents the
+      // receipt no verifier accepts.
+      expect(diverging.sent.map(frameKind)).toContain("payload");
+      expect(diverging.sent.map(frameKind)).not.toContain("receipt");
+      // The disclosure that did happen is still attested, as every other
+      // termination of the swap is.
+      expect(exchangeRecordFromFailure(raised)?.record.outcome).toBe(
+        "receipt-swap-terminated",
+      );
+
+      // The partner parks on a receipt frame that never comes; the swap sends no
+      // abort of its own, so what releases the park is the transport -- here the
+      // local close, standing in for the peer-close or file-sync abort-marker
+      // diagnostic a production transport would deliver. Which kind that close
+      // surfaces depends on how far the leg had got when the pipe went away, so
+      // the load-bearing half alone is pinned: the leg REJECTS, returning no
+      // result, no record, and no receipt.
+      await rawInitiator.close();
+      await rawResponder.close();
+      const partnerOutcome = await (divergesFirst ? responder : initiator);
+      expect(partnerOutcome).toBeInstanceOf(ConnectionError);
+    });
+  }
+
+  test("a certificate that does authorize the agreed identity still signs", async () => {
+    // The refusal is the divergence's, not the check's: on the same pair, each
+    // party's terms naming the identity its certificate carries, both receipt
+    // frames go out and both sides return the dual-signed record.
+    const [rawInitiator, rawResponder] = createMessagePipe();
+    const initiatorSide = recording(rawInitiator);
+    const responderSide = recording(rawResponder);
+    const [resInitiator, resResponder] = await Promise.all([
+      runExchange(
+        initiatorSide.conn,
+        "initiator",
+        prepared("Initiator Co", both, clientRows),
+        {
+          psiLibrary,
+          signingIdentity: identityA,
+          partnerFingerprint: fingerprintB,
+          sessionKey,
+        },
+      ),
+      runExchange(
+        responderSide.conn,
+        "responder",
+        prepared("Responder Co", both, serverRows),
+        {
+          psiLibrary,
+          signingIdentity: identityB,
+          partnerFingerprint: fingerprintA,
+          sessionKey,
+        },
+      ),
+    ]);
+    expect(resInitiator.signedReceipt).toBeDefined();
+    expect(resInitiator.signedReceipt).toEqual(resResponder.signedReceipt);
     expect(
-      certificateAuthorizesIdentity(receipt!.responder.certificate, RENAMED),
-    ).toBe(false);
-    // And the partner, whose data has already crossed, is left with the error.
-    const raised = await initiatorOutcome;
-    expect(raised).toBeInstanceOf(ReceiptVerificationError);
-    expect((raised as Error).message).toMatch(/not trusted/);
-    await connInitiator.close();
-    await connResponder.close();
+      certificateAuthorizesIdentity(
+        resInitiator.signedReceipt!.initiator.certificate,
+        "Initiator Co",
+      ),
+    ).toBe(true);
+    // Both frames went out, so the negative assertions above are not vacuous.
+    expect(initiatorSide.sent.map(frameKind)).toContain("receipt");
+    expect(responderSide.sent.map(frameKind)).toContain("receipt");
+    await rawInitiator.close();
+    await rawResponder.close();
   });
 });
 
