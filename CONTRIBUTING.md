@@ -170,6 +170,7 @@ Documentation-tier placement is in scope for code review: a reviewer flags spec-
 - Imperative mood, present tense: "Fix key rotation after failed exchange", not "Fixed ..." or "Fixes ...".
 - Subject line 50 characters or fewer.
 - Include a body for non-trivial commits explaining motivation and context, not just what changed.
+- A pull request is squash-merged, so its squash message is the commit that lands. `node .claude/scripts/squash-message.mjs <pr-number>` drafts one from the branch's commits, the PR body, and this document, and prints it for the maintainer to review before pasting; it merges nothing.
 
 ## Pull Request Process
 

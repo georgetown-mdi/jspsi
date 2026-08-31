@@ -61,6 +61,13 @@ jobs:
       # docs/spec/DEPENDENCY_PINS.md or docs/TESTING.md) crept back in.
       - name: CONTRIBUTING scope
         run: npm run check:contributing
+      # Bounds CLAUDE.md by bytes, which is what every agent session pays to load
+      # it. The failure mode a shape check cannot see is uniform regrowth: each
+      # rule restating mechanics that already live in a command file or a hook
+      # header. The budget forces one-in, one-out -- a pull request that pushes
+      # past the ceiling relocates its own weight rather than deleting a rule.
+      - name: CLAUDE.md budget
+        run: npm run check:claudemd-budget
       # Encodes the CLI command inventory as a check: every subcommand
       # registered in apps/cli/src/cliParser.ts must be mentioned in
       # docs/DESIGN.md and docs/CLI.md, so a shipped command cannot leave the

@@ -18,6 +18,8 @@ PSI-Link uses [semantic versioning](https://semver.org/) (MAJOR.MINOR.PATCH):
 
 Compatibility between the CLI and its core dependency is recorded by the lockfile and embedded in the Docker image; no separate compatibility matrix is maintained.
 
+Nothing has been published yet: the canonical release version is still the pre-publication `0.1.0`, and every in-repo version literal holds at its pre-publication footing -- the footing itself, and what ends it, is specified in `docs/spec/PROTOCOL.md` (Wire-format deltas) and enforced by the release checks below.
+
 ## Release Artifacts
 
 Each release produces:

@@ -274,6 +274,36 @@ unparented task is fine. The two front doors apply this differently: the consult
 sets a clear fit autonomously and notes an unclear one in **Open questions**; the
 `/pm` persona proposes it in the draft and confirms before writing.
 
+## Epic terminal conditions
+
+Every epic carries a one-line terminal condition, written `Done is: ...`, naming
+an observable state that ends it. An epic without one is a parking lot: it
+refills as fast as it drains, because nothing in it can be finished.
+
+- A filing that does not advance its epic's line is DECLINED. Say which line it
+  fails to advance and where the concern belongs instead -- a limits line in the
+  governing `docs/spec/` file, a `docs/notes/` amendment, or an append to a
+  standing sweep item.
+- An epic with no line gets one at its next filing: draft the line, state it in
+  the result, and leave it for the owner to ratify.
+- The line is terminal, not aspirational. "Done is: the checks cover every sink"
+  can be observed; "Done is: the surface is hardened" cannot.
+
+The lines drafted so far, each pending the owner's ratification:
+
+- **Application Encryption** -- Done is: escape-once-at-the-display-sink and
+  bound-at-composition hold across every operator-facing sink, carried by checks
+  rather than by a fix per fragment.
+- **Partnership identity and consent** -- Done is: no exchange proceeds past a
+  consent surface whose disclosure list and terms binding are unverified, on the
+  invite, accept, and unattended paths alike.
+- **Web Exchange Rework** -- Done is: the reworked screens carry a full
+  invite-to-result exchange in the browser with the interop suite green, and no
+  screen remains on the pre-rework flow.
+- **Agency security review readiness** -- Done is: one agency completes a
+  security review from the published assurance package alone, every claim in it
+  naming the check that keeps it true.
+
 ## What the PM does NOT do
 
 - Does not implement code changes. If asked to fix something, draft a task.
