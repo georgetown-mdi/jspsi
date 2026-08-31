@@ -350,6 +350,12 @@ describe("block-worktree-deletions hook", () => {
     expect(
       verdict(`rm ${ROOT}/agent-third/probe.test.ts`, { cwd: SIBLING }).stderr,
     ).toContain(`working in '${SIBLING}'`);
+    // Standing in a tree is not owning it, so the refusal on the tree taken
+    // whole says which of the two answers it read rather than calling a tree the
+    // session merely walked into its own.
+    expect(verdict(`rm -rf ${SIBLING}`, { cwd: SIBLING }).stderr).toContain(
+      "is the worktree this session is working in, taken whole",
+    );
   });
 
   it("has nothing when the event names no agent and the shell stands outside", () => {
@@ -388,6 +394,14 @@ describe("block-worktree-deletions hook", () => {
       cwd: "/repo",
       agentId: null,
     });
+
+    // A session standing in one tree while its agent id names another may work
+    // in both, so a refusal reporting one of them sends it to the wrong place.
+    const bothTrees = verdict(`rm ${SIBLING}/probe.test.ts`, {
+      cwd: HANDED,
+    }).stderr;
+    expect(bothTrees).toContain(`working in '${HANDED}'`);
+    expect(bothTrees).toContain(`owns '${OWN}'`);
   });
 
   // The cost the ownership model states plainly, pinned so the header's stated
@@ -419,14 +433,51 @@ describe("block-worktree-deletions hook", () => {
       `find ${OWN}/dist -name '${SIBLING}' -delete`,
       `rm -rf ${OWN}/dist | tee ${SIBLING}/log.txt`,
       `git -C ${SIBLING} status --short | rm -rf ${OWN}/dist`,
+      // A short flag that is not `-t` names no destination, so the last operand
+      // is still the one mv writes rather than one it takes away.
+      `mv -v /tmp/probe.test.ts ${SIBLING}/apps/web/probe.test.ts`,
     ]);
     expectBlocked([
       `mv ${SIBLING}/probe.test.ts /tmp/probe.test.ts`,
       `mv -t /tmp ${SIBLING}/a.ts ${SIBLING}/b.ts`,
       `mv --target-directory=/tmp ${SIBLING}/a.ts`,
+      `mv --target-directory /tmp ${SIBLING}/a.ts`,
+      // getopt reads a bundled `-t` exactly as a lone one, taking the directory
+      // from the next argument or from the letters after the `t` itself, so each
+      // of these leaves the sibling path a source mv takes away.
+      `mv -vt /tmp ${SIBLING}/a.ts`,
+      `mv -fvt /tmp ${SIBLING}/a.ts`,
+      `mv -vt/tmp ${SIBLING}/a.ts`,
       `find ${SIBLING} -newer ${OWN}/marker -delete`,
       `find -L ${SIBLING} -name '*.ts' -delete`,
       `grep -rn x ${OWN} | head -3 && rm -rf ${SIBLING}/dist`,
+    ]);
+  });
+
+  // A `find -exec` hands its command the arguments written after the command
+  // word, so a path standing there is one the line takes away even though find
+  // never walked it: the start points name only `/tmp`. Each terminator spelling
+  // is read, and the arguments are read by the rules of the command they belong
+  // to -- an `mv` destination inside an `-exec` is no more a removal than one on
+  // a stage of its own, and a command that deletes nothing takes its paths with
+  // it.
+  it("reads the paths a `find -exec` hands its deleting command", () => {
+    expectBlocked([
+      `find /tmp -maxdepth 0 -exec rm -rf ${SIBLING} +`,
+      `find /tmp -maxdepth 0 -exec rm -rf ${SIBLING} \\;`,
+      `find /tmp -maxdepth 0 -exec rm -rf ${SIBLING} ';'`,
+      `find /tmp -maxdepth 0 -execdir rm -rf ${SIBLING} +`,
+      `find /tmp -maxdepth 0 -ok rm -rf ${SIBLING} \\;`,
+      `find /tmp -maxdepth 0 -okdir rm -rf ${SIBLING} \\;`,
+      `find /tmp -maxdepth 0 -exec \\rm -rf ${SIBLING} +`,
+      `find ${OWN}/dist -name '*.map' -exec rm {} + -exec rm -rf ${SIBLING} +`,
+      `find /tmp -maxdepth 0 -exec mv ${SIBLING}/a.ts /tmp/parked \\;`,
+    ]);
+    expectAllowed([
+      `find /tmp -maxdepth 0 -exec ls ${SIBLING} +`,
+      `find /tmp -maxdepth 0 -exec cp {} ${SIBLING}/backup \\;`,
+      `find /tmp -maxdepth 0 -exec mv {} ${SIBLING}/parked \\;`,
+      `find ${OWN}/dist -name '*.map' -exec rm {} +`,
     ]);
   });
 

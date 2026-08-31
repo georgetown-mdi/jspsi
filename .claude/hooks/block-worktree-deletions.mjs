@@ -98,7 +98,11 @@
 // plus the two git spellings above. Of the words on such a line, only the ones
 // that command REMOVES are read as targets -- an mv destination, a find
 // expression's pattern or -exec command word, and every operand of a stage that
-// deletes nothing all name paths the line does not take away.
+// deletes nothing all name paths the line does not take away. A find primary
+// that runs a command of its own is read twice over, because find hands that
+// command its arguments unchanged: the tree find walks by the start-point rule,
+// and the paths standing in the -exec by the rules of the command they are
+// handed to.
 //
 // TWO QUESTIONS ARE PUT TO REAL GIT rather than modelled from its on-disk layout
 // or its configuration precedence: whether a directory under the guarded root
@@ -158,8 +162,9 @@
 //     (removing the link does not follow it anyway).
 //   - ONLY THE OPERANDS A DELETING COMMAND REMOVES ARE READ, so a worktree path
 //     that merely appears elsewhere on the line is not a deletion of it: an `mv`
-//     destination, a `find` expression's `-name` pattern or `-exec` command word,
-//     and every operand of a stage that deletes nothing all pass unread. An `mv`
+//     destination, a `find` expression's `-name` pattern or `-exec` command word
+//     (the paths that command is handed are read as its own), and every operand
+//     of a stage that deletes nothing all pass unread. An `mv`
 //     or a redirect that OVERWRITES a file inside a tree passes with them, as
 //     `cp` always has -- what this hook guards is a tree taken away, not a file
 //     rewritten. `xargs` is the one exception: its targets arrive from an earlier
@@ -170,12 +175,18 @@
 //     refused. That is the model above rather than an oversight, and it is
 //     bounded: no `cd` reaches the tree itself, the root they all live under, or
 //     any tree other than the one the shell ends up in.
-//   - WHICH TREE THE SHELL IS STANDING IN COMES FROM THE EVENT'S cwd, moved by a
-//     `cd` on the same line. Whether the harness reports a drifted shell cwd or a
-//     stale session cwd was not driven at this ref (the test supplies cwd rather
-//     than observing what the harness sends), so a session whose cwd has drifted
-//     into a tree may read as standing outside it -- which refuses a cleanup
-//     rather than allowing a loss.
+//   - WHICH TREE THE SHELL IS STANDING IN COMES FROM THE WORKING DIRECTORY THE
+//     CALL ITSELF CARRIES, and not from a `cd` this line spells. That directory
+//     persists between calls, so a session whose directory was left inside a tree
+//     by some earlier call stands in that tree here, and every deletion of that
+//     tree's CONTENTS is allowed on a line carrying no `cd` at all -- standing is
+//     a place the session is in, not a step it takes on the guarded line. A `cd`
+//     on the line moves it from wherever it already stood, for the pipelines
+//     after that `cd`. Whether the harness reports a drifted shell cwd or a stale
+//     session cwd was not driven at this ref (the test supplies cwd rather than
+//     observing what the harness sends), so a session whose cwd has drifted into
+//     a tree may read as standing outside it -- which refuses a cleanup rather
+//     than allowing a loss.
 //   - A GIT DIRECTORY REDIRECT IS READ ONLY IN THE LITERAL FORMS MEASURED HERE:
 //     `-C` (composed left to right against the one before it, as real git
 //     composes it), `--work-tree`, and `GIT_WORK_TREE` set either as a leading
@@ -482,16 +493,21 @@ function standsIn(path, standingTree) {
 }
 
 // Which tree the refused session may work in, so a refusal is diagnosable from
-// the message alone: the tree it is standing in when it has one, and otherwise
-// the tree its agent id bought -- the fail-closed case, where the message has to
-// say that no tree was named rather than leave the refusal unexplained.
+// the message alone. Both answers are named when they differ -- a session
+// standing in one tree while its agent id names another may work in either, and
+// a message reporting one of them sends it to the wrong place. With neither, the
+// message has to say that no tree was named rather than leave the fail-closed
+// refusal unexplained.
 function ownershipNote(ownTrees, standingTree) {
+  const [owned] = ownTrees.filter((tree) => tree !== standingTree);
   if (standingTree !== null) {
-    return ` -- this session is working in '${standingTree}'`;
+    return owned === undefined
+      ? ` -- this session is working in '${standingTree}'`
+      : ` -- this session is working in '${standingTree}' and owns '${owned}'`;
   }
-  return ownTrees.length === 0
+  return owned === undefined
     ? " -- this session owns no agent worktree"
-    : ` -- this session owns only '${ownTrees[0]}'`;
+    : ` -- this session owns only '${owned}'`;
 }
 
 // The live worktree roots that deleting `target` would carry off with it.
@@ -524,9 +540,13 @@ function deletionVerdict(target, ownTrees, knownRoots, standingTree) {
     return `'${target}' is the root every agent worktree lives under`;
   }
   if (target === context.tree) {
-    return owns(target, ownTrees) || standsIn(target, standingTree)
-      ? `'${target}' is this session's own worktree, taken whole`
-      : `'${target}' is another session's worktree, taken whole${ownershipNote(ownTrees, standingTree)}`;
+    if (owns(target, ownTrees)) {
+      return `'${target}' is this session's own worktree, taken whole`;
+    }
+    if (standsIn(target, standingTree)) {
+      return `'${target}' is the worktree this session is working in, taken whole`;
+    }
+    return `'${target}' is another session's worktree, taken whole${ownershipNote(ownTrees, standingTree)}`;
   }
   if (owns(target, ownTrees) || standsIn(target, standingTree)) return null;
   return `'${target}' is inside '${context.tree}', an agent worktree this session is not working in${ownershipNote(ownTrees, standingTree)}`;
@@ -540,12 +560,23 @@ function isPathOperand(token) {
   );
 }
 
+// The `find` primaries that run a command of their own.
+const EXEC_PRIMARY = /^-(exec|execdir|ok|okdir)$/;
+
+// What ends such a primary within a single stage: a `+`, or the bare `\` a `\;`
+// terminator leaves behind -- the stage splitting above takes a `;` byte whether
+// the shell escaped it or not, so only the escape reaches here, and a quoted
+// `';'` leaves nothing at all, ending the primary at the end of the stage.
+function endsExec(token) {
+  return token === "+" || /^\\+$/.test(token);
+}
+
 function deletesPaths(command) {
   if (DELETING_COMMANDS.has(command.name)) return true;
   if (command.name === "find") {
     return (
       command.args.includes("-delete") ||
-      (command.args.some((arg) => /^-(exec|execdir|ok|okdir)$/.test(arg)) &&
+      (command.args.some((arg) => EXEC_PRIMARY.test(arg)) &&
         command.args.some((arg) => DELETING_COMMANDS.has(commandName(arg))))
     );
   }
@@ -558,9 +589,10 @@ function deletesPaths(command) {
 // `find` removes what it walks, so its targets are its START POINTS: the run of
 // path operands that begins at the first one, ending at the expression that
 // follows them. A leading option (`find -L <tree> ...`) is stepped over rather
-// than read as the end of the list, and every operand inside the expression -- a
-// `-name` pattern, an `-exec` command word -- names something find does not
-// remove.
+// than read as the end of the list, and an operand inside the expression is
+// never one of them: a `-name` pattern and an `-exec` command word name nothing
+// find removes, while the paths an `-exec` hands a deleting command are read as
+// that command's own.
 function startPoints(args) {
   const points = [];
   for (const arg of args) {
@@ -570,27 +602,69 @@ function startPoints(args) {
   return points;
 }
 
+// What a `find` primary's own command removes: find hands that command the
+// arguments standing between its command word and the terminator unchanged, so a
+// path written there is one the line takes away even though find never walked it
+// (`find /tmp -maxdepth 0 -exec rm -rf <tree> +` names no worktree among its
+// start points). The arguments are read by the rules of the command they belong
+// to, so an `mv` destination inside an `-exec` is no more a removal than one on
+// a stage of its own, and the `{}` find substitutes is not a literal path.
+function execTargets(args) {
+  const targets = [];
+  for (const [index, arg] of args.entries()) {
+    if (!EXEC_PRIMARY.test(arg)) continue;
+    const word = args[index + 1];
+    if (word === undefined || !DELETING_COMMANDS.has(commandName(word))) {
+      continue;
+    }
+    const end = args.findIndex((token, at) => at > index && endsExec(token));
+    targets.push(
+      ...removalTargets({
+        name: commandName(word),
+        args: args.slice(index + 2, end < 0 ? args.length : end),
+      }),
+    );
+  }
+  return targets;
+}
+
+// Where a flag names the destination `mv` writes to: the index of the operand
+// holding it, or null when the flag carries it inside its own token. Undefined
+// when no flag names one at all, which leaves the destination the last operand.
+// A short `-t` is read the way getopt reads it whatever it is bundled with, so
+// `mv -vt DIR src` and `mv -fvtDIR src` name a destination exactly as `mv -t DIR
+// src` does: the letters after that `t` are the directory when there are any,
+// and the next argument is it when there are none.
+function destinationOperand(args) {
+  for (const [index, arg] of args.entries()) {
+    if (arg === "--target-directory") return index + 1;
+    if (arg.startsWith("--target-directory=")) return null;
+    if (!/^-[^-]/.test(arg)) continue;
+    const bundled = arg.indexOf("t", 1);
+    if (bundled < 0) continue;
+    return bundled === arg.length - 1 ? index + 1 : null;
+  }
+  return undefined;
+}
+
 // `mv` removes its SOURCES and writes its destination, so the destination -- the
 // last operand, or the one a `-t` names -- is not a path it takes away. What that
 // leaves unread is an mv that OVERWRITES a file in a tree, which is outside this
 // hook's subject exactly as `cp` and a `>` redirect are: neither takes the tree,
 // and neither is read here.
 function moveSources(args) {
-  const flagged = args.findIndex(
-    (arg) => arg === "-t" || arg === "--target-directory",
-  );
-  const destinationNamed =
-    flagged >= 0 || args.some((arg) => arg.startsWith("--target-directory="));
+  const destination = destinationOperand(args);
   const operands = args.filter(
-    (arg, index) =>
-      isPathOperand(arg) && !(flagged >= 0 && index === flagged + 1),
+    (arg, index) => isPathOperand(arg) && index !== destination,
   );
-  return destinationNamed ? operands : operands.slice(0, -1);
+  return destination === undefined ? operands.slice(0, -1) : operands;
 }
 
 // The paths a deleting command actually removes.
 function removalTargets(command) {
-  if (command.name === "find") return startPoints(command.args);
+  if (command.name === "find") {
+    return [...startPoints(command.args), ...execTargets(command.args)];
+  }
   if (command.name === "mv") return moveSources(command.args);
   return command.args.filter(isPathOperand);
 }
