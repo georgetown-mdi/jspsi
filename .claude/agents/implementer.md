@@ -29,9 +29,8 @@ produce is your final message to the caller. Never end expecting a reply.
   scripts, build-output experiments -- in `/tmp`, never in the working tree,
   whether it is a fresh worktree or one handed to you already holding a
   branch's work: an untracked leftover there blocks
-  `require-clean-tree-for-review.mjs` on the branch's next review round, and
-  `block-worktree-deletions.mjs` refuses its deletion by a session that does
-  not own the tree. Anything the change itself needs belongs in the commit.
+  `require-clean-tree-for-review.mjs` on the branch's next review round.
+  Anything the change itself needs belongs in the commit.
 - Never start a long command with `run_in_background`: you have no turn left for
   the completion notification to land in. Run it in the FOREGROUND with a raised
   `timeout` (the Bash tool's ceiling is 600000 ms); split a command that exceeds

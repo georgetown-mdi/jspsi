@@ -210,7 +210,8 @@ describe("block-worktree-deletions hook", () => {
   it("resolves a relative target against a cd earlier in the line", () => {
     expectBlocked([
       `cd ${ROOT} && rm -rf agent-other`,
-      `cd ${ROOT}/agent-other; rm -rf src`,
+      `cd ${ROOT}/agent-other/apps && rm -rf ../../agent-third`,
+      `cd ${ROOT}/agent-other; rm -rf .`,
     ]);
   });
 
@@ -284,7 +285,6 @@ describe("block-worktree-deletions hook", () => {
       `git -C ${SIBLING} -c clean.requireForce=FALSE clean -d`,
       `git -C ${SIBLING} -c CLEAN.REQUIREFORCE=false clean -d`,
       `git -C ${SIBLING} -c clean.requireForce=true -c clean.requireForce=false clean -d`,
-      `cd ${SIBLING} && git clean -fd`,
       `git -C ${SIBLING} -C . clean -ffdx`,
       `git -C ${ROOT} -C agent-other clean -fd`,
       `git --work-tree=${SIBLING} clean -fd`,
@@ -304,6 +304,9 @@ describe("block-worktree-deletions hook", () => {
       `git -C ${SIBLING} -c clean.requireForce=false -c clean.requireForce=true clean -d`,
       `git -C ${SIBLING} -c clean.requireForce=false clean -dn`,
       `git -C ${SIBLING} -c user.name=x clean -d`,
+      // A clean of the tree the shell is standing in is that session's own
+      // cleanup, whichever tree its agent id names.
+      `cd ${SIBLING} && git clean -fd`,
     ]);
     expectAllowed(["git clean -fdx", "git clean -ffx", "git clean -ffd"], {
       cwd: LIVE_TREE,
@@ -312,66 +315,119 @@ describe("block-worktree-deletions hook", () => {
     });
   });
 
-  it("owns the tree its agent id names, not the one its cwd drifted into", () => {
-    // The everyday non-adversarial shape: a session that cd'ed into a sibling
-    // tree earlier in the run, whose cwd persists into every later Bash call.
-    expectBlocked(["rm -rf packages/core/src", "rm -rf *", "rm -rf ./dist"], {
+  // The measured false-positive class this hook cost the most on: a session
+  // working in a branch worktree its agent id does not name -- a non-isolated
+  // spawn, or one pointed at an existing tree -- clearing the probes, artifacts
+  // and screenshots it wrote itself. Every shape here is one a real session met a
+  // refusal on.
+  it("allows a session to clear its own scratch in the tree it is standing in", () => {
+    expectAllowed(
+      [
+        "rm apps/cli/test/unit/zzOrderProbe.test.ts",
+        "rm review_findings.md",
+        "rm -rf apps/web/test/browser/__screenshots__",
+        "mv apps/cli/test/unit/probe.test.ts /tmp/probe.test.ts.bak",
+        "rm -f scratch/commit-msg.txt; git status --short",
+        `rm ${SIBLING}/review_findings.md`,
+        `cd ${SIBLING}/apps/web && rm -f test/browser/probe.test.ts`,
+        `cd ${SIBLING}/apps/web && cat > /tmp/probe.test.ts <<'EOF'\nimport { rm } from "node:fs";\nEOF`,
+        "git clean -fd",
+      ],
+      { cwd: SIBLING, agentId: SPAWNED_WITHOUT_A_TREE },
+    );
+  });
+
+  it("works in the tree it is standing in, and in no other", () => {
+    expectAllowed(["rm -rf packages/core/src", "rm -rf ./dist"], {
       cwd: SIBLING,
     });
-    expectAllowed(["rm -rf packages/core/src", "rm -rf node_modules"], {
-      cwd: OWN,
-    });
-    expect(verdict("rm -rf src", { cwd: SIBLING }).stderr).toContain(
-      `owns only '${OWN}'`,
+    // Standing in one tree buys nothing in another, and nothing in the tree
+    // itself: both are the loss this hook exists for.
+    expectBlocked(
+      [`rm ${ROOT}/agent-third/probe.test.ts`, "rm -rf .", `rm -rf ${SIBLING}`],
+      { cwd: SIBLING },
     );
+    expect(
+      verdict(`rm ${ROOT}/agent-third/probe.test.ts`, { cwd: SIBLING }).stderr,
+    ).toContain(`working in '${SIBLING}'`);
   });
 
-  it("owns nothing when the event names no agent", () => {
-    expectBlocked(["rm -rf node_modules", `rm -rf ${SIBLING}/dist`], {
-      cwd: OWN,
+  it("has nothing when the event names no agent and the shell stands outside", () => {
+    expectBlocked([`rm -rf ${SIBLING}/dist`, `rm -rf ${OWN}/dist`], {
+      cwd: "/repo",
       agentId: null,
     });
     expect(
-      verdict("rm -rf node_modules", { cwd: OWN, agentId: null }).stderr,
+      verdict(`rm -rf ${OWN}/dist`, { cwd: "/repo", agentId: null }).stderr,
     ).toContain("owns no agent worktree");
   });
 
-  // The four cases the ownership model turns on, driven together so the answer
-  // each one ships stands in a single place: the tree this session's agent id
-  // names, a tree it was handed instead, a sibling that is neither, and an event
-  // carrying no agent id at all.
-  it("resolves the four ownership cases from the agent id alone", () => {
-    expectAllowed([`rm ${OWN}/probe.test.ts`, "rm -rf dist"], { cwd: OWN });
+  // The cases the model turns on, driven together so the answer each one ships
+  // stands in a single place: the tree this session's agent id names, reached from
+  // outside it; a tree it was handed and is standing in; a tree it is neither
+  // standing in nor owns; and the tree itself, which neither answer ever buys.
+  it("resolves the ownership cases from the agent id and the standing tree", () => {
+    expectAllowed([`rm ${OWN}/probe.test.ts`, `rm -rf ${OWN}/dist`], {
+      cwd: ROOT,
+    });
 
     const handed = { cwd: HANDED, agentId: SPAWNED_WITHOUT_A_TREE };
-    expectBlocked(
-      [`rm ${HANDED}/probe.test.ts`, "rm probe.test.ts", `rm -rf ${HANDED}`],
-      handed,
-    );
-    const handedRefusal = verdict(`rm ${HANDED}/probe.test.ts`, handed).stderr;
-    expect(handedRefusal).toContain(
-      `owns only '${ROOT}/agent-${SPAWNED_WITHOUT_A_TREE}'`,
-    );
-    // A refusal a handed-over session meets has to carry the procedure that
-    // clears the file without a deletion, or the session has nothing to do next.
-    expect(handedRefusal).toContain("stash push -u -- <path>");
-    // The advice is scoped to the reader's own case, not offered blanket: it
-    // names the handed-tree condition under which the stash route applies and
-    // says plainly that another session's tree gets no cleanup of any kind.
-    expect(handedRefusal).toContain("was handed");
-    expect(handedRefusal).toContain(
-      "not handed is another live session's workplace",
-    );
+    expectAllowed([`rm ${HANDED}/probe.test.ts`, "rm probe.test.ts"], handed);
+    expectBlocked([`rm -rf ${HANDED}`, `rm ${SIBLING}/probe.test.ts`], handed);
 
-    expectBlocked([`rm ${SIBLING}/probe.test.ts`], handed);
+    // A refusal has to carry the procedure that clears a stranded tree without a
+    // deletion, or a session with one to retire has nothing to do next -- and it
+    // has to say plainly that a tree another session is working in gets no
+    // cleanup at all.
+    const refusal = verdict(`rm ${SIBLING}/probe.test.ts`, handed).stderr;
+    expect(refusal).toContain("stash push -u -- <path>");
+    expect(refusal).toContain("STRANDED tree");
+    expect(refusal).toContain("gets no cleanup of any kind");
 
-    expectBlocked([`rm ${HANDED}/probe.test.ts`, "rm probe.test.ts"], {
-      cwd: HANDED,
+    expectBlocked([`rm ${HANDED}/probe.test.ts`], {
+      cwd: "/repo",
       agentId: null,
     });
-    expect(
-      verdict("rm probe.test.ts", { cwd: HANDED, agentId: null }).stderr,
-    ).toContain("owns no agent worktree");
+  });
+
+  // The cost the ownership model states plainly, pinned so the header's stated
+  // limit cannot go stale: a `cd` into a tree makes it the tree the shell stands
+  // in, contents and all. What no `cd` reaches is the tree itself, the root they
+  // all live under, or any tree other than the one it lands in.
+  it("takes a cd into a tree for standing in it, never for taking it", () => {
+    expectAllowed([`cd ${SIBLING} && rm -rf src`], { cwd: "/repo" });
+    expectBlocked(
+      [
+        `cd ${SIBLING} && rm -rf .`,
+        `cd ${SIBLING}/.. && rm -rf agent-other`,
+        `cd ${SIBLING} && rm -rf ${ROOT}/agent-third/src`,
+        `cd /repo && rm -rf ${SIBLING}/src`,
+      ],
+      { cwd: "/repo" },
+    );
+  });
+
+  // The 'incidental mention' class: a worktree path standing on a line that
+  // deletes something else. Only the operands the deleting command removes are
+  // read, so none of these is a deletion of the tree it names -- while the
+  // removal itself is read wherever it stands.
+  it("reads only the operands the deleting command removes", () => {
+    expectAllowed([
+      `grep -n 'DELETING|"rm"|clean' ${SIBLING}/hook.mjs | head -40`,
+      `mv /tmp/probe.test.ts ${SIBLING}/apps/web/probe.test.ts`,
+      `find ${OWN}/dist -newer ${SIBLING}/marker -delete`,
+      `find ${OWN}/dist -name '${SIBLING}' -delete`,
+      `rm -rf ${OWN}/dist | tee ${SIBLING}/log.txt`,
+      `git -C ${SIBLING} status --short | rm -rf ${OWN}/dist`,
+    ]);
+    expectBlocked([
+      `mv ${SIBLING}/probe.test.ts /tmp/probe.test.ts`,
+      `mv -t /tmp ${SIBLING}/a.ts ${SIBLING}/b.ts`,
+      `mv --target-directory=/tmp ${SIBLING}/a.ts`,
+      `find ${SIBLING} -newer ${OWN}/marker -delete`,
+      `find -L ${SIBLING} -name '*.ts' -delete`,
+      `grep -rn x ${OWN} | head -3 && rm -rf ${SIBLING}/dist`,
+    ]);
   });
 
   // The procedure the refusal names is a claim about real git, so every step of
@@ -639,30 +695,31 @@ describe("block-worktree-deletions hook", () => {
         persisted: "false",
         versionDependentForceCount: true,
       },
-      { spelling: "git clean -d", from: "tree", persisted: "false" },
-      { spelling: "git clean", from: "tree", persisted: "false" },
+      { spelling: "git -C SIBLING clean -d", from: "own", persisted: "false" },
+      { spelling: "git -C SIBLING clean", from: "own", persisted: "false" },
       // A `-c` on the command line settles the value either way round.
       {
-        spelling: "git -c clean.requireForce=true clean -d",
-        from: "tree",
+        spelling: "git -C SIBLING -c clean.requireForce=true clean -d",
+        from: "own",
         persisted: "false",
       },
       {
-        spelling: "git -c clean.requireForce=false clean -d",
-        from: "tree",
+        spelling: "git -C SIBLING -c clean.requireForce=false clean -d",
+        from: "own",
         persisted: "true",
       },
       // Left on in the file, git refuses the unforced clean and skips the
       // healthy nested trees, so neither row is a deletion to refuse.
-      { spelling: "git clean -d", from: "tree", persisted: "true" },
+      { spelling: "git -C SIBLING clean -d", from: "own", persisted: "true" },
       { spelling: "git clean -df", from: "dir", persisted: "true" },
     ]) {
-      const { dir, git, tree, precious } = makeRepoWithWorktree();
+      const { dir, git, tree, own, precious } = makeRepoWithWorktree();
       git("config", "clean.requireForce", persisted);
-      const cwd = from === "dir" ? dir : tree;
+      const cwd = from === "dir" ? dir : own;
+      const spelt = spelling.replaceAll("SIBLING", tree);
       const label = `${spelling} from ${from}, persisted ${persisted}`;
-      const blocked = verdict(spelling, { cwd, projectDir: dir }).status === 2;
-      spawnSync("bash", ["-c", spelling], { cwd });
+      const blocked = verdict(spelt, { cwd, projectDir: dir }).status === 2;
+      spawnSync("bash", ["-c", spelt], { cwd });
       // The fail-closed property, which holds whatever git runs it: work
       // destroyed by a command the hook allowed is the one outcome no version
       // may produce.
@@ -689,36 +746,44 @@ describe("block-worktree-deletions hook", () => {
   it("blocks exactly the cleans an inline config environment turns destructive", () => {
     for (const { spelling, requireForce } of [
       {
-        spelling: "GIT_CONFIG_GLOBAL=CONFIG_FILE git clean -d",
+        spelling: "GIT_CONFIG_GLOBAL=CONFIG_FILE git -C SIBLING clean -d",
         requireForce: "false",
       },
-      { spelling: "HOME=HOME_DIR git clean -d", requireForce: "false" },
       {
-        spelling: "export GIT_CONFIG_GLOBAL=CONFIG_FILE; git clean -d",
+        spelling: "HOME=HOME_DIR git -C SIBLING clean -d",
+        requireForce: "false",
+      },
+      {
+        spelling:
+          "export GIT_CONFIG_GLOBAL=CONFIG_FILE; git -C SIBLING clean -d",
         requireForce: "false",
       },
       // A file that leaves requireForce on leaves git's refusal in place, and a
       // command-line `-c` wins over whichever file the assignment points at.
       {
-        spelling: "GIT_CONFIG_GLOBAL=CONFIG_FILE git clean -d",
+        spelling: "GIT_CONFIG_GLOBAL=CONFIG_FILE git -C SIBLING clean -d",
         requireForce: "true",
       },
-      { spelling: "HOME=HOME_DIR git clean -d", requireForce: "true" },
+      {
+        spelling: "HOME=HOME_DIR git -C SIBLING clean -d",
+        requireForce: "true",
+      },
       {
         spelling:
-          "GIT_CONFIG_GLOBAL=CONFIG_FILE git -c clean.requireForce=true clean -d",
+          "GIT_CONFIG_GLOBAL=CONFIG_FILE git -C SIBLING -c clean.requireForce=true clean -d",
         requireForce: "false",
       },
     ]) {
-      const { dir, tree, precious } = makeRepoWithWorktree();
+      const { dir, tree, own, precious } = makeRepoWithWorktree();
       const home = makeGitConfigHome(requireForce);
       const command = spelling
         .replaceAll("HOME_DIR", home)
-        .replaceAll("CONFIG_FILE", join(home, ".gitconfig"));
+        .replaceAll("CONFIG_FILE", join(home, ".gitconfig"))
+        .replaceAll("SIBLING", tree);
       const label = `${spelling}, requireForce ${requireForce}`;
       const blocked =
-        verdict(command, { cwd: tree, projectDir: dir }).status === 2;
-      spawnSync("bash", ["-c", command], { cwd: tree });
+        verdict(command, { cwd: own, projectDir: dir }).status === 2;
+      spawnSync("bash", ["-c", command], { cwd: own });
       expect(existsSync(precious), label).toBe(!blocked);
     }
   });
@@ -738,9 +803,9 @@ describe("block-worktree-deletions hook", () => {
       `#!/bin/sh\necho "$@" >> "${log}"\necho false\n`,
       { mode: 0o755 },
     );
-    const { dir, tree } = makeRepoWithWorktree();
-    const { status } = verdict(`PATH=${shim} git clean -d`, {
-      cwd: tree,
+    const { dir, tree, own } = makeRepoWithWorktree();
+    const { status } = verdict(`PATH=${shim} git -C ${tree} clean -d`, {
+      cwd: own,
       projectDir: dir,
     });
     expect(status).toBe(0);
