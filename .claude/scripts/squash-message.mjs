@@ -15,10 +15,11 @@
 //   node squash-message.mjs <pr-number>
 //
 // GENERATION ONLY. The run is given a read-only tool allowance -- reading files,
-// `git log`, and `gh pr view` -- and `gh pr merge`, `gh pr edit`, and `git push`
-// are named on the deny list besides. Nothing here merges, edits, or pushes
-// anything: the message goes to stdout and the maintainer decides what to do
-// with it. The colocated test pins that property of the argv this builds.
+// `git log`, `git show`, `gh pr view`, and `gh pr diff` -- and `gh pr merge`,
+// `gh pr edit`, and `git push` are named on the deny list besides. Nothing here
+// merges, edits, or pushes anything: the message goes to stdout and the
+// maintainer decides what to do with it. The colocated test pins that property
+// of the argv this builds.
 //
 // The prompt is left in the maintainer's own words rather than elaborated. It
 // names CONTRIBUTING.md with an `@` mention because that is what the interactive

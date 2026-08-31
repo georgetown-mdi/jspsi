@@ -133,7 +133,7 @@ the branch is worse for leaving. Absent that line, state it and move on.
   run that contradicts the finding closes it (record the command and outcome in
   Step 4); one that confirms it makes the fix a measured one.
 - **A gated role round's disposition can take a consult.** Choosing among fix,
-  contest, and documented limit on a gated `security-reviewer` or
+  contest, narrow, and stated limit on a gated `security-reviewer` or
   `adversarial-verifier` round is the adjudication CLAUDE.md's model-tier rule
   reserves Fable for -- a one-shot, owner-approved consult on the choice, never
   a Fable fix round. It is the highest-judgment call in the loop, and a consult
@@ -241,10 +241,10 @@ is latent and likely to come back to bite.
 
 **Security-review readiness.** One line: ready, or not yet and what is gating it.
 The branch is ready when the diff has stabilized (trajectory converging, not
-churning), no unaddressed finding touches a security-relevant surface (one taken
-as a documented limit stops gating readiness once the owner ratifies that
-disposition), brittle areas are shored up or independently assessed, and
-typecheck/lint/tests are green. When it is ready, say so.
+churning), no unaddressed finding touches a security-relevant surface (one
+narrowed, or recorded as a stated limit, stops gating readiness once the owner
+ratifies that disposition), brittle areas are shored up or independently
+assessed, and typecheck/lint/tests are green. When it is ready, say so.
 
 **Re-attestation.** A fix committed here moves the head, so a Security review
 line already attesting an earlier sha goes stale. The mechanical paths below are
