@@ -308,6 +308,54 @@ describe("signaling diagnostics sink", () => {
     expect(brokerLines()[1]).toContain("[client-frame]");
   });
 
+  test("a frame that parses to null or a primitive is absorbed under client-frame, the peer staying registered", async () => {
+    const broker = await startBroker();
+    const client = await connectRegistered(broker.port, "peer-null-primitive");
+
+    client.send("null");
+    await waitFor(() => brokerLines().length > 0);
+    expect(brokerLines()[0]).toContain("[client-frame]");
+
+    client.send("5");
+    await waitFor(() => brokerLines().length > 1);
+    expect(brokerLines()[1]).toContain("[client-frame]");
+
+    // Still registered past both throws: a further real parse failure is still
+    // read as this socket's own frame rather than one nobody is attributing to
+    // anymore.
+    client.send("not json at all");
+    await waitFor(() => brokerLines().length > 2);
+    expect(brokerLines()[2]).toContain("[client-frame]");
+  });
+
+  test("a dispatch fault through the real realm wiring -- a non-string payload queued for an absent destination -- is attributed apart from the parse", async () => {
+    const broker = await startShippedBroker();
+    const client = await connectRegistered(broker.port, "peer-realdispatch");
+
+    // An OFFER to a destination nobody has registered, carrying a payload
+    // `realm.addMessageToQueue` cannot size: `messageByteSize` throws inside it
+    // before the frame is ever queued, so what surfaces here is the shipped
+    // wiring's own fault rather than a listener this test attached.
+    client.send(
+      JSON.stringify({
+        type: "OFFER",
+        dst: "nobody-registered",
+        payload: { not: "a string" },
+      }),
+    );
+
+    await waitFor(() => brokerLines().length > 0);
+    const [line] = brokerLines();
+    expect(line).toContain("[frame-dispatch]");
+    expect(line).not.toContain("[client-frame]");
+
+    // Still registered: a parse failure right after is read as this socket's
+    // own frame, not one the dispatch fault tore down.
+    client.send("not json at all");
+    await waitFor(() => brokerLines().length > 1);
+    expect(brokerLines()[1]).toContain("[client-frame]");
+  });
+
   test("a flood is shed at the rate limit and the shedding is itself reported", async () => {
     const broker = await startBroker();
     const startedAt = Date.now();
