@@ -43,7 +43,7 @@ ARG FIPS_MODULE_VERSION=3.0.8-d694bfa693b76001
 # assertion in the stage below holds rather than this comment. Where the digest
 # was resolved, and the checklist a bump of it works through, are in
 # docs/spec/DEPENDENCY_PINS.md.
-FROM amazonlinux:2023@sha256:694092ae18877ed4e3cb9b643759ba95df1f12af12528fefa18f60f79d4c1568 AS nodebase
+FROM amazonlinux:2023@sha256:181f98c48832fe926f8ca3b6ffeafcce128e96e77b93d08fbe9a9bc9403ce284 AS nodebase
 ARG NODE_VERSION
 ARG AL2023_RELEASEVER
 # The coupling the digest above is pinned for, asserted rather than described:
