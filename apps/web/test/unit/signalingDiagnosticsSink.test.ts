@@ -26,24 +26,24 @@ import type { DiagnosticSink } from "@psilink/core";
 // The sink behind the signaling server's `error` event: that a released socket
 // reaches an operator-readable log line at all, that the line says which release
 // path raised it, that a peer looping parse failures is shed rather than allowed
-// to flood the log, and that the peer's own bytes arrive escaped so they cannot
-// forge a line of their own. The release paths that RAISE these reports are
-// covered in signalingServer.test.ts; what is measured here is what becomes of a
-// report afterwards.
+// to flood the log and the notices name which classes lost reports, and that the
+// peer's own bytes arrive escaped so they cannot forge a line of their own. The
+// release paths that RAISE these reports are covered in signalingServer.test.ts;
+// what is measured here is what becomes of a report afterwards.
 
 /** The broker's logger context, which is what marks its lines in a capture that
  * sees every prefixed logger in the process. */
 const BROKER_LOG_CONTEXT = "peerjs-broker";
 
-/** A payload that is not JSON and whose bytes the parser quotes back in its own
- * message: an ESC that would open an ANSI sequence, a CR/LF that would end the
- * log line, and a forged context behind them to head a line of the peer's own. */
 /** Room for everything on a diagnostic line that is not the escaped detail: the
  * ISO timestamp, the level and context labels, and the fixed copy the detail is
  * appended to. Generous on purpose -- what the bound below is about is the
  * detail's own cap holding, not the width of the first-party text. */
 const FIXED_LINE_ALLOWANCE = 200;
 
+/** A payload that is not JSON and whose bytes the parser quotes back in its own
+ * message: an ESC that would open an ANSI sequence, a CR/LF that would end the
+ * log line, and a forged context behind them to head a line of the peer's own. */
 const HOSTILE_FRAME = "\u001b\r\n[forged] not json";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -81,11 +81,40 @@ interface Broker {
   wss: WebSocketServer;
 }
 
-/** A signaling server on a loopback HTTP server with the diagnostics sink
- * attached, which is the wiring `CreateInstanceWSOnly` ships. */
-async function startBroker(
-  opts: { coResidentUpgrade?: "answers" | "ignores" } = {},
-): Promise<Broker> {
+/** Stop a loopback HTTP server at the end of the test that started it. */
+function closeWithTest(server: http.Server): void {
+  cleanups.push(
+    () =>
+      new Promise<void>((resolve) => {
+        server.closeAllConnections();
+        server.close(() => resolve());
+      }),
+  );
+}
+
+/** A co-resident `upgrade` listener beside the signaling server -- the shared
+ * dev server's shape, and the only wiring in which an upgrade this server
+ * declines is left for somebody. Registered after the signaling server's own
+ * listener, since what is being driven is what becomes of an upgrade it
+ * declined. */
+function attachCoResidentUpgrade(
+  server: http.Server,
+  behavior: "answers" | "ignores",
+): void {
+  const adopter =
+    behavior === "answers" ? new WsServer({ noServer: true }) : null;
+  server.on("upgrade", (req, socket, head) => {
+    if (req.url?.startsWith("/peerjs")) return;
+    adopter?.handleUpgrade(req, socket, head, (adopted) => {
+      adopted.on("error", () => {});
+    });
+  });
+}
+
+/** A signaling server whose `error` event a test raises on directly, for what a
+ * real socket cannot drive on demand: the budget, the window's clock, and a
+ * source no raise site of this server's would pass. */
+async function startBroker(): Promise<Broker> {
   const server = http.createServer();
   const wss = new WebSocketServer({
     server,
@@ -94,30 +123,26 @@ async function startBroker(
   });
   attachSignalingDiagnostics(wss);
 
-  if (opts.coResidentUpgrade !== undefined) {
-    // Registered after the signaling server's own listener, so an upgrade it
-    // declines is left for this one -- the shared dev server's shape.
-    const adopter =
-      opts.coResidentUpgrade === "answers"
-        ? new WsServer({ noServer: true })
-        : null;
-    server.on("upgrade", (req, socket, head) => {
-      if (req.url?.startsWith("/peerjs")) return;
-      adopter?.handleUpgrade(req, socket, head, (adopted) => {
-        adopted.on("error", () => {});
-      });
-    });
-  }
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  closeWithTest(server);
+  return { port: (server.address() as AddressInfo).port, wss };
+}
+
+/** A signaling server built by `CreatePeerServerWSOnly` -- the single builder
+ * the web app's mount and the standalone runner both go through -- so a test
+ * driving a real socket at it measures the shipped wiring rather than a
+ * restatement of it. */
+async function startShippedBroker(
+  opts: { coResidentUpgrade?: "answers" | "ignores" } = {},
+): Promise<{ port: number }> {
+  const server = http.createServer();
+  CreatePeerServerWSOnly(server, { path: "/", key: "peerjs" });
+  if (opts.coResidentUpgrade !== undefined)
+    attachCoResidentUpgrade(server, opts.coResidentUpgrade);
 
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  cleanups.push(
-    () =>
-      new Promise<void>((resolve) => {
-        server.closeAllConnections();
-        server.close(() => resolve());
-      }),
-  );
-  return { port: (server.address() as AddressInfo).port, wss };
+  closeWithTest(server);
+  return { port: (server.address() as AddressInfo).port };
 }
 
 function upgradeRequest(port: number, target: string): string {
@@ -189,7 +214,7 @@ async function waitFor(
 
 describe("signaling diagnostics sink", () => {
   test("an upgrade no co-resident listener answered is reported, attributed", async () => {
-    const broker = await startBroker({ coResidentUpgrade: "ignores" });
+    const broker = await startShippedBroker({ coResidentUpgrade: "ignores" });
     openRawConnection(broker.port).send(upgradeRequest(broker.port, "/hmr"));
 
     await waitFor(() => brokerLines().length > 0);
@@ -201,7 +226,7 @@ describe("signaling diagnostics sink", () => {
   });
 
   test("an error the release window catches is attributed apart from an unanswered upgrade", async () => {
-    const broker = await startBroker({ coResidentUpgrade: "answers" });
+    const broker = await startShippedBroker({ coResidentUpgrade: "answers" });
     const raw = openRawConnection(broker.port);
     raw.send(upgradeRequest(broker.port, "/hmr"));
 
@@ -259,17 +284,92 @@ describe("signaling diagnostics sink", () => {
         "client-frame",
       );
 
+    // The budget is one budget across every source, so a release the window
+    // caught mid-flood is shed on what the flood spent. That is the starvation
+    // the breakdown below exists to name: the operator cannot see the alarm, so
+    // the notices have to tell them which alarm it was.
+    const starved = 2;
+    for (let sent = 0; sent < starved; sent += 1)
+      broker.wss.emit("error", new Error(`reset ${sent}`), "released-socket");
+
     // The budget, plus one notice saying the rest of the window is being shed.
     // Nothing else: the notice cannot itself become the flood.
     expect(brokerLines()).toHaveLength(DIAGNOSTICS_PER_RATE_LIMIT_WINDOW + 1);
     expect(brokerLines().at(-1)).toContain("rate limited");
+    expect(brokerLines().at(-1)).toContain(
+      "suppressed so far (client-frame: 1)",
+    );
 
     clock.mockReturnValue(startedAt + DIAGNOSTIC_RATE_LIMIT_WINDOW_MS);
     broker.wss.emit("error", new Error("after the window"), "client-frame");
 
-    const shed = flood - DIAGNOSTICS_PER_RATE_LIMIT_WINDOW;
-    expect(brokerLines().at(-2)).toContain(`${shed} suppressed`);
+    const shedFrames = flood - DIAGNOSTICS_PER_RATE_LIMIT_WINDOW;
+    expect(brokerLines().at(-2)).toContain(
+      `${shedFrames + starved} suppressed while rate limited (client-frame: ${shedFrames}, released-socket: ${starved})`,
+    );
     expect(brokerLines().at(-1)).toContain("after the window");
+  });
+
+  test("a clock stepped backwards keeps shedding until it has caught back up", async () => {
+    const broker = await startBroker();
+    const startedAt = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(startedAt);
+
+    for (let sent = 0; sent <= DIAGNOSTICS_PER_RATE_LIMIT_WINDOW; sent += 1)
+      broker.wss.emit(
+        "error",
+        new Error(`parse failure ${sent}`),
+        "client-frame",
+      );
+    const atTheLimit = brokerLines().length;
+    expect(atTheLimit).toBe(DIAGNOSTICS_PER_RATE_LIMIT_WINDOW + 1);
+
+    // A whole window backwards, which a sink that read the step as a new window
+    // would answer by handing the flood a fresh budget.
+    clock.mockReturnValue(startedAt - DIAGNOSTIC_RATE_LIMIT_WINDOW_MS);
+    broker.wss.emit("error", new Error("stepped back"), "client-frame");
+    expect(brokerLines()).toHaveLength(atTheLimit);
+
+    // Shed right up to the reading the window was opened against, so what the
+    // step costs is silence for its own length on top of the window's.
+    clock.mockReturnValue(startedAt + DIAGNOSTIC_RATE_LIMIT_WINDOW_MS - 1);
+    broker.wss.emit("error", new Error("not caught up yet"), "client-frame");
+    expect(brokerLines()).toHaveLength(atTheLimit);
+
+    clock.mockReturnValue(startedAt + DIAGNOSTIC_RATE_LIMIT_WINDOW_MS);
+    broker.wss.emit("error", new Error("caught up"), "client-frame");
+    expect(brokerLines().at(-2)).toContain(
+      "3 suppressed while rate limited (client-frame: 3)",
+    );
+    expect(brokerLines().at(-1)).toContain("caught up");
+  });
+
+  test("a report whose source names nothing this sink knows is written unattributed", async () => {
+    const broker = await startBroker();
+
+    // `emit` is untyped, so a raise can hand the sink any source at all -- and a
+    // source it cannot render is exactly the raise whose report an operator has
+    // nothing else to read.
+    broker.wss.emit("error", new Error("raised under no known source"), {});
+
+    const [line] = brokerLines();
+    expect(line).toContain("[unattributed]");
+    expect(line).toContain("raised under no known source");
+
+    // The slot it spent is a slot it used: the rest of the budget writes, and
+    // the report past it is shed rather than admitted on a slot a dropped
+    // diagnostic had already charged.
+    for (let sent = 1; sent < DIAGNOSTICS_PER_RATE_LIMIT_WINDOW; sent += 1)
+      broker.wss.emit(
+        "error",
+        new Error(`parse failure ${sent}`),
+        "client-frame",
+      );
+    expect(brokerLines()).toHaveLength(DIAGNOSTICS_PER_RATE_LIMIT_WINDOW);
+
+    broker.wss.emit("error", new Error("past the budget"), "client-frame");
+    expect(brokerLines()).toHaveLength(DIAGNOSTICS_PER_RATE_LIMIT_WINDOW + 1);
+    expect(brokerLines().at(-1)).toContain("rate limited");
   });
 
   test("a diagnostic's detail is bounded, so one report cannot be the flood", async () => {
@@ -303,24 +403,8 @@ describe("signaling diagnostics sink", () => {
   });
 
   test("the shipped instance wiring carries a report to the sink", async () => {
-    const server = http.createServer();
-    await new Promise<void>((resolve) =>
-      server.listen(0, "127.0.0.1", resolve),
-    );
-    cleanups.push(
-      () =>
-        new Promise<void>((resolve) => {
-          server.closeAllConnections();
-          server.close(() => resolve());
-        }),
-    );
-    // The single builder the web app's mount and the standalone runner both go
-    // through, driven rather than inspected: what is measured is that a report
-    // raised inside it reaches the log.
-    CreatePeerServerWSOnly(server, { path: "/", key: "peerjs" });
-
-    const port = (server.address() as AddressInfo).port;
-    const client = await connectRegistered(port, "peer-wiring");
+    const broker = await startShippedBroker();
+    const client = await connectRegistered(broker.port, "peer-wiring");
     client.send("not json at all");
 
     await waitFor(() => brokerLines().length > 0);
