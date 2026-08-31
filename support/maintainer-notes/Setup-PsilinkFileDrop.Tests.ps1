@@ -3,8 +3,9 @@
     Pester suite over the path-resolution functions in
     Setup-PsilinkFileDrop.ps1, the console command it closes on, and the
     image-capability question it turns an unusable image away on before it asks
-    for a password. Maintainer-facing: it lives outside the guide folder, and an
-    operator following the setup page never receives it.
+    for a password -- and the single fetch that question makes before it gives
+    up. Maintainer-facing: it lives outside the guide folder, and an operator
+    following the setup page never receives it.
 
 .DESCRIPTION
     The script under test is dot-sourced with -LoadFunctionsOnly, which defines
@@ -542,6 +543,65 @@ Describe 'Invoke-Docker' {
     }
 }
 
+Describe 'The image fetch both call sites make' {
+    BeforeAll {
+        $script:FetchStubRoot = Join-Path $env:TEMP ('psilink-fetch-stub-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        New-Item -ItemType Directory -Path $script:FetchStubRoot -Force | Out-Null
+
+        # A pull that worked, recording the call it was given so the vector can
+        # be read back rather than inferred from the exit code.
+        $script:PullEngine = Join-Path $script:FetchStubRoot 'pull.cmd'
+        Set-Content -LiteralPath $script:PullEngine -Encoding Ascii -Value @(
+            '@echo off',
+            '>"%PSILINK_STUB_ARGS%" echo %*',
+            'exit /b 0')
+
+        # And one that could not reach the registry, which is the arm whose
+        # output the refusal prints as the evidence an operator has to act on.
+        $script:UnreachableRegistryEngine = Join-Path $script:FetchStubRoot 'noregistry.cmd'
+        Set-Content -LiteralPath $script:UnreachableRegistryEngine -Encoding Ascii -Value @(
+            '@echo off',
+            'echo error response from daemon: the proxy refused the connection 1>&2',
+            'exit /b 1')
+    }
+
+    AfterAll {
+        Remove-Item -LiteralPath $script:FetchStubRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'fetches the same image quietly whichever call site asked for it' {
+        # -Refresh changes what the operator is told and nothing about what is
+        # fetched, which is what lets one function carry the size-and-duration
+        # notice for the first run and for the refresh below it.
+        $argsFile = Join-Path $script:FetchStubRoot 'recorded-args.txt'
+        $previous = $env:PSILINK_STUB_ARGS
+        try {
+            $env:PSILINK_STUB_ARGS = $argsFile
+            $first = Invoke-ImageFetch -Image 'vdorie/psi-link:latest' -Engine $script:PullEngine
+            $firstCall = ([string] (Get-Content -LiteralPath $argsFile -Raw)).Trim()
+            $refresh = Invoke-ImageFetch -Image 'vdorie/psi-link:latest' -Engine $script:PullEngine -Refresh
+            $refreshCall = ([string] (Get-Content -LiteralPath $argsFile -Raw)).Trim()
+        } finally {
+            if ($null -eq $previous) { Remove-Item env:PSILINK_STUB_ARGS -ErrorAction SilentlyContinue }
+            else { $env:PSILINK_STUB_ARGS = $previous }
+        }
+
+        $first.ExitCode | Should -Be 0
+        $refresh.ExitCode | Should -Be 0
+        $firstCall | Should -Match 'pull' -Because $firstCall
+        $firstCall | Should -Match '--quiet' -Because $firstCall
+        $firstCall | Should -Match 'vdorie/psi-link:latest' -Because $firstCall
+        $refreshCall | Should -Be $firstCall -Because $refreshCall
+    }
+
+    It 'carries back what an engine that could not fetch anything said' {
+        $result = Invoke-ImageFetch -Image 'vdorie/psi-link:latest' -Engine $script:UnreachableRegistryEngine -Refresh
+
+        $result.ExitCode | Should -Be 1
+        $result.Output | Should -Match 'proxy refused the connection'
+    }
+}
+
 Describe 'The image capability check' {
     BeforeAll {
         $script:CapabilityStubRoot = Join-Path $env:TEMP ('psilink-capability-stub-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
@@ -657,8 +717,9 @@ Describe 'The image capability check inside the setup flow' {
     BeforeAll {
         # Whole engines, each named so the flow's own `docker` calls reach it
         # through the PATH. Each answers preflight normally and then serves one
-        # of the shapes of `doctor --help` -- or, for the third, refuses to run
-        # a container at all -- and appends every call it was given to
+        # of the shapes of `doctor --help`, with or without a fetch that can
+        # change that answer -- or, for the last of them, refuses to run a
+        # container at all -- and appends every call it was given to
         # PSILINK_STUB_LOG, which is what lets a test assert what the flow did
         # NOT go on to run.
         #
@@ -666,9 +727,13 @@ Describe 'The image capability check inside the setup flow' {
         # text would close a block early, and the pre-doctor help is the real
         # CLI's, punctuation included.
         $script:StaleEngineRoot = Join-Path $env:TEMP ('psilink-flow-stale-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        $script:SelfHealEngineRoot = Join-Path $env:TEMP ('psilink-flow-selfheal-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        $script:NoRegistryEngineRoot = Join-Path $env:TEMP ('psilink-flow-noregistry-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
         $script:CapableEngineRoot = Join-Path $env:TEMP ('psilink-flow-capable-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
         $script:NoRunEngineRoot = Join-Path $env:TEMP ('psilink-flow-norun-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
         New-Item -ItemType Directory -Path $script:StaleEngineRoot -Force | Out-Null
+        New-Item -ItemType Directory -Path $script:SelfHealEngineRoot -Force | Out-Null
+        New-Item -ItemType Directory -Path $script:NoRegistryEngineRoot -Force | Out-Null
         New-Item -ItemType Directory -Path $script:CapableEngineRoot -Force | Out-Null
         New-Item -ItemType Directory -Path $script:NoRunEngineRoot -Force | Out-Null
 
@@ -692,11 +757,50 @@ Describe 'The image capability check inside the setup flow' {
             'echo %*| findstr /C:"doctor --help" >nul',
             'if not errorlevel 1 goto doctorhelp') + $engineTail + @(':doctorhelp')
 
-        Set-Content -LiteralPath (Join-Path $script:StaleEngineRoot 'docker.cmd') -Encoding Ascii -Value ($prologue + @(
+        # The branch checks the engines that also serve a pull carry, ahead of
+        # the same tail. Each of them supplies its own :imagepull and
+        # :doctorhelp bodies, which is where the direction it stands for lives.
+        # An engine with no pull arm holds the other direction: a run that
+        # fetched where it should not have reaches the unexpected-call arm.
+        $refreshHead = $engineHead + @(
+            'echo %*| findstr /C:"pull" >nul',
+            'if not errorlevel 1 goto imagepull',
+            'echo %*| findstr /C:"doctor --help" >nul',
+            'if not errorlevel 1 goto doctorhelp') + $engineTail
+        $pullWorks = @(':imagepull', 'exit /b 0', ':doctorhelp')
+        $preDoctorHelp = @(
             'echo psilink [command] [options]',
             'echo Usage:',
             'echo   psilink [--save] [options] URL INPUT_FILE [OUTPUT_FILE]',
+            'exit /b 0')
+
+        # A registry copy no newer than the one on the PC: the pull succeeds and
+        # the help it answers afterwards is the same one it answered before.
+        Set-Content -LiteralPath (Join-Path $script:StaleEngineRoot 'docker.cmd') `
+            -Encoding Ascii -Value ($refreshHead + $pullWorks + $preDoctorHelp)
+
+        # A registry copy that does carry the doctor: the same `doctor --help`
+        # answers the pre-doctor usage until a pull has been made and the
+        # doctor's own after one. The recorded log is the state it remembers by,
+        # so the stub needs no second file to keep.
+        Set-Content -LiteralPath (Join-Path $script:SelfHealEngineRoot 'docker.cmd') `
+            -Encoding Ascii -Value ($refreshHead + $pullWorks + @(
+            'findstr /C:"pull" "%PSILINK_STUB_LOG%" >nul',
+            'if not errorlevel 1 goto freshimage') + $preDoctorHelp + @(
+            ':freshimage',
+            'echo Usage: psilink doctor probe or doctor mount DIRECTORY',
+            'echo   psilink doctor probe   Check the file drop over the network',
             'exit /b 0'))
+
+        # A registry the engine cannot reach at all, which leaves the copy on
+        # the PC the only one there is and the refusal reading what Docker said
+        # about the fetch rather than about an image it never received.
+        Set-Content -LiteralPath (Join-Path $script:NoRegistryEngineRoot 'docker.cmd') `
+            -Encoding Ascii -Value ($refreshHead + @(
+            ':imagepull',
+            'echo error response from daemon: the proxy refused the connection 1>&2',
+            'exit /b 1',
+            ':doctorhelp') + $preDoctorHelp)
 
         Set-Content -LiteralPath (Join-Path $script:CapableEngineRoot 'docker.cmd') -Encoding Ascii -Value ($prologue + @(
             'echo Usage: psilink doctor probe or doctor mount DIRECTORY',
@@ -764,6 +868,8 @@ Describe 'The image capability check inside the setup flow' {
 
     AfterAll {
         Remove-Item -LiteralPath $script:StaleEngineRoot -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $script:SelfHealEngineRoot -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $script:NoRegistryEngineRoot -Recurse -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $script:CapableEngineRoot -Recurse -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $script:NoRunEngineRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
@@ -776,7 +882,18 @@ Describe 'The image capability check inside the setup flow' {
         $run.TimedOut | Should -BeFalse -Because $shape
         $run.Exit | Should -Be 1 -Because $shape
         $run.Output | Should -Match 'too old' -Because $shape
-        $run.Output | Should -Match 'docker pull vdorie/psi-link:latest' -Because $shape
+        # The registry answered with the same image, which is what makes this
+        # arm terminal. The remedy the operator is left with is not a pull to
+        # make by hand: the run made that pull, and asking for it again sends
+        # them after an image they already have.
+        $run.Output | Should -Match 'fetched just now' -Because $shape
+        $run.Output | Should -Match 'Doing it by hand' -Because $shape
+        $run.Output | Should -Not -Match 'docker pull vdorie/psi-link:latest' -Because $shape
+        # The notice the fetch runs under. `pull --quiet` prints nothing until
+        # it is done, so a refresh on a failure path that said nothing would
+        # read as a hang.
+        $run.Output | Should -Match 'few hundred megabytes' -Because $shape
+        @([regex]::Matches($run.Calls, 'pull --quiet')).Count | Should -Be 1 -Because $run.Calls
         # The two things a 64 from the battery can honestly mean. This is
         # neither: it is the image, so neither may be printed here.
         $run.Output | Should -Not -Match 'defect in Setup-PsilinkFileDrop.ps1' -Because $shape
@@ -822,6 +939,9 @@ Describe 'The image capability check inside the setup flow' {
         $run.Output | Should -Not -Match 'unexpected engine call' -Because $shape
         $run.Calls | Should -Match 'image inspect' -Because $run.Calls
         $run.Calls | Should -Not -Match 'doctor --help' -Because $run.Calls
+        # The image is present here, and no question about it has been asked
+        # yet, so nothing has any reason to fetch one.
+        $run.Calls | Should -Not -Match 'pull' -Because $run.Calls
     }
 
     It 'reaches no battery with an image that cannot produce a verdict' {
@@ -836,6 +956,49 @@ Describe 'The image capability check inside the setup flow' {
         $run.Calls | Should -Not -Match 'doctor probe' -Because $run.Calls
         $run.Calls | Should -Not -Match 'doctor mount' -Because $run.Calls
         $run.Calls | Should -Not -Match 'volume create' -Because $run.Calls
+        # The fetch is on the failure path, so the question is asked before it
+        # and again after it, and never a battery in between.
+        $run.Calls | Should -Match '(?s)doctor --help.*pull --quiet' -Because $run.Calls
+    }
+
+    It 'names the fetch that could not run rather than a registry that answered' {
+        # The third way the refusal is reached: nothing could be fetched, so the
+        # copy on this PC is still all there is, and what Docker said about the
+        # fetch is the only thing the operator has to act on.
+        $run = Invoke-SetupWithEngine -EngineRoot $script:NoRegistryEngineRoot -SetupScript $setupScript -ScriptArguments @(
+            '-Server', 'fs-04.agency.gov', '-Share', 'exchange', '-SkipConfirm')
+        $shape = "timedout=$($run.TimedOut) exit=$($run.Exit) calls=$($run.Calls)"
+
+        $run.TimedOut | Should -BeFalse -Because $shape
+        $run.Exit | Should -Be 1 -Because $shape
+        $run.Output | Should -Match 'too old' -Because $shape
+        $run.Output | Should -Match 'could not be fetched' -Because $shape
+        $run.Output | Should -Match 'proxy refused the connection' -Because $shape
+        $run.Output | Should -Not -Match 'fetched just now' -Because $shape
+    }
+
+    It 'fetches once and carries on when the registry has an image that answers' {
+        # The self-heal, and the reason the arm above can stay terminal: the
+        # copy on this PC carries no doctor, the published one does, and the
+        # fetch on the failure path is what turns a refusal into a run. It ends
+        # the way the capable run below does -- waiting at a password prompt
+        # Read-Host reads from the console rather than from the redirect -- so
+        # the wait is the evidence and there is no exit code to assert.
+        $run = Invoke-SetupWithEngine -EngineRoot $script:SelfHealEngineRoot -SetupScript $setupScript -ScriptArguments @(
+            '-Server', 'fs-04.agency.gov', '-Share', 'exchange', '-SkipConfirm') -TimeoutSeconds 20
+        $output = [string] $run.Output
+        $shape = "timedout=$($run.TimedOut) exit=$($run.Exit) calls=$($run.Calls) tail=" +
+            (($output.Substring([Math]::Max(0, $output.Length - 200))) -replace '\s+', ' ')
+
+        # Asked, fetched, asked again: the order is what makes this a refresh of
+        # a copy already judged rather than a pull made before anything knew.
+        $run.Calls | Should -Match '(?s)doctor --help.*pull --quiet.*doctor --help' -Because $run.Calls
+        @([regex]::Matches($run.Calls, 'pull --quiet')).Count | Should -Be 1 -Because $run.Calls
+        $output | Should -Match 'few hundred megabytes' -Because $shape
+        $output | Should -Match 'image carries the checks' -Because $shape
+        $output | Should -Match 'credentials for the file server' -Because $shape
+        $output | Should -Not -Match 'too old' -Because $shape
+        $run.TimedOut | Should -BeTrue -Because $shape
     }
 
     It 'lets an image that carries the doctor through to the credentials' {
@@ -861,6 +1024,12 @@ Describe 'The image capability check inside the setup flow' {
         $output | Should -Match 'image carries the checks' -Because $shape
         $output | Should -Match 'credentials for the file server' -Because $shape
         $output | Should -Not -Match 'too old' -Because $shape
+        # A run whose image already answers pays nothing for the fetch. This
+        # engine serves no pull at all, so one made here reaches its
+        # unexpected-call arm rather than passing unnoticed.
+        $run.Calls | Should -Not -Match 'pull' -Because $shape
+        $output | Should -Not -Match 'Refreshing the psilink image' -Because $shape
+        $output | Should -Not -Match 'unexpected engine call' -Because $shape
         # Held as a check rather than left to the reasoning above: a Windows
         # PowerShell that did answer the password prompt from a redirect would
         # end this run instead of waiting, and fails here.

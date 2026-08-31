@@ -186,6 +186,12 @@ if ! command -v smbclient >/dev/null 2>&1; then
   emit "         already on the PC."
   emit ""
   emit "ACTION:  run 'docker pull vdorie/psi-link:latest' and try again."
+  emit ""
+  emit "         If that says the image is already up to date, or this message"
+  emit "         comes back after it, the published image does not carry the"
+  emit "         checks yet and there is nothing to update to. Set the file"
+  emit "         drop up by hand in the meantime: see the troubleshooting"
+  emit "         page, 'Doing it by hand'."
   exit 11
 fi
 
