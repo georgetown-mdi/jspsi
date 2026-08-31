@@ -277,7 +277,7 @@ describe("signaling diagnostics sink", () => {
     // Bytes the display boundary rewrites to six characters each: the cap is
     // on what is WRITTEN, so a detail that costs six times its own length must
     // not spend six times the budget.
-    const flooded = "\\u202e".repeat(100_000);
+    const flooded = String.fromCodePoint(0x202e).repeat(100_000);
 
     broker.wss.emit("error", new Error(flooded), "client-frame");
 
