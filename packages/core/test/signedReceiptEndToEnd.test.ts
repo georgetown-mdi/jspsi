@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import PSI from "@openmined/psi.js";
 
 import {
+  assertLocalCertificateAuthorizesAgreedIdentity,
   exchangeRecordFromFailure,
   exchangeRecordOwedButUnbuilt,
   prepareForExchange,
@@ -24,6 +25,7 @@ import {
   computeCertificateFingerprint,
   generateSigningIdentity,
 } from "../src/signingIdentity";
+import { COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH } from "../src/utils/sanitizeForDisplay";
 
 import type { Output } from "../src/config/linkageTerms";
 import type { MessageConnection } from "../src/connection/messageConnection";
@@ -592,6 +594,40 @@ describe("a party whose certificate is bound away from its agreed terms", () => 
     await rawInitiator.close();
     await rawResponder.close();
   });
+});
+
+// The two identities land LAST in this refusal (assertLocalCertificateAuthorizesAgreedIdentity's
+// own JSDoc), so whatever its fixed prose spends of the renderer's per-link
+// budget (COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH) comes out of them -- and they are
+// the values an operator has to compare to act on it. What erodes that room is
+// copy rather than code, so the budget is a check rather than a comment: its CLI
+// sibling (assertIdentityMatchesAgreedTerms, apps/cli/src/signingIdentityDivergence.ts)
+// pins the identical pattern in exchangeSigning.test.ts.
+
+/** Room the refusal must leave for the two identities together, in characters. */
+const IDENTITY_PAIR_DISPLAY_BUDGET = 350;
+
+test("the local-certificate refusal's fixed prose leaves the identity pair room inside the display cap", () => {
+  const agreedIdentity = "Party A, Agency A, a@agency-a.gov";
+  let thrown: unknown;
+  try {
+    assertLocalCertificateAuthorizesAgreedIdentity(
+      identityA.certificate,
+      agreedIdentity,
+    );
+  } catch (err) {
+    thrown = err;
+  }
+  // The composed message less the two values it names; identityA's certificate
+  // is bound to "Initiator Co".
+  const message = (thrown as Error).message;
+  const fixedProse =
+    message.length -
+    identityA.certificate.identity.length -
+    agreedIdentity.length;
+  expect(fixedProse).toBeLessThanOrEqual(
+    COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH - IDENTITY_PAIR_DISPLAY_BUDGET,
+  );
 });
 
 // --- Pairing a receipt to one run --------------------------------------------
