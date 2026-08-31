@@ -118,13 +118,17 @@ export class HarnessFileDropClient implements FileTransportClient {
     try {
       const maxBytes = options?.maxBytes;
       if (maxBytes !== undefined) {
-        // Stat the OPEN handle, so a writer appending after the check cannot
-        // drive the read past the cap the poll loop set.
+        // Stat the OPEN handle and read exactly the statted size, so a writer
+        // appending after the check cannot drive the read past the cap the
+        // poll loop set; readFile() would read to live EOF instead.
         const { size } = await handle.stat();
         if (size > maxBytes)
           throw new Error(
             `${filePath} is ${size} bytes, past the ${maxBytes}-byte frame cap`,
           );
+        const bounded = Buffer.alloc(size);
+        const { bytesRead } = await handle.read(bounded, 0, size, 0);
+        return bounded.subarray(0, bytesRead);
       }
       return await handle.readFile();
     } finally {
