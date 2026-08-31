@@ -41,10 +41,22 @@ const BROKER_LOG_CONTEXT = "peerjs-broker";
  * detail's own cap holding, not the width of the first-party text. */
 const FIXED_LINE_ALLOWANCE = 200;
 
+/** A C0 control byte, none of which may survive to a line the sink wrote: CR/LF
+ * would end it and let whatever follows head a line of its own, and ESC would
+ * open an ANSI sequence in the operator's terminal. */
+// eslint-disable-next-line no-control-regex -- the control bytes are the subject
+const CONTROL_BYTE = /[\u0000-\u001f]/;
+
 /** A payload that is not JSON and whose bytes the parser quotes back in its own
  * message: an ESC that would open an ANSI sequence, a CR/LF that would end the
  * log line, and a forged context behind them to head a line of the peer's own. */
 const HOSTILE_FRAME = "\u001b\r\n[forged] not json";
+
+/** The same shape as a SOURCE rather than a frame. `emit` is untyped, so a raise
+ * can hand the sink any string at all; one carrying control bytes is what would
+ * drive a terminal sequence or head a line of its own were the source written
+ * into the line rather than resolved to a tag this sink knows. */
+const HOSTILE_SOURCE = "\u001b\r\n[forged] not-a-real-source";
 
 const cleanups: Array<() => Promise<void>> = [];
 
@@ -260,8 +272,7 @@ describe("signaling diagnostics sink", () => {
     expect(line).toContain("[client-frame]");
     // Escaped, not carried: no C0 control byte survives to the sink, so the peer
     // can neither drive a terminal sequence nor open a log line of its own.
-    // eslint-disable-next-line no-control-regex -- the control bytes are the subject
-    expect(line).not.toMatch(/[\u0000-\u001f]/);
+    expect(line).not.toMatch(CONTROL_BYTE);
     expect(line).toContain("\\x1b");
     expect(line).toContain("\\x0d\\x0a");
     // The forged context is still readable, as escaped text on this line rather
@@ -269,6 +280,32 @@ describe("signaling diagnostics sink", () => {
     expect(line.indexOf("[forged]")).toBeGreaterThan(
       line.indexOf("[client-frame]"),
     );
+  });
+
+  test("a fault dispatching a parsed frame is attributed apart from the parse", async () => {
+    const broker = await startBroker();
+    broker.wss.on("message", () => {
+      throw new Error("a message listener faulted");
+    });
+    const client = await connectRegistered(broker.port, "peer-dispatch");
+
+    // A frame that parses, so what throws is this server's own dispatch rather
+    // than the peer's bytes. It is absorbed rather than let out: `ws` calls the
+    // message handler from inside its own receiver, where a throw is an uncaught
+    // exception and the end of the broker.
+    client.send(JSON.stringify({ type: "OFFER", dst: "nobody" }));
+
+    await waitFor(() => brokerLines().length > 0);
+    const [line] = brokerLines();
+    expect(line).toContain("[frame-dispatch]");
+    expect(line).toContain("a message listener faulted");
+    expect(line).not.toContain("[client-frame]");
+
+    // And a frame that does not parse is still the peer's, the listener above
+    // never being reached by one.
+    client.send("not json at all");
+    await waitFor(() => brokerLines().length > 1);
+    expect(brokerLines()[1]).toContain("[client-frame]");
   });
 
   test("a flood is shed at the rate limit and the shedding is itself reported", async () => {
@@ -383,17 +420,21 @@ describe("signaling diagnostics sink", () => {
 
     // A string is exactly as untyped a source as the non-string shape above --
     // one that names nothing this sink knows must render under the same tag,
-    // not carry its own bytes into it.
+    // and a hostile one must not carry its own bytes into the line at all.
     broker.wss.emit(
       "error",
       new Error("raised under an unrecognized string source"),
-      "not-a-real-source",
+      HOSTILE_SOURCE,
     );
 
     const [line] = brokerLines();
     expect(line).toContain("[unattributed]");
     expect(line).toContain("raised under an unrecognized string source");
-    expect(line).not.toContain("not-a-real-source");
+    // What the tag is worth: none of the bytes the raise chose reach the line,
+    // so an unknown source can neither drive a terminal sequence nor head a
+    // line of its own, escaped or otherwise.
+    expect(line).not.toMatch(CONTROL_BYTE);
+    expect(line).not.toContain("[forged]");
 
     // The slot it spent is a slot it used: the rest of the budget writes, and
     // the report past it is shed rather than admitted on a slot a dropped
