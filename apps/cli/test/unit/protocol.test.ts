@@ -254,7 +254,9 @@ import {
   sanitizeErrorForDisplay,
   sanitizeForDisplay,
   describeResolvedRunShape,
+  DEFAULT_MAX_DISPLAY_LENGTH,
   DISPLAY_TRUNCATION_MARKER,
+  WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
 } from "@psilink/core";
 import type {
   AssociationTable,
@@ -5098,6 +5100,77 @@ test("a terms-exchange warning under --event-stream reaches the fd-3 warning eve
       (line) => line.includes("terms exchange:") && line.includes(widthNotice),
     ),
   ).toBe(true);
+}, 20_000);
+
+test("a terms-exchange warning past the per-value cap reaches stderr as whole as it reaches fd 3", async () => {
+  // A terms warning is a COMPOSITION -- first-party explanation and recovery
+  // text around fragments each escaped and capped where they were interpolated
+  // -- so both CLI sinks carry one text and neither may deliver less of it than
+  // the other. Charging the stderr line to the per-value cap deletes the
+  // recovery clause a composed warning ends on while fd 3 relays the whole of
+  // it, which is the operator at the terminal reading less than the supervisor
+  // reading the machine channel. No warning core composes today is this wide,
+  // so the width is driven here rather than waited for.
+  const partnerKeys = Array.from(
+    { length: 12 },
+    (_, index) => `partner_linkage_key_${index}`,
+  ).join(", ");
+  const composedWarning =
+    `linkage key set mismatch: the partner's copy of the agreed terms names ` +
+    `[${partnerKeys}], which is not the set this party's copy names; one ` +
+    `party may have a stale copy of the linkage terms, so compare the two ` +
+    `copies out of band before you re-run the exchange`;
+  expect(composedWarning.length).toBeGreaterThan(DEFAULT_MAX_DISPLAY_LENGTH);
+  expect(composedWarning.length).toBeLessThan(
+    WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
+  );
+
+  vi.mocked(runExchange).mockImplementation((async (...args: unknown[]) => {
+    const options = args[3] as { onWarning?: (msg: string) => void };
+    options.onWarning?.(composedWarning);
+    return defaultRunExchange();
+  }) as never);
+
+  mockFd3Open();
+  try {
+    // Party A runs flag-on, party B flag-off, so every captured fd-3 line is A's.
+    await Promise.all([
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-a",
+        undefined,
+        undefined,
+        undefined,
+        { eventStream: true },
+      ),
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-b",
+      ),
+    ]);
+  } finally {
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+
+  const warning = takeFd3Lines().find((line) => line.type === "warning");
+  expect(warning).toBeDefined();
+  expect(warning!.message).toBe(composedWarning);
+
+  // The same text on the human log, prefix aside: equality rather than
+  // containment, so a cap that shortened either sink fails here.
+  const stderrLine = mockState.warnings.find((line) =>
+    line.startsWith("terms exchange:"),
+  );
+  expect(stderrLine).toBe(`terms exchange: ${warning!.message as string}`);
+  expect(stderrLine).not.toContain(DISPLAY_TRUNCATION_MARKER);
 }, 20_000);
 
 test("a failed onAuthenticated hook under --event-stream emits a warning event before the success terminal event", async () => {

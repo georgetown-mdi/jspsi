@@ -88,15 +88,15 @@ export const COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH = 1024;
  * else to read. The stderr log path delivers that warning whole; no other path
  * may deliver less of it.
  *
- * Three boundaries carry a whole warning message and take this cap rather than
- * the default, so none of the three re-caps what an earlier one delivered: the
- * CLI's fd-3 warning event, the console relay that re-validates that stream
+ * Four boundaries carry a whole warning message and take this cap rather than
+ * the default, so none of the four re-caps what an earlier one delivered: the
+ * CLI's stderr log of a composed terms-exchange warning, the CLI's fd-3 warning
+ * event, the console relay that re-validates that stream
  * (`validateAndSanitizeEvent`), and the console seat that renders it
- * (`appendSanitizedRunWarning`). A boundary carrying a single value keeps the
- * default -- including the CLI's stderr log of a composed terms-exchange
- * warning, which today interpolates only two date values and sits well under
- * it; a terms warning composed past the default would render cut there while
- * arriving whole on fd 3.
+ * (`appendSanitizedRunWarning`). The first two are one warning's two sinks, so a
+ * cap that differed between them would show the operator at the terminal less of
+ * it than the supervisor reading the machine channel gets. A boundary carrying a
+ * single value keeps the default.
  *
  * Sized to admit that warning with every fragment at its own cap and escaped
  * again at each boundary it crosses (a further pass doubles an already-doubled
