@@ -26,36 +26,23 @@ npm run build -w packages/core
 # hang); the lockfile floor is set accordingly in apps/web/package.json.
 npx playwright install chromium
 
-# Default this container's Claude sessions to prompt-free. The container's egress
-# firewall plus the checked-in deny-list and protected-branch push hook in
-# .claude/ are the safety floor (both deny rules and PreToolUse hooks apply even in
-# bypassPermissions mode), so prompts add nothing here. This sets only the
-# CONTAINER's user settings (a mounted volume), never the project or host config,
-# so it does not change how
-# Claude behaves on the host that shares this repo's .claude/settings.json. It is
-# idempotent: it leaves an existing defaultMode untouched.
+# Write this container's Claude user settings from the tracked template beside
+# this script, which is their single source of truth: prompt-free operation
+# (`bypassPermissions` -- the container's egress firewall plus the checked-in
+# deny-list and protected-branch push hook are the safety floor, and both deny
+# rules and PreToolUse hooks apply even in that mode), the session model and
+# effort, the editor and TUI preferences, and the statusline, read from the
+# workspace bind-mount so the repository carries the one copy.
+#
+# The copy is wholesale rather than key-by-key: the ~/.claude volume outlives
+# nothing but the container it was created for, and a volume seeded once then
+# hand-edited drifts from the template with no signal at all. An edit that
+# should survive a re-create belongs in the template, in the repository, where
+# it is reviewed like any other change.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 mkdir -p "$CONFIG_DIR"
-SETTINGS="$CONFIG_DIR/settings.json" node -e '
-  const fs = require("fs");
-  const path = process.env.SETTINGS;
-  let settings = {};
-  try {
-    settings = JSON.parse(fs.readFileSync(path, "utf8"));
-  } catch (err) {
-    // A missing file is fine (start fresh); an existing but unreadable or invalid
-    // one must not be silently overwritten -- abort and leave it for inspection.
-    if (err.code !== "ENOENT") {
-      console.error("refusing to overwrite existing " + path + ": " + err.message);
-      process.exit(1);
-    }
-  }
-  settings.permissions = settings.permissions || {};
-  if (!settings.permissions.defaultMode) {
-    settings.permissions.defaultMode = "bypassPermissions";
-  }
-  fs.writeFileSync(path, JSON.stringify(settings, null, 2) + "\n");
-'
+cp "$SCRIPT_DIR/claude-settings.json" "$CONFIG_DIR/settings.json"
 
 # Pre-seed Claude Code's interactive first-run state so sessions in this container
 # open at the prompt instead of the theme/welcome onboarding and the per-workspace
@@ -64,8 +51,9 @@ SETTINGS="$CONFIG_DIR/settings.json" node -e '
 # these gates already -- this is for the interactive CLI and the VS Code extension,
 # which share this config dir. These keys live in .claude.json and are internal to
 # Claude Code (undocumented), captured against 2.1.177 -- re-verify on an upgrade.
-# Idempotent: fills only missing keys and refuses to overwrite an unreadable file,
-# matching the settings.json seeding above.
+# Unlike settings.json above this file is seeded rather than replaced: it is
+# Claude Code's own state for this container, so it fills only missing keys and
+# refuses to overwrite an unreadable file.
 CLAUDE_JSON="$CONFIG_DIR/.claude.json" WORKSPACE="/workspace" node -e '
   const fs = require("fs");
   const path = process.env.CLAUDE_JSON;

@@ -1,23 +1,39 @@
 #!/usr/bin/env node
-// PreToolUse hook: refuse an Edit, Write, or NotebookEdit that would write a
-// file git does not ignore in the repository's MAIN worktree.
+// PreToolUse hook: refuse an Edit, Write, or NotebookEdit that would write a file
+// git does not ignore into a checkout of this repository that the session is not
+// working in -- the MAIN worktree always, and a sibling worktree when the session
+// is itself working inside a linked one.
 //
-// Why this exists: review and fixing now run by ref. The orchestrating session
-// stays in the primary checkout and never enters a branch's tree, while every
-// branch lives in its own worktree under .claude/worktrees/ and every writing
-// spawn is pointed at that tree by absolute path. A write that lands in the
-// primary checkout instead is therefore always a mistake -- it puts the edit on
-// whatever branch the primary checkout happens to hold (staging, typically),
-// off the branch under review, where no round will ever see it and no PR will
-// carry it.
+// Why this exists: review and fixing run by ref. The orchestrating session stays
+// in the primary checkout and never enters a branch's tree, while every branch
+// lives in its own worktree under .claude/worktrees/ and every writing spawn is
+// pointed at that tree by absolute path. A write that lands in the primary
+// checkout instead is therefore always a mistake -- it puts the edit on whatever
+// branch the primary checkout happens to hold (staging, typically), off the
+// branch under review, where no round will ever see it and no PR will carry it.
 //
-// PATH-SCOPED, NOT ACTOR-SCOPED. The rule is about where the bytes land, not who
-// writes them: an implementer writing into .claude/worktrees/<tree>/... is
-// untouched, and a write to primary-checkout content is refused whoever makes
-// it. A linked worktree sits UNDER the main root's path prefix here
-// (.claude/worktrees/ is inside it), so the owning worktree is the longest
-// matching entry of `git worktree list --porcelain` rather than a prefix test
-// against the first one.
+// THE SIBLING CASE. The file tools take a literal absolute path and are not
+// rooted to the session's directory, so a session working in one worktree writes
+// into another simply by reusing a path it read from context -- and every
+// unmodified tracked file is byte-identical across the trees, so the write
+// succeeds, reads back correctly, and shows up only as an unexplained diff on
+// somebody else's branch. That is refused for the same reason the main checkout
+// is: the bytes land on a branch nobody meant to change.
+//
+// WHERE THE SESSION IS, and why it matters for exactly one of the two rules. The
+// main-worktree refusal is path-scoped: it fires whoever writes and from
+// wherever, since no session writes that content. The sibling refusal cannot be,
+// because pointing a spawn at a tree by absolute path from the primary checkout
+// is the dispatch shape the by-ref model is built on -- a session whose own
+// directory is the main checkout writes into a branch's worktree as its normal
+// work. So the sibling rule binds only a session already working inside a linked
+// worktree, where a write into a DIFFERENT linked worktree has no legitimate
+// reading. A session directory that cannot be placed in a worktree at all leaves
+// the sibling rule silent, like every other unanswerable state here.
+//
+// A linked worktree sits UNDER the main root's path prefix (.claude/worktrees/ is
+// inside it), so the worktree owning a path is the longest matching entry of
+// `git worktree list --porcelain` rather than a prefix test against the first.
 //
 // WHAT PASSES, and why the test is IGNORED-ness rather than tracked-ness. Under
 // the by-ref model the main session writes no branch content at all, so the only
@@ -27,7 +43,11 @@
 // is a mistake whether the file exists yet or not: a brand-new source file
 // created in the primary checkout lands on whatever branch it holds exactly as
 // an edit to a tracked one does, and `git check-ignore` is the one question that
-// answers for both.
+// answers for both. The same question decides the sibling case, asked of the
+// worktree that owns the path: an ignored file is not that branch's content
+// either. It also passes the gitignored locals a worktree may carry as symlinks
+// into another tree, which resolve to their target's checkout before either rule
+// looks at them.
 //
 // FAIL OPEN, deliberately, and opposite to require-clean-tree-for-review.mjs:
 // this guard shapes where work is written, and nothing about correctness or
@@ -38,13 +58,13 @@
 // than answering, an unreadable event) allows.
 //
 // THE DELIBERATE OVERRIDE, the idiom block-model-drop-sendmessage.mjs sets with
-// its [accept-model-drop] marker: a maintainer-directed primary-checkout edit
-// stays possible by creating the sentinel file named in OVERRIDE_SENTINEL below,
-// which lifts this hook for that checkout until it is deleted. Edit and Write
-// carry no free-text field a marker could ride in, so the deliberate act is a
-// file rather than a phrase. Like that marker it is self-applicable -- what it
-// buys is that the override is named, visible in the tree, and reversible, not
-// that it cannot be forged.
+// its [accept-model-drop] marker: a maintainer-directed edit of a checkout the
+// session is not working in stays possible by creating the sentinel file named in
+// OVERRIDE_SENTINEL below IN THAT CHECKOUT, which lifts this hook for it until
+// the file is deleted. Edit and Write carry no free-text field a marker could
+// ride in, so the deliberate act is a file rather than a phrase. Like that marker
+// it is self-applicable -- what it buys is that the override is named, visible in
+// the tree, and reversible, not that it cannot be forged.
 //
 // STATED LIMITS.
 //   - Only file_path (Edit, Write) and notebook_path (NotebookEdit) are read. A
@@ -54,6 +74,11 @@
 //     is reported as not ignored whatever the exclude patterns say (the check
 //     consults the index). A path whose answer changes between this check and
 //     the write is answered as git sees it now.
+//   - The session's tree is read from the event's cwd, which is where the harness
+//     says the session is working, not where any one command ran. A cwd that
+//     silently reverted out of an entered worktree therefore reads as the tree it
+//     reverted to, so the sibling rule follows the cwd rather than the intent;
+//     warn-worktree-revert.mjs is what surfaces that revert.
 //
 // Exit 0 allows the call; exit 2 blocks it and feeds stderr back to Claude.
 
@@ -68,7 +93,7 @@ const OVERRIDE_SENTINEL = join(
   "allow-primary-checkout-writes.local",
 );
 
-function block(target, mainRoot) {
+function blockMainWorktreeWrite(target, mainRoot) {
   process.stderr.write(
     `Blocked by block-primary-checkout-writes hook: '${target}' is repository content of the ` +
       `main worktree at '${mainRoot}', which no session writes -- only paths git ignores there ` +
@@ -79,6 +104,19 @@ function block(target, mainRoot) {
       "branch the primary checkout holds, off the branch under review, where no review round " +
       "and no pull request will carry it. For a deliberate, maintainer-directed edit of this " +
       `checkout, create '${OVERRIDE_SENTINEL}' in it and delete it when you are done.\n`,
+  );
+  process.exit(2);
+}
+
+function blockSiblingWorktreeWrite(target, path, owner, sessionTree) {
+  process.stderr.write(
+    `Blocked by block-primary-checkout-writes hook: '${target}' is repository content of the ` +
+      `worktree at '${owner}', but this session is working in '${sessionTree}'. The file tools ` +
+      "take the path literally and are not rooted to the working directory, so this would edit " +
+      "another branch's checkout, where every unmodified file looks identical and the write " +
+      "shows up only as an unexplained diff on that branch. Did you mean " +
+      `'${join(sessionTree, relative(owner, path))}'? For a deliberate edit of the other ` +
+      `worktree, create '${OVERRIDE_SENTINEL}' in it and delete it when you are done.\n`,
   );
   process.exit(2);
 }
@@ -162,6 +200,14 @@ function owningWorktree(path, paths) {
     .sort((a, b) => b.length - a.length)[0];
 }
 
+// The worktree the session itself is working in, or undefined when its directory
+// cannot be placed in one -- an event carrying no cwd, or one outside this
+// repository. Undefined leaves the sibling rule silent.
+function sessionWorktree(cwd, paths) {
+  if (typeof cwd !== "string" || cwd.length === 0) return undefined;
+  return owningWorktree(canonical(cwd), paths);
+}
+
 // Whether git ignores the path: true, false, or null when git declines to
 // answer at all (exit 128, a missing binary), which allows like every other
 // unanswerable state. `check-ignore` exits 1 -- a real answer of "not ignored"
@@ -202,11 +248,24 @@ function main() {
   if (paths === null) process.exit(0);
 
   const mainRoot = paths[0];
-  if (owningWorktree(path, paths) !== mainRoot) process.exit(0);
-  if (existsSync(join(mainRoot, OVERRIDE_SENTINEL))) process.exit(0);
-  if (isIgnored(mainRoot, path) !== false) process.exit(0);
+  const owner = owningWorktree(path, paths);
+  if (owner === undefined) process.exit(0); // outside every checkout of this repo
 
-  block(target, mainRoot);
+  const sessionTree = sessionWorktree(event.cwd, paths);
+  const writesAnotherWorktree =
+    sessionTree !== undefined &&
+    sessionTree !== mainRoot &&
+    sessionTree !== owner;
+  if (owner !== mainRoot && !writesAnotherWorktree) process.exit(0);
+
+  if (existsSync(join(owner, OVERRIDE_SENTINEL))) process.exit(0);
+  if (isIgnored(owner, path) !== false) process.exit(0);
+
+  if (owner === mainRoot) {
+    blockMainWorktreeWrite(target, mainRoot);
+  } else {
+    blockSiblingWorktreeWrite(target, path, owner, sessionTree);
+  }
 }
 
 try {

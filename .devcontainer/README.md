@@ -53,16 +53,24 @@ Three layers, so prompt-free operation inside is safe:
    protection (server-side, no bypass actors); layer 1 -- the container boundary --
    is the real protection for the filesystem. Note this file is checked in, so the
    same rules also apply to Claude sessions run against this repo *on the host*,
-   where there is no container wall behind them.
+   where there is no container wall behind them. It also carries an allow-list --
+   which spares a session prompts it would otherwise answer by hand, and never
+   overrides a deny -- and the command-sandbox rules that go with it.
 
-`post-create.sh` sets `permissions.defaultMode: bypassPermissions` in the
-container's *user* settings only, so sessions inside start prompt-free without
-changing how Claude behaves on the host. It also pre-seeds Claude Code's
-interactive first-run state -- the onboarding and per-workspace trust prompts --
-and sets the VS Code extension's own bypass mode in `devcontainer.json` (the
-extension does not honor the CLI's `defaultMode`), so interactive sessions,
-terminal or extension, start prompt-free as well. Headless `claude -p` skips
-these gates either way.
+`post-create.sh` writes the container's *user* settings wholesale from
+`claude-settings.json`, the tracked template beside it: `permissions.defaultMode:
+bypassPermissions` so sessions inside start prompt-free, the session model and
+effort, the editor and TUI preferences, and the statusline command pointing at
+`/workspace/.claude/statusline.mjs` on the bind-mounted workspace. None of this
+touches the host's own Claude configuration. The template is the source of truth
+for those settings, so a change to make belongs in it: the `~/.claude` volume is
+per-`${devcontainerId}` and a hand-edit inside one is replaced the next time a
+container is created against it. It also pre-seeds Claude Code's interactive
+first-run state -- the onboarding and per-workspace trust prompts, which are
+session state and are filled in rather than replaced -- and sets the VS Code
+extension's own bypass mode in `devcontainer.json` (the extension does not honor
+the CLI's `defaultMode`), so interactive sessions, terminal or extension, start
+prompt-free as well. Headless `claude -p` skips these gates either way.
 
 ### What it does not protect against
 
