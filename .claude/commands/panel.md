@@ -39,8 +39,10 @@ than read is out of this command's scope -- measure it yourself first instead.
 
 ## Step 2 -- Run the panel Workflow
 
-Invoke the Workflow tool with `scriptPath` set to `scripts/panel-workflow.mjs`
-and `args` set to
+Invoke the Workflow tool with `scriptPath` set to the ABSOLUTE path of
+`scripts/panel-workflow.mjs` in this repository (`git rev-parse --show-toplevel`
+gives the root) -- the bare relative spelling fails the call with "script file
+not found" -- and `args` set to
 `{"question": "<the question>", "docs": [<DOCS, possibly empty>]}`.
 
 The script is checked in and passed by path: do not paste its text into the call

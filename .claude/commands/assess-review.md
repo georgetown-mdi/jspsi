@@ -96,17 +96,32 @@ another blind whole-branch round.
 For each finding: verify it if it merits verification (read the specific
 hunks/files it names at the ref, not the whole diff), then decide.
 
-A gated claim or confirmed review finding has three dispositions, not one: fix
-it; contest it by measuring the disputed behavior first-hand (a verdict reached
-by reading alone is still open until a run decides it); or narrow the claim to
-what is measured, recording the remainder as a limits line in the governing
-`docs/spec/` file, written on the branch in the same pass. That line is the
-whole of the narrow exit by default. A follow-on board item is the escalation
-above it, taken only when the remainder itself needs a runtime change, and no
-session files more than one such item autonomously -- past that, the rest are
-proposals in the report for the owner to scope. The third disposition is the
-cheap one, not a failure -- a true finding whose fix would grow the guarded
-surface is often best narrowed.
+A gated claim or confirmed review finding has four dispositions, not one:
+
+1. **Fix it.**
+2. **Contest it** by measuring the disputed behavior first-hand -- a verdict
+   reached by reading alone is still open until a run decides it.
+3. **Narrow the claim** to what is measured, recording the remainder as a limits
+   line in the governing `docs/spec/` file, written on the branch in the same
+   pass. That line is the whole of the narrow exit by default. A follow-on board
+   item is the escalation above it, taken only when the remainder itself needs a
+   runtime change, and no session files more than one such item autonomously --
+   past that, the rest are proposals in the report for the owner to scope.
+4. **Record it as a stated limit**: the finding is true, it stands, and what it
+   costs is written into the round's dispositions ledger. No branch edit, no
+   `docs/spec/` line, and NO BOARD ITEM -- the ledger entry is the record, and it
+   is durable because the ledger is per branch and survives the round.
+
+The last two are the cheap ones, not failures. A true finding whose fix would
+grow the guarded surface is usually best narrowed, and one that costs nothing a
+user or partner can reach is usually best stated.
+
+**Stated limit is the DEFAULT** for a confirmed finding that changes no runtime
+behavior on a user- or partner-reachable surface: an internal naming preference,
+a test-only ergonomic, a support-script nicety, a shape a reviewer would write
+differently. Reach past it -- to a fix, or to any sink that costs a board item --
+only for a finding that reaches such a surface, or one you can say in a line why
+the branch is worse for leaving. Absent that line, state it and move on.
 
 - **Default to fixing.** Drive-by corrections are welcome -- you do not need
   permission to fix something small and clearly right.
@@ -146,12 +161,12 @@ surface is often best narrowed.
   dependency, a shared convention, or the branch's scope. Ask in prose with the
   options and a recommendation; do NOT use the question tool.
 - **Leave it** only when it is truly out of scope for this branch, genuinely
-  not worth the change, or best taken as a documented limit per the
-  three-disposition rule above -- for that last, the brief writes the limits line
-  into the governing `docs/spec/` file in the same pass and you propose the
-  remedy as a follow-on in Step 4's table. Do NOT file a board issue for anything
-  -- no automated filings; an unaddressed finding is recorded in Step 4, not on
-  the board, and a follow-on is filed only on the owner's word.
+  not worth the change, or best taken as a limit per the four dispositions above
+  -- narrowed, where the brief writes the limits line into the governing
+  `docs/spec/` file in the same pass, or stated, where the ledger entry is the
+  whole record. Do NOT file a board issue for anything -- no automated filings;
+  an unaddressed finding is recorded in the ledger and in Step 4, not on the
+  board, and a follow-on is filed only on the owner's word.
 
 ### Dispatching the fixes
 
@@ -186,7 +201,9 @@ there is the one the brief describes.
   the brief carries the edit itself -- the file, the old text, the new text, and
   the test to run -- and the spawn is a `sonnet` implementer applying it. Writing
   the edit out is the cheap path: the reading and the judgment already happened
-  here, and re-deriving them is what a full spawn would charge for.
+  here, and re-deriving them is what a full spawn would charge for. Dispatching
+  it rather than making it inline buys something else on a security surface: the
+  fresh hands keep reviewer independence intact.
 - **A larger fix travels as a task.** Above that, the brief states the findings,
   the constraint, and the verification, and the spawn is a full `opus`
   implementer. A branch mixing both sizes takes one `opus` spawn with the small
@@ -203,10 +220,13 @@ Then record what you decided. The round's row in
 confirmed cluster, gating claim, and out-of-claim finding, each written `open`
 by the round that raised it. Rewrite each in place to the disposition you took:
 `fixed`, `contested` (the disputed behavior was measured first-hand and did not
-hold), `narrowed` (the limits line is on the branch), or `deferred` (it has
-a row in Step 4's table). An entry left `open` says nobody decided that finding,
-so leave none behind -- and a round whose entries are all still `open` is a
-round that was read and not triaged.
+hold), `narrowed` (the limits line is on the branch), `limit` (accepted as it
+stands, no board item), or `deferred` (it has a row in Step 4's table). A `limit`
+entry carries a `note` beside it -- one phrase saying what the branch is living
+with -- because the entry is the whole record of that finding and an unannotated
+one reads as an entry nobody wrote down. An entry left `open` says nobody decided
+that finding, so leave none behind -- and a round whose entries are all still
+`open` is a round that was read and not triaged.
 
 ## Step 4 -- Report what you left, and readiness
 

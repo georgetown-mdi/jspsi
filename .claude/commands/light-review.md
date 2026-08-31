@@ -113,8 +113,10 @@ the round, not run long; say in your report which claims you dropped and why.
 ## Step 2 -- Run one review Workflow per target
 
 Invoke the Workflow tool ONCE PER SURVIVING TARGET, all of them in a single
-message so they run concurrently. Each call sets `scriptPath` to
-`scripts/light-review-workflow.mjs` and `args` to
+message so they run concurrently. Each call sets `scriptPath` to the ABSOLUTE
+path `<PRIMARY>/scripts/light-review-workflow.mjs`, with PRIMARY from Step 1 --
+the bare relative `scripts/light-review-workflow.mjs` fails the call with
+"script file not found" -- and `args` to
 `{"targetRef": "<ref>", "worktreePath": <TREE, or null when no tree holds the ref>, "docs": [<the DOCS list, possibly empty>], "role": <the role name or null>, "claims": [<CLAIMS, or an empty list in lens mode>]}`.
 
 One call reviews one ref. There is no batched multi-ref call to build: the fan-out
@@ -171,8 +173,8 @@ Common to both:
    plus each out-of-claim finding in role mode -- where `item` is the cluster name, the
    claim text, or the finding name. You write every one as `"open"`; you are the round,
    not its triage. assess-review rewrites them in place to `fixed`, `contested`,
-   `narrowed`, or `deferred` as it disposes of each, and a row still carrying `open`
-   after triage is a finding nobody decided.
+   `narrowed`, `limit`, or `deferred` as it disposes of each, and a row still carrying
+   `open` after triage is a finding nobody decided.
 
 ### Lens mode -- the Workflow returned `{reviewerCount, simplerShapeVotes, clusters}`
 
