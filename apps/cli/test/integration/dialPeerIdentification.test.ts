@@ -212,7 +212,11 @@ test(
         true,
       );
       expect(
-        links.filter((link) => link.startsWith("first bytes the peer sent:")),
+        links.filter((link) =>
+          link.startsWith(
+            "first bytes the peer sent, private-key material stripped:",
+          ),
+        ),
       ).toEqual([]);
       expect(links).toContain(
         `configured endpoint: 127.0.0.1:${endpoint.port}`,
