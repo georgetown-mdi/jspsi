@@ -1,9 +1,12 @@
 import { Readable } from "node:stream";
 
 import {
-  TransportOperationStalledError,
-  redactPrivateKeyMaterial,
+  clipToRenderedCost,
+  DEFAULT_MAX_DISPLAY_LENGTH,
   redactAndSanitizeForDisplay,
+  redactPrivateKeyMaterial,
+  renderedDisplayCost,
+  TransportOperationStalledError,
 } from "@psilink/core";
 
 /**
@@ -57,6 +60,48 @@ import {
 export const SFTP_STALL_DEADLINE_MS = 60_000;
 
 /**
+ * What one of this builder's labelled cause links may render to: the per-value
+ * display budget, which is what a chooser's own value is budgeted at everywhere
+ * else (the sibling directory-path link in {@link ./listingGuard} fits to the
+ * same one). Each link carries its label plus one fragment and nothing else, so
+ * the whole of the link is the two together.
+ *
+ * It is well under the per-link cap the renderer applies
+ * (`COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH`), which is deliberate: that cap is a
+ * ceiling, not a quota, and each fragment here is a value rather than a
+ * composition. A real stall detail, rendezvous message path, and server error
+ * sentence are each well inside this, so the clip only ever bites a fragment
+ * that is itself the anomaly.
+ */
+const STALLED_LINK_BUDGET = DEFAULT_MAX_DISPLAY_LENGTH;
+
+/**
+ * Compose one labelled cause link, with `fragment` fitted to
+ * {@link STALLED_LINK_BUDGET} at this composition site.
+ *
+ * The fragment is bounded HERE rather than left to the display boundary because
+ * nothing upstream bounds it: `path` carries a peer-supplied filename of no
+ * bounded length, and the dead-session arm's `serverReported` is the text a
+ * hostile server chose. A value that reaches the renderer unbounded spends
+ * whatever the renderer's own cap allows, which is the budget sized for a whole
+ * composed message rather than for one value.
+ *
+ * The fragment is redacted before it is clipped, and the clip appends the
+ * truncation marker itself, so a planted `BEGIN` marker cannot consume the
+ * marker that says the fragment was cut (see {@link clipToRenderedCost}). What is
+ * kept is raw, and is escaped once where the error is rendered, so a hostile
+ * server's control/ANSI or deceptive-Unicode characters are neutralized at the
+ * display boundary rather than here, where escaping them would leave the sink to
+ * escape them a second time.
+ */
+function stalledLink(label: string, fragment: string): string {
+  return `${label}${clipToRenderedCost(
+    redactPrivateKeyMaterial(fragment),
+    STALLED_LINK_BUDGET - renderedDisplayCost(label),
+  )}`;
+}
+
+/**
  * Construct the typed, terminal {@link TransportOperationStalledError} for an
  * SFTP operation that did not make progress within its bound. `operation` names
  * the read (e.g. `"directory listing"`, `"file read"`, `"exclusive create"`) and
@@ -64,20 +109,14 @@ export const SFTP_STALL_DEADLINE_MS = 60_000;
  * operation-specific message.
  *
  * Every value beyond the operation's own label takes a labelled cause link of its
- * own rather than riding the summary, ONE chooser per link. `path` carries a
- * peer-supplied filename of no bounded length; `detail` is first-party prose at
- * every call site but {@link ./ssh2SftpAdapter}'s dead-session one, which relays
- * the fatal error the server itself reported through `serverReported`, bounded
- * nowhere at all. On a shared link either would spend the budget the refusal and
- * the next step {@link TransportOperationStalledError} carries need, and whichever
- * filled it would then be free to compose the framing that introduced what it
- * deleted.
- *
- * Each fragment is interpolated raw and escaped where the error is rendered, so a
- * hostile server's control/ANSI or deceptive-Unicode characters are neutralized at
- * the display boundary rather than here, where escaping them would leave the sink
- * to escape them a second time. Each is additionally redacted here; redaction is
- * not escaping and so does not double (see {@link redactPrivateKeyMaterial}).
+ * own rather than riding the summary, ONE chooser per link, each fitted by
+ * {@link stalledLink}. `path` carries a peer-supplied filename of no bounded
+ * length; `detail` is first-party prose at every call site but
+ * {@link ./ssh2SftpAdapter}'s dead-session one, which relays the fatal error the
+ * server itself reported through `serverReported`, bounded nowhere at all. On a
+ * shared link either would spend the budget the refusal and the next step
+ * {@link TransportOperationStalledError} carries need, and whichever filled it
+ * would then be free to compose the framing that introduced what it deleted.
  */
 export function transportOperationStalledError(
   operation: string,
@@ -89,13 +128,11 @@ export function transportOperationStalledError(
     `SFTP ${operation} stalled; refusing to wait on the server further`,
     {
       details: [
-        `how the ${operation} stalled: ${redactPrivateKeyMaterial(detail)}`,
-        `stalled ${operation} path: ${redactPrivateKeyMaterial(path)}`,
+        stalledLink(`how the ${operation} stalled: `, detail),
+        stalledLink(`stalled ${operation} path: `, path),
         ...(serverReported === undefined
           ? []
-          : [
-              `error the server reported: ${redactPrivateKeyMaterial(serverReported)}`,
-            ]),
+          : [stalledLink("error the server reported: ", serverReported)]),
       ],
     },
   );

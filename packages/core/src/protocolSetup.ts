@@ -515,8 +515,10 @@ function assertPartnerEffectiveKeyCount(
  * widest admissible pair of counts: 5,120 advertised against the 5,101 the agreed
  * terms imply when all but one of MAX_LINKAGE_ENTRIES keys declares a fan-out of
  * its own -- the longest rendering, since both counts reach four digits and no
- * admissible pair carries more. The CLI escapes a terms warning at that cap on its
- * way to stderr, so a longer notice would reach the operator cut short.
+ * admissible pair carries more. That keeps it one readable line rather than
+ * bounding its delivery: both CLI sinks carry a terms warning at the
+ * composed-warning budget (`WARNING_MESSAGE_MAX_DISPLAY_LENGTH`), which this sits
+ * an order of magnitude inside.
  */
 function partnerWidthAboveAgreedNotice(
   partnerEffectiveKeyCount: number,

@@ -22,6 +22,7 @@ import {
   redactAndSanitizeForDisplay,
   sanitizeErrorForDisplay,
   UsageError,
+  WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
 } from "@psilink/core";
 import type {
   Authentication,
@@ -1633,7 +1634,16 @@ export async function runProtocol(
           // reason it does everywhere else: escaping first can truncate a whole
           // key block into a dangling marker at the display cap, which the
           // prefixer's pass then fails closed on for the rest of the argument.
-          log.warn("terms exchange:", redactAndSanitizeForDisplay(msg));
+          // A warning is a COMPOSITION, so the cap is the composed-warning
+          // budget the fd-3 event applies rather than the per-value default:
+          // the two sinks carry one text, and an operator reading stderr must
+          // not be shown less of it than the machine channel relays.
+          log.warn(
+            "terms exchange:",
+            redactAndSanitizeForDisplay(msg, {
+              maxLength: WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
+            }),
+          );
           emit((e) => e.warning(msg));
         },
         // A host-key divergence is a security signal, not a terms warning, so

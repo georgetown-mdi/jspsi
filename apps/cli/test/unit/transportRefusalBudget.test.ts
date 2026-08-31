@@ -217,22 +217,14 @@ for (const site of CLI_SITES) {
 
 // The cap is kept rather than widened: a fragment nothing bounds before the
 // renderer still truncates THERE, and what it can spend is the budget of the
-// link it sits alone on.
+// link it sits alone on. The frame-size guard's inbound path is the one CLI
+// fragment left to the renderer this way; the listing and liveness guards fit
+// theirs where they compose them (below).
 const FLOODED_SITES: Array<[string, () => Error, string]> = [
   [
     "the frame-size guard's path",
     () => frameSizeExceededError("/rv/" + "p".repeat(100_000), 1),
     FRAME_SIZE_RECOVERY_STEP,
-  ],
-  [
-    "the liveness guard's path",
-    () =>
-      transportOperationStalledError(
-        "file read",
-        "/rv/" + "p".repeat(100_000),
-        "received no data",
-      ),
-    STALLED_RECOVERY_STEP,
   ],
 ];
 
@@ -278,6 +270,18 @@ const COMPOSITION_CLIPPED_SITES: Array<[string, () => Error]> = [
   ],
 ];
 
+// A labelled link is fitted at its composition site when it renders inside the
+// per-value budget and says so: the marker rides the same budget it was cut to,
+// so a link that spent it whole is one the operator can tell was cut.
+function expectClippedAtComposition(links: string[], label: string): void {
+  const link = links.find((candidate) => candidate.startsWith(label));
+  expect(link).toBeDefined();
+  expect(link).toContain(DISPLAY_TRUNCATION_MARKER);
+  expect((link as string).length).toBeLessThanOrEqual(
+    DEFAULT_MAX_DISPLAY_LENGTH,
+  );
+}
+
 for (const [label, raise] of COMPOSITION_CLIPPED_SITES) {
   test(`every fragment is cut before the renderer at ${label}`, () => {
     const rendered = sanitizeErrorForDisplay(raise());
@@ -289,12 +293,7 @@ for (const [label, raise] of COMPOSITION_CLIPPED_SITES) {
     expect(links).toContain(LISTING_RECOVERY_STEP);
     expect(links.length).toBeLessThan(MAX_ERROR_CAUSE_DEPTH);
 
-    const directory = links.find((link) => link.startsWith("directory: "));
-    expect(directory).toBeDefined();
-    expect(directory).toContain(DISPLAY_TRUNCATION_MARKER);
-    expect((directory as string).length).toBeLessThanOrEqual(
-      DEFAULT_MAX_DISPLAY_LENGTH,
-    );
+    expectClippedAtComposition(links, "directory: ");
   });
 }
 
@@ -428,57 +427,113 @@ test("a server-reported error cannot forge the renderer's own framing", () => {
   expect(rendered).toContain("\\u202e");
 });
 
-const LIVENESS_DELIVERIES: Array<[string, () => Error, readonly string[]]> = [
-  [
-    "a detail flooded past every budget",
-    () =>
+// Each of the three is fitted where it is composed, like the listing guard's
+// directory, so a flood is cut to the per-value budget before the renderer ever
+// sees it. The path is driven at the widest a partner can make it -- an
+// offline-accept config seeds the rendezvous directory from the invitation
+// endpoint, whose schema is what bounds it -- and each fragment at a width no
+// bound covers at all, since neither a peer-supplied filename nor the fatal
+// error a hostile server reports answers to one.
+const LIVENESS_DELIVERIES: Array<{
+  label: string;
+  raise: () => Error;
+  whole: readonly string[];
+  clipped: readonly string[];
+}> = [
+  {
+    label: "a detail flooded past every budget",
+    raise: () =>
       transportOperationStalledError(
         "file read",
         MESSAGE_PATH,
         "d".repeat(100_000),
       ),
-    [STALLED_SUMMARY, STALLED_RECOVERY_STEP, STALLED_PATH_LINK],
-  ],
-  [
-    "a path flooded past every budget",
-    () =>
+    whole: [STALLED_SUMMARY, STALLED_RECOVERY_STEP, STALLED_PATH_LINK],
+    clipped: ["how the file read stalled: "],
+  },
+  {
+    label: "a path filling the endpoint schema's width",
+    raise: () =>
+      transportOperationStalledError(
+        "file read",
+        ENDPOINT_WIDTH_PATH,
+        ORDINARY_STALL_DETAIL,
+      ),
+    whole: [STALLED_SUMMARY, STALLED_RECOVERY_STEP, STALL_DETAIL_LINK],
+    clipped: ["stalled file read path: "],
+  },
+  {
+    label: "a path flooded past every budget",
+    raise: () =>
       transportOperationStalledError(
         "file read",
         "/rv/" + "p".repeat(100_000),
         ORDINARY_STALL_DETAIL,
       ),
-    [STALLED_SUMMARY, STALLED_RECOVERY_STEP, STALL_DETAIL_LINK],
-  ],
-  [
-    "a detail and a path flooded together",
-    () =>
+    whole: [STALLED_SUMMARY, STALLED_RECOVERY_STEP, STALL_DETAIL_LINK],
+    clipped: ["stalled file read path: "],
+  },
+  {
+    label: "a detail and a path flooded together",
+    raise: () =>
       transportOperationStalledError(
         "file read",
         "/rv/" + "p".repeat(100_000),
         "d".repeat(100_000),
       ),
-    [STALLED_SUMMARY, STALLED_RECOVERY_STEP],
-  ],
-  [
-    "a server-reported error flooded past every budget",
-    () => deadSessionError(MESSAGE_PATH, "s".repeat(100_000)),
-    [...DEAD_SESSION_FIRST_PARTY_LINKS, STALLED_PATH_LINK],
-  ],
-  [
-    "a server-reported error and a path flooded together",
-    () => deadSessionError("/rv/" + "p".repeat(100_000), "s".repeat(100_000)),
-    DEAD_SESSION_FIRST_PARTY_LINKS,
-  ],
+    whole: [STALLED_SUMMARY, STALLED_RECOVERY_STEP],
+    clipped: ["how the file read stalled: ", "stalled file read path: "],
+  },
+  {
+    label: "a server-reported error flooded past every budget",
+    raise: () => deadSessionError(MESSAGE_PATH, "s".repeat(100_000)),
+    whole: [...DEAD_SESSION_FIRST_PARTY_LINKS, STALLED_PATH_LINK],
+    clipped: ["error the server reported: "],
+  },
+  {
+    label: "a server-reported error and a path flooded together",
+    raise: () =>
+      deadSessionError("/rv/" + "p".repeat(100_000), "s".repeat(100_000)),
+    whole: DEAD_SESSION_FIRST_PARTY_LINKS,
+    clipped: ["error the server reported: ", "stalled file read path: "],
+  },
 ];
 
-for (const [label, raise, wholeLinks] of LIVENESS_DELIVERIES) {
-  test(`the liveness guard delivers its summary and every other chooser whole with ${label}`, () => {
-    const rendered = sanitizeErrorForDisplay(raise());
+for (const site of LIVENESS_DELIVERIES) {
+  test(`the liveness guard delivers its summary and every other chooser whole with ${site.label}`, () => {
+    const rendered = sanitizeErrorForDisplay(site.raise());
+    const links = linksOf(rendered);
 
-    for (const whole of wholeLinks) expect(linksOf(rendered)).toContain(whole);
-    // The flood reached a budget rather than fitting inside one, so what these
-    // deliveries measure is a cap that fell somewhere.
-    expect(truncatedLinks(rendered).length).toBeGreaterThan(0);
-    expect(linksOf(rendered).length).toBeLessThan(MAX_ERROR_CAUSE_DEPTH);
+    for (const whole of site.whole) expect(links).toContain(whole);
+    // Nothing arrives at the renderer needing to be cut: the flood was fitted
+    // where it was composed, so no link spends even its own budget.
+    expect(truncatedLinks(rendered)).toEqual([]);
+    for (const label of site.clipped) expectClippedAtComposition(links, label);
+    expect(links.length).toBeLessThan(MAX_ERROR_CAUSE_DEPTH);
   });
 }
+
+test("the liveness guard redacts each fragment before it clips it", () => {
+  // Redaction before the clip is what keeps the fail-closed dangling rule
+  // inside the fragment that carried the marker. Reversing the two leaves a
+  // BEGIN with its END clipped off, which the renderer's own per-link pass then
+  // consumes to the end of the link -- taking the marker that said the fragment
+  // was cut, and every byte composed behind it, with it. A key block wider than
+  // the link's budget is what makes the two orders render differently.
+  const block =
+    "-----BEGIN OPENSSH PRIVATE KEY-----" +
+    "k".repeat(4 * DEFAULT_MAX_DISPLAY_LENGTH) +
+    "-----END OPENSSH PRIVATE KEY-----";
+  const rendered = sanitizeErrorForDisplay(
+    transportOperationStalledError(
+      "file read",
+      `${block}/message.json`,
+      ORDINARY_STALL_DETAIL,
+    ),
+  );
+
+  expect(linksOf(rendered)).toContain(
+    "stalled file read path: [redacted private key]/message.json",
+  );
+  expect(linksOf(rendered)).toContain(STALL_DETAIL_LINK);
+});
