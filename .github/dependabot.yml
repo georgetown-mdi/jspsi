@@ -61,11 +61,12 @@ updates:
           - "peerjs"
           - "peerjs-js-binarypack"
           - "werift"
-          # Exact-pinned, matching-critical: both parties' runtime behavior for
-          # these must stay byte-identical or PSI key derivation silently
-          # diverges. Excluded so each bump is an individual, reviewable PR
-          # instead of riding along in this batch -- see "Why these are
-          # exact-pinned" in docs/spec/DEPENDENCY_PINS.md.
+          # Inlined into a built @psilink/core artifact rather than resolved
+          # at runtime -- canonicalize in every build, re2js and yaml in the
+          # standalone UMD browser build. Excluded so each bump is an
+          # individual, reviewable PR instead of riding along in this batch --
+          # see "Inlined dependencies and their remediation path" in
+          # docs/spec/DEPENDENCY_PINS.md.
           - "re2js"
           - "yaml"
           - "canonicalize"
