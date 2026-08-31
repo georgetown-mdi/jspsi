@@ -209,9 +209,19 @@ for (const site of CLI_SITES) {
     // A first-party link fits its budget by measurement, not by construction:
     // growing the fixed copy of a summary, a label, or the recovery sentence
     // past its budget puts the cap back on the operator's text, so it fails
-    // here rather than silently deleting the next step.
+    // here rather than silently deleting the next step. truncatedLinks only
+    // flags a link over the renderer's 1024-character cap, which a
+    // composition-site clip (256 characters) never reaches, so a link ending
+    // with the marker is checked here too. Excluded: the entry-name preview
+    // (filenameTooLongError), which carries the marker BY CONSTRUCTION at any
+    // length over MAX_FILENAME_LENGTH, this site's own trigger, rather than
+    // from filling its budget.
     expect(truncatedLinks(rendered)).toEqual([]);
     expect(linksOf(rendered).length).toBeLessThan(MAX_ERROR_CAUSE_DEPTH);
+    for (const link of linksOf(rendered)) {
+      if (link.startsWith("entry name: ")) continue;
+      expect(link.endsWith(DISPLAY_TRUNCATION_MARKER)).toBe(false);
+    }
   });
 }
 

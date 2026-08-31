@@ -69,9 +69,11 @@ export const SFTP_STALL_DEADLINE_MS = 60_000;
  * It is well under the per-link cap the renderer applies
  * (`COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH`), which is deliberate: that cap is a
  * ceiling, not a quota, and each fragment here is a value rather than a
- * composition. A real stall detail, rendezvous message path, and server error
- * sentence are each well inside this, so the clip only ever bites a fragment
- * that is itself the anomaly.
+ * composition, so the clip only ever bites a fragment that is itself the
+ * anomaly. That a real stall detail, rendezvous message path, and server
+ * error sentence each fit inside it is asserted, not just claimed here, by
+ * apps/cli/test/unit/transportRefusalBudget.test.ts's ordinary-size
+ * CLI-sites delivery.
  */
 const STALLED_LINK_BUDGET = DEFAULT_MAX_DISPLAY_LENGTH;
 
