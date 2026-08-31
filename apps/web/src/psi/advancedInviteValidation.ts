@@ -460,12 +460,16 @@ export function validateAdvancedInvite(
   // above blocks Generate, the mint and the run boundary refuse the same terms,
   // and the key list carries its "won't match" badge -- one refusal covering the
   // authored draft and the imported document alike. Its measured instance is a
-  // `substring` whose declared window reads nothing at any value length (an
-  // absent, zero, or non-integer bound), which the terms schema admits and the
-  // factory nulls every row for. Every window core grades dead is one these
-  // descriptors also reject, so the element editor marks the offending param
-  // inline while the badge names the key: held by a test rather than by this
-  // note, in advancedInviteValidation.test.ts.
+  // `substring` whose declared window reads nothing at any value length -- an
+  // absent or zero bound, which the terms schema admits and the factory nulls
+  // every row for. (A present non-integer bound never reaches this grading: that
+  // shape the terms schema rejects at parse.) Every window core grades dead is
+  // one these descriptors also reject, so
+  // the element editor marks the offending param inline while the badge names
+  // the key: held by tests rather than by this note --
+  // advancedInviteValidation.test.ts for the grading and that agreement,
+  // stepListEditor.test.ts for the inline mark, and invitation.test.ts /
+  // prepareForExchange.test.ts for the mint and run boundaries.
   if (
     !draft.standardization.every((transformation) =>
       (transformation.steps ?? []).every(isStepValid),

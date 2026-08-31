@@ -36,6 +36,30 @@ import type { AdvancedInviteDraft } from "../../src/psi/advancedInviteTypes.js";
 
 const ALL_COLUMNS = ["ssn", "ssn4", "first_name", "last_name", "dob"];
 
+/** `draft` with `transform` on the first element of its first key, enabled. */
+function withFirstElementTransform(
+  draft: AdvancedInviteDraft,
+  transform: Array<TransformStep>,
+): AdvancedInviteDraft {
+  return {
+    ...draft,
+    keys: draft.keys.map((entry, index) =>
+      index === 0
+        ? {
+            ...entry,
+            enabled: true,
+            key: {
+              ...entry.key,
+              elements: entry.key.elements.map((element, position) =>
+                position === 0 ? { ...element, transform } : element,
+              ),
+            },
+          }
+        : entry,
+    ),
+  };
+}
+
 describe("the fan-out gate (the run refuses what the schema admits)", () => {
   // Core refuses an exchange whose standardization or linkage-key transforms
   // declare a fan-out step, so an invitation carrying one is refused at its own
@@ -278,30 +302,6 @@ describe("the canonical-encode gate (the byte form both parties hash)", () => {
   // "reset to defaults" -- discarding the operator's whole draft over one value.
   const now = new Date("2026-01-01T00:00:00Z");
 
-  /** `draft` with `transform` on the first element of its first key, enabled. */
-  function withFirstElementTransform(
-    draft: AdvancedInviteDraft,
-    transform: Array<TransformStep>,
-  ): AdvancedInviteDraft {
-    return {
-      ...draft,
-      keys: draft.keys.map((entry, index) =>
-        index === 0
-          ? {
-              ...entry,
-              enabled: true,
-              key: {
-                ...entry.key,
-                elements: entry.key.elements.map((element, position) =>
-                  position === 0 ? { ...element, transform } : element,
-                ),
-              },
-            }
-          : entry,
-      ),
-    };
-  }
-
   test("names the transform for a param the element editor itself can author", () => {
     // The element editor offers `substring`, and its NumberInput writes an
     // out-of-range value into the draft beside the inline error rather than
@@ -459,30 +459,6 @@ describe("the dead-key gate on a key-element transform that matches nothing", ()
     ...(params !== undefined && { params }),
   });
 
-  /** `draft` with `transform` on the first element of its first key, enabled. */
-  function withFirstElementTransform(
-    draft: AdvancedInviteDraft,
-    transform: Array<TransformStep>,
-  ): AdvancedInviteDraft {
-    return {
-      ...draft,
-      keys: draft.keys.map((entry, index) =>
-        index === 0
-          ? {
-              ...entry,
-              enabled: true,
-              key: {
-                ...entry.key,
-                elements: entry.key.elements.map((element, position) =>
-                  position === 0 ? { ...element, transform } : element,
-                ),
-              },
-            }
-          : entry,
-      ),
-    };
-  }
-
   test("blocks Generate on an authored element whose window reads nothing", () => {
     for (const [label, params] of DEGENERATE_WINDOWS) {
       const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
@@ -572,7 +548,8 @@ describe("the dead-key gate on a key-element transform that matches nothing", ()
     // down to the element and the step: the badge and the blocking message name
     // the key, and the step editor renders the descriptor's own per-param error
     // on the offending input (ParamInput drives it from validateParamValue, the
-    // check isStepValid composes). That holds only while every window core
+    // check isStepValid composes; the render half is pinned in
+    // stepListEditor.test.ts). That holds only while every window core
     // refuses is also one the descriptors reject, which is a claim about two
     // independently-edited rules -- core's window arithmetic and the substring
     // descriptor's schema -- so it is swept here rather than asserted in a
@@ -643,29 +620,6 @@ describe("the inert-coalesce notice (a declared default the run will not substit
     ).find((candidate) => candidate.name === output);
     if (field === undefined) throw new Error("no field for the transformation");
     return SEMANTIC_TYPE_LABELS[field.type];
-  }
-
-  function withFirstElementTransform(
-    draft: AdvancedInviteDraft,
-    transform: Array<TransformStep>,
-  ): AdvancedInviteDraft {
-    return {
-      ...draft,
-      keys: draft.keys.map((entry, index) =>
-        index === 0
-          ? {
-              ...entry,
-              enabled: true,
-              key: {
-                ...entry.key,
-                elements: entry.key.elements.map((element, position) =>
-                  position === 0 ? { ...element, transform } : element,
-                ),
-              },
-            }
-          : entry,
-      ),
-    };
   }
 
   test("says nothing about a draft that declares no default value", () => {
