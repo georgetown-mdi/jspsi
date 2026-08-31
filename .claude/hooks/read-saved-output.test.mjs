@@ -7,6 +7,14 @@ import { afterEach, describe, expect, it } from "vitest";
 
 const HOOK = fileURLToPath(new URL("./read-saved-output.mjs", import.meta.url));
 
+// The hook's own READBACK_BYTES. It is a script the harness runs and exports
+// nothing, so the cap is restated here and asserted against the emitted note.
+const CAP = 51200;
+
+// A control character, which JSON escapes to six characters. The payload-size
+// test below leans on that expansion; the source stays printable.
+const BELL = String.fromCharCode(7);
+
 // Run the hook as a real subprocess with a synthesized PostToolUse payload on
 // stdin. A PostToolUse hook cannot block, so the only outcomes are exit 0 with a
 // JSON additionalContext message on stdout, or exit 0 with nothing.
@@ -14,6 +22,7 @@ function runHook(payload) {
   const { status, stdout } = spawnSync("node", [HOOK], {
     input: JSON.stringify(payload),
     encoding: "utf8",
+    maxBuffer: 8 * 1024 * 1024,
   });
   const context =
     stdout.trim().length > 0
@@ -108,10 +117,43 @@ describe("read-saved-output hook", () => {
     }
   });
 
-  it("caps the readback and says so", () => {
-    const path = saved("x".repeat(60000));
+  it("caps the readback at the file's last bytes and says so", () => {
+    // The verdict of a long run sits at its end, so a file past the cap is read
+    // back from its tail and the head is what gets dropped.
+    const path = saved(`BOF_SENTINEL\n${"x".repeat(60000)}\nEOF_SENTINEL\n`);
     const { context } = bash(notice(path));
-    expect(context).toContain("read back to 51200 bytes");
-    expect(context.length).toBeLessThan(52000);
+    expect(context).toContain(`last ${CAP} bytes of 60027`);
+    expect(context).toContain("EOF_SENTINEL");
+    expect(context).not.toContain("BOF_SENTINEL");
+    expect(context.length).toBeLessThan(CAP + 800);
+  });
+
+  it("cuts the tail at a character boundary", () => {
+    // A cap counted in bytes can land inside a multi-byte sequence; the setup
+    // asserts that it does here, so the decode assertion has something to prove.
+    const filler = "あ".repeat(20000); // three bytes each
+    const bytes = Buffer.from(`BOF_SENTINEL\n${filler}EOF_SENTINEL\n`, "utf8");
+    const fillerStart = Buffer.byteLength("BOF_SENTINEL\n");
+    expect((bytes.length - CAP - fillerStart) % 3).not.toBe(0);
+    const { context } = bash(notice(saved(bytes)));
+    expect(context).not.toContain("�");
+    expect(context).toContain("EOF_SENTINEL");
+    expect(context).toContain("あ".repeat(3));
+  });
+
+  it("delivers a payload past the pipe buffer without truncating it", () => {
+    // Each of these bytes escapes to six JSON characters, so the payload is
+    // several times the OS pipe buffer: a write raced by process.exit() arrives
+    // cut off mid-string and the session gets an unparseable fragment.
+    const path = saved(BELL.repeat(CAP));
+    const { status, stdout } = spawnSync("node", [HOOK], {
+      input: JSON.stringify({ tool_name: "Bash", tool_response: notice(path) }),
+      encoding: "utf8",
+      maxBuffer: 8 * 1024 * 1024,
+    });
+    expect(status).toBe(0);
+    expect(stdout.length).toBeGreaterThan(4 * 65536);
+    const { additionalContext } = JSON.parse(stdout).hookSpecificOutput;
+    expect(additionalContext).toContain(BELL.repeat(CAP));
   });
 });

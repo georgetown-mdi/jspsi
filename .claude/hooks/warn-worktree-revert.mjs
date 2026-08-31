@@ -34,7 +34,7 @@
 //     the same, since the hook cannot tell those apart from bare ones.
 
 import { execFileSync } from "node:child_process";
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, normalize, resolve } from "node:path";
 
 const MAX_TRANSCRIPT_BYTES = 64 * 1024 * 1024;
@@ -114,18 +114,32 @@ function readTranscript(path) {
   }
 }
 
+// The path with symlinks resolved, so a tree reached through a symlinked segment
+// (/tmp on macOS) still matches what git reports, which is always the physical
+// path. A path that cannot be resolved keeps its normalized spelling; the caller
+// treats a tree that is not there as retired rather than reverted.
+function canonical(path) {
+  try {
+    return realpathSync(path);
+  } catch {
+    return normalize(path);
+  }
+}
+
 // The transcript's EnterWorktree path made absolute. It may be recorded relative,
 // resolved at call time against the main checkout root, which --git-common-dir
 // yields from any worktree of the repository.
 function resolveIntended(cwd, intended) {
-  if (isAbsolute(intended)) return normalize(intended);
+  if (isAbsolute(intended)) return canonical(intended);
   const common = git(
     cwd,
     "rev-parse",
     "--path-format=absolute",
     "--git-common-dir",
   );
-  return common === null ? null : resolve(dirname(normalize(common)), intended);
+  return common === null
+    ? null
+    : canonical(resolve(dirname(normalize(common)), intended));
 }
 
 function warning(intended, current, branch) {
@@ -157,8 +171,9 @@ function main() {
   const recorded = intendedWorktree(transcript);
   if (recorded === null) process.exit(0);
 
-  const current = git(cwd, "rev-parse", "--show-toplevel");
-  if (current === null) process.exit(0); // not in a repository -- nothing to compare
+  const reported = git(cwd, "rev-parse", "--show-toplevel");
+  if (reported === null) process.exit(0); // not in a repository -- nothing to compare
+  const current = canonical(reported);
 
   const intended = resolveIntended(cwd, recorded);
   if (intended === null) process.exit(0);
@@ -167,7 +182,7 @@ function main() {
   } catch {
     process.exit(0); // the entered tree is gone -- retired, not reverted
   }
-  if (normalize(current) === intended) process.exit(0); // still there
+  if (current === intended) process.exit(0); // still there
 
   process.stdout.write(
     JSON.stringify({
@@ -175,7 +190,7 @@ function main() {
         hookEventName: event.hook_event_name ?? "UserPromptSubmit",
         additionalContext: warning(
           intended,
-          normalize(current),
+          current,
           git(cwd, "branch", "--show-current") || "?",
         ),
       },

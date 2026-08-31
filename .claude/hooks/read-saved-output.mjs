@@ -33,8 +33,9 @@
 //     inside a <persisted-output> element; the payload's own shape was not
 //     observable from inside a session, so a payload that never carries it
 //     leaves this hook inert rather than wrong.
-//   - The readback is capped at READBACK_BYTES and says so when it truncates.
-//     The file itself stays on disk for a targeted read of the rest.
+//   - The readback carries the LAST READBACK_BYTES bytes of the file and says so
+//     when there was more, since the verdict it exists to deliver sits at the
+//     end. The file itself stays on disk for a targeted read of the rest.
 //
 // PostToolUse cannot block -- the command has already run -- so the only outcomes
 // are an additionalContext message or silence. Fail open on every error.
@@ -65,23 +66,45 @@ function savedOutputPath(toolResponse) {
   return null;
 }
 
+// Exit only once the payload has reached the pipe. process.exit() straight after
+// write() discards whatever the stream still holds, so a payload past the OS pipe
+// buffer -- exactly the long readback this hook exists for -- arrives cut off
+// mid-string and unparseable. Callers return rather than leaning on emit to end
+// the turn, since it no longer ends it synchronously.
 function emit(additionalContext) {
   process.stdout.write(
     JSON.stringify({
       hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext },
     }),
+    () => process.exit(0),
   );
-  process.exit(0);
+}
+
+// A tail taken by byte count can open inside a multi-byte sequence, which would
+// decode to a replacement character. Only the leading edge can be partial (the
+// slice ends at EOF), and a UTF-8 sequence is at most four bytes, so at most
+// three continuation bytes stand before the first whole character.
+function fromCharacterBoundary(bytes) {
+  let start = 0;
+  while (start < bytes.length && start < 3 && (bytes[start] & 0xc0) === 0x80) {
+    start += 1;
+  }
+  return bytes.subarray(start);
 }
 
 function readback(path) {
-  const contents = readFileSync(path, "utf8");
-  const kept = contents.slice(0, READBACK_BYTES);
-  const note =
-    kept.length < contents.length
-      ? `\n[read back to ${READBACK_BYTES} bytes -- read '${path}' directly for the rest]`
-      : "";
-  return `Full bash output (read from ${path}):\n${kept}${note}`;
+  const contents = readFileSync(path);
+  if (contents.length <= READBACK_BYTES) {
+    return `Full bash output (read from ${path}):\n${contents.toString("utf8")}`;
+  }
+  const tail = fromCharacterBoundary(
+    contents.subarray(contents.length - READBACK_BYTES),
+  );
+  return (
+    `Full bash output, last ${READBACK_BYTES} bytes of ${contents.length} ` +
+    `(read from ${path} -- read that file directly for the earlier part):\n` +
+    tail.toString("utf8")
+  );
 }
 
 function main() {
@@ -99,7 +122,7 @@ function main() {
   try {
     if (!statSync(path).isFile()) throw new Error("not a regular file");
   } catch {
-    emit(
+    return emit(
       `WARNING: this command's output was too large to show and was saved to ${path}, ` +
         "but that path is not a readable file. The result above is a preview only -- " +
         "re-run the command narrowed to what you need rather than concluding from it.",
@@ -116,6 +139,10 @@ function main() {
     );
   }
 }
+
+// The deferred exit keeps the process alive until the payload flushes, so a pipe
+// the harness closes first reaches this listener instead of dying on EPIPE.
+process.stdout.on("error", () => process.exit(0));
 
 try {
   main();

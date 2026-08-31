@@ -1,5 +1,11 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -143,6 +149,33 @@ describe("warn-worktree-revert hook", () => {
       transcript_path: enteredTranscript(repo.feature),
     });
     expect(event).toBe("SessionStart");
+  });
+
+  it("stays silent when the entry was recorded through a symlinked path", () => {
+    // git always reports the physical path, so an entry recorded with the
+    // spelling the harness was handed -- /tmp on macOS resolves to /private/tmp
+    // -- differs byte for byte from it while naming the same directory. Without
+    // canonicalization that is a warning the session can never clear.
+    const repo = makeRepo();
+    const linkDir = mkdtempSync(join(tmpdir(), "worktree-revert-link-"));
+    dirs.push(linkDir);
+    const link = join(linkDir, "repo");
+    symlinkSync(repo.main, link);
+    const throughLink = join(link, ".claude", "worktrees", "feature");
+    expect(throughLink).not.toBe(repo.feature);
+    expect(
+      runHook({
+        cwd: throughLink,
+        transcript_path: enteredTranscript(throughLink),
+      }),
+    ).toMatchObject({ status: 0, context: null });
+    // A real revert still warns, naming the tree by its physical path.
+    expect(
+      runHook({
+        cwd: repo.main,
+        transcript_path: enteredTranscript(throughLink),
+      }).context,
+    ).toContain(repo.feature);
   });
 
   it("resolves an entry recorded relative to the main checkout", () => {

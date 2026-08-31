@@ -21,6 +21,11 @@ let raw = "";
 process.stdin.on("data", (chunk) => {
   raw += chunk;
 });
+// A statusline is decoration: a stream that fails takes the line with it rather
+// than putting a stack trace where the line belongs.
+process.stdin.on("error", () => {
+  process.exit(0);
+});
 process.stdin.on("end", () => {
   let status;
   try {
@@ -38,19 +43,25 @@ process.stdin.on("end", () => {
   );
 
   const contextWindow = status.context_window;
-  if (contextWindow && contextWindow.used_percentage != null) {
+  if (Number.isFinite(contextWindow?.used_percentage)) {
     const usage = contextWindow.current_usage;
-    const usedTokens = usage
-      ? usage.input_tokens +
-        usage.cache_read_input_tokens +
-        usage.cache_creation_input_tokens +
-        usage.output_tokens
+    // Summed blind, a subfield the payload leaves out renders as "NaNk". The
+    // count is shown only when all four are numbers; the percentage alone is
+    // the fallback, as it is for a payload carrying no usage at all.
+    const counted = [
+      usage?.input_tokens,
+      usage?.cache_read_input_tokens,
+      usage?.cache_creation_input_tokens,
+      usage?.output_tokens,
+    ];
+    const usedTokens = counted.every((count) => Number.isFinite(count))
+      ? counted.reduce((sum, count) => sum + count, 0)
       : null;
     const windowSize = contextWindow.context_window_size;
     const percent = Math.round(contextWindow.used_percentage);
     const kilo = (n) => `${Math.round(n / 1000)}k`;
     const detail =
-      usedTokens != null && windowSize
+      usedTokens != null && Number.isFinite(windowSize) && windowSize > 0
         ? `ctx ${percent}% (${kilo(usedTokens)}/${kilo(windowSize)})`
         : `ctx ${percent}%`;
     const color = percent >= 80 ? RED : percent >= 60 ? YELLOW : "";
@@ -81,13 +92,13 @@ process.stdin.on("end", () => {
   );
 
   const totalCost = status.cost?.total_cost_usd;
-  if (totalCost != null) parts.push(`$${totalCost.toFixed(2)}`);
+  if (Number.isFinite(totalCost)) parts.push(`$${totalCost.toFixed(2)}`);
 
   const fiveHour = status.rate_limits?.five_hour?.used_percentage;
   const sevenDay = status.rate_limits?.seven_day?.used_percentage;
   const planSpans = [];
-  if (fiveHour != null) planSpans.push(`5h ${Math.round(fiveHour)}%`);
-  if (sevenDay != null) planSpans.push(`7d ${Math.round(sevenDay)}%`);
+  if (Number.isFinite(fiveHour)) planSpans.push(`5h ${Math.round(fiveHour)}%`);
+  if (Number.isFinite(sevenDay)) planSpans.push(`7d ${Math.round(sevenDay)}%`);
   if (planSpans.length > 0) parts.push(planSpans.join(" "));
 
   process.stdout.write(parts.join(" | "));
