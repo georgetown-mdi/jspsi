@@ -76,6 +76,8 @@ npm run test:unit -w apps/web
 npx vitest run path/to/file.test.ts   # single file
 ```
 
+Building, running the dev server, or testing `apps/web` regenerates the checked-in `src/routeTree.gen.ts` (see [apps/web/README.md](apps/web/README.md#generated-route-tree)), so it can churn in a working tree with no route change. Stage explicit paths rather than `git add -A`, which also sweeps stray review or scratch artifacts into a commit.
+
 ### Integration and browser tests
 
 Must pass before a PR merges to `main` or `staging`. Each suite is
@@ -151,6 +153,8 @@ If you are writing a constant value, a byte/wire layout, an HKDF info string or 
 Overview docs must stay scannable: no multi-hundred-word paragraphs -- use subheadings and lists. When an edit lands in a section that is already a wall of text, restructure the section rather than growing a sentence in place.
 
 Write documentation as the target state, not a narration of what changed -- no "now", "previously", or "no longer"; the reader cannot see the diff, and change history belongs in the commit message.
+
+Use an obviously fake placeholder for any credential-shaped value in an example config or sample document -- GitHub push protection rejects a push whose commits add a real-looking secret anywhere, docs and example YAML included, and recovering means amending the offending commit rather than adding a follow-up on top of it.
 
 The governance documents -- [SECURITY.md](SECURITY.md), [PRIVACY.md](PRIVACY.md), [docs/INCIDENT_RESPONSE.md](docs/INCIDENT_RESPONSE.md), [docs/SECURITY_DESIGN.md](docs/SECURITY_DESIGN.md), [docs/COMPLIANCE.md](docs/COMPLIANCE.md), and [docs/SHARED_RESPONSIBILITY.md](docs/SHARED_RESPONSIBILITY.md) -- carry `review_owner` and `last_reviewed` in their YAML front matter, so an agency reviewer can see who owns each one and when it was last confirmed correct without reading the git history. The owner is a role rather than a person, so it survives a change of maintainer. A substantive change to one of these -- anything that alters what the document asserts, as opposed to a typo, link, or formatting fix -- sets its `last_reviewed` to the date the change lands. The date means someone read the document and found it still correct, so leave it where it is for an edit that was not that.
 
