@@ -27,6 +27,10 @@
  * one; there is no counterpart for the record, since whether one is owed at all
  * depends on how far the run got. So a body that answers and reports no record is
  * `none`, which renders as nothing rather than as a claim the run has none.
+ *
+ * A body reporting a record the appliance HOLDS and cannot describe is a different
+ * answer, and the seat states that one: nothing downloads, but the file is there,
+ * and the controls beside the seat remove the workdir it sits in.
  */
 
 import { EXCHANGE_RECORD_OUTCOMES } from "@psilink/core";
@@ -37,6 +41,7 @@ import { recordFileStamp } from "@bench/runOutputs";
 
 import type { ExchangeRecordOutcome } from "@psilink/core";
 import type { RecordDownloads } from "./exchangeLifecycle";
+import type { RecordUnavailableReason } from "@jobs/jobManager";
 
 /** The appliance endpoint the shareable record downloads from. The browser never
  * composes the file's path: the appliance resolves it inside the job's own
@@ -72,12 +77,20 @@ export function jobRecordDownloads(
 
 /**
  * What one ask told the seat about this run's exchange record: the pair with the
- * outcome the record itself states, nothing to say, or an ask carrying no answer.
+ * outcome the record itself states, a record held back that neither this bundle
+ * nor the appliance can describe, nothing to say, or an ask carrying no answer.
  *
  * `none` is the appliance answering that it holds no record for this run, which
  * covers a run that owes none and a run whose record could not be written. The two
  * are not separable from the status body and a seat renders both as nothing: it
  * states an absence only where it can name what is absent.
+ *
+ * `undescribable` is the appliance answering that a record file IS in this run's
+ * workdir and it cannot offer it -- an `outcome` the appliance does not know, a
+ * body it cannot parse, or a missing keys half. Nothing downloads in that state
+ * (the routes are 404 under the same rule), but a record of a disclosure is on
+ * disk, so it is kept apart from `none`: the seat says what is known, and the
+ * controls that destroy the workdir confirm before doing so.
  *
  * `unanswered` is kept apart from `none` for the reason the receipt reader keeps
  * its own apart: a rejected request, a job the appliance forgot across a restart,
@@ -90,6 +103,7 @@ export type JobExchangeRecordOffer =
       outcome: ExchangeRecordOutcome;
       downloads: RecordDownloads;
     }
+  | { kind: "undescribable" }
   | { kind: "none" }
   | { kind: "unanswered" };
 
@@ -99,6 +113,42 @@ interface JobStatusFields {
   recordAvailable?: unknown;
   recordCreatedAt?: unknown;
   recordOutcome?: unknown;
+  recordUnavailableReason?: unknown;
+}
+
+/**
+ * What each reason the appliance can give for withholding the pair
+ * ({@link @jobs/jobManager}) leaves the seat holding.
+ *
+ * Written as a total map of that type rather than a test for the one value that
+ * matters, so a reason added on the appliance side stops this bundle compiling
+ * instead of silently joining the straight-through-discard answer.
+ */
+const OFFER_FOR_UNAVAILABLE_REASON: Record<
+  RecordUnavailableReason,
+  JobExchangeRecordOffer
+> = {
+  "not-settled": { kind: "none" },
+  "no-record": { kind: "none" },
+  "undescribable-record": { kind: "undescribable" },
+};
+
+/**
+ * The offer a body denying availability leaves, read from the reason it gives.
+ *
+ * An absent reason is the answer an appliance that predates the field gives, and
+ * reads as the plain denial it was: the field refines that answer rather than
+ * replacing it. A reason this bundle does not recognize is the version-skew case
+ * one level down -- an appliance withholding the pair for something this bundle
+ * cannot name -- and it answers `unanswered`, on the same rule an unrecognized
+ * `recordOutcome` takes: an answer that cannot be read is not a denial, and
+ * folding it into `none` would let it license destroying the run's workdir.
+ */
+function offerForUnavailableRecord(reason: unknown): JobExchangeRecordOffer {
+  if (reason === undefined) return { kind: "none" };
+  for (const [known, offer] of Object.entries(OFFER_FOR_UNAVAILABLE_REASON))
+    if (reason === known) return offer;
+  return { kind: "unanswered" };
 }
 
 /** Whether a status body's `recordOutcome` is one of the values the record format
@@ -112,11 +162,13 @@ function recordOutcomeOf(value: unknown): ExchangeRecordOutcome | undefined {
 /**
  * Where this job's record stands, read off `GET /api/jobs/:jobId` in one ask.
  *
- * `none` is read from `recordAvailable`, and only from it: the appliance denying
- * availability (false or absent) is the one definitive not-available answer there
- * is, so a 200 whose body does not assert `recordAvailable: true` -- absent, wrong
- * type, or the body not being this endpoint's status object at all -- reads as
- * that denial and falls to `none` alongside it.
+ * A denial is read from `recordAvailable` and then from the reason beside it: a
+ * 200 whose body does not assert `recordAvailable: true` -- absent, wrong type, or
+ * the body not being this endpoint's status object at all -- is the appliance not
+ * offering the pair, and `recordUnavailableReason` is what says whether that is
+ * the definitive absence of a record or one it holds and cannot describe
+ * ({@link offerForUnavailableRecord}). Only the first licenses a discard that does
+ * not ask.
  *
  * A body asserting `recordAvailable === true` is the appliance saying it holds the
  * record, and that assertion is trusted even where the rest of the body is not: a
@@ -141,7 +193,8 @@ export async function fetchJobExchangeRecordOffer(
     const body: unknown = await response.json();
     if (body === null || typeof body !== "object") return { kind: "none" };
     const status = body as JobStatusFields;
-    if (status.recordAvailable !== true) return { kind: "none" };
+    if (status.recordAvailable !== true)
+      return offerForUnavailableRecord(status.recordUnavailableReason);
     const outcome = recordOutcomeOf(status.recordOutcome);
     if (typeof status.recordCreatedAt !== "string" || outcome === undefined)
       return { kind: "unanswered" };

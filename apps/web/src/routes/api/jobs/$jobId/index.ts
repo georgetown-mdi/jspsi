@@ -10,11 +10,11 @@ import { jobEmptyResponse, jobJsonResponse } from "@jobs/gate";
  * Both feature-gated and id-validated. An unknown job (or a malformed id) is 404.
  * GET reports status, the reconciled terminal outcome, whether a result file is
  * available, whether the exchange-record pair is available (with its `createdAt`
- * and its own `outcome` when it is), and -- for the diagnostic log and the
- * dual-signed receipt alike -- whether this run asked for the artifact and whether
- * it is on disk. DELETE kills a still-running child, marks the exchange deleted,
- * and removes the disk; for a workdir named by a valid id but orphaned by a server
- * restart it removes the disk-only directory.
+ * and its own `outcome` when it is, and why it is withheld when it is not), and --
+ * for the diagnostic log and the dual-signed receipt alike -- whether this run
+ * asked for the artifact and whether it is on disk. DELETE kills a still-running
+ * child, marks the exchange deleted, and removes the disk; for a workdir named by
+ * a valid id but orphaned by a server restart it removes the disk-only directory.
  */
 export const Route = createFileRoute("/api/jobs/$jobId/")({
   server: {
@@ -41,6 +41,9 @@ export const Route = createFileRoute("/api/jobs/$jobId/")({
             : {}),
           ...(view.recordOutcome !== undefined
             ? { recordOutcome: view.recordOutcome }
+            : {}),
+          ...(view.recordUnavailableReason !== undefined
+            ? { recordUnavailableReason: view.recordUnavailableReason }
             : {}),
           logRequested: view.logRequested,
           logAvailable: view.logAvailable,

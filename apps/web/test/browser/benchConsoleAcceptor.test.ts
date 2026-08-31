@@ -15,9 +15,17 @@ import {
   ACCEPT_UNSUPPORTED_TITLE,
   acceptUnsupported,
 } from "@bench/acceptorModel";
+import {
+  SERVER_JOB_KEEP_OPEN_BODY,
+  UNDESCRIBABLE_RECORD_CONFIRM_BODY,
+  UNTAKEN_RECORD_CONFIRM_BODY,
+} from "@bench/BenchRunSurface";
+import {
+  TERMINATED_RECORD_LEAD,
+  UNDESCRIBABLE_RECORD_LEAD,
+} from "@bench/RecordDownload";
 import { AcceptorBench } from "@bench/AcceptorBench";
 import { RETAIN_MODE_BILATERAL_NOTICE } from "@bench/exchangeFilesModel";
-import { SERVER_JOB_KEEP_OPEN_BODY } from "@bench/BenchRunSurface";
 import { SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT } from "@bench/filedropRendezvousChoice";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
@@ -395,6 +403,17 @@ interface AcceptStubOptions {
   /** The appliance's rendezvous report; a single named mount when unset. A split
    * pair here is the provisioning a split filedrop accept runs over. */
   rendezvous?: unknown;
+  /** The run status the job's status route reports. A discard cancels and polls a
+   * job it is told is still running, so a test whose recovery must reach the
+   * DELETE promptly reports a terminal one. */
+  jobStatus?: string;
+  /** The exchange record the job's status route reports. Unset, the body denies
+   * availability under `recordUnavailable` below. */
+  record?: { createdAt: string; outcome: string };
+  /** Why the status route says it is withholding the record pair, for a body that
+   * denies availability. The default is the appliance's definitive denial, which
+   * is what a run that owes no record answers. */
+  recordUnavailable?: string;
 }
 
 // The full same-origin job API a console server-job accept drives: a mounted
@@ -488,8 +507,26 @@ function stubServerJobAccept(options: AcceptStubOptions = {}): {
       }
       if (url === "/api/jobs/job-7/events")
         return Promise.resolve(eventStream());
-      if (url === "/api/jobs/job-7")
-        return Promise.resolve(jsonResponse({ recordAvailable: false }));
+      if (url === "/api/jobs/job-7") {
+        if ((init?.method ?? "GET") === "DELETE")
+          return Promise.resolve(new Response(null, { status: 204 }));
+        return Promise.resolve(
+          jsonResponse({
+            status: options.jobStatus ?? "running",
+            ...(options.record !== undefined
+              ? {
+                  recordAvailable: true,
+                  recordCreatedAt: options.record.createdAt,
+                  recordOutcome: options.record.outcome,
+                }
+              : {
+                  recordAvailable: false,
+                  recordUnavailableReason:
+                    options.recordUnavailable ?? "no-record",
+                }),
+          }),
+        );
+      }
       if (url === "/api/jobs/job-7/cancel")
         return Promise.resolve(new Response(null, { status: 200 }));
       return Promise.resolve(new Response(null, { status: 404 }));
@@ -890,5 +927,115 @@ describe("console acceptor run warnings", () => {
       .element(page.getByText("The exchange reported a warning"))
       .toBeInTheDocument();
     await expect.element(page.getByText(NOT_EMPTY_LEAD)).toBeInTheDocument();
+  });
+});
+
+// The acceptor seat's own recoveries, each of which DELETEs the run's folder on
+// the appliance. The record ask that decides whether they confirm is this seat's
+// own -- a different call site from the inviter's, with its own enabling gate --
+// so its states are driven here rather than taken on trust from the inviter's.
+describe("console acceptor recoveries against the run's exchange record", () => {
+  const CREATED_AT = "2026-07-08T14:32:00.000Z";
+  const RECORD_STAMP = "2026-07-08T14-32-00-000Z";
+
+  /** Accept, reach the running run, then end it in a retryable transport
+   * terminal -- the failure whose recovery is Try again, which discards the run's
+   * folder on the appliance. */
+  async function acceptToExchangeFailure(
+    api: ReturnType<typeof stubServerJobAccept>,
+  ): Promise<void> {
+    window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
+    app.render(createElement(AcceptorBench));
+    await reachAcceptStart();
+    await vi.waitFor(() => expect(api.hasEventStream()).toBe(true));
+    api.emitEvent({
+      v: 1,
+      type: "error",
+      category: "exchange",
+      message: "the exchange stopped before it finished",
+    });
+    api.closeEvents();
+    await expect
+      .element(page.getByRole("button", { name: "Try again" }))
+      .toBeInTheDocument();
+  }
+
+  test("offers the record the appliance holds and confirms before destroying it", async () => {
+    const api = stubServerJobAccept({
+      jobStatus: "failed",
+      record: { createdAt: CREATED_AT, outcome: "receipt-swap-terminated" },
+    });
+    await acceptToExchangeFailure(api);
+
+    await expect
+      .element(page.getByText(TERMINATED_RECORD_LEAD))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByRole("link", {
+          name: `Download record (safe to share): psilink-record-${RECORD_STAMP}.json`,
+        }),
+      )
+      .toBeInTheDocument();
+
+    await page.getByRole("button", { name: "Try again" }).click();
+    await expect
+      .element(page.getByText(UNTAKEN_RECORD_CONFIRM_BODY))
+      .toBeInTheDocument();
+    expect(api.captured.some((r) => r.method === "DELETE")).toBe(false);
+
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await flushPendingUpdates();
+    expect(api.captured.some((r) => r.method === "DELETE")).toBe(false);
+  });
+
+  test("a record the appliance cannot read confirms, and links no download", async () => {
+    const api = stubServerJobAccept({
+      jobStatus: "failed",
+      recordUnavailable: "undescribable-record",
+    });
+    await acceptToExchangeFailure(api);
+
+    await expect
+      .element(page.getByText(UNDESCRIBABLE_RECORD_LEAD))
+      .toBeInTheDocument();
+    expect(
+      page
+        .getByRole("link", { name: /Download record \(safe to share\)/ })
+        .query(),
+    ).toBeNull();
+
+    await page.getByRole("button", { name: "Try again" }).click();
+    await expect
+      .element(page.getByText(UNDESCRIBABLE_RECORD_CONFIRM_BODY))
+      .toBeInTheDocument();
+    expect(page.getByText(UNTAKEN_RECORD_CONFIRM_BODY).query()).toBeNull();
+    expect(api.captured.some((r) => r.method === "DELETE")).toBe(false);
+
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await flushPendingUpdates();
+    expect(api.captured.some((r) => r.method === "DELETE")).toBe(false);
+  });
+
+  test("the appliance's own no-record answer retries straight through", async () => {
+    const api = stubServerJobAccept({ jobStatus: "failed" });
+    await acceptToExchangeFailure(api);
+
+    // Wait for the ask to have LANDED, not merely to have been sent: a recovery
+    // pressed while it is in flight confirms, which is a different state.
+    await expect
+      .element(page.getByRole("button", { name: "Try again" }))
+      .not.toHaveAttribute("aria-haspopup");
+    expect(page.getByText(UNDESCRIBABLE_RECORD_LEAD).query()).toBeNull();
+
+    await page.getByRole("button", { name: "Try again" }).click();
+    expect(page.getByText(UNTAKEN_RECORD_CONFIRM_BODY).query()).toBeNull();
+    await vi.waitFor(() =>
+      expect(
+        api.captured.some(
+          (r) => r.url === "/api/jobs/job-7" && r.method === "DELETE",
+        ),
+      ).toBe(true),
+    );
   });
 });

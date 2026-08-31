@@ -69,6 +69,7 @@ The job id is a server-generated v4 UUID; the client never supplies it. Every id
   "recordAvailable": <bool>,
   "recordCreatedAt": "<iso-8601>",  // present only when recordAvailable is true
   "recordOutcome": "completed" | "receipt-swap-terminated",  // same
+  "recordUnavailableReason": "not-settled" | "no-record" | "undescribable-record",  // present only when recordAvailable is false
   "logRequested": <bool>,
   "logAvailable": <bool>,
   "receiptRequested": <bool>,
@@ -82,9 +83,17 @@ The job id is a server-generated v4 UUID; the client never supplies it. Every id
 
 - **It turns on the record's existence, not on the run having succeeded.** A record is owed from the moment the payload exchange returns, so a run that disclosed and then terminated writes one to the same destination a completed run's takes, and it is precisely the disclosure-accounting artifact that run's operator needs. A failure before that point owes no record and writes none, so it reports `recordAvailable: false` on the file's own absence rather than on a status test standing in for it.
 - **Settling is a separate claim from the file being there, and both are required.** The CLI writes the pair near the end of a run, so a mid-run read could take a half-written state for the run's answer; a complete pair sitting in a running job's workdir does not open the routes.
-- **A record that carries no recognized `outcome` reads as unavailable.** Every record this appliance's own CLI writes states one, so a file without it is not a record the appliance can describe -- and describing it is load-bearing, per `recordOutcome` below.
+- **A record that carries no recognized `outcome` reads as unavailable.** Every record this appliance's own CLI writes states one, so a file without it is not a record the appliance can describe -- and describing it is load-bearing, per `recordOutcome` below. Unavailable is not absent, though, and the body says which: such a file is reported `undescribable-record` per `recordUnavailableReason` below.
 
-That gate has a limit: the status body does not distinguish a run that wrote no record from a record the appliance cannot describe, so a version-skewed data root -- a CLI writing an `outcome` value this server bundle does not know -- reads as no record. A client's own classification of `recordAvailable: false` guards only the body it receives, not what is actually on disk.
+`recordUnavailableReason` says which negative a withheld pair is, present exactly when `recordAvailable` is false. The three are separate answers because what a client may safely do with them differs:
+
+- `no-record` -- nothing is at the record path. This is the appliance's DEFINITIVE denial, and the only one that licenses a console control to destroy the run's workdir without asking first.
+- `undescribable-record` -- a record file IS in the workdir and the appliance cannot offer it: its `outcome` is not one this server bundle knows (a data root a differently-versioned CLI wrote), it does not parse into a `createdAt` and an `outcome` at all, or the verification-keys half beside it is missing so the pair cannot be served whole. A record of a disclosure is on disk, so a client neither offers it nor treats it as an absence.
+- `not-settled` -- the run is still going and the CLI writes the pair near the end of it.
+
+The field refines the boolean rather than replacing it: `recordAvailable` stays the single gate the download routes share, so an undescribable record is withheld there too (the appliance does not serve a pair it cannot read whole) and the client's own version-skew guard remains the one below on `recordOutcome`. What the field removes is a client having to read one negative as two things: a body denying availability without naming a reason is an appliance that predates the field, and reads as the plain denial it was.
+
+A client's classification still guards only the body it receives, not what is on disk: the reason is the appliance's reading of the workdir, and a record file that reads as absent to it -- unreadable to the server process, say -- is reported absent.
 
 `recordCreatedAt` is the record's own timestamp and `recordOutcome` its own outcome, both present exactly when `recordAvailable` is true. A client derives the download filenames from the timestamp, matching the in-browser exchange path, and reads the outcome to say what it is offering: a terminated record's commitments re-supply from a result file that run never wrote, so the keys beside it have nothing to open ([EXCHANGE_RECORD.md](EXCHANGE_RECORD.md#when-a-record-is-owed)) -- a client that offered the two alike would make a claim the record does not.
 
@@ -106,7 +115,7 @@ Served only when `status === "succeeded"` and the output file exists and is read
 
 ### The `GET /api/jobs/:jobId/record` and `/api/jobs/:jobId/keys` responses
 
-Both are served under the status route's own `recordAvailable` rule above -- the run settled, both files (`record.json`, `record.keys.json`) readable, and the record validating into a `createdAt` and a recognized `outcome` -- and `404` otherwise. One gate for the two routes and the status field means a client that offers a download whenever `recordAvailable` is true never links a `404`, and the pair is never split. Unlike the result response this is NOT gated on `status === "succeeded"`: a run that disclosed and then terminated exits non-zero and still owes the record of that disclosure, so gating on success would withhold the accounting artifact from the run whose operator most needs it -- while the console's own recovery controls remove the workdir it sits in.
+Both are served under the status route's own `recordAvailable` rule above -- the run settled, both files (`record.json`, `record.keys.json`) readable, and the record validating into a `createdAt` and a recognized `outcome` -- and `404` otherwise, an `undescribable-record` included: the appliance withholds a pair it cannot read whole rather than serving material it cannot describe, and the status body's reason is what tells the client the file is nonetheless there. One gate for the two routes and the status field means a client that offers a download whenever `recordAvailable` is true never links a `404`, and the pair is never split. Unlike the result response this is NOT gated on `status === "succeeded"`: a run that disclosed and then terminated exits non-zero and still owes the record of that disclosure, so gating on success would withhold the accounting artifact from the run whose operator most needs it -- while the console's own recovery controls remove the workdir it sits in.
 
 The bodies are the job's server-chosen record and keys files inside its workdir, never a client-named path. Headers: `Content-Type: application/json; charset=utf-8`, a fixed `Content-Disposition: attachment; filename="psilink-record.json"` / `"psilink-record.keys.json"` (a server-side fallback; the browser's save name is set by its download control and carries the record's timestamp), and `X-Content-Type-Options: nosniff`, plus the `no-store` discipline. The verification keys are private material -- a salt plus the record's commitment can open a committed value -- so `/keys` is gated and `no-store` identically to `/record` and `/result`; see [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md).
 
