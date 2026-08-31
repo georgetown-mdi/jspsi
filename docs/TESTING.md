@@ -304,6 +304,47 @@ warm cache passes even when the configuration is wrong. Inline vitest projects
 do not inherit the root `optimizeDeps`/`resolve` configuration; each project
 that needs it carries its own.
 
+## Cross-runtime interop suite
+
+The CLI and the web app share no code but `@psilink/core`, and their own suites
+never meet: each drives both sides of an exchange with itself. The `interop`
+project is the one place a real `psilink` process and a party assembled from the
+web app's own exchange modules complete a live exchange together, in both
+invitation directions, over one file-drop directory.
+
+```sh
+npm run build -w apps/cli           # the party on the CLI side is the built program
+npm run test:interop -w apps/web
+```
+
+It lives in `apps/web/test/interop/` because only that workspace may import
+`apps/web/src`; the CLI side is a spawned child process, which is how the console
+already drives it. The suite skips itself when `apps/cli/dist/` is absent rather
+than failing on a tree that has not built it.
+
+Two pieces of the web party are the harness's rather than the app's, and each is
+there because the app has no counterpart it could use:
+
+- **The file-drop directory client.** `FileSyncConnection` lives in core but its
+  filesystem client (`LocalFSClient`) lives in `apps/cli`, which `apps/web` may
+  not import. The harness supplies one scoped to what the file-sync protocol
+  calls, not a second copy of the shipped client's hardening.
+- **The application-layer AEAD wrap.** A CLI party on a file-sync channel
+  requests it unconditionally and `applyEncryption` is the OR of both parties'
+  requests, so a web party must apply it for the exchange to start. The web app's
+  own handshake driver refuses it -- the app exchanges only over a
+  DTLS-confidential WebRTC channel -- so a third test in the suite runs that
+  driver against a CLI party and pins the refusal. That test fails the day
+  `apps/web` applies the wrap itself, which is when the stand-in should go.
+
+Everything else is each runtime's own: the CLI's argv, configuration, key file,
+PSI backend and result CSV; the web app's acceptor assembly, its invitation mint
+and inviter spec assembly, and its browser WASM PSI engine.
+
+It runs on both `cli_build_and_test.yaml` and `eb_build_and_test.yaml`. That is
+deliberate rather than redundant: the drift it exists to catch can land on either
+runtime, and each workflow's path filter sees only its own.
+
 ## What a run did not cover
 
 A run that quietly covers less than the suite does is worse than a red one: its

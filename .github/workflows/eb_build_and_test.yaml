@@ -127,6 +127,19 @@ jobs:
       # a web-unit regression gives a clear failure signal of its own.
       - name: Web unit tests
         run: npm run test:unit -w apps/web
+      # The cross-runtime suite drives the real `psilink` program against a party
+      # built from this app's own exchange modules, so it needs the CLI built --
+      # nothing else in this workflow does, which is why the build is a step of
+      # this pair rather than of the shared setup. It stands up no server and no
+      # browser: its whole world is a temporary file-drop directory.
+      #
+      # It runs here AND on the CLI workflow's own leg, deliberately: the drift it
+      # exists to catch can land on either runtime, and each workflow's path
+      # filter sees only its own.
+      - name: Build the CLI for the cross-runtime suite
+        run: npm run build -w apps/cli
+      - name: CLI/web cross-runtime interop
+        run: npm run test:interop -w apps/web
       # apt applies no network timeout of its own, so a mirror connection that
       # goes quiet hangs the --with-deps install below with nothing to time it
       # out.

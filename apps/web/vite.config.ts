@@ -221,6 +221,28 @@ export default defineConfig((_configEnv) => {
         },
         {
           test: {
+            include: ["test/interop/**/*.{test,spec}.ts"],
+            name: "interop",
+            environment: "node",
+            // The cross-runtime suite: a real `psilink` child process meeting a
+            // party built from this app's own exchange modules. A project of its
+            // own rather than a file in `integration`, because it needs neither
+            // the production server build nor the dev server that project's
+            // globalSetup pays for -- its whole world is a temporary directory.
+            //
+            // A test here is a whole exchange: a rendezvous, a key exchange, and
+            // a PSI round per linkage key, with a cold-started Node process
+            // loading a WASM engine on one side -- and the arm that pins the web
+            // path's AEAD refusal additionally waits out the CLI party's peer
+            // budget. The default 5s bounds none of that, and the real deadlines
+            // are the ones the file sets: each party's peer budget, and a hard
+            // per-invocation kill on the child.
+            testTimeout: 180_000,
+          },
+          resolve: { alias: srcAliases },
+        },
+        {
+          test: {
             include: [
               "test/browser/**/*.{test,spec}.{ts,tsx}",
               "test/**/*.browser.{test,spec}.{ts,tsx}",
