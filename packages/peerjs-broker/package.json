@@ -8,6 +8,7 @@
   "exports": {
     ".": "./src/contrib/index.ts",
     "./standalone": "./src/standalone.ts",
+    "./diagnostics": "./src/diagnostics.ts",
     "./*": "./src/contrib/*.ts"
   },
   "scripts": {
@@ -23,6 +24,7 @@
     "webrtc"
   ],
   "dependencies": {
+    "@psilink/core": "file:../../packages/core",
     "ws": "^8.21.3"
   },
   "devDependencies": {

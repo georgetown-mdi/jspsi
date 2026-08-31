@@ -6,6 +6,8 @@ import { MessagesExpire } from "./services/messagesExpire/index.ts";
 import { Realm } from "./models/realm.ts";
 import { WebSocketServer } from "./services/webSocketServer/index.ts";
 
+import { attachSignalingDiagnostics } from "../diagnostics.ts";
+
 import defaultConfig from "./config/index.ts";
 
 // import type express from "express";
@@ -99,12 +101,10 @@ export function CreateInstanceWSOnly({
 
   // Attached rather than left off: an `error` emitted with no listener is thrown
   // rather than dropped, and the broker raises one over a peer hang-up it is
-  // built to survive. Discarding it is the limit of this wiring; one that wants
-  // the broker's reports read attaches a sink here.
+  // built to survive. Behind that the sink writes each report to the diagnostic
+  // log, attributed, rate limited, and with the peer's own bytes escaped.
   // See docs/spec/CHANNEL_SECURITY.md.
-  wss.on("error", (_error: Error) => {
-    // emit("error", error);
-  });
+  attachSignalingDiagnostics(wss);
 
   messagesExpire.startMessagesExpiration();
   checkBrokenConnections.start();

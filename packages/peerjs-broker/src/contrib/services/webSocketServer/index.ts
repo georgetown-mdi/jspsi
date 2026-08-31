@@ -18,6 +18,7 @@ import type { IClient } from "../../models/client.ts";
 import type { IConfig } from "../../config/index.ts";
 import type { IMessage } from "../../models/message.js";
 import type { IRealm } from "../../models/realm.ts";
+import type { SignalingDiagnosticSource } from "../../../diagnostics.ts";
 
 export interface IWebSocketServer extends EventEmitter {
   readonly path: string;
@@ -204,14 +205,14 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
       this._onSocketConnection(socket, req);
     });
     this.socketServer.on("error", (error: Error) => {
-      this._onSocketError(error);
+      this._onSocketError(error, "signaling-server");
     });
   }
 
   private _onSocketConnection(socket: WebSocket, req: IncomingMessage): void {
     // An unhandled socket error might crash the server. Handle it first.
     socket.on("error", (error) => {
-      this._onSocketError(error);
+      this._onSocketError(error, "client-socket");
     });
 
     // We are only interested in the query, the base url is therefore not relevant
@@ -253,13 +254,17 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
     this._registerClient({ socket, id, token });
   }
 
-  // A report leaves this server on its own `error` event, and in the shipped
-  // wirings that is where it stops: `CreateInstanceWSOnly` attaches a listener
-  // that discards it -- load-bearing all the same, an `error` emitted with no
-  // listener being thrown rather than dropped. A wiring that wants these read
-  // attaches a sink of its own. See docs/spec/CHANNEL_SECURITY.md.
-  private _onSocketError(error: Error): void {
-    this.emit("error", error);
+  // A report leaves this server on its own `error` event, carrying what raised
+  // it: the paths that reach here produce errors that look alike once the
+  // `Error` is all that survives, so the source is what lets the sink
+  // `CreateInstanceWSOnly` attaches tell them apart. It rides as a second event
+  // argument, which a listener that wants only the error ignores. See
+  // docs/spec/CHANNEL_SECURITY.md.
+  private _onSocketError(
+    error: unknown,
+    source: SignalingDiagnosticSource,
+  ): void {
+    this.emit("error", error, source);
   }
 
   // Release an upgrade on a path that is not ours (shouldHandle() applies the
@@ -312,7 +317,7 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
     // destroyed and reported here.
     const releaseOnError = (error: Error): void => {
       socket.destroy();
-      this._onSocketError(error);
+      this._onSocketError(error, "released-socket");
     };
     socket.on("error", releaseOnError);
 
@@ -346,6 +351,7 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
         new Error(
           "PeerJS signaling server released an upgrade no co-resident listener answered",
         ),
+        "unanswered-upgrade",
       );
     };
 
@@ -460,7 +466,7 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
 
         this.emit("message", client, message);
       } catch (e) {
-        this.emit("error", e);
+        this._onSocketError(e, "client-frame");
       }
     });
 
