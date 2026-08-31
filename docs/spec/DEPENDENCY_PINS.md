@@ -32,7 +32,8 @@ what else it reads and what it does not.
 That form is for npm packages only, because every name in such a heading is read
 as one and looked up in the npm groups. A checklist for a pin in another
 ecosystem therefore carries a heading of another shape -- "Bumping the FIPS base
-image" below is a docker-ecosystem pin, whose bumps that config never batches --
+image" below is a docker-ecosystem pin, which the update config holds out of
+Dependabot entirely --
 and renaming one of those to `Upgrading ...` fails the check with a message
 asking for an npm exclude entry that would be false.
 
@@ -675,26 +676,44 @@ That endpoint is a confidentiality statement an operator reads before handing a 
 ## Bumping the FIPS base image
 
 `Dockerfile.fips` pins its Amazon Linux 2023 rootfs by multi-arch index digest,
-so the base moves only when someone edits that digest. Three committed values
-name one release between them, and a bump that moves fewer than all three builds
+so the base moves only when someone edits that digest. Four committed values
+name one release between them, and a bump that moves fewer than all four builds
 an image whose userland and package layer came from different snapshots. What
 each of those pins is, and how the current values were resolved, is in
 [CONTAINER_IMAGES.md](CONTAINER_IMAGES.md#the-fips-variant-images-pins); what
 follows is the procedure that keeps them together.
 
-**The arrival signal.** Dependabot's docker ecosystem (`.github/dependabot.yml`,
-weekly on Monday, targeting `staging`) tracks the digest in the `FROM` and opens
-a pull request of its own when the `amazonlinux:2023` tag is rebuilt onto a newer
-rootfs. That block declares no groups, so such a bump is never batched. Its
-weekly cadence is the accepted latency -- nothing polls the registry more often,
-and a rebuild is what this waits for rather than something this repository can
-provoke.
+**No mechanical arrival signal, by configuration.** The docker ecosystem block
+in `.github/dependabot.yml` ignores `amazonlinux`, so nothing opens a pull
+request when the tag is rebuilt onto a newer rootfs. The four values below have
+to name one release between them and the move carries a re-measurement
+obligation besides, none of which a version comparison over tag components can
+see -- so this base moves as a coordinated, human-reviewed change or not at all,
+and the digest freeze in `scripts/dockerfile-freeze.test.mjs` is what pins it
+meanwhile. The default image's `node:26-alpine` base carries no such entry, and
+its digest-only bumps do arrive on that block's weekly schedule; the two pins'
+treatments are deliberately different, and
+[Bumping the default base image](#bumping-the-default-base-image) is the other
+one. Why the split was taken is in
+[fips-variant-image.md](../notes/fips-variant-image.md#why-the-base-is-held-out-of-dependabot).
 
-**The same-diff trio.** A digest bump lands with all three of these or not at
-all:
+**What surfaces a base worth moving to**, in the absence of a filed bump:
 
-1. The digest in `Dockerfile.fips`'s `FROM`. This is what the Dependabot pull
-   request edits, and the only one of the three it moves on its own.
+- The OS-layer Trivy scan the release workflow runs over the built variant,
+  which gates every publish, so a snapshot carrying fixable HIGH or CRITICAL
+  findings blocks a release rather than shipping. `image_smoke.yaml`'s weekly
+  build does not answer this for the variant while its scan is scoped out
+  (below).
+- An advisory, or a certificate-lifecycle event, read by hand against the pins
+  in [CONTAINER_IMAGES.md](CONTAINER_IMAGES.md#the-fips-variant-images-pins).
+
+**The same-diff quartet.** A base move lands with all four of these or not at
+all, verified against one release:
+
+1. The digest in `Dockerfile.fips`'s `FROM`, resolved as the multi-arch index
+   digest -- `docker buildx imagetools inspect amazonlinux:2023` -- because a
+   platform-specific manifest digest names one architecture and fails on the
+   other.
 2. The `FIPS_BASE` literal in `scripts/dockerfile-freeze.test.mjs`.
    `npm run test:scripts` stays red until it matches, so the reconciliation is
    forced rather than remembered.
@@ -702,14 +721,43 @@ all:
    transaction resolves against. The `nodebase` stage compares it against the
    `system-release` version the rootfs reports and fails the build when the two
    differ, so a digest that moves without it reddens the image build.
+4. The certified provider's pins -- `FIPS_PROVIDER_PACKAGE`,
+   `FIPS_PROVIDER_VERSION` and `FIPS_MODULE_VERSION` -- confirmed against what
+   the new snapshot serves rather than carried over. Moving the releasever moves
+   what the package layer resolves: a snapshot no longer serving that NVR fails
+   the `dnf swap` itself, and one serving a different module under the same
+   package name fails the `rpm -qf` and `openssl list` assertions that follow.
+   A snapshot still serving the pinned NVR leaves all three values unchanged --
+   a result those assertions establish, not one the diff may assume.
 
 Read the release out of the new rootfs to learn what to write in (3):
 `rpm -q --qf '%{VERSION}' system-release` inside it, or `docker create` plus
 `docker cp` of `/etc/os-release` to read the other architecture's rootfs without
-emulating or executing it. Moving the releasever also moves what the package
-layer resolves, the certified provider's NVR included: a snapshot no longer
-serving that NVR fails the `dnf swap` itself, and one serving a different module
-under it fails the `rpm -qf` and `openssl list` assertions that follow.
+emulating or executing it.
+
+**The re-measurement obligation.** The variant's published FIPS claims rest on
+measurements of one base rootfs and one provider build. Those taken by hand are
+archived outside this repository, and the notes that state them
+([fips-variant-image.md](../notes/fips-variant-image.md),
+[fips-provider-surface.md](../notes/fips-provider-surface.md)) cite those
+archives rather than any path in this tree -- so nothing here re-derives them
+and no check reddens when a base move leaves one stale. The engagement legs are
+the automatic half, re-taken by the pull request's own run (below); these are
+the hand work a move obliges beyond it:
+
+- **The OS package closure figures** -- package count, image size, and the
+  GPL-3.0/LGPL-3.0 breadth recorded in
+  [CONTAINER_IMAGES.md](CONTAINER_IMAGES.md#the-fips-reference-builds-inventory).
+  These are properties of the snapshot rather than of the module, and a package
+  gained or dropped moves them. The setuid/setgid half of the closure is the one
+  part a check already re-takes.
+- **The certificate comparison behind the provider choice**, whenever (4) above
+  lands on a different provider NVR: the rejection of the alternative
+  certificate rests on a side-by-side vulnerability scan of two images, which is
+  a measurement of the package layers being compared.
+- **The architecture split.** The hand measurements were taken on `aarch64` and
+  CI builds `amd64`, so a move inherits that split rather than closing it; a
+  figure re-taken on one architecture is labelled with it.
 
 **What re-proves the result.** `image_smoke.yaml` builds `Dockerfile.fips` on
 every pull request touching it, which is where all of those build-time assertions
@@ -741,8 +789,8 @@ Two limits sit between a green run there and a bump being proved:
 
 ## Bumping the default base image
 
-This is the second docker-ecosystem pin carrying its own bump section outside
-the machine-read `Upgrading ...` heading form -- consciously, per the
+This is the second Dockerfile base-image pin carrying its own bump section
+outside the machine-read `Upgrading ...` heading form -- consciously, per the
 convention [recorded in this document's lead](#pinned-dependency-internals) alongside
 [the FIPS base image's section](#bumping-the-fips-base-image): a heading in
 that form is read only as a parenthesised list of npm package names, so
@@ -760,8 +808,12 @@ covers and why the base is pinned by digest rather than by tag is in
 **The arrival signal.** Dependabot's docker ecosystem
 (`.github/dependabot.yml`, weekly on Monday, targeting `staging`) tracks the
 digest in the `FROM` and opens a pull request of its own when the
-`node:26-alpine` tag is rebuilt onto a newer image, the same cadence and the
-same never-batched treatment as [the FIPS base's](#bumping-the-fips-base-image).
+`node:26-alpine` tag is rebuilt onto a newer image. That block declares no
+groups, so the bump is never batched. This is the base image that block covers:
+[the FIPS variant's](#bumping-the-fips-base-image) is held out of it by an
+`ignore` entry, and moves by hand instead. Its weekly cadence is the accepted
+latency here -- nothing polls the registry more often, and a rebuild is what
+this waits for rather than something this repository can provoke.
 Dependabot's own commit edits only the `Dockerfile` `FROM` lines; nothing
 updates the mirrored literal below, so the pull request arrives with
 `npm run test:scripts` red by construction -- the freeze test's whole point,

@@ -745,9 +745,13 @@ jobs:
       # A finding is a prompt to bump the pinned base -- the digest in the
       # Dockerfile, and on the variant the Amazon Linux release snapshot its dnf
       # transactions resolve against as well: the pins are deliberate, so nothing
-      # on the npm side resolves them, and the docker ecosystem in
-      # .github/dependabot.yml opens that bump on its own weekly schedule rather
-      # than in answer to this.
+      # on the npm side resolves them. For the default image the docker ecosystem
+      # in .github/dependabot.yml opens that bump on its own weekly schedule
+      # rather than in answer to this. The variant's base is ignored by that
+      # block and moves as a coordinated human-reviewed change instead, so on
+      # that leg a finding here is one of the signals the move answers to; the
+      # procedure and the rest of them are in "Bumping the FIPS base image" in
+      # docs/spec/DEPENDENCY_PINS.md.
       #
       # Temporarily scoped to the default leg. Both images are published and
       # the release workflow gates each one's push on this same scanner at this
