@@ -22,6 +22,7 @@ import {
   MAX_DATE_FORMAT_LENGTH,
   MAX_TRANSFORM_PARAM_LENGTH,
 } from "../src/config/linkageTerms";
+import { summarizeInvitation } from "../src/invitationSummary";
 import { NestingDepthExceededError } from "../src/utils/camelizeKeys";
 import { describeDecodeError } from "../src/utils/describeDecodeError";
 import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";
@@ -869,20 +870,6 @@ test.each(
 );
 
 test.each(splitRetainEndpoints)(
-  "a split $name endpoint decodes with the declaration omitted",
-  async ({ endpoint }) => {
-    // Absence is "nothing declared", not a contradicted negative -- and it is
-    // precisely the pair the summary's endpoint-shape ground exists to cover, so
-    // the refusal must not swallow it. A foreign or older mint emits it.
-    const decoded = await decodeInvitation(
-      await encodeRaw({ ...baseToken, connectionEndpoint: endpoint }),
-    );
-    expect(decoded.inviterRetainsFiles).toBeUndefined();
-    expect(decoded.connectionEndpoint).toEqual(endpoint);
-  },
-);
-
-test.each(splitRetainEndpoints)(
   "a split $name endpoint may declare retain mode",
   async ({ endpoint }) => {
     const decoded = await decodeInvitation(
@@ -893,6 +880,38 @@ test.each(splitRetainEndpoints)(
       }),
     );
     expect(decoded.inviterRetainsFiles).toBe(true);
+  },
+);
+
+test.each(splitRetainEndpoints)(
+  "encodeInvitation refuses to mint a split $name endpoint with no retain declaration",
+  async ({ endpoint }) => {
+    // The mint-only half of the asymmetry: psilink never EMITS a rendezvous whose
+    // permanent transcript is readable from the locator's shape alone, since any
+    // artifact composed from the declaration -- an accept kit's file-handling
+    // disclosure -- would then state nothing. Held at this one seam rather than at
+    // each producer's own gate, so no mint path can reach the state by omission.
+    await expect(
+      encodeInvitation({ ...baseToken, connectionEndpoint: endpoint }),
+    ).rejects.toThrow(/inviterRetainsFiles must be true/);
+  },
+);
+
+test.each(splitRetainEndpoints)(
+  "the same undeclared split $name token still decodes and summarizes as retaining",
+  async ({ endpoint }) => {
+    // The decode half of the very shape the mint above refuses: a foreign or
+    // older implementation may emit it, psilink handles it correctly today, and
+    // tightening the shared schema would reject it on a public protocol surface
+    // for nothing. Absence stays "nothing declared" rather than a contradicted
+    // negative, so neither the mint rule nor the false-declaration refusal may
+    // swallow it -- and the summary states the retention on the endpoint's shape
+    // regardless, so nothing an acceptor is shown depends on the mint-side rule.
+    const token = { ...baseToken, connectionEndpoint: endpoint };
+    const decoded = await decodeInvitation(await encodeRaw(token));
+    expect(decoded.inviterRetainsFiles).toBeUndefined();
+    expect(decoded.connectionEndpoint).toEqual(endpoint);
+    expect(summarizeInvitation(decoded).disclosesRetainedFiles).toBe(true);
   },
 );
 
@@ -1155,8 +1174,15 @@ const splitRoundTripCases: { name: string; endpoint: ConnectionEndpoint }[] = [
 test.each(splitRoundTripCases)(
   "round-trips a split-directory $name endpoint verbatim (no swap at the wire)",
   async ({ endpoint }) => {
+    // Minted with the retain declaration the mint schema requires beside this
+    // shape; what this case pins is the directory pair surviving the wire
+    // unswapped, not the declaration's own rules.
     const decoded = await decodeInvitation(
-      await encodeInvitation({ ...baseToken, connectionEndpoint: endpoint }),
+      await encodeInvitation({
+        ...baseToken,
+        connectionEndpoint: endpoint,
+        inviterRetainsFiles: true,
+      }),
     );
     expect(decoded.connectionEndpoint).toEqual(endpoint);
   },

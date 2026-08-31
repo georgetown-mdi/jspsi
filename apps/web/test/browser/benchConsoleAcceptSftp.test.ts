@@ -9,7 +9,11 @@ import { createElement } from "react";
 // Load Mantine's stylesheet so components render with their real geometry.
 import "@mantine/core/styles.css";
 
-import { encodeInvitation, generateSharedSecret } from "@psilink/core";
+import {
+  encodeInvitation,
+  endpointRequiresRetainedFiles,
+  generateSharedSecret,
+} from "@psilink/core";
 
 import {
   ACCEPT_UNSUPPORTED_TITLE,
@@ -76,6 +80,14 @@ async function encodeToken(endpoint: ConnectionEndpoint): Promise<string> {
     sharedSecret: generateSharedSecret(),
     expires: new Date(Date.now() + 3600 * 1000).toISOString(),
     connectionEndpoint: endpoint,
+    // Core's mint requires the retain declaration beside an endpoint whose shape
+    // puts every connection built from it in retain mode, and refuses one beside
+    // a webrtc endpoint. Read which is which from core's own predicate rather
+    // than restating it per endpoint below, so these tokens are minted the way a
+    // real inviter mints them.
+    ...(endpointRequiresRetainedFiles(endpoint)
+      ? { inviterRetainsFiles: true }
+      : {}),
   };
   return encodeInvitation(token);
 }

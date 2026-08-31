@@ -157,6 +157,22 @@ function sampleToken(
   };
 }
 
+// The same token carrying a SPLIT inbound/outbound endpoint. Core requires the
+// retain declaration beside that shape at the mint (a split directory puts every
+// connection built from it in retain mode), so a case that goes through
+// encodeInvitation carries it exactly as a real inviter's mint does. A case that
+// renders a token without minting it uses sampleToken directly, since an
+// undeclared split endpoint stays a decodable shape.
+function splitEndpointToken(
+  expires: string,
+  connectionEndpoint: ConnectionEndpoint,
+): InvitationToken {
+  return {
+    ...sampleToken(expires, connectionEndpoint),
+    inviterRetainsFiles: true,
+  };
+}
+
 // A token whose one linkage key splits its element's value into several match
 // candidates: the shape that raises a fan-out consent fact, in whichever of the
 // two registers the strategy puts it.
@@ -1340,7 +1356,9 @@ test("validateAccept: offline split-seed accept does not warn on --no-retain-fil
   log.setLevel("silent");
   const warnSpy = vi.spyOn(log, "warn");
   try {
-    const encoded = await encodeInvitation(sampleToken(FUTURE(), endpoint));
+    const encoded = await encodeInvitation(
+      splitEndpointToken(FUTURE(), endpoint),
+    );
     const ready = await validateAccept({
       resolved: { mode: "offline", invitation: encoded, input },
       options: testOptions({ retainFiles: false }),
@@ -2294,7 +2312,9 @@ test("validateAccept: online auto-applies a split endpoint's mirror-swapped dire
     outboundPath: "/exchange/inviter-out",
   };
   try {
-    const encoded = await encodeInvitation(sampleToken(FUTURE(), endpoint));
+    const encoded = await encodeInvitation(
+      splitEndpointToken(FUTURE(), endpoint),
+    );
     const ready = await validateAccept({
       resolved: {
         mode: "online",
@@ -2332,7 +2352,9 @@ test("validateAccept: online --outbound-path overrides the endpoint's split pair
     outboundPath: "/exchange/inviter-out",
   };
   try {
-    const encoded = await encodeInvitation(sampleToken(FUTURE(), endpoint));
+    const encoded = await encodeInvitation(
+      splitEndpointToken(FUTURE(), endpoint),
+    );
     const ready = await validateAccept({
       resolved: {
         mode: "online",
