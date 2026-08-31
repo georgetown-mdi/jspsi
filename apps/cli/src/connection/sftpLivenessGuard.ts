@@ -70,10 +70,12 @@ export const SFTP_STALL_DEADLINE_MS = 60_000;
  * (`COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH`), which is deliberate: that cap is a
  * ceiling, not a quota, and each fragment here is a value rather than a
  * composition, so the clip only ever bites a fragment that is itself the
- * anomaly. That a real stall detail, rendezvous message path, and server
- * error sentence each fit inside it is asserted, not just claimed here, by
- * apps/cli/test/unit/transportRefusalBudget.test.ts's ordinary-size
- * CLI-sites delivery.
+ * anomaly. That the details, paths, and server error sentences of the
+ * enumerated CLI-sites table each fit inside it at ordinary size is
+ * asserted by apps/cli/test/unit/transportRefusalBudget.test.ts; the
+ * adapter's stall shapes outside that table (delete, rename, exclusive
+ * create, existence check) are covered by that suite's class-level flood
+ * half, and their ordinary-size fit is measured, not pinned.
  */
 const STALLED_LINK_BUDGET = DEFAULT_MAX_DISPLAY_LENGTH;
 
