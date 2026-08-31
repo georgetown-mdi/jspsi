@@ -147,6 +147,17 @@ describe("observePeerAnswer reads what answered the port", () => {
     });
   });
 
+  test("classifies on the raw text: a private-key marker ahead of the identification string does not swallow it", async () => {
+    const endpoint = await peerAnswering((socket) =>
+      socket.end(
+        "-----BEGIN RSA PRIVATE KEY-----\r\nSSH-2.0-OpenSSH_9.6p1\r\n",
+      ),
+    );
+    expect(await observePeerAnswer(endpoint, BUDGET_MS)).toEqual({
+      kind: "identified",
+    });
+  });
+
   test("reads past the excerpt so a preamble ahead of the identification string does not decide it", async () => {
     const preamble = "authorized use only\r\n".repeat(8);
     expect(preamble.length).toBeGreaterThan(PEER_EXCERPT_MAX_BYTES);
@@ -429,7 +440,7 @@ describe("explainPeerIdentificationFailure partitions the peer's bytes", () => {
     ).split("\ncaused by: ");
     expect(links[0]).toContain("an HTTP response");
     expect(links).toContain(
-      "first bytes the peer sent: HTTP/1.0 403 Forbidden",
+      "first bytes the peer sent, redacted: HTTP/1.0 403 Forbidden",
     );
     expect(
       links.some((link) => link.startsWith("Check that the configured")),
@@ -471,7 +482,7 @@ describe("explainPeerIdentificationFailure partitions the peer's bytes", () => {
         `configured endpoint: ${endpoint.host}:${endpoint.port}`,
       );
       const peerLink = links.find((link) =>
-        link.startsWith("first bytes the peer sent:"),
+        link.startsWith("first bytes the peer sent, redacted:"),
       );
       expect(peerLink).toBeDefined();
       expect(peerLink).toContain("\\x00");

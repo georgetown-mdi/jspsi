@@ -420,7 +420,7 @@ export function explainPeerIdentificationFailure(
             `identifies itself late, reads this way too.`,
           READ_PROVENANCE,
           endpointDetail,
-          `first bytes the peer sent: ${answer.excerpt}`,
+          `first bytes the peer sent, redacted: ${answer.excerpt}`,
         ],
         error,
       ),
