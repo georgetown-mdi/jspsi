@@ -45,9 +45,13 @@ const SIGNALING_DIAGNOSTIC_SOURCES = [
  *   a peer can loop it.
  * - `frame-dispatch`: a fault raised while dispatching a frame that DID parse to
  *   this server's own `message` listeners -- the relay and whatever an embedding
- *   host attached. The peer chose the frame, but the fault is this server's, so
- *   it is kept apart from `client-frame`: read as a parse failure it would send
- *   an operator looking for a peer sending garbage.
+ *   host attached. It is a fault in this server's own handling, so it is kept
+ *   apart from `client-frame`: read as a parse failure it would send an
+ *   operator looking for a peer sending garbage. Its detail can still carry a
+ *   bounded, sink-escaped fragment of the peer's frame -- Node's own errors
+ *   echo an offending value into their message (a numeric payload verbatim, an
+ *   object as "an instance of Object"), bounded by what JSON parses a scalar
+ *   into and capped and escaped like every other diagnostic at the sink.
  * - `signaling-server`: an error the `ws` server itself raised.
  * - `unattributed`: a diagnostic raised on the `error` event naming none of the
  *   above. `emit` is untyped, so the source is whatever the raise passed --

@@ -320,9 +320,9 @@ describe("signaling diagnostics sink", () => {
     await waitFor(() => brokerLines().length > 1);
     expect(brokerLines()[1]).toContain("[client-frame]");
 
-    // Still registered past both throws: a further real parse failure is still
-    // read as this socket's own frame rather than one nobody is attributing to
-    // anymore.
+    // The socket survives both throws and keeps producing attributed
+    // diagnostics: a further real parse failure still lands as this socket's
+    // own [client-frame] line.
     client.send("not json at all");
     await waitFor(() => brokerLines().length > 2);
     expect(brokerLines()[2]).toContain("[client-frame]");
@@ -349,8 +349,9 @@ describe("signaling diagnostics sink", () => {
     expect(line).toContain("[frame-dispatch]");
     expect(line).not.toContain("[client-frame]");
 
-    // Still registered: a parse failure right after is read as this socket's
-    // own frame, not one the dispatch fault tore down.
+    // The socket survives the dispatch fault and keeps producing attributed
+    // diagnostics: a parse failure right after still lands as this socket's
+    // own [client-frame] line, not one the fault tore down.
     client.send("not json at all");
     await waitFor(() => brokerLines().length > 1);
     expect(brokerLines()[1]).toContain("[client-frame]");
