@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "defaultMode": "bypassPermissions"
+  },
+  "model": "Fable",
+  "statusLine": {
+    "type": "command",
+    "command": "node /workspace/.claude/statusline.mjs"
+  },
+  "effortLevel": "xhigh",
+  "awaySummaryEnabled": false,
+  "tui": "fullscreen",
+  "skipDangerousModePermissionPrompt": true,
+  "skipWorkflowUsageWarning": true,
+  "editorMode": "vim",
+  "autoContinueAtUsageLimit": false,
+  "useAutoModeDuringPlan": false,
+  "enableArtifact": false
+}

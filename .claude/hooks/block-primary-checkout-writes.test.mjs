@@ -1,5 +1,11 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -143,7 +149,10 @@ describe("block-primary-checkout-writes hook", () => {
 
   it("allows a tracked or brand-new file inside a linked worktree nested under the main root", () => {
     // The prefix trap: .claude/worktrees/<tree> sits under the main root's path,
-    // so a plain prefix test would refuse every fix implementer's edits.
+    // so a plain prefix test would refuse every fix implementer's edits. The
+    // main-checkout cwd is the dispatch shape -- a session in the primary
+    // checkout writing into the tree it was pointed at -- which the sibling rule
+    // must leave alone.
     const dir = track(makeRepo());
     const tree = addWorktree(dir, "feature");
     expect(write(join(tree, "tracked.ts"), dir).status).toBe(0);
@@ -151,6 +160,68 @@ describe("block-primary-checkout-writes hook", () => {
     const fresh = join(tree, "apps", "web", "src", "newComponent.tsx");
     expect(write(fresh, dir).status).toBe(0);
     expect(write(fresh, tree).status).toBe(0);
+  });
+
+  it("allows a worktree write when the session directory places it in no tree", () => {
+    const dir = track(makeRepo());
+    const tree = addWorktree(dir, "feature");
+    const outside = track(mkdtempSync(join(tmpdir(), "primary-writes-away-")));
+    expect(write(join(tree, "tracked.ts"), outside).status).toBe(0);
+    expect(
+      runHook({
+        tool_name: "Write",
+        tool_input: { file_path: join(tree, "tracked.ts"), content: "x" },
+      }).status,
+    ).toBe(0);
+  });
+
+  it("blocks a write into a sibling worktree from a session inside another one", () => {
+    const dir = track(makeRepo());
+    const own = addWorktree(dir, "feature");
+    const sibling = addWorktree(dir, "other");
+    const { status, stderr } = write(join(sibling, "tracked.ts"), own);
+    expect(status).toBe(2);
+    // The refusal names both trees and the corrected path, as git spells them:
+    // the temp root is reached through a symlink on macOS.
+    expect(stderr).toContain(realpathSync(sibling));
+    expect(stderr).toContain(realpathSync(own));
+    expect(stderr).toContain(join(realpathSync(own), "tracked.ts"));
+    const fresh = runHook({
+      tool_name: "NotebookEdit",
+      tool_input: { notebook_path: join(sibling, "apps", "web", "new.ipynb") },
+      cwd: own,
+    });
+    expect(fresh.status).toBe(2);
+  });
+
+  it("still blocks main-worktree content from a session inside a worktree", () => {
+    const dir = track(makeRepo());
+    const own = addWorktree(dir, "feature");
+    const { status, stderr } = write(join(dir, "tracked.ts"), own);
+    expect(status).toBe(2);
+    expect(stderr).toContain("repository content of the main worktree");
+  });
+
+  it("allows a gitignored path in a sibling worktree", () => {
+    const dir = track(makeRepo());
+    const own = addWorktree(dir, "feature");
+    const sibling = addWorktree(dir, "other");
+    expect(write(join(sibling, "scratch", "notes.md"), own).status).toBe(0);
+  });
+
+  it("allows a sibling-worktree write while that tree carries the sentinel", () => {
+    const dir = track(makeRepo());
+    const own = addWorktree(dir, "feature");
+    const sibling = addWorktree(dir, "other");
+    const sentinel = join(
+      sibling,
+      ".claude",
+      "allow-primary-checkout-writes.local",
+    );
+    mkdirSync(join(sibling, ".claude"), { recursive: true });
+    expect(write(join(sibling, "tracked.ts"), own).status).toBe(2);
+    writeFileSync(sentinel, "");
+    expect(write(join(sibling, "tracked.ts"), own).status).toBe(0);
   });
 
   it("allows a path outside any repository", () => {

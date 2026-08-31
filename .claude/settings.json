@@ -4,6 +4,55 @@
     "pr": ""
   },
   "permissions": {
+    "allow": [
+      "Bash(npm run lint)",
+      "Bash(npm run typecheck)",
+      "Bash(npm run build -w *)",
+      "Bash(npm test)",
+      "Bash(npm test *)",
+      "Bash(npm run test)",
+      "Bash(npm run test -w *)",
+      "Bash(npm run test:unit -w *)",
+      "Bash(npm run test:browser -w *)",
+      "Bash(npm run test:integration -w *)",
+      "Bash(npx vitest run *)",
+      "Bash(npx tsc -p *)",
+      "Bash(npx prettier --check *)",
+      "Bash(npx prettier --write *)",
+      "Bash(tsc -p *)",
+      "Bash(npm install)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git stash *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(env)",
+      "Bash(echo:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(grep:*)",
+      "Bash(python3 -c ' *)",
+      "Bash(docker info *)",
+      "Bash(node .claude/scripts/fetch-issues.mjs *)",
+      "Bash(node .claude/scripts/edit-issue.mjs *)",
+      "Bash(node .claude/scripts/lint-issues.mjs *)",
+      "Bash(node .claude/scripts/list-epic.mjs *)",
+      "Bash(node .claude/scripts/list-issues.mjs *)",
+      "Bash(gh project item-create *)",
+      "Read(//tmp/**)",
+      "Read(//private/tmp/**)",
+      "Edit(//tmp/**)",
+      "Edit(//private/tmp/**)",
+      "Skill(code-review:code-review)",
+      "Skill(code-review:code-review:*)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:api.github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:www.w3.org)"
+    ],
     "deny": [
       "Read(~/.ssh/**)",
       "Edit(~/.ssh/**)",
@@ -16,6 +65,41 @@
       "Edit(.env.*)",
       "Edit(**/.env.*)",
       "Edit(/etc/**)"
+    ]
+  },
+  "sandbox": {
+    "network": {
+      "allowLocalBinding": true,
+      "allowedDomains": ["registry.npmjs.org"]
+    },
+    "filesystem": {
+      "allowWrite": ["~/.npm"],
+      "denyRead": [
+        "~/Documents",
+        "~/Downloads",
+        "~/Desktop",
+        "~/Music",
+        "~/Pictures",
+        "~/Movies",
+        "~/Public",
+        "~/Library/Mobile Documents",
+        "~/Library/CloudStorage",
+        "~/.ssh",
+        "~/.aws"
+      ]
+    },
+    "excludedCommands": [
+      "gh *",
+      "docker *",
+      "npm run test:integration*",
+      "npm run test:container*",
+      "git push*",
+      "git fetch*",
+      "git pull*",
+      "git clone*",
+      "git tag*",
+      "git worktree*",
+      "node .claude/scripts/*"
     ]
   },
   "hooks": {
@@ -118,7 +202,31 @@
         "hooks": [
           {
             "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/read-saved-output.mjs\""
+          },
+          {
+            "type": "command",
             "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/remind-squash-message.mjs\""
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/warn-worktree-revert.mjs\""
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/warn-worktree-revert.mjs\""
           }
         ]
       }
