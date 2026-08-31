@@ -3050,6 +3050,58 @@ function substringWindow(
 }
 
 /**
+ * Whether a `substring` step's declared bounds read NOTHING out of a value of
+ * ANY length -- the value-INDEPENDENT drop {@link pipelineAlwaysDrops} is built
+ * from, as opposed to a window that merely overshoots the values one input
+ * happens to carry. The motivating shape is a bound the operator never filled or
+ * cleared mid-edit (`substring` with no `start`), which the terms schema admits
+ * as well-formed while {@link substringFactory} nulls every row.
+ *
+ * The conditions, each a case where {@link substringWindow} returns no window
+ * whatever `valueLength` it is handed:
+ *
+ * - `start` is not an integer, or is `0`. Both are the guard `substringWindow`
+ *   opens with, which never consults the value.
+ * - `length` is not an integer. Same guard.
+ * - `length` is `0`: the end argument lands exactly on the start bound, and a
+ *   window closing where it opens slices `""`.
+ * - `length` is negative AND the composed end argument cannot outrun the start
+ *   bound for any value. Two shapes reach that. A positive `start` whose
+ *   `start + length >= 1` leaves the end argument at or above zero and at or
+ *   below the start bound, so the window is empty at every length. A `start` of
+ *   `-1` reads from the last character onward, and no negative `length` puts an
+ *   end past it -- the end argument counting back from the value's own end
+ *   lands at or before that last character for every length.
+ *
+ * A negative `length` in any OTHER combination reads a real window once the
+ * value is long enough (`slice` counts a below-zero end argument back from the
+ * end of the value), so it is the data's to decide and is not claimed here.
+ * Whether a value is ever that long is the acceptor's data, which the terms do
+ * not carry.
+ *
+ * The arithmetic is a second reading of {@link substringWindow}'s, which is what
+ * a differential sweep in `standardization.test.ts` exists for: it drives the
+ * shipped key builder over every bound pair in a grid and every value length a
+ * window could open at, and fails on any pair where this verdict and the
+ * measured one disagree in either direction.
+ *
+ * @internal exported so that sweep can compare the two readings, and so the
+ * rescue-equivalence sweep can model the same drop source the shipped predicate
+ * reads.
+ */
+export function substringWindowDropsEveryValue(
+  params: Params | undefined,
+): boolean {
+  const start = params?.start;
+  const length = params?.length;
+  if (typeof start !== "number" || !Number.isInteger(start) || start === 0)
+    return true;
+  if (typeof length !== "number" || !Number.isInteger(length)) return true;
+  if (length > 0) return false;
+  return length === 0 || start === -1 || start + length >= 1;
+}
+
+/**
  * The dates {@link substringCollapsesParsedDateToConstant} measures a pipeline
  * over. Chosen so that the first two differ in EVERY digit of every rendered
  * component -- 1971 against 2068 in all four year digits, 01 against 12 in both
@@ -3439,7 +3491,8 @@ export function substringRunDropsEveryParsedDate(
  * Each entry is the params some predicate here reads. `parse_date`'s two formats
  * decide {@link parseDateInputDropsEveryRecord} and the layout
  * {@link substringCollapsesParsedDateToConstant} measures; `substring`'s bounds
- * decide the window that measurement slices; `coalesce`'s `default` decides
+ * decide the window that measurement slices, and whether it opens at all
+ * ({@link substringWindowDropsEveryValue}); `coalesce`'s `default` decides
  * {@link coalesceSubstitutesConstant}. These are the params whose value can push
  * the marker toward a MILDER word, so a partner must not be able to displace their
  * detail rows past the display cap.
@@ -3479,9 +3532,12 @@ export const CONSENT_VERDICT_PARAM_NAMES: Readonly<
 /**
  * Whether a transform/standardization pipeline produces NO value for every
  * possible input -- a self-defeating "dead" pipeline, determinable from the terms
- * alone without any data. Two value-INDEPENDENT drops are recognized: a
+ * alone without any data. Three value-INDEPENDENT drops are recognized: a
  * `parse_date` whose input format omits a required component
- * ({@link parseDateInputDropsEveryRecord}), and a `substring` run whose composed
+ * ({@link parseDateInputDropsEveryRecord}); a `substring` whose declared bounds
+ * read no window out of a value of any length
+ * ({@link substringWindowDropsEveryValue}), which needs no layout ahead of it
+ * because the bounds settle it alone; and a `substring` run whose composed
  * window falls outside every layout an earlier live `parse_date` can render
  * ({@link substringRunDropsEveryParsedDate}), which is measured over probe dates
  * rather than composed arithmetically. A later `coalesce` with a string default
@@ -3492,15 +3548,17 @@ export const CONSENT_VERDICT_PARAM_NAMES: Readonly<
  * coverage sweep does not flag a constant field). A coalesce BEFORE the drop, or
  * one with no string default, does not rescue.
  *
- * Steps whose drop behavior depends on the VALUE -- a `substring` past the end of
- * a short value the pipeline did not itself lay out, a `filter_regex` no value
- * matches -- are deliberately NOT treated as always-dropping: that is the
- * data-dependent residual the satisfiability layer leaves to the runtime coverage
- * sweep, and assuming it here could wrongly flag a legitimate pipeline. A run
- * measured over the probes is claimed only where every step in it reads the
- * layout rather than the content ({@link LAYOUT_DETERMINED_FUNCTION_NAMES}), so
- * this still reports a value-independent certainty alone and can never claim a
- * producible pipeline is dead.
+ * Steps whose drop behavior depends on the VALUE -- a `substring` whose window
+ * overshoots the short values one input happens to carry and reads a real one out
+ * of longer values, a `filter_regex` no value matches -- are deliberately NOT
+ * treated as always-dropping: that is the data-dependent residual the
+ * satisfiability layer leaves to the runtime coverage sweep, and assuming it here
+ * could wrongly flag a legitimate pipeline. Each claim above is held to that line:
+ * a declared window is claimed only where NO value length opens it, and a run
+ * measured over the probes only where every step in it reads the layout rather
+ * than the content ({@link LAYOUT_DETERMINED_FUNCTION_NAMES}), so this still
+ * reports a value-independent certainty alone and can never claim a producible
+ * pipeline is dead.
  */
 export function pipelineAlwaysDrops(
   steps: ReadonlyArray<TransformStep> | undefined,
@@ -3525,6 +3583,8 @@ export function pipelineAlwaysDrops(
     if (
       (step.function === "parse_date" &&
         parseDateInputDropsEveryRecord(step.params)) ||
+      (step.function === "substring" &&
+        substringWindowDropsEveryValue(step.params)) ||
       substringRunDropsEveryParsedDate(steps, index)
     )
       dropped = true;

@@ -26,6 +26,7 @@ import {
   coalesceSubstitutesConstant,
   substringCollapsesParsedDateToConstant,
   substringRunDropsEveryParsedDate,
+  substringWindowDropsEveryValue,
   LAYOUT_DETERMINED_FUNCTION_NAMES,
   DATE_COLLAPSE_PROBES,
   CONSENT_VERDICT_PARAM_NAMES,
@@ -1956,9 +1957,10 @@ describe("pipelineAlwaysDrops rescue equivalence", () => {
 
   // The rescue with no position half: the declared default's shape alone. The
   // rescue is what this compares, so the DROP sources are held equal -- the
-  // measured substring run is asked of core, whose reading of it is not what is
-  // under test, while the rest is a local transcription rather than a call into
-  // the shipped predicate, which would compare it to itself.
+  // measured substring run and the degenerate declared window are asked of core,
+  // whose readings of them are not what is under test, while the rest is a local
+  // transcription rather than a call into the shipped predicate, which would
+  // compare it to itself.
   const dropsUnderDefaultShapeRescue = (
     steps: ReadonlyArray<TransformStep>,
   ): boolean => {
@@ -1973,6 +1975,8 @@ describe("pipelineAlwaysDrops rescue equivalence", () => {
       if (
         (step.function === "parse_date" &&
           parseDateInputDropsEveryRecord(step.params)) ||
+        (step.function === "substring" &&
+          substringWindowDropsEveryValue(step.params)) ||
         substringRunDropsEveryParsedDate(steps, index)
       )
         dropped = true;
@@ -5972,6 +5976,173 @@ describe("assessLinkageSatisfiability dead keys", () => {
         expect(buildKeyStrings(terms.linkageKeys[0], dataset, 0)).toBeNull();
       }
     }
+  });
+
+  // A `substring` whose declared bounds open no window is dead on the bounds
+  // alone -- no `parse_date` layout ahead of it, which is the only shape the
+  // measured substring-run reading covers.
+  //
+  // The first six are what the terms schema ADMITS, so they are the ones that
+  // reach a minted invitation: the bounds an operator leaves unset or clears
+  // mid-edit, and the two zeroes its integer refine cannot express. The last
+  // three the schema rejects at parse; they are kept because this grading also
+  // runs over terms not built through that schema, the same defense-in-depth
+  // `decideLinkageTermsVerdict` keeps for an undeclared field reference.
+  const DEGENERATE_WINDOWS: ReadonlyArray<
+    [string, Record<string, unknown> | undefined]
+  > = [
+    ["no params at all", undefined],
+    ["empty params", {}],
+    ["start unset", { length: 5 }],
+    ["length unset", { start: 3 }],
+    ["start of 0", { start: 0, length: 5 }],
+    ["length of 0", { start: 3, length: 0 }],
+    ["fractional start", { start: 1.5, length: 5 }],
+    ["string start", { start: "3", length: 5 }],
+    ["null length", { start: 3, length: null }],
+  ];
+
+  test("a substring whose bounds open no window is a dead key", () => {
+    for (const [label, params] of DEGENERATE_WINDOWS) {
+      const terms = dobTerms([
+        { function: "substring", ...(params !== undefined && { params }) },
+      ]);
+      const { unsatisfied, satisfiableKeyCount, deadKeys } =
+        assessLinkageSatisfiability(columns, terms);
+      // The column is present, so the field is satisfiable and the key passes
+      // the column-SHAPE verdict -- the silent gap this fills.
+      expect([label, unsatisfied]).toEqual([label, []]);
+      expect([label, satisfiableKeyCount]).toEqual([label, 1]);
+      expect([label, deadKeys.map((k) => k.name)]).toEqual([label, ["DOB"]]);
+    }
+  });
+
+  test("the builder produces no key string for those bounds, whatever the value (differential)", () => {
+    // Pin each "dead" verdict against actual builder runs over values of every
+    // length a window under these bounds could open at, so a future change to
+    // the slicing convention that the predicate fails to mirror turns red here
+    // rather than silently minting terms that match nothing.
+    const rows = Array.from({ length: 40 }, (_, length) => ({
+      dob: "9".repeat(length),
+    }));
+    for (const [label, params] of DEGENERATE_WINDOWS) {
+      const key: LinkageKey = {
+        name: "DOB",
+        elements: [
+          {
+            field: "dob",
+            transform: [
+              {
+                function: "substring",
+                ...(params !== undefined && { params }),
+              },
+            ],
+          },
+        ],
+      };
+      const dataset = new StandardizedDataset([
+        new StandardizedField("dob", "dob", [], rows),
+      ]);
+      for (let index = 0; index < rows.length; index++)
+        expect([label, index, buildKeyStrings(key, dataset, index)]).toEqual([
+          label,
+          index,
+          null,
+        ]);
+    }
+  });
+
+  test("a substring that reads a window somewhere is not a dead key", () => {
+    // The other side of the claim, so the test above is not passing because
+    // every substring is called dead: each of these opens a window at some
+    // value length, including the negative lengths that count back from the
+    // value's end and the window that overshoots every short value, so the drop
+    // is the data's to decide and is not claimed.
+    const rows = Array.from({ length: 120 }, (_, length) => ({
+      dob: "9".repeat(length),
+    }));
+    for (const params of [
+      { start: 3, length: 5 },
+      { start: 1, length: 1 },
+      { start: -2, length: 1 },
+      { start: 1, length: -1 },
+      { start: -2, length: -1 },
+      { start: 3, length: -3 },
+      { start: 99, length: 4 },
+    ]) {
+      const terms = dobTerms([{ function: "substring", params }]);
+      const { deadKeys } = assessLinkageSatisfiability(columns, terms);
+      expect([params, deadKeys]).toEqual([params, []]);
+      // Not vacuous: some value length really does key under these bounds.
+      const dataset = new StandardizedDataset([
+        new StandardizedField("dob", "dob", [], rows),
+      ]);
+      const keyed = rows.some(
+        (_row, index) =>
+          buildKeyStrings(terms.linkageKeys[0], dataset, index) !== null,
+      );
+      expect([params, keyed]).toEqual([params, true]);
+    }
+  });
+
+  test("a later coalesce default rescues a degenerate substring window (not dead)", () => {
+    const { deadKeys } = assessLinkageSatisfiability(
+      columns,
+      dobTerms([
+        { function: "substring" },
+        { function: "coalesce", params: { default: "X" } },
+      ]),
+    );
+    expect(deadKeys).toEqual([]);
+  });
+
+  test("the declared-window verdict matches the builder across a bounds grid (differential)", () => {
+    // The verdict reads the slicing convention a second time
+    // (substringWindowDropsEveryValue against substringWindow), so this is what
+    // holds the two together: every bound pair in the grid, against every value
+    // length up to 96 -- comfortably past the |start| + |length| + 1 ceiling any
+    // window in this grid can first open at -- and a disagreement in either
+    // direction is a failure. Over-claiming would hard-block a producible
+    // pipeline at the mint; under-claiming would let one that matches nothing
+    // through it.
+    const BOUND = 16;
+    const rows = Array.from({ length: 97 }, (_, length) => ({
+      dob: "9".repeat(length),
+    }));
+    const dataset = new StandardizedDataset([
+      new StandardizedField("dob", "dob", [], rows),
+    ]);
+    const divergent: string[] = [];
+    let claimedDead = 0;
+    let pairs = 0;
+    for (let start = -BOUND; start <= BOUND; start++) {
+      if (start === 0) continue;
+      for (let length = -BOUND; length <= BOUND; length++) {
+        pairs += 1;
+        const params = { start, length };
+        const key: LinkageKey = {
+          name: "DOB",
+          elements: [
+            { field: "dob", transform: [{ function: "substring", params }] },
+          ],
+        };
+        const measuredDead = rows.every(
+          (_row, index) => buildKeyStrings(key, dataset, index) === null,
+        );
+        const claimed = substringWindowDropsEveryValue(params);
+        if (claimed) claimedDead += 1;
+        if (claimed !== measuredDead)
+          divergent.push(
+            `${JSON.stringify(params)}: claimed=${claimed} measured=${measuredDead}`,
+          );
+      }
+    }
+    expect(divergent.slice(0, 3)).toEqual([]);
+    expect(divergent).toHaveLength(0);
+    // Not vacuous: the grid reaches both verdicts.
+    expect(pairs).toBe(2 * BOUND * (2 * BOUND + 1));
+    expect(claimedDead).toBeGreaterThan(0);
+    expect(claimedDead).toBeLessThan(pairs);
   });
 });
 

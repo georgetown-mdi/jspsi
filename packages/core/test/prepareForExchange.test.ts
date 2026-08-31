@@ -1317,6 +1317,42 @@ describe("prepareForExchange: the class every refusal carries", () => {
     });
   }
 
+  test("a linkage key whose declared window opens at no length is refused", () => {
+    // Not a row in the table above, because the refusal has to be measured
+    // against the same terms carrying a window that DOES open: the terms are
+    // identical but for the bounds, so what stops the run is the window rather
+    // than the fixture around it.
+    const keyedOnWindow = (params: Record<string, unknown>): LinkageTerms => ({
+      ...terms,
+      linkageKeys: [
+        {
+          name: "FN_LN",
+          elements: [
+            {
+              field: "first_name",
+              transform: [{ function: "substring", params }],
+            },
+            { field: "last_name" },
+          ],
+        },
+      ],
+    });
+    const prepareWith = (params: Record<string, unknown>) =>
+      prepareForExchange(
+        { linkageTerms: keyedOnWindow(params), metadata },
+        "Tester",
+        rawRows,
+        columns,
+      );
+
+    expect(() => prepareWith({ start: 1, length: 3 })).not.toThrow();
+    // A bound left unfilled: admitted by the terms schema, and read as no window
+    // at any value length, so the key produces nothing for either party.
+    expect(() => prepareWith({ length: 3 })).toThrow(
+      LinkageTermsUnsatisfiableError,
+    );
+  });
+
   test("the deduplicating-strategy refusal is unreachable, so it has no row", () => {
     // The one prepare-time refusal the table cannot drive: every shipped strategy
     // matches a deduplicating term, so no spec reaches assertDeduplicateImplemented.

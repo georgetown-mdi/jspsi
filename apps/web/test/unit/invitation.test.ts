@@ -437,6 +437,67 @@ describe("generateInvitation", () => {
     ]);
   });
 
+  test("fails closed on an authored key whose substring window reads nothing", async () => {
+    // The other value-independent drop, and the one an operator reaches by
+    // clearing a bound mid-edit: the declared window opens at no value length, so
+    // the key nulls every row -- for the partner as much as for this file, since
+    // the terms are hashed into the agreement the acceptor cannot edit. The mint
+    // is the last point either party holds a control over it.
+    const base = getDefaultLinkageTerms(
+      "Org",
+      inferMetadata(["first_name", "last_name", "dob"]),
+    );
+    const keyedOnWindow = (params: Record<string, unknown>) => ({
+      ...base,
+      linkageFields: [{ name: "first_name", type: "first_name" as const }],
+      linkageKeys: [
+        {
+          name: "fn-only",
+          elements: [
+            {
+              field: "first_name",
+              transform: [{ function: "substring", params }],
+            },
+          ],
+        },
+      ],
+    });
+    const inviterFile = () =>
+      csvStream("first_name,last_name,dob\nAlice,Smith,1990-01-02\n");
+
+    // The premise the refusal is measured against: with a window that opens,
+    // these terms and this file mint, so what closes the mint below is the
+    // window and not the fixture.
+    await expect(
+      generateInvitation({
+        inviterName: "Org",
+        file: inviterFile(),
+        location,
+        linkageTerms: keyedOnWindow({ start: 1, length: 3 }),
+      }),
+    ).resolves.toBeDefined();
+
+    const error = await generateInvitation({
+      inviterName: "Org",
+      file: inviterFile(),
+      location,
+      linkageTerms: keyedOnWindow({ length: 3 }),
+    }).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(InvitationFileError);
+    const failure = (error as InvitationFileError).failure;
+    expect(failure.kind).toBe("unlinkable");
+    if (failure.kind !== "unlinkable") throw new Error("unreachable");
+    expect(failure.refusal.kind).toBe("shortfall");
+    if (failure.refusal.kind !== "shortfall") throw new Error("unreachable");
+    // Dead rather than short of columns: the file carries what the key names, so
+    // the remedy is a corrected transform, not a different file.
+    expect(failure.refusal.verdict.deadKeys.map((key) => key.name)).toEqual([
+      "fn-only",
+    ]);
+    expect(failure.refusal.verdict.unsatisfiableKeys).toHaveLength(0);
+  });
+
   test("rejects an unnamed column header early as an unnameable InvitationFileError", async () => {
     // A trailing comma in the header yields an unnamed ("") column. The quick path
     // must reject it early as a typed, user-actionable InvitationFileError (kind

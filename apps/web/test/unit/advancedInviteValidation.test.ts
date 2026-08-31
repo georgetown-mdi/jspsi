@@ -8,10 +8,12 @@ import {
   MAX_INVITATION_LIFETIME_SECONDS,
   authoredLinkageFields,
   canonicalString,
+  pipelineAlwaysDrops,
   safeParseLinkageTerms,
 } from "@psilink/core";
 
 import {
+  draftFromTerms,
   draftWithFieldAdded,
   seedAdvancedInvite,
 } from "../../src/psi/advancedInviteDraft.js";
@@ -22,6 +24,7 @@ import {
 } from "../../src/psi/advancedInviteValidation.js";
 import { SEMANTIC_TYPE_LABELS } from "../../src/psi/metadataEditing.js";
 import { buildAdvancedTerms } from "../../src/psi/advancedInviteTerms.js";
+import { isStepValid } from "../../src/psi/standardizationAuthoring.js";
 
 import type {
   LinkageStrategy,
@@ -32,6 +35,30 @@ import type {
 import type { AdvancedInviteDraft } from "../../src/psi/advancedInviteTypes.js";
 
 const ALL_COLUMNS = ["ssn", "ssn4", "first_name", "last_name", "dob"];
+
+/** `draft` with `transform` on the first element of its first key, enabled. */
+function withFirstElementTransform(
+  draft: AdvancedInviteDraft,
+  transform: Array<TransformStep>,
+): AdvancedInviteDraft {
+  return {
+    ...draft,
+    keys: draft.keys.map((entry, index) =>
+      index === 0
+        ? {
+            ...entry,
+            enabled: true,
+            key: {
+              ...entry.key,
+              elements: entry.key.elements.map((element, position) =>
+                position === 0 ? { ...element, transform } : element,
+              ),
+            },
+          }
+        : entry,
+    ),
+  };
+}
 
 describe("the fan-out gate (the run refuses what the schema admits)", () => {
   // Core refuses an exchange whose standardization or linkage-key transforms
@@ -275,30 +302,6 @@ describe("the canonical-encode gate (the byte form both parties hash)", () => {
   // "reset to defaults" -- discarding the operator's whole draft over one value.
   const now = new Date("2026-01-01T00:00:00Z");
 
-  /** `draft` with `transform` on the first element of its first key, enabled. */
-  function withFirstElementTransform(
-    draft: AdvancedInviteDraft,
-    transform: Array<TransformStep>,
-  ): AdvancedInviteDraft {
-    return {
-      ...draft,
-      keys: draft.keys.map((entry, index) =>
-        index === 0
-          ? {
-              ...entry,
-              enabled: true,
-              key: {
-                ...entry.key,
-                elements: entry.key.elements.map((element, position) =>
-                  position === 0 ? { ...element, transform } : element,
-                ),
-              },
-            }
-          : entry,
-      ),
-    };
-  }
-
   test("names the transform for a param the element editor itself can author", () => {
     // The element editor offers `substring`, and its NumberInput writes an
     // out-of-range value into the draft beside the inline error rather than
@@ -410,16 +413,167 @@ describe("the canonical-encode gate (the byte form both parties hash)", () => {
     expect(result.errors.keys).not.toMatch(/reset to defaults/);
   });
 
-  test("a transform param the descriptors do not judge still generates", () => {
+  test("the gate consults no descriptor for a key-element transform param", () => {
     // The gate is the encoder's, not the authoring descriptors': a param value
     // core tolerates at runtime (a `coalesce` default that is not text runs as a
     // pass-through) encodes, so it keeps generating and is left to the notice
     // that names it. A descriptor-shaped gate would refuse it instead.
+    const step = { function: "coalesce", params: { default: 7 } };
+    // The premise: the descriptors DO judge and reject this param, so what the
+    // case measures is that the gate does not ask them -- not that there is
+    // nothing here for them to say.
+    expect(isStepValid(step)).toBe(false);
     const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
-    const tolerated = withFirstElementTransform(draft, [
-      { function: "coalesce", params: { default: 7 } },
-    ]);
+    const tolerated = withFirstElementTransform(draft, [step]);
     expect(validateAdvancedInvite(tolerated, seed, now).canGenerate).toBe(true);
+  });
+});
+
+describe("the dead-key gate on a key-element transform that matches nothing", () => {
+  // The stance one describe up -- the encoder is the gate on a key element, not
+  // the descriptors -- covers params core tolerates at runtime. It does not
+  // cover a param the pipeline drops on value-INDEPENDENTLY: a `substring` whose
+  // declared window reads nothing at any value length nulls every row for both
+  // parties, so the key matches nothing while the invitation mints green. Core
+  // grades such an element dead (`pipelineAlwaysDrops`), which is what these
+  // pin -- at both doors, the operator's own controls and an imported document.
+  const now = new Date("2026-01-01T00:00:00Z");
+
+  /** The declared windows the factory reads nothing out of, by how an operator
+   * reaches each: the element editor drops a cleared NumberInput's key rather
+   * than writing an empty string, so an unfilled bound is simply absent. */
+  const DEGENERATE_WINDOWS: ReadonlyArray<
+    [string, Record<string, unknown> | undefined]
+  > = [
+    ["a step added and left unfilled", undefined],
+    ["a cleared start", { length: 4 }],
+    ["a cleared length", { start: 2 }],
+    ["a start of 0", { start: 0, length: 4 }],
+    ["a length of 0", { start: 2, length: 0 }],
+  ];
+
+  const substringStep = (
+    params: Record<string, unknown> | undefined,
+  ): TransformStep => ({
+    function: "substring",
+    ...(params !== undefined && { params }),
+  });
+
+  test("blocks Generate on an authored element whose window reads nothing", () => {
+    for (const [label, params] of DEGENERATE_WINDOWS) {
+      const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+      // The premise the refusal has to be measured against: this draft
+      // generates before the step is added.
+      expect([
+        label,
+        validateAdvancedInvite(draft, seed, now).canGenerate,
+      ]).toEqual([label, true]);
+      const authored = withFirstElementTransform(draft, [
+        substringStep(params),
+      ]);
+      const terms = buildAdvancedTerms(authored);
+      // And the premises that make this the dead-key grading's refusal rather
+      // than another gate's: the terms schema admits the step, and the value
+      // encodes, so neither the schema mapping nor the canonical-encode gate is
+      // what closes Generate below.
+      expect([label, safeParseLinkageTerms(terms).success]).toEqual([
+        label,
+        true,
+      ]);
+      expect(() => canonicalString(terms), label).not.toThrow();
+
+      const result = validateAdvancedInvite(authored, seed, now);
+      expect([label, result.canGenerate]).toEqual([label, false]);
+      expect([label, result.terms]).toEqual([label, undefined]);
+      // The dead-key half of the shortfall, whose remedy sends the operator to
+      // the key list rather than to their own columns or a discarded draft.
+      expect(result.errors.keys, label).toMatch(/drops every record/);
+      expect(result.errors.keys, label).toMatch(/badged "won't match"/);
+      expect(result.errors.keys, label).not.toMatch(
+        /cannot be produced from this input's columns/,
+      );
+      expect(result.errors.keys, label).not.toMatch(/reset to defaults/);
+    }
+  });
+
+  test("an imported document carrying the same window reaches the same verdict", () => {
+    for (const [label, params] of DEGENERATE_WINDOWS) {
+      const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+      const document = buildAdvancedTerms(
+        withFirstElementTransform(draft, [substringStep(params)]),
+      );
+      // Arrive by the import door rather than the editing one: serialize and
+      // re-parse the document, then rebuild the draft from it, so the step is
+      // one the operator never authored here.
+      const parsed = safeParseLinkageTerms(
+        JSON.parse(JSON.stringify(document)) as unknown,
+      );
+      expect([label, parsed.success]).toEqual([label, true]);
+      if (!parsed.success) continue;
+      const imported = draftFromTerms(parsed.data, seed);
+      // The premise: the import carried the step through rather than
+      // normalizing it away, so what follows is a verdict on this window.
+      const rebuilt = buildAdvancedTerms(imported);
+      expect([label, rebuilt.linkageKeys[0].elements[0].transform]).toEqual([
+        label,
+        [substringStep(params)],
+      ]);
+
+      const result = validateAdvancedInvite(imported, seed, now);
+      expect([label, result.canGenerate]).toEqual([label, false]);
+      expect(result.errors.keys, label).toMatch(/drops every record/);
+      expect(result.errors.keys, label).toMatch(/badged "won't match"/);
+    }
+  });
+
+  test("a window that reads something still generates, by either door", () => {
+    // Not vacuous: the block above is this window's, not every substring's.
+    const live = [{ function: "substring", params: { start: 2, length: 3 } }];
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const authored = withFirstElementTransform(draft, live);
+    expect(validateAdvancedInvite(authored, seed, now).canGenerate).toBe(true);
+    const parsed = safeParseLinkageTerms(
+      JSON.parse(JSON.stringify(buildAdvancedTerms(authored))) as unknown,
+    );
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect(
+      validateAdvancedInvite(draftFromTerms(parsed.data, seed), seed, now)
+        .canGenerate,
+    ).toBe(true);
+  });
+
+  test("every window core grades dead is one the element editor marks inline", () => {
+    // What lets the operator attribute the refusal past the key the badge names,
+    // down to the element and the step: the badge and the blocking message name
+    // the key, and the step editor renders the descriptor's own per-param error
+    // on the offending input (ParamInput drives it from validateParamValue, the
+    // check isStepValid composes; the render half is pinned in
+    // stepListEditor.test.ts). That holds only while every window core
+    // refuses is also one the descriptors reject, which is a claim about two
+    // independently-edited rules -- core's window arithmetic and the substring
+    // descriptor's schema -- so it is swept here rather than asserted in a
+    // comment.
+    const bounds: Array<number | undefined> = [undefined];
+    for (let bound = -8; bound <= 8; bound++) bounds.push(bound);
+    let dead = 0;
+    let live = 0;
+    for (const start of bounds)
+      for (const length of bounds) {
+        const step = substringStep({
+          ...(start !== undefined && { start }),
+          ...(length !== undefined && { length }),
+        });
+        if (!pipelineAlwaysDrops([step])) {
+          live += 1;
+          continue;
+        }
+        dead += 1;
+        expect([step, isStepValid(step)]).toEqual([step, false]);
+      }
+    // Not vacuous: the sweep reaches both verdicts.
+    expect(dead).toBeGreaterThan(0);
+    expect(live).toBeGreaterThan(0);
   });
 });
 
@@ -466,29 +620,6 @@ describe("the inert-coalesce notice (a declared default the run will not substit
     ).find((candidate) => candidate.name === output);
     if (field === undefined) throw new Error("no field for the transformation");
     return SEMANTIC_TYPE_LABELS[field.type];
-  }
-
-  function withFirstElementTransform(
-    draft: AdvancedInviteDraft,
-    transform: Array<TransformStep>,
-  ): AdvancedInviteDraft {
-    return {
-      ...draft,
-      keys: draft.keys.map((entry, index) =>
-        index === 0
-          ? {
-              ...entry,
-              enabled: true,
-              key: {
-                ...entry.key,
-                elements: entry.key.elements.map((element, position) =>
-                  position === 0 ? { ...element, transform } : element,
-                ),
-              },
-            }
-          : entry,
-      ),
-    };
   }
 
   test("says nothing about a draft that declares no default value", () => {

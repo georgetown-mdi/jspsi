@@ -20,16 +20,26 @@ import type {
  *
  * Core answers all three by byte equality under the canonical encoding, which the
  * signed document format depends on and which rejects an explicit `undefined`
- * where it accepts an absent property. A parsed document never carries one, but a
- * draft is live JavaScript objects the editor rebuilds, where a spread restates a
- * property that is not set as `undefined`. Such a key states what the offer states
- * and reads the same on every surface that displays it, so a compare answering
- * `false` for it drops the key's opt-in badge on the bench and the built terms'
- * rule-set citation -- a partner-visible provenance claim lost over a property
- * that says nothing.
+ * where it accepts an absent property. The values these compares take are
+ * DRAFT-side: live JavaScript objects the editor holds and rebuilds, not the
+ * parsed documents the predicates are otherwise handed, so nothing holds them to
+ * a document's shape and both spellings of "not set" are representable. A key
+ * spelling it the second way states what the offer states and reads the same on
+ * every surface that displays it, so a compare answering `false` for it would drop
+ * the key's opt-in badge on the bench and the built terms' rule-set citation -- a
+ * partner-visible provenance claim lost over a property that says nothing.
  *
- * So the prune lives on this side of the boundary, where the values are drafts
- * rather than documents: the editor's membership compares route through here
+ * The prune closes that by making the difference unrepresentable at the compare,
+ * rather than by an enumeration of which edit paths can produce the shape -- so an
+ * editor callback that starts producing one costs nothing here. The adjacent half
+ * is the one measured: no draft-editing helper and no import BUILDS terms
+ * carrying an explicit `undefined` (`advancedInviteTerms.test.ts`), which is what
+ * keeps the Generate gate's canonical-encode dry run clear. That sweep does not
+ * reach the expert editor's own key, alias, transform, and fuzzy callbacks, which
+ * the encode gate covers instead.
+ *
+ * The prune therefore lives on this side of the boundary, where the values are
+ * drafts rather than documents: the editor's membership compares route through here
  * rather than reaching for core's strict predicate directly, so the prune is
  * applied uniformly across the class. A `no-restricted-imports` ban in
  * `apps/web/eslint.config.js` holds them here, refusing an import of
