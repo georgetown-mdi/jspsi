@@ -124,8 +124,8 @@ function refusalCauseChain(
  * validation -- before any credential, terms, or data are sent, and from the
  * receipt swap's local certificate/terms gate, mid-exchange: a consumer
  * keying on this class must not infer phase from membership, since both front
- * ends discriminate on phase independently (core's `classifyTerminalError`,
- * the web's `exchangeLifecycle`).
+ * ends discriminate on phase independently (the CLI's `classifyTerminalError`,
+ * the web's `exchangeLifecycle`/`classifyExchangeFailure`).
  *
  * This base type is the membership rule for the web's actionable "config" alert,
  * which renders the error's message: the web classifies a prepare-phase failure
