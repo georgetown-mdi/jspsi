@@ -149,11 +149,12 @@ export type ExchangeErrorCategory =
  * discriminants are structural: the TYPE narrows it to a prepare-phase fault whose
  * message is composed only of local config (see `OperatorConfigError`), keeping
  * the partner-influenceable payload-send `UsageError` out of the message-surfacing
- * alert; the PHASE keeps an `OperatorConfigError` surfacing mid-`"run"` (none does
- * today) from being mislabeled -- neither is a prose claim about what the other
- * half throws. A {@link LinkageTermsUnsatisfiableError} joins the category on the
- * same phase discriminant, for the non-retry affordance rather than the message
- * (see {@link ExchangeErrorCategory}). */
+ * alert; the PHASE keeps a mid-`"run"` `OperatorConfigError` -- the receipt swap's
+ * local certificate refusal is one -- from being mislabeled `config`; it falls
+ * through and correctly classifies `"exchange"` instead -- neither is a prose
+ * claim about what the other half throws. A {@link LinkageTermsUnsatisfiableError}
+ * joins the category on the same phase discriminant, for the non-retry affordance
+ * rather than the message (see {@link ExchangeErrorCategory}). */
 function classifyExchangeFailure(
   error: unknown,
   phase: "prepare" | "run",
