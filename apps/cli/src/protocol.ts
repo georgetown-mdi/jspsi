@@ -14,6 +14,7 @@ import {
   authenticateConnection,
   assertSharedSecretReadyForHandshake,
   deriveAbortToken,
+  OperatorConfigError,
   PeerAbortError,
   ReceiptVerificationError,
   causeChainSome,
@@ -1992,20 +1993,31 @@ export async function runProtocol(
     // Non-signing-partner observability: this side configured a signed receipt but
     // the exchange failed before runExchange returned (exchangeComplete false), and
     // not with a receipt verification error (a distinct security event already
-    // surfaced by that error's own kind/message). The signed-receipt swap is the
-    // last step of runExchange, so a partner that ran without a signing identity
-    // sends no receipt frame and this side parks on that receive until the peer
-    // timeout -- a drop otherwise indistinguishable from a generic peer-silence.
-    // Surface that context so the operator can check whether the partner was
-    // configured to sign at all, rather than chasing a transport fault.
+    // surfaced by that error's own kind/message) and not with this party's own
+    // local certificate/terms refusal at the swap gate (a config fault this
+    // party's operator caused, not the partner's absence of signing). The
+    // signed-receipt swap is the last step of runExchange, so a partner that ran
+    // without a signing identity sends no receipt frame and this side parks on
+    // that receive until the peer timeout -- a drop otherwise indistinguishable
+    // from a generic peer-silence. Surface that context so the operator can check
+    // whether the partner was configured to sign at all, rather than chasing a
+    // transport fault.
     // Walks the `cause` chain for a ReceiptVerificationError, so a future wrap
     // of the security failure cannot downgrade it to this softer warn.
     const isReceiptVerificationFailure = (e: unknown): boolean =>
       causeChainSome(e, (link) => link instanceof ReceiptVerificationError);
+    // Class-exact, not the UsageError superclass OperatorConfigError itself
+    // extends: a different usage fault mid-exchange still warrants the
+    // partner-signing check, so only this exact class is excluded. Walks the
+    // `cause` chain for the same forward-compatibility reason as
+    // isReceiptVerificationFailure above.
+    const isLocalConfigRefusal = (e: unknown): boolean =>
+      causeChainSome(e, (link) => link.constructor === OperatorConfigError);
     if (
       signing !== null &&
       !exchangeComplete &&
-      !isReceiptVerificationFailure(err)
+      !isReceiptVerificationFailure(err) &&
+      !isLocalConfigRefusal(err)
     )
       log.warn(
         "A signed receipt was configured for this exchange, but the exchange " +

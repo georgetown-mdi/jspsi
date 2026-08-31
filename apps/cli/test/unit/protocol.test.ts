@@ -245,6 +245,7 @@ import {
   fromEventConnection,
   authenticateConnection,
   generateSigningIdentity,
+  OperatorConfigError,
   ReceiptVerificationError,
   isPeerWaitTimeout,
   MESSAGE_ENVELOPE_VERSION,
@@ -2168,11 +2169,12 @@ test(
 //
 // Pins the catch-block gate that decides whether to warn the operator that a
 // signed receipt was configured but the exchange did not complete the receipt
-// swap -- `signing !== null && !exchangeComplete && !isReceiptVerificationFailure`
-// in runProtocol's catch. Runs a REAL two-party handshake (only runExchange is
-// mocked) with a signing config threaded through, using the same
-// awaitBothArmed/runAbortParty barrier pattern as the abort-marker section
-// above so both parties reach the same point deterministically.
+// swap -- `signing !== null && !exchangeComplete && !isReceiptVerificationFailure
+// && !isLocalConfigRefusal` in runProtocol's catch. Runs a REAL two-party
+// handshake (only runExchange is mocked) with a signing config threaded
+// through, using the same awaitBothArmed/runAbortParty barrier pattern as the
+// abort-marker section above so both parties reach the same point
+// deterministically.
 
 const NON_SIGNING_PARTNER_WARNING =
   "A signed receipt was configured for this exchange, but the exchange " +
@@ -2347,6 +2349,38 @@ test(
         "simulated receipt pin mismatch",
       );
       throw new Error(`outer wrap: ${inner.message}`, { cause: inner });
+    }) as never);
+
+    const [resultA, resultB] = await Promise.allSettled([
+      runSigningParty(keyFileA, "test-a", path.join(tmpDir, "receipt-a.json")),
+      runSigningParty(keyFileB, "test-b", path.join(tmpDir, "receipt-b.json")),
+    ]);
+    expect(resultA.status).toBe("rejected");
+    expect(resultB.status).toBe("rejected");
+    expect(mockState.runExchangeEntries).toBe(2);
+
+    expect(
+      mockState.warnings.some((m) => m.includes(NON_SIGNING_PARTNER_WARNING)),
+    ).toBe(false);
+  },
+);
+
+test(
+  "an OperatorConfigError does not warn about a non-signing partner",
+  { timeout: BOTH_ARMED_HANG_BACKSTOP_MS + 5_000 },
+  async () => {
+    // A run stopped by this party's own certificate/terms divergence (the
+    // swap gate's local certificate check) is a local configuration fault,
+    // not evidence the partner failed to configure signing; the advisory
+    // must not point the operator at the partner for a purely local refusal.
+    const keyFileA = path.join(tmpDir, "a.key");
+    const keyFileB = path.join(tmpDir, "b.key");
+    saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+    saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
+
+    vi.mocked(runExchange).mockImplementation((async () => {
+      await awaitBothArmed();
+      throw new OperatorConfigError("simulated local certificate refusal");
     }) as never);
 
     const [resultA, resultB] = await Promise.allSettled([
