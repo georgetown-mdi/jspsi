@@ -32,7 +32,8 @@ what else it reads and what it does not.
 That form is for npm packages only, because every name in such a heading is read
 as one and looked up in the npm groups. A checklist for a pin in another
 ecosystem therefore carries a heading of another shape -- "Bumping the FIPS base
-image" below is a docker-ecosystem pin, whose bumps that config never batches --
+image" below is a docker-ecosystem pin, which the update config holds out of
+Dependabot entirely --
 and renaming one of those to `Upgrading ...` fails the check with a message
 asking for an npm exclude entry that would be false.
 

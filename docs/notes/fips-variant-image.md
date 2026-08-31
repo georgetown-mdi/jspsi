@@ -548,9 +548,9 @@ Three things make that the cheap posture rather than an expensive one:
   reddens when they go stale, so the obligation travels with whoever takes the
   bump. Which measurements a move disturbs is enumerated in the same procedure.
 
-The cost is that nothing files a reminder. What surfaces a base worth moving to
-is the release workflow's OS-layer scan over the built variant, which gates
-every publish, plus an advisory or a certificate-lifecycle event read by hand;
+The cost is that nothing files a reminder. The signals that do surface a base
+worth moving to are listed in
+[the procedure in DEPENDENCY_PINS.md](../spec/DEPENDENCY_PINS.md#bumping-the-fips-base-image);
 the variant leg's pull-request-time scan is scoped out while its pinned rootfs
 carries findings no pin movement can reach, so that gate is at release rather
 than continuous.
