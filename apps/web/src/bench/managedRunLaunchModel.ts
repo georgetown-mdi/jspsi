@@ -472,8 +472,10 @@ function missedFailure(
  * missed tier reaches the generic copy already ({@link tierFailure}).
  *
  * The re-invite tiers (`"expired"`, `"storage"`, `"imported"`), the input tier, and
- * the unexplained tier are absent because none of their copy says anything about what
- * this run disclosed: each reads the same on either side of the boundary. */
+ * the unexplained tier are absent because none of their copy asserts non-disclosure.
+ * The unexplained tier's copy does claim this run connected, which a pre-boundary
+ * render can overstate; that error runs in the safe direction (claiming a connection
+ * that did not happen, never denying one that did), so it stays ungated. */
 const NON_DISCLOSURE_ATTESTING_TIERS: ReadonlyArray<ManagedFailureTier> = [
   "handed-off",
   "custody-unreadable",
