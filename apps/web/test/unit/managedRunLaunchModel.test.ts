@@ -36,8 +36,11 @@ import type {
   ManagedExchangeLastRun,
   ManagedExchangeRecord,
 } from "@psi/managedExchangeRecord";
+import type {
+  ManagedRunFailure,
+  ManagedRunFailureAlert,
+} from "@bench/managedRunLaunchModel";
 import type { ManagedLocalState } from "@psi/managedLocalState";
-import type { ManagedRunFailure } from "@bench/managedRunLaunchModel";
 
 // The launch surface's failure classification, tested in Node: the pre-connection
 // benign states come from the error; a failed-closed handshake and every other
@@ -75,7 +78,7 @@ function failed(
  * change what the classification reads, and of the host's fallback when the
  * post-failure reload rejects. The tests that turn on the difference between the
  * two readings build them separately. */
-function classifyAgainstOneRecord(
+function classifyStateAgainstOneRecord(
   error: unknown,
   recordForBothReadings: ManagedExchangeRecord,
   local: ManagedLocalState | undefined,
@@ -91,6 +94,40 @@ function classifyAgainstOneRecord(
     local,
     now,
     dataExchangeStarted,
+  );
+}
+
+/** A classified state's copy, asserted to be there. Every state carries copy except
+ * the hand-off one, which the surface consumes by settling onto the stored spent
+ * state, so a test reading copy off that state is reading prose that does not
+ * exist. */
+function withCopy(
+  failure: ManagedRunFailure | undefined,
+): ManagedRunFailureAlert {
+  if (failure === undefined || failure.kind === "handed-off")
+    throw new Error(
+      `expected a classified state carrying copy, got ${String(failure?.kind)}`,
+    );
+  return failure;
+}
+
+/** {@link classifyStateAgainstOneRecord}, narrowed to the states that carry copy --
+ * what every test drives except the two that drive the hand-off state itself. */
+function classifyAgainstOneRecord(
+  error: unknown,
+  recordForBothReadings: ManagedExchangeRecord,
+  local: ManagedLocalState | undefined,
+  now: number,
+  dataExchangeStarted: boolean,
+): ManagedRunFailureAlert {
+  return withCopy(
+    classifyStateAgainstOneRecord(
+      error,
+      recordForBothReadings,
+      local,
+      now,
+      dataExchangeStarted,
+    ),
   );
 }
 
@@ -173,7 +210,7 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
     // exchange runs now -- no retry, no re-invite, and no override that would
     // take the exchange back by pressing a button on a failed run. Reaching this
     // kind is what settles the surface onto the spent state.
-    const failure = classifyAgainstOneRecord(
+    const failure = classifyStateAgainstOneRecord(
       new ManagedExchangeSpentError("abc"),
       record({ lastRun: failed("handed-off") }),
       { spent: { spentAt: "2026-07-13T09:00:00.000Z" } },
@@ -184,9 +221,11 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
     expect(failure.recovery).toBe("none");
     expect(managedRunRetryable(failure)).toBe(false);
     expect(managedRunReinvites(failure)).toBe(false);
-    expect(failure.message).not.toMatch(/temporary connection problem/);
-    expect(failure.message).not.toMatch(/attack|tamper|impersonat/i);
-    expect(failure.message).toMatch(/nothing left this device/);
+    // The state carries no copy of its own: the spent surface it settles onto is
+    // what names the hand-off and what the refused run did, and copy authored here
+    // would be prose no surface reaches (ManagedRunSurface.tsx).
+    expect(failure).not.toHaveProperty("title");
+    expect(failure).not.toHaveProperty("message");
   });
 
   test("the recorded hand-off kind reads the same at the next visit", () => {
@@ -199,6 +238,7 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
     );
     expect(failure?.kind).toBe("handed-off");
     expect(failure?.recovery).toBe("none");
+    expect(failure).not.toHaveProperty("message");
   });
 
   test("a partner who never arrived is the benign no-show state, not the transport copy", () => {
@@ -439,12 +479,14 @@ describe("classifyManagedRunFailure: a no-show read against standing desync evid
     expect(afterRun.lastRun?.outcome).toBe("missed");
     expect(afterRun.lastRun?.failureKind).toBeUndefined();
 
-    const failure = classifyManagedRunFailure(
-      new PartnerNoShowError("timed out waiting for the other party"),
-      { atLaunch, afterRun },
-      undefined,
-      NOW,
-      false,
+    const failure = withCopy(
+      classifyManagedRunFailure(
+        new PartnerNoShowError("timed out waiting for the other party"),
+        { atLaunch, afterRun },
+        undefined,
+        NOW,
+        false,
+      ),
     );
     expect(failure.kind).toBe("storage");
     expect(failure.recovery).toBe("reinvite");
@@ -661,6 +703,150 @@ describe("classifyManagedRunFailure: the recorded tiers from the record's bookke
   });
 });
 
+describe("classifyManagedRunFailure: the derived benign tiers take this run's boundary", () => {
+  // Each tier below is derived from a stored kind whose copy attests what THIS run
+  // disclosed -- that it stopped before connecting, that nothing left this device.
+  // The stamp licenses that for the run that wrote it and no other, and a failed
+  // run's bookkeeping write is best-effort while the host classifies against its
+  // pre-run record when the post-failure reload rejects, so an earlier run's stamp
+  // can still be standing when a failure from mid-data-exchange is classified. Both
+  // directions are driven per tier: before the boundary the tier and its copy are
+  // what the operator gets, past it the generic copy is.
+
+  test("a stored unreadable custody entry gives way past the boundary", () => {
+    // The tier whose copy attests non-disclosure most explicitly -- it names the
+    // partner as not contacted -- so a stale stamp read past the boundary would
+    // have the surface vouch for a run that connected.
+    const stamped = record({ lastRun: failed("custody-unreadable") });
+    const before = classifyAgainstOneRecord(
+      new Error("data channel dropped"),
+      stamped,
+      undefined,
+      NOW,
+      false,
+    );
+    expect(before.kind).toBe("custody-unreadable");
+    expect(before.message).toMatch(/nothing left this device/i);
+    expect(before.message).toMatch(/partner was not contacted/i);
+
+    // Both routes to the tier: this run's own custody refusal, which the error-read
+    // guard already declines past the boundary, and the tier derived from the
+    // standing stamp under a plain mid-exchange failure.
+    for (const error of [
+      new ManagedExchangeCustodyUnreadableError("abc", new Error("invalid")),
+      new Error("data channel dropped"),
+    ]) {
+      const failure = classifyAgainstOneRecord(
+        error,
+        stamped,
+        undefined,
+        NOW,
+        true,
+      );
+      expect(failure.kind).toBe("transport");
+      expect(failure.message).not.toMatch(/nothing left this device/i);
+      expect(failure.message).not.toMatch(/partner was not contacted/i);
+    }
+  });
+
+  test("a stored consent refusal gives way past the boundary", () => {
+    // The record-only tier: no live error carries a disclosure refusal to this
+    // classification, so the standing stamp is the whole of what it reads.
+    const stamped = record({ lastRun: failed("consent") });
+    const before = classifyAgainstOneRecord(
+      new Error("refused before connecting"),
+      stamped,
+      undefined,
+      NOW,
+      false,
+    );
+    expect(before.kind).toBe("consent");
+    expect(before.message).toMatch(/nothing left this device/i);
+
+    const past = classifyAgainstOneRecord(
+      new Error("data channel dropped"),
+      stamped,
+      undefined,
+      NOW,
+      true,
+    );
+    expect(past.kind).toBe("transport");
+    expect(past.message).not.toMatch(/nothing left this device/i);
+    expect(past.message).not.toMatch(/stopped before connecting/i);
+  });
+
+  test("a stored linkage shortfall gives way past the boundary", () => {
+    const stamped = record({ lastRun: failed("terms-shortfall") });
+    const before = classifyAgainstOneRecord(
+      new Error("data channel dropped"),
+      stamped,
+      undefined,
+      NOW,
+      false,
+    );
+    expect(before.kind).toBe("terms-shortfall");
+    expect(before.message).toMatch(/nothing left this device/i);
+
+    for (const error of [
+      new LinkageTermsUnsatisfiableError("refused at the run boundary"),
+      new Error("data channel dropped"),
+    ]) {
+      const failure = classifyAgainstOneRecord(
+        error,
+        stamped,
+        undefined,
+        NOW,
+        true,
+      );
+      expect(failure.kind).toBe("transport");
+      expect(failure.message).not.toMatch(/nothing left this device/i);
+    }
+  });
+
+  test("the tiers claiming nothing about this run's disclosure keep their reading", () => {
+    // The gate is scoped to the attestation rather than applied to every derived
+    // tier: a persist failure names a rotation that did not save, a restore names a
+    // secret the partnership may have moved past, and both recover by re-invite
+    // whichever side of the boundary this run failed on. Gating them would replace
+    // that recovery with a retry the desync does not have, and would put the
+    // unexplained tier's confirmation work out of reach of the failure that needs
+    // it.
+    const restored: ManagedLocalState = {
+      imported: { importedAt: "2026-07-13T00:00:00.000Z" },
+    };
+    const ungated: Array<
+      [
+        ManagedExchangeRecord,
+        ManagedLocalState | undefined,
+        ManagedRunFailureAlert["kind"],
+      ]
+    > = [
+      [record({ lastRun: failed("storage") }), undefined, "storage"],
+      [record({ lastRun: failed("auth") }), restored, "imported"],
+      [
+        record({
+          expires: "2026-07-01T00:00:00.000Z",
+          lastRun: failed("auth"),
+        }),
+        undefined,
+        "expired",
+      ],
+      [record({ lastRun: failed("input") }), undefined, "input"],
+      [record({ lastRun: failed("auth") }), undefined, "unexplained"],
+    ];
+    for (const [stamped, sibling, kind] of ungated)
+      expect(
+        classifyAgainstOneRecord(
+          new Error("data channel dropped"),
+          stamped,
+          sibling,
+          NOW,
+          true,
+        ).kind,
+      ).toBe(kind);
+  });
+});
+
 describe("managedRunFailureFromRecord: the next-visit tier (no live launch)", () => {
   test("a stored auth failure surfaces the unexplained tier at the next visit", () => {
     const failure = managedRunFailureFromRecord(
@@ -686,12 +872,13 @@ describe("managedRunFailureFromRecord: the next-visit tier (no live launch)", ()
     // was refused, so the record alone decides what the next visit is told. The
     // remedy it names is a conforming file or re-agreed terms -- never a retry,
     // and never the file picker the input tier offers, which refuses identically.
-    const failure = managedRunFailureFromRecord(
-      record({ lastRun: failed("terms-shortfall") }),
-      undefined,
-      NOW,
+    const failure = withCopy(
+      managedRunFailureFromRecord(
+        record({ lastRun: failed("terms-shortfall") }),
+        undefined,
+        NOW,
+      ),
     );
-    if (failure === undefined) throw new Error("expected a failure state");
     expect(failure.kind).toBe("terms-shortfall");
     expect(failure.recovery).toBe("restate");
     expect(managedRunRetryable(failure)).toBe(false);
@@ -715,14 +902,16 @@ describe("managedRunFailureFromRecord: the next-visit tier (no live launch)", ()
   });
 
   test("a stored storage failure surfaces the storage tier at the next visit", () => {
-    const failure = managedRunFailureFromRecord(
-      record({ lastRun: failed("storage") }),
-      undefined,
-      NOW,
+    const failure = withCopy(
+      managedRunFailureFromRecord(
+        record({ lastRun: failed("storage") }),
+        undefined,
+        NOW,
+      ),
     );
-    expect(failure?.kind).toBe("storage");
-    expect(failure?.recovery).toBe("reinvite");
-    expect(failure?.message).toMatch(/could not save its updated secret/);
+    expect(failure.kind).toBe("storage");
+    expect(failure.recovery).toBe("reinvite");
+    expect(failure.message).toMatch(/could not save its updated secret/);
   });
 
   test("a stored unreadable custody entry surfaces its own tier at the next visit", () => {
@@ -730,24 +919,31 @@ describe("managedRunFailureFromRecord: the next-visit tier (no live launch)", ()
     // stamp is the whole evidence -- and it must read as the unreadable-record
     // state rather than as the persist failure whose copy and re-invite recovery
     // fit only a rotation that did not save.
-    const failure = managedRunFailureFromRecord(
-      record({ lastRun: failed("custody-unreadable") }),
-      undefined,
-      NOW,
+    const failure = withCopy(
+      managedRunFailureFromRecord(
+        record({ lastRun: failed("custody-unreadable") }),
+        undefined,
+        NOW,
+      ),
     );
-    expect(failure?.kind).toBe("custody-unreadable");
-    expect(failure?.recovery).not.toBe("reinvite");
-    expect(failure?.message).not.toMatch(/could not save its updated secret/);
+    expect(failure.kind).toBe("custody-unreadable");
+    expect(failure.recovery).not.toBe("reinvite");
+    expect(failure.message).not.toMatch(/could not save its updated secret/);
   });
 
   test("a lapsed record surfaces the expiry tier naming the real lapsed instant", () => {
-    const failure = managedRunFailureFromRecord(
-      record({ expires: "2026-07-01T00:00:00.000Z", lastRun: failed("auth") }),
-      undefined,
-      NOW,
+    const failure = withCopy(
+      managedRunFailureFromRecord(
+        record({
+          expires: "2026-07-01T00:00:00.000Z",
+          lastRun: failed("auth"),
+        }),
+        undefined,
+        NOW,
+      ),
     );
-    expect(failure?.kind).toBe("expired");
-    expect(failure?.message).toMatch(/2026/);
+    expect(failure.kind).toBe("expired");
+    expect(failure.message).toMatch(/2026/);
   });
 
   test("a never-run or succeeded record surfaces no failure", () => {

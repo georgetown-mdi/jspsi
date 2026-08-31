@@ -456,12 +456,13 @@ export type BenignRerunOutcome =
  * is not a benign outcome here, and falls through to the caller's generic
  * transport path.
  *
- * The guard binds the outcomes read here off THIS run's error, and nothing
- * further: a surface state derived instead from the record's stored bookkeeping
- * ({@link ./managedFailureTiers.ts}, read by
- * {@link ../bench/managedRunLaunchModel.ts}) rests on the guard the run that
- * stamped the kind applied, so a stored `"consent"` or `"terms-shortfall"` kind
- * carries its non-disclosure copy from that stamp alone.
+ * The guard binds the outcomes read here off THIS run's error. A surface state
+ * derived instead from the record's stored bookkeeping
+ * ({@link ./managedFailureTiers.ts}) meets the same boundary where it is
+ * classified ({@link ../bench/managedRunLaunchModel.ts}): a stored kind whose copy
+ * attests that nothing left this device gives way to the generic tier past the
+ * boundary exactly as the state read off the error does here, rather than resting
+ * on the guard the run that stamped the kind applied.
  */
 export function benignRerunOutcome(
   error: unknown,
