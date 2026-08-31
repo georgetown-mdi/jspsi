@@ -360,12 +360,6 @@ export function sanitizeErrorChainLinks(rendered: string): Array<string> {
   const links = rendered.split(ERROR_CAUSE_SEPARATOR);
   const kept = links.slice(0, MAX_ERROR_CAUSE_DEPTH);
   const last = kept.length - 1;
-  // A chain the renderer already cut arrives with its marker riding PAST the
-  // last link's cap, since that is where the renderer appends it. Escaping the
-  // link whole would charge the marker's own characters to the budget and cut
-  // them off a link that spent it -- turning a chain that said it was cut into
-  // one that reads complete. Lift the marker off, escape what it rode on, and
-  // put it back where the renderer puts it.
   const arrivedElided = kept[last].endsWith(ELISION_SUFFIX);
   if (arrivedElided) kept[last] = kept[last].slice(0, -ELISION_SUFFIX.length);
   const escaped = kept.map((link) =>
