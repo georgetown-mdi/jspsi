@@ -27,6 +27,7 @@ import { failureFor } from "./useInviterExchange";
 
 import {
   DownloadRow,
+  FailureMessage,
   NoResultFileInset,
   RunWarningsAlert,
   recoveredExchangeHeading,
@@ -313,7 +314,7 @@ export function RecoveredExchangePanel() {
           title={failure.title}
           mb="md"
         >
-          <span style={{ whiteSpace: "pre-line" }}>{failure.message}</span>
+          <FailureMessage message={failure.message} />
         </Alert>
       )}
       <RunWarningsAlert warnings={warnings} />

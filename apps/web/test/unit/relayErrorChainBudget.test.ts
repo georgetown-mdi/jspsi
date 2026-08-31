@@ -15,6 +15,7 @@ import {
 } from "@psilink/core";
 
 import {
+  EMPTY_CHAIN_LINK,
   createFetchJobApiClient,
   createServerJobReattachDriver,
 } from "@psi/serverJobExchangeDriver";
@@ -267,10 +268,9 @@ test("a flooded chain is held to the volume the renderer itself emits", async ()
 test("a cut chain reaches the seat saying it was cut", async () => {
   // The elision marker is what lets an operator tell a whole failure from a cut
   // one, so it has to survive the seat's own pass rather than only the relay's.
-  // Links well under the per-link budget, since a link AT the budget spends the
-  // room the marker would occupy and every boundary re-escaping it cuts the tail
-  // -- the same property that makes a message composed at a budget the one the
-  // next boundary truncates.
+  // Here the relay is what cuts the chain: more links arrive than the renderer's
+  // depth bound admits, and the marker the relay appends is the one the seat has
+  // to carry.
   const flood = Array.from(
     { length: MAX_ERROR_CAUSE_DEPTH * 2 },
     (_, index) => `link ${index}`,
@@ -286,6 +286,72 @@ test("a cut chain reaches the seat saying it was cut", async () => {
   expect(failure.message).toContain(CAUSE_DEPTH_ELISION_MARKER);
   expect(failure.message).toContain(`link ${MAX_ERROR_CAUSE_DEPTH - 1}`);
   expect(failure.message).not.toContain(`link ${MAX_ERROR_CAUSE_DEPTH}`);
+});
+
+test("a chain the CLI already cut reaches the seat still saying so", async () => {
+  // The other cut: the CLI's own renderer spent the depth bound and marked the
+  // last link, so the chain arrives already carrying the marker. It rides PAST
+  // that link's cap, which is where the renderer appends it, so a boundary
+  // re-escaping the link whole spends the budget on the marker and drops it --
+  // and the marker's absence is exactly what tells the operator the chain is the
+  // whole failure. Links at twice the per-link budget put every link on the cap,
+  // which is the case a boundary that re-caps loses.
+  const deep = Array.from({ length: MAX_ERROR_CAUSE_DEPTH * 2 }, (_, index) =>
+    `link ${index} `.padEnd(COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH * 2, "w"),
+  ).reduceRight<Error | undefined>(
+    (cause, message) => new Error(message, { cause }),
+    undefined,
+  ) as Error;
+  const message = sanitizeErrorForDisplay(deep);
+  expect(message.endsWith(CAUSE_DEPTH_ELISION_MARKER)).toBe(true);
+
+  const relayed = await relayErrorFromChild(message);
+  const chain = relayed.filter((event) => event.type === "error")[0][
+    ERROR_MESSAGE_CHAIN_FIELD
+  ] as Array<string>;
+  expect(chain).toHaveLength(MAX_ERROR_CAUSE_DEPTH);
+  expect(chain[chain.length - 1].endsWith(CAUSE_DEPTH_ELISION_MARKER)).toBe(
+    true,
+  );
+
+  const failure = await failureAtSeat(relayed);
+  expect(failure.message.endsWith(CAUSE_DEPTH_ELISION_MARKER)).toBe(true);
+  // Not vacuous: the chain really was cut, and its last rendered link really did
+  // spend its whole budget, so the marker sits past a truncation of its own.
+  expect(failure.message).toContain(`link ${MAX_ERROR_CAUSE_DEPTH - 1}`);
+  expect(failure.message).not.toContain(`link ${MAX_ERROR_CAUSE_DEPTH}`);
+  expect(failure.message).toContain(DISPLAY_TRUNCATION_MARKER);
+});
+
+test("a link the CLI rendered with no text of its own reaches the seat", async () => {
+  // A cause thrown as an empty string renders as a link with no text: real,
+  // first-party, and framed by the renderer like any other link. Dropping it at
+  // the seat would shorten the chain, which re-points every link after it at the
+  // wrong cause -- the operator reads the second failure as the direct cause of
+  // the first.
+  const message = sanitizeErrorForDisplay(
+    new Error("the appliance refused the run", {
+      cause: new Error("", { cause: "" }),
+    }),
+  );
+  expect(message).toBe(
+    joinErrorCauseChain(["the appliance refused the run", "Error", ""]),
+  );
+
+  const relayed = await relayErrorFromChild(message);
+  const chain = relayed.filter((event) => event.type === "error")[0][
+    ERROR_MESSAGE_CHAIN_FIELD
+  ] as Array<string>;
+  expect(chain).toEqual(["the appliance refused the run", "Error", ""]);
+
+  const failure = await failureAtSeat(relayed);
+  expect(failure.message).toBe(
+    joinErrorCauseChain([
+      "the appliance refused the run",
+      "Error",
+      EMPTY_CHAIN_LINK,
+    ]),
+  );
 });
 
 // The links the seat renders are the relay's own derivation, which is a claim

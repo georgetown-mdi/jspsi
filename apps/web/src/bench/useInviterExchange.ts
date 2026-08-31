@@ -98,9 +98,9 @@ export interface RunFailure {
  * framing instead is what would let a literal `\ncaused by:` inside one become a
  * link of its own, indistinguishable at the seat from a cause psilink rendered.
  *
- * The framing between links is the renderer's own newline, which every alert
- * that shows this renders with `white-space: pre-line`, so each link lands on its
- * own line.
+ * The framing between links is the renderer's own newline, and what lays it out
+ * as a line break is `FailureMessage` in `./BenchRunSurface`, the component the
+ * failure alerts show this message through.
  */
 function sanitizedFailureMessage(error: unknown): string {
   return error instanceof RelayedTerminalError
