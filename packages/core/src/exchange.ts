@@ -86,7 +86,8 @@ import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 import type { ExchangeSpec } from "./config/exchangeSpec.js";
 import type { PartnerPayload } from "./payloadExchange.js";
 import type { BuiltExchangeRecord } from "./exchangeRecord.js";
-import type { SigningIdentity } from "./signingIdentity.js";
+import { certificateAuthorizesIdentity } from "./signingIdentity.js";
+import type { CertificateBody, SigningIdentity } from "./signingIdentity.js";
 import { partnerPinIsPresent } from "./config/signing.js";
 import type { SigningConfig, SigningMode } from "./config/signing.js";
 import type { DualSignedRecord, ReceiptContent } from "./signedReceipt.js";
@@ -653,6 +654,55 @@ export function assertSignedReceiptNamesBothParties(
       ". A certificate is trusted by the identity its holder used in the " +
       "agreed terms, so an unnamed party cannot present or verify one: set " +
       "linkage_terms.identity on both sides, or run without receipt signing.",
+  );
+}
+
+/**
+ * Refuse a run whose own signing certificate does not authorize the identity this
+ * party carries in its AGREED TERMS.
+ *
+ * A certificate is trusted by the identity its holder used in the agreed terms
+ * rather than the one the certificate carries, so a party signing under a
+ * certificate bound to any other name signs a receipt that verifies nowhere --
+ * its own `verify-receipt` included. Unheld, what such a run leaves that party
+ * turns on the handshake role it drew, which none of its own configuration
+ * decides: signing first, its frame is refused and the run terminates; signing
+ * last, it sends its frame before the partner can refuse it and returns as a
+ * success does, holding that worthless receipt. Neither outcome is representable
+ * with the binding held here, beside the partner half
+ * {@link exchangeSignedReceipt} already holds at the swap and before this party's
+ * certificate or signature reaches the wire.
+ *
+ * An {@link OperatorConfigError}, not the {@link ReceiptVerificationError} the
+ * swap's other refusals raise, even though it fires where that category owns the
+ * failures. Nothing about the peer is consulted to reach it -- both values that
+ * disagree are this party's own -- and the security-kind error asserts the
+ * opposite: a caller branching on it, the CLI's exit-code mapping first (64 for
+ * this party's own configuration against 69 for a failure met at the peer), would
+ * report a local misconfiguration as the partner's fault.
+ *
+ * The message names both disagreeing values, which are this party's own: nothing
+ * partner-controlled is quoted. They are composed raw, escaped once at the
+ * display sink like every other fragment (CONTRIBUTING.md, Operator-facing
+ * escaping), and land LAST, after the remedy, for the reason its CLI sibling
+ * gives: the renderer caps a composed link, and an over-long name should spend
+ * that truncation on itself rather than on the step the operator has to act on.
+ */
+export function assertLocalCertificateAuthorizesAgreedIdentity(
+  certificate: CertificateBody,
+  agreedIdentity: string,
+): void {
+  if (certificateAuthorizesIdentity(certificate, agreedIdentity)) return;
+  throw new OperatorConfigError(
+    "this party's signing certificate does not authorize the identity it " +
+      "agreed terms under, so it cannot finish: a certificate is trusted by " +
+      "the identity its holder used in the agreed terms, so the partner " +
+      "authorizes the presented certificate against that name and refuses it, " +
+      "and a receipt signed under it verifies nowhere. Set " +
+      "linkage_terms.identity to the name the certificate carries, or sign " +
+      "with an identity bound to the name the agreed terms carry. The " +
+      `certificate is bound to "${certificate.identity}"; the agreed terms ` +
+      `name "${agreedIdentity}".`,
   );
 }
 
@@ -2055,6 +2105,15 @@ export async function runExchange(
       const namedParties = assertSignedReceiptNamesBothParties(
         linkageTerms,
         partnerTerms,
+      );
+      // The other half of that binding, on this party's own side: the partner
+      // will authorize the certificate about to go out against the name this
+      // party agreed terms under, so a certificate bound elsewhere is refused
+      // here rather than presented. Held to the name the assertion above just
+      // returned. See assertLocalCertificateAuthorizesAgreedIdentity.
+      assertLocalCertificateAuthorizesAgreedIdentity(
+        signingIdentity.certificate,
+        namedParties.local,
       );
       // The receipt content is built from the mutually-verifiable facts directly
       // -- the agreed-terms hash and session-keyed MACs of the two directional
