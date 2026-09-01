@@ -2,6 +2,8 @@ import { Readable } from "node:stream";
 
 import { describe, expect, test, vi } from "vitest";
 import {
+  DEFAULT_MAX_DISPLAY_LENGTH,
+  DISPLAY_TRUNCATION_MARKER,
   FrameSizeExceededError,
   sanitizeErrorForDisplay,
   TransportOperationStalledError,
@@ -86,6 +88,38 @@ describe("frameSizeExceededError", () => {
     const err = frameSizeExceededError("/drop/c\u0430fe.json", 100);
     expect(sanitizeErrorForDisplay(err)).not.toContain("\u0430");
     expect(sanitizeErrorForDisplay(err)).toContain("\\u0430");
+  });
+
+  test("fits a path bounded by nothing to the per-value budget", () => {
+    // A get() names a file the peer chose, of no bounded length. Read on the
+    // link as it RENDERS rather than off the builder's return, since a bound
+    // held only inside the builder is one the escape at the boundary can still
+    // overrun; the marker rides the same budget it was cut to, so a link that
+    // spent it whole is one the operator can tell was cut.
+    const link = linksOf(
+      frameSizeExceededError("/drop/" + "p".repeat(100_000), 100),
+    ).find((candidate) => candidate.startsWith("inbound file: "));
+
+    expect(link).toBeDefined();
+    expect(link).toContain(DISPLAY_TRUNCATION_MARKER);
+    expect((link as string).length).toBeLessThanOrEqual(
+      DEFAULT_MAX_DISPLAY_LENGTH,
+    );
+  });
+
+  test("redacts the path before it clips it", () => {
+    // Reversing the two leaves a BEGIN with its END clipped off, which the
+    // renderer's own per-link pass then consumes to the end of the link --
+    // taking the marker that said the path was cut with it. A key block wider
+    // than the link's budget is what makes the two orders render differently.
+    const block =
+      "-----BEGIN OPENSSH PRIVATE KEY-----" +
+      "k".repeat(4 * DEFAULT_MAX_DISPLAY_LENGTH) +
+      "-----END OPENSSH PRIVATE KEY-----";
+
+    expect(
+      linksOf(frameSizeExceededError(`${block}/message.json`, 100)),
+    ).toContain("inbound file: [redacted private key]/message.json");
   });
 });
 

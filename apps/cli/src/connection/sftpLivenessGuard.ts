@@ -1,13 +1,11 @@
 import { Readable } from "node:stream";
 
 import {
-  clipToRenderedCost,
-  DEFAULT_MAX_DISPLAY_LENGTH,
   redactAndSanitizeForDisplay,
-  redactPrivateKeyMaterial,
-  renderedDisplayCost,
   TransportOperationStalledError,
 } from "@psilink/core";
+
+import { fittedCauseLink } from "./causeLink";
 
 /**
  * Per-operation liveness bounds for the SFTP adapter's server-driven operations
@@ -60,52 +58,6 @@ import {
 export const SFTP_STALL_DEADLINE_MS = 60_000;
 
 /**
- * What one of this builder's labelled cause links may render to: the per-value
- * display budget, which is what a chooser's own value is budgeted at everywhere
- * else (the sibling directory-path link in {@link ./listingGuard} fits to the
- * same one). Each link carries its label plus one fragment and nothing else, so
- * the whole of the link is the two together.
- *
- * It is well under the per-link cap the renderer applies
- * (`COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH`), which is deliberate: that cap is a
- * ceiling, not a quota, and each fragment here is a value rather than a
- * composition, so the clip only ever bites a fragment that is itself the
- * anomaly. That the details, paths, and server error sentences of the
- * enumerated CLI-sites table each fit inside it at ordinary size is
- * asserted by apps/cli/test/unit/transportRefusalBudget.test.ts; the
- * adapter's stall shapes outside that table (delete, rename, exclusive
- * create, existence check) are covered by that suite's class-level flood
- * half, and their ordinary-size fit is measured, not pinned.
- */
-const STALLED_LINK_BUDGET = DEFAULT_MAX_DISPLAY_LENGTH;
-
-/**
- * Compose one labelled cause link, with `fragment` fitted to
- * {@link STALLED_LINK_BUDGET} at this composition site.
- *
- * The fragment is bounded HERE rather than left to the display boundary because
- * nothing upstream bounds it: `path` carries a peer-supplied filename of no
- * bounded length, and the dead-session arm's `serverReported` is the text a
- * hostile server chose. A value that reaches the renderer unbounded spends
- * whatever the renderer's own cap allows, which is the budget sized for a whole
- * composed message rather than for one value.
- *
- * The fragment is redacted before it is clipped, and the clip appends the
- * truncation marker itself, so a planted `BEGIN` marker cannot consume the
- * marker that says the fragment was cut (see {@link clipToRenderedCost}). What is
- * kept is raw, and is escaped once where the error is rendered, so a hostile
- * server's control/ANSI or deceptive-Unicode characters are neutralized at the
- * display boundary rather than here, where escaping them would leave the sink to
- * escape them a second time.
- */
-function stalledLink(label: string, fragment: string): string {
-  return `${label}${clipToRenderedCost(
-    redactPrivateKeyMaterial(fragment),
-    STALLED_LINK_BUDGET - renderedDisplayCost(label),
-  )}`;
-}
-
-/**
  * Construct the typed, terminal {@link TransportOperationStalledError} for an
  * SFTP operation that did not make progress within its bound. `operation` names
  * the read (e.g. `"directory listing"`, `"file read"`, `"exclusive create"`) and
@@ -113,14 +65,23 @@ function stalledLink(label: string, fragment: string): string {
  * operation-specific message.
  *
  * Every value beyond the operation's own label takes a labelled cause link of its
- * own rather than riding the summary, ONE chooser per link, each fitted by
- * {@link stalledLink}. `path` carries a peer-supplied filename of no bounded
- * length; `detail` is first-party prose at every call site but
- * {@link ./ssh2SftpAdapter}'s dead-session one, which relays the fatal error the
- * server itself reported through `serverReported`, bounded nowhere at all. On a
- * shared link either would spend the budget the refusal and the next step
- * {@link TransportOperationStalledError} carries need, and whichever filled it
- * would then be free to compose the framing that introduced what it deleted.
+ * own rather than riding the summary, ONE chooser per link, each fitted at this
+ * composition site by {@link ./causeLink.fittedCauseLink} -- the first-party
+ * stall detail included, so all three links carry one rule. `path` carries a
+ * peer-supplied filename of no bounded length; `detail` is first-party prose at
+ * every call site but {@link ./ssh2SftpAdapter}'s dead-session one, which relays
+ * the fatal error the server itself reported through `serverReported`, bounded
+ * nowhere at all. On a shared link either would spend the budget the refusal and
+ * the next step {@link TransportOperationStalledError} carries need, and
+ * whichever filled it would then be free to compose the framing that introduced
+ * what it deleted.
+ *
+ * The details, paths, and server error sentences of the enumerated CLI-sites
+ * table each fit their budget at ordinary size, asserted by
+ * apps/cli/test/unit/transportRefusalBudget.test.ts; the adapter's stall shapes
+ * outside that table (delete, rename, exclusive create, existence check) are
+ * covered by that suite's class-level flood half, and their ordinary-size fit is
+ * measured, not pinned.
  */
 export function transportOperationStalledError(
   operation: string,
@@ -132,11 +93,11 @@ export function transportOperationStalledError(
     `SFTP ${operation} stalled; refusing to wait on the server further`,
     {
       details: [
-        stalledLink(`how the ${operation} stalled: `, detail),
-        stalledLink(`stalled ${operation} path: `, path),
+        fittedCauseLink(`how the ${operation} stalled: `, detail),
+        fittedCauseLink(`stalled ${operation} path: `, path),
         ...(serverReported === undefined
           ? []
-          : [stalledLink("error the server reported: ", serverReported)]),
+          : [fittedCauseLink("error the server reported: ", serverReported)]),
       ],
     },
   );
