@@ -135,6 +135,17 @@ export interface IMessageQueue {
 
   byteSize(): number;
 
+  /**
+   * Hold a serialized frame and charge its accounted bytes to the queue's
+   * running total. The size the frame carries is confirmed against the frame
+   * itself and a disagreement is refused rather than accumulated: `byteSize` is
+   * the quantity `MAX_QUEUE_BYTES` bounds a queue by, so a caller-supplied size
+   * the frame does not match would leave that bound tracking something other
+   * than the memory it exists to hold down, with nothing downstream in a
+   * position to notice. `serializeFrame` measures the size the in-tree enqueue
+   * path passes, which agrees by construction; the refusal covers the callers
+   * this package's exports admit but this repository does not contain.
+   */
   addMessage(frame: SerializedFrame): void;
 
   readMessage(): IMessage | undefined;
@@ -144,11 +155,11 @@ export interface IMessageQueue {
 
 export class MessageQueue implements IMessageQueue {
   private lastReadAt: number = new Date().getTime();
-  // Each frame carries the byte size it was accounted at, so the running total
-  // below is maintained without ever re-measuring a payload: a frame is sized
-  // once, where it is serialized. Reads decrement the total, so a queue a
-  // reconnecting peer drains can accept fresh frames again rather than staying
-  // wedged at the cap.
+  // Each frame carries the byte size it was accounted at, and every read
+  // decrements the total by that same per-frame value, so a queue a reconnecting
+  // peer drains can accept fresh frames again rather than staying wedged at the
+  // cap. The total is therefore only as sound as the sizes charged into it,
+  // which is what the enqueue below confirms.
   private readonly frames: SerializedFrame[] = [];
   private bytes = 0;
 
@@ -165,6 +176,14 @@ export class MessageQueue implements IMessageQueue {
   }
 
   public addMessage(frame: SerializedFrame): void {
+    const measured = frameByteSize(frame.message);
+
+    if (frame.byteSize !== measured) {
+      throw new RangeError(
+        `signaling frame accounted at ${frame.byteSize} bytes measures ${measured}`,
+      );
+    }
+
     this.bytes += frame.byteSize;
     this.frames.push(frame);
   }
