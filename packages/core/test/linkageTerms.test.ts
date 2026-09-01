@@ -496,6 +496,93 @@ test("a swap target matching no element in its key is rejected", () => {
   expect(result.error.issues[0].message).toMatch(/swap target/);
 });
 
+// --- A swap pair's fuzzy designations ----------------------------------------
+// The swap moves the field references and leaves each position's own
+// generate_fuzzy_comparisons where it is, so a mismatched pair would expand a
+// column one way on the party that swaps and another on the party that does not
+// -- two readings of one agreed document, neither visible from a party's own
+// copy. Bound here, at the layer every parse path inherits.
+
+function swappedPair(
+  first: string | undefined,
+  second: string | undefined,
+): unknown {
+  return {
+    ...base,
+    linkageFields: [
+      { name: "firstName", type: "first_name" },
+      { name: "lastName", type: "last_name" },
+    ],
+    linkageKeys: [
+      {
+        name: "Swapped",
+        elements: [
+          { field: "firstName", generate_fuzzy_comparisons: first },
+          { field: "lastName", generate_fuzzy_comparisons: second },
+        ],
+        swap: ["firstName", "lastName"],
+      },
+    ],
+  };
+}
+
+test("a swap pair declaring different fuzzy comparisons is rejected", () => {
+  const result = safeParseLinkageTerms(
+    swappedPair("transpositions", "edit_distances"),
+  );
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(result.error.issues[0].path).toContain("linkageKeys");
+  expect(result.error.issues[0].message).toMatch(
+    /same generate_fuzzy_comparisons/,
+  );
+});
+
+test("a swap pair with one position declaring a fuzzy comparison is rejected", () => {
+  // The asymmetric shape the mismatch actually takes in an authored document: an
+  // expansion added to one position of a pair and not the other.
+  const result = safeParseLinkageTerms(
+    swappedPair("transpositions", undefined),
+  );
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(result.error.issues[0].message).toMatch(
+    /same generate_fuzzy_comparisons/,
+  );
+});
+
+test("a swap pair declaring the same fuzzy comparison validates", () => {
+  const matched = safeParseLinkageTerms(
+    swappedPair("transpositions", "transpositions"),
+  );
+  expect(matched.success).toBe(true);
+  const neither = safeParseLinkageTerms(swappedPair(undefined, undefined));
+  expect(neither.success).toBe(true);
+});
+
+test("a fuzzy comparison outside a swap pair is unaffected", () => {
+  const result = safeParseLinkageTerms({
+    ...base,
+    linkageFields: [
+      { name: "firstName", type: "first_name" },
+      { name: "lastName", type: "last_name" },
+      { name: "ssn", type: "ssn" },
+    ],
+    linkageKeys: [
+      {
+        name: "Swapped",
+        elements: [
+          { field: "firstName" },
+          { field: "lastName" },
+          { field: "ssn", generate_fuzzy_comparisons: "transpositions" },
+        ],
+        swap: ["firstName", "lastName"],
+      },
+    ],
+  });
+  expect(result.success).toBe(true);
+});
+
 // --- Transform-regex dialect conformance -------------------------------------
 // Element-transform regex patterns are partner-controlled and run per row over
 // the full dataset, under the linear-time engine (utils/linearRegex.ts), so they

@@ -1209,6 +1209,9 @@ function describeRuleSet(
  *   member of `linkageFields[].name`); a dangling reference is rejected.
  * - Every `swap` target must match an element identifier (`element.name` if
  *   present, otherwise `element.field`) present within that same linkage key.
+ * - The two elements a `swap` names must declare the same
+ *   `generateFuzzyComparisons`, the expansion staying with the position while
+ *   the swap moves the field reference.
  *
  * TODO: versioning compatibility rules (migration paths between semver
  * versions).
@@ -1770,6 +1773,38 @@ export const LinkageTermsSchema: z.ZodType<LinkageTerms> =
         message:
           "each linkage key swap target must match an element identifier " +
           "(name if present, otherwise field) within the same key",
+        path: ["linkageKeys"],
+      },
+    )
+    // A swap pair's two positions must declare the SAME fuzzy expansion. The swap
+    // moves only the field references and leaves each position's own
+    // `generateFuzzyComparisons` where it is, so a mismatched pair applies one
+    // expansion to a column on the party that swaps and a different one on the
+    // party that does not -- two readings of the same agreed terms, and neither
+    // party can see that from its own copy. Binding the pair here is what lets
+    // the key-read layer resolve the expansion from the position it already holds
+    // (`planFuzzyExpansions`, standardization.ts). A pair whose targets do not
+    // resolve is left to the referential-integrity refine above, which owns that
+    // fault. As above, the message echoes no partner-controlled value.
+    .refine(
+      (a) =>
+        a.linkageKeys.every((key) => {
+          if (key.swap === undefined) return true;
+          const paired = key.swap.map((target) =>
+            key.elements.find((el) => (el.name ?? el.field) === target),
+          );
+          if (paired.some((element) => element === undefined)) return true;
+          return (
+            paired[0]?.generateFuzzyComparisons ===
+            paired[1]?.generateFuzzyComparisons
+          );
+        }),
+      {
+        message:
+          "the two elements a linkage key swap names must declare the same " +
+          "generate_fuzzy_comparisons: a swap moves the field references and " +
+          "leaves each element's own expansion in place, so a mismatched pair " +
+          "would expand a column differently on the two parties",
         path: ["linkageKeys"],
       },
     )

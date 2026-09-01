@@ -1218,8 +1218,9 @@ export async function linkViaSinglePassPSI(
   // reject a frame this party built. A candidate producer whose width the declared
   // factors do not account for lands here rather than on the wire: a row within the
   // per-record bound still overruns the slots when the key it widens is one the
-  // declared factors count as single-valued, which is the fuzzy case
-  // `declaredEffectiveKeyCount` (fanOutFunctions.ts) defers to this seam. That
+  // declared factors count as single-valued, which is what a producer outside
+  // FAN_OUT_FUNCTION_NAMES realizes -- `declaredEffectiveKeyCount`
+  // (fanOutFunctions.ts) declares a factor for each producer it knows. That
   // producer is a configuration its operator can change, so the refusal is
   // usage-typed rather than internal.
   const localSlotBound = localEffectiveKeyCount * numRecords;
@@ -1229,10 +1230,9 @@ export async function linkViaSinglePassPSI(
         `across ${numLinkageKeys} linkage key(s) and ${numRecords} record(s), ` +
         `more than the ${localSlotBound} this party's declared linkage terms and ` +
         "standardization account for. Drop the step that expands a record's " +
-        "value for a key the declared factors count as single-valued -- a fuzzy " +
-        "comparison, or a transform that expands one value without being a " +
-        "declared fan-out function -- so this party's rows fit the width it " +
-        "advertised.",
+        "value for a key the declared factors count as single-valued -- a " +
+        "transform that expands one value without being a declared fan-out " +
+        "function -- so this party's rows fit the width it advertised.",
     );
   }
 

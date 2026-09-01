@@ -127,6 +127,36 @@ export function adjacentYearCandidates(value: string): string[] {
 }
 
 /**
+ * Whether `kind`'s candidates are built by the resolved PSI RECEIVER alone
+ * rather than by both parties.
+ *
+ * This is expanding-side selection, not the one-sided OUTPUT entitlement
+ * (docs/notes/one-sided-disclosure.md): the entitlement is an agreed term, while
+ * this is a local execution choice keyed on the role both parties resolve from
+ * the record counts they already exchanged (`resolveRole`, protocolSetup.ts). It
+ * moves no term, no terms hash, and no wire byte, extending the receiver-only
+ * `swap` directive's precedent.
+ *
+ * A deletion neighborhood is built by BOTH parties: each side's own deletions
+ * are what let a substitution or insertion between the two values meet in the
+ * middle (see {@link deletionCandidates}), so expanding one side alone would
+ * match on less than the terms declare.
+ *
+ * Total over the kind and pure -- it reads no term, no role, and no row -- so
+ * both parties classify a kind identically, and a member added to
+ * {@link GenerateFuzzyComparisons} without an arm here fails to compile.
+ */
+export function expandsOnReceiverOnly(kind: GenerateFuzzyComparisons): boolean {
+  switch (kind) {
+    case "transpositions":
+      return true;
+    case "edit_distances":
+    case "adjacent_years":
+      return false;
+  }
+}
+
+/**
  * Expand one standardized value into the match candidates a
  * `generateFuzzyComparisons` rule declares.
  *

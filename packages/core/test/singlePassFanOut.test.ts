@@ -669,10 +669,11 @@ test("a row realizing more candidates than the party declared is refused, not sh
 });
 
 test("a cell wider than the normative width bound is refused as the table is built", async () => {
-  // Realization drops an over-width row for the DECLARED fan-out producers alone,
-  // so what lands here is an expansion that rule does not bind -- a fuzzy
-  // comparison, an unlisted function, or a caller that assembled one anyway -- and
-  // it is what keeps the sender from building a frame its own decoder would reject.
+  // Realization drops an over-width row for the DECLARED fan-out producers alone
+  // and refuses a fuzzy-widened one outright, so what lands here is an expansion
+  // neither rule binds -- an unlisted function, or a caller that assembled one
+  // anyway -- and it is what keeps the sender from building a frame its own
+  // decoder would reject.
   const tooWide = new Set(
     Array.from({ length: MAX_KEY_CANDIDATES_PER_ROW + 1 }, (_u, i) => `V${i}`),
   );
