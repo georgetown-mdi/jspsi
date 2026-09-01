@@ -20,6 +20,10 @@ import {
 import { OUTBOUND_SEND_NO_PAYLOAD_SENTENCE } from "@psilink/core";
 
 import { ColumnName, isolatedColumnName } from "@components/ColumnName";
+import {
+  MAX_DECLARED_NAMES_SHOWN,
+  unshownDeclaredNamesLine,
+} from "@components/declaredNameBound";
 import { MetadataGrid } from "@components/MetadataGrid";
 import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
 import { useOnlineStatus } from "@components/useOnlineStatus";
@@ -48,24 +52,6 @@ import type {
   Standardization,
 } from "@psilink/core";
 import type { ReactNode } from "react";
-
-/**
- * How many of the invitation's declared column names the payload-declaration
- * conflict notice paints before it stops and counts the rest.
- *
- * That list is the partner's, bounded only by core's `MAX_PAYLOAD_ENTRIES` times
- * the escaped display ceiling each name takes at this sink, so painting it whole
- * puts around a megabyte of text between the operator and both the metadata grid
- * they have to edit and the launch control below it -- usability denial on the one
- * screen that holds the gate. Every remedy the notice states is derived from the
- * WHOLE set, so what the cap costs is legibility of the tail, never the accuracy of
- * what the operator is told to do.
- *
- * Sized to show a realistic declaration entire -- a payload set is a handful of
- * columns -- while leaving the flooded case a fixed height. Exported so the check
- * that holds the notice's rendered size reads the same number the render does.
- */
-export const MAX_DECLARED_NAMES_SHOWN = 10;
 
 /**
  * The operator's OWN CSV headers as the declaration notice lists them: through the
@@ -225,8 +211,10 @@ export function AcceptorColumnsStep({
     declarationConflict?.declaredButNotSent.filter((gap) => gap.inFile) ?? [];
   const expectedMissingFromFile =
     declarationConflict?.declaredButNotSent.filter((gap) => !gap.inFile) ?? [];
-  // What the cap leaves out is counted rather than dropped, so the operator is told
-  // how large the list their partner sent is even where the screen cannot hold it.
+  // The cap keeps a flooded declaration from putting the metadata grid the operator
+  // has to edit, and the launch control below it, past a screenful of partner text.
+  // What it leaves out is counted rather than dropped, so the operator is still told
+  // how large the list their partner sent is; every remedy below reads the whole set.
   const shownDeclaredGaps =
     declarationConflict?.declaredButNotSent.slice(
       0,
@@ -543,7 +531,7 @@ export function AcceptorColumnsStep({
                     </List>
                     {unshownDeclaredCount > 0 && (
                       <Text size="sm" mb={4}>
-                        and {unshownDeclaredCount} more not shown here.
+                        {unshownDeclaredNamesLine(unshownDeclaredCount)}
                       </Text>
                     )}
                     {/* The remedy here is mostly the partner's: widening the
