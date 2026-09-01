@@ -75,6 +75,7 @@ import { acceptKitFileName, buildAcceptKit } from "./acceptKit";
 import {
   availableTransports,
   cleaningCoverageProblems,
+  demotionNotice,
   editorFromCsv,
   editorReprofiled,
   editorWithAlgorithm,
@@ -241,11 +242,6 @@ const SECTION_SET: Record<Section, true> = {
 
 function isSection(value: string): value is Section {
   return value in SECTION_SET;
-}
-
-function demotionNotice(demoted: ReadonlyArray<string>): string {
-  if (demoted.length === 0) return "";
-  return `${demoted.join(", ")} changed to Ignored - only one column can be the record identifier.`;
 }
 
 // The inviter name the sample seeds, so step 1 lands complete without the

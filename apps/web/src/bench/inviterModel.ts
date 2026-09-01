@@ -832,6 +832,22 @@ export function editorWithColumnDisclosure(
   return withMetadata(editor, csv, metadata, demotedIdentifiers);
 }
 
+/**
+ * What step 2's polite region says about a {@link ColumnEditResult}'s demoted
+ * identifiers. The names are the operator's own CSV headers going into a string
+ * sink, so they carry the isolation as characters, the treatment every other
+ * column-name sink on the step gives them. The rule can displace more than one
+ * column at once, so this notice puts literal copy in one text block with the
+ * names -- the separators and the sentence after them -- which is the shape the
+ * isolate class's residual reaches: what the isolation does not contain there is
+ * stated on `@components/ColumnName` and driven in
+ * test/browser/benchInviterSharing.test.ts.
+ */
+export function demotionNotice(demoted: ReadonlyArray<string>): string {
+  if (demoted.length === 0) return "";
+  return `${demoted.map(isolatedColumnName).join(", ")} changed to Ignored - only one column can be the record identifier.`;
+}
+
 /** The linkage keys the draft currently authors, in order. */
 export function enabledKeys(draft: AdvancedInviteDraft): Array<LinkageKey> {
   return draft.keys.filter((entry) => entry.enabled).map((entry) => entry.key);

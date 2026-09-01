@@ -37,6 +37,7 @@ import styles from "@bench/bench.module.css";
 import { isolatedColumnName } from "@components/ColumnName";
 
 import { createAppMount } from "./renderApp";
+import { visualOrderWithin } from "./visualOrder";
 
 import type {
   InvitationToken,
@@ -246,42 +247,6 @@ async function encodeExpiredToken(): Promise<string> {
 
 function csvFile(content: string): File {
   return new File([content], "cohort_intake.csv", { type: "text/csv" });
-}
-
-/** The given substrings in visual reading order, measured with a Range over the
- * text nodes under `root`. Glyph level rather than element level, which is what
- * makes it discriminating: an unterminated override reorders the glyphs a
- * neighbouring name's box already holds without moving that box, so sorting the
- * elements' own rectangles reports the DOM order either way. Throws on a substring
- * that is absent or paints nothing, so an order it returns is one the browser
- * actually laid out rather than a sort over empty boxes. */
-function visualOrderWithin(
-  root: Node,
-  substrings: Array<string>,
-): Array<string> {
-  const texts: Array<Text> = [];
-  if (root instanceof Text) texts.push(root);
-  else {
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      texts.push(node as Text);
-    }
-  }
-  return substrings
-    .map((substring) => {
-      const hit = texts
-        .map((node) => ({ node, start: node.data.indexOf(substring) }))
-        .find(({ start }) => start >= 0);
-      if (hit === undefined) throw new Error(`not rendered: ${substring}`);
-      const range = document.createRange();
-      range.setStart(hit.node, hit.start);
-      range.setEnd(hit.node, hit.start + substring.length);
-      const box = range.getBoundingClientRect();
-      if (box.width === 0) throw new Error(`paints nothing: ${substring}`);
-      return { substring, box };
-    })
-    .sort((a, b) => a.box.top - b.box.top || a.box.left - b.box.left)
-    .map((entry) => entry.substring);
 }
 
 const app = createAppMount();
@@ -1280,6 +1245,31 @@ describe("acceptor columns step: one column name across the screen", () => {
     expect(options.map((option) => option.textContent)).toContain(
       isolatedColumnName(bidiColumn),
     );
+  });
+
+  test("a header behind an unmatched PDI reorders the panel's own sentence", async () => {
+    // The isolate class is the isolation's residual (UAX #9 BD9/X6a), and this
+    // panel puts copy in one text block with the names -- the separators between
+    // them and the sentence's full stop -- so the residual is reachable here;
+    // other sinks of that shape are measured in benchInviterSharing, and
+    // @components/ColumnName carries the limit class both files drive. The
+    // unmatched PDI ends the <bdi>'s isolation after
+    // "pre", and the override written after that break carries the name's tail
+    // past the name listed after it. Bounded by the trust basis
+    // @components/ColumnName records: these are the operator's own headers.
+    const residual = "pre\u2069mid\u202Eevil";
+    mountStep(["first_name", "last_name", residual, "post"]);
+    await expect
+      .element(page.getByText("For each matched row:", { exact: false }))
+      .toBeInTheDocument();
+    const panel = page
+      .getByText("For each matched row:", { exact: false })
+      .element();
+    expect(visualOrderWithin(panel, ["pre", "evil", "post"])).toEqual([
+      "pre",
+      "post",
+      "evil",
+    ]);
   });
 
   test("two long headers sharing a prefix stay distinct in the grid", async () => {

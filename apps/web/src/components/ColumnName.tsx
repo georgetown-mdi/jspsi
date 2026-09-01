@@ -80,13 +80,25 @@ function boundedName(name: string): string {
  * a single neutral character to the text around it, so nothing inside can reorder
  * anything outside. PDI also terminates any embedding or override (RLE, LRE, RLO,
  * LRO, a missing PDF) the isolated text left open, which is what bounds an
- * unbalanced name of that class. The isolate class itself is the string form's
- * residual: per UAX #9 BD9/X6a a name carrying an unmatched PDI closes this
- * wrapper's isolate early, and one carrying an unmatched RLI, LRI, or FSI
- * consumes the closing PDI and leaves the wrapper open over the copy that
- * follows. Whether the `<bdi>` element form shares that hole is a question about
- * the browser's layout, unmeasured here; the names are the operator's own
- * headers, on the trust basis the module note above records.
+ * unbalanced name of that class. The isolate class itself is the residual, and
+ * BOTH forms carry it: a name whose unmatched PDI closes the wrapper early leaves
+ * an override written after that break running over the copy that follows, in the
+ * characters {@link isolatedColumnName} composes and equally in the `<bdi>`
+ * {@link ColumnName} renders. What holds it off a sink is the arrangement rather
+ * than the wrapper: a name given a block of its own -- a grid row header, a chip,
+ * a list item -- has no copy beside it for the leak to run over, while any sink
+ * that puts literal copy in one text block with a wrapped name -- separators
+ * between names, a sentence after them -- can have that copy reordered. Which
+ * sinks are of which shape is a measurement rather than a claim to make here:
+ * test/browser/benchInviterSharing.test.ts and test/browser/benchAccept.test.ts
+ * drive both forms, the block containment, and the sinks measured to reach the
+ * residual, and a sink no check drives is not asserted to contain it. What bounds
+ * the impact is the trust basis the module note above records -- these are the
+ * operator's own CSV headers.
+ *
+ * The one hole no check here covers, stated as UAX #9 states it rather than as a
+ * measurement: a name carrying an unmatched RLI, LRI, or FSI consumes the closing
+ * PDI, so the wrapper opens and never closes. The same trust basis bounds it.
  */
 const FIRST_STRONG_ISOLATE = "\u2068";
 const POP_DIRECTIONAL_ISOLATE = "\u2069";
