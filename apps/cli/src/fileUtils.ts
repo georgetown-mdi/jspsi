@@ -245,7 +245,11 @@ function warnIfWindowsAclOverPermissive(
  * `reportedPath` names the destination the operator knows in the failure
  * message: the temp-file writers pass theirs, so the message names it rather
  * than the temp file, and a caller stripping the very file it writes leaves it
- * at `targetPath`.
+ * at `targetPath`. The doctor's work-directory call site passes an ancestor of
+ * the operand instead -- `os.tmpdir()`, not the `mkdtemp` directory the strip
+ * actually targets -- because a refused strip removes that directory before
+ * the message is composed, so the name the operator is left with is the
+ * surviving parent that carries the inheritable ACE.
  */
 export function stripExtendedAcls(
   targetPath: string,
