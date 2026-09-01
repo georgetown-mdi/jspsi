@@ -441,9 +441,11 @@ export function AcceptorColumnsStep({
                 {/* The operator's OWN CSV headers, shown through the same
                     ColumnName every column-name surface on this screen uses, so
                     the name here reads exactly as it does in the grid row the
-                    operator marked -- and a header carrying bidi characters
-                    cannot reorder this sentence about what leaves the machine.
-                    What the isolation does not contain is stated on ColumnName. */}
+                    operator marked. This is the one ColumnName site that puts
+                    copy beside a name -- the separators and the full stop -- so
+                    it is the one where the isolate class's residual reaches
+                    something: what the isolation does not contain is stated on
+                    ColumnName, and driven in benchAccept's panel measurement. */}
                 For each matched row:{" "}
                 {disclosed.map((column, index) => (
                   <Fragment key={column}>

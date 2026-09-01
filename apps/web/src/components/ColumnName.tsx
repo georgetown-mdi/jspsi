@@ -84,11 +84,14 @@ function boundedName(name: string): string {
  * BOTH forms carry it: a name whose unmatched PDI closes the wrapper early leaves
  * an override written after that break running over the copy that follows, in the
  * characters {@link isolatedColumnName} composes and equally in the `<bdi>`
- * {@link ColumnName} renders. What contains it is the arrangement rather than the
- * wrapper: neither shipped {@link ColumnName} site puts copy beside the name --
- * the grid row header and the chip are each the whole of their own block -- so the
- * leak has nothing to run over. Both forms and that containment are driven in
- * test/browser/benchInviterSharing.test.ts.
+ * {@link ColumnName} renders. What holds it off a sink is the arrangement rather
+ * than the wrapper: a name given a block of its own -- a grid row header, a chip,
+ * a list item -- has no copy beside it for the leak to run over, and every
+ * {@link ColumnName} site but one is that shape. The exception is the acceptor
+ * panel's "For each matched row:" sentence, where the separators and the full
+ * stop sit beside the names and the reordering is reachable. Both forms, the
+ * block containment, and that one reachable site are driven in
+ * test/browser/benchInviterSharing.test.ts and test/browser/benchAccept.test.ts.
  *
  * The one hole no check here covers, stated as UAX #9 states it rather than as a
  * measurement: a name carrying an unmatched RLI, LRI, or FSI consumes the closing
