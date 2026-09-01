@@ -302,18 +302,18 @@ Ratified by the owner:
 
 Drafted, pending the owner's ratification:
 
-- **Application Encryption** (board 9) -- Done is: escape-once-at-the-display-sink and
-  bound-at-composition hold across every operator-facing sink, carried by checks
-  rather than by a fix per fragment.
-- **Partnership identity and consent** (board 9) -- Done is: no exchange proceeds past a
-  consent surface whose disclosure list and terms binding are unverified, on the
-  invite, accept, and unattended paths alike.
-- **Web Exchange Rework** (board 9) -- Done is: the reworked screens carry a full
-  invite-to-result exchange in the browser with the interop suite green, and no
-  screen remains on the pre-rework flow.
-- **Agency security review readiness** (board 10) -- Done is: one agency completes a
-  security review from the published assurance package alone, every claim in it
-  naming the check that keeps it true.
+- **Application Encryption** (board 9) -- Done is:
+  escape-once-at-the-display-sink and bound-at-composition hold across every
+  operator-facing sink, carried by checks rather than by a fix per fragment.
+- **Partnership identity and consent** (board 9) -- Done is: no exchange
+  proceeds past a consent surface whose disclosure list and terms binding are
+  unverified, on the invite, accept, and unattended paths alike.
+- **Web Exchange Rework** (board 9) -- Done is: the reworked screens carry a
+  full invite-to-result exchange in the browser with the interop suite green,
+  and no screen remains on the pre-rework flow.
+- **Agency security review readiness** (board 10) -- Done is: one agency
+  completes a security review from the published assurance package alone, every
+  claim in it naming the check that keeps it true.
 - **Core Functionality** (board 9) -- Done is: no linkage term the schema admits
   is parsed, displayed, or agreed without the run applying it -- every
   declared-but-inert path implemented or refused.
