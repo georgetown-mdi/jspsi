@@ -45,13 +45,15 @@ export const MAX_MESSAGES_PER_QUEUE = 100;
 // worst-case resident bytes each frame is accounted at (UTF-16, 2 bytes/char),
 // and the queue holds every frame serialized so those accounted bytes are the
 // bytes it retains: a flood cannot push one queue past 512 KiB, so the global
-// resident ceiling is ~512 MiB. The cap is 2x the wire frame cap, which makes a
+// resident ceiling is ~512 MiB. The cap is 2x the wire frame cap, which holds a
 // frame whose payload arrived as a string -- held exactly as it arrived --
-// always holdable; a structured payload is held by its serialization, whose
-// length the wire cap does not bound, so at the size extreme such a frame can
-// account past the cap and be dropped. Real signaling frames are KB-scale, so a
-// queue still holds dozens of them and the drop costs only that sender's own
-// reconnect hold. See docs/spec/CHANNEL_SECURITY.md.
+// exactly up to a 33-character src; src is stamped after the wire cap is
+// checked, so a longer legitimate id (e.g. a 36-character UUID) can push the
+// same frame past the cap and drop it. A structured payload is held by its
+// serialization, whose length the wire cap does not bound, so at the size
+// extreme such a frame can account past the cap and be dropped. Real signaling
+// frames are KB-scale, so a queue still holds dozens of them and the drop costs
+// only that sender's own reconnect hold. See docs/spec/CHANNEL_SECURITY.md.
 export const MAX_QUEUE_BYTES = 512 * 1024;
 
 export class Realm implements IRealm {

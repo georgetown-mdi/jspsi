@@ -82,7 +82,9 @@ export function CreateInstanceWSOnly({
       // Reading a held frame reconstitutes its payload, which parses text this
       // server serialized itself -- and this handler runs from inside the
       // socket's own connection event with nothing between it and `ws`, so a
-      // throw here would be an uncaught exception on an internet-facing server.
+      // throw from that read would be an uncaught exception on an
+      // internet-facing server. The try below guards only the read; the
+      // dispatch call beside it is unguarded, with no reachable throw today.
       // A frame that cannot be reconstituted is therefore dropped down the same
       // `frame-dispatch` route the enqueue seam's refusal takes, and the rest of
       // the hold is still handed to the peer that came back for it. The loop is
