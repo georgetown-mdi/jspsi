@@ -173,11 +173,17 @@ function edited(
   return draft;
 }
 
-function probeTransform(terms: LinkageTerms): Array<TransformStep> {
-  const transform = terms.linkageKeys[0].elements[0].transform;
-  if (transform === undefined)
+// Every element transform a transform-position variation has to move. The base's
+// swap pair carries one transform across both of its positions, and the terms
+// refuse a pair whose transforms differ, so a variation that moved one alone
+// would produce a variant no surface can be asked to render.
+function probeTransforms(terms: LinkageTerms): Array<Array<TransformStep>> {
+  const transforms = terms.linkageKeys[0].elements
+    .map((element) => element.transform)
+    .filter((transform) => transform !== undefined);
+  if (transforms.length === 0)
     throw new Error("the consent probe base declares no element transform");
-  return transform;
+  return transforms;
 }
 
 function fieldOfType<T extends LinkageField["type"]>(
@@ -254,7 +260,18 @@ export const CONSENT_PROBE_TERMS: LinkageTerms = {
             { function: "substring", params: { start: 1, length: 3 } },
           ],
         },
-        { field: "family_name", name: "family" },
+        {
+          // The swap pair carries ONE transform across both of its positions,
+          // which is what the terms admit: a swap moves the field references and
+          // leaves each transform on its position, so a pair whose transforms
+          // differ is refused.
+          field: "family_name",
+          name: "family",
+          transform: [
+            { function: "to_upper_case" },
+            { function: "substring", params: { start: 1, length: 3 } },
+          ],
+        },
         { field: "birth_date", generateFuzzyComparisons: "adjacent_years" },
       ],
       swap: ["given", "family"],
@@ -588,7 +605,8 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
       "never would.",
     vary: (terms) =>
       edited(terms, (draft) => {
-        probeTransform(draft)[0].function = "to_lower_case";
+        for (const transform of probeTransforms(draft))
+          transform[0].function = "to_lower_case";
       }),
   },
   "linkageKeys[].elements[].transform[].params": {
@@ -598,7 +616,8 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
       "parameters matches a different set of records.",
     vary: (terms) =>
       edited(terms, (draft) => {
-        probeTransform(draft)[1].params = { start: 1, length: 4 };
+        for (const transform of probeTransforms(draft))
+          transform[1].params = { start: 1, length: 4 };
       }),
   },
   "linkageKeys[].swap": {

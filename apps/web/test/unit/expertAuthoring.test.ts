@@ -132,14 +132,18 @@ describe("expert authoring round-trips", () => {
   test("a key authored element-by-element decodes back equal through generateInvitation", async () => {
     const { draft } = seedAdvancedInvite("County Health Dept", ALL_COLUMNS);
     // Author one key from scratch: two elements referencing declared fields, a
-    // substring transform on the first, and a swap matching them in either order.
+    // substring transform, and a swap matching them in either order. The swapped
+    // pair carries ONE transform across both positions, which is what the terms
+    // admit -- a swap moves the field references and leaves each transform where
+    // it is, so a pair whose transforms differ is refused.
+    const initial = [
+      { function: "substring", params: { start: 1, length: 1 } },
+    ];
     let d: AdvancedInviteDraft = { ...draft, keys: [] };
     d = addKey(d, "first_name");
     d = addElement(d, 0, "last_name");
-    d = updateElementAt(d, 0, 0, (el) => ({
-      ...el,
-      transform: [{ function: "substring", params: { start: 1, length: 1 } }],
-    }));
+    d = updateElementAt(d, 0, 0, (el) => ({ ...el, transform: initial }));
+    d = updateElementAt(d, 0, 1, (el) => ({ ...el, transform: initial }));
     d = updateKeyAt(d, 0, (key) => ({
       ...key,
       swap: ["first_name", "last_name"],

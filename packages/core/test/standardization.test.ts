@@ -59,6 +59,7 @@ import { getDefaultStandardization } from "../src/defaults/standardization";
 import {
   MAX_KEY_ELEMENTS,
   MAX_TRANSFORM_PARAM_LENGTH,
+  safeParseLinkageTerms,
 } from "../src/config/linkageTerms";
 import type {
   LinkageField,
@@ -3253,6 +3254,90 @@ describe("buildKeyStrings", () => {
     );
   });
 
+  test("an empty transform is the identity, the same as declaring none", () => {
+    // What lets the terms schema read an omitted `transform` and an empty one as
+    // one pipeline when it holds a swap pair to a single transform.
+    const dataset = makeDataset({ first_name: "JANE", last_name: "SMITH" });
+    const withKey = (transform?: LinkageKeyElement["transform"]) => ({
+      name: "FN+LN",
+      elements: [{ field: "first_name", transform }, { field: "last_name" }],
+    });
+    expect(buildKeyStrings(withKey([]), dataset, 0)).toEqual(
+      buildKeyStrings(withKey(), dataset, 0),
+    );
+    expect(buildKeyStrings(withKey([]), dataset, 0)).toEqual(
+      new Set(["JANESMITH"]),
+    );
+  });
+
+  test("a swap pair the terms admit matches the same whichever party receives", () => {
+    // Only the receiver swaps, so a pair's two transforms have to agree for the
+    // swapped round to compare like with like: the terms schema binds them, and
+    // this is the property that binding buys. Role resolution is re-derived per
+    // run from the parties' record counts rather than carried by the terms, so a
+    // pair without it would move the match set between runs of one agreed
+    // document.
+    const swapKey = {
+      name: "swap(FN, LN)",
+      elements: [
+        { field: "first_name", transform: [{ function: "to_upper_case" }] },
+        { field: "last_name", transform: [{ function: "to_upper_case" }] },
+      ],
+      swap: ["first_name", "last_name"] as [string, string],
+    };
+    // The reversed-entry record the swap exists to catch, the two parties also
+    // disagreeing on case -- which is what the transform is there to settle.
+    const partyA = makeDataset({ first_name: "John", last_name: "smith" });
+    const partyB = makeDataset({ first_name: "smith", last_name: "john" });
+    // The two roles concatenate the pair in opposite orders, so the key STRING a
+    // match lands on differs between them; what must not differ is whether the
+    // record pair matches at all.
+    const matches = (
+      key: LinkageKey,
+      sender: StandardizedDataset,
+      receiver: StandardizedDataset,
+    ): boolean => {
+      const sent = buildKeyStrings(key, sender, 0, false) ?? new Set();
+      const received = buildKeyStrings(key, receiver, 0, true) ?? new Set();
+      return [...received].some((candidate) => sent.has(candidate));
+    };
+    expect(matches(swapKey, partyA, partyB)).toBe(
+      matches(swapKey, partyB, partyA),
+    );
+    // And the two agree on a MATCH, not on a shared miss.
+    expect(matches(swapKey, partyA, partyB)).toBe(true);
+
+    // The same pair with its transforms differing is what role resolution would
+    // otherwise decide -- the given-name comparison runs under the transform of
+    // whichever position the receiver's swap feeds it.
+    const differing = {
+      ...swapKey,
+      elements: [swapKey.elements[0], { field: "last_name" }],
+    };
+    expect(matches(differing, partyA, partyB)).not.toBe(
+      matches(differing, partyB, partyA),
+    );
+    // It does not reach this layer: the terms refuse it.
+    const refused = safeParseLinkageTerms({
+      version: "2.1.0",
+      date: "2025-06-01",
+      algorithm: "psi",
+      output: { expectsOutput: true, shareWithPartner: true },
+      deduplicate: false,
+      linkageFields: [
+        { name: "first_name", type: "first_name" },
+        { name: "last_name", type: "last_name" },
+      ],
+      linkageKeys: [differing],
+    });
+    expect(refused.success).toBe(false);
+    if (refused.success) return;
+    // Refused by THIS rule, not by some other gap in the document above.
+    expect(refused.error.issues.map((issue) => issue.message)).toContainEqual(
+      expect.stringMatching(/same transform/),
+    );
+  });
+
   test("an element transform that fans out contributes each part, not a join", () => {
     // The element-transform authoring surface fans out exactly as the field path
     // does -- one semantics and one width bound across both. Joining the parts
@@ -4854,7 +4939,12 @@ describe("buildKeyStrings", () => {
   // --- the receiver's swapped locators ---------------------------------------
   // A key declaring `swap` moves the two named elements' FIELDS on the receiver
   // and leaves their transforms in place, so the position that reads a column
-  // and the position that declares it are different ones there.
+  // and the position that declares it are different ones there. The fixtures
+  // below declare a transform on ONE position of the pair, which is what tells
+  // the two positions apart in a refusal's issue path; the terms schema binds an
+  // authored pair to one transform, so this is a locator fixture rather than an
+  // admissible document, and these cases hold this layer's attribution honest
+  // for whatever key it is handed.
 
   const swapKey = (transform?: LinkageKeyElement["transform"]) => ({
     name: "FN+LN swapped",
