@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { v4 as uuidv4 } from "uuid";
 
 import {
@@ -2578,6 +2578,32 @@ describe("FileSyncRendezvous bounded hello read", () => {
 // and on no other: the bounded window below, and the unconfirmed-hello fact the
 // connection exposes for attribution.
 
+// Puts Date.now under the test's own control, so a run's progress against its
+// peer budget is spent where the test spends it rather than on the wall clock.
+// The two boundary tests below turn on intervals narrower than a scheduler
+// stall -- a listing that crosses the budget, and the skew between two clock
+// readings -- which a real clock can only approximate by making them wide
+// enough to outrun the scheduler, at the cost of the time it takes to do so.
+// The caller restores the clock; nothing but its own advance() moves it while
+// installed, so every instant a test asserts is one it chose.
+function installVirtualClock(startMs: number): {
+  advance: (ms: number) => void;
+  restore: () => void;
+} {
+  let nowMs = startMs;
+  const spy = vi.spyOn(Date, "now").mockImplementation(() => nowMs);
+  return {
+    advance: (ms: number) => {
+      nowMs += ms;
+    },
+    restore: () => spy.mockRestore(),
+  };
+}
+
+// A fixed instant for the virtual clock to start from, so a failure reports the
+// same numbers on every run.
+const CLOCK_START_MS = 1_700_000_000_000;
+
 describe("FileSyncRendezvous entry-present peer hello window", () => {
   const flags = { locklessRendezvous: true, retainFiles: false };
   const LEFTOVER_ID = "2f1c9a04-3b7e-4f6a-9d21-88ca0e6b5477";
@@ -2724,63 +2750,77 @@ describe("FileSyncRendezvous entry-present peer hello window", () => {
   });
 
   // The floor rendezvousBoundMs puts under the window, and the boundary between
-  // the window and the peer budget it is weighed against, on a real clock.
+  // the window and the peer budget it is weighed against.
   //
   // A budget this small cannot hold a round trip at the shipped
   // joinerRecoveryMs, so the window must not fire at all: the run reports the
   // ordinary peer-wait timeout instead of naming a hello a live-but-slow partner
   // may own. Driving two real connections over a latency-asymmetric transport,
   // the unfloored window aborted such a partner in ~650 ms and prescribed
-  // removing its hello; the floor's removal drops the window to an eighth of
-  // this budget, 187 ms in, far inside the wait asserted below.
+  // removing its hello; dropping joinerRecoveryMs from the floor leaves an
+  // eighth of this budget, well inside the wait asserted below.
   //
   // Deriving the window from a clock reading of its own, rather than the one the
-  // deadline is measured from, would arm it a machine's worth of milliseconds
-  // short of the budget, and a poll landing in that sliver reports the leftover
-  // as residue for a budget that had simply run out. A sliver that narrow is
-  // unobservable on a real clock, so the skew below widens it: the first read of
-  // timeToLive after this party's hello is on disk -- the read any derivation of
-  // the remaining budget must make -- burns SKEW_MS of real time, so a second
-  // reading taken after it lands SKEW_MS late while a single reading is unmoved.
-  // The poll cadence is an order of magnitude finer than the skew, so a window
-  // armed that far inside the budget is hit by several polls before it expires.
+  // deadline is measured from, arms it whatever the machine spent between the
+  // two readings short of the budget, and a poll landing in that sliver reports
+  // the leftover as residue for a budget that had simply run out. The skew is
+  // what a second reading has to survive, so the clock spends it exactly where
+  // such a reading would take it: the first read of timeToLive after this
+  // party's hello is on disk -- the read any derivation of the remaining budget
+  // must make -- moves the clock SKEW_MS on, which a deadline measured from the
+  // caller's own sample never sees. The poll cadence is finer than the skew, so
+  // a window armed that far inside the budget is hit by several polls before it
+  // expires.
   test("does not fire on a budget too small to hold a round trip", async () => {
-    const BUDGET_MS = 1500;
-    const SKEW_MS = 300;
+    const BUDGET_MS = 300;
+    const SKEW_MS = 100;
+    const POLL_MS = 20;
     const files = new Map<string, Buffer>();
     placePeerHello(files, "zzz", flags);
-    const timeToLive = new Date(Date.now() + BUDGET_MS);
+    const timeToLive = new Date(CLOCK_START_MS + BUDGET_MS);
     const p = makeParty(
       "aaa",
-      { ...flags, timeToLive, pollingFrequency: 20 },
+      { ...flags, timeToLive, pollingFrequency: POLL_MS },
       files,
     );
 
-    let skewPending = false;
-    const rename = p.client.rename;
-    p.client.rename = async (from: string, to: string): Promise<void> => {
-      await rename(from, to);
-      if (to === `${DIR}/${helloName("aaa")}`) skewPending = true;
-    };
-    Object.defineProperty(p.options, "timeToLive", {
-      get: () => {
-        if (skewPending) {
-          skewPending = false;
-          const until = Date.now() + SKEW_MS;
-          while (Date.now() < until) {
-            // Busy-wait: the skew has to be real elapsed time inside what is a
-            // synchronous derivation, so nothing can be awaited here.
+    const clock = installVirtualClock(CLOCK_START_MS);
+    let err: unknown;
+    let ended = 0;
+    try {
+      // One cadence of the budget per poll, charged at the listing that opens
+      // it: the run's progress toward the peer timeout, and the only spending
+      // besides the skew below.
+      const list = p.client.list;
+      p.client.list = async (dir: string): Promise<FileInfo[]> => {
+        const entries = await list(dir);
+        clock.advance(POLL_MS);
+        return entries;
+      };
+      let skewPending = false;
+      const rename = p.client.rename;
+      p.client.rename = async (from: string, to: string): Promise<void> => {
+        await rename(from, to);
+        if (to === `${DIR}/${helloName("aaa")}`) skewPending = true;
+      };
+      Object.defineProperty(p.options, "timeToLive", {
+        get: () => {
+          if (skewPending) {
+            skewPending = false;
+            clock.advance(SKEW_MS);
           }
-        }
-        return timeToLive;
-      },
-    });
+          return timeToLive;
+        },
+      });
 
-    const err = await p.rdv.run(p.scope).then(
-      () => undefined,
-      (e: unknown) => e,
-    );
-    const ended = Date.now();
+      err = await p.rdv.run(p.scope).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      ended = Date.now();
+    } finally {
+      clock.restore();
+    }
 
     expect(isPeerWaitTimeout(err)).toBe(true);
     expect((err as Error).message).not.toContain("residue");
@@ -2788,6 +2828,64 @@ describe("FileSyncRendezvous entry-present peer hello window", () => {
     // inside it, and the floor extended nothing past it either.
     expect(ended).toBeGreaterThanOrEqual(timeToLive.getTime());
     expect(ended).toBeLessThan(timeToLive.getTime() + BUDGET_MS);
+    expect(files.has(`${DIR}/${helloName("zzz")}`)).toBe(true);
+  });
+
+  // The other half of that boundary: what a budget too small to arm the window
+  // reports when it runs out INSIDE a poll rather than between two.
+  //
+  // The poll interval is how often this party looks; it says nothing about how
+  // long the transport takes to answer (see rendezvousBoundMs), so a listing
+  // can be entered under the budget and returned over it. Leaving the window
+  // unarmed on a budget it does not fit inside is what decides the failure that
+  // poll reports: a deadline capped at the budget instead sits exactly at the
+  // budget's end, which this listing has already crossed, so the run attributes
+  // an exhausted budget to the partner's hello -- naming it as possible residue
+  // to an operator who is not there to read the difference.
+  test("reports the peer timeout when a poll's own listing crosses the budget", async () => {
+    const BUDGET_MS = 1000;
+    const LIST_MS = 200;
+    const files = new Map<string, Buffer>();
+    placePeerHello(files, "zzz", flags);
+    const timeToLive = new Date(CLOCK_START_MS + BUDGET_MS);
+    // The shipped joinerRecoveryMs floors the window above this budget, so
+    // nothing is armed and the peer timeout is the only failure available.
+    const p = makeParty(
+      "aaa",
+      { ...flags, timeToLive, pollingFrequency: 20 },
+      files,
+    );
+
+    const clock = installVirtualClock(CLOCK_START_MS);
+    let err: unknown;
+    let ended = 0;
+    try {
+      // A transport an order of magnitude slower to answer than this party is
+      // to ask, and the only spending of the budget, so it necessarily expires
+      // inside a listing rather than at the loop's own check.
+      const list = p.client.list;
+      p.client.list = async (dir: string): Promise<FileInfo[]> => {
+        const entries = await list(dir);
+        clock.advance(LIST_MS);
+        return entries;
+      };
+
+      err = await p.rdv.run(p.scope).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      ended = Date.now();
+    } finally {
+      clock.restore();
+    }
+
+    expect(isPeerWaitTimeout(err)).toBe(true);
+    expect((err as Error).message).toContain("synchronization has timed out");
+    expect((err as Error).message).not.toContain("residue");
+    // Ended within the listing that crossed the budget: the poll a deadline
+    // capped at the budget would have failed on instead.
+    expect(ended).toBeGreaterThan(timeToLive.getTime());
+    expect(ended - timeToLive.getTime()).toBeLessThanOrEqual(LIST_MS);
     expect(files.has(`${DIR}/${helloName("zzz")}`)).toBe(true);
   });
 
