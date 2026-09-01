@@ -559,12 +559,6 @@ export async function runProbe(
   // refused strip or write takes the whole run with it, rather than delivering
   // the password through a directory or a file that could not be secured.
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-doctor-"));
-  try {
-    stripExtendedAcls(workDir, { symlinks: "do-not-follow" });
-  } catch (err) {
-    fs.rmSync(workDir, { recursive: true, force: true });
-    throw err;
-  }
   const authFile = path.join(workDir, "auth");
   const lines = [
     `username=${input.username}`,
@@ -572,6 +566,7 @@ export async function runProbe(
     ...(input.domain === "" ? [] : [`domain=${input.domain}`]),
   ];
   try {
+    stripExtendedAcls(workDir, { symlinks: "do-not-follow" });
     writeFileOwnerOnly(authFile, `${lines.join("\n")}\n`);
   } catch (err) {
     fs.rmSync(workDir, { recursive: true, force: true });
