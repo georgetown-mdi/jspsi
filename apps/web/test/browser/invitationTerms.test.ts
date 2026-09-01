@@ -11,13 +11,21 @@ import {
   DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
   DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
   DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
+  DEFAULT_MAX_DISPLAY_LENGTH,
+  DISPLAY_TRUNCATION_MARKER,
   LINKAGE_RULE_SET_VERDICT_COPY,
+  MAX_NAME_LENGTH,
+  MAX_PAYLOAD_ENTRIES,
   UNRECOGNIZED_TRANSFORM_NOTE,
   getDefaultLinkageTerms,
   linkageRuleSetVerdictNote,
   sanitizeForDisplay,
 } from "@psilink/core";
 
+import {
+  MAX_DECLARED_NAMES_SHOWN,
+  unshownDeclaredNamesLine,
+} from "@components/declaredNameBound";
 import { InvitationTerms } from "@components/InvitationTerms";
 
 import {
@@ -2261,6 +2269,134 @@ describe("InvitationTerms: a declared-empty receive is surfaced, not collapsed w
     expect(panel.textContent).toContain("You request from your partner:");
     expect(panel.textContent).toContain("(none)");
     expect(panel.textContent).not.toContain("abort");
+  });
+});
+
+describe("InvitationTerms: the declared payload lists are bounded by count", () => {
+  // Both declared directions are the inviter's own text, bounded only by core's
+  // MAX_PAYLOAD_ENTRIES and by what each name escapes to at this sink. Painted one
+  // item per entry, that is roughly a megabyte of text behind the details disclosure
+  // on the one screen holding the consent decision -- usability denial rather than
+  // injection, the names being escaped -- so each list paints a fixed number of them
+  // and counts the rest.
+
+  // Ordinary content rather than an attack, and outside printable ASCII: U+00E9
+  // LATIN SMALL LETTER E WITH ACUTE is what a real declaration carries, and it
+  // escapes at this sink, so a name of them spends the whole display allowance.
+  // Written as an escape, never a raw byte, so a test about an invisible expansion
+  // is itself readable.
+  const NON_ASCII = "\u00E9";
+
+  // What the "Other details" panel may paint with both declarations flooded. An
+  // ABSOLUTE number, deliberately not derived from MAX_DECLARED_NAMES_SHOWN: a
+  // ceiling that scaled with the cap would hold at any cap, including none, which is
+  // the change this check exists to catch. It leaves roughly 1400 characters of
+  // headroom over what the panel measures with both directions flooded, so a copy
+  // edit to the blocks sharing the disclosure does not trip it, and stays over a
+  // hundred times under the megabyte the same declaration paints uncapped -- the
+  // difference between scrolling the disclosure and being unable to read past it.
+  const PANEL_CEILING = 8_000;
+
+  // The declaration at core's own ceiling, every name long enough to spend the whole
+  // escaped display allowance: the shape that decides whether the acceptor can still
+  // read the terms it is consenting to.
+  function flooded(prefix: string): Array<string> {
+    return Array.from(
+      { length: MAX_PAYLOAD_ENTRIES },
+      (_, index) => `${prefix}${index}-${NON_ASCII.repeat(MAX_NAME_LENGTH)}`,
+    );
+  }
+
+  // Plain fields carrying no declared constraints, so every <li> inside the panel
+  // comes from a payload list: the personal-data block renders a constrained field's
+  // constraints as their own bulleted list, which would otherwise be counted in.
+  const unconstrainedTerms: LinkageTerms = {
+    ...terms,
+    linkageFields: terms.linkageFields.map(({ name, type }) => ({
+      name,
+      type,
+    })),
+  };
+
+  test("paints at most MAX_DECLARED_NAMES_SHOWN names per direction and counts the rest", async () => {
+    const send = flooded("send");
+    const receive = flooded("receive");
+    // The premise, asserted rather than assumed: each of those names spends the
+    // whole per-value allowance at this sink and is cut at it, so what is measured
+    // below is the worst case and not a mild one.
+    const escaped = sanitizeForDisplay(send[0]);
+    expect(escaped.endsWith(DISPLAY_TRUNCATION_MARKER)).toBe(true);
+    expect(escaped.length).toBeGreaterThan(DEFAULT_MAX_DISPLAY_LENGTH);
+
+    renderTerms({
+      ...unconstrainedTerms,
+      payload: {
+        send: send.map((name) => ({ name })),
+        receive: receive.map((name) => ({ name })),
+      },
+    });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    const panel = await readyPanel("Other details");
+
+    // What the same declaration would paint uncapped, measured rather than asserted
+    // from the constants: the bound is only worth pinning against the size it
+    // replaces.
+    const uncappedSize = [...send, ...receive].reduce(
+      (total, name) => total + sanitizeForDisplay(name).length,
+      0,
+    );
+    expect(uncappedSize).toBeGreaterThan(1_000_000);
+
+    // Per list, not in total: each direction gets its own cap, so one flooded
+    // declaration cannot spend the other's allowance.
+    expect(panel.querySelectorAll("li")).toHaveLength(
+      2 * MAX_DECLARED_NAMES_SHOWN,
+    );
+    // Twice -- once per bounded direction -- and each stating the whole remainder,
+    // so neither list drops its tail silently.
+    const countLine = unshownDeclaredNamesLine(
+      MAX_PAYLOAD_ENTRIES - MAX_DECLARED_NAMES_SHOWN,
+    );
+    expect(panel.textContent.split(countLine)).toHaveLength(3);
+    expect(panel.textContent.length).toBeLessThanOrEqual(PANEL_CEILING);
+  });
+
+  test("states the whole declared magnitude in the core while the lists are bounded", async () => {
+    // What the cap costs is legibility of the tail, never the accuracy of what the
+    // acceptor is told: the always-visible direction counts are derived from the
+    // whole declared set, so a bounded list cannot understate an invitation.
+    renderTerms({
+      ...unconstrainedTerms,
+      payload: {
+        send: flooded("send").map((name) => ({ name })),
+        receive: flooded("receive").map((name) => ({ name })),
+      },
+    });
+    const disclose = group("What you disclose");
+    await expect.element(disclose).toBeInTheDocument();
+    expect(disclose.element().textContent).toContain(
+      `Your partner requests ${MAX_PAYLOAD_ENTRIES} data columns from you.`,
+    );
+    const receive = group("What you receive");
+    await expect.element(receive).toBeInTheDocument();
+    expect(receive.element().textContent).toContain(
+      `You will receive ${MAX_PAYLOAD_ENTRIES} data columns from your partner.`,
+    );
+  });
+
+  test("a declaration under the cap is painted entire, with no count line", async () => {
+    // The realistic shape the cap is sized for: a handful of columns, shown whole.
+    renderTerms({
+      ...unconstrainedTerms,
+      payload: {
+        send: [{ name: "risk_score" }, { name: "cohort" }],
+        receive: [{ name: "site_id" }],
+      },
+    });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    const panel = await readyPanel("Other details");
+    expect(panel.querySelectorAll("li")).toHaveLength(3);
+    expect(panel.textContent).not.toContain("more not shown here");
   });
 });
 

@@ -30,6 +30,11 @@ import {
   summarizeInvitation,
 } from "@psilink/core";
 
+import {
+  MAX_DECLARED_NAMES_SHOWN,
+  unshownDeclaredNamesLine,
+} from "@components/declaredNameBound";
+
 import { ColumnChips } from "@components/ColumnChips";
 
 import type { ReactNode, Ref } from "react";
@@ -155,6 +160,40 @@ function TermsTier({
 function OutboundSendCount({ count }: { count: number }) {
   return (
     <Text size="sm">You will send {dataColumns(count)} to your partner.</Text>
+  );
+}
+
+/**
+ * One of the invitation's declared payload directions as a list of column names,
+ * bounded by count: at most {@link MAX_DECLARED_NAMES_SHOWN} names are painted and
+ * the remainder is counted in the shared closing line. The declaration is the
+ * partner's, so an invitation at core's `MAX_PAYLOAD_ENTRIES` with every name at the
+ * escape's own cut would otherwise paint roughly a megabyte of text behind this
+ * screen's details disclosure -- the one screen holding the consent decision.
+ *
+ * Only what is PAINTED is capped. The direction counts stated always-visible in the
+ * core, and the count-only refusals guarding this render, are computed from the whole
+ * declared set, so a bounded list never understates how much the invitation declares.
+ *
+ * Keyed by index: column order is fixed for a decoded invitation and a sanitized name
+ * is not unique. One column per item rather than a joined string -- a
+ * partner-controlled name may contain the separator, which joined text would render
+ * as spurious extra columns.
+ */
+function DeclaredColumnList({ columns }: { columns: Array<string> }) {
+  const shown = columns.slice(0, MAX_DECLARED_NAMES_SHOWN);
+  const unshownCount = columns.length - shown.length;
+  return (
+    <>
+      <List size="sm" withPadding listStyleType="circle">
+        {shown.map((column, index) => (
+          <List.Item key={index}>{column}</List.Item>
+        ))}
+      </List>
+      {unshownCount > 0 && (
+        <Text size="sm">{unshownDeclaredNamesLine(unshownCount)}</Text>
+      )}
+    </>
   );
 }
 
@@ -1684,16 +1723,7 @@ export function InvitationTerms({
                       <Stack gap={2}>
                         <Text size="sm">Your partner will send:</Text>
                         {summary.payload.send.length > 0 ? (
-                          // One column per item rather than a joined string: a
-                          // partner-controlled column name may contain the separator,
-                          // which joined text would render as spurious extra columns.
-                          // Keyed by index -- column order is fixed and a sanitized
-                          // name is not unique.
-                          <List size="sm" withPadding listStyleType="circle">
-                            {summary.payload.send.map((column, index) => (
-                              <List.Item key={index}>{column}</List.Item>
-                            ))}
-                          </List>
+                          <DeclaredColumnList columns={summary.payload.send} />
                         ) : (
                           <Text size="sm" c="dimmed">
                             (none)
@@ -1715,11 +1745,7 @@ export function InvitationTerms({
                           : "Your partner requests from you:"}
                       </Text>
                       {summary.payload.receive.length > 0 ? (
-                        <List size="sm" withPadding listStyleType="circle">
-                          {summary.payload.receive.map((column, index) => (
-                            <List.Item key={index}>{column}</List.Item>
-                          ))}
-                        </List>
+                        <DeclaredColumnList columns={summary.payload.receive} />
                       ) : (
                         <Text size="sm" c="dimmed">
                           (none)

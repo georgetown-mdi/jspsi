@@ -19,14 +19,14 @@ import {
 } from "@psilink/core";
 
 import {
-  AcceptorColumnsStep,
-  MAX_DECLARED_NAMES_SHOWN,
-} from "@bench/AcceptorColumnsStep";
-import {
   acceptorColumnsEditorState,
   acceptorInitialColumnsState,
   acceptorVerdict,
 } from "@bench/acceptorColumnsModel";
+
+import { AcceptorColumnsStep } from "@bench/AcceptorColumnsStep";
+
+import { MAX_DECLARED_NAMES_SHOWN } from "@components/declaredNameBound";
 
 // The grid labels its controls through this helper, so a query for one derives the
 // expected label from it rather than restating the isolate as literal characters.
