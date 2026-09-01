@@ -420,7 +420,7 @@ export function explainPeerIdentificationFailure(
             `identifies itself late, reads this way too.`,
           READ_PROVENANCE,
           endpointDetail,
-          `first bytes the peer sent, private-key material stripped: ${answer.excerpt}`,
+          `first bytes the peer sent; PEM private-key blocks replaced: ${answer.excerpt}`,
         ],
         error,
       ),

@@ -440,7 +440,7 @@ describe("explainPeerIdentificationFailure partitions the peer's bytes", () => {
     ).split("\ncaused by: ");
     expect(links[0]).toContain("an HTTP response");
     expect(links).toContain(
-      "first bytes the peer sent, private-key material stripped: HTTP/1.0 403 Forbidden",
+      "first bytes the peer sent; PEM private-key blocks replaced: HTTP/1.0 403 Forbidden",
     );
     expect(
       links.some((link) => link.startsWith("Check that the configured")),
@@ -483,7 +483,7 @@ describe("explainPeerIdentificationFailure partitions the peer's bytes", () => {
       );
       const peerLink = links.find((link) =>
         link.startsWith(
-          "first bytes the peer sent, private-key material stripped:",
+          "first bytes the peer sent; PEM private-key blocks replaced:",
         ),
       );
       expect(peerLink).toBeDefined();
