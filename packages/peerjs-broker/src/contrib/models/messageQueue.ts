@@ -12,6 +12,17 @@ import type { IMessage } from "./message.ts";
 export interface SerializedFrame {
   readonly message: IMessage;
   readonly byteSize: number;
+  /**
+   * Which form the payload was held in, so delivery returns the one the sender
+   * sent: `"json"` for a structure held as its JSON text, `"string"` for a
+   * payload that was already a string and is held verbatim. A string payload is
+   * deliberately not JSON-quoted -- the two quote characters are residency the
+   * frame never carried on the wire, and the largest wire-legal frame between
+   * two rendezvous ids accounts to within two bytes of `MAX_QUEUE_BYTES`, so
+   * quoting alone would make it unholdable and break the property that any
+   * single legal frame can be held.
+   */
+  readonly payloadKind: "string" | "json";
 }
 
 /**
@@ -45,14 +56,21 @@ function frameByteSize(message: IMessage): number {
  * protocol fields survive, so an extra property hung off a peer's frame is
  * neither retained nor uncounted.
  *
+ * A payload that is already a string is held as it arrived rather than quoted,
+ * so its accounted residency is the residency it had on the wire; the kind is
+ * recorded on the frame and delivery reconstitutes accordingly.
+ *
  * `Buffer.byteLength` throws on a non-string `type`, `src`, or `dst`, and a
  * payload with no JSON form is refused rather than sized zero; either way the
  * frame is dropped before it can be queued or key a queue of its own, and the
  * throw surfaces as a `frame-dispatch` diagnostic.
  */
 export function serializeFrame(message: IMessage): SerializedFrame {
+  const payloadKind = typeof message.payload === "string" ? "string" : "json";
   const payload =
-    message.payload === undefined ? undefined : JSON.stringify(message.payload);
+    message.payload === undefined || payloadKind === "string"
+      ? message.payload
+      : JSON.stringify(message.payload);
 
   if (payload === undefined && message.payload !== undefined) {
     throw new TypeError("signaling payload has no serialized form");
@@ -65,20 +83,29 @@ export function serializeFrame(message: IMessage): SerializedFrame {
     payload,
   };
 
-  return { message: serialized, byteSize: frameByteSize(serialized) };
+  return {
+    message: serialized,
+    byteSize: frameByteSize(serialized),
+    payloadKind,
+  };
 }
 
 /**
- * The delivery form of a held frame: the payload parsed back out of the string
- * the queue holds, so a peer draining a queue receives what a directly relayed
- * frame would have carried (the transmission handler serializes whatever it is
- * handed). The parse reads this server's own serialization of a value it
- * already parsed off the wire, so it re-admits no structure the receive path
- * did not already accept. `IMessage` types `payload` as a string, which a
- * structured signaling payload has never been.
+ * The delivery form of a held frame: a structured payload parsed back out of
+ * the string the queue holds, so a peer draining a queue receives what a
+ * directly relayed frame would have carried (the transmission handler
+ * serializes whatever it is handed). The parse reads this server's own
+ * serialization of a value it already parsed off the wire, so it re-admits no
+ * structure the receive path did not already accept. A payload held verbatim
+ * because it arrived as a string is returned as it is, unparsed. `IMessage`
+ * types `payload` as a string, which a structured signaling payload has never
+ * been.
  */
-function reconstituteFrame({ message }: SerializedFrame): IMessage {
-  if (message.payload === undefined) return message;
+function reconstituteFrame({
+  message,
+  payloadKind,
+}: SerializedFrame): IMessage {
+  if (message.payload === undefined || payloadKind === "string") return message;
 
   return {
     ...message,

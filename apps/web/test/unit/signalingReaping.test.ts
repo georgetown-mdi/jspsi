@@ -14,6 +14,7 @@ import { MAX_SIGNALING_PAYLOAD_BYTES } from "@psilink/peerjs-broker/services/web
 import { MessageType } from "@psilink/peerjs-broker/enums";
 import { PEER_PING_INTERVAL_MS } from "@psi/rendezvous";
 import defaultConfig from "@psilink/peerjs-broker/config/index";
+import { deriveRendezvousPeerId } from "@psilink/core";
 import { serializeFrame } from "@psilink/peerjs-broker/models/messageQueue";
 
 import type { IMessage } from "@psilink/peerjs-broker/models/message";
@@ -240,8 +241,8 @@ describe("relay message-queue bounds", () => {
     // have the same heap residency. The accounting must size them identically;
     // a UTF-8 measure would call the ASCII one half the size and let a wide
     // payload occupy ~2x the cap while measuring under it. Both are sized at
-    // the serialized form the queue holds, so each carries the two quotes
-    // `JSON.stringify` puts around a string payload.
+    // the form the queue holds, which for a payload that arrived as a string is
+    // that string itself.
     const base = { type: MessageType.OFFER, src: "s", dst: "d" } as const;
     const ascii: IMessage = {
       ...base,
@@ -253,7 +254,7 @@ describe("relay message-queue bounds", () => {
     };
     expect(accountedBytes(ascii)).toBe(accountedBytes(wide));
     expect(accountedBytes(wide)).toBe(
-      2 * ("OFFER".length + "s".length + "d".length + FRAME_PAYLOAD_CHARS + 2),
+      2 * ("OFFER".length + "s".length + "d".length + FRAME_PAYLOAD_CHARS),
     );
 
     // And the queue enforces the cap against a wide-payload spray just the same.
@@ -354,10 +355,9 @@ describe("relay message-queue bounds", () => {
     // arriving as an object buys no extra room in the queue.
     const payload = densePayload(NEAR_WIRE_CAP_CHARS);
     const serialized = JSON.stringify(payload);
-    // JSON.stringify puts two quotes around a string payload, so this string is
-    // held at exactly the object's serialized length.
-    const equivalentString = "x".repeat(serialized.length - 2);
-    expect(JSON.stringify(equivalentString).length).toBe(serialized.length);
+    // A payload that arrives as a string is held as it arrived, so a string of
+    // the object's serialized length occupies exactly the object's residency.
+    const equivalentString = "x".repeat(serialized.length);
 
     const fill = (payloadValue: unknown): Realm => {
       const realm = new Realm();
@@ -402,6 +402,108 @@ describe("relay message-queue bounds", () => {
     expect(queue.byteSize()).toBeGreaterThan(
       MAX_QUEUE_BYTES - accountedBytes(bigObjectOfferTo("dst")),
     );
+  });
+
+  test("holds the largest wire-legal frame addressed between rendezvous ids", async () => {
+    // MAX_QUEUE_BYTES is twice the wire cap so that any single legal frame can
+    // always be held, but at the extreme that headroom is two bytes wide: a
+    // frame charged for a byte it never carried on the wire spends it and is
+    // refused. The worst case is the biggest frame a peer can actually put on
+    // the socket -- the sender omits `src`, which the server stamps for it, so
+    // every byte saved there becomes payload -- addressed between the two ids
+    // psilink derives for a rendezvous.
+    const secret = Buffer.alloc(32, 1).toString("base64url");
+    const inviterId = await deriveRendezvousPeerId(secret, "inviter");
+    const acceptorId = await deriveRendezvousPeerId(secret, "acceptor");
+
+    const envelopeChars = JSON.stringify({
+      type: MessageType.OFFER,
+      dst: inviterId,
+      payload: "",
+    }).length;
+    const payload = "x".repeat(MAX_SIGNALING_PAYLOAD_BYTES - envelopeChars);
+    // Wire-legal to the byte: one more payload character and `ws` refuses the
+    // frame at `maxPayload` before the relay ever sees it.
+    expect(
+      Buffer.byteLength(
+        JSON.stringify({
+          type: MessageType.OFFER,
+          dst: inviterId,
+          payload,
+        }),
+        "utf8",
+      ),
+    ).toBe(MAX_SIGNALING_PAYLOAD_BYTES);
+
+    const realm = new Realm();
+    realm.addMessageToQueue(inviterId, {
+      type: MessageType.OFFER,
+      src: acceptorId,
+      dst: inviterId,
+      payload,
+    });
+    const queue = realm.getMessageQueueById(inviterId);
+    expect(queue?.size()).toBe(1);
+
+    // Held as it arrived, and accounted at exactly the strings held -- nothing
+    // added on the way in, so the accounting stays under the cap.
+    const [held] = queue!.getMessages();
+    expect(held.message.payload).toBe(payload);
+    expect(held.byteSize).toBe(
+      2 *
+        (MessageType.OFFER.length +
+          acceptorId.length +
+          inviterId.length +
+          payload.length),
+    );
+    expect(held.byteSize).toBeLessThanOrEqual(MAX_QUEUE_BYTES);
+    expect(queue!.byteSize()).toBe(held.byteSize);
+    expect(queue!.readMessage()?.payload).toBe(payload);
+  });
+
+  test("drops a frame's extra top-level properties rather than holding them", () => {
+    // Only the four protocol fields are held, so a property a peer hangs off
+    // its frame rides neither into the queue's retained bytes nor past them
+    // uncounted -- and the peer that drains the hold is handed the same four
+    // fields a directly relayed frame would have carried.
+    const payload = { sdp: "v=0\r\na=group:BUNDLE 0\r\n" };
+    const offer = {
+      type: MessageType.OFFER,
+      src: "s",
+      dst: "d",
+      payload,
+      extra: "x".repeat(4096),
+      nonce: { deep: ["y".repeat(4096)] },
+    } as unknown as IMessage;
+
+    const realm = new Realm();
+    realm.addMessageToQueue("d", offer);
+    const queue = realm.getMessageQueueById("d")!;
+
+    const [held] = queue.getMessages();
+    expect(Object.keys(held.message).sort()).toEqual([
+      "dst",
+      "payload",
+      "src",
+      "type",
+    ]);
+    expect(held.byteSize).toBe(
+      2 *
+        ("OFFER".length +
+          "s".length +
+          "d".length +
+          JSON.stringify(payload).length),
+    );
+    expect(queue.byteSize()).toBe(held.byteSize);
+
+    const delivered = queue.readMessage()!;
+    expect(Object.keys(delivered).sort()).toEqual([
+      "dst",
+      "payload",
+      "src",
+      "type",
+    ]);
+    expect(delivered.payload).toEqual(payload);
   });
 
   test("rejects a frame with a non-string id field before it is queued", () => {
