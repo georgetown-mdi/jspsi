@@ -56,7 +56,10 @@ import {
   linkageTermsFromRuleSet,
 } from "../src/defaults/linkageTerms";
 import { getDefaultStandardization } from "../src/defaults/standardization";
-import { MAX_TRANSFORM_PARAM_LENGTH } from "../src/config/linkageTerms";
+import {
+  MAX_KEY_ELEMENTS,
+  MAX_TRANSFORM_PARAM_LENGTH,
+} from "../src/config/linkageTerms";
 import type {
   LinkageField,
   LinkageKey,
@@ -4649,6 +4652,133 @@ describe("buildKeyStrings", () => {
         { function: "split_on", params: { delimiter: "," } },
       ]),
     ).toBeInstanceOf(Set);
+  });
+
+  test("every function that can expand a value is classified as expanding", () => {
+    // The converse of the drift test above, and the direction that carries the
+    // classification's guarantee: a function able to return several candidates
+    // for one value, left out of the classification, leaves the keys it feeds
+    // classified as producing no multiplicity, and the runtime backstop catches
+    // that only where the expansion lands before the row's crossing.
+    //
+    // One step per name core admits, with params that let the function do its
+    // job, driven alone over values chosen so a function able to expand one
+    // value into several does so for at least one of them. Every name carries
+    // an entry, including the functions taking no params, so a function added
+    // to the registry is given probe params here rather than driven paramless
+    // past the witness below.
+    const PROBE_PARAMS: Record<string, Record<string, unknown> | undefined> = {
+      remove_non_ascii: undefined,
+      replace_separators_with_spaces: undefined,
+      squash_spaces: undefined,
+      remove_punctuation: undefined,
+      remove_dashes: undefined,
+      trim_whitespace: undefined,
+      to_upper_case: undefined,
+      to_lower_case: undefined,
+      remove_accents: undefined,
+      remove_affixes: undefined,
+      substring: { start: 1, length: 3 },
+      parse_date: { inputFormat: "MM/DD/YYYY", outputFormat: "YYYYMMDD" },
+      pad_left: { length: 9 },
+      phonetic: { algorithm: "soundex" },
+      null_if: { values: ["EXCLUDED"] },
+      replace_regex: { pattern: "[A-Z]+", replacement: "" },
+      extract_regex: { pattern: "([0-9]+)" },
+      filter_regex: { pattern: "^[0-9]+$" },
+      split_on: { delimiter: "[ ,-]" },
+      coalesce: { default: "ZZZ_FALLBACK" },
+    };
+    const PROBE_VALUES = [
+      "SMITH",
+      "SMITH,JONES",
+      "Ana-Maria",
+      "a b",
+      "12/31/1999",
+      "EXCLUDED",
+      "123 456",
+      "",
+    ];
+    expect([...STANDARDIZATION_FUNCTION_NAMES].sort()).toEqual(
+      Object.keys(PROBE_PARAMS).sort(),
+    );
+    // A step that returned several candidates for ONE input value is the
+    // producer of that multiplicity -- the same reading the run charges a
+    // producer by. Exact in this direction, since a witness proves the function
+    // can expand; the absence of one proves nothing, so a function this corpus
+    // never expands is not held to the classification's other side.
+    const expanding = STANDARDIZATION_FUNCTION_NAMES.filter((fn) => {
+      const params = PROBE_PARAMS[fn];
+      const step =
+        params === undefined ? { function: fn } : { function: fn, params };
+      return PROBE_VALUES.some((value) => {
+        const result = runPipeline(value, [step]);
+        return result instanceof Set && result.size > 1;
+      });
+    });
+    expect(
+      expanding.length,
+      "the corpus witnesses no expansion",
+    ).toBeGreaterThan(0);
+    for (const fn of expanding)
+      expect(canProduceMultipleValues(fn), fn).toBe(true);
+  });
+
+  test("the widest key no producer can expand assembles rather than crossing", () => {
+    // The no-producer arm of the accumulation classification is a fail-closed
+    // default rather than a fate a row reaches (docs/spec/CHANNEL_SECURITY.md):
+    // nothing expands a value there, so what holds such a key is the per-value
+    // ceiling on each element it carries, and the most one row can accumulate
+    // under it is that ceiling once per element -- at most MAX_KEY_ELEMENTS of
+    // them, which is where the terms schema bounds a key. Driven rather than
+    // computed, so an edit to the ceiling or to the row's key-string cap, both
+    // module-private, moves this row instead of leaving it pinned to a stale
+    // arithmetic identity.
+    const carriesValueOfLength = (length: number): boolean => {
+      try {
+        buildKeyStrings(
+          { name: "LN", elements: [{ field: "last_name" }] },
+          makeDataset({ last_name: "A".repeat(length) }),
+          0,
+          false,
+          1,
+        );
+        return true;
+      } catch (err) {
+        if (!(err instanceof UsageError)) throw err;
+        return false;
+      }
+    };
+    // The bracket is asserted rather than assumed: a ceiling outside it fails
+    // here rather than being silently mis-measured.
+    let largestCarried = 1;
+    let smallestRefused = 1 << 20;
+    expect(carriesValueOfLength(largestCarried)).toBe(true);
+    expect(carriesValueOfLength(smallestRefused)).toBe(false);
+    while (smallestRefused - largestCarried > 1) {
+      const middle = Math.floor((largestCarried + smallestRefused) / 2);
+      if (carriesValueOfLength(middle)) largestCarried = middle;
+      else smallestRefused = middle;
+    }
+
+    const assembled = [
+      ...(buildKeyStrings(
+        {
+          name: "every element at the ceiling",
+          elements: Array.from({ length: MAX_KEY_ELEMENTS }, () => ({
+            field: "last_name",
+          })),
+        },
+        makeDataset({ last_name: "A".repeat(largestCarried) }),
+        0,
+        false,
+        1,
+      ) ?? []),
+    ];
+    // One key string carrying every element's whole value: the row was neither
+    // refused, which is the fate a crossing takes for such a key, nor dropped.
+    expect(assembled).toHaveLength(1);
+    expect(assembled[0]).toHaveLength(MAX_KEY_ELEMENTS * largestCarried);
   });
 
   test("the accumulation drop signal reaches no caller", () => {
