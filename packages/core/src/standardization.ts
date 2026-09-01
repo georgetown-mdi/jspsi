@@ -2271,12 +2271,17 @@ class AccumulatedCandidatesDrop extends Error {
  */
 export const MAX_DROP_LINES_PER_KEY_ROUND = 5;
 
-// What one key round has dropped: the rows it reported in full, and every row it
-// dropped. One tally per ROUND rather than per key, so a sender and a receiver
+// What one key round has dropped: every row it dropped, how many of those it
+// named in a line of their own, and the dropped total its last closing line
+// carried. The last two are separate notions -- the individual-line allowance
+// stops at MAX_DROP_LINES_PER_KEY_ROUND while the watermark follows the total --
+// so a round closed twice states each further drop once and against the right
+// number. One tally per ROUND rather than per key, so a sender and a receiver
 // reading the same key object in one process keep their counts apart.
 interface KeyRoundDropTally {
-  reported: number;
   dropped: number;
+  reportedIndividually: number;
+  summarizedThrough: number;
 }
 
 // A record whose candidate set for one key is too wide contributes nothing to
@@ -2290,8 +2295,8 @@ function dropRowFromKeyRound(
   reason: string,
 ): null {
   tally.dropped += 1;
-  if (tally.reported < MAX_DROP_LINES_PER_KEY_ROUND) {
-    tally.reported += 1;
+  if (tally.reportedIndividually < MAX_DROP_LINES_PER_KEY_ROUND) {
+    tally.reportedIndividually += 1;
     logger.warn(
       `row ${index}, key "${redactAndSanitizeForDisplay(key.name)}": ` +
         `${reason}, so the record contributes no value to this key's round ` +
@@ -2301,26 +2306,40 @@ function dropRowFromKeyRound(
   return null;
 }
 
-// The round's closing line for the rows its sink counted but did not report, on
-// the same logger and level those lines use. It names counts and the key alone,
-// as they do. Advancing `reported` to the total makes it idempotent -- a second
-// call has nothing left to state -- so a caller may close a round it has already
-// closed, and a round that goes on dropping after its close summarizes only the
-// rows the earlier line did not cover.
+// The round's closing line for the rows its sink counted but neither named
+// individually nor already summarized, on the same logger and level those lines
+// use. It names counts and the key alone, as they do. Advancing the watermark to
+// the dropped total makes it idempotent -- a second call has nothing left to
+// state -- so a caller may close a round it has already closed. A round that goes
+// on dropping past a close covers the further rows at its next one, worded as a
+// count against that earlier line's total rather than against the exhausted
+// individual-line allowance, which only the first summary is measured from.
 function summarizeKeyRoundDrops(
   key: LinkageKey,
   tally: KeyRoundDropTally,
 ): void {
-  if (tally.dropped <= tally.reported) return;
-  const unreported = tally.dropped - tally.reported;
-  tally.reported = tally.dropped;
-  logger.warn(
-    `key "${redactAndSanitizeForDisplay(key.name)}": ${tally.dropped} rows ` +
-      `dropped from this key's round, ${unreported} of them beyond the ` +
-      `${MAX_DROP_LINES_PER_KEY_ROUND} reported individually; each ` +
-      "contributes no value to this key's round and remains eligible for " +
-      "later keys",
-  );
+  const covered = Math.max(tally.reportedIndividually, tally.summarizedThrough);
+  if (tally.dropped <= covered) return;
+  const summarizedThroughBefore = tally.summarizedThrough;
+  tally.summarizedThrough = tally.dropped;
+  const escapedName = redactAndSanitizeForDisplay(key.name);
+  const eligibility =
+    "; each contributes no value to this key's round and remains eligible " +
+    "for later keys";
+  if (summarizedThroughBefore === 0)
+    logger.warn(
+      `key "${escapedName}": ${tally.dropped} rows dropped from this key's ` +
+        `round, ${tally.dropped - tally.reportedIndividually} of them beyond ` +
+        `the ${MAX_DROP_LINES_PER_KEY_ROUND} reported individually` +
+        eligibility,
+    );
+  else
+    logger.warn(
+      `key "${escapedName}": ${tally.dropped - summarizedThroughBefore} ` +
+        "further rows dropped from this key's round since its last summary, " +
+        `${tally.dropped} in total` +
+        eligibility,
+    );
 }
 
 /**
@@ -2357,7 +2376,7 @@ function planKeyRead(
     elements,
     pair,
     fate: keyAccumulationFate(elements, dataset),
-    drops: { reported: 0, dropped: 0 },
+    drops: { dropped: 0, reportedIndividually: 0, summarizedThrough: 0 },
   };
 }
 
@@ -2751,10 +2770,12 @@ export class StandardizedKeyIterable {
   }
 
   /**
-   * Close the round's drop reporting, emitting the one summary line that covers
-   * the rows dropped past the {@link MAX_DROP_LINES_PER_KEY_ROUND} reported in
-   * full. Silent for a round that dropped nothing, or few enough to have
-   * reported every one, and idempotent.
+   * Close the round's drop reporting, emitting one summary line for the rows
+   * dropped past the {@link MAX_DROP_LINES_PER_KEY_ROUND} reported in full.
+   * Silent for a round that dropped nothing, or few enough to have reported
+   * every one, and idempotent. A round read on past a close covers the rows it
+   * drops after it at its next close, counted against the total that line
+   * carried.
    *
    * The consumer calls it: a round is read by index as well as by iteration
    * (the cascade reads only the rows still unmatched after the previous key), so

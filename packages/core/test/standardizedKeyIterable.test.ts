@@ -344,6 +344,34 @@ describe("StandardizedKeyIterable — drop reporting over a whole round", () => 
     expect(warn).toHaveBeenCalledTimes(MAX_DROP_LINES_PER_KEY_ROUND + 1);
   });
 
+  test("a round closed again after further drops counts them as a delta", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const iter = new StandardizedKeyIterable(key, wideDataset(), rowCount);
+    const firstBatch = MAX_DROP_LINES_PER_KEY_ROUND * 2;
+    for (let row = 0; row < firstBatch; row++) iter.at(row);
+    iter.summarizeDroppedRows();
+    for (let row = firstBatch; row < rowCount; row++) iter.at(row);
+    iter.summarizeDroppedRows();
+
+    const summaries = warn.mock.calls
+      .map((call) => call[0] as string)
+      .filter((message) => message.includes("dropped from this key's round"));
+    expect(summaries).toHaveLength(2);
+    expect(summaries[0]).toContain(`${firstBatch} rows dropped`);
+    expect(summaries[0]).toContain(
+      `${firstBatch - MAX_DROP_LINES_PER_KEY_ROUND} of them beyond the ` +
+        `${MAX_DROP_LINES_PER_KEY_ROUND} reported individually`,
+    );
+    // The allowance was spent before the second batch, so the second line
+    // counts its rows against the total the first one carried. Measuring the
+    // rows it stands for against the allowance instead would pair a delta with
+    // a clause only the first close can satisfy -- a round dropping 15 behind 5
+    // individual lines would state 5 of them beyond those 5, not 10.
+    expect(summaries[1]).toContain(`${rowCount - firstBatch} further rows`);
+    expect(summaries[1]).toContain(`${rowCount} in total`);
+    expect(summaries[1]).not.toContain("reported individually");
+  });
+
   test("a round under the allowance closes with no summary at all", () => {
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
     const iter = new StandardizedKeyIterable(key, wideDataset(), rowCount);
