@@ -637,12 +637,26 @@ export async function handler(argv: Arguments): Promise<void> {
     let prepared: PreparedExchange;
     try {
       connection = createConnection(server, options);
+      // The quick path asks nothing and requires nothing: `--identity` rides
+      // into the terms when it names this party, and the terms carry none when
+      // it does not. A blank value is what a scripted `--identity "$ORG"` sends
+      // with ORG unset, so it reads as absent rather than as an empty label.
+      prepared = await prepareDataset(
+        optionalIdentity(options.identity),
+        input,
+        linkageStrategy,
+      );
       // Establish first-use SSH host-key trust on the ORIGINAL `connection`
       // (before the clone below), so the pin reaches both the live connect and,
       // under --save, the persisted config (finalizeBootstrap saves this same
       // object). A pinned connection is a no-op; an unpinned one prompts on a TTY
       // and fails closed otherwise. With --save the pin is saved with the config;
-      // without it the key is trusted for this one-off exchange only.
+      // without it the key is trusted for this one-off exchange only. It follows
+      // the preparation above because the first-use probe opens a real transport
+      // to the server, while every refusal the preparation can raise -- an
+      // unreadable or unparsable CSV, a dataset core refuses to prepare -- is
+      // decided from this party's own input alone; deciding those first is what
+      // keeps a refused run from connecting.
       await establishHostKeyTrust(connection, {
         verbosity,
         loggerName: "psilink",
@@ -655,15 +669,6 @@ export async function handler(argv: Arguments): Promise<void> {
       // the exchange itself. A missing or unreadable `@path` file is a UsageError
       // here (exit 64), before any credential is sent.
       liveConnection = resolveConnectionCredentials(connection);
-      // The quick path asks nothing and requires nothing: `--identity` rides
-      // into the terms when it names this party, and the terms carry none when
-      // it does not. A blank value is what a scripted `--identity "$ORG"` sends
-      // with ORG unset, so it reads as absent rather than as an empty label.
-      prepared = await prepareDataset(
-        optionalIdentity(options.identity),
-        input,
-        linkageStrategy,
-      );
     } catch (err) {
       // A bad URL scheme or unsupported channel is a usage error (exit 64);
       // prepareDataset failures carry their own exitCode; otherwise exit 69.

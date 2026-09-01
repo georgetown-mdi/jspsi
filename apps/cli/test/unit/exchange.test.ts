@@ -15,7 +15,10 @@ import {
 } from "@psilink/core";
 import type { InvitationToken, LinkageTerms } from "@psilink/core";
 import { loadKeyFile, saveKeyFile } from "../../src/keyFile";
-import { saveSigningIdentity } from "../../src/signingIdentityFile";
+import {
+  loadSigningIdentity,
+  saveSigningIdentity,
+} from "../../src/signingIdentityFile";
 import { runProtocol } from "../../src/protocol";
 import { PERSISTENCE_LOSS_EXIT_CODE } from "../../src/eventStream";
 import { establishHostKeyTrust } from "../../src/hostKeyTrust";
@@ -84,6 +87,15 @@ vi.mock("../../src/protocol", () => ({ runProtocol: vi.fn() }));
 // drives; stub it so that test reaches the runProtocol hand-off without probing
 // sftp.example.org (hostKeyTrust.test.ts covers the real flow).
 vi.mock("../../src/hostKeyTrust", () => ({ establishHostKeyTrust: vi.fn() }));
+
+// The signing-identity load is spy-WRAPPED for the same reason: the ordering
+// test below needs to observe when the handler reaches it, while every test that
+// seeds an identity file keeps loading the real one.
+vi.mock("../../src/signingIdentityFile", async (importActual) => {
+  const actual =
+    await importActual<typeof import("../../src/signingIdentityFile")>();
+  return { ...actual, loadSigningIdentity: vi.fn(actual.loadSigningIdentity) };
+});
 
 // The outbound-consent surface is spy-WRAPPED rather than replaced: the ordering
 // test below needs to observe when the handler reaches it, while the
@@ -1829,12 +1841,13 @@ test("handler: an unnamed party that signs nothing runs unchanged", async () => 
 // --- handler: the local preparation precedes host-key trust -----------------
 // An exchange refused from local inputs alone must not have connected to the
 // server first, and on an unpinned sftp config the first-use host-key step is
-// what would connect: its probe opens a real transport. So the preparation that
-// carries those refusals -- the linkage-satisfiability gate and the
-// outbound-consent surface -- runs ahead of that step, and the checks below hold
-// that order rather than the comments beside either. A refusal the parsed
-// configuration alone decides, a certificate-mode run naming no signing
-// identity, runs ahead of the preparation in turn. All of them stub
+// what would connect: its probe opens a real transport. So both steps that
+// carry those refusals -- the preparation, with its linkage-satisfiability gate
+// and outbound-consent surface, and the signing resolution, whose identity file
+// can be missing or bound to another party -- run ahead of that step, and the
+// checks below hold that order rather than the comments beside any of them. A
+// refusal the parsed configuration alone decides, a certificate-mode run naming
+// no signing identity, runs ahead of both in turn. All of them stub
 // establishHostKeyTrust (as the whole file does), so what they pin is the order
 // of the STEPS; that the probe is what the host-key one opens is
 // hostKeyTrust.test.ts's.
@@ -1973,6 +1986,111 @@ test("handler: certificate mode naming no identity file is refused before either
     expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
     expect(fs.readFileSync(configFile, "utf8")).toBe(configBytes);
     expect(fs.statSync(configFile).mtimeMs).toBe(configMtimeMs);
+  } finally {
+    exitSpy.mockRestore();
+  }
+});
+
+/** Write the unpinned sftp config, key file, and CSV the two signing-ordering
+ * checks drive the handler over: a certificate-mode block naming `identityFile`
+ * and pinning a partner, so the identity file is the only thing either check
+ * varies. */
+function writeSigningExchangeInputs(identityFile: string): string {
+  fs.writeFileSync(
+    configFile,
+    YAML.stringify({
+      ...minimalSFTPConfig,
+      signing: {
+        mode: "certificate",
+        identityFile,
+        partnerFingerprint: PARTNER_FINGERPRINT,
+      },
+    }),
+  );
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  const input = path.join(dir, "in.csv");
+  fs.writeFileSync(input, "ssn\n123456789\n");
+  return input;
+}
+
+test("handler: the signing identity resolves before host-key trust", async () => {
+  // Both refusals the resolution carries -- an identity file that is not there
+  // or will not parse, and one bound to a party other than this run's terms
+  // identity -- read this party's own configuration and its own file, so they
+  // are settled before the step that connects. The identity seeded here loads
+  // and is bound to the terms identity, so both steps run and what is measured
+  // is their order.
+  const input = writeSigningExchangeInputs(
+    await seedSigningIdentity("Test Party"),
+  );
+
+  vi.mocked(loadSigningIdentity).mockClear();
+  vi.mocked(establishHostKeyTrust).mockClear();
+  vi.mocked(runProtocol).mockReset();
+  vi.mocked(runProtocol).mockResolvedValueOnce({});
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    await handler({
+      _: [],
+      $0: "psilink",
+      input,
+      "config-file": configFile,
+      "key-file": keyFile,
+      "log-level": "silent",
+    } as unknown as Arguments);
+    expect(exitSpy).not.toHaveBeenCalled();
+    // Both steps ran: an order read off one call alone would take a silently
+    // skipped step for a satisfied one.
+    expect(vi.mocked(loadSigningIdentity)).toHaveBeenCalled();
+    expect(vi.mocked(establishHostKeyTrust)).toHaveBeenCalled();
+    // Vitest stamps every mock call with a run-wide sequence number, which is
+    // what orders calls on two separate mocks against each other.
+    const [loaded] = vi.mocked(loadSigningIdentity).mock.invocationCallOrder;
+    const [trusted] = vi.mocked(establishHostKeyTrust).mock.invocationCallOrder;
+    expect(loaded).toBeLessThan(trusted);
+  } finally {
+    exitSpy.mockRestore();
+  }
+});
+
+test("handler: a signing identity missing from its configured path exits 64 with no host-key probe", async () => {
+  // The ordering above is a call order, which a handler that STARTED host-key
+  // trust without awaiting it would satisfy just as well -- and then the probe
+  // would have connected anyway. So the refusing case is driven too, over the
+  // same unpinned sftp config: a certificate-mode block whose identity_file
+  // names a path holding no identity must end the run at the refusal, exit 64,
+  // with the host-key step -- and so the probe inside it -- never entered.
+  const input = writeSigningExchangeInputs(
+    path.join(dir, "absent-signing-identity.json"),
+  );
+
+  vi.mocked(establishHostKeyTrust).mockClear();
+  vi.mocked(runProtocol).mockReset();
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    await expect(
+      handler({
+        _: [],
+        $0: "psilink",
+        input,
+        "config-file": configFile,
+        "key-file": keyFile,
+        "log-level": "silent",
+      } as unknown as Arguments),
+    ).rejects.toThrow("exit:64");
+    expect(mockState.errors.join("\n")).toContain(
+      "no signing identity was found at",
+    );
+    expect(vi.mocked(establishHostKeyTrust)).not.toHaveBeenCalled();
+    expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
   } finally {
     exitSpy.mockRestore();
   }
