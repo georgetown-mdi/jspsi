@@ -1971,8 +1971,17 @@ export async function runExchange(
     // the drop totals its per-row lines stopped short of. Inside the finally so
     // a round that dropped rows before the PSI phase threw still reports them,
     // and after the disposal, which frees key material and is not to be risked
-    // on a diagnostic line.
-    for (const round of linkageKeyIterables) round.summarizeDroppedRows();
+    // on a diagnostic line. Each close is caught on its own: a diagnostic sink
+    // that throws here would otherwise replace the exception this teardown is
+    // unwinding -- the failure the operator needs -- with its own, and cost
+    // every later round its close.
+    for (const round of linkageKeyIterables) {
+      try {
+        round.summarizeDroppedRows();
+      } catch {
+        // Nothing to report it through: the reporting channel is what failed.
+      }
+    }
   }
 
   // One entry per matched PAIR, in this party's own ascending row order, is what

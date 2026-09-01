@@ -406,6 +406,33 @@ describe("StandardizedKeyIterable — drop reporting over a whole round", () => 
     for (const summary of summaries)
       expect(summary).toContain(`${rowCount} rows dropped`);
   });
+
+  test("the summary escapes the key name, as the individual lines do", () => {
+    // A key name is partner-authored free text and both lines interpolate it, so
+    // each is a sink of its own: a bell, an ESC that would drive an ANSI
+    // sequence, and a backslash must reach the operator as visible escapes.
+    const bell = String.fromCharCode(0x07);
+    const escape = String.fromCharCode(0x1b);
+    const hostileName = `SSN${bell}${escape}[31m\\LN`;
+    const escapedName = "SSN\\x07\\x1b[31m\\\\LN";
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const iter = new StandardizedKeyIterable(
+      { ...key, name: hostileName },
+      wideDataset(),
+      rowCount,
+    );
+    for (const _value of iter);
+    iter.summarizeDroppedRows();
+
+    const lines = warn.mock.calls.map((call) => call[0] as string);
+    expect(lines).toHaveLength(MAX_DROP_LINES_PER_KEY_ROUND + 1);
+    for (const line of lines) {
+      expect(line).toContain(`key "${escapedName}"`);
+      expect(line).not.toContain(bell);
+      expect(line).not.toContain(escape);
+      expect(line).not.toContain(hostileName);
+    }
+  });
 });
 
 describe("StandardizedKeyIterable — a key realizing the empty string", () => {
