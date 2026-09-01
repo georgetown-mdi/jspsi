@@ -80,12 +80,19 @@ function boundedName(name: string): string {
  * a single neutral character to the text around it, so nothing inside can reorder
  * anything outside. PDI also terminates any embedding or override (RLE, LRE, RLO,
  * LRO, a missing PDF) the isolated text left open, which is what bounds an
- * unbalanced name of that class. The isolate class itself is the string form's
- * residual: per UAX #9 BD9/X6a a name carrying an unmatched PDI closes this
- * wrapper's isolate early, and one carrying an unmatched RLI, LRI, or FSI
- * consumes the closing PDI and leaves the wrapper open over the copy that
- * follows. Whether the `<bdi>` element form shares that hole is a question about
- * the browser's layout, unmeasured here; the names are the operator's own
+ * unbalanced name of that class. The isolate class itself is the residual, and
+ * BOTH forms carry it: a name whose unmatched PDI closes the wrapper early leaves
+ * an override written after that break running over the copy that follows, in the
+ * characters {@link isolatedColumnName} composes and equally in the `<bdi>`
+ * {@link ColumnName} renders. What contains it is the arrangement rather than the
+ * wrapper: neither shipped {@link ColumnName} site puts copy beside the name --
+ * the grid row header and the chip are each the whole of their own block -- so the
+ * leak has nothing to run over. Both forms and that containment are driven in
+ * test/browser/benchInviterSharing.test.ts.
+ *
+ * The one hole no check here covers, stated as UAX #9 states it rather than as a
+ * measurement: a name carrying an unmatched RLI, LRI, or FSI consumes the closing
+ * PDI, so the wrapper opens and never closes. The names are the operator's own
  * headers, on the trust basis the module note above records.
  */
 const FIRST_STRONG_ISOLATE = "\u2068";
