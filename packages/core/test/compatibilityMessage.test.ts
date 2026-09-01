@@ -1,5 +1,7 @@
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
+import ts from "typescript";
 import { describe, expect, test } from "vitest";
 
 import {
@@ -108,8 +110,32 @@ describe("bareTermsValue", () => {
     // shape admitting none of those cannot reach for the structure around it.
     // Each case carries a digit so it is the character under test that fails it
     // rather than the digit requirement below.
-    for (const forbidden of [TERMS_VALUE_DELIMITER, " ", ",", "[", "]", "\n"])
-      expect(BARE_TERMS_VALUE_PATTERN.test(`a1${forbidden}b`)).toBe(false);
+    //
+    // The last three are the non-ASCII characters a charset relaxation would
+    // most plausibly admit: a class widened for a non-ASCII set name -- anything
+    // but the clause characters and ASCII whitespace -- takes all three, and one
+    // widened only to exclude JavaScript's `\s` still takes the zero-width
+    // space, which that class does not count as whitespace. Each breaks the
+    // premise the bare form rests on, that a value the shape admits is exactly
+    // one token, in a way none of the ASCII cases above does: the first two
+    // separate a token or break a line while the ASCII whitespace class names
+    // neither, and the third is invisible, so the token a reader sees is not the
+    // one the vocabulary check measured. Named rather than listed bare so a
+    // failure says which character got through.
+    for (const [name, forbidden] of [
+      ["the delimiter", TERMS_VALUE_DELIMITER],
+      ["a space", " "],
+      ["a comma", ","],
+      ["an opening bracket", "["],
+      ["a closing bracket", "]"],
+      ["a newline", "\n"],
+      ["a no-break space", "\u00a0"],
+      ["a line separator", "\u2028"],
+      ["a zero-width space", "\u200b"],
+    ])
+      expect(BARE_TERMS_VALUE_PATTERN.test(`a1${forbidden}b`), name).toBe(
+        false,
+      );
   });
 
   test("a value carrying no digit is not bare-shaped", () => {
@@ -163,38 +189,71 @@ test("a raw terms value cannot be composed into a diagnostic", () => {
 
 // --- The vocabulary a bare value must not be able to spell --------------------
 
-const DIAGNOSTIC_MODULE_SOURCE = readFileSync(
+const DIAGNOSTIC_MODULE_PATH = fileURLToPath(
   new URL("../src/config/linkageTerms.ts", import.meta.url),
-  "utf8",
 );
+const DIAGNOSTIC_MODULE_SOURCE = readFileSync(DIAGNOSTIC_MODULE_PATH, "utf8");
+
+/**
+ * The fixed first-party spans of every `compatibilityMessage` template in
+ * `validateCompatibility`'s own module, one string per template with each
+ * interpolation replaced by a space.
+ *
+ * Parsed with the compiler API rather than matched with a regex over the source
+ * text: a template's fixed spans are what the compiler hands the tag, so a
+ * template that nests a backtick -- escaped, or inside a nested literal in one of
+ * its own interpolations -- is read whole instead of silently truncated at that
+ * backtick, which would drop the copy behind it from the vocabulary below without
+ * failing anything.
+ */
+const diagnosticTemplates = (): string[] => {
+  const parsed = ts.createSourceFile(
+    DIAGNOSTIC_MODULE_PATH,
+    DIAGNOSTIC_MODULE_SOURCE,
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  const templates: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isTaggedTemplateExpression(node) &&
+      ts.isIdentifier(node.tag) &&
+      node.tag.text === "compatibilityMessage"
+    )
+      templates.push(
+        ts.isNoSubstitutionTemplateLiteral(node.template)
+          ? node.template.text
+          : [
+              node.template.head.text,
+              ...node.template.templateSpans.map((span) => span.literal.text),
+            ].join(" "),
+      );
+    ts.forEachChild(node, visit);
+  };
+  visit(parsed);
+  // A call site the walk failed to reach would shrink the vocabulary without
+  // failing anything, so the count is tied back to the call sites as the source
+  // text spells them -- an independent count of the same thing.
+  expect(templates).toHaveLength(
+    DIAGNOSTIC_MODULE_SOURCE.split("compatibilityMessage`").length - 1,
+  );
+  return templates;
+};
 
 /**
  * Every token of first-party copy the compatibility diagnostics are built from.
  *
- * Read out of the templates in `validateCompatibility`'s own module rather than
- * restated here, so the vocabulary cannot fall behind a template edit: a
- * diagnostic reworded to carry a digit in its prose fails the assertion below
- * instead of silently reopening the bare form's connective position. A tagged
- * template's fixed spans are what remains once its interpolations are removed,
- * and none of these templates nests a backtick.
+ * Read out of the templates rather than restated here, so the vocabulary cannot
+ * fall behind a template edit: a diagnostic reworded to carry a digit in its
+ * prose fails the assertion below instead of silently reopening the bare form's
+ * connective position.
  */
-const firstPartyTokens = (): string[] => {
-  const templates = [
-    ...DIAGNOSTIC_MODULE_SOURCE.matchAll(/compatibilityMessage`([^`]*)`/g),
-  ].map((match) => match[1]);
-  // A call site the pattern failed to reach would shrink the vocabulary without
-  // failing anything, so the count is tied back to the call sites themselves.
-  expect(templates).toHaveLength(
-    DIAGNOSTIC_MODULE_SOURCE.split("compatibilityMessage`").length - 1,
-  );
-  return [
+const firstPartyTokens = (): string[] =>
+  [
     ...new Set(
-      templates.flatMap((template) =>
-        template.replaceAll(/\$\{[^}]*\}/g, " ").split(/\s+/),
-      ),
+      diagnosticTemplates().flatMap((template) => template.split(/\s+/)),
     ),
   ].filter((token) => token.length > 0);
-};
 
 test("no connective or label the diagnostics are built from is bare-shaped", () => {
   // The argument the bare form rests on, as a check rather than as prose. A bare
@@ -347,11 +406,15 @@ const ONCE_ESCAPED_ESC = "\\x1b";
 const TWICE_ESCAPED_ESC = "\\\\x1b";
 
 /**
- * Every compatibility diagnostic that names a terms value, with the value under
- * test threaded through it. The enumeration is the acceptance criterion's "so
- * none is left out": each entry supplies a benign token the case would carry
- * anyway, and the adversarial shapes below are built AROUND that token, so a
- * benign run and a hostile run of the same entry differ in nothing but the value.
+ * Every VALUE SLOT of every compatibility diagnostic that names a terms value,
+ * with the value under test threaded through it: one entry per slot, so both
+ * sides of a two-slot comparison and each of the four the rule-set clause
+ * renders are driven rather than one standing in for the rest -- the two sides
+ * of a slot pair are separate interpolations, and a delimiter dropped from
+ * either is a separate defect. Each entry supplies a benign token the case would
+ * carry anyway, and the adversarial shapes below are built AROUND that token, so
+ * a benign run and a hostile run of the same entry differ in nothing but the
+ * value.
  *
  * The compile-time half of the sweep is separate and stronger -- the brand on
  * validateCompatibility's accumulators, exercised above -- so this table does not
@@ -428,6 +491,25 @@ const SWEPT: readonly SweptDiagnostic[] = [
       ),
   },
   {
+    id: "rule set mismatch, local field set name",
+    benign: "baseline-pii",
+    compose: (value) =>
+      errorStartingWith(
+        withRuleSet(
+          base,
+          { name: "hmis-keys", version: "1.0.0" },
+          { name: value, version: "1.0.0" },
+        ),
+        withRuleSet(
+          base,
+          { name: "hmis-keys", version: "1.0.0" },
+          { name: "other-pii", version: "2.0.0" },
+        ),
+        "linkage rule set mismatch",
+        "rule set mismatch, local field set name",
+      ),
+  },
+  {
     id: "rule set mismatch, partner field set name",
     benign: "baseline-pii",
     compose: (value) =>
@@ -447,6 +529,25 @@ const SWEPT: readonly SweptDiagnostic[] = [
       ),
   },
   {
+    id: "rule set mismatch, local key set version",
+    benign: "2.0.0",
+    compose: (value) =>
+      errorStartingWith(
+        withRuleSet(
+          base,
+          { name: "hmis-keys", version: value },
+          { name: "baseline-pii", version: "1.0.0" },
+        ),
+        withRuleSet(
+          base,
+          { name: "other-keys", version: "1.0.0" },
+          { name: "baseline-pii", version: "1.0.0" },
+        ),
+        "linkage rule set mismatch",
+        "rule set mismatch, local key set version",
+      ),
+  },
+  {
     id: "rule set mismatch, partner key set version",
     benign: "2.0.0",
     compose: (value) =>
@@ -463,6 +564,44 @@ const SWEPT: readonly SweptDiagnostic[] = [
         ),
         "linkage rule set mismatch",
         "rule set mismatch, partner key set version",
+      ),
+  },
+  {
+    id: "rule set mismatch, local field set version",
+    benign: "2.0.0",
+    compose: (value) =>
+      errorStartingWith(
+        withRuleSet(
+          base,
+          { name: "hmis-keys", version: "1.0.0" },
+          { name: "baseline-pii", version: value },
+        ),
+        withRuleSet(
+          base,
+          { name: "hmis-keys", version: "1.0.0" },
+          { name: "other-pii", version: "1.0.0" },
+        ),
+        "linkage rule set mismatch",
+        "rule set mismatch, local field set version",
+      ),
+  },
+  {
+    id: "rule set mismatch, partner field set version",
+    benign: "2.0.0",
+    compose: (value) =>
+      errorStartingWith(
+        withRuleSet(
+          base,
+          { name: "hmis-keys", version: "1.0.0" },
+          { name: "baseline-pii", version: "1.0.0" },
+        ),
+        withRuleSet(
+          base,
+          { name: "hmis-keys", version: "1.0.0" },
+          { name: "other-pii", version: value },
+        ),
+        "linkage rule set mismatch",
+        "rule set mismatch, partner field set version",
       ),
   },
   {
@@ -510,6 +649,17 @@ const SWEPT: readonly SweptDiagnostic[] = [
       ),
   },
   {
+    id: "legal agreement expiration date mismatch, local side",
+    benign: "2031-06-30",
+    compose: (value) =>
+      errorStartingWith(
+        withAgreement(base, "MOU-001", "Care coordination", value),
+        withAgreement(base, "MOU-001", "Care coordination", "2030-01-01"),
+        "legal agreement expiration date mismatch",
+        "legal agreement expiration date mismatch, local side",
+      ),
+  },
+  {
     id: "legal agreement expiration date mismatch, partner side",
     benign: "2031-06-30",
     compose: (value) =>
@@ -533,6 +683,17 @@ const SWEPT: readonly SweptDiagnostic[] = [
       ),
   },
   {
+    id: "version mismatch, local side",
+    benign: "2.0.0",
+    compose: (value) =>
+      errorStartingWith(
+        { ...base, version: value },
+        base,
+        "version mismatch",
+        "version mismatch, local side",
+      ),
+  },
+  {
     id: "version mismatch, partner side",
     benign: "2.0.0",
     compose: (value) =>
@@ -541,6 +702,17 @@ const SWEPT: readonly SweptDiagnostic[] = [
         { ...base, version: value },
         "version mismatch",
         "version mismatch, partner side",
+      ),
+  },
+  {
+    id: "algorithm mismatch, local side",
+    benign: "psi-c",
+    compose: (value) =>
+      errorStartingWith(
+        { ...base, algorithm: value as LinkageTerms["algorithm"] },
+        base,
+        "algorithm mismatch",
+        "algorithm mismatch, local side",
       ),
   },
   {
@@ -555,6 +727,20 @@ const SWEPT: readonly SweptDiagnostic[] = [
       ),
   },
   {
+    id: "linkage strategy mismatch, local side",
+    benign: "single-pass",
+    compose: (value) =>
+      errorStartingWith(
+        {
+          ...base,
+          linkageStrategy: value as LinkageTerms["linkageStrategy"],
+        },
+        base,
+        "linkage strategy mismatch",
+        "linkage strategy mismatch, local side",
+      ),
+  },
+  {
     id: "linkage strategy mismatch, partner side",
     benign: "single-pass",
     compose: (value) =>
@@ -566,6 +752,17 @@ const SWEPT: readonly SweptDiagnostic[] = [
         },
         "linkage strategy mismatch",
         "linkage strategy mismatch, partner side",
+      ),
+  },
+  {
+    id: "date mismatch warning, local side",
+    benign: "2025-06-01",
+    compose: (value) =>
+      warningStartingWith(
+        { ...base, date: value },
+        base,
+        "date mismatch",
+        "date mismatch warning, local side",
       ),
   },
   {
@@ -747,11 +944,18 @@ const ADVERSARIAL_SHAPES: ReadonlyArray<{
  * vocabulary check above -- a bare value is one token, and no token these
  * templates are built from can be bare-shaped -- so a bare value cannot be
  * standing where a connective would.
+ *
+ * The bare form is collapsed ONCE, at the slot the template rendered it into,
+ * rather than everywhere it occurs. A slot is driven by exactly one entry above,
+ * so one occurrence is what a correct message holds; collapsing every copy would
+ * erase a second one the composition wrote -- a value echoed into a slot beside
+ * its own -- from both the skeleton comparison and the marker assertion, which is
+ * the whole of what either has to say about a value carried bare.
  */
 const clauseSkeleton = (rendered: string, value: string): string => {
   const { skeleton } = readMessage(rendered);
   return bareTermsValue(value) === value
-    ? skeleton.replaceAll(value, "<value>")
+    ? skeleton.replace(value, "<value>")
     : skeleton;
 };
 

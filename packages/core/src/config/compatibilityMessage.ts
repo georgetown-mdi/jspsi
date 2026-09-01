@@ -81,9 +81,11 @@ export const TERMS_VALUE_DELIMITER = '"';
 export const MAX_BARE_TERMS_VALUE_LENGTH = 64;
 
 /**
- * The shape {@link bareTermsValue} renders undelimited: letters, digits, `.`,
- * `_`, and `-`, at least one of them a DIGIT, up to
- * {@link MAX_BARE_TERMS_VALUE_LENGTH} characters.
+ * The CHARSET half of the shape {@link bareTermsValue} renders undelimited:
+ * letters, digits, `.`, `_`, and `-`, at least one of them a DIGIT. It bounds no
+ * length of its own -- {@link bareTermsValue} checks
+ * {@link MAX_BARE_TERMS_VALUE_LENGTH} beside it, so this pattern matches a value
+ * of any length.
  *
  * Chosen as the shape that cannot participate in a clause boundary at all. It
  * excludes {@link TERMS_VALUE_DELIMITER}, so such a value cannot close a
