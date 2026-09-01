@@ -2760,17 +2760,21 @@ describe("FileSyncRendezvous entry-present peer hello window", () => {
   // removing its hello; dropping joinerRecoveryMs from the floor leaves an
   // eighth of this budget, well inside the wait asserted below.
   //
-  // Deriving the window from a clock reading of its own, rather than the one the
-  // deadline is measured from, arms it whatever the machine spent between the
-  // two readings short of the budget, and a poll landing in that sliver reports
-  // the leftover as residue for a budget that had simply run out. The skew is
-  // what a second reading has to survive, so the clock spends it exactly where
-  // such a reading would take it: the first read of timeToLive after this
-  // party's hello is on disk -- the read any derivation of the remaining budget
-  // must make -- moves the clock SKEW_MS on, which a deadline measured from the
-  // caller's own sample never sees. The poll cadence is finer than the skew, so
-  // a window armed that far inside the budget is hit by several polls before it
-  // expires.
+  // Deriving the window from a clock reading of its own, rather than the one
+  // the deadline is measured from, exercises the split-reading path this
+  // helper's single sample is designed to avoid. Under strict arming (windowMs
+  // < remaining) that path cannot move the deadline past the budget either
+  // way -- a later reading only shrinks the remaining budget the window is
+  // checked against -- so the split reading discriminates nothing here: it
+  // exercises the path, and the boundary outcome asserted below (the window
+  // does not fire, the run reports the ordinary peer timeout) carries the
+  // coverage. The clock spends the skew exactly where such a reading would
+  // take it: the first read of timeToLive after this party's hello is on
+  // disk -- the read any derivation of the remaining budget must make --
+  // moves the clock SKEW_MS on, which a deadline measured from the caller's
+  // own sample never sees. The poll cadence is finer than the skew, so a
+  // window armed that far inside the budget would be hit by several polls
+  // before it expires.
   test("does not fire on a budget too small to hold a round trip", async () => {
     const BUDGET_MS = 300;
     const SKEW_MS = 100;

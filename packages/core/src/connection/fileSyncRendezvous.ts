@@ -352,9 +352,12 @@ const RENDEZVOUS_HELLO_READ_POLL_CYCLES = 6;
 // joinerRecoveryMs is that wall-clock quantity, already: it is what the lock
 // path allows for a peer's publish-and-rename to land on this transport, which
 // is the same wait these bounds are absorbing. Reusing it keeps one knob for one
-// question rather than a second constant to tune, and both bounds below stay
-// capped by the remaining peer budget -- on a budget too small to hold the
-// floor, the ordinary peer timeout fires instead, with its ordinary message.
+// question rather than a second constant to tune. Neither bound below extends a
+// wait past what the operator configured: the I5a hello-read bound stays capped
+// at the remaining peer budget, while the entry-hello window is armed only
+// while it fits strictly inside that budget rather than capped to it -- on a
+// budget too small to hold the floor, the ordinary peer timeout fires instead,
+// with its ordinary message.
 const rendezvousBoundMs = (
   options: RendezvousOptions,
   pollCycles: number,
@@ -409,17 +412,20 @@ const ENTRY_HELLO_ACK_WINDOW_FRACTION = 1 / 8;
 const ENTRY_HELLO_ACK_WINDOW_MIN_POLL_CYCLES = 6;
 
 // The instant an entry-present peer hello stops being given the benefit of the
-// doubt, or undefined when the remaining budget cannot hold the window -- the
-// ordinary peer timeout then fires instead, with its ordinary message.
+// doubt, or undefined when the window cannot fit strictly inside the remaining
+// budget -- the ordinary peer timeout then fires instead, with its ordinary
+// message.
 //
-// The caller passes the clock sample the deadline is measured from rather than
-// this taking its own, so the window and the remaining budget it is weighed
-// against come from one reading: a second reading would put the armed deadline
-// a machine's worth of milliseconds inside the peer timeout, and a poll landing
-// in that sliver would report a hello as residue for a budget that simply ran
-// out. Arming is strict for the same reason: a window that merely reaches the
-// budget would be decided by whichever check the last poll ran first, and the
-// exhausted budget is the peer timeout's case to report.
+// The guarantee that the deadline never reaches the peer timeout is carried by
+// strict arming, not by which clock reading the window is measured from:
+// arming requires windowMs strictly less than the remaining budget, so
+// now + windowMs stays strictly inside that budget even if now were read a
+// second time -- a later reading only shrinks the remaining budget the window
+// is checked against, which tightens the bound rather than loosening it. The
+// caller passes the clock sample the deadline is measured from rather than
+// this taking its own as supporting hygiene on top of that guarantee: it keeps
+// the window and the budget it is weighed against visibly one reading, rather
+// than two a reader has to work through the strict-arming argument to trust.
 const entryHelloAckDeadline = (
   options: RendezvousOptions,
   now: number,
