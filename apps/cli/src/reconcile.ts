@@ -1,4 +1,4 @@
-import { compatibilityMessage, normalizeFiledropPath } from "@psilink/core";
+import { normalizeFiledropPath } from "@psilink/core";
 import type {
   CompatibilityMessageFragment,
   ConnectionConfig,
@@ -8,7 +8,11 @@ import type {
 
 import {
   RECONCILE_UNSET,
+  reconcileClause,
+  reconcileClauseConflict,
   reconcileDiffValue,
+  reconcileValueClause,
+  type ReconcileClause,
   type ReconcileDiff,
 } from "./config";
 import type { RunnableConnectionConfig } from "./connectionFromUrl";
@@ -82,15 +86,41 @@ function pushDirectoryConflicts(
   // side with that locator so the conflict shows both forms. Only invoked when
   // the field being rendered is actually unset, so it never fires for a
   // same-form mismatch (where the existing value is shown directly).
-  const existingHint = (): CompatibilityMessageFragment => {
+  //
+  // The hint is a CLAUSE -- first-party copy naming one or two locators the
+  // partner chose -- so it is composed as one (reconcileClause) rather than as a
+  // plain fragment: the diff block's slot then divides among the locators it
+  // names, and a split hint at two schema-length paths degrades inside each
+  // rather than losing the second half of the sentence and leaving the first
+  // path's run unterminated.
+  const existingHint = (): ReconcileClause => {
     if (have.path !== undefined)
-      return compatibilityMessage`${RECONCILE_UNSET} (the config uses a single shared path ${locator(have.path)})`;
+      return reconcileClause`${RECONCILE_UNSET} (the config uses a single shared path ${locator(have.path)})`;
     if (have.inboundPath !== undefined || have.outboundPath !== undefined)
-      return compatibilityMessage`${RECONCILE_UNSET} (the config uses a split inbound_path ${locator(have.inboundPath)}, outbound_path ${locator(have.outboundPath)})`;
-    return RECONCILE_UNSET;
+      return reconcileClause`${RECONCILE_UNSET} (the config uses a split inbound_path ${locator(have.inboundPath)}, outbound_path ${locator(have.outboundPath)})`;
+    return reconcileClause`${RECONCILE_UNSET}`;
   };
-  const shown = (value: string | undefined): CompatibilityMessageFragment =>
-    value === undefined ? existingHint() : reconcileDiffValue(value);
+  // A locator conflict is a clause line only where the existing side is the
+  // hint; where both sides are one delimited run each, neither has anything
+  // inside it to partition and the slot's own clip is the whole fit.
+  const conflict = (
+    path: string,
+    haveValue: string | undefined,
+    wantValue: string,
+  ): ReconcileDiff =>
+    haveValue === undefined
+      ? {
+          field: path,
+          ...reconcileClauseConflict(
+            existingHint(),
+            reconcileValueClause(wantValue),
+          ),
+        }
+      : {
+          field: path,
+          existing: reconcileDiffValue(haveValue),
+          incoming: reconcileDiffValue(wantValue),
+        };
 
   const split =
     want.inboundPath !== undefined || want.outboundPath !== undefined;
@@ -99,28 +129,20 @@ function pushDirectoryConflicts(
       want.inboundPath !== undefined &&
       !pathsEqual(have.inboundPath, want.inboundPath)
     )
-      conflicts.push({
-        field: field("inbound_path"),
-        existing: shown(have.inboundPath),
-        incoming: reconcileDiffValue(want.inboundPath),
-      });
+      conflicts.push(
+        conflict(field("inbound_path"), have.inboundPath, want.inboundPath),
+      );
     if (
       want.outboundPath !== undefined &&
       !pathsEqual(have.outboundPath, want.outboundPath)
     )
-      conflicts.push({
-        field: field("outbound_path"),
-        existing: shown(have.outboundPath),
-        incoming: reconcileDiffValue(want.outboundPath),
-      });
+      conflicts.push(
+        conflict(field("outbound_path"), have.outboundPath, want.outboundPath),
+      );
     return;
   }
   if (want.path !== undefined && !pathsEqual(have.path, want.path))
-    conflicts.push({
-      field: field("path"),
-      existing: shown(have.path),
-      incoming: reconcileDiffValue(want.path),
-    });
+    conflicts.push(conflict(field("path"), have.path, want.path));
 }
 
 /**

@@ -20,6 +20,7 @@ import {
   compatibilityMessage,
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
   DEFAULT_LINKAGE_RULE_SET,
+  DISPLAY_TRUNCATION_MARKER,
   isDrawnFromLinkageRuleSet,
   MAX_NESTING_DEPTH,
   NestingDepthExceededError,
@@ -498,15 +499,39 @@ export interface ReconcileDiff {
 }
 
 /**
- * The two sides of one conflict line as functions of the share their slots get.
+ * The two sides of one conflict line as claims on the block's budget.
  *
  * Carried BESIDE the sides rather than in place of them, and produced by the one
  * composition that produced those sides ({@link reconcileClause}), so a fitted
  * side cannot describe a different clause than the unfitted one it replaces.
  */
 export interface ReconcileDiffFit {
-  existing: (budget: number) => string;
-  incoming: (budget: number) => string;
+  existing: ReconcileSideFit;
+  incoming: ReconcileSideFit;
+}
+
+/**
+ * What one side of a conflict line needs, what it cannot go below, and how it
+ * renders at what it is given.
+ *
+ * The two measurements are what makes the block's allocation NEED-AWARE rather
+ * than count-driven ({@link formatReconcileDiffs}): a side takes only `need`,
+ * and what it leaves is available to the sides that exceed their share, so the
+ * count of disagreeing fields no longer decides on its own whether any value is
+ * shown.
+ */
+export interface ReconcileSideFit {
+  /** Rendered cost of this side whole, which is all it can ever spend. */
+  need: number;
+  /**
+   * Least this side can be given and still read as what it is. A side given
+   * less than the smaller of this and its `need` is not fitted at all: its LINE
+   * names its field and drops both values, which costs the operator less than a
+   * clause cut back to punctuation and truncation markers.
+   */
+  minimum: number;
+  /** This side rendered into `budget`. */
+  fit: (budget: number) => string;
 }
 
 /** Placeholder rendered for an absent value in a {@link ReconcileDiff}. */
@@ -555,14 +580,75 @@ function reconcileDiffBareValue(value: string): CompatibilityMessageFragment {
 }
 
 /**
- * One side of a conflict line built from more than one value: the clause whole,
- * and the same clause fitted to a budget.
+ * Least a conflict line may spend on ONE of its two values while still showing
+ * any of that value's own bytes.
+ *
+ * A fitted value pays for its delimiters and, when the fit cuts it, for the
+ * truncation marker, so below this a side renders as punctuation and a marker
+ * with nothing of the value left inside. A line whose sides cannot both be given
+ * this much is named without its values instead ({@link formatReconcileDiffs}),
+ * which is the honest reading of "there is no room for this line's values" and
+ * costs the operator less than a marker.
  */
-interface ReconcileClause {
+const RECONCILE_MIN_VALUE_BUDGET = 32;
+
+/**
+ * The same floor for ONE value inside a clause, which pays for the marker out of
+ * its own share the way a whole side does.
+ *
+ * Sized off the marker rather than restated, because what makes a share useless
+ * is that the marker consumes it: at or below the marker's cost a clipped value
+ * renders as the marker alone, so a clause given the count of its values times
+ * this floor still shows some of every value's own bytes. Smaller than the
+ * whole-side floor above, since a clause fits several values into a slot sized
+ * for one side and the alternative is dropping the line's values entirely.
+ */
+const RECONCILE_MIN_CLAUSE_VALUE_BUDGET =
+  renderedDisplayCost(DISPLAY_TRUNCATION_MARKER) + 8;
+
+/**
+ * Divide `budget` among claims of the given `needs`, need-aware: a claim takes
+ * only what it needs, and what it leaves is available to the claims that exceed
+ * an equal share, so a constraint falls only on the claims too wide for the room
+ * -- never on a claim that was already going to fit.
+ *
+ * Serving the claims in ascending order is what settles that in one pass: every
+ * claim still unserved is at least as wide as the one being served, so an equal
+ * share of what remains is the most the current claim can take without stranding
+ * one behind it, and a claim narrower than that share hands the difference on.
+ */
+function allocateByNeed(needs: readonly number[], budget: number): number[] {
+  const shares = needs.map(() => 0);
+  const ascending = needs
+    .map((_, index) => index)
+    .sort((a, b) => needs[a] - needs[b]);
+  let remaining = Math.max(0, budget);
+  for (let served = 0; served < ascending.length; served += 1) {
+    const share = Math.floor(remaining / (ascending.length - served));
+    if (needs[ascending[served]] > share) {
+      // Every claim still unserved is at least this wide, so they are all
+      // constrained and all take the same share. What the division leaves over
+      // goes unspent rather than to whichever claim happened to be served last:
+      // two claims of equal need are two claims that fit alike, and a line whose
+      // two sides differ by the odd character left over is a line whose sides
+      // were cut at different points for no reason the operator can see.
+      for (let rest = served; rest < ascending.length; rest += 1)
+        shares[ascending[rest]] = share;
+      break;
+    }
+    shares[ascending[served]] = needs[ascending[served]];
+    remaining -= needs[ascending[served]];
+  }
+  return shares;
+}
+
+/**
+ * One side of a conflict line built from more than one value: the clause whole,
+ * what it claims on the block's budget, and the same clause fitted to a budget.
+ */
+export interface ReconcileClause extends ReconcileSideFit {
   /** Every value at its full width, for a slot that can hold them. */
   text: CompatibilityMessageFragment;
-  /** The clause with each value clipped to an equal share of `budget`. */
-  fit: (budget: number) => string;
 }
 
 /**
@@ -572,10 +658,12 @@ interface ReconcileClause {
  *
  * This is the provenance partition {@link formatReconcileDiffs} applies between
  * lines, carried one level down into a line: the clause's own spans are
- * first-party copy, measured where they stand, and what the slot leaves is split
- * equally among the values it names. Clipping the composed clause instead spends
- * the slot left to right, so the first value takes all of it and the connective,
- * the values behind it, and the clause's second half are simply deleted -- a
+ * first-party copy, measured where they stand, and what the slot leaves is
+ * shared out among the values it names by the same need-aware rule the block
+ * applies between sides, so a version of five characters cannot hold a quarter
+ * of the slot away from the name beside it. Clipping the composed clause instead
+ * spends the slot left to right, so the first value takes all of it and the
+ * connective, the values behind it, and the clause's second half are deleted -- a
  * partner-chosen set name at the schema's length would leave the operator a
  * citation with no version, no `over`, and no field set on either side.
  * Sub-partitioned, degradation happens INSIDE a value: at any share the clause
@@ -588,24 +676,54 @@ interface ReconcileClause {
  * {@link formatReconcileDiffs} records for every clip it makes, so the fit does
  * not re-assert the seam's guarantee over what it cut.
  */
-function reconcileClause(
+export function reconcileClause(
   fixedSpans: TemplateStringsArray,
   ...values: readonly CompatibilityMessageFragment[]
 ): ReconcileClause {
   const structureCost = renderedDisplayCost(fixedSpans.join(""));
+  const needs = values.map((value) => renderedDisplayCost(value));
   return {
     text: compatibilityMessage(fixedSpans, ...values),
+    need: needs.reduce((total, need) => total + need, structureCost),
+    // The spans do not shrink and every value the clause names has to stay
+    // visible inside them, so this is what the clause structurally is. A value
+    // already narrower than the floor asks for its own width instead, which is
+    // the same rule the block applies to a side.
+    minimum: needs.reduce(
+      (total, need) =>
+        total + Math.min(need, RECONCILE_MIN_CLAUSE_VALUE_BUDGET),
+      structureCost,
+    ),
     fit: (budget: number): string => {
-      const share = Math.floor((budget - structureCost) / values.length);
+      const shares = allocateByNeed(needs, Math.max(0, budget - structureCost));
       let composed: string = fixedSpans[0];
       for (let index = 0; index < values.length; index += 1)
         composed +=
-          clipToRenderedCost(values[index], share) + fixedSpans[index + 1];
+          clipToRenderedCost(values[index], shares[index]) +
+          fixedSpans[index + 1];
       // A share below what the truncation marker itself costs leaves a clipped
       // value wider than its share, so the composed clause is held to the slot
-      // it was given rather than to the sum of the parts it fitted.
+      // it was given rather than to the sum of the parts it fitted. The block's
+      // floor keeps a fitted line off that shape; this is the backstop under a
+      // budget reached some other way.
       return clipToRenderedCost(composed, budget);
     },
+  };
+}
+
+/**
+ * One delimited run as a clause side, for a conflict line whose OTHER side is a
+ * clause: the line's fit covers both sides, and this one has nothing inside it
+ * to partition -- the slot's clip degrades the single run and takes nothing else
+ * with it.
+ */
+export function reconcileValueClause(value: string): ReconcileClause {
+  const text = reconcileDiffValue(value);
+  return {
+    text,
+    need: renderedDisplayCost(text),
+    minimum: RECONCILE_MIN_VALUE_BUDGET,
+    fit: (budget: number): string => clipToRenderedCost(text, budget),
   };
 }
 
@@ -613,10 +731,12 @@ function reconcileClause(
  * The side of a conflict on an OPTIONAL block that names no chosen value at all,
  * as a clause -- so a line whose other side is one can carry a fit for both of
  * its sides. Nothing here to sub-partition: the placeholder is first-party copy,
- * held to the slot it was given.
+ * so it asks for exactly its own width and is held to the slot it was given.
  */
 const RECONCILE_ABSENT_CLAUSE: ReconcileClause = {
   text: RECONCILE_UNSET,
+  need: renderedDisplayCost(RECONCILE_UNSET),
+  minimum: renderedDisplayCost(RECONCILE_UNSET),
   fit: (budget: number): string => clipToRenderedCost(RECONCILE_UNSET, budget),
 };
 
@@ -628,14 +748,14 @@ const RECONCILE_ABSENT_CLAUSE: ReconcileClause = {
  * ({@link reconcileClause}), which is what keeps a fitted side an account of the
  * same clause the unfitted one is.
  */
-function reconcileClauseConflict(
+export function reconcileClauseConflict(
   existing: ReconcileClause,
   incoming: ReconcileClause,
 ): Omit<ReconcileDiff, "field"> {
   return {
     existing: existing.text,
     incoming: incoming.text,
-    fit: { existing: existing.fit, incoming: incoming.fit },
+    fit: { existing, incoming },
   };
 }
 
@@ -1082,19 +1202,6 @@ export function diffLinkageTerms(
  */
 const RECONCILE_CONFIG_PATH_BUDGET = 128;
 
-/**
- * Least a conflict line may spend on ONE of its two values while still showing
- * any of that value's own bytes.
- *
- * A fitted value pays for its delimiters and, when the fit cuts it, for the
- * truncation marker, so below this a line renders as punctuation and a marker
- * with nothing of the value left inside. Where the diff count drives the share
- * under it, {@link formatReconcileDiffs} names the fields alone instead --
- * which is the honest reading of "so many fields disagree that no value fits",
- * and costs the operator less than a column of markers.
- */
-const RECONCILE_MIN_VALUE_BUDGET = 32;
-
 /** First-party spans a conflict line is built from, measured rather than
  *  restated wherever the budget arithmetic needs their cost. */
 const RECONCILE_LINE_PREFIX = "  - ";
@@ -1118,14 +1225,28 @@ const RECONCILE_WITHHELD_NOTE =
   "bytes redacted as private-key material, or clipped for length)";
 
 /**
- * Replaces the values on every line when the diff count leaves no room to show
- * any of them, so each disagreeing field is still NAMED. Truncation eats
- * conflict detail here, which is the whole point of composing the recovery step
- * ahead of this block (see {@link reconcileConflictMessage}).
+ * Explains a line the block named without its values, so a bare field name does
+ * not read as a field with nothing to say about it -- beside lines that carry
+ * both their values, or as the whole block when the room reaches no line's.
+ *
+ * States the reason a line came to that, which is why it is one notice rather
+ * than one per shape: what the block ran out of is room against the WIDTH the
+ * values asked for, whether that was one wide line among short ones or a field
+ * list long enough to leave nothing for any of them. Truncation eats conflict
+ * detail here, which is the whole point of composing the recovery step ahead of
+ * this block (see {@link reconcileConflictMessage}).
  */
-const RECONCILE_FIELDS_ONLY_NOTE =
-  "  (too many fields disagree to show their values in one message; each line " +
-  "above names a field whose values differ)";
+const RECONCILE_NAMED_ONLY_NOTE =
+  "  (a field named above without its values has values too wide for the room " +
+  "this message has left; every line names a field whose values differ)";
+
+/**
+ * The most the notices below a block can cost it, which is what the last layout
+ * pass reserves so it cannot need more than it was given.
+ */
+const RECONCILE_NOTICE_RESERVE_CEILING = renderedDisplayCost(
+  `\n${RECONCILE_NAMED_ONLY_NOTE}\n${RECONCILE_WITHHELD_NOTE}`,
+);
 
 /**
  * Render a list of {@link ReconcileDiff} as an indented, human-readable block
@@ -1144,14 +1265,26 @@ const RECONCILE_FIELDS_ONLY_NOTE =
  * point, which is not a display bound -- one code point escapes to as many as
  * ten characters -- and it bounds a name list at 256 entries, so a single
  * conflict line can render past the whole budget the renderer gives the one link
- * this message is. The budget is therefore shared out: every line is charged its
- * own first-party skeleton, and what is left over is divided equally between the
- * value slots, so no line and no chooser can spend another's room. A slot whose
- * side is a clause of several values divides its share once more, among those
- * values ({@link reconcileClause}), so what a slot too small to hold everything
- * degrades is a value rather than the clause structure standing behind it. Every
- * disagreeing field is named whatever the values do, because a field an operator
- * is never told about is a difference they cannot go and resolve.
+ * this message is. The budget is therefore shared out, and shared out by NEED:
+ * every line is charged the first-party skeleton it is named by, each side is
+ * measured at what it would actually render to, and what a short value does not
+ * take is available to the long value beside it. A constraint then falls only on
+ * the sides too wide for the room -- eight ordinary disagreements are eight
+ * lines carrying both their values, however many of them there are, because
+ * counting them was never what decided it. A slot whose side is a clause of
+ * several values shares its slot out among those values by the same rule
+ * ({@link reconcileClause}), so what a slot too small to hold everything
+ * degrades is a value rather than the clause structure standing behind it.
+ *
+ * Where a side cannot be given the least it can read as -- a delimited run
+ * showing some of its own bytes, or a clause showing some of every value it
+ * names inside its own connectives -- that LINE names its field and drops both
+ * values, and a first-party notice under the block says so. Degrading the line
+ * whole is what keeps the alternative off the message: a clause cut back to a
+ * column of truncation markers, or to a name with the connective and the second
+ * half deleted behind it. Every disagreeing field is named whatever becomes of
+ * its values, because a field an operator is never told about is a difference
+ * they cannot go and resolve.
  *
  * Two properties the fit does not carry, recorded rather than claimed away. The
  * clip lands wherever `budget` falls, so it can cut inside a delimited run and
@@ -1169,64 +1302,127 @@ export function formatReconcileDiffs(
 ): string {
   if (diffs.length === 0) return "";
 
-  const skeleton = (d: ReconcileDiff): string =>
-    `${RECONCILE_LINE_PREFIX}${d.field}${RECONCILE_LINE_EXISTING}${RECONCILE_LINE_INCOMING}`;
+  const nameOnly = (d: ReconcileDiff): string =>
+    `${RECONCILE_LINE_PREFIX}${d.field}`;
   // Charged with the line break that follows it, which the display escape widens
-  // like any other control character rather than carrying at its own width.
-  const skeletonCost = diffs.reduce(
-    (total, d) => total + renderedDisplayCost(`${skeleton(d)}\n`),
+  // like any other control character rather than carrying at its own width. Its
+  // field name is what a line costs even after its values are dropped, so it is
+  // taken off the top rather than shared out.
+  const nameCost = diffs.reduce(
+    (total, d) => total + renderedDisplayCost(`${nameOnly(d)}\n`),
     0,
   );
-  const valueBudgetUnder = (reserved: number): number =>
-    Math.floor((budget - skeletonCost - reserved) / (2 * diffs.length));
+  // What a line pays on top of its name for carrying values at all.
+  const valueSkeletonCost = renderedDisplayCost(
+    `${RECONCILE_LINE_EXISTING}${RECONCILE_LINE_INCOMING}`,
+  );
 
-  const render = (
-    valueBudget: number,
-  ): { block: string; withheld: boolean } => {
+  // A side that composed no fit is ONE delimited run, which asks for its own
+  // width and cannot go below what shows any of its bytes.
+  const sideOf = (
+    side: CompatibilityMessageFragment,
+    fit: ReconcileSideFit | undefined,
+  ): ReconcileSideFit =>
+    fit ?? {
+      need: renderedDisplayCost(side),
+      minimum: RECONCILE_MIN_VALUE_BUDGET,
+      fit: (slot: number): string => clipToRenderedCost(side, slot),
+    };
+  // A side already narrower than its own floor asks for its width, not the
+  // floor: it renders whole at what it asked for.
+  const floorOf = (side: ReconcileSideFit): number =>
+    Math.min(side.need, side.minimum);
+  const lines = diffs.map((d) => {
+    const existing = sideOf(d.existing, d.fit?.existing);
+    const incoming = sideOf(d.incoming, d.fit?.incoming);
+    return {
+      diff: d,
+      existing,
+      incoming,
+      floor: valueSkeletonCost + floorOf(existing) + floorOf(incoming),
+    };
+  });
+
+  const layOut = (reserved: number): { block: string; noticeCost: number } => {
+    const pool = budget - reserved - nameCost;
+    // Cheapest first, which shows values on as many lines as the room admits;
+    // ascending order also means the first line that does not fit settles every
+    // line behind it, each of which asks for at least as much.
+    const shown = new Set<number>();
+    let claimed = 0;
+    for (const index of lines
+      .map((_, position) => position)
+      .sort((a, b) => lines[a].floor - lines[b].floor)) {
+      if (claimed + lines[index].floor > pool) break;
+      shown.add(index);
+      claimed += lines[index].floor;
+    }
+
+    // Every shown side holds its floor, and what is left over is shared out
+    // among the sides that asked for more than one by the same need-aware rule.
+    const shownLines = lines.filter((_, index) => shown.has(index));
+    const surplus = allocateByNeed(
+      shownLines.flatMap((line) => [
+        line.existing.need - floorOf(line.existing),
+        line.incoming.need - floorOf(line.incoming),
+      ]),
+      pool - claimed,
+    );
+
     let withheld = false;
-    const lines = diffs.map((d) => {
-      const existing = d.fit
-        ? d.fit.existing(valueBudget)
-        : clipToRenderedCost(d.existing, valueBudget);
-      const incoming = d.fit
-        ? d.fit.incoming(valueBudget)
-        : clipToRenderedCost(d.incoming, valueBudget);
+    let dropped = 0;
+    let position = 0;
+    const rendered = lines.map((line, index) => {
+      if (!shown.has(index)) {
+        dropped += 1;
+        return nameOnly(line.diff);
+      }
+      const existing = line.existing.fit(
+        floorOf(line.existing) + surplus[position * 2],
+      );
+      const incoming = line.incoming.fit(
+        floorOf(line.incoming) + surplus[position * 2 + 1],
+      );
+      position += 1;
       if (existing === incoming) withheld = true;
       return (
-        `${RECONCILE_LINE_PREFIX}${d.field}${RECONCILE_LINE_EXISTING}${existing}` +
+        `${nameOnly(line.diff)}${RECONCILE_LINE_EXISTING}${existing}` +
         `${RECONCILE_LINE_INCOMING}${incoming}`
       );
     });
-    return { block: lines.join("\n"), withheld };
+
+    const notices: string[] = [];
+    if (dropped > 0) notices.push(RECONCILE_NAMED_ONLY_NOTE);
+    if (withheld) notices.push(RECONCILE_WITHHELD_NOTE);
+    return {
+      block: [...rendered, ...notices].join("\n"),
+      noticeCost: notices.reduce(
+        (total, notice) => total + renderedDisplayCost(`\n${notice}`),
+        0,
+      ),
+    };
   };
 
-  const fieldsOnly = (): string =>
-    `${diffs.map((d) => `${RECONCILE_LINE_PREFIX}${d.field}`).join("\n")}\n${RECONCILE_FIELDS_ONLY_NOTE}`;
-
-  let block: string;
-  if (valueBudgetUnder(0) < RECONCILE_MIN_VALUE_BUDGET) block = fieldsOnly();
-  else {
-    const first = render(valueBudgetUnder(0));
-    if (!first.withheld) block = first.block;
-    else {
-      // The note's own cost comes out of the values' share, not out of the
-      // budget the first pass already spent, so the explanation cannot be what
-      // pushes the block past its bound. Re-fitting under the smaller share can
-      // only collapse further sides, never revive one, so one further pass
-      // settles it.
-      const reserved = renderedDisplayCost(`\n${RECONCILE_WITHHELD_NOTE}`);
-      block =
-        valueBudgetUnder(reserved) < RECONCILE_MIN_VALUE_BUDGET
-          ? fieldsOnly()
-          : `${render(valueBudgetUnder(reserved)).block}\n${RECONCILE_WITHHELD_NOTE}`;
-    }
+  // A notice's own cost comes out of the values' share rather than out of the
+  // budget the layout already spent, so the explanation cannot be what pushes
+  // the block past its bound. Which notices a layout needs is only known once it
+  // is laid out, so a layout needing more than it reserved is laid out again
+  // under what it needed; the last reservation is the most any layout can need,
+  // which is what settles this rather than a further pass.
+  let reserved = 0;
+  let attempt = layOut(reserved);
+  if (attempt.noticeCost > reserved) {
+    reserved = attempt.noticeCost;
+    attempt = layOut(reserved);
   }
+  if (attempt.noticeCost > reserved)
+    attempt = layOut(RECONCILE_NOTICE_RESERVE_CEILING);
   // The arithmetic above holds the block inside `budget` for every shape reached
   // today, which a test pins by asserting no line of a worst-case message is
   // cut. This is the backstop under it: a producer that adds a wider first-party
-  // skeleton, or a diff count past what the notes above can absorb, is bounded
+  // skeleton, or a field-name list past what the notices can absorb, is bounded
   // here rather than silently spending the recovery step's room.
-  return clipToRenderedCost(block, budget);
+  return clipToRenderedCost(attempt.block, budget);
 }
 
 /**
