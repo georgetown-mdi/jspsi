@@ -91,8 +91,7 @@ function pushDirectoryConflicts(
   // partner chose -- so it is composed as one (reconcileClause) rather than as a
   // plain fragment: the diff block's slot then divides among the locators it
   // names, and a split hint at two schema-length paths degrades inside each
-  // rather than losing the second half of the sentence and leaving the first
-  // path's run unterminated.
+  // rather than losing the second half of the sentence behind the first path.
   const existingHint = (): ReconcileClause => {
     if (have.path !== undefined)
       return reconcileClause`${RECONCILE_UNSET} (the config uses a single shared path ${locator(have.path)})`;

@@ -579,6 +579,68 @@ function reconcileDiffBareValue(value: string): CompatibilityMessageFragment {
   return bareTermsValue(redactPrivateKeyMaterial(value));
 }
 
+const DISPLAY_TRUNCATION_MARKER_COST = renderedDisplayCost(
+  DISPLAY_TRUNCATION_MARKER,
+);
+
+/**
+ * The delimiter core's seam wraps a terms value in and doubles inside one, read
+ * off the seam rather than restated, so the fit below cannot drift from the
+ * grammar it has to preserve.
+ */
+const TERMS_VALUE_DELIMITER = quoteTermsValue("")[0];
+
+const TERMS_VALUE_DELIMITER_COST = renderedDisplayCost(TERMS_VALUE_DELIMITER);
+
+/**
+ * Fit a composed conflict-line fragment to `budget`, cutting the VALUE inside a
+ * delimited run rather than the run's rendering: the cut never falls between the
+ * two characters of a doubled delimiter, and a cut that lands inside a run
+ * delimits what it kept -- truncation marker inside -- rather than leaving the
+ * run open.
+ *
+ * This is the treatment's own order (redact, clip, delimit) carried to where the
+ * composition happens, and it is what keeps the seam's guarantee over a fitted
+ * line: the run structure an operator reads is the structure this module
+ * composed, at any budget and for any value width. Core's
+ * {@link clipToRenderedCost} cuts the rendered form instead, so a value the
+ * partner sized to land the cut mid-run leaves that run open and everything
+ * composed after it on the line -- the clause's next value, the other side of
+ * the line -- reads at the opposite run parity from the one it was composed at.
+ *
+ * The doubling is why the clip cannot simply be moved ahead of the delimiting: a
+ * raw prefix measured against the budget renders WIDER once its delimiters are
+ * doubled back in. Charging each doubled pair as it is kept is that same clip,
+ * costed at what the run renders to.
+ */
+function fitToRenderedCostClosingRuns(text: string, budget: number): string {
+  if (renderedDisplayCost(text) <= budget) return text;
+  const units = Array.from(text);
+  let kept = "";
+  let cost = 0;
+  let insideRun = false;
+  let index = 0;
+  while (index < units.length) {
+    const unit = units[index];
+    const delimiter = unit === TERMS_VALUE_DELIMITER;
+    const doubled: boolean =
+      delimiter && insideRun && units[index + 1] === TERMS_VALUE_DELIMITER;
+    const taken = doubled ? unit + unit : unit;
+    const nextInsideRun: boolean =
+      delimiter && !doubled ? !insideRun : insideRun;
+    const spent = cost + renderedDisplayCost(taken);
+    // What closing this cut costs is reserved before the unit is kept, so the
+    // run this enters is one the budget can still close.
+    const closing = nextInsideRun ? TERMS_VALUE_DELIMITER_COST : 0;
+    if (spent + DISPLAY_TRUNCATION_MARKER_COST + closing > budget) break;
+    kept += taken;
+    cost = spent;
+    insideRun = nextInsideRun;
+    index += doubled ? 2 : 1;
+  }
+  return `${kept}${DISPLAY_TRUNCATION_MARKER}${insideRun ? TERMS_VALUE_DELIMITER : ""}`;
+}
+
 /**
  * Least a conflict line may spend on ONE of its two values while still showing
  * any of that value's own bytes.
@@ -598,13 +660,13 @@ const RECONCILE_MIN_VALUE_BUDGET = 32;
  *
  * Sized off the marker rather than restated, because what makes a share useless
  * is that the marker consumes it: at or below the marker's cost a clipped value
- * renders as the marker alone, so a clause given the count of its values times
- * this floor still shows some of every value's own bytes. Smaller than the
- * whole-side floor above, since a clause fits several values into a slot sized
- * for one side and the alternative is dropping the line's values entirely.
+ * renders as a run with nothing of its own inside, so a clause given the count
+ * of its values times this floor still shows some of every value's own bytes.
+ * Smaller than the whole-side floor above, since a clause fits several values
+ * into a slot sized for one side and the alternative is dropping the line's
+ * values entirely.
  */
-const RECONCILE_MIN_CLAUSE_VALUE_BUDGET =
-  renderedDisplayCost(DISPLAY_TRUNCATION_MARKER) + 8;
+const RECONCILE_MIN_CLAUSE_VALUE_BUDGET = DISPLAY_TRUNCATION_MARKER_COST + 8;
 
 /**
  * Divide `budget` among claims of the given `needs`, need-aware: a claim takes
@@ -670,11 +732,14 @@ export interface ReconcileClause extends ReconcileSideFit {
  * still reads as a name, a version, the connective, and the other half, however
  * little of each survives.
  *
- * The fitted form is a plain string rather than a fragment, which is what the
- * block it lands in composes: a clip can cut inside a delimited run and leave it
- * unterminated ahead of the truncation marker, the residual
- * {@link formatReconcileDiffs} records for every clip it makes, so the fit does
- * not re-assert the seam's guarantee over what it cut.
+ * A share too small for its value degrades that value's own bytes and nothing
+ * around them: the fit cuts inside the run and delimits what it kept
+ * ({@link fitToRenderedCostClosingRuns}), so no cut can leave a run open for the
+ * clause's next value -- or for the other side of the line -- to be read inside.
+ * The fitted form is a plain string rather than a fragment because it is
+ * composed by concatenation rather than through core's tagged template; what
+ * holds the run structure over it is a check on the rendered lines
+ * (`apps/cli/test/unit/config.test.ts`).
  */
 export function reconcileClause(
   fixedSpans: TemplateStringsArray,
@@ -699,14 +764,14 @@ export function reconcileClause(
       let composed: string = fixedSpans[0];
       for (let index = 0; index < values.length; index += 1)
         composed +=
-          clipToRenderedCost(values[index], shares[index]) +
+          fitToRenderedCostClosingRuns(values[index], shares[index]) +
           fixedSpans[index + 1];
-      // A share below what the truncation marker itself costs leaves a clipped
-      // value wider than its share, so the composed clause is held to the slot
-      // it was given rather than to the sum of the parts it fitted. The block's
-      // floor keeps a fitted line off that shape; this is the backstop under a
-      // budget reached some other way.
-      return clipToRenderedCost(composed, budget);
+      // A share below what the marker and the run's own delimiters cost leaves
+      // a clipped value wider than its share, so the composed clause is held to
+      // the slot it was given rather than to the sum of the parts it fitted. The
+      // block's floor keeps a fitted line off that shape; this is the backstop
+      // under a budget reached some other way.
+      return fitToRenderedCostClosingRuns(composed, budget);
     },
   };
 }
@@ -723,7 +788,7 @@ export function reconcileValueClause(value: string): ReconcileClause {
     text,
     need: renderedDisplayCost(text),
     minimum: RECONCILE_MIN_VALUE_BUDGET,
-    fit: (budget: number): string => clipToRenderedCost(text, budget),
+    fit: (budget: number): string => fitToRenderedCostClosingRuns(text, budget),
   };
 }
 
@@ -737,7 +802,8 @@ const RECONCILE_ABSENT_CLAUSE: ReconcileClause = {
   text: RECONCILE_UNSET,
   need: renderedDisplayCost(RECONCILE_UNSET),
   minimum: renderedDisplayCost(RECONCILE_UNSET),
-  fit: (budget: number): string => clipToRenderedCost(RECONCILE_UNSET, budget),
+  fit: (budget: number): string =>
+    fitToRenderedCostClosingRuns(RECONCILE_UNSET, budget),
 };
 
 /**
@@ -1286,21 +1352,20 @@ const RECONCILE_NOTICE_RESERVE_CEILING = renderedDisplayCost(
  * its values, because a field an operator is never told about is a difference
  * they cannot go and resolve.
  *
- * Two properties the fit does not carry, recorded rather than claimed away. The
- * clip lands wherever `budget` falls, so it can cut inside a delimited run and
- * leave it unterminated ahead of the truncation marker -- which reads as cut,
- * not as a further clause, and cannot manufacture structure the raw value did
- * not already carry, since clipping only removes bytes. Inside a
- * sub-partitioned clause the cut run can instead read as TERMINATED, by the
- * next opening delimiter the composition placed after it -- the clause's own
- * next value or, where the cut value is last on its side, the other side's
- * opening delimiter -- and what then stands inside it is composed connectives
- * together with a partner-chosen value that renders undelimited (a checked
- * bare form, such as a citation's semver), never structure the raw value
- * forged, since every delimiter inside a value is doubled. And the marker is
- * plain ASCII the escape passes through, so a value carrying its text can
- * claim a cut that did not happen; what an operator can rely on is the
- * marker's ABSENCE.
+ * The cut lands wherever `budget` falls, and where that is inside a delimited
+ * run it cuts the value and delimits what it kept, marker inside
+ * ({@link fitToRenderedCostClosingRuns}). So the runs a fitted line shows are
+ * the runs this composition placed, at every budget and every value width: a
+ * value cannot be sized to land the cut where its own bytes would take over the
+ * closing of a run, and nothing composed after a cut value -- the clause's next
+ * value, the other side of the line -- can be read at a run parity it was not
+ * composed at. That is held by a check over the rendered lines rather than by
+ * this paragraph (`apps/cli/test/unit/config.test.ts`).
+ *
+ * One property is recorded rather than closed: the marker is plain ASCII the
+ * escape passes through, and it stands inside the cut value's own run, which is
+ * where a value spelling its text would put it -- so a value can claim a cut
+ * that did not happen. What an operator can rely on is the marker's ABSENCE.
  *
  * @internal exported for testing; `reconcileConflictMessage` is the caller.
  */
@@ -1334,7 +1399,7 @@ export function formatReconcileDiffs(
     fit ?? {
       need: renderedDisplayCost(side),
       minimum: RECONCILE_MIN_VALUE_BUDGET,
-      fit: (slot: number): string => clipToRenderedCost(side, slot),
+      fit: (slot: number): string => fitToRenderedCostClosingRuns(side, slot),
     };
   // A side already narrower than its own floor asks for its width, not the
   // floor: it renders whole at what it asked for.
@@ -1430,7 +1495,7 @@ export function formatReconcileDiffs(
   // cut. This is the backstop under it: a producer that adds a wider first-party
   // skeleton, or a field-name list past what the notices can absorb, is bounded
   // here rather than silently spending the recovery step's room.
-  return clipToRenderedCost(attempt.block, budget);
+  return fitToRenderedCostClosingRuns(attempt.block, budget);
 }
 
 /**

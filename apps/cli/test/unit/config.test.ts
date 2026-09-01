@@ -14,6 +14,7 @@ import {
   MAX_NESTING_DEPTH,
   NestingDepthExceededError,
   parseExchangeSpec,
+  quoteTermsValue,
   renderedDisplayCost,
   sanitizeErrorForDisplay,
   snakeizeKeys,
@@ -2496,6 +2497,79 @@ test("a schema-maximal clause beside ordinary lines never renders as bare marker
   }
 });
 
+// The smallest budget at which the block shows a line's values instead of naming
+// the field alone -- read off the block by driving it, so what it reports is the
+// floor the code actually applies rather than the floor arithmetic restated.
+function smallestBudgetShowingValues(diff: ReconcileDiff): number {
+  const ceiling =
+    renderedDisplayCost(diff.existing) +
+    renderedDisplayCost(diff.incoming) +
+    64;
+  for (let budget = 0; budget <= ceiling; budget += 1)
+    if (formatReconcileDiffs([diff], budget).includes(": existing "))
+      return budget;
+  throw new Error("the block never showed the line's values");
+}
+
+test("a clause's floor charges a narrow value its width, not the floor", () => {
+  // A value narrower than the per-value floor claims its OWN width, not the
+  // floor: what a clause cannot go below is the room its wide values need for
+  // some of their bytes plus the room its short ones need whole. So a citation
+  // naming one wide set and one short one keeps its values at a budget a
+  // citation of four wide values cannot -- charge every value the floor flat and
+  // the two lines come to the same thing, and the short values are dropped over
+  // room they were never going to spend.
+  const wideName = "w".repeat(200);
+  const wideVersion = schemaMaximalSemver(1);
+  const lineFor = (
+    existingCitation: LinkageRuleSetReference,
+    incomingCitation: LinkageRuleSetReference,
+  ): ReconcileDiff => {
+    const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+    const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+    existing.linkageRuleSet = existingCitation;
+    incoming.linkageRuleSet = incomingCitation;
+    const { conflicts } = diffLinkageTerms(existing, incoming);
+    expect(conflicts.map((d) => d.field)).toEqual(["linkage_rule_set"]);
+    return conflicts[0];
+  };
+  const mixed = lineFor(
+    {
+      keySet: { name: wideName, version: "1.0.0" },
+      fieldSet: { name: "ab", version: "2.0.0" },
+    },
+    {
+      keySet: { name: `x${wideName.slice(1)}`, version: "1.0.0" },
+      fieldSet: { name: "ab", version: "2.0.0" },
+    },
+  );
+  const allWide = lineFor(
+    {
+      keySet: { name: wideName, version: wideVersion },
+      fieldSet: { name: wideName, version: wideVersion },
+    },
+    {
+      keySet: { name: `x${wideName.slice(1)}`, version: wideVersion },
+      fieldSet: { name: wideName, version: wideVersion },
+    },
+  );
+
+  const budget = smallestBudgetShowingValues(mixed);
+  expect(budget).toBeLessThan(smallestBudgetShowingValues(allWide));
+  // At that budget the short values are there whole -- the version behind each
+  // name, and the field set's own name -- with only the wide name cut back to
+  // some of its own bytes inside its run.
+  const [existingSide, incomingSide] = formatReconcileDiffs([mixed], budget)
+    .split(": existing ")[1]
+    .split(" vs required ");
+  for (const side of [existingSide, incomingSide]) {
+    expect(side, side).toContain(` 1.0.0 over "ab" 2.0.0`);
+    expect(side.startsWith('"'), side).toBe(true);
+    expect(side, side).toContain(`w${DISPLAY_TRUNCATION_MARKER}"`);
+  }
+  expect(formatReconcileDiffs([allWide], budget)).not.toContain(": existing ");
+});
+
 // The two locators a split directory hint names, read out of the hint's own
 // first-party sentence: what the operator is shown for each half of the pair the
 // config holds, with the sentence's closing parenthesis off the second.
@@ -2516,10 +2590,10 @@ test("the directory-form hint keeps both halves of a split locator", () => {
   // OTHER directory form, and both of those are the partner's -- the inviting
   // party's endpoint, copied into the config on an earlier acceptance. Spent
   // left to right the slot would go to the inbound path, deleting
-  // `, outbound_path "..."` and the sentence's own closing: the operator left an
-  // unterminated run and no account of the second half of the pair. Driven at a
-  // width the slot holds whole and at one it cannot, so the fit is read both
-  // where nothing is cut and where both locators are.
+  // `, outbound_path "..."` and the sentence's own closing: the operator left
+  // with no account of the second half of the pair. Driven at a width the slot
+  // holds whole and at one it cannot, so the fit is read both where nothing is
+  // cut and where both locators are.
   const target: RunnableConnectionConfig = {
     channel: "filedrop",
     path: `/mnt/shared/${"r".repeat(53)}`,
@@ -2560,15 +2634,17 @@ test("the directory-form hint keeps both halves of a split locator", () => {
   );
 
   // Past it: the sentence still names both halves and still closes, and each
-  // locator degrades inside its own run to the recorded shape -- some of its own
-  // bytes, then the marker, with the run left unterminated by the cut.
+  // locator degrades INSIDE its own run -- some of its own bytes, then the
+  // marker, then the delimiter the fit closed the cut run with, so the sentence
+  // around it reads at the parity it was composed at rather than at the one the
+  // cut left.
   const cut = splitHintLocators(hintAtWidth(250));
   for (const [half, opening] of [
     [cut.inbound, '"/mnt/in/i'],
     [cut.outbound, '"/mnt/out/o'],
   ] as const) {
     expect(half.startsWith(opening), half).toBe(true);
-    expect(half.endsWith(DISPLAY_TRUNCATION_MARKER), half).toBe(true);
+    expect(half.endsWith(`${DISPLAY_TRUNCATION_MARKER}"`), half).toBe(true);
   }
 });
 
@@ -2698,6 +2774,202 @@ test("a partner-chosen value cannot forge a conflict line's own structure", () =
 
   const rendered = renderedAcceptReconcileError(conflicts);
   expect(rendered).toContain("then retry with the same invitation.");
+});
+
+// One line's CLAUSE SKELETON under the grammar `quoteTermsValue` emits: outside
+// a run every character stands for itself, inside one a doubled delimiter is a
+// literal and a single delimiter closes the run, and each run collapses to one
+// placeholder. Two renderings that differ only in the bytes inside their runs
+// therefore have the same skeleton, which is the precise statement that no value
+// was shown to the operator as structure psilink wrote.
+//
+// The same walk core reads its own seam's messages back through
+// (`packages/core/test/utils/compatibilityMessageReader.ts`), restated here
+// because apps/cli's tsconfig cannot reach another workspace's test tree. What
+// keeps the two walking the same grammar is that the grammar itself is pinned
+// against the constructor below, in each suite that walks it.
+function clauseSkeleton(line: string): string {
+  let skeleton = "";
+  let index = 0;
+  while (index < line.length) {
+    if (line[index] !== '"') {
+      skeleton += line[index];
+      index += 1;
+      continue;
+    }
+    index += 1;
+    let closed = false;
+    while (index < line.length) {
+      if (line[index] === '"') {
+        if (line[index + 1] === '"') {
+          index += 2;
+          continue;
+        }
+        index += 1;
+        closed = true;
+        break;
+      }
+      index += 1;
+    }
+    skeleton += closed ? "<value>" : "<unterminated>";
+  }
+  return skeleton;
+}
+
+// The skeleton of a block, read LINE BY LINE: a run is composed inside one line,
+// so a run still open where a line ends is one the operator meets unterminated --
+// and a walk over the joined block would hide it, closing it on the next line's
+// opening delimiter instead.
+function blockSkeleton(block: string, lineBreak: string): string {
+  return block.split(lineBreak).map(clauseSkeleton).join(lineBreak);
+}
+
+// What a value costs the block when it is rendered as one delimited run: the
+// seam doubles a delimiter inside a value, so a raw character is not a rendered
+// one and the widths the block allocates by have to be measured through it.
+const quotedCost = (raw: string): number =>
+  renderedDisplayCost(quoteTermsValue(raw));
+
+// A value of exactly `cost` rendered characters, opening on `lead`. Built out of
+// a unit carrying the seam's own delimiter, so delimiters stand throughout the
+// value and a cut anywhere inside it lands at or beside a doubled pair.
+const delimiterCarryingValue = (cost: number, lead: string): string => {
+  let raw = lead;
+  while (quotedCost(`${raw}a"b`) <= cost) raw += 'a"b';
+  while (quotedCost(raw) < cost) raw += "x";
+  expect(quotedCost(raw)).toBe(cost);
+  return raw;
+};
+
+// The inert twin of the same rendered width: nothing to forge with, so what the
+// block composes around it is the structure the composition placed and nothing
+// else. Same width means the same slot, the same share, and the same cut.
+const inertValue = (cost: number, lead: string): string => {
+  const raw = lead + "x".repeat(cost - quotedCost(lead));
+  expect(quotedCost(raw)).toBe(cost);
+  return raw;
+};
+
+// Terms disagreeing on the shapes a cut can fall in: a delimited name list, a
+// clause of four values, and a clause whose first value is followed by first-
+// party copy and a bare date. Each value is built by `value`, wide enough that
+// the budgets below cut it, and every side opens on a character of its own so
+// two fitted sides never read alike.
+function parityTerms(
+  value: (cost: number, lead: string) => string,
+  scale = 1,
+): {
+  existing: LinkageTerms;
+  incoming: LinkageTerms;
+} {
+  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+  existing.linkageFields = [{ name: value(60 * scale, "a"), type: "ssn" }];
+  incoming.linkageFields = [{ name: value(60 * scale, "b"), type: "ssn" }];
+  existing.linkageRuleSet = {
+    keySet: { name: value(80 * scale, "c"), version: "1.0.0" },
+    fieldSet: { name: value(80 * scale, "d"), version: "2.0.0" },
+  };
+  incoming.linkageRuleSet = {
+    keySet: { name: value(80 * scale, "e"), version: "1.0.0" },
+    fieldSet: { name: value(80 * scale, "f"), version: "2.0.0" },
+  };
+  existing.legalAgreement = {
+    reference: value(70 * scale, "g"),
+    purpose: "Audit and evaluation of the State tutoring program",
+    expirationDate: "2030-01-01",
+  };
+  incoming.legalAgreement = {
+    reference: value(70 * scale, "h"),
+    purpose: "Audit and evaluation of the State tutoring program",
+    expirationDate: "2031-06-30",
+  };
+  return { existing, incoming };
+}
+
+test("a fitted conflict line's runs are the runs the block composed, at every budget", () => {
+  // The seam's guarantee has to survive the FIT, which is where a value the
+  // partner sized decides where the cut falls. Read back as a clause skeleton: a
+  // rendering whose values carry the line's connectives and the seam's delimiter
+  // must give the same skeleton as one whose values carry nothing at all, and no
+  // run may be left open for what follows it on the line to be read inside.
+  //
+  // The grammar both the fit and that walk assume, pinned here rather than
+  // taken on the constructor's word: one delimiter around a run, doubled inside
+  // it.
+  expect(quoteTermsValue("a")).toBe('"a"');
+  expect(quoteTermsValue('"')).toBe('""""');
+
+  // A locator conflict beside the linkage-terms ones, one side narrow enough to
+  // render whole and the other wide enough to be cut: the cut then falls at the
+  // END of a line, where a run it leaves open has no later delimiter of the
+  // composition's to close it, and the line's delimiter count is odd.
+  const locatorLine = (
+    value: (cost: number, lead: string) => string,
+  ): ReconcileDiff => ({
+    field: "connection.server.host",
+    existing: reconcileDiffValue(value(40, "i")),
+    incoming: reconcileDiffValue(value(200, "j")),
+  });
+  const diffsFor = (
+    value: (cost: number, lead: string) => string,
+  ): ReconcileDiff[] => {
+    const terms = parityTerms(value);
+    return [
+      ...diffLinkageTerms(terms.existing, terms.incoming).conflicts,
+      locatorLine(value),
+    ];
+  };
+  const hostileDiffs = diffsFor(delimiterCarryingValue);
+  const inertDiffs = diffsFor(inertValue);
+  expect(hostileDiffs.map((d) => d.field)).toEqual([
+    "linkage_fields",
+    "linkage_rule_set",
+    "legal_agreement",
+    "connection.server.host",
+  ]);
+
+  // Every budget from nothing to the whole block's need, which is every position
+  // the cut can take on any of these lines: the value widths that place it are
+  // the partner's to choose, so the property is read across all of them rather
+  // than at a width this file picked.
+  const whole = formatReconcileDiffs(hostileDiffs, Number.MAX_SAFE_INTEGER);
+  expect(whole).not.toContain(DISPLAY_TRUNCATION_MARKER);
+  let sawCut = false;
+  let sawNamedOnly = false;
+  for (let budget = 0; budget <= renderedDisplayCost(whole); budget += 1) {
+    const hostile = formatReconcileDiffs(hostileDiffs, budget);
+    const benign = formatReconcileDiffs(inertDiffs, budget);
+    const where = `budget ${budget}`;
+    expect(blockSkeleton(hostile, "\n"), where).not.toContain("<unterminated>");
+    expect(blockSkeleton(hostile, "\n"), where).toBe(
+      blockSkeleton(benign, "\n"),
+    );
+    sawCut ||= hostile.includes(DISPLAY_TRUNCATION_MARKER);
+    sawNamedOnly ||= hostile.includes("too wide for the room");
+  }
+  // Non-vacuous in both directions: the sweep covered budgets that cut a value
+  // and budgets that left a line named without its values.
+  expect(sawCut).toBe(true);
+  expect(sawNamedOnly).toBe(true);
+
+  // The same property where the operator meets it: through the whole refusal,
+  // escaped at the display boundary, at value widths the message's own cap
+  // cannot hold.
+  const refusalAtWidth = (
+    value: (cost: number, lead: string) => string,
+  ): string => {
+    const terms = parityTerms(value, 3);
+    return renderedAcceptReconcileError(
+      diffLinkageTerms(terms.existing, terms.incoming).conflicts,
+    );
+  };
+  const rendered = refusalAtWidth(delimiterCarryingValue);
+  expect(rendered).toContain(DISPLAY_TRUNCATION_MARKER);
+  expect(blockSkeleton(rendered, "\\x0a")).not.toContain("<unterminated>");
+  expect(blockSkeleton(rendered, "\\x0a")).toBe(
+    blockSkeleton(refusalAtWidth(inertValue), "\\x0a"),
+  );
 });
 
 test("diffLinkageTerms: an un-encodable value does not throw and identical terms still reconcile", () => {
