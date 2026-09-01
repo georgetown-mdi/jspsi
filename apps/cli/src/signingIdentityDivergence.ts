@@ -23,8 +23,9 @@ import type { CertificateBody } from "@psilink/core";
 // both parties holding a verifiable receipt on either handshake role: the swap
 // refuses this party's own certificate against its own agreed terms
 // (assertLocalCertificateAuthorizesAgreedIdentity in @psilink/core), and the run
-// ends with no result and no receipt, keeping only the exchange record of the
-// disclosure already made. That refusal lands only after the payloads have
+// ends with no result and no receipt, keeping at most the exchange record of
+// the disclosure already made -- and, where record writing is off (--no-record),
+// nothing at all. That refusal lands only after the payloads have
 // crossed, while this fault is settled while the operator is still configuring,
 // so the run is refused here before any credential, terms, or data are sent --
 // the disposition its sibling certificate-mode faults take
