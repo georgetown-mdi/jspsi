@@ -246,22 +246,73 @@ describe("relay message-queue bounds", () => {
     );
   });
 
-  test("rejects a frame with a non-string payload before it is queued", () => {
-    // payload is typed string, but the inbound frame is parsed from untrusted
-    // JSON; a non-string payload must not slip past the byte accounting (which
-    // would otherwise undercount or NaN-poison the running total). messageByteSize
-    // throws on it, so addMessageToQueue never enqueues such a frame.
-    const malformed = {
+  test("sizes a structured payload by its serialized bytes and queues it", () => {
+    // payload is typed string, but every real signaling payload -- an SDP offer
+    // or answer, an ICE candidate -- reaches the relay as a parsed JSON object.
+    // Such a frame must be held for an absent peer, sized by what crossed the
+    // wire, rather than rejected by the byte accounting.
+    const payload = {
+      sdp: { type: "offer", sdp: "v=0\r\na=group:BUNDLE 0\r\n" },
+      type: "data",
+      connectionId: "dc_9c1f",
+    };
+    const offer = {
       type: MessageType.OFFER,
       src: "s",
       dst: "d",
-      payload: { not: "a string" },
+      payload,
+    } as unknown as IMessage;
+
+    expect(messageByteSize(offer)).toBe(
+      2 * ("OFFER".length + "s".length + "d".length) +
+        2 * JSON.stringify(payload).length,
+    );
+
+    const realm = new Realm();
+    realm.addMessageToQueue("d", offer);
+    const queue = realm.getMessageQueueById("d");
+    expect(queue?.size()).toBe(1);
+    expect(queue?.byteSize()).toBe(messageByteSize(offer));
+    expect(queue?.readMessage()?.payload).toEqual(payload);
+  });
+
+  test("caps the resident bytes of a queue sprayed with structured payloads", () => {
+    // The byte cap binds on the serialized size just as it does on a string
+    // payload: a structured payload cannot evade it by arriving as an object.
+    const realm = new Realm();
+    const bigObjectOfferTo = (dst: string): IMessage =>
+      ({
+        type: MessageType.OFFER,
+        src: "spammer",
+        dst,
+        payload: { sdp: "x".repeat(FRAME_PAYLOAD_CHARS) },
+      }) as unknown as IMessage;
+    for (let i = 0; i < 200; i += 1) {
+      realm.addMessageToQueue("dst", bigObjectOfferTo("dst"));
+    }
+    const queue = realm.getMessageQueueById("dst")!;
+    expect(queue.byteSize()).toBeLessThanOrEqual(MAX_QUEUE_BYTES);
+    expect(queue.byteSize()).toBeGreaterThan(
+      MAX_QUEUE_BYTES - messageByteSize(bigObjectOfferTo("dst")),
+    );
+  });
+
+  test("rejects a frame with a non-string id field before it is queued", () => {
+    // The id fields are typed string, but `dst` rides inside the peer's own
+    // frame and is parsed from untrusted JSON; a non-string one must not slip
+    // past the byte accounting (which would otherwise undercount or NaN-poison
+    // the running total) or key a queue of its own. messageByteSize throws on
+    // it, so addMessageToQueue never enqueues such a frame.
+    const malformed = {
+      type: MessageType.OFFER,
+      src: "s",
+      dst: { not: "a string" },
     } as unknown as IMessage;
     expect(() => messageByteSize(malformed)).toThrow();
 
     const realm = new Realm();
-    expect(() => realm.addMessageToQueue("d", malformed)).toThrow();
-    expect(realm.getMessageQueueById("d")).toBeUndefined();
+    expect(() => realm.addMessageToQueue(malformed.dst, malformed)).toThrow();
+    expect(realm.getClientsIdsWithQueue()).toHaveLength(0);
   });
 
   test("frees bytes as a queue is read, so a drained queue accepts again", () => {

@@ -84,9 +84,10 @@ export class Realm implements IRealm {
   }
 
   public addMessageToQueue(id: string, message: IMessage): void {
-    // Size the frame before allocating anything: a malformed non-string payload
-    // throws here (and is dropped upstream) so it never consumes a queue slot,
-    // and the size is computed once for both the byte cap and `addMessage`.
+    // Size the frame before allocating anything: the size is computed once for
+    // both the byte cap and `addMessage`, and a frame carrying a non-string id
+    // field throws here (and is dropped upstream) so it never keys a queue or
+    // consumes a slot in one.
     const messageBytes = messageByteSize(message);
 
     let queue = this.getMessageQueueById(id);
