@@ -68,6 +68,7 @@ import {
   runOrExit,
 } from "../../src/util/cli";
 import { openEventStream } from "../../src/eventStream";
+import { establishHostKeyTrust } from "../../src/hostKeyTrust";
 import { runProtocol } from "../../src/protocol";
 import { captureFd3 } from "../eventStreamTestSupport";
 import { streamOf, ttyStream, withStdin } from "../stdinStream";
@@ -87,6 +88,18 @@ vi.mock("../../src/protocol", () => ({
 vi.mock("../../src/eventStream", async (importActual) => {
   const actual = await importActual<typeof import("../../src/eventStream")>();
   return { ...actual, openEventStream: vi.fn(actual.openEventStream) };
+});
+
+// The first-use host-key step is spy-WRAPPED for the same reason: the ordering
+// test below needs to observe whether the bootstrap reached it, while every
+// other test keeps running the real one -- a no-op on the pinned connections
+// they supply.
+vi.mock("../../src/hostKeyTrust", async (importActual) => {
+  const actual = await importActual<typeof import("../../src/hostKeyTrust")>();
+  return {
+    ...actual,
+    establishHostKeyTrust: vi.fn(actual.establishHostKeyTrust),
+  };
 });
 
 // runOrExit creates its error logger by name; silence that name so the
@@ -3229,6 +3242,79 @@ test("runOnlineBootstrap persists an @path private-key passphrase as the referen
     expect(parsed.connection.server.private_key_passphrase).toBe(
       `@${passFile}`,
     );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runOnlineBootstrap refuses a credential @path naming a missing file before the host-key step", async () => {
+  // An invite or accept refused from local inputs alone must not have contacted
+  // the server first, and on the unpinned sftp connection driven here the
+  // first-use host-key step is what would: its probe opens a real transport. A
+  // `--server-password @path` whose file is not there is decided from this
+  // party's own filesystem, so the credential values are read ahead of that step
+  // even though they are applied after it, and the run ends at the refusal --
+  // a UsageError, which the invite/accept boundary maps to exit 64 -- with the
+  // host-key step never entered.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  const connection: SFTPConnectionConfig = {
+    channel: "sftp",
+    server: {
+      host: "sftp.example.org",
+      password: `@${path.join(dir, "absent-password")}`,
+    },
+  };
+  vi.mocked(establishHostKeyTrust).mockClear();
+  vi.mocked(runProtocol).mockReset();
+  try {
+    await expect(
+      runOnlineBootstrap({ ...onlineBootstrapParams(configPath), connection }),
+    ).rejects.toThrow(UsageError);
+    expect(vi.mocked(establishHostKeyTrust)).not.toHaveBeenCalled();
+    expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
+    expect(fs.existsSync(configPath)).toBe(false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runOnlineBootstrap dials the connection the host-key step pinned", async () => {
+  // The other half of reading the credential files early: the connection handed
+  // to runProtocol is still cloned AFTER the host-key step, so the pin that step
+  // writes onto the original is what the real open() enforces. A clone taken at
+  // the read instead would carry the resolved credential and no pin, and dial an
+  // unverified server -- so the run driven here supplies both.
+  const FP = "SHA256:" + "D".repeat(43);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  const pwFile = path.join(dir, "pw");
+  fs.writeFileSync(pwFile, "s3cret\n");
+  const connection: SFTPConnectionConfig = {
+    channel: "sftp",
+    server: { host: "sftp.example.org", password: `@${pwFile}` },
+  };
+
+  vi.mocked(establishHostKeyTrust).mockImplementationOnce((async (
+    conn: SFTPConnectionConfig,
+  ) => {
+    conn.server.hostKeyFingerprint = FP;
+  }) as never);
+  let connectionPassedToRunProtocol: SFTPConnectionConfig | undefined;
+  vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
+    connectionPassedToRunProtocol = callArgs[0] as SFTPConnectionConfig;
+    await soleFunctionArg(callArgs)();
+    return {};
+  }) as never);
+
+  try {
+    await runOnlineBootstrap({
+      ...onlineBootstrapParams(configPath),
+      connection,
+    });
+    expect(connectionPassedToRunProtocol?.server.hostKeyFingerprint).toBe(FP);
+    // And the credential read before that step still reached the same object.
+    expect(connectionPassedToRunProtocol?.server.password).toBe("s3cret");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
