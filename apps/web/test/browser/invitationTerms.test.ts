@@ -2318,6 +2318,47 @@ describe("InvitationTerms: the declared payload lists are bounded by count", () 
     })),
   };
 
+  // The first-party line each direction's block opens with, under the acceptor
+  // perspective these tests render.
+  const SEND_LABEL = "Your partner will send:";
+  const RECEIVE_LABEL = "Your partner requests from you:";
+
+  // One direction's block: the label, the list container holding the painted names,
+  // and the unshown-count line when the declaration overran the cap. Located by the
+  // first-party label it opens with, so an assertion scoped to one direction cannot
+  // read the other's list or the other's count line.
+  function directionBlock(panel: HTMLElement, label: string): HTMLElement {
+    const blocks = Array.from(panel.querySelectorAll("ul"))
+      .map((list) => list.parentElement)
+      .filter(
+        (block): block is HTMLElement =>
+          block !== null && block.textContent.startsWith(label),
+      );
+    if (blocks.length !== 1)
+      throw new Error(
+        `expected one declared list labelled "${label}", found ${blocks.length}`,
+      );
+    return blocks[0];
+  }
+
+  // The container a declared name is painted inside, as opposed to the block around
+  // it: the two together are what tells an entry from the copy stating what the
+  // entries left out.
+  function listIn(block: HTMLElement): HTMLElement {
+    const list = block.querySelector("ul");
+    if (!list) throw new Error("declared list container not found");
+    return list;
+  }
+
+  // What the block paints outside that container: the label, and the count line when
+  // the declaration overran the cap.
+  function textOutsideList(block: HTMLElement): string {
+    return Array.from(block.children)
+      .filter((child) => child.tagName !== "UL")
+      .map((child) => child.textContent)
+      .join("");
+  }
+
   test("paints at most MAX_DECLARED_NAMES_SHOWN names per direction and counts the rest", async () => {
     const send = flooded("send");
     const receive = flooded("receive");
@@ -2352,12 +2393,19 @@ describe("InvitationTerms: the declared payload lists are bounded by count", () 
     expect(panel.querySelectorAll("li")).toHaveLength(
       2 * MAX_DECLARED_NAMES_SHOWN,
     );
-    // Twice -- once per bounded direction -- and each stating the whole remainder,
-    // so neither list drops its tail silently.
+    // Once per bounded direction, stating that direction's whole remainder, so
+    // neither list drops its tail silently. Counted inside the direction's own block
+    // and outside its list container rather than across the panel: the sentence is
+    // first-party copy about one list, and a panel-wide count would also read the
+    // partner text painted inside both.
     const countLine = unshownDeclaredNamesLine(
       MAX_PAYLOAD_ENTRIES - MAX_DECLARED_NAMES_SHOWN,
     );
-    expect(panel.textContent.split(countLine)).toHaveLength(3);
+    for (const label of [SEND_LABEL, RECEIVE_LABEL]) {
+      const block = directionBlock(panel, label);
+      expect(textOutsideList(block).split(countLine)).toHaveLength(2);
+      expect(listIn(block).textContent).not.toContain(countLine);
+    }
     expect(panel.textContent.length).toBeLessThanOrEqual(PANEL_CEILING);
   });
 
@@ -2397,6 +2445,65 @@ describe("InvitationTerms: the declared payload lists are bounded by count", () 
     const panel = await readyPanel("Other details");
     expect(panel.querySelectorAll("li")).toHaveLength(3);
     expect(panel.textContent).not.toContain("more not shown here");
+  });
+
+  test("a name carrying list separators or the count line's own words is still one item inside the list", async () => {
+    // The escape neutralizes control, bidi, and non-ASCII code points and leaves
+    // printable ASCII alone, so a declared name may carry a comma or a semicolon --
+    // list separators, were the list one line -- or read exactly as the first-party
+    // sentence stating how many names were not painted. What tells a partner name
+    // from that sentence is where it is painted: an entry is a bulleted item inside
+    // the direction's list container, and the count line sits outside it.
+    const countLine = unshownDeclaredNamesLine(
+      MAX_PAYLOAD_ENTRIES - MAX_DECLARED_NAMES_SHOWN,
+    );
+    // At the head of the declaration, so all three fall inside the painted slice: a
+    // name past the cut is not painted at all and would measure nothing.
+    const HOSTILE_NAMES = [countLine, "site, cohort", "risk; score"];
+
+    // Flooded to core's ceiling like the checks above, so the count line the
+    // declaration produces is the sentence the mimic is written as, but with short
+    // filler names: what this measures is placement, not rendered size.
+    function ledByHostileNames(prefix: string): Array<string> {
+      return Array.from({ length: MAX_PAYLOAD_ENTRIES }, (_, index) =>
+        index < HOSTILE_NAMES.length
+          ? HOSTILE_NAMES[index]
+          : `${prefix}${index}`,
+      );
+    }
+
+    renderTerms({
+      ...unconstrainedTerms,
+      payload: {
+        send: ledByHostileNames("send").map((name) => ({ name })),
+        receive: ledByHostileNames("receive").map((name) => ({ name })),
+      },
+    });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    const panel = await readyPanel("Other details");
+
+    for (const [label, prefix] of [
+      [SEND_LABEL, "send"],
+      [RECEIVE_LABEL, "receive"],
+    ] as const) {
+      const block = directionBlock(panel, label);
+      const list = listIn(block);
+      // One item per declared name and in the declared order: a name carrying a
+      // separator is a single entry, never two, and the mimic is an entry rather
+      // than the line it reads as.
+      expect(
+        Array.from(list.querySelectorAll("li"), (item) => item.textContent),
+      ).toEqual(
+        ledByHostileNames(prefix)
+          .slice(0, MAX_DECLARED_NAMES_SHOWN)
+          .map((name) => sanitizeForDisplay(name)),
+      );
+      // The sentence twice over the direction's block, once on each side of the
+      // container: the mimic inside it, the genuine line outside, so the collision
+      // is one of content and the placement still separates them.
+      expect(list.textContent.split(countLine)).toHaveLength(2);
+      expect(textOutsideList(block).split(countLine)).toHaveLength(2);
+    }
   });
 });
 
