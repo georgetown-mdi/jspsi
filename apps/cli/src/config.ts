@@ -484,6 +484,29 @@ export interface ReconcileDiff {
   existing: CompatibilityMessageFragment;
   /** Rendering of the value the invitation or URL requires. */
   incoming: CompatibilityMessageFragment;
+  /**
+   * How each side is fitted where the line's slot cannot hold it whole.
+   *
+   * Absent where a side is ONE delimited run, which has nothing inside it to
+   * partition: the slot's clip degrades that run and takes nothing else with it.
+   * Supplied where a side is a CLAUSE -- several chosen values inside
+   * first-party structure -- so the slot's share is divided among those values
+   * rather than spent left to right on the first of them, which would delete the
+   * structure standing behind it (see {@link reconcileClause}).
+   */
+  fit?: ReconcileDiffFit;
+}
+
+/**
+ * The two sides of one conflict line as functions of the share their slots get.
+ *
+ * Carried BESIDE the sides rather than in place of them, and produced by the one
+ * composition that produced those sides ({@link reconcileClause}), so a fitted
+ * side cannot describe a different clause than the unfitted one it replaces.
+ */
+export interface ReconcileDiffFit {
+  existing: (budget: number) => string;
+  incoming: (budget: number) => string;
 }
 
 /** Placeholder rendered for an absent value in a {@link ReconcileDiff}. */
@@ -529,6 +552,61 @@ export function reconcileDiffValue(
  */
 function reconcileDiffBareValue(value: string): CompatibilityMessageFragment {
   return bareTermsValue(redactPrivateKeyMaterial(value));
+}
+
+/**
+ * One side of a conflict line built from more than one value: the clause whole,
+ * and the same clause fitted to a budget.
+ */
+interface ReconcileClause {
+  /** Every value at its full width, for a slot that can hold them. */
+  text: CompatibilityMessageFragment;
+  /** The clause with each value clipped to an equal share of `budget`. */
+  fit: (budget: number) => string;
+}
+
+/**
+ * Compose a conflict line's side as a tagged template, keeping the values apart
+ * from the first-party spans around them so a slot too small for the whole
+ * clause can be divided among the VALUES.
+ *
+ * This is the provenance partition {@link formatReconcileDiffs} applies between
+ * lines, carried one level down into a line: the clause's own spans are
+ * first-party copy, measured where they stand, and what the slot leaves is split
+ * equally among the values it names. Clipping the composed clause instead spends
+ * the slot left to right, so the first value takes all of it and the connective,
+ * the values behind it, and the clause's second half are simply deleted -- a
+ * partner-chosen set name at the schema's length would leave the operator a
+ * citation with no version, no `over`, and no field set on either side.
+ * Sub-partitioned, degradation happens INSIDE a value: at any share the clause
+ * still reads as a name, a version, the connective, and the other half, however
+ * little of each survives.
+ *
+ * The fitted form is a plain string rather than a fragment, which is what the
+ * block it lands in composes: a clip can cut inside a delimited run and leave it
+ * unterminated ahead of the truncation marker, the residual
+ * {@link formatReconcileDiffs} records for every clip it makes, so the fit does
+ * not re-assert the seam's guarantee over what it cut.
+ */
+function reconcileClause(
+  fixedSpans: TemplateStringsArray,
+  ...values: readonly CompatibilityMessageFragment[]
+): ReconcileClause {
+  const structureCost = renderedDisplayCost(fixedSpans.join(""));
+  return {
+    text: compatibilityMessage(fixedSpans, ...values),
+    fit: (budget: number): string => {
+      const share = Math.floor((budget - structureCost) / values.length);
+      let composed: string = fixedSpans[0];
+      for (let index = 0; index < values.length; index += 1)
+        composed +=
+          clipToRenderedCost(values[index], share) + fixedSpans[index + 1];
+      // A share below what the truncation marker itself costs leaves a clipped
+      // value wider than its share, so the composed clause is held to the slot
+      // it was given rather than to the sum of the parts it fitted.
+      return clipToRenderedCost(composed, budget);
+    },
+  };
 }
 
 /**
@@ -663,13 +741,19 @@ function renderStructural(
  * name is delimited. Unescaped, unlike {@link describeRuleSetCitation}, whose
  * sink is a `log.warn`: a diff line is composed into a {@link UsageError} and
  * escaped once where it is shown.
+ *
+ * All four values stand in ONE clause rather than two halves composed together,
+ * because the sub-partition the fit runs is over the values a clause names
+ * ({@link reconcileClause}): as two nested halves the outer clause would divide
+ * its slot between the halves and each half would then divide again, giving the
+ * name and the version of each side a quarter of the slot the same way, but only
+ * after two rounds of the marker's own cost. One clause of four values is the
+ * same share arithmetic charged once.
  */
 function renderRuleSetCitation(
   reference: LinkageRuleSetReference,
-): CompatibilityMessageFragment {
-  const half = (identity: LinkageSetIdentity): CompatibilityMessageFragment =>
-    compatibilityMessage`${reconcileDiffValue(identity.name)} ${reconcileDiffBareValue(identity.version)}`;
-  return compatibilityMessage`${half(reference.keySet)} over ${half(reference.fieldSet)}`;
+): ReconcileClause {
+  return reconcileClause`${reconcileDiffValue(reference.keySet.name)} ${reconcileDiffBareValue(reference.keySet.version)} over ${reconcileDiffValue(reference.fieldSet.name)} ${reconcileDiffBareValue(reference.fieldSet.version)}`;
 }
 
 /**
@@ -687,13 +771,13 @@ function renderRuleSetCitation(
 function renderRuleSetCitationConflict(
   existing: LinkageRuleSetReference,
   incoming: LinkageRuleSetReference,
-): {
-  existing: CompatibilityMessageFragment;
-  incoming: CompatibilityMessageFragment;
-} {
+): Omit<ReconcileDiff, "field"> {
+  const existingClause = renderRuleSetCitation(existing);
+  const incomingClause = renderRuleSetCitation(incoming);
   return {
-    existing: renderRuleSetCitation(existing),
-    incoming: renderRuleSetCitation(incoming),
+    existing: existingClause.text,
+    incoming: incomingClause.text,
+    fit: { existing: existingClause.fit, incoming: incomingClause.fit },
   };
 }
 
@@ -883,11 +967,13 @@ export function diffLinkageTerms(
       "linkage rule set",
     )
   ) {
-    const r = renderRuleSetCitationConflict(
-      existing.linkageRuleSet,
-      incoming.linkageRuleSet,
-    );
-    add("linkage_rule_set", r.existing, r.incoming);
+    conflicts.push({
+      field: "linkage_rule_set",
+      ...renderRuleSetCitationConflict(
+        existing.linkageRuleSet,
+        incoming.linkageRuleSet,
+      ),
+    });
   }
 
   // The reference is partner-chosen free text and the expiration date is
@@ -983,22 +1069,20 @@ const RECONCILE_LINE_EXISTING = ": existing ";
 const RECONCILE_LINE_INCOMING = " vs required ";
 
 /**
- * Stands in for the second side of a conflict line whose two values fit to the
- * same text -- what a pair differing only inside redacted or clipped bytes comes
- * to. Fixed first-party text carrying no bytes from either side, and fitted to
- * the same share the value it replaces would have spent, so substituting it
- * cannot widen the line it stands on.
- */
-const RECONCILE_SAME_TEXT = compatibilityMessage`(the same text)`;
-
-/**
- * Explains {@link RECONCILE_SAME_TEXT}, once for the block rather than once per
- * line. Its cost is taken out of the block's budget before the values are
- * re-fitted against it, so saying this never costs the line that needed it.
+ * Explains a line whose two sides read alike -- what a pair differing only
+ * inside redacted or clipped bytes comes to -- once for the block rather than
+ * once per line.
+ *
+ * Both sides are still shown as they fitted, rather than the second being
+ * replaced by fixed text saying it matched the first: what the two sides DO
+ * share is the operator's whole reading of a value the display cannot show them,
+ * and a standin deletes it from the side that could have carried it. Its cost is
+ * taken out of the block's budget before the values are re-fitted against it, so
+ * saying this never costs the line that needed it.
  */
 const RECONCILE_WITHHELD_NOTE =
-  "  (a side shown as the same text differs only inside what this display " +
-  "withheld: bytes redacted as private-key material, or clipped for length)";
+  "  (two sides that read alike differ only inside what this display withheld: " +
+  "bytes redacted as private-key material, or clipped for length)";
 
 /**
  * Replaces the values on every line when the diff count leaves no room to show
@@ -1029,7 +1113,10 @@ const RECONCILE_FIELDS_ONLY_NOTE =
  * conflict line can render past the whole budget the renderer gives the one link
  * this message is. The budget is therefore shared out: every line is charged its
  * own first-party skeleton, and what is left over is divided equally between the
- * value slots, so no line and no chooser can spend another's room. Every
+ * value slots, so no line and no chooser can spend another's room. A slot whose
+ * side is a clause of several values divides its share once more, among those
+ * values ({@link reconcileClause}), so what a slot too small to hold everything
+ * degrades is a value rather than the clause structure standing behind it. Every
  * disagreeing field is named whatever the values do, because a field an operator
  * is never told about is a difference they cannot go and resolve.
  *
@@ -1064,16 +1151,17 @@ export function formatReconcileDiffs(
     valueBudget: number,
   ): { block: string; withheld: boolean } => {
     let withheld = false;
-    const side = (value: string): string =>
-      clipToRenderedCost(value, valueBudget);
     const lines = diffs.map((d) => {
-      const existing = side(d.existing);
-      const incoming = side(d.incoming);
-      const alike = existing === incoming;
-      if (alike) withheld = true;
+      const existing = d.fit
+        ? d.fit.existing(valueBudget)
+        : clipToRenderedCost(d.existing, valueBudget);
+      const incoming = d.fit
+        ? d.fit.incoming(valueBudget)
+        : clipToRenderedCost(d.incoming, valueBudget);
+      if (existing === incoming) withheld = true;
       return (
         `${RECONCILE_LINE_PREFIX}${d.field}${RECONCILE_LINE_EXISTING}${existing}` +
-        `${RECONCILE_LINE_INCOMING}${alike ? side(RECONCILE_SAME_TEXT) : incoming}`
+        `${RECONCILE_LINE_INCOMING}${incoming}`
       );
     });
     return { block: lines.join("\n"), withheld };
