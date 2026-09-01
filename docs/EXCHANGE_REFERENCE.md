@@ -357,6 +357,8 @@ Each step in a `transform` array applies one function from the cleaning and stan
 
 When a `swap` array is present, the receiver transmits a linkage key generated with the two named elements swapped, while the sender generates a linkage key with un-swapped elements. A `swap` target names an element by that element's effective identifier: its `name` if it declares one, otherwise its `field`. An element that declares a `name` is referenced by that `name`, not by its `field`. For example, a key might match first name swapped with last name to catch data entry errors where the names are reversed at one agency. Each `swap` target must resolve to an element of the same key by this rule; a target matching no element in its key is rejected when the terms are decoded, rather than silently doing nothing at exchange time.
 
+The two elements a `swap` names must also declare the same [`generate_fuzzy_comparisons`](#element-fields) -- both the same value, or neither one. A swap moves the field references and leaves each element's own expansion where it is, so a pair declaring different expansions would widen a column one way on the party that swaps and another on the party that does not. A mismatched pair is rejected when the terms are decoded.
+
 ### `linkage_terms.linkage_rule_set`
 
 *Type:* object  

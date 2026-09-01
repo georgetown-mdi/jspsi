@@ -14,6 +14,7 @@
  * re-exports both, which is where consumers read them from.
  */
 
+import { APPLIED_SETTINGS } from "./appliedSettings.js";
 import type { LinkageKey, LinkageTerms } from "./config/linkageTerms.js";
 import type { Standardization } from "./config/standardization.js";
 
@@ -117,10 +118,15 @@ export function withNoListedFanOutFunctions<T>(body: () => T): T {
  * guarantee a dual-party-output exchange otherwise gives, because each candidate
  * can independently reveal co-possession. Past the bound that width is not the
  * operator's call to make per row, and the consequence of an authored fan-out
- * within the bound is surfaced where the operator consents to the terms. For the
- * other candidate producer, `generateFuzzyComparisons`, the number is the
- * advisory alone -- its own width factor is that feature's to set when its
- * matching lands.
+ * within the bound is surfaced where the operator consents to the terms.
+ *
+ * It binds the other candidate producer, `generateFuzzyComparisons`, as the
+ * declared width factor of any key an element of which declares one -- the same
+ * number, so a fuzzy key's slots are expressible in the 1-or-20 grammar the terms
+ * envelope already carries -- and as a REFUSAL rather than a drop for a row a
+ * fuzzy expansion widened past it (`buildKeyStrings`): a fuzzy element declares
+ * every candidate as one that matches independently, so a row contributing part
+ * of its set would match on less than the terms describe.
  */
 export const MAX_KEY_CANDIDATES_PER_ROW = 20;
 
@@ -167,6 +173,20 @@ function keyDeclaresFanOut(
   );
 }
 
+// Whether any of the key's elements declares a fuzzy expansion, read WITHOUT
+// regard to the role this party will resolve to. The advertisement rides message
+// 1 of the terms exchange, before the initiator holds the partner's record count,
+// so the role is not yet known when this number is fixed -- and an expansion some
+// role executes on one party alone is still a width that party may need. Every
+// party therefore declares the receiver-case ceiling, which is what makes the
+// floor each party derives from the agreed terms the same on both sides
+// whichever of them ends up as the receiver.
+function keyDeclaresFuzzyExpansion(key: LinkageKey): boolean {
+  return key.elements.some(
+    (element) => element.generateFuzzyComparisons !== undefined,
+  );
+}
+
 /**
  * A party's declared **effective key count**: the sum, over the agreed linkage
  * keys, of its declared candidate factor for each -- {@link
@@ -187,12 +207,17 @@ function keyDeclaresFanOut(
  * (which the partner cannot see, and which is why a party may advertise more than
  * that floor). Passing no `standardization` yields exactly that floor.
  *
- * `generateFuzzyComparisons` is a second per-record candidate producer and does
- * NOT raise the count: it expands nothing while `APPLIED_SETTINGS.fuzzyComparisons`
- * is false, and setting its own width factor here is that feature's work to do
- * before the flag flips. A fuzzy row that reached a round without one would
- * exceed the slots this count bounds, which the single-pass build refuses rather
- * than ships (see `link.ts`).
+ * `generateFuzzyComparisons` is the second per-record candidate producer and
+ * carries the same factor, on a key any of whose elements declares one. The two
+ * producers do not compound: a key both widen still declares
+ * {@link MAX_KEY_CANDIDATES_PER_ROW}, which is what a record may contribute to
+ * one key however many producers built the set.
+ *
+ * The fuzzy half is gated on `APPLIED_SETTINGS.fuzzyComparisons`, which is what
+ * keeps the advertisement the number every party already sends while the
+ * expansion builds nothing: declaring a width for candidates no row realizes
+ * would spend this party's share of the single-pass ceiling on slots that stay
+ * empty.
  */
 export function declaredEffectiveKeyCount(
   terms: LinkageTerms,
@@ -201,8 +226,10 @@ export function declaredEffectiveKeyCount(
   const fanOutFields = fanOutStandardizedFields(standardization);
   let effectiveKeyCount = 0;
   for (const key of terms.linkageKeys)
-    effectiveKeyCount += keyDeclaresFanOut(key, fanOutFields)
-      ? MAX_KEY_CANDIDATES_PER_ROW
-      : 1;
+    effectiveKeyCount +=
+      keyDeclaresFanOut(key, fanOutFields) ||
+      (APPLIED_SETTINGS.fuzzyComparisons && keyDeclaresFuzzyExpansion(key))
+        ? MAX_KEY_CANDIDATES_PER_ROW
+        : 1;
   return effectiveKeyCount;
 }

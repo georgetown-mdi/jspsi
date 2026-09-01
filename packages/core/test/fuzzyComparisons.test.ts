@@ -4,6 +4,7 @@ import {
   adjacentYearCandidates,
   deletionCandidates,
   expandFuzzyComparisons,
+  expandsOnReceiverOnly,
   transpositionCandidates,
   MAX_FUZZY_EXPANSION_INPUT_LENGTH,
 } from "../src/fuzzyComparisons";
@@ -12,9 +13,33 @@ import {
   StandardizedDataset,
   StandardizedField,
 } from "../src/standardization";
+import { declaredEffectiveKeyCount } from "../src/fanOutFunctions";
 import { APPLIED_SETTINGS } from "../src/appliedSettings";
 import { UsageError } from "../src/errors";
-import type { LinkageKey } from "../src/config/linkageTerms";
+import type {
+  GenerateFuzzyComparisons,
+  LinkageKey,
+  LinkageTerms,
+} from "../src/config/linkageTerms";
+
+const FUZZY_KINDS: readonly GenerateFuzzyComparisons[] = [
+  "transpositions",
+  "edit_distances",
+  "adjacent_years",
+];
+
+// The one-key terms a width assertion reads: the key declares the expansion and
+// nothing else, so its effective key count is the plain 1 or the fuzzy factor.
+function fuzzyTerms(kind: GenerateFuzzyComparisons): LinkageTerms {
+  return {
+    linkageKeys: [
+      {
+        name: "one",
+        elements: [{ field: "last_name", generateFuzzyComparisons: kind }],
+      },
+    ],
+  } as LinkageTerms;
+}
 
 // The expansion primitives are pure and always exercised. buildKeyStrings gates
 // calling them on APPLIED_SETTINGS.fuzzyComparisons; this file pins the behavior
@@ -173,6 +198,30 @@ describe("expandFuzzyComparisons", () => {
   });
 });
 
+describe("expandsOnReceiverOnly", () => {
+  test("classifies every kind the schema admits", () => {
+    // Total over the enum: a kind added without an arm fails to compile, and this
+    // pins that each existing one is classified rather than defaulted.
+    expect(expandsOnReceiverOnly("transpositions")).toBe(true);
+    expect(expandsOnReceiverOnly("adjacent_years")).toBe(true);
+    expect(expandsOnReceiverOnly("edit_distances")).toBe(false);
+  });
+
+  test("reads the kind alone, so both parties classify identically", () => {
+    for (const kind of FUZZY_KINDS)
+      expect(expandsOnReceiverOnly(kind)).toBe(expandsOnReceiverOnly(kind));
+  });
+});
+
+describe("the declared width of a fuzzy key", () => {
+  // Read under the shipped flag (false) here; the widths the flag buys are pinned
+  // in fuzzyExpansionWidth.test.ts, which mocks it on.
+  test("a fuzzy element raises no width while the expansion is inert", () => {
+    for (const kind of FUZZY_KINDS)
+      expect(declaredEffectiveKeyCount(fuzzyTerms(kind))).toBe(1);
+  });
+});
+
 describe("buildKeyStrings while fuzzy expansion is not applied", () => {
   function makeDataset(fields: Record<string, string>): StandardizedDataset {
     return new StandardizedDataset(
@@ -231,5 +280,40 @@ describe("buildKeyStrings while fuzzy expansion is not applied", () => {
     };
     expect(() => buildKeyStrings(key, dataset, 0)).not.toThrow(UsageError);
     expect(buildKeyStrings(key, dataset, 0)?.size).toBe(1);
+  });
+
+  test("the two roles build the same key for every kind", () => {
+    // The expansion is what the role keys, so with it inert a fuzzy element is
+    // role-blind: the receiver and the sender realize one identical value, and no
+    // width, refusal, or advisory separates them.
+    const dataset = makeDataset({ last_name: "SMITH" });
+    for (const kind of FUZZY_KINDS) {
+      const key: LinkageKey = {
+        name: "LN",
+        elements: [{ field: "last_name", generateFuzzyComparisons: kind }],
+      };
+      expect(buildKeyStrings(key, dataset, 0, false)).toEqual(
+        new Set(["SMITH"]),
+      );
+      expect(buildKeyStrings(key, dataset, 0, true)).toEqual(
+        new Set(["SMITH"]),
+      );
+    }
+  });
+
+  test("a row the expansion would widen past the width bound still builds one key", () => {
+    // With the flag on this row is refused (fuzzyComparisonsApplied.test.ts); the
+    // refusal is reachable only through the expansion, so the gate closes it too.
+    const dataset = makeDataset({ a: "ABCDEFGH", b: "JKLMNOPQ" });
+    const key: LinkageKey = {
+      name: "A+B",
+      elements: [
+        { field: "a", generateFuzzyComparisons: "edit_distances" },
+        { field: "b", generateFuzzyComparisons: "edit_distances" },
+      ],
+    };
+    expect(buildKeyStrings(key, dataset, 0, true)).toEqual(
+      new Set(["ABCDEFGHJKLMNOPQ"]),
+    );
   });
 });

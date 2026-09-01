@@ -13,6 +13,7 @@ import {
   StandardizedDataset,
   StandardizedField,
 } from "../src/standardization";
+import { MAX_KEY_CANDIDATES_PER_ROW } from "../src/fanOutFunctions";
 import { UsageError } from "../src/errors";
 import { getLogger } from "../src/utils/logger";
 import type { LinkageKey, TransformStep } from "../src/config/linkageTerms";
@@ -49,7 +50,7 @@ describe("buildKeyStrings: fuzzy comparison expansion", () => {
       ],
     };
     const dataset = makeDataset({ date_of_birth: "19900115" });
-    expect(buildKeyStrings(key, dataset, 0)).toEqual(
+    expect(buildKeyStrings(key, dataset, 0, true)).toEqual(
       new Set(["19900115", "19890115", "19910115"]),
     );
   });
@@ -66,7 +67,7 @@ describe("buildKeyStrings: fuzzy comparison expansion", () => {
       last_name: "SMITH",
       date_of_birth: "19900115",
     });
-    expect(buildKeyStrings(key, dataset, 0)).toEqual(
+    expect(buildKeyStrings(key, dataset, 0, true)).toEqual(
       new Set(["SMITH19900115", "SMITH19890115", "SMITH19910115"]),
     );
   });
@@ -83,8 +84,9 @@ describe("buildKeyStrings: fuzzy comparison expansion", () => {
       last_name: "AB",
       date_of_birth: "19900115",
     });
-    // "AB" -> {AB, BA}; the date -> 3 candidates.
-    expect(buildKeyStrings(key, dataset, 0)?.size).toBe(6);
+    // "AB" -> {AB, BA}; the date -> 3 candidates. Read as the receiver, the role
+    // every declared expansion runs under.
+    expect(buildKeyStrings(key, dataset, 0, true)?.size).toBe(6);
   });
 
   test("the element transform runs BEFORE the expansion", () => {
@@ -108,7 +110,7 @@ describe("buildKeyStrings: fuzzy comparison expansion", () => {
       ],
     };
     const dataset = makeDataset({ date_of_birth: "01/15/1990" });
-    expect(buildKeyStrings(key, dataset, 0)).toEqual(
+    expect(buildKeyStrings(key, dataset, 0, true)).toEqual(
       new Set(["19900115", "19890115", "19910115"]),
     );
   });
@@ -128,7 +130,7 @@ describe("buildKeyStrings: fuzzy comparison expansion", () => {
       ],
     };
     const dataset = makeDataset({ id: "1234" });
-    expect(buildKeyStrings(key, dataset, 0)).toEqual(
+    expect(buildKeyStrings(key, dataset, 0, true)).toEqual(
       new Set(["123", "213", "132"]),
     );
   });
@@ -186,7 +188,7 @@ describe("buildKeyStrings: fuzzy fan-out guardrails", () => {
     );
   }
 
-  test("the fan-out warning measures the EXPANDED count", () => {
+  test("the width bound refuses a row the expansion widened past it", () => {
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
     const key: LinkageKey = {
       name: "A+B",
@@ -195,15 +197,51 @@ describe("buildKeyStrings: fuzzy fan-out guardrails", () => {
         { field: "b", generateFuzzyComparisons: "edit_distances" },
       ],
     };
-    // Each 8-character value expands to itself plus 8 deletions: 9 x 9 = 81.
-    const built = buildKeyStrings(
-      key,
-      datasetOf({ a: "ABCDEFGH", b: "JKLMNOPQ" }),
-      0,
+    // Each 8-character value expands to itself plus 8 deletions: 9 x 9 = 81, over
+    // the 20 the key's declared width buys it. The row is refused rather than
+    // narrowed to a slice of the candidate set the terms declare, and rather than
+    // warned and shipped -- 61 of its candidates would have no slot to occupy.
+    const dataset = datasetOf({ a: "ABCDEFGH", b: "JKLMNOPQ" });
+    expect(() => buildKeyStrings(key, dataset, 0)).toThrow(UsageError);
+    expect(() => buildKeyStrings(key, dataset, 0)).toThrow(
+      /expands one row into 81 candidate values through fuzzy comparisons, above the 20/,
     );
-    expect(built?.size).toBe(81);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  test("the width refusal names no local value", () => {
+    const key: LinkageKey = {
+      name: "A+B",
+      elements: [
+        { field: "a", generateFuzzyComparisons: "edit_distances" },
+        { field: "b", generateFuzzyComparisons: "edit_distances" },
+      ],
+    };
+    const dataset = datasetOf({ a: "SECRETAB", b: "SECRETCD" });
+    expect(() => buildKeyStrings(key, dataset, 0)).toThrow(/^(?!.*SECRET).*$/s);
+  });
+
+  test("a declared fan-out keeps the warned drop at the same bound", () => {
+    // The two producers take different fates at one bound, so a row a declared
+    // fan-out widened must still be dropped and warned rather than swept into the
+    // fuzzy refusal beside it.
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const key: LinkageKey = {
+      name: "split",
+      elements: [
+        {
+          field: "a",
+          transform: [{ function: "split_on", params: { delimiter: "/" } }],
+        },
+      ],
+    };
+    const parts = Array.from(
+      { length: MAX_KEY_CANDIDATES_PER_ROW + 1 },
+      (_unused, i) => `V${i}`,
+    ).join("/");
+    expect(buildKeyStrings(key, datasetOf({ a: parts }), 0)).toBeNull();
     expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn.mock.calls[0][0]).toMatch(/81 key strings \(>20\)/);
+    expect(warn.mock.calls[0][0]).toMatch(/realizes 21 candidate values/);
   });
 
   test("no warning fires below the threshold", () => {
@@ -299,5 +337,96 @@ describe("buildKeyStrings: fuzzy fan-out guardrails", () => {
     expect(buildKeyStrings(key, dataset, 0)).toEqual(
       new Set(["ABCDEFGHIJKLMNOPQRSTUVWX"]),
     );
+  });
+});
+
+describe("buildKeyStrings: the expanding side", () => {
+  function datasetOf(fields: Record<string, string>): StandardizedDataset {
+    return new StandardizedDataset(
+      Object.entries(fields).map(
+        ([name, value]) =>
+          new StandardizedField(name, name, [], [{ [name]: value }]),
+      ),
+    );
+  }
+
+  const RECEIVER_ONLY_KIND = "transpositions";
+  const BOTH_SIDED_KIND = "edit_distances";
+
+  test.each([
+    {
+      kind: "transpositions" as const,
+      field: "last_name",
+      value: "ABC",
+      onReceiver: ["ABC", "BAC", "ACB"],
+    },
+    {
+      kind: "adjacent_years" as const,
+      field: "date_of_birth",
+      value: "19900115",
+      onReceiver: ["19900115", "19890115", "19910115"],
+    },
+  ])(
+    "$kind expands on the receiver and not on the sender",
+    ({ kind, field, value, onReceiver }) => {
+      const key: LinkageKey = {
+        name: "K",
+        elements: [{ field, generateFuzzyComparisons: kind }],
+      };
+      const dataset = datasetOf({ [field]: value });
+      expect(buildKeyStrings(key, dataset, 0, true)).toEqual(
+        new Set(onReceiver),
+      );
+      expect(buildKeyStrings(key, dataset, 0, false)).toEqual(new Set([value]));
+    },
+  );
+
+  test("the both-sided kind expands identically for either role", () => {
+    const key: LinkageKey = {
+      name: "LN",
+      elements: [
+        { field: "last_name", generateFuzzyComparisons: BOTH_SIDED_KIND },
+      ],
+    };
+    const dataset = datasetOf({ last_name: "ABC" });
+    const expected = new Set(["ABC", "BC", "AC", "AB"]);
+    expect(buildKeyStrings(key, dataset, 0, true)).toEqual(expected);
+    expect(buildKeyStrings(key, dataset, 0, false)).toEqual(expected);
+  });
+
+  test("the sender of a mixed key still expands the both-sided element", () => {
+    const key: LinkageKey = {
+      name: "LN+FN",
+      elements: [
+        { field: "last_name", generateFuzzyComparisons: RECEIVER_ONLY_KIND },
+        { field: "first_name", generateFuzzyComparisons: BOTH_SIDED_KIND },
+      ],
+    };
+    const dataset = datasetOf({ last_name: "AB", first_name: "CD" });
+    // Receiver: {AB, BA} x {CD, D, C}. Sender: {AB} x {CD, D, C}.
+    expect(buildKeyStrings(key, dataset, 0, true)?.size).toBe(6);
+    expect(buildKeyStrings(key, dataset, 0, false)).toEqual(
+      new Set(["ABCD", "ABD", "ABC"]),
+    );
+  });
+
+  test("the receiver applies a swapped position's own expansion", () => {
+    // `swap` moves the field references and leaves each position's expansion
+    // where it is, so the receiver expands the column its sibling declared. The
+    // terms schema requires both positions to declare the same expansion, which
+    // is what keeps that from being a second reading of the same terms.
+    const key: LinkageKey = {
+      name: "swapped",
+      elements: [
+        { field: "a", generateFuzzyComparisons: RECEIVER_ONLY_KIND },
+        { field: "b", generateFuzzyComparisons: RECEIVER_ONLY_KIND },
+      ],
+      swap: ["a", "b"],
+    };
+    const dataset = datasetOf({ a: "AB", b: "CD" });
+    expect(buildKeyStrings(key, dataset, 0, true)).toEqual(
+      new Set(["CDAB", "DCAB", "CDBA", "DCBA"]),
+    );
+    expect(buildKeyStrings(key, dataset, 0, false)).toEqual(new Set(["ABCD"]));
   });
 });

@@ -28,20 +28,19 @@
  * moment a flag is meant to flip.
  *
  * For `fuzzyComparisons`, flipping the flag is not sufficient on its own. The
- * expansion itself is implemented and gated on this flag in `buildKeyStrings`
- * (`standardization.ts`), which builds the whole candidate
- * set for a fuzzy element. What is missing is downstream: the one strategy that
- * matches a candidate set is single-pass, and it matches only the width a party's
- * declared terms and standardization account for, while
- * `declaredEffectiveKeyCount` (`fanOutFunctions.ts`) gives a fuzzy element no
- * candidate factor. So a fuzzy row overruns the value slots its own party
- * advertised and is refused as the index table is built, and under every other
- * strategy a multi-candidate row is refused outright. Flipping this flag must
- * land with the width factor fuzzy declares for itself -- and with a decision on
- * how a record matching several partner records through different candidates is
- * attributed, which the fan-out resolution rule settles for `split_on`
- * (docs/spec/PROTOCOL.md, Record-level resolution) and which fuzzy either
- * inherits or replaces.
+ * expansion is implemented and gated on this flag in `buildKeyStrings`
+ * (`standardization.ts`), which builds the role-keyed candidate set for a fuzzy
+ * element, and so is the width a fuzzy key declares
+ * (`declaredEffectiveKeyCount`, `fanOutFunctions.ts`), which is what a
+ * multi-candidate row needs slots for under single-pass. What is still missing is
+ * downstream. The one strategy that matches a candidate set is single-pass, and
+ * under every other strategy a multi-candidate row is refused outright -- with
+ * the flag on, a fuzzy element's declared width is an advertisement the partner
+ * refuses off single-pass, which the run boundary should diagnose as the fuzzy
+ * term it is rather than as a fan-out. And a record matching several partner
+ * records through different candidates needs an attribution rule, which the
+ * fan-out resolution settles for `split_on` (docs/spec/PROTOCOL.md, Record-level
+ * resolution) and which fuzzy either inherits or replaces.
  *
  * The count-only algorithm (`psi-c`) is NOT gated here: the exchange runs it
  * (`linkViaCountOnlyPSI`, `link.ts`), `assertAlgorithmImplemented` (`exchange.ts`)
