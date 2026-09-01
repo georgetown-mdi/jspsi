@@ -9,6 +9,11 @@ import {
 } from "./config/metadata.js";
 import type { Output, Payload } from "./config/linkageTerms.js";
 import { MAX_NAME_LENGTH } from "./config/linkageTerms.js";
+import type { CompatibilityMessageFragment } from "./config/compatibilityMessage.js";
+import {
+  compatibilityMessage,
+  quoteTermsValueList,
+} from "./config/compatibilityMessage.js";
 import type { OutboundPayloadConsent } from "./config/outboundPayloadConsent.js";
 import { readRowColumn } from "./file.js";
 import type { CSVRow } from "./file.js";
@@ -348,9 +353,13 @@ export function preparePayload(
  * web `generateInvitation` authoring path) to keep the consent surface and the
  * token honest. The two points are disjoint entry paths, not redundant: neither
  * alone covers both the consent screen and the non-invite exchanges. Offending
- * names are partner-controlled on the accept side (the adopted inviter terms) and
- * are interpolated raw, matching `validateCompatibility`'s payload-mismatch
- * messages: an error is escaped once where it is rendered.
+ * names are partner-controlled on the accept side (the adopted inviter terms), so
+ * the messages below compose through the same seam
+ * ({@link compatibilityMessage}, `config/compatibilityMessage.ts`) as
+ * `validateCompatibility`'s payload-mismatch messages: each name stands in its own
+ * delimited run, so none can forge the bracketed list's partition or a clause of
+ * psilink's own, and the display escape still runs once where the error is
+ * rendered.
  *
  * @param output This party's own output declaration, from the same
  *   {@link LinkageTerms} the `payload` comes from. Required rather than optional so
@@ -375,24 +384,29 @@ export function assertPayloadSendDisclosed(
   const overDeclared = sendNames.filter((name) => !disclosedSet.has(name));
   const underDeclared = disclosed.filter((name) => !sendSet.has(name));
   if (overDeclared.length === 0 && underDeclared.length === 0) return;
-  const problems: string[] = [];
-  const remedies: string[] = [];
+  const problems: CompatibilityMessageFragment[] = [];
+  const remedies: CompatibilityMessageFragment[] = [];
   if (overDeclared.length > 0) {
-    const shown = overDeclared.join(", ");
+    const shown = quoteTermsValueList(overDeclared);
     const plural = overDeclared.length > 1;
     problems.push(
-      `names ${plural ? "columns" : "a column"} metadata does not transmit ([${shown}])`,
+      plural
+        ? compatibilityMessage`names columns metadata does not transmit ([${shown}])`
+        : compatibilityMessage`names a column metadata does not transmit ([${shown}])`,
     );
     remedies.push(
-      `Remove [${shown}] from payload.send, or set ${plural ? "their" : "its"} ` +
-        `metadata to transmit (is_payload: true and role not ignored).`,
+      plural
+        ? compatibilityMessage`Remove [${shown}] from payload.send, or set their metadata to transmit (is_payload: true and role not ignored).`
+        : compatibilityMessage`Remove [${shown}] from payload.send, or set its metadata to transmit (is_payload: true and role not ignored).`,
     );
   }
   if (underDeclared.length > 0) {
-    const shown = underDeclared.join(", ");
+    const shown = quoteTermsValueList(underDeclared);
     const plural = underDeclared.length > 1;
     problems.push(
-      `omits ${plural ? "columns" : "a column"} metadata does transmit ([${shown}])`,
+      plural
+        ? compatibilityMessage`omits columns metadata does transmit ([${shown}])`
+        : compatibilityMessage`omits a column metadata does transmit ([${shown}])`,
     );
     // An EMPTY send gets a different remedy: "add them to payload.send" is wrong
     // advice there. On an accepted invitation the empty send is the mirror of the
@@ -400,26 +414,29 @@ export function assertPayloadSendDisclosed(
     // -- so widening the declaration locally would not make the disclosure agreed,
     // and the next acceptance would overwrite it. Narrowing what is transmitted,
     // or getting a corrected invitation, are the remedies that exist.
-    remedies.push(
-      sendNames.length === 0
-        ? `Set the metadata for [${shown}] not to transmit (is_payload: false ` +
-            `or role ignored). An empty payload.send declares that this party ` +
-            `discloses nothing; on an accepted invitation it mirrors the ` +
-            `partner's payload.receive, so disclosing these columns instead ` +
-            `takes a corrected invitation, not a local edit.`
-        : `Add [${shown}] to payload.send, or set ${plural ? "their" : "its"} ` +
-            `metadata not to transmit (is_payload: false or role ignored).`,
-    );
+    if (sendNames.length === 0)
+      remedies.push(
+        compatibilityMessage`Set the metadata for [${shown}] not to transmit (is_payload: false or role ignored). An empty payload.send declares that this party discloses nothing; on an accepted invitation it mirrors the partner's payload.receive, so disclosing these columns instead takes a corrected invitation, not a local edit.`,
+      );
+    else
+      remedies.push(
+        plural
+          ? compatibilityMessage`Add [${shown}] to payload.send, or set their metadata not to transmit (is_payload: false or role ignored).`
+          : compatibilityMessage`Add [${shown}] to payload.send, or set its metadata not to transmit (is_payload: false or role ignored).`,
+      );
   }
+  // Folded through the tag rather than joined: `join` yields a plain `string`, so
+  // the brand -- and with it the compiler's guarantee that nothing partner-chosen
+  // entered the clause structure raw -- would be gone before the throw. Both
+  // lists are non-empty by the early return above, so the seedless fold is total.
+  const problem = problems.reduce(
+    (left, right) => compatibilityMessage`${left} and ${right}`,
+  );
+  const remedy = remedies.reduce(
+    (left, right) => compatibilityMessage`${left} ${right}`,
+  );
   throw new UsageError(
-    `payload.send must name exactly the columns this party's metadata ` +
-      `discloses, but it ${problems.join(" and ")}. A payload column's values ` +
-      `are sent only when its metadata has is_payload: true and role is not ` +
-      `ignored; payload.send is the data dictionary exchanged with the partner, ` +
-      `shown for consent, written into the exchange record, and mirrored into a ` +
-      `recurring partner's received-payload lock-in, so a dictionary that does ` +
-      `not match the disclosed set mis-states what is actually sent. ` +
-      `${remedies.join(" ")}`,
+    compatibilityMessage`payload.send must name exactly the columns this party's metadata discloses, but it ${problem}. A payload column's values are sent only when its metadata has is_payload: true and role is not ignored; payload.send is the data dictionary exchanged with the partner, shown for consent, written into the exchange record, and mirrored into a recurring partner's received-payload lock-in, so a dictionary that does not match the disclosed set mis-states what is actually sent. ${remedy}`,
   );
 }
 

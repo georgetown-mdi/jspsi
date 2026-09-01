@@ -21,54 +21,9 @@ import {
   WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
   sanitizeForDisplay,
 } from "../src/utils/sanitizeForDisplay";
+import { readMessage } from "./utils/compatibilityMessageReader";
 
 // --- Reading a composed diagnostic back --------------------------------------
-
-/**
- * Walk a composed diagnostic under the grammar `quoteTermsValue` emits: outside
- * a run every character stands for itself; inside one, a doubled delimiter is a
- * literal and a single delimiter closes the run.
- *
- * Returns the message's CLAUSE SKELETON -- each run collapsed to one placeholder
- * -- and the raw values the runs carried. The skeleton is what the assertions
- * below compare: two runs of the same diagnostic, one with a benign value and one
- * with an adversarial one, must produce the SAME skeleton, which is the precise
- * statement that no value can be shown to the operator as a clause psilink wrote.
- */
-const readMessage = (
-  message: string,
-): { skeleton: string; values: string[] } => {
-  let skeleton = "";
-  const values: string[] = [];
-  let index = 0;
-  while (index < message.length) {
-    if (message[index] !== TERMS_VALUE_DELIMITER) {
-      skeleton += message[index];
-      index += 1;
-      continue;
-    }
-    index += 1;
-    let value = "";
-    let closed = false;
-    while (index < message.length) {
-      if (message[index] === TERMS_VALUE_DELIMITER) {
-        if (message[index + 1] === TERMS_VALUE_DELIMITER) {
-          value += TERMS_VALUE_DELIMITER;
-          index += 2;
-          continue;
-        }
-        index += 1;
-        closed = true;
-        break;
-      }
-      value += message[index];
-      index += 1;
-    }
-    values.push(value);
-    skeleton += closed ? "<value>" : "<unterminated>";
-  }
-  return { skeleton, values };
-};
 
 test("the reader recovers exactly what the seam delimited", () => {
   // The assertions below are only as good as this reader, so pin it against the

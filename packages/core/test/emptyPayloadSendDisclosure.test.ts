@@ -137,7 +137,7 @@ test("an acceptor declaring it sends nothing is refused before anything is sent 
   // Both disclosed columns are named, and the remedy is to stop transmitting them
   // or to get a corrected invitation -- never to widen the declaration locally,
   // which the partner never agreed to.
-  expect(acceptorPrepared).toThrow(/\[diagnosis, notes\]/);
+  expect(acceptorPrepared).toThrow(/\["diagnosis","notes"\]/);
   expect(acceptorPrepared).toThrow(/corrected invitation/);
 });
 
