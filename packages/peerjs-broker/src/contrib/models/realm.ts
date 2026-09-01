@@ -1,5 +1,5 @@
 import type { IMessageQueue } from "./messageQueue.ts";
-import { MessageQueue, messageByteSize } from "./messageQueue.ts";
+import { MessageQueue, serializeFrame } from "./messageQueue.ts";
 import { randomUUID } from "node:crypto";
 import type { IClient } from "./client.ts";
 import type { IMessage } from "./message.ts";
@@ -42,11 +42,18 @@ export const MAX_MESSAGES_PER_QUEUE = 100;
 // character once it holds any non-Latin1 character, so one frame can occupy
 // ~512 KiB of heap -- ~50 MiB per queue, ~50 GiB across the full
 // MAX_OUTSTANDING_QUEUES. This byte cap holds it down directly, in the same
-// worst-case resident bytes messageByteSize measures (UTF-16, 2 bytes/char): a
-// flood cannot push one queue past 512 KiB, so the global resident ceiling is
-// ~512 MiB. The cap is 2x the wire frame cap, so any single legal frame is
-// always holdable; real signaling frames are KB-scale, so a queue still holds
-// dozens of them.
+// worst-case resident bytes each frame is accounted at (UTF-16, 2 bytes/char),
+// and the queue holds every frame serialized so those accounted bytes are the
+// bytes it retains: a flood cannot push one queue past 512 KiB, so the global
+// resident ceiling is ~512 MiB. The cap is 2x the wire frame cap, which holds a
+// frame whose payload arrived as a string -- held exactly as it arrived --
+// exactly up to a 33-character src; src is stamped after the wire cap is
+// checked, so a longer legitimate id (e.g. a 36-character UUID) can push the
+// same frame past the cap and drop it. A structured payload is held by its
+// serialization, whose length the wire cap does not bound, so at the size
+// extreme such a frame can account past the cap and be dropped. Real signaling
+// frames are KB-scale, so a queue still holds dozens of them and the drop costs
+// only that sender's own reconnect hold. See docs/spec/CHANNEL_SECURITY.md.
 export const MAX_QUEUE_BYTES = 512 * 1024;
 
 export class Realm implements IRealm {
@@ -84,10 +91,12 @@ export class Realm implements IRealm {
   }
 
   public addMessageToQueue(id: string, message: IMessage): void {
-    // Size the frame before allocating anything: a malformed non-string payload
-    // throws here (and is dropped upstream) so it never consumes a queue slot,
-    // and the size is computed once for both the byte cap and `addMessage`.
-    const messageBytes = messageByteSize(message);
+    // Serialize the frame before allocating anything: the queue holds this
+    // form, so the bytes checked against the cap below are the bytes it goes on
+    // to retain. A frame carrying a non-string id field, or a payload with no
+    // JSON form, throws here (and is dropped upstream) so it never keys a queue
+    // or consumes a slot in one.
+    const frame = serializeFrame(message);
 
     let queue = this.getMessageQueueById(id);
 
@@ -103,9 +112,9 @@ export class Realm implements IRealm {
     // by total buffered bytes -- the byte check keeps the resident ceiling far
     // below the count cap times the max frame size.
     if (queue.size() >= MAX_MESSAGES_PER_QUEUE) return;
-    if (queue.byteSize() + messageBytes > MAX_QUEUE_BYTES) return;
+    if (queue.byteSize() + frame.byteSize > MAX_QUEUE_BYTES) return;
 
-    queue.addMessage(message, messageBytes);
+    queue.addMessage(frame);
   }
 
   public clearMessageQueue(id: string): void {

@@ -79,9 +79,28 @@ export function CreateInstanceWSOnly({
     const messageQueue = realm.getMessageQueueById(client.getId());
 
     if (messageQueue) {
-      let message: IMessage | undefined;
+      // Reading a held frame reconstitutes its payload, which parses text this
+      // server serialized itself -- and this handler runs from inside the
+      // socket's own connection event with nothing between it and `ws`, so a
+      // throw from that read would be an uncaught exception on an
+      // internet-facing server. The try below guards only the read; the
+      // dispatch call beside it is unguarded, with no reachable throw today.
+      // A frame that cannot be reconstituted is therefore dropped down the same
+      // `frame-dispatch` route the enqueue seam's refusal takes, and the rest of
+      // the hold is still handed to the peer that came back for it. The loop is
+      // bounded by the frames held when the drain began, since a read that
+      // throws has already removed its frame.
+      for (let held = messageQueue.size(); held > 0; held -= 1) {
+        let message: IMessage | undefined;
 
-      while ((message = messageQueue.readMessage())) {
+        try {
+          message = messageQueue.readMessage();
+        } catch (e) {
+          wss.emit("error", e, "frame-dispatch");
+          continue;
+        }
+
+        if (message === undefined) break;
         messageHandler.handle(client, message);
       }
       realm.clearMessageQueue(client.getId());

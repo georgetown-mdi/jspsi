@@ -48,10 +48,13 @@ const SIGNALING_DIAGNOSTIC_SOURCES = [
  *   host attached. It is a fault in this server's own handling, so it is kept
  *   apart from `client-frame`: read as a parse failure it would send an
  *   operator looking for a peer sending garbage. Its detail can still carry a
- *   bounded, sink-escaped fragment of the peer's frame -- Node's own errors
- *   echo an offending value into their message (a numeric payload verbatim, an
- *   object as "an instance of Object"), bounded by what JSON parses a scalar
- *   into and capped and escaped like every other diagnostic at the sink.
+ *   bounded, sink-escaped fragment of a peer's payload: dispatch-side, Node's
+ *   own errors echo an offending value into their message (a numeric payload
+ *   verbatim, an object as "an instance of Object"), bounded by what JSON
+ *   parses a scalar into; drain-side, reconstituting a held frame can instead
+ *   raise a V8 SyntaxError quoting roughly 30 characters of the server's own
+ *   serialization of that payload. Either shape is capped and escaped like
+ *   every other diagnostic at the sink.
  * - `signaling-server`: an error the `ws` server itself raised.
  * - `unattributed`: a diagnostic raised on the `error` event naming none of the
  *   above. `emit` is untyped, so the source is whatever the raise passed --

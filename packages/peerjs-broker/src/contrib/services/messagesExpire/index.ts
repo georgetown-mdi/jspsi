@@ -70,9 +70,9 @@ export class MessagesExpire implements IMessagesExpire {
 
       if (lastReadDiff < maxDiff) continue;
 
-      const messages = messageQueue.getMessages();
-
-      for (const message of messages) {
+      // Only the routing ids are read here, which a held frame carries as
+      // strings, so the expiry sweep never parses a queued payload.
+      for (const { message } of messageQueue.getMessages()) {
         const seenKey = `${message.src}_${message.dst}`;
 
         if (!seen[seenKey]) {

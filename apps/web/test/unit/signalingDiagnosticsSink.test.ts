@@ -328,19 +328,19 @@ describe("signaling diagnostics sink", () => {
     expect(brokerLines()[2]).toContain("[client-frame]");
   });
 
-  test("a dispatch fault through the real realm wiring -- a non-string payload queued for an absent destination -- is attributed apart from the parse", async () => {
+  test("a dispatch fault through the real realm wiring -- a non-string destination id queued for an absent destination -- is attributed apart from the parse", async () => {
     const broker = await startShippedBroker();
     const client = await connectRegistered(broker.port, "peer-realdispatch");
 
-    // An OFFER to a destination nobody has registered, carrying a payload
-    // `realm.addMessageToQueue` cannot size: `messageByteSize` throws inside it
-    // before the frame is ever queued, so what surfaces here is the shipped
-    // wiring's own fault rather than a listener this test attached.
+    // An OFFER addressed to a destination id that is not a string: nobody has
+    // registered it, and `realm.addMessageToQueue` cannot size a frame carrying
+    // it -- `serializeFrame` throws inside it before the frame is ever queued,
+    // so what surfaces here is the shipped wiring's own fault rather than a
+    // listener this test attached.
     client.send(
       JSON.stringify({
         type: "OFFER",
-        dst: "nobody-registered",
-        payload: { not: "a string" },
+        dst: { not: "a string" },
       }),
     );
 

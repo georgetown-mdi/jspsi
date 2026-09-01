@@ -61,8 +61,8 @@ export const MAX_SIGNALING_PAYLOAD_BYTES = 256 * 1024;
 // bytes of its string fields, `src` included, and the server overwrites `src` with
 // the connecting client's id (below): an unbounded id therefore lets a single
 // near-maximum frame addressed to an absent destination exceed the per-queue byte
-// cap on account of `src` alone, breaking the "any single legal frame is always
-// holdable" margin that cap's 2x-the-wire-cap sizing rests on. Bounding the id
+// cap on account of `src` alone, breaking for a frame of any payload kind the
+// holdability margin that cap's 2x-the-wire-cap sizing rests on. Bounding the id
 // holds that `src` contribution to at most 2 * MAX_HANDSHAKE_PARAM_LENGTH (512)
 // resident bytes -- a negligible fraction of the 512 KiB queue cap -- so a real,
 // KB-scale frame from any accepted id stays holdable. `token` and `key` are bounded
@@ -477,11 +477,11 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
       // Dispatch is absorbed rather than let out, because `ws` calls this handler
       // from inside its own receiver with nothing between it and the socket's
       // `data` event: a throw here is an uncaught exception, and this server is
-      // internet-facing. Reachable rather than theoretical -- the relay sizes a
-      // frame it holds for an absent destination and throws on a non-string field
-      // (models/messageQueue.ts) -- which is why the report has to name this
-      // server: read as a client frame it points the operator at a peer sending
-      // garbage instead of at the fault.
+      // internet-facing. Reachable rather than theoretical -- the relay
+      // serializes a frame it holds for an absent destination and throws on a
+      // non-string id field (models/messageQueue.ts) -- which is why the report
+      // has to name this server: read as a client frame it points the operator
+      // at a peer sending garbage instead of at the fault.
       try {
         this.emit("message", client, message);
       } catch (e) {
