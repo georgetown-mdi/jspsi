@@ -512,12 +512,13 @@ describe("the doctor credentials directory's and file's extended ACL", () => {
     ).catch((err: unknown) => err);
 
     expect(workDir.path).toBeDefined();
-    // The refusal names the directory the operator would go clear, and it is the
-    // only strip the run got to make: the credentials write never started, so
-    // nothing was left to reach the temp path's own strip.
+    // The refusal names the operator's temp root rather than the removed work
+    // directory: that is where the inheritable ACE lives, and the mkdtemp path
+    // is already gone by the time the message would be read. The strip's own
+    // operand is still the work directory, asserted below.
     expect(sanitizeErrorForDisplay(thrown)).toBe(
       joinErrorCauseChain([
-        `Could not clear extended ACLs on ${workDir.path as string}; inspect ` +
+        `Could not clear extended ACLs on ${os.tmpdir()}; inspect ` +
           "them with `ls -le` and clear them manually with `chmod -N`",
         `Command failed: /bin/chmod -h -N ${path.join(dir, "absent")}`,
       ]),

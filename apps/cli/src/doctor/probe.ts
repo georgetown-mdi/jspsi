@@ -566,7 +566,10 @@ export async function runProbe(
     ...(input.domain === "" ? [] : [`domain=${input.domain}`]),
   ];
   try {
-    stripExtendedAcls(workDir, { symlinks: "do-not-follow" });
+    stripExtendedAcls(workDir, {
+      symlinks: "do-not-follow",
+      reportedPath: os.tmpdir(),
+    });
     writeFileOwnerOnly(authFile, `${lines.join("\n")}\n`);
   } catch (err) {
     fs.rmSync(workDir, { recursive: true, force: true });
