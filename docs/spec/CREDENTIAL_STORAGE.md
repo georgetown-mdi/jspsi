@@ -138,6 +138,7 @@ content lands in:
 | Temp-file writers (`writeFileOwnerOnly`, `writeFileAtomic`) | `-h -N` | The path is psilink's own temp path, opened with `O_EXCL` and `O_NOFOLLOW`; a symlink at it is one planted in the create window. `-h` acts on the named entry, so following one cannot redirect the strip onto another file's ACL while the content goes to the temp file. |
 | Streamed result CSV (`createOwnerOnlyWriteStream`) | `-N` | The path is an operator-supplied output path, opened without `O_NOFOLLOW` and `fchmod`'d on the descriptor, so a pre-existing symlink there is deliberately followed (see [Result CSV output](#result-csv-output)). `chmod` resolves the path for the same reason: acting on the link node would clear an ACL that governs nothing while the rows landed in a target whose ACEs still stood. Because the strip re-resolves the path rather than acting on the already-`fchmod`'d descriptor -- Node's `fs` exposes no fd-based ACL API -- a destPath swapped between the `fchmod` and the strip aims the two at different files. |
 | `--log-file` descriptor (`configureLogFile`) | `-N` | The path is an operator-supplied flag value, opened `"a"` with neither `O_NOFOLLOW` nor `O_EXCL`, so a symlink there is followed and the lines land in its target. The strip resolves the path for the same reason the streamed CSV's does, and inherits the same known limitation: it re-resolves the path rather than acting on the open descriptor. |
+| `doctor probe` work directory (`runProbe`) | `-h -N` | The path is one `mkdtemp` created itself, so a symlink at it is one planted in the window after that create. `-h` acts on the named entry, so following one cannot clear an unrelated directory's ACL while the credentials file is created under an inheritable ACE that still stands. |
 
 The strip covers every artifact this document's write construction produces --
 the key file, the signing identity, the exchange record and its verification
@@ -149,6 +150,35 @@ withholds. The credentials file is the case where the directory rather than the
 destination carries the ACE: it is written into a `mkdtemp` directory under the
 operator's `TMPDIR`, so an inheritable ACE set there reaches the password
 through it.
+
+That directory is therefore stripped in its own right, at `mkdtemp` and before
+the credentials file exists. Deleting its ACL removes both the ACE on the
+directory an `smbclient` run reads through and the `file_inherit` /
+`directory_inherit` flags that would otherwise copy that ACE onto everything
+created inside it -- the credentials file, the write probe, and the marker file
+-- since an inherited ACE is resolved at creation time from the parent's ACL.
+The operand is the directory's own entry: there is no `-R`, and at that point the
+directory is empty. The credentials file keeps the writer's own strip as well, so
+neither the inheritance nor the file's own ACL depends on the other being
+cleared.
+
+A refused strip's message does not name that directory: the fail-closed path
+removes it before the message is composed, so `reportedPath` there is
+`os.tmpdir()` -- the surviving parent that carries the inheritable ACE, not the
+removed `mkdtemp` directory -- and that is the path the generic `ls -le` /
+`chmod -N` remediation copy points the operator at. On a shared or system
+`TMPDIR` (`TMPDIR=/tmp`, say), that parent is not psilink's own: running
+`chmod -N` against it would clear every principal's ACEs on a directory other
+software shares, not just the inheritable one this run left behind. The
+operator should inspect and remove only the inheritable entries at that path,
+or relocate `TMPDIR` for the run, rather than clearing a directory other
+software depends on.
+
+That the directory-operand form works at all -- that `/bin/chmod -h -N` accepts
+a directory as its operand, and that clearing the ACL there drops both the
+`file_inherit` and `directory_inherit` flags -- is asserted only by a
+macOS-gated unit test no CI runner executes; as of 2026-09-01 it has not been
+driven against the real tool on a macOS host in this repo's record.
 
 The `--log-file` descriptor is stripped at its own open instead, between that
 open and the installation of the sink that writes the first line -- the same
@@ -165,7 +195,9 @@ Windows: no content is written. The temp-file writers unlink the temp file on th
 way out, so nothing reaches the destination -- and for the `doctor probe`
 credentials file the run goes with it, its whole `mkdtemp` directory removed and
 the checks abandoned, rather than a password being delivered through a file whose
-ACL could not be cleared. The streamed CSV aborts before its
+ACL could not be cleared. A refused strip of the work directory ends the run on
+the same terms one step earlier, the directory removed before the password has
+been composed into a file at all. The streamed CSV aborts before its
 truncate, so an existing destination keeps its rows; only a file that call itself
 created is left behind, empty and already `0600`, mirroring the Windows
 placeholder.
@@ -189,6 +221,7 @@ field being present rather than the value in it:
 | ------- | ------- |
 | `chmod` was spawned: it carries an exit status (a numeric `status`, `0` included) or a termination signal (a `signal` string). A nonzero exit is one shape; the 5 s timeout is two more, since the kill leaves a signal and no status on a child that dies on it, but the exit status the child chose and no signal on one that ignores `SIGTERM` and finishes afterwards | "Could not clear extended ACLs on _file_", followed by the `ls -le` / `chmod -N` remediation |
 | The strip never ran, carrying neither a status nor a signal: no `/bin/chmod`, an exec the OS refused, or a `process.cwd()` that threw before the command line existed | "Could not run the extended-ACL strip on _file_; no content was written" |
+| Either shape above, at the `doctor probe` work-directory strip: `reportedPath` there is `os.tmpdir()`, not the `mkdtemp` directory the strip operand names, because a refused strip removes that directory before either message is composed | Names the operator's temp root (`os.tmpdir()`), the surviving ancestor that carries the inheritable ACE, in place of _file_ -- not the removed `mkdtemp` directory |
 
 Those field shapes are captured from `execFileSync` in the CLI unit tests and
 fed to the classifier rather than modeled there, so a runtime that reshaped them

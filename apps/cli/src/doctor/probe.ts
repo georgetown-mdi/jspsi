@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { MAX_DIRECTORY_ENTRIES } from "../connection/listingGuard";
-import { writeFileOwnerOnly } from "../fileUtils";
+import { stripExtendedAcls, writeFileOwnerOnly } from "../fileUtils";
 import type { CommandResult, CommandRunner } from "./runner";
 import { nodeCommandRunner } from "./runner";
 import type { SmbProbeInput } from "./smbEnvironment";
@@ -551,10 +551,13 @@ export async function runProbe(
   // and removed on every exit path below. The password lands under the same
   // write construction every other psilink credential takes: the 0600 mode set
   // on the descriptor before any content, and on macOS the extended ACL cleared
-  // first -- a mkdtemp directory under the operator's TMPDIR hands an
-  // inheritable ACE down to what is created in it. A refused write takes the
-  // whole run with it, below, rather than delivering the password through a file
-  // that could not be secured.
+  // first. The directory is the other half of that on macOS: a mkdtemp directory
+  // under the operator's TMPDIR inherits an ACE of its own and hands it down to
+  // everything created inside, so it is stripped before the credentials file
+  // exists -- clearing the ACE on the directory an smbclient run reads through,
+  // and leaving none for the file, the write probe, or the marker to inherit. A
+  // refused strip or write takes the whole run with it, rather than delivering
+  // the password through a directory or a file that could not be secured.
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-doctor-"));
   const authFile = path.join(workDir, "auth");
   const lines = [
@@ -563,6 +566,10 @@ export async function runProbe(
     ...(input.domain === "" ? [] : [`domain=${input.domain}`]),
   ];
   try {
+    stripExtendedAcls(workDir, {
+      symlinks: "do-not-follow",
+      reportedPath: os.tmpdir(),
+    });
     writeFileOwnerOnly(authFile, `${lines.join("\n")}\n`);
   } catch (err) {
     fs.rmSync(workDir, { recursive: true, force: true });
