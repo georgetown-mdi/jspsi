@@ -45,6 +45,7 @@ import {
   acceptorLedgerRows,
   acceptorLedgerTag,
   acceptorLegalAgreementDisplay,
+  acceptorNameProblem,
   acceptorRailFacts,
   acceptorRunsAsServerJob,
   acceptorSpine,
@@ -579,11 +580,16 @@ export function AcceptorBench() {
   async function acceptAndContinue() {
     if (decode.status !== "ready") return;
     const name = acceptorConsentName({ consented, name: acceptorName });
+    // The shape of the name the run would adopt, re-checked here for the same
+    // reason the consent gate is: the disabled state alone is not the refusal.
+    const nameProblem = acceptorNameProblem(acceptorName);
     const fileChosen = consoleBuild
       ? consoleSource !== undefined
       : file !== undefined;
-    if (name === undefined || !fileChosen) {
+    if (name === undefined || nameProblem !== undefined || !fileChosen) {
       const nextErrors: FieldErrors = {};
+      // A name carrying a control character needs no entry here: the field
+      // renders that refusal live, for every keystroke rather than this submit.
       if (name === undefined && acceptorName.trim() === "")
         nextErrors.name = "Your name is required";
       if (!fileChosen) nextErrors.file = true;
@@ -953,10 +959,15 @@ export function AcceptorBench() {
       />
     );
 
-  const consentGateReady = acceptorConsentReady({
-    consented,
-    name: acceptorName,
-  });
+  // The name field's live inline refusal: a control character in the name the run
+  // would adopt as this party's identity, named at the field the operator can fix
+  // rather than surfacing as an opaque failure once the exchange is under way.
+  const nameProblem = acceptorNameProblem(acceptorName);
+  const consentGateReady =
+    acceptorConsentReady({
+      consented,
+      name: acceptorName,
+    }) && nameProblem === undefined;
 
   // The columns-step edit callbacks over the shared layered state: a metadata edit
   // replaces the metadata layer; a remap re-roles the chosen column for matching
@@ -1213,7 +1224,7 @@ export function AcceptorBench() {
               description="Shown to your partner so they can identify you in this exchange"
               value={acceptorName}
               maxLength={200}
-              error={fieldErrors.name}
+              error={fieldErrors.name ?? nameProblem}
               onChange={(event) => {
                 setAcceptorName(event.currentTarget.value);
                 if (fieldErrors.name !== undefined)

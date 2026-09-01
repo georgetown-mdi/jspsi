@@ -22,6 +22,7 @@ import {
   acceptorInitialColumnsState,
   acceptorVerdict,
 } from "@bench/acceptorColumnsModel";
+import { ACCEPTOR_NAME_CONTROL_CHAR_PROBLEM } from "@bench/acceptorModel";
 import { AcceptorBench } from "@bench/AcceptorBench";
 import { AcceptorColumnsStep } from "@bench/AcceptorColumnsStep";
 import { BENCH_STEP_STATE_KEY } from "@bench/stepHistory";
@@ -481,6 +482,29 @@ describe("acceptor bench: consent gate and parse-behind-consent", () => {
     // Clearing consent re-disables it.
     await userEvent.click(page.getByRole("checkbox"));
     await expect.element(accept).toBeDisabled();
+  });
+
+  test("a name carrying a control character is refused at the field", async () => {
+    await reachConsent();
+    const accept = page.getByRole("button", { name: "Accept and continue" });
+    await userEvent.click(page.getByRole("checkbox"));
+
+    // A name pasted out of a spreadsheet cell, carrying the separator with it.
+    // The run adopts this value as this party's terms identity, which core
+    // refuses outright -- so the fault is named at the field the operator can
+    // still fix rather than surfacing once the exchange is under way.
+    await userEvent.fill(page.getByLabelText("Your name"), "County\tHealth");
+    await expect
+      .element(page.getByText(ACCEPTOR_NAME_CONTROL_CHAR_PROBLEM))
+      .toBeInTheDocument();
+    await expect.element(accept).toBeDisabled();
+
+    // Correcting it clears the refusal and re-opens the gate.
+    await userEvent.fill(page.getByLabelText("Your name"), "County Health");
+    await expect.element(accept).toBeEnabled();
+    expect(app.container.textContent).not.toContain(
+      ACCEPTOR_NAME_CONTROL_CHAR_PROBLEM,
+    );
   });
 
   test("the file is not parsed until Accept fires with the gate satisfied", async () => {

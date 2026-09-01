@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import { UNNAMED_PARTY_LABEL } from "@psilink/core";
 
 import {
+  ACCEPTOR_NAME_CONTROL_CHAR_PROBLEM,
   ACCEPTOR_SEND_FORWARD_REFERENCE,
   acceptUnsupported,
   acceptorConsentName,
@@ -14,6 +15,7 @@ import {
   acceptorLedgerRows,
   acceptorLedgerTag,
   acceptorLegalAgreementDisplay,
+  acceptorNameProblem,
   acceptorRailFacts,
   acceptorRunsAsServerJob,
   acceptorSpine,
@@ -482,6 +484,47 @@ describe("acceptor consent gate", () => {
     expect(
       acceptorConsentReady({ consented: true, name: "  Sam Alvarez  " }),
     ).toBe(true);
+  });
+});
+
+describe("acceptor name shape", () => {
+  // The name the acceptance commits becomes this party's terms `identity`, which
+  // core refuses for a control character (deriveAcceptedLinkageTerms). The field
+  // reports that at the field, so a pasted label carrying one is fixed before the
+  // run rather than failing the launch. The characters are built from escapes so
+  // this source carries no raw control bytes.
+  const DEL = "\u007f";
+  const C1_NEXT_LINE = "\u0085";
+
+  test.each([
+    ["a tab", "\t"],
+    ["a line feed", "\n"],
+    ["an ESC", ESC],
+    ["a DEL", DEL],
+    ["a C1 control", C1_NEXT_LINE],
+  ])("reports %s in the name", (_label, control) => {
+    expect(acceptorNameProblem(`County${control}Health`)).toBe(
+      ACCEPTOR_NAME_CONTROL_CHAR_PROBLEM,
+    );
+  });
+
+  test("reports nothing for a name written in letters outside ASCII", () => {
+    // The rule stops below U+00A0, exactly as the terms document's does, so an
+    // operator writing its own name in its own script is not stopped at the field.
+    expect(
+      acceptorNameProblem("Ministère de la Santé, 厚生労働省"),
+    ).toBeUndefined();
+  });
+
+  test("reports nothing for the surrounding whitespace the gate trims away", () => {
+    // The committed value is the trimmed one, so a trailing newline is not a
+    // control character the run would ever adopt.
+    expect(acceptorNameProblem(" County Health\n")).toBeUndefined();
+  });
+
+  test("reports nothing for an empty name, which the consent gate owns", () => {
+    expect(acceptorNameProblem("")).toBeUndefined();
+    expect(acceptorConsentReady({ consented: true, name: "" })).toBe(false);
   });
 });
 

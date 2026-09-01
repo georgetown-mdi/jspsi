@@ -184,10 +184,12 @@ export const MAX_TEXT_LENGTH = 1024;
  * admissible.
  *
  * The web console draws these same ranges over an operator's `--identity` label
- * (`IDENTITY_CONTROL_CHAR_PATTERN`, apps/web/src/psi/identityLabel.ts): the two
- * must stay identical, since a label the console accepts becomes the `identity`
- * of a terms document this schema then reads. The console contract is strictly
- * stricter -- the boundaries that apply it also refuse a leading `-`.
+ * (`IDENTITY_CONTROL_CHAR_PATTERN`, apps/web/src/psi/identityLabel.ts), a label
+ * that becomes the `identity` of a terms document this schema then reads; the two
+ * are held equal by the web suite's parity check
+ * (apps/web/test/unit/identityLabelParity.test.ts) rather than by this note. The
+ * console contract is strictly stricter -- the boundaries that apply it also
+ * refuse a leading `-`.
  */
 export const TEXT_CONTROL_CHAR_PATTERN = /[\u0000-\u001f\u007f-\u009f]/;
 
@@ -1921,11 +1923,13 @@ export function safeParseLinkageTerms(raw: unknown) {
  *   identity does not leak into the acceptor's prepared terms (and from there
  *   into its exchange record). It is the one value this function introduces, and
  *   it is free text the accepting operator supplies -- a CLI flag or prompt, a
- *   browser field -- so it is held to the document's own control-character rule
- *   ({@link TEXT_CONTROL_CHAR_PATTERN}) at entry, under a refusal that names the
- *   local input. Left to the re-check at the end it would fail the mirrored
- *   document instead, reporting an invitation psilink cannot accept and sending
- *   the operator to its partner over a name it typed itself.
+ *   browser field -- so it is held at entry to every rule the schema holds a
+ *   party `identity` to: the document's control-character rule
+ *   ({@link TEXT_CONTROL_CHAR_PATTERN}), the non-empty floor, and the
+ *   {@link MAX_TEXT_LENGTH} ceiling, each under a refusal that names the local
+ *   input. Left to the re-check at the end they would fail the mirrored document
+ *   instead, reporting an invitation psilink cannot accept and sending the
+ *   operator to its partner over a name it typed itself.
  * - `output` is MIRRORED, not copied. {@link validateCompatibility}, run by both
  *   parties, compares output as a mirror: it requires
  *   `local.output.shareWithPartner === partner.output.expectsOutput` and
@@ -2009,13 +2013,10 @@ export function safeParseLinkageTerms(raw: unknown) {
  * terms were already validated at decode, `deduplicate`, `output`, and `payload`
  * are derived rather than authored by either party, and `identity` -- the one
  * free text substituted here, and the accepting operator's own -- carries the
- * document's control-character rule at entry above, so it is refused there under
- * a message attributing it locally rather than reaching this one. That holds only
- * for a control character: an empty or over-{@link MAX_TEXT_LENGTH} acceptor
- * identity carries neither check at entry and does reach this re-check under the
- * invitation-blaming account instead. Neither shipped front end can produce one
- * (the CLI refuses an empty identity, the web field caps its length), but the
- * account this re-check gives is not itself scoped to control characters.
+ * whole of the field's own rule at entry above (control characters, the non-empty
+ * floor, the {@link MAX_TEXT_LENGTH} ceiling), so no value the accepting operator
+ * supplied itself reaches this message: each is refused above under an account
+ * naming the local input.
  *
  * It also refuses a `psi-c` document outside the count-only shape, before the
  * mirror is built rather than after ({@link assertCountOnlyTermsShape}): the
@@ -2032,9 +2033,10 @@ export function safeParseLinkageTerms(raw: unknown) {
  * from every check between here and the run. Refusing at the accept boundary
  * keeps such an invitation off the consent surfaces and off the wire.
  *
- * @throws {UsageError} when `acceptorIdentity` carries a control character, or
- *   when the inviter's terms are `psi-c` outside the count-only shape or declare
- *   `deduplicate` under a strategy that matches no deduplicating cardinality.
+ * @throws {UsageError} when `acceptorIdentity` carries a control character, is
+ *   empty, or exceeds {@link MAX_TEXT_LENGTH}, or when the inviter's terms are
+ *   `psi-c` outside the count-only shape or declare `deduplicate` under a
+ *   strategy that matches no deduplicating cardinality.
  * @throws {Error} when the inviter's terms cannot be coherently accepted for the
  *   mirrored output direction.
  */
@@ -2042,14 +2044,24 @@ export function deriveAcceptedLinkageTerms(
   inviterTerms: LinkageTerms,
   acceptorIdentity: string,
 ): LinkageTerms {
-  // This party's own name takes the document's free-text shape rule here, before
-  // it is substituted (see the doc comment): left to the re-check at the end, the
-  // same value is refused as an invitation that cannot be accepted -- an account
-  // of an input the operator supplied itself.
+  // This party's own name takes the rules the schema holds a party `identity` to
+  // here, before it is substituted (see the doc comment): left to the re-check at
+  // the end, the same value is refused as an invitation that cannot be accepted --
+  // an account of an input the operator supplied itself.
   if (TEXT_CONTROL_CHAR_PATTERN.test(acceptorIdentity))
     throw new UsageError(
       "the identity supplied for this party cannot be used: " +
         `${TEXT_CONTROL_CHAR_MESSAGE}. Supply one that carries none.`,
+    );
+  if (acceptorIdentity.length === 0)
+    throw new UsageError(
+      "the identity supplied for this party cannot be used: it is empty. " +
+        "Supply a name for this party.",
+    );
+  if (acceptorIdentity.length > MAX_TEXT_LENGTH)
+    throw new UsageError(
+      "the identity supplied for this party cannot be used: it is longer than " +
+        `${MAX_TEXT_LENGTH} characters. Supply a shorter one.`,
     );
   assertCountOnlyTermsShape(inviterTerms);
   assertDeduplicateImplemented(inviterTerms);

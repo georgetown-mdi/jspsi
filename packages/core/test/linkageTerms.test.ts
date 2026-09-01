@@ -3330,6 +3330,39 @@ test("deriveAcceptedLinkageTerms refuses a control character in the ACCEPTOR's o
   expect(message).not.toContain("\t");
 });
 
+test.each([
+  ["an empty", ""],
+  ["an over-length", "A".repeat(MAX_TEXT_LENGTH + 1)],
+])(
+  "deriveAcceptedLinkageTerms refuses %s ACCEPTOR identity as a local input",
+  (_label, identity) => {
+    // The schema's own floor and ceiling on a party identity, applied where the
+    // control-character rule already is. Substituted unchecked, either value fails
+    // the re-check at the end of the derivation instead, whose account is the
+    // invitation's -- so the operator would be told psilink cannot accept its
+    // partner's invitation over a name it supplied itself.
+    let thrown: unknown;
+    try {
+      deriveAcceptedLinkageTerms(inviterBase, identity);
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeInstanceOf(UsageError);
+    const { message } = thrown as Error;
+    expect(message).toContain("the identity supplied for this party");
+    expect(message).not.toContain("cannot be accepted unchanged");
+  },
+);
+
+test("deriveAcceptedLinkageTerms accepts an acceptor identity at the length ceiling", () => {
+  // The ceiling is the schema's own, so the longest identity the document admits
+  // is not refused by the entry check drawn beside it.
+  const identity = "A".repeat(MAX_TEXT_LENGTH);
+  expect(deriveAcceptedLinkageTerms(inviterBase, identity).identity).toBe(
+    identity,
+  );
+});
+
 test("deriveAcceptedLinkageTerms mirrors payload send/receive (asymmetric invite/accept shape)", () => {
   // The common invite/accept shape: the inviter authors a payload.send (columns it
   // will give the partner) and leaves receive unauthored (lazy -- it takes whatever
