@@ -225,59 +225,63 @@ for (const site of CLI_SITES) {
   });
 }
 
-// The cap is kept rather than widened: a fragment nothing bounds before the
-// renderer still truncates THERE, and what it can spend is the budget of the
-// link it sits alone on. The frame-size guard's inbound path is the one CLI
-// fragment left to the renderer this way; the listing and liveness guards fit
-// theirs where they compose them (below).
-const FLOODED_SITES: Array<[string, () => Error, string]> = [
-  [
-    "the frame-size guard's path",
-    () => frameSizeExceededError("/rv/" + "p".repeat(100_000), 1),
-    FRAME_SIZE_RECOVERY_STEP,
-  ],
-];
-
-for (const [label, raise, recoveryStep] of FLOODED_SITES) {
-  test(`a flooded fragment spends only its own link at ${label}`, () => {
-    const rendered = sanitizeErrorForDisplay(raise());
-
-    expect(linksOf(rendered)).toContain(recoveryStep);
-    // Whatever truncated, the summary and the recovery step were not it.
-    for (const link of truncatedLinks(rendered))
-      expect(link).not.toBe(recoveryStep);
-    expect(truncatedLinks(rendered).length).toBeGreaterThan(0);
-    expect(linksOf(rendered).length).toBeLessThan(MAX_ERROR_CAUSE_DEPTH);
-  });
-}
-
-// The listing guard's two fragments are cut at their COMPOSITION site instead,
-// each to the per-value budget a chooser's own value is given everywhere else,
-// so neither reaches the renderer at a size the renderer has to cut. Driven at
-// the widest a partner can make the directory -- an offline-accept config seeds
-// it from the invitation endpoint, whose schema is what bounds it -- and at a
-// width no bound covers at all, since the operator's own path answers to
-// neither. The assertion is on the link as it RENDERS: a bound held only inside
-// the builder is one the escape at the boundary can still overrun.
+// The renderer's per-link cap is kept rather than widened, and no CLI fragment
+// is left to spend it: the listing, frame-size, and liveness guards each cut
+// their fragments at their COMPOSITION site, to the per-value budget a chooser's
+// own value is given everywhere else, so none reaches the renderer at a size the
+// renderer has to cut. Driven at the widest a partner can make the directory --
+// an offline-accept config seeds it from the invitation endpoint, whose schema
+// is what bounds it -- and at a width no bound covers at all, since neither the
+// operator's own path nor a peer-supplied inbound filename answers to one. The
+// assertion is on the link as it RENDERS: a bound held only inside the builder
+// is one the escape at the boundary can still overrun.
 const ENDPOINT_WIDTH_PATH = "/rv/" + "p".repeat(MAX_ENDPOINT_PATH_LENGTH - 4);
-const COMPOSITION_CLIPPED_SITES: Array<[string, () => Error]> = [
-  [
-    "an entry-count refusal whose directory fills the endpoint schema's width",
-    () => directoryTooLargeError(ENDPOINT_WIDTH_PATH, MAX_DIRECTORY_ENTRIES),
-  ],
-  [
-    "an entry-count refusal whose directory is bounded by nothing",
-    () => directoryTooLargeError("/rv/" + "p".repeat(100_000), 1),
-  ],
-  [
-    "a filename refusal whose entry name and directory are both flooded",
-    () =>
+const COMPOSITION_CLIPPED_SITES: Array<{
+  label: string;
+  raise: () => Error;
+  recoveryStep: string;
+  clipped: string;
+}> = [
+  {
+    label:
+      "an entry-count refusal whose directory fills the endpoint schema's width",
+    raise: () =>
+      directoryTooLargeError(ENDPOINT_WIDTH_PATH, MAX_DIRECTORY_ENTRIES),
+    recoveryStep: LISTING_RECOVERY_STEP,
+    clipped: "directory: ",
+  },
+  {
+    label: "an entry-count refusal whose directory is bounded by nothing",
+    raise: () => directoryTooLargeError("/rv/" + "p".repeat(100_000), 1),
+    recoveryStep: LISTING_RECOVERY_STEP,
+    clipped: "directory: ",
+  },
+  {
+    label: "a filename refusal whose entry name and directory are both flooded",
+    raise: () =>
       filenameTooLongError(
         "/rv/" + "p".repeat(100_000),
         "n".repeat(100_000),
         MAX_FILENAME_LENGTH,
       ),
-  ],
+    recoveryStep: LISTING_RECOVERY_STEP,
+    clipped: "directory: ",
+  },
+  {
+    label:
+      "a streamed frame-size refusal whose inbound path is bounded by nothing",
+    raise: () => frameSizeExceededError("/rv/" + "p".repeat(100_000), 1),
+    recoveryStep: FRAME_SIZE_RECOVERY_STEP,
+    clipped: "inbound file: ",
+  },
+  {
+    label:
+      "an fstat frame-size refusal whose inbound path is bounded by nothing",
+    raise: () =>
+      frameSizeExceededError("/rv/" + "p".repeat(100_000), 1, 100_001),
+    recoveryStep: FRAME_SIZE_RECOVERY_STEP,
+    clipped: "inbound file: ",
+  },
 ];
 
 // A labelled link is fitted at its composition site when it renders inside the
@@ -292,18 +296,18 @@ function expectClippedAtComposition(links: string[], label: string): void {
   );
 }
 
-for (const [label, raise] of COMPOSITION_CLIPPED_SITES) {
-  test(`every fragment is cut before the renderer at ${label}`, () => {
-    const rendered = sanitizeErrorForDisplay(raise());
+for (const site of COMPOSITION_CLIPPED_SITES) {
+  test(`every fragment is cut before the renderer at ${site.label}`, () => {
+    const rendered = sanitizeErrorForDisplay(site.raise());
     const links = linksOf(rendered);
 
     // Nothing arrives at the renderer needing to be cut: no link spends even
     // its own budget, let alone deletes the step behind it.
     expect(truncatedLinks(rendered)).toEqual([]);
-    expect(links).toContain(LISTING_RECOVERY_STEP);
+    expect(links).toContain(site.recoveryStep);
     expect(links.length).toBeLessThan(MAX_ERROR_CAUSE_DEPTH);
 
-    expectClippedAtComposition(links, "directory: ");
+    expectClippedAtComposition(links, site.clipped);
   });
 }
 

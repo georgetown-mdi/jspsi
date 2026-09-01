@@ -1,10 +1,8 @@
 import { Writable } from "node:stream";
 
-import {
-  FrameSizeExceededError,
-  redactPrivateKeyMaterial,
-} from "@psilink/core";
+import { FrameSizeExceededError } from "@psilink/core";
 
+import { fittedCauseLink } from "./causeLink";
 import {
   SFTP_STALL_DEADLINE_MS,
   transportOperationStalledError,
@@ -30,6 +28,8 @@ import {
  *    the stream) via the idle deadline in {@link ./sftpLivenessGuard}.
  */
 
+const INBOUND_FILE_LINK_LABEL = "inbound file: ";
+
 /**
  * Construct the canonical typed, terminal error for an over-cap inbound file.
  * Pass `observedBytes` when the exact size is known up front (LocalFSClient's
@@ -38,10 +38,11 @@ import {
  * `path` takes a labelled cause link of its own rather than leading the summary:
  * on a `get()` it carries the peer-supplied filename under no bounded length, and
  * on a shared link those bytes spend the budget the cap, the refusal and the next
- * step {@link FrameSizeExceededError} carries need. It is interpolated raw and
- * escaped where the error is rendered, so its control/ANSI or deceptive-Unicode
- * characters are neutralized at the display boundary, and redacted here (see
- * {@link redactPrivateKeyMaterial}).
+ * step {@link FrameSizeExceededError} carries need. The link is fitted at this
+ * composition site by {@link ./causeLink.fittedCauseLink}, the same discipline
+ * the sibling listing and liveness guards apply, so a filename a hostile server
+ * made arbitrarily wide is cut to a value's budget rather than to the renderer's
+ * whole-message one.
  */
 export function frameSizeExceededError(
   path: string,
@@ -55,7 +56,7 @@ export function frameSizeExceededError(
         `${maxBytes} bytes`;
   return new FrameSizeExceededError(
     `an inbound file ${detail}; refusing to read it into memory`,
-    { details: [`inbound file: ${redactPrivateKeyMaterial(path)}`] },
+    { details: [fittedCauseLink(INBOUND_FILE_LINK_LABEL, path)] },
   );
 }
 

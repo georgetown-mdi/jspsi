@@ -1,13 +1,11 @@
 import {
-  clipToRenderedCost,
-  DEFAULT_MAX_DISPLAY_LENGTH,
   DirectoryListingBoundsError,
   DISPLAY_TRUNCATION_MARKER,
   redactPrivateKeyMaterial,
-  renderedDisplayCost,
   type TransportOperationStalledError,
 } from "@psilink/core";
 
+import { fittedCauseLink } from "./causeLink";
 import { transportOperationStalledError } from "./sftpLivenessGuard";
 
 /**
@@ -85,41 +83,20 @@ export const MAX_FILENAME_LENGTH = 255;
 const DIRECTORY_LINK_LABEL = "directory: ";
 
 /**
- * What the `directory:` link may render to: the per-value display budget, which
- * is what a chooser's own value is budgeted at everywhere else (the rendezvous
- * entry guard's detail link fits to the same one). The link carries the path
- * alone, so the whole of it is the path's plus the label's.
+ * Compose the labelled `directory:` cause link both refusals below carry, fitted
+ * at this composition site by {@link ./causeLink.fittedCauseLink}.
  *
- * It is well under the per-link cap the renderer applies
- * (`COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH`), which is deliberate: that cap is a
- * ceiling, not a quota, and a path is a value rather than a composition. A real
- * rendezvous path is an order of magnitude inside this, so the clip only ever
- * bites a path that is itself the anomaly.
- */
-const DIRECTORY_LINK_BUDGET = DEFAULT_MAX_DISPLAY_LENGTH;
-
-/**
- * Compose the labelled `directory:` cause link both refusals below carry, with
- * the path fitted to {@link DIRECTORY_LINK_BUDGET} at this composition site.
- *
- * The path is bounded HERE rather than left to the display boundary because it
- * is bounded nowhere upstream: it is operator-configured, but on an
- * offline-accept config it can be seeded from a partner invitation endpoint that
- * is charset-unconstrained and 4096 characters wide, and a value that reaches
- * the renderer unbounded spends whatever the renderer's own cap allows. Fitting
- * it here is the same discipline the sibling entry-name preview applies, so
- * neither fragment somebody else chose relays an attacker-sized string onward.
- *
- * The path is redacted before it is clipped, and the clip appends the truncation
- * marker itself, so a planted `BEGIN` marker cannot consume the marker that says
- * the path was cut (see {@link clipToRenderedCost}). What is kept is raw, and is
- * escaped once where the error is rendered, like every other fragment here.
+ * The path is bounded there rather than at the display boundary because it is
+ * bounded nowhere upstream: it is operator-configured, but on an offline-accept
+ * config it can be seeded from a partner invitation endpoint that is
+ * charset-unconstrained and 4096 characters wide. A real rendezvous path is an
+ * order of magnitude inside the budget, so the clip only ever bites a path that
+ * is itself the anomaly, and fitting it is the same discipline the sibling
+ * entry-name preview applies -- so neither fragment somebody else chose relays
+ * an attacker-sized string onward.
  */
 function directoryLink(dirPath: string): string {
-  return `${DIRECTORY_LINK_LABEL}${clipToRenderedCost(
-    redactPrivateKeyMaterial(dirPath),
-    DIRECTORY_LINK_BUDGET - renderedDisplayCost(DIRECTORY_LINK_LABEL),
-  )}`;
+  return fittedCauseLink(DIRECTORY_LINK_LABEL, dirPath);
 }
 
 /**
