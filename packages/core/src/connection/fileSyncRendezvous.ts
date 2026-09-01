@@ -352,9 +352,12 @@ const RENDEZVOUS_HELLO_READ_POLL_CYCLES = 6;
 // joinerRecoveryMs is that wall-clock quantity, already: it is what the lock
 // path allows for a peer's publish-and-rename to land on this transport, which
 // is the same wait these bounds are absorbing. Reusing it keeps one knob for one
-// question rather than a second constant to tune, and both bounds below stay
-// capped by the remaining peer budget -- on a budget too small to hold the
-// floor, the ordinary peer timeout fires instead, with its ordinary message.
+// question rather than a second constant to tune. Neither bound below extends a
+// wait past what the operator configured: the I5a hello-read bound stays capped
+// at the remaining peer budget, while the entry-hello window is armed only
+// while it fits strictly inside that budget rather than capped to it -- on a
+// budget too small to hold the floor, the ordinary peer timeout fires instead,
+// with its ordinary message.
 const rendezvousBoundMs = (
   options: RendezvousOptions,
   pollCycles: number,
@@ -408,17 +411,31 @@ const ENTRY_HELLO_ACK_WINDOW_FRACTION = 1 / 8;
 // partner whose round trip outruns the poll cadence.
 const ENTRY_HELLO_ACK_WINDOW_MIN_POLL_CYCLES = 6;
 
-// The window in milliseconds, capped at the remaining budget so it can never
-// outlast the peer timeout itself (where the ordinary timeout fires instead).
-const entryHelloAckWindowMs = (options: RendezvousOptions): number => {
-  const remaining = options.timeToLive!.getTime() - Date.now();
-  return Math.min(
-    remaining,
-    Math.max(
-      rendezvousBoundMs(options, ENTRY_HELLO_ACK_WINDOW_MIN_POLL_CYCLES),
-      remaining * ENTRY_HELLO_ACK_WINDOW_FRACTION,
-    ),
+// The instant an entry-present peer hello stops being given the benefit of the
+// doubt, or undefined when the window cannot fit strictly inside the remaining
+// budget -- the ordinary peer timeout then fires instead, with its ordinary
+// message.
+//
+// The guarantee that the deadline never reaches the peer timeout is carried by
+// strict arming, not by which clock reading the window is measured from:
+// arming requires windowMs strictly less than the remaining budget, so
+// now + windowMs stays strictly inside that budget even if now were read a
+// second time -- a later reading only shrinks the remaining budget the window
+// is checked against, which tightens the bound rather than loosening it. The
+// caller passes the clock sample the deadline is measured from rather than
+// this taking its own as supporting hygiene on top of that guarantee: it keeps
+// the window and the budget it is weighed against visibly one reading, rather
+// than two a reader has to work through the strict-arming argument to trust.
+const entryHelloAckDeadline = (
+  options: RendezvousOptions,
+  now: number,
+): number | undefined => {
+  const remaining = options.timeToLive!.getTime() - now;
+  const windowMs = Math.max(
+    rendezvousBoundMs(options, ENTRY_HELLO_ACK_WINDOW_MIN_POLL_CYCLES),
+    remaining * ENTRY_HELLO_ACK_WINDOW_FRACTION,
   );
+  return windowMs < remaining ? now + windowMs : undefined;
 };
 
 // The longest filename the protocol's own constructors build from UUID
@@ -1546,14 +1563,15 @@ export class FileSyncRendezvous {
     let ackPath: string | undefined;
 
     // Deadline for the bounded recovery window on an entry-present peer hello,
-    // armed only when one predated this run (see run()). Measured from here, the
-    // instant this party's own hello is on disk: before that there is nothing
-    // for a live peer to acknowledge, so an earlier start would charge the peer
-    // for this party's own publish.
+    // armed only when one predated this run (see run()) and the remaining
+    // budget can hold the window. Measured from here, the instant this party's
+    // own hello is on disk: before that there is nothing for a live peer to
+    // acknowledge, so an earlier start would charge the peer for this party's
+    // own publish.
     const entryHelloDeadline =
       entryPeerHello === undefined
         ? undefined
-        : Date.now() + entryHelloAckWindowMs(deps.options());
+        : entryHelloAckDeadline(deps.options(), Date.now());
 
     const waitForPeer = async () => {
       if (deps.options().locklessRendezvous) {
