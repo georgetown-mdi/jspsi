@@ -1967,6 +1967,12 @@ export async function runExchange(
     // orphaned.
     if (participant !== undefined) participant.dispose();
     else engine.dispose();
+    // Every round has been read as far as it ever will be, so each one states
+    // the drop totals its per-row lines stopped short of. Inside the finally so
+    // a round that dropped rows before the PSI phase threw still reports them,
+    // and after the disposal, which frees key material and is not to be risked
+    // on a diagnostic line.
+    for (const round of linkageKeyIterables) round.summarizeDroppedRows();
   }
 
   // One entry per matched PAIR, in this party's own ascending row order, is what
