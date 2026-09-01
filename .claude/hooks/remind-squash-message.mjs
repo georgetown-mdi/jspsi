@@ -147,9 +147,8 @@ function mainCheckoutRoot(cwd) {
 const MESSAGE_RULES =
   "an imperative subject plus a prose body summarizing the whole change, under " +
   "the Commit Messages rules in CONTRIBUTING.md (no markdown, no board ids, no " +
-  "self-attribution). Measure the subject against that document's 50-character " +
-  'limit WITH the " (#NNNN)" suffix GitHub appends at squash time included, so ' +
-  "the drafted subject itself budgets roughly 42 characters";
+  "self-attribution), with the subject inside CONTRIBUTING.md's 50-character " +
+  'limit, which counts the " (#NNNN)" suffix GitHub appends at squash time';
 
 function fileReminder(count, path) {
   return (

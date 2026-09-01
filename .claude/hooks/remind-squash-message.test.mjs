@@ -1,5 +1,11 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -265,7 +271,7 @@ describe("remind-squash-message hook", () => {
   // full 50 characters lands over the limit.
   it("names the message rules whichever reminder it emits", () => {
     const dir = track(makeRepo(2));
-    const rules = ["50-character", '" (#NNNN)"', "42 characters"];
+    const rules = ["CONTRIBUTING.md", "50-character", '" (#NNNN)"'];
     const fileContext = context(prCreateEvent(dir, ghOutput(5)));
     execFileSync("git", ["-C", dir, "checkout", "-q", "--detach"]);
     const printContext = context(prCreateEvent(dir, { stdout: "" }));
@@ -273,6 +279,14 @@ describe("remind-squash-message hook", () => {
       expect(fileContext).toContain(rule);
       expect(printContext).toContain(rule);
     }
+  });
+
+  it("keeps the subject budget the hook cites in CONTRIBUTING.md", () => {
+    const contributing = readFileSync(
+      join(REPO_ROOT, "CONTRIBUTING.md"),
+      "utf8",
+    );
+    expect(contributing).toContain("roughly 42 characters");
   });
 
   it("names a directory this repository's gitignore covers", () => {
