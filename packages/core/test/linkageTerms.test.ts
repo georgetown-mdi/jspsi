@@ -583,6 +583,131 @@ test("a fuzzy comparison outside a swap pair is unaffected", () => {
   expect(result.success).toBe(true);
 });
 
+// --- A swap pair's transforms ------------------------------------------------
+// Same rule, same reason, on the pair's other position-bound attribute: the swap
+// moves the field references and leaves each position's transform where it is, so
+// a mismatched pair transforms a column one way on the party that swaps and
+// another on the party that does not. Role resolution is re-derived per run from
+// the parties' record counts rather than carried by the terms, so the pair would
+// also decide the match set differently run to run.
+
+function swappedTransforms(
+  first: unknown,
+  second: unknown,
+): Record<string, unknown> {
+  return {
+    ...base,
+    linkageFields: [
+      { name: "firstName", type: "first_name" },
+      { name: "lastName", type: "last_name" },
+    ],
+    linkageKeys: [
+      {
+        name: "Swapped",
+        elements: [
+          { field: "firstName", transform: first },
+          { field: "lastName", transform: second },
+        ],
+        swap: ["firstName", "lastName"],
+      },
+    ],
+  };
+}
+
+const upperCase = [{ function: "to_upper_case" }];
+
+test("a swap pair declaring different transforms is rejected", () => {
+  const result = safeParseLinkageTerms(
+    swappedTransforms(upperCase, [{ function: "to_lower_case" }]),
+  );
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(result.error.issues[0].path).toContain("linkageKeys");
+  expect(result.error.issues[0].message).toMatch(/same transform/);
+});
+
+test("a swap pair with one position declaring a transform is rejected", () => {
+  // The asymmetric shape the mismatch actually takes in an authored document: a
+  // pipeline added to one position of a pair and not the other.
+  const result = safeParseLinkageTerms(swappedTransforms(upperCase, undefined));
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(result.error.issues[0].message).toMatch(/same transform/);
+});
+
+test("a swap pair declaring the same transform validates", () => {
+  const matched = safeParseLinkageTerms(
+    swappedTransforms(upperCase, [{ function: "to_upper_case" }]),
+  );
+  expect(matched.success).toBe(true);
+  // An absent pipeline and an empty one are the same identity pipeline, so a
+  // pair spelling it either way is one transform, not two.
+  const neither = safeParseLinkageTerms(swappedTransforms(undefined, []));
+  expect(neither.success).toBe(true);
+});
+
+test("a swap pair's transform params are compared canonically, not by key order", () => {
+  // Two spellings of one pipeline: `params` is a JSON object, whose key order
+  // carries no meaning and does not survive the canonical encoding the agreed
+  // terms are hashed in. A pair differing only there declares one transform.
+  const result = safeParseLinkageTerms(
+    swappedTransforms(
+      [{ function: "substring", params: { start: 1, length: 4 } }],
+      [{ function: "substring", params: { length: 4, start: 1 } }],
+    ),
+  );
+  expect(result.success).toBe(true);
+});
+
+test("a swap pair's transform params differing in value are rejected", () => {
+  const result = safeParseLinkageTerms(
+    swappedTransforms(
+      [{ function: "substring", params: { start: 1, length: 4 } }],
+      [{ function: "substring", params: { start: 1, length: 5 } }],
+    ),
+  );
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(result.error.issues[0].message).toMatch(/same transform/);
+});
+
+test("a swap pair whose transform params cannot be canonically encoded is refused", () => {
+  // A transform param's value is unconstrained by type, so a partner value
+  // outside the reproducible canonical domain -- an integer past 2^53 -- reaches
+  // the pair comparison. It is answered by a refusal, even for two identically
+  // spelled pipelines, rather than by an exception escaping the safe parse.
+  const unencodable = [{ function: "to_upper_case", params: { scale: 1e300 } }];
+  const result = safeParseLinkageTerms(
+    swappedTransforms(unencodable, unencodable),
+  );
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(result.error.issues[0].message).toMatch(/same transform/);
+});
+
+test("a transform outside a swap pair is unaffected", () => {
+  const result = safeParseLinkageTerms({
+    ...base,
+    linkageFields: [
+      { name: "firstName", type: "first_name" },
+      { name: "lastName", type: "last_name" },
+      { name: "ssn", type: "ssn" },
+    ],
+    linkageKeys: [
+      {
+        name: "Swapped",
+        elements: [
+          { field: "firstName" },
+          { field: "lastName" },
+          { field: "ssn", transform: upperCase },
+        ],
+        swap: ["firstName", "lastName"],
+      },
+    ],
+  });
+  expect(result.success).toBe(true);
+});
+
 // --- Transform-regex dialect conformance -------------------------------------
 // Element-transform regex patterns are partner-controlled and run per row over
 // the full dataset, under the linear-time engine (utils/linearRegex.ts), so they

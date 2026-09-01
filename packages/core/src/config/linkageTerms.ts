@@ -1212,8 +1212,8 @@ function describeRuleSet(
  * - Every `swap` target must match an element identifier (`element.name` if
  *   present, otherwise `element.field`) present within that same linkage key.
  * - The two elements a `swap` names must declare the same
- *   `generateFuzzyComparisons`, the expansion staying with the position while
- *   the swap moves the field reference.
+ *   `generateFuzzyComparisons` and the same `transform`, both staying with the
+ *   position while the swap moves the field reference.
  *
  * TODO: versioning compatibility rules (migration paths between semver
  * versions).
@@ -1679,6 +1679,80 @@ export function assertBothSidedDeduplicateImplemented(
   );
 }
 
+// The two elements a key's `swap` names, or undefined when the key declares no
+// swap or when a target resolves to no element of that key -- the dangling case
+// the referential-integrity refine owns, which every rule about a PAIR passes
+// over so the document is answered by the one message about its actual fault.
+// Element identity is `el.name ?? el.field`, the same expression the
+// element-identifier-uniqueness refine uses, so the rules cannot disagree about
+// which two elements a swap names.
+function swapPairedElements(
+  key: LinkageKey,
+): [LinkageKeyElement, LinkageKeyElement] | undefined {
+  if (key.swap === undefined) return undefined;
+  const [first, second] = key.swap.map((target) =>
+    key.elements.find((el) => (el.name ?? el.field) === target),
+  );
+  if (first === undefined || second === undefined) return undefined;
+  return [first, second];
+}
+
+// Whether two swap-paired positions declare the same transform pipeline. An
+// absent `transform` and an empty one are both the identity pipeline, so both
+// normalize to the empty list; standardization.test.ts pins that equivalence at
+// the layer that runs them. Equality is by canonical encoding rather than a
+// structural walk: a
+// `params` record's key order is not significant to the agreed terms -- which are
+// hashed in this same canonical form -- so two spellings of one pipeline must
+// compare equal.
+//
+// `transform.params` values are `z.unknown()`, so a partner value outside the
+// reproducible canonical domain (a JSON integer beyond 2^53) survives schema
+// parsing and then fails to encode. Such a pair is reported as DIFFERING rather
+// than propagating the throw out of a `safeParse`: a pipeline that cannot be
+// encoded cannot be shown to match its partner position, and the swap semantics
+// this predicate establishes are the thing being refused on.
+function swapPairDeclaresOneTransform(
+  first: LinkageKeyElement,
+  second: LinkageKeyElement,
+): boolean {
+  try {
+    return (
+      canonicalString(first.transform ?? []) ===
+      canonicalString(second.transform ?? [])
+    );
+  } catch (err) {
+    if (err instanceof CanonicalEncodingError) return false;
+    throw err;
+  }
+}
+
+/**
+ * Whether the two elements this key's `swap` names declare DIFFERENT transforms,
+ * the shape {@link LinkageTermsSchema} refuses.
+ *
+ * A swap moves the field references and leaves each element's own transform on
+ * its position, so only a pair whose transforms agree compares like-normalized
+ * values on both sides of the swapped key -- and only such a pair reaches the
+ * same verdict whichever party role resolution designates as receiver, a role
+ * settled per run from the parties' record counts rather than carried by the
+ * terms. An omitted transform and an empty one are the same identity pipeline,
+ * and two `params` records differing only in key order are one pipeline.
+ *
+ * False for a key declaring no swap, and for one whose swap target resolves to no
+ * element -- the dangling case the schema answers by its own rule.
+ *
+ * Exported for an authoring surface that wants to name this fault before the
+ * schema refuses the document, so the rule is read in one place rather than
+ * restated per surface.
+ */
+export function swapPairTransformsDiffer(key: LinkageKey): boolean {
+  const paired = swapPairedElements(key);
+  return (
+    paired !== undefined && !swapPairDeclaresOneTransform(paired[0], paired[1])
+  );
+}
+
 export const LinkageTermsSchema: z.ZodType<LinkageTerms> =
   LinkageTermsBaseSchema.refine(
     (a) => !a.deduplicate || a.output.expectsOutput,
@@ -1791,14 +1865,11 @@ export const LinkageTermsSchema: z.ZodType<LinkageTerms> =
     .refine(
       (a) =>
         a.linkageKeys.every((key) => {
-          if (key.swap === undefined) return true;
-          const paired = key.swap.map((target) =>
-            key.elements.find((el) => (el.name ?? el.field) === target),
-          );
-          if (paired.some((element) => element === undefined)) return true;
+          const paired = swapPairedElements(key);
           return (
-            paired[0]?.generateFuzzyComparisons ===
-            paired[1]?.generateFuzzyComparisons
+            paired === undefined ||
+            paired[0].generateFuzzyComparisons ===
+              paired[1].generateFuzzyComparisons
           );
         }),
       {
@@ -1810,6 +1881,17 @@ export const LinkageTermsSchema: z.ZodType<LinkageTerms> =
         path: ["linkageKeys"],
       },
     )
+    // The sibling rule to the expansion refine above, on the swap pair's other
+    // position-bound attribute; the rationale lives on swapPairTransformsDiffer.
+    // As above, the message echoes no partner-controlled value.
+    .refine((a) => !a.linkageKeys.some(swapPairTransformsDiffer), {
+      message:
+        "the two elements a linkage key swap names must declare the same " +
+        "transform: a swap moves the field references and leaves each " +
+        "element's own transform in place, so a mismatched pair would " +
+        "transform a column differently on the two parties",
+      path: ["linkageKeys"],
+    })
     // Reject a transform regex outside the linear-time dialect before it can run.
     // Element-transform regex patterns are partner-controlled and execute per row
     // over the full dataset, under the linear-time engine (utils/linearRegex.ts),

@@ -359,6 +359,10 @@ When a `swap` array is present, the receiver transmits a linkage key generated w
 
 The two elements a `swap` names must also declare the same [`generate_fuzzy_comparisons`](#element-fields) -- both the same value, or neither one. A swap moves the field references and leaves each element's own expansion where it is, so a pair declaring different expansions would widen a column one way on the party that swaps and another on the party that does not. A mismatched pair is rejected when the terms are decoded.
 
+The same rule binds the pair's [`transform`](#element-fields): both positions must declare the same pipeline -- the same steps with the same parameters, or neither one a pipeline at all. A swap moves the field references and leaves each element's own transform where it is, so only a pair whose transforms agree compares like-normalized values on both sides of the swapped key. It is also what makes the key's verdict independent of which party is the receiver: that role is settled per run from the two parties' record counts, not written into the terms, so a pair with differing transforms would match on one run and not the next with no change to the agreed document. A mismatched pair is rejected when the terms are decoded.
+
+Two spellings of the same pipeline are the same pipeline: an omitted `transform` and an empty list both mean "apply nothing", and a step's `params` keys are compared without regard to the order they were written in. Give the swapped pair one transform, the one the slot calls for. Cleaning that belongs to a column rather than to the slot -- a source system that stores one of the two fields differently -- goes in that column's [data standardizing transformation](#data-standardizing-transformations), which each party writes for its own input and applies before any key is built.
+
 ### `linkage_terms.linkage_rule_set`
 
 *Type:* object  

@@ -13,6 +13,7 @@ import {
   disclosedColumnNames,
   safeParseLinkageTerms,
   summarizeLinkageShortfall,
+  swapPairTransformsDiffer,
 } from "@psilink/core";
 
 import {
@@ -134,6 +135,26 @@ const UNENCODABLE_KEY_TRANSFORM_MESSAGE =
   "exact form both parties agree on, such as a number too large to store " +
   "precisely. Open that key and correct that transform's parameters, or remove " +
   "the step.";
+
+/** Shown when a key's two swapped elements carry different cleaning steps.
+ *
+ * A swap has only the receiver read the pair in the other order, and each
+ * element's steps stay on its own position, so a pair whose steps differ cleans a
+ * column one way on the party that swaps and another on the party that does not.
+ * The terms schema refuses it -- on the `linkageKeys` path, which the generic
+ * mapping collapses to "Enable at least one linkage key." on a draft whose keys
+ * are all enabled, so this message has to be set ahead of that mapping to be the
+ * one the operator reads.
+ *
+ * Names neither the key nor the fields, for the reason
+ * {@link UNSUPPLYABLE_KEY_MESSAGE} names none: an imported key's names are
+ * partner-influenceable. Both remedies are the operator's to choose between --
+ * matching the steps keeps the either-order matching, dropping the swap keeps the
+ * differing steps. */
+const SWAP_TRANSFORM_MISMATCH_MESSAGE =
+  "A linkage key matches two of its fields in either order, but gives them " +
+  "different cleaning steps. Open that key and give both fields the same steps, " +
+  "or turn off matching them in either order.";
 
 /** Shown when the built terms cannot be canonically encoded and the offending
  * value is not in any enabled key's transform -- the residual the editor's own
@@ -337,6 +358,19 @@ export function validateAdvancedInvite(
       ? UNENCODABLE_KEY_TRANSFORM_MESSAGE
       : UNENCODABLE_TERMS_MESSAGE;
   }
+
+  // A swap pair whose two elements carry different transforms, which the schema
+  // refuses on the linkageKeys path -- so it needs its own message ahead of the
+  // mapping for the same reason the checks above do. Placed after the encode dry
+  // run because an un-encodable param makes a pair unmatchable here too, and that
+  // fault has the more precise remedy of the two. The verdict is core's own
+  // reading of the rule, so the editor and the schema cannot disagree about which
+  // pairs are refused.
+  if (
+    errors.keys === undefined &&
+    terms.linkageKeys.some(swapPairTransformsDiffer)
+  )
+    errors.keys = SWAP_TRANSFORM_MISMATCH_MESSAGE;
 
   // The "non-receiving-party-cannot-receive" rule, enforced live: sending payload
   // to a partner that receives no result is incoherent -- the partner has no matched

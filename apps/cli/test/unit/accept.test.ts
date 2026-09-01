@@ -3814,14 +3814,16 @@ test("displayInvitation: names the fields matched on, once at the top and under 
   expect(lines).toContain(
     "  matched on (enforced): first name, last name, date of birth",
   );
-  // The swap re-attributes each element's marker to its partner's field, so the
-  // truncating element's "partial" is shown on the field it will actually read.
+  // The swap re-attributes each element's marker to its partner's field. Its two
+  // positions carry one transform -- the terms refuse a pair whose transforms
+  // differ -- so the truncation is shown on both of the fields it reads, and the
+  // unswapped date element keeps its own marker.
   const keyIndex = lines.indexOf(
     "    - given name, family name, and date of birth",
   );
   expect(keyIndex).toBeGreaterThanOrEqual(0);
   expect(lines[keyIndex + 1]).toBe(
-    "      matches on: first name - last name (partial) - " +
+    "      matches on: first name (partial) - last name (partial) - " +
       "date of birth (fuzzy) (matched in either order)",
   );
   expect(lines[keyIndex + 2]).toBe("      elements:");

@@ -2002,7 +2002,10 @@ function applyElementTransform(
 // leaves each element's own name and transforms where they are, so on the
 // receiver the position that READS a column and the position that DECLARES it
 // are different ones; `pair` is what lets a refusal name whichever of the two it
-// is about.
+// is about. Only the receiver swaps, so the pair's two transforms have to agree
+// for the round to compare like with like whichever party role resolution makes
+// receiver; the terms schema binds them (config/linkageTerms.ts), which is what
+// lets the transform stay with the position here.
 function swapElements(
   elements: LinkageKeyElement[],
   [nameA, nameB]: [string, string],

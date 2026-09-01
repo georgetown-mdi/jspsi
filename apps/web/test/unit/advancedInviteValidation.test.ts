@@ -429,6 +429,77 @@ describe("the canonical-encode gate (the byte form both parties hash)", () => {
   });
 });
 
+describe("the swap pair whose two elements clean differently", () => {
+  // A swap has only the receiver read the pair in the other order and leaves each
+  // element's steps on its own position, so a pair whose steps differ cleans a
+  // column one way on the party that swaps and another on the party that does
+  // not. The terms refuse it; the editor can author it, so it needs a message
+  // that names it rather than the generic "Enable at least one linkage key."
+
+  const now = new Date("2026-01-01T00:00:00Z");
+
+  /** `draft` with a swap over its first key's first two elements, enabled. */
+  function withSwappedFirstPair(
+    draft: AdvancedInviteDraft,
+    transforms: Array<Array<TransformStep> | undefined>,
+  ): AdvancedInviteDraft {
+    return {
+      ...draft,
+      keys: draft.keys.map((entry, index) =>
+        index === 0
+          ? {
+              ...entry,
+              enabled: true,
+              key: {
+                ...entry.key,
+                // An absent transform is written by OMITTING the property, the
+                // way the editor's controls clear an optional; an explicit
+                // `undefined` is outside the canonical domain and would be
+                // refused by the encode gate before this rule is reached.
+                elements: entry.key.elements.map((element, position) => {
+                  const transform = transforms[position];
+                  if (position >= 2) return element;
+                  return transform === undefined
+                    ? element
+                    : { ...element, transform };
+                }),
+                swap: [
+                  entry.key.elements[0].name ?? entry.key.elements[0].field,
+                  entry.key.elements[1].name ?? entry.key.elements[1].field,
+                ] as [string, string],
+              },
+            }
+          : entry,
+      ),
+    };
+  }
+
+  const trim: Array<TransformStep> = [{ function: "trim_whitespace" }];
+
+  test("differing steps on the pair are named rather than reported as no keys", () => {
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const mismatched = withSwappedFirstPair(draft, [trim, undefined]);
+    // The premise: the terms really are refused, so the message below answers
+    // this rule and not another obstacle in the draft.
+    expect(safeParseLinkageTerms(buildAdvancedTerms(mismatched)).success).toBe(
+      false,
+    );
+
+    const result = validateAdvancedInvite(mismatched, seed, now);
+    expect(result.canGenerate).toBe(false);
+    expect(result.errors.keys).toMatch(/different cleaning steps/);
+    expect(result.errors.keys).not.toMatch(/Enable at least one linkage key/);
+  });
+
+  test("the same steps on both positions of the pair generate", () => {
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const matched = withSwappedFirstPair(draft, [trim, [...trim]]);
+    const result = validateAdvancedInvite(matched, seed, now);
+    expect(result.errors.keys).toBeUndefined();
+    expect(result.canGenerate).toBe(true);
+  });
+});
+
 describe("the dead-key gate on a key-element transform that matches nothing", () => {
   // The stance one describe up -- the encoder is the gate on a key element, not
   // the descriptors -- covers params core tolerates at runtime. It does not
