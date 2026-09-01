@@ -435,7 +435,7 @@ describe("both routes carry the producer's excerpt as it stands", () => {
       ),
     );
     expect(rendered).toContain(
-      `first bytes the peer sent, private-key material stripped: ${sanitizeForDisplay(PRODUCED_EXCERPT)}`,
+      `first bytes the peer sent; PEM private-key blocks replaced: ${sanitizeForDisplay(PRODUCED_EXCERPT)}`,
     );
   });
 });

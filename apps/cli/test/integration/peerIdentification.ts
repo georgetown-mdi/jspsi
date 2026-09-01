@@ -49,7 +49,7 @@ export function expectNonSshAnswerDiagnosis(
   // carries them.
   const peerLinks = links.filter((link) =>
     link.startsWith(
-      "first bytes the peer sent, private-key material stripped:",
+      "first bytes the peer sent; PEM private-key blocks replaced:",
     ),
   );
   expect(peerLinks).toHaveLength(1);

@@ -214,7 +214,7 @@ test(
       expect(
         links.filter((link) =>
           link.startsWith(
-            "first bytes the peer sent, private-key material stripped:",
+            "first bytes the peer sent; PEM private-key blocks replaced:",
           ),
         ),
       ).toEqual([]);
