@@ -173,6 +173,14 @@ describe("column-name isolation: what the wrapper does not contain", () => {
   // 2026-09-01: the check-your-answers "Columns shared" row, the acceptor
   // ledger's send row, and the visually-hidden live regions on both steps.
   //
+  // Four more sinks of the same string-composition shape stay undriven here
+  // too, measured 2026-09-01: the accessible-name compositions at
+  // MatchingSharingSection.tsx:117 and :133 ("Type for <name>", "How <name>
+  // is used") and MetadataGrid.tsx:225 and :244 ("Type for column <name>",
+  // "How column <name> is used"). They fall outside the "one text block"
+  // wording above because they compose an attribute string, not element
+  // copy, but the residual reaches them the same way.
+  //
   // Written as escapes, never as raw bytes, so the source of a test about
   // invisible characters is itself readable.
   const PDI = "\u2069";
@@ -291,12 +299,11 @@ describe("column-name isolation: what the wrapper does not contain", () => {
 
   test("the demotion notice does not contain one behind an unmatched PDI", async () => {
     // The same measurement as the string form above, at the shipped sink: the
-    // notice's own trailing copy is what the override runs over. The state is
-    // reached through the two selects the grid offers, in the order an operator
-    // drives them -- retype the residual header to the identifier type, mark it
-    // the record identifier (displacing the seeded post_id), then hand the role
-    // back to post_id -- so the name in the notice is the one the rule displaced
-    // rather than a prop the test chose.
+    // notice's own trailing copy is what the override runs over. Driven through
+    // the editing path the selects call -- retype the residual header to the
+    // identifier type, mark it the record identifier (displacing the seeded
+    // post_id), then hand the role back to post_id -- so the name in the notice
+    // is the one the rule displaced rather than a prop the test chose.
     const acquired = csvOf([
       "first_name",
       "last_name",
