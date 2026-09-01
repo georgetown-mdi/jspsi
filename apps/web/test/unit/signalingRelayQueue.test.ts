@@ -1,14 +1,19 @@
 import http from "node:http";
 
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import WebSocket from "ws";
 
+import { getDiagnosticSink, setDiagnosticSink } from "@psilink/core";
+
 import { CreatePeerServerWSOnly } from "@psilink/peerjs-broker";
+import { MessageType } from "@psilink/peerjs-broker/enums";
 
 import { KEY } from "../utils/signalingHarness";
 
 import type { AddressInfo } from "node:net";
+import type { DiagnosticSink } from "@psilink/core";
 import type { IRealm } from "@psilink/peerjs-broker/models/realm";
+import type { SerializedFrame } from "@psilink/peerjs-broker/models/messageQueue";
 
 // The relay's hold-for-reconnect queue driven end to end over real sockets: a
 // signaling frame addressed to a peer that has dropped its socket is held and
@@ -65,13 +70,37 @@ interface PeerSocket {
   frames: Array<SignalingFrame>;
 }
 
+/** The broker's logger context, which marks its lines in a capture that sees
+ * every prefixed logger in the process. */
+const BROKER_LOG_CONTEXT = "peerjs-broker";
+
 const clients: Array<WebSocket> = [];
 const cleanups: Array<() => Promise<void>> = [];
 
+let capturedLines: Array<string>;
+let priorSink: DiagnosticSink | undefined;
+
+beforeEach(() => {
+  capturedLines = [];
+  priorSink = getDiagnosticSink();
+  setDiagnosticSink((_method, prefix, args) => {
+    capturedLines.push([prefix, ...args.map((arg) => String(arg))].join(" "));
+  });
+});
+
 afterEach(async () => {
+  setDiagnosticSink(priorSink);
   for (const ws of clients.splice(0)) ws.terminate();
   while (cleanups.length) await cleanups.pop()?.();
 });
+
+/** Only the broker's lines: the capture is process-wide, so another core logger
+ * emitting during a test must not be read as a broker diagnostic. */
+function brokerLines(): Array<string> {
+  return capturedLines.filter((line) =>
+    line.includes(`[${BROKER_LOG_CONTEXT}]`),
+  );
+}
 
 /** A signaling server built by `CreatePeerServerWSOnly` -- the single builder
  * the web app's mount and the standalone runner both go through -- so the queue
@@ -192,5 +221,84 @@ describe("relay hold-for-reconnect round trip", () => {
     const offer = reconnected.frames.find((frame) => frame.type === "OFFER")!;
     expect(offer.src).toBe(SENDER_ID);
     expect(offer.payload).toEqual(NESTED_PAYLOAD);
+  });
+
+  test("drops a held frame it cannot reconstitute and delivers the rest of the hold", async () => {
+    // The drain parses each frame held as JSON text, and it runs from inside the
+    // socket's connection event with nothing between it and `ws` -- so a parse
+    // that threw would be an uncaught exception on an internet-facing server.
+    // Planted here rather than sent, since the text a frame is held with is this
+    // server's own serialization and no peer can corrupt it over the wire: what
+    // is measured is what the drain does if one ever is.
+    const broker = await startShippedBroker();
+
+    const absent = await connectCollecting(broker.port, ABSENT_ID);
+    absent.ws.close();
+    await waitFor(() => broker.realm.getClientById(ABSENT_ID) === undefined);
+
+    const sender = await connectCollecting(broker.port, SENDER_ID);
+    sender.ws.send(
+      JSON.stringify({ type: "OFFER", dst: ABSENT_ID, payload: OFFER_PAYLOAD }),
+    );
+    await waitFor(
+      () => broker.realm.getMessageQueueById(ABSENT_ID)?.size() === 1,
+    );
+
+    const corruptedText = "{ not json";
+    const corrupted: SerializedFrame = {
+      message: {
+        type: MessageType.OFFER,
+        src: SENDER_ID,
+        dst: ABSENT_ID,
+        payload: corruptedText,
+      },
+      byteSize:
+        2 *
+        (MessageType.OFFER.length +
+          SENDER_ID.length +
+          ABSENT_ID.length +
+          corruptedText.length),
+      payloadKind: "json",
+    };
+    broker.realm.getMessageQueueById(ABSENT_ID)!.addMessage(corrupted);
+
+    sender.ws.send(
+      JSON.stringify({
+        type: "OFFER",
+        dst: ABSENT_ID,
+        payload: NESTED_PAYLOAD,
+      }),
+    );
+    await waitFor(
+      () => broker.realm.getMessageQueueById(ABSENT_ID)?.size() === 3,
+    );
+
+    // Both good frames arrive, in the order they were held, with the corrupted
+    // one between them dropped rather than delivered or blocking the two.
+    const reconnected = await connectCollecting(broker.port, ABSENT_ID);
+    await waitFor(
+      () =>
+        reconnected.frames.filter((frame) => frame.type === "OFFER").length ===
+        2,
+    );
+    expect(
+      reconnected.frames
+        .filter((frame) => frame.type === "OFFER")
+        .map((frame) => frame.payload),
+    ).toEqual([OFFER_PAYLOAD, NESTED_PAYLOAD]);
+
+    // The drop is reported as this server's own fault rather than the peer's,
+    // down the same route the enqueue seam's refusal takes.
+    await waitFor(() =>
+      brokerLines().some((line) => line.includes("[frame-dispatch]")),
+    );
+    expect(brokerLines().some((line) => line.includes("[client-frame]"))).toBe(
+      false,
+    );
+
+    // The drain ran to the end and released the hold, and the socket that came
+    // back for it is still open.
+    expect(broker.realm.getMessageQueueById(ABSENT_ID)).toBeUndefined();
+    expect(reconnected.ws.readyState).toBe(WebSocket.OPEN);
   });
 });

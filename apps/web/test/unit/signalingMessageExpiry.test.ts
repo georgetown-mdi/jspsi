@@ -6,6 +6,7 @@ import { Realm } from "@psilink/peerjs-broker/models/realm";
 
 import type { IClient } from "@psilink/peerjs-broker/models/client";
 import type { IMessage } from "@psilink/peerjs-broker/models/message";
+import type { SerializedFrame } from "@psilink/peerjs-broker/models/messageQueue";
 
 // The expiry sweep behind the relay's hold-for-reconnect queues: a queue whose
 // destination never came back for it is cleared on a timer, and each sender is
@@ -32,6 +33,24 @@ function offerFrom(src: string, payload: unknown): IMessage {
     dst: ABSENT_ID,
     payload,
   } as unknown as IMessage;
+}
+
+/** A frame in the form the queue holds one, stamped as held-JSON but carrying
+ * text that is not JSON -- so any read of it throws where a real held frame's
+ * would not. Built by hand: the held text is the server's own serialization, so
+ * nothing a peer sends produces this. */
+function poisonedFrameFrom(src: string): SerializedFrame {
+  const payload = "{ not json";
+  return {
+    message: { type: MessageType.OFFER, src, dst: ABSENT_ID, payload },
+    byteSize:
+      2 *
+      (MessageType.OFFER.length +
+        src.length +
+        ABSENT_ID.length +
+        payload.length),
+    payloadKind: "json",
+  };
 }
 
 /** A stand-in for the broker's message handler that records what the sweep
@@ -129,16 +148,19 @@ describe("relay queue expiry sweep", () => {
     expect(handled).toEqual([]);
   });
 
-  test("expires a held payload that is not JSON without reading it", () => {
-    // A payload that arrived as a string is held verbatim, so what the queue
-    // carries here has no JSON form at all. The sweep clears it and builds its
-    // notice from the routing ids: parsing the held payload would throw, and a
-    // sweep that never touches it cannot.
+  test("expires a queue holding a frame whose payload cannot be parsed", () => {
+    // A frame stamped as held-JSON whose text is not JSON: reading it out
+    // throws, so a sweep that touched payloads at all would fail here rather
+    // than quietly work. It is planted rather than sent, the held text being
+    // the server's own serialization; the sweep clears the queue and builds
+    // both notices from the routing ids alone.
     const realm = new Realm();
-    realm.addMessageToQueue(ABSENT_ID, offerFrom(SENDER_ID, "{ not json"));
-    expect(
-      realm.getMessageQueueById(ABSENT_ID)?.getMessages()[0]?.message.payload,
-    ).toBe("{ not json");
+    realm.addMessageToQueue(
+      ABSENT_ID,
+      offerFrom(SENDER_ID, { sdp: "v=0\r\n" }),
+    );
+    const queue = realm.getMessageQueueById(ABSENT_ID)!;
+    queue.addMessage(poisonedFrameFrom(OTHER_SENDER_ID));
 
     const { handled } = runSweep(
       realm,
@@ -148,6 +170,23 @@ describe("relay queue expiry sweep", () => {
     expect(realm.getMessageQueueById(ABSENT_ID)).toBeUndefined();
     expect(handled).toEqual([
       { type: MessageType.EXPIRE, src: ABSENT_ID, dst: SENDER_ID },
+      { type: MessageType.EXPIRE, src: ABSENT_ID, dst: OTHER_SENDER_ID },
     ]);
+  });
+
+  test("the frame planted above is one a read really cannot parse", () => {
+    // The counterpart of the test above: what makes that one a measurement
+    // rather than a restatement is that the planted frame is genuinely
+    // parse-poisoned on the read path the drain takes.
+    const realm = new Realm();
+    realm.addMessageToQueue(
+      ABSENT_ID,
+      offerFrom(SENDER_ID, { sdp: "v=0\r\n" }),
+    );
+    const queue = realm.getMessageQueueById(ABSENT_ID)!;
+    queue.addMessage(poisonedFrameFrom(OTHER_SENDER_ID));
+
+    queue.readMessage();
+    expect(() => queue.readMessage()).toThrow();
   });
 });

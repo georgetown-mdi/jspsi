@@ -517,11 +517,29 @@ describe("relay message-queue bounds", () => {
       src: "s",
       dst: { not: "a string" },
     } as unknown as IMessage;
-    expect(() => accountedBytes(malformed)).toThrow();
+    expect(() => accountedBytes(malformed)).toThrow(/dst/);
 
     const realm = new Realm();
     expect(() => realm.addMessageToQueue(malformed.dst, malformed)).toThrow();
     expect(realm.getClientsIdsWithQueue()).toHaveLength(0);
+  });
+
+  test("refuses a malformed id before serializing the payload it came with", () => {
+    // The ids are checked first, so a frame that cannot be queued at all does
+    // not pay a full serialization of a quarter-megabyte structure before the
+    // cheap refusal -- and the refusal an operator reads names `dst`, the one
+    // leg of it a peer can drive, rather than whatever the payload happened to
+    // fail on. Pinned with a payload that also has no serialized form, so the
+    // two refusals compete and the id one is measured to win.
+    const malformed = {
+      type: MessageType.OFFER,
+      src: "s",
+      dst: { not: "a string" },
+      payload: () => "no wire form",
+    } as unknown as IMessage;
+
+    expect(() => accountedBytes(malformed)).toThrow(/dst/);
+    expect(() => accountedBytes(malformed)).not.toThrow(/serialized form/);
   });
 
   test("refuses a payload with no serialized form rather than sizing it zero", () => {

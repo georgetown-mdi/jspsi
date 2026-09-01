@@ -19,8 +19,9 @@ export interface SerializedFrame {
    * deliberately not JSON-quoted -- the two quote characters are residency the
    * frame never carried on the wire, and the largest wire-legal frame between
    * two rendezvous ids accounts to within two bytes of `MAX_QUEUE_BYTES`, so
-   * quoting alone would make it unholdable and break the property that any
-   * single legal frame can be held.
+   * quoting alone would make it unholdable -- and the string kind is where
+   * holdability is exact, a structured payload being held by a serialization
+   * whose length the wire cap does not bound.
    */
   readonly payloadKind: "string" | "json";
 }
@@ -60,12 +61,21 @@ function frameByteSize(message: IMessage): number {
  * so its accounted residency is the residency it had on the wire; the kind is
  * recorded on the frame and delivery reconstitutes accordingly.
  *
- * `Buffer.byteLength` throws on a non-string `type`, `src`, or `dst`, and a
- * payload with no JSON form is refused rather than sized zero; either way the
- * frame is dropped before it can be queued or key a queue of its own, and the
- * throw surfaces as a `frame-dispatch` diagnostic.
+ * A non-string `type`, `src`, or `dst` is refused, and so is a payload with no
+ * JSON form rather than its being sized zero; either way the frame is dropped
+ * before it can be queued or key a queue of its own, and the throw surfaces as
+ * a `frame-dispatch` diagnostic. The ids are checked ahead of the payload so a
+ * frame that cannot be queued at all does not first pay a full serialization of
+ * a quarter-megabyte structure -- and so the refusal an operator reads names the
+ * `dst` the peer actually chose, which is the only leg of this reachable from
+ * the wire.
  */
 export function serializeFrame(message: IMessage): SerializedFrame {
+  for (const field of ["type", "src", "dst"] as const) {
+    if (typeof message[field] !== "string")
+      throw new TypeError(`signaling frame ${field} is not a string`);
+  }
+
   const payloadKind = typeof message.payload === "string" ? "string" : "json";
   const payload =
     message.payload === undefined || payloadKind === "string"
@@ -100,6 +110,11 @@ export function serializeFrame(message: IMessage): SerializedFrame {
  * because it arrived as a string is returned as it is, unparsed. `IMessage`
  * types `payload` as a string, which a structured signaling payload has never
  * been.
+ *
+ * The parse is nonetheless allowed to throw rather than being swallowed here:
+ * the drain site absorbs it, drops that one frame down the `frame-dispatch`
+ * route, and delivers the rest of the hold, so a held frame that cannot be
+ * reconstituted is reported instead of silently becoming an empty delivery.
  */
 function reconstituteFrame({
   message,
