@@ -20,9 +20,9 @@ import { InviterBench } from "@bench/InviterBench";
 import { stagesFor } from "@bench/exchangeRun";
 import styles from "@bench/bench.module.css";
 
-// The ledger expectation derives its form from this function, so it pins that the
-// send row carries the same form step 2's chips do, not what that form is; the
-// literal FSI/PDI expectations live in
+// The ledger and demotion-notice expectations derive their form from this
+// function, so they pin that those sinks carry the same form step 2's chips do,
+// not what that form is; the literal FSI/PDI expectations live in
 // apps/web/test/unit/columnNameDisplay.test.ts.
 import { isolatedColumnName } from "@components/ColumnName";
 
@@ -427,6 +427,16 @@ describe("inviter bench", () => {
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Matching & sharing");
 
+    // The grid's two control labels, asserted before anything selects through
+    // them: a label regression is a named expectation here rather than a locator
+    // timeout on the selects below, which reads as flake.
+    await expect
+      .element(page.getByLabelText(typeLabel("program_code")))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByLabelText(usedLabel("program_code")))
+      .toBeInTheDocument();
+
     // Undiscloses the only sent column: the ledger and the empty-state inset
     // track the edit.
     await page
@@ -455,7 +465,8 @@ describe("inviter bench", () => {
     await expect
       .element(
         page.getByText(
-          "client_id changed to Ignored - only one column can be the record identifier.",
+          `${isolatedColumnName("client_id")} changed to Ignored - only one ` +
+            "column can be the record identifier.",
         ),
       )
       .toBeInTheDocument();

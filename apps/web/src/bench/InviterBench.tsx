@@ -36,6 +36,7 @@ import {
   useNonEmptyRates,
 } from "@components/useNonEmptyRates";
 import { CONSOLE_COVERAGE_PENDING_LABEL } from "@components/FieldCoverage";
+import { isolatedColumnName } from "@components/ColumnName";
 import { triggerBlobDownload } from "@components/blobDownload";
 import { unlinkableFileAlert } from "@components/UnlinkableFileAlert";
 
@@ -243,9 +244,12 @@ function isSection(value: string): value is Section {
   return value in SECTION_SET;
 }
 
+// The names are the operator's own CSV headers going into a string sink -- the
+// step's visible polite region -- so they carry the isolation as characters, the
+// treatment every other column-name sink on the step gives them.
 function demotionNotice(demoted: ReadonlyArray<string>): string {
   if (demoted.length === 0) return "";
-  return `${demoted.join(", ")} changed to Ignored - only one column can be the record identifier.`;
+  return `${demoted.map(isolatedColumnName).join(", ")} changed to Ignored - only one column can be the record identifier.`;
 }
 
 // The inviter name the sample seeds, so step 1 lands complete without the
