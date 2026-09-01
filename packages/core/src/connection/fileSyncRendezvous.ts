@@ -408,17 +408,28 @@ const ENTRY_HELLO_ACK_WINDOW_FRACTION = 1 / 8;
 // partner whose round trip outruns the poll cadence.
 const ENTRY_HELLO_ACK_WINDOW_MIN_POLL_CYCLES = 6;
 
-// The window in milliseconds, capped at the remaining budget so it can never
-// outlast the peer timeout itself (where the ordinary timeout fires instead).
-const entryHelloAckWindowMs = (options: RendezvousOptions): number => {
-  const remaining = options.timeToLive!.getTime() - Date.now();
-  return Math.min(
-    remaining,
-    Math.max(
-      rendezvousBoundMs(options, ENTRY_HELLO_ACK_WINDOW_MIN_POLL_CYCLES),
-      remaining * ENTRY_HELLO_ACK_WINDOW_FRACTION,
-    ),
+// The instant an entry-present peer hello stops being given the benefit of the
+// doubt, or undefined when the remaining budget cannot hold the window -- the
+// ordinary peer timeout then fires instead, with its ordinary message.
+//
+// The caller passes the clock sample the deadline is measured from rather than
+// this taking its own, so the window and the remaining budget it is weighed
+// against come from one reading: a second reading would put the armed deadline
+// a machine's worth of milliseconds inside the peer timeout, and a poll landing
+// in that sliver would report a hello as residue for a budget that simply ran
+// out. Arming is strict for the same reason: a window that merely reaches the
+// budget would be decided by whichever check the last poll ran first, and the
+// exhausted budget is the peer timeout's case to report.
+const entryHelloAckDeadline = (
+  options: RendezvousOptions,
+  now: number,
+): number | undefined => {
+  const remaining = options.timeToLive!.getTime() - now;
+  const windowMs = Math.max(
+    rendezvousBoundMs(options, ENTRY_HELLO_ACK_WINDOW_MIN_POLL_CYCLES),
+    remaining * ENTRY_HELLO_ACK_WINDOW_FRACTION,
   );
+  return windowMs < remaining ? now + windowMs : undefined;
 };
 
 // The longest filename the protocol's own constructors build from UUID
@@ -1546,14 +1557,15 @@ export class FileSyncRendezvous {
     let ackPath: string | undefined;
 
     // Deadline for the bounded recovery window on an entry-present peer hello,
-    // armed only when one predated this run (see run()). Measured from here, the
-    // instant this party's own hello is on disk: before that there is nothing
-    // for a live peer to acknowledge, so an earlier start would charge the peer
-    // for this party's own publish.
+    // armed only when one predated this run (see run()) and the remaining
+    // budget can hold the window. Measured from here, the instant this party's
+    // own hello is on disk: before that there is nothing for a live peer to
+    // acknowledge, so an earlier start would charge the peer for this party's
+    // own publish.
     const entryHelloDeadline =
       entryPeerHello === undefined
         ? undefined
-        : Date.now() + entryHelloAckWindowMs(deps.options());
+        : entryHelloAckDeadline(deps.options(), Date.now());
 
     const waitForPeer = async () => {
       if (deps.options().locklessRendezvous) {

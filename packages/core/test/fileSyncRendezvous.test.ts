@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from "vitest";
+import { describe, expect, test } from "vitest";
 import { v4 as uuidv4 } from "uuid";
 
 import {
@@ -1867,12 +1867,12 @@ describe("FileSyncRendezvous across connection-per-poll session boundaries", () 
   // The peer budget the lockless sweep below owns instead of baseOptions'
   // shared 2 s. Every assertion in that sweep is about what the directory
   // holds, never how long a step took, so this is a backstop for a peer ack
-  // that never arrives -- and, through entryHelloAckWindowMs capping its window
-  // at the remaining budget, it is also what the entry-present peer hello gets
-  // to answer in. The shared 2 s is a thousand times an idle position and
-  // inside one descheduling stall on a starved one: at nice 19 against 40
-  // nice-0 CPU hogs on a ten-core container the sweep aborts partway with
-  // "synchronization has timed out", settling the outcome by the scheduler
+  // that never arrives -- and, since the entry-present window is not armed on a
+  // budget it cannot fit strictly inside, it is also what the entry-present peer
+  // hello gets to answer in. The shared 2 s is a thousand times an idle
+  // position and inside one descheduling stall on a starved one: at nice 19
+  // against 40 nice-0 CPU hogs on a ten-core container the sweep aborts partway
+  // with "synchronization has timed out", settling the outcome by the scheduler
   // rather than by the boundary that position placed. Both bounds here were
   // verified green under that same regime, so a later tightening has one to
   // measure against.
@@ -2723,63 +2723,72 @@ describe("FileSyncRendezvous entry-present peer hello window", () => {
     expect(p.state.entryPeerHello).toBe(helloName("zzz"));
   });
 
-  // The floor rendezvousBoundMs puts under the window. A budget this small
-  // cannot hold a round trip at the shipped joinerRecoveryMs, so the window must
-  // not fire at all: the run reports the ordinary peer-wait timeout instead of
-  // naming a hello a live-but-slow partner may own. Driving two real
-  // connections over a latency-asymmetric transport, the unfloored window
-  // aborted such a partner in ~650 ms and prescribed removing its hello.
+  // The floor rendezvousBoundMs puts under the window, and the boundary between
+  // the window and the peer budget it is weighed against, on a real clock.
   //
-  // Driven on a virtual clock, where only a poll's own wait moves time. On a
-  // real one the cap ties the window's deadline to the peer budget's, and the
-  // two land apart by whatever the machine spends between the two Date.now()
-  // calls that derive them, so a poll falling in that sliver decides which
-  // budget reports the run rather than the floor this case is about. Here the
-  // deadline is the budget exactly, no poll can fall past it while the wait loop
-  // still runs, and the only thing that can fire the window is the floor's
-  // removal -- which drops it to an eighth of the budget, 187 ms in.
+  // A budget this small cannot hold a round trip at the shipped
+  // joinerRecoveryMs, so the window must not fire at all: the run reports the
+  // ordinary peer-wait timeout instead of naming a hello a live-but-slow partner
+  // may own. Driving two real connections over a latency-asymmetric transport,
+  // the unfloored window aborted such a partner in ~650 ms and prescribed
+  // removing its hello; the floor's removal drops the window to an eighth of
+  // this budget, 187 ms in, far inside the wait asserted below.
+  //
+  // Deriving the window from a clock reading of its own, rather than the one the
+  // deadline is measured from, would arm it a machine's worth of milliseconds
+  // short of the budget, and a poll landing in that sliver reports the leftover
+  // as residue for a budget that had simply run out. A sliver that narrow is
+  // unobservable on a real clock, so the skew below widens it: the first read of
+  // timeToLive after this party's hello is on disk -- the read any derivation of
+  // the remaining budget must make -- burns SKEW_MS of real time, so a second
+  // reading taken after it lands SKEW_MS late while a single reading is unmoved.
+  // The poll cadence is an order of magnitude finer than the skew, so a window
+  // armed that far inside the budget is hit by several polls before it expires.
   test("does not fire on a budget too small to hold a round trip", async () => {
-    vi.useFakeTimers();
-    try {
-      const files = new Map<string, Buffer>();
-      placePeerHello(files, "zzz", flags);
-      const p = makeParty(
-        "aaa",
-        {
-          ...flags,
-          timeToLive: new Date(Date.now() + 1500),
-          pollingFrequency: 20,
-        },
-        files,
-      );
+    const BUDGET_MS = 1500;
+    const SKEW_MS = 300;
+    const files = new Map<string, Buffer>();
+    placePeerHello(files, "zzz", flags);
+    const timeToLive = new Date(Date.now() + BUDGET_MS);
+    const p = makeParty(
+      "aaa",
+      { ...flags, timeToLive, pollingFrequency: 20 },
+      files,
+    );
 
-      const started = Date.now();
-      let ended = started;
-      const settled = p.rdv.run(p.scope).then(
-        () => {
-          ended = Date.now();
-          return undefined;
-        },
-        (e: unknown) => {
-          ended = Date.now();
-          return e;
-        },
-      );
-      // Twice the budget, so a window that never fires and a run that overran
-      // its budget are told apart by the elapsed assertion below rather than by
-      // the run still being in flight when this returns.
-      await vi.advanceTimersByTimeAsync(3000);
-      const err = await settled;
-      const elapsed = ended - started;
+    let skewPending = false;
+    const rename = p.client.rename;
+    p.client.rename = async (from: string, to: string): Promise<void> => {
+      await rename(from, to);
+      if (to === `${DIR}/${helloName("aaa")}`) skewPending = true;
+    };
+    Object.defineProperty(p.options, "timeToLive", {
+      get: () => {
+        if (skewPending) {
+          skewPending = false;
+          const until = Date.now() + SKEW_MS;
+          while (Date.now() < until) {
+            // Busy-wait: the skew has to be real elapsed time inside what is a
+            // synchronous derivation, so nothing can be awaited here.
+          }
+        }
+        return timeToLive;
+      },
+    });
 
-      expect(isPeerWaitTimeout(err)).toBe(true);
-      expect((err as Error).message).not.toContain("residue");
-      // Capped at the operator's budget: the floor never extends a wait past it.
-      expect(elapsed).toBeLessThan(3000);
-      expect(files.has(`${DIR}/${helloName("zzz")}`)).toBe(true);
-    } finally {
-      vi.useRealTimers();
-    }
+    const err = await p.rdv.run(p.scope).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    const ended = Date.now();
+
+    expect(isPeerWaitTimeout(err)).toBe(true);
+    expect((err as Error).message).not.toContain("residue");
+    // The operator's own budget is what ended this run: no window expired
+    // inside it, and the floor extended nothing past it either.
+    expect(ended).toBeGreaterThanOrEqual(timeToLive.getTime());
+    expect(ended).toBeLessThan(timeToLive.getTime() + BUDGET_MS);
+    expect(files.has(`${DIR}/${helloName("zzz")}`)).toBe(true);
   });
 
   // The pair a lockless run killed just after it acked leaves behind: the peer's
