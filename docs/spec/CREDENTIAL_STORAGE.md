@@ -176,9 +176,16 @@ software depends on.
 
 That the directory-operand form works at all -- that `/bin/chmod -h -N` accepts
 a directory as its operand, and that clearing the ACL there drops both the
-`file_inherit` and `directory_inherit` flags -- is asserted only by a
-macOS-gated unit test no CI runner executes; as of 2026-09-01 it has not been
-driven against the real tool on a macOS host in this repo's record.
+`file_inherit` and `directory_inherit` flags -- was driven against the real tool
+on 2026-09-01: `npx vitest run apps/cli/test/unit/extendedAclCoverage.test.ts`
+on a macOS host, 10 passed and 1 skipped, the skip being the Linux-only "no
+strip is attempted on the host's real platform" leg. Both facts come from the
+"nothing under an inheriting TMPDIR carries an ACE" leg, which pins the
+inheritance first -- a control directory and a control file created under the
+same root do carry the ACE -- and then finds no ACE on the stripped work
+directory, on the credentials file, or on a file created beside it afterwards.
+No CI runner executes those macOS-gated legs, so they run on demand rather than
+continuously, and a regression in them would be caught at the next such run.
 
 The `--log-file` descriptor is stripped at its own open instead, between that
 open and the installation of the sink that writes the first line -- the same
