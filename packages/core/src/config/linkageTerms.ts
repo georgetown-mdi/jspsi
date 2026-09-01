@@ -1879,18 +1879,9 @@ export const LinkageTermsSchema: z.ZodType<LinkageTerms> =
         path: ["linkageKeys"],
       },
     )
-    // A swap pair's two positions must declare the SAME transform, for the reason
-    // the expansion rule above binds its own attribute: the swap moves only the
-    // field references, so each position's pipeline stays where it is and runs
-    // over whichever column the party's role feeds it. With the pair's transforms
-    // equal, every comparison the swapped key makes is between two values
-    // normalized the same way, and it makes the same comparisons whichever party
-    // role resolution designates as receiver. A mismatched pair has neither
-    // property, and role resolution is not a property of the terms document --
-    // it is re-derived per run from the record counts -- so the two parties would
-    // be reading one agreed document into a match set that neither authored and
-    // neither can see from its own copy. As above, the message echoes no
-    // partner-controlled value.
+    // The sibling rule to the expansion refine above, on the swap pair's other
+    // position-bound attribute; the rationale lives on swapPairTransformsDiffer.
+    // As above, the message echoes no partner-controlled value.
     .refine((a) => !a.linkageKeys.some(swapPairTransformsDiffer), {
       message:
         "the two elements a linkage key swap names must declare the same " +
