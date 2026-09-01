@@ -43,7 +43,10 @@ import {
 } from "./config";
 import { detectFileConflicts } from "./fileUtils";
 import { openEventStream, reportPersistenceLoss } from "./eventStream";
-import { resolveConnectionCredentials } from "./util/atSignRefs";
+import {
+  applyConnectionCredentials,
+  readConnectionCredentials,
+} from "./util/atSignRefs";
 import { establishHostKeyTrust, type HostKeyPersistence } from "./hostKeyTrust";
 import { openInputSource, singleValue } from "./util/cli";
 import {
@@ -817,6 +820,15 @@ export async function runOnlineBootstrap(params: {
     keyFilePath: params.keyPath,
   };
 
+  // Read the files any `@path` credential ref names, holding the values aside
+  // rather than applying them: params.connection must keep the reference so the
+  // saveConfig in the hook below persists it and not the secret. A missing,
+  // unreadable, or empty referenced file is a UsageError (exit 64) decided from
+  // this party's own filesystem, so it is settled here rather than after the
+  // host-key step below, whose first-use probe opens a real transport to the
+  // server.
+  const credentials = readConnectionCredentials(params.connection);
+
   // Establish first-use SSH host-key trust before connecting, on the ORIGINAL
   // params.connection so the pin reaches both the live connect (via the clone
   // below) and the persisted config. A pinned connection is a no-op; an unpinned
@@ -841,21 +853,22 @@ export async function runOnlineBootstrap(params: {
     persistence: hostKeyPersistence,
   });
 
-  // The connection this run dials: params.connection with its `@path` credential
-  // refs resolved and this run's own peer budget applied. params.connection keeps
-  // neither, so the saveConfig in the hook below persists the `@path` reference
-  // rather than the secret (re-resolved at the next `psilink exchange`'s config
-  // load) and no wait sized for one interactive setup. A missing or unreadable
-  // referenced file is a UsageError (exit 64) surfaced here, before any
-  // credential is sent. The budget goes through applyConnectionOverrides like
-  // every other timeout override, which keeps the schema the sole source of truth
-  // for its floor and clones -- load-bearing, since the credential resolver
-  // returns a non-sftp connection as-is, and mutating that would put the budget
-  // straight back into what is written. The cast restores the
-  // ProtocolConnectionConfig narrowing both widen to ConnectionConfig; it is safe
-  // because neither changes the channel.
+  // The connection this run dials: params.connection with the credential values
+  // read above applied and this run's own peer budget on top. params.connection
+  // keeps neither, so the saveConfig in the hook below persists the `@path`
+  // reference rather than the secret (re-resolved at the next `psilink
+  // exchange`'s config load) and no wait sized for one interactive setup. The
+  // clone is taken HERE rather than at the read, so a first-use pin the host-key
+  // step just wrote onto params.connection rides into the live connect. The
+  // budget goes through applyConnectionOverrides like every other timeout
+  // override, which keeps the schema the sole source of truth for its floor and
+  // clones -- load-bearing, since the credential application returns a non-sftp
+  // connection as-is, and mutating that would put the budget straight back into
+  // what is written. The cast restores the ProtocolConnectionConfig narrowing
+  // both widen to ConnectionConfig; it is safe because neither changes the
+  // channel.
   const liveConnection = applyConnectionOverrides(
-    resolveConnectionCredentials(params.connection),
+    applyConnectionCredentials(params.connection, credentials),
     { options: { peerTimeout: params.runOnlyPeerTimeoutSeconds } },
   ) as ProtocolConnectionConfig;
 

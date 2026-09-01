@@ -128,9 +128,10 @@ const REAL_DEPS: HostKeyTrustDeps = {
  * Mutates `connection.server.hostKeyFingerprint` in place on success so the
  * caller's subsequent open() verifies the just-confirmed key -- which also
  * catches a key swapped between this probe and that connect. Callers that clone
- * the connection for live use (via `resolveConnectionCredentials`) must invoke
- * this on the ORIGINAL before cloning, so the mutation reaches both the live
- * connect and the persisted config.
+ * the connection for live use (via `resolveConnectionCredentials`, or
+ * `applyConnectionCredentials` where the credential files are read ahead of this
+ * step) must invoke this on the ORIGINAL before cloning, so the mutation reaches
+ * both the live connect and the persisted config.
  *
  * @param deps injectable probe/confirm; defaults to the real implementations
  *   (a throwaway probe connection and the stderr y/N prompt). `@internal`.

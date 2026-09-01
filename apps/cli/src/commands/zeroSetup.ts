@@ -26,7 +26,10 @@ import { detectFileConflicts, expandTilde } from "../fileUtils";
 import { DEFAULT_KEY_PATH } from "../keyFile";
 import { optionalIdentity } from "../partyIdentity";
 import { resolveRecordOutput } from "../recordFile";
-import { resolveConnectionCredentials } from "../util/atSignRefs";
+import {
+  applyConnectionCredentials,
+  readConnectionCredentials,
+} from "../util/atSignRefs";
 import { establishHostKeyTrust } from "../hostKeyTrust";
 import {
   configureLogging,
@@ -179,7 +182,7 @@ function parseArgs(argv: Arguments): ZeroSetupArgs {
   // repeat-rejection and log-level validation invite/accept use), then layer the
   // zero-setup-specific handling on top. Unlike exchange, an `@path` credential
   // ref is carried through verbatim (not resolved at parse time) and read only at
-  // the live-use boundary (resolveConnectionCredentials in the handler), so a
+  // the live-use boundary (readConnectionCredentials in the handler), so a
   // persisted config keeps the `@path` rather than the resolved secret.
   const common = parseCommonBootstrapArgs(argv);
   return {
@@ -637,24 +640,6 @@ export async function handler(argv: Arguments): Promise<void> {
     let prepared: PreparedExchange;
     try {
       connection = createConnection(server, options);
-      // Establish first-use SSH host-key trust on the ORIGINAL `connection`
-      // (before the clone below), so the pin reaches both the live connect and,
-      // under --save, the persisted config (finalizeBootstrap saves this same
-      // object). A pinned connection is a no-op; an unpinned one prompts on a TTY
-      // and fails closed otherwise. With --save the pin is saved with the config;
-      // without it the key is trusted for this one-off exchange only.
-      await establishHostKeyTrust(connection, {
-        verbosity,
-        loggerName: "psilink",
-        persistence: options.save
-          ? { mode: "save-with-config", configPath: options.configFile }
-          : { mode: "ephemeral" },
-      });
-      // `connection` keeps any `@path` credential ref so finalizeBootstrap's save
-      // persists the reference, not the secret; `liveConnection` resolves it for
-      // the exchange itself. A missing or unreadable `@path` file is a UsageError
-      // here (exit 64), before any credential is sent.
-      liveConnection = resolveConnectionCredentials(connection);
       // The quick path asks nothing and requires nothing: `--identity` rides
       // into the terms when it names this party, and the terms carry none when
       // it does not. A blank value is what a scripted `--identity "$ORG"` sends
@@ -664,6 +649,36 @@ export async function handler(argv: Arguments): Promise<void> {
         input,
         linkageStrategy,
       );
+      // Read the files any `@path` credential ref names, holding the values
+      // aside rather than applying them: `connection` must keep the reference so
+      // finalizeBootstrap's save persists it and not the secret. A missing,
+      // unreadable, or empty referenced file is a UsageError (exit 64) decided
+      // from this party's own filesystem, so it is settled here rather than
+      // after the host-key step below has contacted the server.
+      const credentials = readConnectionCredentials(connection);
+      // Establish first-use SSH host-key trust on the ORIGINAL `connection`
+      // (before the clone below), so the pin reaches both the live connect and,
+      // under --save, the persisted config (finalizeBootstrap saves this same
+      // object). A pinned connection is a no-op; an unpinned one prompts on a TTY
+      // and fails closed otherwise. With --save the pin is saved with the config;
+      // without it the key is trusted for this one-off exchange only. It follows
+      // the preparation and the credential read above because the first-use probe
+      // opens a real transport to the server, while every refusal those two can
+      // raise -- an unreadable or unparsable CSV, a dataset core refuses to
+      // prepare, a credential @path naming a file that is not there -- is decided
+      // from this party's own input alone; deciding those first is what keeps a
+      // refused run from connecting.
+      await establishHostKeyTrust(connection, {
+        verbosity,
+        loggerName: "psilink",
+        persistence: options.save
+          ? { mode: "save-with-config", configPath: options.configFile }
+          : { mode: "ephemeral" },
+      });
+      // The connection the exchange dials: the original cloned AFTER the host-key
+      // step, so any just-confirmed pin rides along, with the credential values
+      // read above applied to the clone alone.
+      liveConnection = applyConnectionCredentials(connection, credentials);
     } catch (err) {
       // A bad URL scheme or unsupported channel is a usage error (exit 64);
       // prepareDataset failures carry their own exitCode; otherwise exit 69.

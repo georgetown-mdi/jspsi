@@ -13,6 +13,7 @@ import yargs, { type Arguments } from "yargs";
 import {
   CONSENT_FACTS,
   getLogger,
+  prepareForExchange,
   sanitizeErrorForDisplay,
   UsageError,
 } from "@psilink/core";
@@ -56,6 +57,15 @@ vi.mock("../../src/protocol", async (importActual) => ({
 // reach the runProtocol hand-off without a real probe over the fake URL, and
 // assert the handler wires it with the right persistence mode.
 vi.mock("../../src/hostKeyTrust", () => ({ establishHostKeyTrust: vi.fn() }));
+
+// The dataset preparation is spy-WRAPPED rather than replaced: the ordering test
+// below needs to observe when the handler reaches it, while every test in the
+// file -- the refusal the ordering pair's second half drives included -- keeps
+// running the real prepare behind it.
+vi.mock("@psilink/core", async (importActual) => {
+  const actual = await importActual<typeof import("@psilink/core")>();
+  return { ...actual, prepareForExchange: vi.fn(actual.prepareForExchange) };
+});
 
 let existsSyncSpy: MockInstance;
 
@@ -683,6 +693,220 @@ test("handler with --save carries the first-use pin into the written config", as
     );
     // The mutated connection flowed through buildSaveSpec -> saveConfig.
     expect(fs.readFileSync(configFile, "utf8")).toContain(FP);
+  } finally {
+    exitSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- handler: the dataset preparation precedes host-key trust ----------------
+// A zero-setup run refused from its own input alone must not have connected to
+// the server first, and on an sftp URL the first-use host-key step is what would
+// connect: its probe opens a real transport. So the preparation that carries
+// those refusals runs ahead of that step, and the two checks below hold that
+// order rather than the comment beside it. Both stub establishHostKeyTrust (as
+// the whole file does), so what they pin is the order of the two STEPS; that the
+// probe is what the second one opens is hostKeyTrust.test.ts's.
+
+test("handler: the dataset is prepared before host-key trust", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zeroprepare-"));
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    const input = path.join(dir, "input.csv");
+    fs.writeFileSync(
+      input,
+      "first_name,last_name,date_of_birth\nBob,Jones,1990-01-02\n",
+    );
+    vi.mocked(prepareForExchange).mockClear();
+    vi.mocked(establishHostKeyTrust).mockClear();
+    vi.mocked(runProtocol).mockImplementationOnce((async (
+      ...callArgs: unknown[]
+    ) =>
+      driveCompletedExchange(callArgs, { partnerSaveIntent: false })) as never);
+
+    await handler({
+      _: ["sftp://userb@localhost:2222/drop", input],
+      $0: "psilink",
+      "config-file": path.join(dir, "psilink.yaml"),
+      "key-file": path.join(dir, ".psilink.key"),
+      identity: "Tester",
+      record: false,
+      "log-level": "silent",
+    } as unknown as Arguments);
+
+    // Both steps ran: an order read off one call alone would take a silently
+    // skipped step for a satisfied one. The host-key assertion doubles as the
+    // check that this URL took the sftp path at all.
+    expect(vi.mocked(prepareForExchange)).toHaveBeenCalled();
+    expect(vi.mocked(establishHostKeyTrust)).toHaveBeenCalled();
+    // Vitest stamps every mock call with a run-wide sequence number, which is
+    // what orders calls on two separate mocks against each other.
+    const [prepared] = vi.mocked(prepareForExchange).mock.invocationCallOrder;
+    const [trusted] = vi.mocked(establishHostKeyTrust).mock.invocationCallOrder;
+    expect(prepared).toBeLessThan(trusted);
+  } finally {
+    exitSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: an input the prepare refuses exits 64 with no host-key probe", async () => {
+  // The ordering above is a call order, which a handler that STARTED host-key
+  // trust without awaiting it would satisfy just as well -- and then the probe
+  // would have connected anyway. So the refusing case is driven too, over the
+  // same sftp URL: a header naming a transmitted column too long to carry is
+  // refused from this party's own file, and must end the run there, exit 64,
+  // with the host-key step -- and so the probe inside it -- never entered.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerorefusal-"));
+  const stderrChunks: string[] = [];
+  const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(((
+    chunk: string | Uint8Array,
+  ) => {
+    stderrChunks.push(String(chunk));
+    return true;
+  }) as never);
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    const overlong = "z".repeat(300);
+    const input = path.join(dir, "input.csv");
+    fs.writeFileSync(
+      input,
+      `first_name,last_name,date_of_birth,${overlong}\n` +
+        "Bob,Jones,1990-01-02,x\n",
+    );
+    vi.mocked(establishHostKeyTrust).mockClear();
+    vi.mocked(runProtocol).mockClear();
+
+    await expect(
+      handler({
+        _: ["sftp://userb@localhost:2222/drop", input],
+        $0: "psilink",
+        "config-file": path.join(dir, "psilink.yaml"),
+        "key-file": path.join(dir, ".psilink.key"),
+        identity: "Tester",
+        record: false,
+        "log-level": "error",
+      } as unknown as Arguments),
+    ).rejects.toThrow("exit:64");
+    expect(stderrChunks.join("")).toContain("limit on a column name");
+    expect(vi.mocked(establishHostKeyTrust)).not.toHaveBeenCalled();
+    expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
+  } finally {
+    getLogger("psilink").setLevel("silent");
+    stderrSpy.mockRestore();
+    exitSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: a credential @path naming a missing file exits 64 with no host-key probe", async () => {
+  // The same invariant over the other local refusal the connect path carries: a
+  // `--server-password @path` whose file is not there is decided from this
+  // party's own filesystem, so it must end the run before the host-key step --
+  // whose probe opens a real transport -- is entered. The credential values are
+  // therefore read ahead of that step even though they are applied after it.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerocred-"));
+  const stderrChunks: string[] = [];
+  const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(((
+    chunk: string | Uint8Array,
+  ) => {
+    stderrChunks.push(String(chunk));
+    return true;
+  }) as never);
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    const input = path.join(dir, "input.csv");
+    fs.writeFileSync(
+      input,
+      "first_name,last_name,date_of_birth\nBob,Jones,1990-01-02\n",
+    );
+    vi.mocked(establishHostKeyTrust).mockClear();
+    vi.mocked(runProtocol).mockClear();
+
+    await expect(
+      handler({
+        _: ["sftp://userb@localhost:2222/drop", input],
+        $0: "psilink",
+        "server-password": `@${path.join(dir, "absent-password")}`,
+        "config-file": path.join(dir, "psilink.yaml"),
+        "key-file": path.join(dir, ".psilink.key"),
+        identity: "Tester",
+        record: false,
+        "log-level": "error",
+      } as unknown as Arguments),
+    ).rejects.toThrow("exit:64");
+    expect(stderrChunks.join("")).toContain("cannot read the @-file reference");
+    expect(vi.mocked(establishHostKeyTrust)).not.toHaveBeenCalled();
+    expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
+  } finally {
+    getLogger("psilink").setLevel("silent");
+    stderrSpy.mockRestore();
+    exitSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: the first-use pin reaches the connection the exchange dials", async () => {
+  // The other half of reading the credential files early: the connection handed
+  // to runProtocol is still cloned AFTER the host-key step, so the pin that step
+  // writes onto the original is what the real open() enforces. A clone taken at
+  // the read instead would carry the resolved credential and no pin, and dial an
+  // unverified server -- so the run driven here supplies both.
+  const FP = "SHA256:" + "D".repeat(43);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zeropin-"));
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    const pwFile = path.join(dir, "pw");
+    fs.writeFileSync(pwFile, "s3cret\n");
+    const input = path.join(dir, "input.csv");
+    fs.writeFileSync(
+      input,
+      "first_name,last_name,date_of_birth\nBob,Jones,1990-01-02\n",
+    );
+
+    vi.mocked(establishHostKeyTrust).mockImplementationOnce((async (
+      conn: SFTPConnectionConfig,
+    ) => {
+      conn.server.hostKeyFingerprint = FP;
+    }) as never);
+    let connToRunProtocol: SFTPConnectionConfig | undefined;
+    vi.mocked(runProtocol).mockImplementationOnce((async (
+      ...callArgs: unknown[]
+    ) => {
+      connToRunProtocol = callArgs[0] as SFTPConnectionConfig;
+      return driveCompletedExchange(callArgs, { partnerSaveIntent: false });
+    }) as never);
+
+    await handler({
+      _: ["sftp://userb@localhost:2222/drop", input],
+      $0: "psilink",
+      "server-password": `@${pwFile}`,
+      "config-file": path.join(dir, "psilink.yaml"),
+      "key-file": path.join(dir, ".psilink.key"),
+      identity: "Tester",
+      record: false,
+      "log-level": "silent",
+    } as unknown as Arguments);
+
+    expect(connToRunProtocol?.server.hostKeyFingerprint).toBe(FP);
+    // And the credential read before that step still reached the same object.
+    expect(connToRunProtocol?.server.password).toBe("s3cret");
   } finally {
     exitSpy.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });

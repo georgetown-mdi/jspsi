@@ -1061,13 +1061,34 @@ export async function handler(argv: Arguments): Promise<void> {
       exitWithError(log, err, exitCodeForError(err));
     }
 
+    // Load the signing identity from the path the pre-flight above established
+    // the config names, before any credential, terms, or data are sent: a path
+    // holding no identity file fails here (exit 64) rather than after the
+    // handshake, and an identity bound to something other than this run's terms
+    // identity is refused while the run can still be stopped rather than after
+    // it has sent this party's data toward receipts the partner rejects. Both
+    // refusals read this party's own configuration and its own identity file, so
+    // they are settled ahead of the host-key step below and the transport its
+    // first-use probe opens. `null` when signing is not configured for
+    // certificate mode, which leaves the exchange unsigned.
+    let signing: SigningPersist | null;
+    try {
+      signing = await resolveSigningPersist(
+        exchangeDataSpec.signing,
+        termsIdentity,
+      );
+    } catch (err) {
+      exitWithError(log, err, err instanceof UsageError ? 64 : 69);
+    }
+
     // Establish SSH host-key trust: on an unpinned sftp config this prompts and
     // pins on first interactive use, and fails closed (no prompt, no
     // auto-accept) on a non-interactive run. It is a no-op for a pinned config
-    // or a non-sftp channel. It follows the dataset preparation above because
-    // the first-use probe opens a real transport to the server, while every
-    // refusal that preparation can raise -- the linkage terms the input cannot
-    // satisfy, an unconfirmed outbound payload -- is decided from local inputs
+    // or a non-sftp channel. It follows the dataset preparation and the signing
+    // resolution above because the first-use probe opens a real transport to the
+    // server, while every refusal those two can raise -- the linkage terms the
+    // input cannot satisfy, an unconfirmed outbound payload, a signing identity
+    // that is missing or bound to another party -- is decided from local inputs
     // alone; deciding those first is what keeps a refused run from connecting.
     // A UsageError (non-TTY, or a declined prompt) maps to exit 64, a probe
     // transport failure to 69.
@@ -1087,24 +1108,6 @@ export async function handler(argv: Arguments): Promise<void> {
       enabled: options.record,
       recordFile: options.recordFile,
     });
-
-    // Load the signing identity from the path the pre-flight above established
-    // the config names, before any credential, terms, or data are sent: a path
-    // holding no identity file fails here (exit 64) rather than after the
-    // handshake, and an identity bound to something other than this run's terms
-    // identity is refused while the run can still be stopped rather than after
-    // it has sent this party's data toward receipts the partner rejects. `null`
-    // when signing is not configured for certificate mode, which leaves the
-    // exchange unsigned.
-    let signing: SigningPersist | null;
-    try {
-      signing = await resolveSigningPersist(
-        exchangeDataSpec.signing,
-        termsIdentity,
-      );
-    } catch (err) {
-      exitWithError(log, err, err instanceof UsageError ? 64 : 69);
-    }
 
     let exchangeError: unknown;
     try {
