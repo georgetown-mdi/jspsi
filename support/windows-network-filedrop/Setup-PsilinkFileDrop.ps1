@@ -230,6 +230,34 @@ function Test-DoctorCapableImage {
               Output   = $help.Output }
 }
 
+function Invoke-ImageFetch {
+    <#  Fetch the image, saying first how long it is going to take.
+
+        `pull --quiet` prints nothing until it is finished and the image is a
+        few hundred megabytes, so a fetch that announced nothing reads as a
+        hang. Both callers say the same thing about the size and the wait,
+        which is why that notice lives here rather than beside either of them;
+        -Refresh only changes the line above it, because a fetch that follows
+        a failed check is a different thing to be told than a first run.
+
+        Returns the pull's Invoke-Docker result. #>
+    param(
+        [Parameter(Mandatory = $true)][string] $Image,
+        [switch] $Refresh,
+        [string] $Engine = 'docker'
+    )
+
+    if ($Refresh) {
+        Write-Host 'Fetching a newer copy from the registry before giving up.'
+    } else {
+        Write-Host 'Fetching the psilink image (first run only).'
+    }
+    Write-Host 'It is a few hundred megabytes -- the same image the exchange itself'
+    Write-Host 'runs -- so this can take several minutes with nothing on screen.'
+
+    return Invoke-Docker -Engine $Engine -DockerArgs @('pull', '--quiet', $Image)
+}
+
 # ==========================================================================
 # The credentials and the volume
 #
@@ -705,10 +733,7 @@ Write-Good "Docker engine $(($dockerInfo.Output -split '\s+')[1]) is running."
 # diagnosis printed above it.
 $imagePresent = Invoke-Docker -DockerArgs @('image', 'inspect', 'vdorie/psi-link:latest')
 if ($imagePresent.ExitCode -ne 0) {
-    Write-Host 'Fetching the psilink image (first run only). It is a few hundred'
-    Write-Host 'megabytes -- the same image the exchange itself runs -- so this can'
-    Write-Host 'take several minutes with nothing on screen.'
-    $pull = Invoke-Docker -DockerArgs @('pull', '--quiet', 'vdorie/psi-link:latest')
+    $pull = Invoke-ImageFetch -Image 'vdorie/psi-link:latest'
     if ($pull.ExitCode -ne 0) {
         Write-Bad 'Could not fetch the psilink image the checks run in.'
         Write-Host ''
@@ -830,7 +855,7 @@ if (-not $explicitTarget -and -not $SkipConfirm) {
     }
 }
 
-# Asked once, here, rather than beside either battery: two things fix the place.
+# Asked here rather than beside either battery: two things fix the place.
 # Above it, part 1 has already let every answer that runs no battery leave -- a
 # folder that is local, a path that could not be read, values the operator did
 # not confirm -- and none of those needs the image to carry anything, so asking
@@ -838,6 +863,41 @@ if (-not $explicitTarget -and -not $SkipConfirm) {
 # part 2 asks for the share password, and an image that cannot produce a verdict
 # has to be turned away before the operator types one.
 $doctorImage = Test-DoctorCapableImage -Image 'vdorie/psi-link:latest'
+
+# One pull, on the failure path and nowhere else. The guard above fetches an
+# image that is absent and never a newer one, so a copy from before the checks
+# existed survives every re-run -- and the operator it turns away can do nothing
+# about that but run the pull by hand. Asking the registry here is that pull,
+# with the same question put again afterwards, so the case self-heals wherever
+# the registry has the answer. An image that already carries the checks never
+# reaches this, so a working run waits for nothing.
+#
+# An EngineFailed answer is not fetched for: Docker could not start a container
+# at all, which a newer image does not change, and the pull would be one more
+# thing to fail in front of the message the operator has to read.
+$refreshFailure = ''
+if (-not $doctorImage.Capable -and $doctorImage.Reason -eq 'NoDoctor') {
+    Write-Head 'Refreshing the psilink image'
+    Write-Warn 'The copy on this PC does not carry the checks this script runs.'
+    Write-Note 'An image is fetched only when it is missing, so a copy from'
+    Write-Note 'before the checks existed stays until something asks the'
+    Write-Note 'registry for a newer one.'
+    Write-Host ''
+    $refresh = Invoke-ImageFetch -Image 'vdorie/psi-link:latest' -Refresh
+    if ($refresh.ExitCode -eq 0) {
+        $doctorImage = Test-DoctorCapableImage -Image 'vdorie/psi-link:latest'
+    } else {
+        # What the pull said is also whether it failed at all, as the refusal
+        # below reads it, so a pull that failed saying nothing has to leave
+        # something behind: an empty answer would send the operator to the arm
+        # for a registry that answered.
+        $refreshFailure = $refresh.Output
+        if (-not $refreshFailure) {
+            $refreshFailure = "The fetch ended with exit $($refresh.ExitCode) and said nothing."
+        }
+    }
+}
+
 if (-not $doctorImage.Capable) {
     if ($doctorImage.Reason -eq 'EngineFailed') {
         Write-Head 'Could not run the checks'
@@ -857,17 +917,27 @@ if (-not $doctorImage.Capable) {
     Write-Note 'with your share, your credentials, or this script -- the checks'
     Write-Note 'it would have run are simply not in this copy of the image.'
     Write-Info ''
-    Write-Info 'The image is fetched only when it is missing, never to refresh'
-    Write-Info 'one already here, so a copy from before the checks existed'
-    Write-Info 'survives every re-run. Refresh it, then run this again:'
+    if ($refreshFailure) {
+        Write-Info 'A newer copy could not be fetched either, so the one here is'
+        Write-Info 'all there is to run. Docker could not reach its registry: a'
+        Write-Info 'corporate proxy intercepting HTTPS is the usual cause, and'
+        Write-Info 'Docker Desktop needs its certificate under Settings >'
+        Write-Info 'Resources > Proxies. What Docker answered:'
+        Write-Host ''
+        Write-Host $refreshFailure
+        Write-Info ''
+        Write-Info 'Run this again once Docker can fetch images. If it then says'
+        Write-Info 'the image is already up to date and this message comes back,'
+        Write-Info 'the published image does not carry the checks yet and there'
+        Write-Info 'is nothing to update to.'
+    } else {
+        Write-Info 'The published image was fetched just now and does not carry'
+        Write-Info 'them either, so there is nothing to update to and pulling it'
+        Write-Info 'again by hand will not change this.'
+    }
     Write-Info ''
-    Write-Info '    docker pull vdorie/psi-link:latest'
-    Write-Info ''
-    Write-Info 'If that reports the image is already up to date, or this message'
-    Write-Info 'comes back after it, then the published image does not carry the'
-    Write-Info 'checks yet and there is nothing to update to. Set the file drop'
-    Write-Info 'up by hand in the meantime: see the troubleshooting page, "Doing'
-    Write-Info 'it by hand".'
+    Write-Info 'Set the file drop up by hand in the meantime: see the'
+    Write-Info 'troubleshooting page, "Doing it by hand".'
     # What the image actually said, printed after the remedy rather than instead
     # of it: an image published before the checks existed answers this with its
     # own usage text, which is expected and nothing to act on, but the same

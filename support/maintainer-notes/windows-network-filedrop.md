@@ -344,8 +344,13 @@ its own CI leg -- or the CRLF strip, which that run made itself and which went
 with the here-strings. The write-refusal branch is reached only on a path that
 has already failed, so the cost of it being wrong is a wrong message rather than
 a wrong outcome; the doctor calls are on the happy path, so a wrong argument
-vector there stops every run. The next Windows pass should start with a working
-share, which is what exercises them.
+vector there stops every run. The image fetch the capability gate makes when
+the copy on the PC carries no doctor is unverified there as well -- the pull
+itself, and the second ask that either carries the run on or reaches the same
+refusal -- though the Pester stub engines drive both of its directions.
+Reaching it on Windows takes a local copy older than the checks, tagged as the
+floating tag the script asks for. The next Windows pass should start with a
+working share, which is what exercises them.
 
 A later pass ran the script in the form it had on 30 July 2026, from Windows
 against the same
