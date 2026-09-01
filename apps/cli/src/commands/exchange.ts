@@ -879,8 +879,9 @@ function assertSigningIdentityNamed(signing: SigningConfig | undefined): void {
  * partner verifies the loaded certificate against -- and a certificate bound to
  * anything else makes the run unfinishable, so it is refused here (see
  * {@link assertIdentityMatchesAgreedTerms}). Pass it on every call: a load that
- * skipped the check would leave the divergence to fail at the partner's end of
- * an exchange that has already sent this party's data.
+ * skipped the check would leave the divergence to the exchange layer's own
+ * refusal at the terms exchange, which spares this party's data but not the
+ * connection, the credentials it presents, or the terms it puts on the wire.
  *
  * @throws {UsageError} when `mode: certificate` is set but no signing identity
  *   exists at the named path, or the file is malformed/unreadable.

@@ -146,9 +146,10 @@ export function assertIdentityMatchesAgreedTerms(
     "this exchange signs receipts (signing.mode: certificate), but the " +
       "signing identity is bound to a party name the agreed terms do not " +
       "carry, so it cannot finish: your partner authorizes the certificate " +
-      "against the agreed terms and rejects it at the signature swap, which " +
-      `runs only after your data has crossed. ${RECONCILE_GUIDANCE} The ` +
-      `certificate is bound to "${certificate.identity}"; ` +
+      "against the agreed terms and rejects it, so the exchange refuses the " +
+      "divergence at the terms exchange, before your data crosses. " +
+      `${RECONCILE_GUIDANCE} ` +
+      `The certificate is bound to "${certificate.identity}"; ` +
       `linkage_terms.identity is "${termsIdentity}".`,
   );
 }
