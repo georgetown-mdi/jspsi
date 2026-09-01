@@ -5,13 +5,19 @@ import WebSocket from "ws";
 
 import { getDiagnosticSink, setDiagnosticSink } from "@psilink/core";
 
+import {
+  MessageQueue,
+  serializeFrame,
+} from "@psilink/peerjs-broker/models/messageQueue";
 import { CreatePeerServerWSOnly } from "@psilink/peerjs-broker";
+import { MAX_QUEUE_BYTES } from "@psilink/peerjs-broker/models/realm";
 import { MessageType } from "@psilink/peerjs-broker/enums";
 
 import { KEY } from "../utils/signalingHarness";
 
 import type { AddressInfo } from "node:net";
 import type { DiagnosticSink } from "@psilink/core";
+import type { IMessage } from "@psilink/peerjs-broker/models/message";
 import type { IRealm } from "@psilink/peerjs-broker/models/realm";
 import type { SerializedFrame } from "@psilink/peerjs-broker/models/messageQueue";
 
@@ -300,5 +306,68 @@ describe("relay hold-for-reconnect round trip", () => {
     // back for it is still open.
     expect(broker.realm.getMessageQueueById(ABSENT_ID)).toBeUndefined();
     expect(reconnected.ws.readyState).toBe(WebSocket.OPEN);
+  });
+});
+
+describe("queue byte accounting", () => {
+  // MAX_QUEUE_BYTES bounds a queue by the sizes charged into its running total,
+  // so a frame whose `byteSize` disagrees with the frame itself would move that
+  // bound off the memory it exists to hold down. Driven against the queue rather
+  // than over a socket because the in-tree enqueue path sizes every frame with
+  // `serializeFrame` and so cannot produce the disagreement: the reachable
+  // caller is one outside this repository, holding these package exports.
+
+  /** An offer sized the way the enqueue path sizes it, so what a test varies is
+   * the accounted size alone. */
+  function sizedOffer(): SerializedFrame {
+    return serializeFrame({
+      type: MessageType.OFFER,
+      src: SENDER_ID,
+      dst: ABSENT_ID,
+      payload: OFFER_PAYLOAD,
+    } as unknown as IMessage);
+  }
+
+  test.each([
+    ["understates", 1],
+    ["overstates", 4096],
+  ])(
+    "refuses a frame whose accounted size %s the frame",
+    (_direction, byteSize) => {
+      const queue = new MessageQueue();
+      queue.addMessage(sizedOffer());
+      const heldBytes = queue.byteSize();
+      expect(heldBytes).toBeGreaterThan(0);
+
+      expect(() => {
+        queue.addMessage({ ...sizedOffer(), byteSize });
+      }).toThrow(RangeError);
+
+      // Refused outright: neither the mismatched size nor the frame it came with
+      // reaches the queue, so the total still describes exactly what is held.
+      expect(queue.size()).toBe(1);
+      expect(queue.byteSize()).toBe(heldBytes);
+    },
+  );
+
+  test("a mismatch on a frame the queue would otherwise hold is caught before the total moves", () => {
+    // The mismatch that matters is one the cap would never have questioned: the
+    // size handed in is small and legal, and only the frame behind it is large.
+    const queue = new MessageQueue();
+    const oversized = serializeFrame({
+      type: MessageType.OFFER,
+      src: SENDER_ID,
+      dst: ABSENT_ID,
+      payload: "x".repeat(200_000),
+    });
+    expect(oversized.byteSize).toBeLessThanOrEqual(MAX_QUEUE_BYTES);
+    expect(oversized.byteSize).toBeGreaterThan(MAX_QUEUE_BYTES / 2);
+
+    expect(() => {
+      queue.addMessage({ ...oversized, byteSize: 16 });
+    }).toThrow(RangeError);
+
+    expect(queue.size()).toBe(0);
+    expect(queue.byteSize()).toBe(0);
   });
 });
