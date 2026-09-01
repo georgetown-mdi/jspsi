@@ -2059,6 +2059,14 @@ const widestAtSchemaBound = (units: number): string => "\u0100".repeat(units);
 const otherWidestAtSchemaBound = (units: number): string =>
   `${widestAtSchemaBound(units - 1)}\u0101`;
 
+// A citation version at the schema's bound. The bound is the one that holds a
+// name (MAX_NAME_LENGTH), but the shape is a semver, so the widest such a value
+// can render is that many ASCII digits and dots -- past the ceiling core renders
+// a value undelimited under, so it arrives as a delimited run of its own and is
+// fitted like any other value rather than standing in the clause as prose.
+const schemaMaximalSemver = (major: number): string =>
+  `${major}.0.${"9".repeat(MAX_NAME_LENGTH - `${major}.0.`.length)}`;
+
 // A name at the schema's bound in each shape a value's rendered cost can take,
 // for the fits driven at their worst case. A function declaration so a test
 // composed above the helper it is built from can still call it.
@@ -2108,6 +2116,13 @@ test("the worst-case fixture's values are the widest the schema admits", () => {
     expect(value.length, shape).toBe(units);
     expect(renderedDisplayCost(value), shape).toBeLessThan(widest);
   }
+
+  // A version is held to the same bound and to a semver shape, so the widest it
+  // can be is that bound in digits -- and at that width core declines the bare
+  // form, which is what makes it a delimited run the fit divides its share with.
+  const semver = schemaMaximalSemver(1);
+  expect(semver).toHaveLength(units);
+  expect(renderedDisplayCost(bareTermsValue(semver))).toBe(units + 2);
 });
 
 // Two linkage-terms documents that disagree on EVERY field the reconcile
@@ -2144,18 +2159,28 @@ function maximallyConflictingTerms(): {
   incoming.linkageKeys[0].elements[0].field =
     otherWidestAtSchemaBound(MAX_NAME_LENGTH);
 
+  // Both names AND both versions at the schema's bound: a version's own shape
+  // caps how wide it can render, but nothing holds it to the five characters a
+  // released rule set carries, so the citation's four values are driven at what
+  // each of them can actually claim on the slot.
   existing.linkageRuleSet = {
-    fieldSet: { name: widestAtSchemaBound(MAX_NAME_LENGTH), version: "1.0.0" },
-    keySet: { name: widestAtSchemaBound(MAX_NAME_LENGTH), version: "1.0.0" },
+    fieldSet: {
+      name: widestAtSchemaBound(MAX_NAME_LENGTH),
+      version: schemaMaximalSemver(1),
+    },
+    keySet: {
+      name: widestAtSchemaBound(MAX_NAME_LENGTH),
+      version: schemaMaximalSemver(1),
+    },
   };
   incoming.linkageRuleSet = {
     fieldSet: {
       name: otherWidestAtSchemaBound(MAX_NAME_LENGTH),
-      version: "3.1.0",
+      version: schemaMaximalSemver(3),
     },
     keySet: {
       name: otherWidestAtSchemaBound(MAX_NAME_LENGTH),
-      version: "3.1.0",
+      version: schemaMaximalSemver(3),
     },
   };
 
@@ -2252,8 +2277,14 @@ test("the reconcile refusal keeps its recovery step and names every field, at ev
     for (const line of lines) {
       if (namedAlone.includes(line)) continue;
       expect(line).toContain(" vs required ");
-      expect(line).not.toContain(`: existing ${DISPLAY_TRUNCATION_MARKER}`);
-      expect(line).not.toContain(` vs required ${DISPLAY_TRUNCATION_MARKER}`);
+      // A shown side opens on its value's OWN rendering -- a delimited run, a
+      // list, the unset placeholder, a bare token opening on a digit -- and
+      // never on the truncation marker. Reading the opening rather than
+      // searching for the marker's text is what catches the shape a side given
+      // less than it can read as comes to: the marker itself clipped, which is
+      // not the marker's text and so passes any search for it.
+      for (const side of line.split(": existing ")[1].split(" vs required "))
+        expect(side.startsWith(DISPLAY_TRUNCATION_MARKER[0]), line).toBe(false);
     }
   }
 });
@@ -2419,9 +2450,11 @@ test("eight ordinary disagreements each carry both of their values", () => {
 test("a schema-maximal clause beside ordinary lines never renders as bare markers", () => {
   // The mid-range: few enough fields that the block has room, wide enough on
   // one of them that an equal share of that room cannot hold the citation's
-  // four values. The clause either keeps its whole structure or gives up its
-  // line's values -- never a column of truncation markers, and never a half
-  // clause whose connective and second name the clip deleted.
+  // four values. The room reaches the citation's line at both counts, so what
+  // is read here is that LINE: each side still a name, its version, the
+  // connective, and the second half of the pair, with some of every name's own
+  // bytes inside its run -- never a column of truncation markers, and never a
+  // half clause whose connective and second name the clip deleted.
   const { existing, incoming } = ordinarilyConflictingTerms();
   existing.linkageRuleSet = {
     fieldSet: { name: widestAtSchemaBound(MAX_NAME_LENGTH), version: "1.0.0" },
@@ -2438,24 +2471,22 @@ test("a schema-maximal clause beside ordinary lines never renders as bare marker
     expect(rendered.length).toBeLessThanOrEqual(
       COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
     );
-    const citation = rendered
-      .split("\n")
-      .find((line) => line.includes("linkage_rule_set"));
-    expect(citation, `${count} conflicts`).toBeDefined();
-    if (citation?.includes(": existing ")) {
-      // Both sides still read as a citation: a name, a version, the connective,
-      // and the other half, however little of each survived.
-      expect(citation.split(" over ")).toHaveLength(3);
-      expect(citation).toContain('existing "');
-      expect(citation).toContain('required "');
-      expect(citation).not.toContain(`existing ${DISPLAY_TRUNCATION_MARKER}`);
-      expect(citation).not.toContain(`required ${DISPLAY_TRUNCATION_MARKER}`);
-      expect(citation).not.toContain(
-        `${DISPLAY_TRUNCATION_MARKER} over ${DISPLAY_TRUNCATION_MARKER}`,
-      );
-    } else {
-      expect(citation).toBe("  - linkage_rule_set");
-      expect(rendered).toContain("too wide for the room");
+    // Read off the citation's own line, which the display boundary separates
+    // from the lines around it by the escape of the break rather than by the
+    // break itself.
+    for (const side of conflictValues(rendered, "linkage_rule_set")) {
+      const halves = side.split(" over ");
+      // Both halves of the citation survive the fit, on both sides.
+      expect(halves, `${count} conflicts`).toHaveLength(2);
+      for (const half of halves) {
+        // A name opening a delimited run of its own, with some of its own bytes
+        // inside it rather than the marker alone, and its version behind it.
+        expect(half.startsWith('"'), `${count} conflicts: ${half}`).toBe(true);
+        expect(half, `${count} conflicts`).not.toContain(
+          `"${DISPLAY_TRUNCATION_MARKER}`,
+        );
+        expect(half, `${count} conflicts`).toMatch(/ \d+\.\d+\.\d+$/);
+      }
     }
     // Whatever the wide line came to, the lines beside it keep their values.
     expect(rendered).toContain('algorithm: existing "psi" vs required "psi-c"');
@@ -2465,14 +2496,30 @@ test("a schema-maximal clause beside ordinary lines never renders as bare marker
   }
 });
 
+// The two locators a split directory hint names, read out of the hint's own
+// first-party sentence: what the operator is shown for each half of the pair the
+// config holds, with the sentence's closing parenthesis off the second.
+function splitHintLocators(hint: string): {
+  inbound: string;
+  outbound: string;
+} {
+  const [, named] = hint.split(" split inbound_path ");
+  expect(named).toBeDefined();
+  const [inbound, outbound] = named.split(", outbound_path ");
+  expect(outbound).toBeDefined();
+  expect(outbound.endsWith(")")).toBe(true);
+  return { inbound, outbound: outbound.slice(0, -1) };
+}
+
 test("the directory-form hint keeps both halves of a split locator", () => {
   // The hint is first-party copy naming the locators the config holds in its
   // OTHER directory form, and both of those are the partner's -- the inviting
   // party's endpoint, copied into the config on an earlier acceptance. Spent
-  // left to right the slot goes to the inbound path, and what the clip deletes
-  // is `, outbound_path "..."` and the sentence's own closing: the operator is
-  // left an unterminated run and no account of the second half of the pair the
-  // config actually holds.
+  // left to right the slot would go to the inbound path, deleting
+  // `, outbound_path "..."` and the sentence's own closing: the operator left an
+  // unterminated run and no account of the second half of the pair. Driven at a
+  // width the slot holds whole and at one it cannot, so the fit is read both
+  // where nothing is cut and where both locators are.
   const target: RunnableConnectionConfig = {
     channel: "filedrop",
     path: `/mnt/shared/${"r".repeat(53)}`,
@@ -2484,7 +2531,7 @@ test("the directory-form hint keeps both halves of a split locator", () => {
     ordinaryIncoming,
   ).conflicts.slice(0, 7);
 
-  for (const width of [57, 250]) {
+  const hintAtWidth = (width: number): string => {
     const existing: ConnectionConfig = {
       channel: "filedrop",
       inboundPath: `/mnt/in/${"i".repeat(width)}`,
@@ -2492,7 +2539,6 @@ test("the directory-form hint keeps both halves of a split locator", () => {
     };
     const { conflicts } = diffConnectionAgainstTarget(existing, target);
     expect(conflicts.map((c) => c.field)).toEqual(["connection.path"]);
-
     const rendered = renderedAcceptReconcileError(
       [...beside, ...conflicts],
       ONLINE_RECONCILE_SOURCES,
@@ -2500,12 +2546,29 @@ test("the directory-form hint keeps both halves of a split locator", () => {
     expect(rendered.length).toBeLessThanOrEqual(
       COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
     );
-    const [hint] = conflictValues(rendered, "connection.path");
-    // Both halves of the pair, each opening a delimited run of its own, and the
-    // sentence closed -- whatever the fit had to take out of the paths.
-    expect(hint, `${width}`).toContain('inbound_path "/mnt/in/i');
-    expect(hint, `${width}`).toContain('outbound_path "/mnt/out/o');
-    expect(hint.endsWith(")"), `${width}`).toBe(true);
+    return conflictValues(rendered, "connection.path")[0];
+  };
+
+  // Narrow enough for the slot: both locators arrive byte-complete inside runs
+  // the fit closed, and nothing on the line is marked cut.
+  const fitting = 20;
+  const whole = splitHintLocators(hintAtWidth(fitting));
+  expect(whole.inbound).toBe(`"/mnt/in/${"i".repeat(fitting)}"`);
+  expect(whole.outbound).toBe(`"/mnt/out/${"o".repeat(fitting)}"`);
+  expect(whole.inbound + whole.outbound).not.toContain(
+    DISPLAY_TRUNCATION_MARKER,
+  );
+
+  // Past it: the sentence still names both halves and still closes, and each
+  // locator degrades inside its own run to the recorded shape -- some of its own
+  // bytes, then the marker, with the run left unterminated by the cut.
+  const cut = splitHintLocators(hintAtWidth(250));
+  for (const [half, opening] of [
+    [cut.inbound, '"/mnt/in/i'],
+    [cut.outbound, '"/mnt/out/o'],
+  ] as const) {
+    expect(half.startsWith(opening), half).toBe(true);
+    expect(half.endsWith(DISPLAY_TRUNCATION_MARKER), half).toBe(true);
   }
 });
 
