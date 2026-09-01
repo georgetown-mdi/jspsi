@@ -147,12 +147,15 @@ afterEach(async () => {
 }, 30_000);
 
 afterAll(async () => {
-  await front?.stop();
-  await broker?.stop();
   try {
-    if (suiteDir) fs.rmSync(suiteDir, { recursive: true, force: true });
-  } catch {
-    // best-effort
+    await front?.stop();
+    await broker?.stop();
+  } finally {
+    try {
+      if (suiteDir) fs.rmSync(suiteDir, { recursive: true, force: true });
+    } catch {
+      // best-effort
+    }
   }
 });
 

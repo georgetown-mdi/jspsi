@@ -17,6 +17,7 @@ const SIGNALING_DIAGNOSTIC_SOURCES = [
   "released-socket",
   "client-socket",
   "client-frame",
+  "frame-dispatch",
   "signaling-server",
   "unattributed",
 ] as const;
@@ -38,9 +39,19 @@ const SIGNALING_DIAGNOSTIC_SOURCES = [
  *   which the window's watch caught and released. An ordinary peer hang-up
  *   arrives here.
  * - `client-socket`: an error on a socket this server accepted and serves.
- * - `client-frame`: a frame from a registered client that did not parse. This
- *   is the peer-controlled one: the parser's message quotes the bytes it choked
- *   on, and a peer can loop it.
+ * - `client-frame`: a frame from a registered client that did not parse, or that
+ *   parsed to something the client id cannot be stamped onto. This is the
+ *   peer-controlled one: the parser's message quotes the bytes it choked on, and
+ *   a peer can loop it.
+ * - `frame-dispatch`: a fault raised while dispatching a frame that DID parse to
+ *   this server's own `message` listeners -- the relay and whatever an embedding
+ *   host attached. It is a fault in this server's own handling, so it is kept
+ *   apart from `client-frame`: read as a parse failure it would send an
+ *   operator looking for a peer sending garbage. Its detail can still carry a
+ *   bounded, sink-escaped fragment of the peer's frame -- Node's own errors
+ *   echo an offending value into their message (a numeric payload verbatim, an
+ *   object as "an instance of Object"), bounded by what JSON parses a scalar
+ *   into and capped and escaped like every other diagnostic at the sink.
  * - `signaling-server`: an error the `ws` server itself raised.
  * - `unattributed`: a diagnostic raised on the `error` event naming none of the
  *   above. `emit` is untyped, so the source is whatever the raise passed --

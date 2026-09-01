@@ -115,6 +115,17 @@ async function register(id: string): Promise<{
   return { client, inbox, closes, awaitMessage };
 }
 
+async function waitFor(
+  predicate: () => boolean,
+  timeoutMs = 10_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error("condition not met in time");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
 beforeAll(async () => {
   broker = await startBrokerProcess();
 }, 60_000);
@@ -237,6 +248,32 @@ test("a wrong API key is refused with the field to fix", async () => {
   );
   expect(refusal).toBeInstanceOf(ConnectionError);
   expect(refusal?.message).toContain("key");
+}, 60_000);
+
+test("a broker diagnostic reaches stderr, leaving the ready-line stdout alone", async () => {
+  // The harness reads the port off stdout with a single match and the runner
+  // promises it nothing else, so a diagnostic that reached the wrong stream would
+  // break that read and put peer-chosen text on the stream a parent parses. A
+  // registered socket sending bytes that are not JSON is the one diagnostic a
+  // peer raises on demand, which is what makes the stdout assertion below carry
+  // weight rather than pass on a broker that logged nothing at all.
+  const { inviterId } = await freshIds();
+  let socket: WebSocket | undefined;
+  const client = await connectToBroker({
+    location: location(),
+    id: inviterId,
+    handlers: { onMessage: () => {}, onClose: () => {} },
+    socketFactory: (url) => (socket = new WebSocket(url)),
+  });
+  opened.push(client);
+
+  const stderrBefore = broker.stderr().length;
+  socket?.send("not json at all");
+
+  await waitFor(() =>
+    broker.stderr().slice(stderrBefore).includes("[client-frame]"),
+  );
+  expect(broker.stdout()).toMatch(/^psilink-broker \d+\n$/);
 }, 60_000);
 
 test("a registered peer stays registered past the broker's silent-socket reaper", async () => {
