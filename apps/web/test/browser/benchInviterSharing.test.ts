@@ -17,7 +17,9 @@ import {
   editorFromCsv,
   editorWithColumnDisclosure,
   editorWithColumnType,
+  inviterLedgerRows,
 } from "@bench/inviterModel";
+import { Ledger } from "@bench/Ledger";
 import { MatchingSharingSection } from "@bench/MatchingSharingSection";
 
 // The expectations derive their form from this function, so they pin that the
@@ -160,6 +162,17 @@ describe("column-name isolation: what the wrapper does not contain", () => {
   // forms the module ships -- the characters a string sink carries, and the <bdi>
   // whose computed `unicode-bidi: isolate` is the markup form.
   //
+  // Guard versus document: every "does not contain" case here is a measurement
+  // and passes with or without the wrapper, since the residual survives it. What
+  // guards the isolation is the form assertions -- the toContain of the wrapped
+  // name here and in the ledger case below, plus bench.test.ts's rendered-notice
+  // expectation -- each of which fails on a sink composing raw names.
+  //
+  // Three further sinks put literal copy in one text block with a wrapped name
+  // and stay undriven here, the same limit class as the two below, measured
+  // 2026-09-01: the check-your-answers "Columns shared" row, the acceptor
+  // ledger's send row, and the visually-hidden live regions on both steps.
+  //
   // Written as escapes, never as raw bytes, so the source of a test about
   // invisible characters is itself readable.
   const PDI = "\u2069";
@@ -197,8 +210,7 @@ describe("column-name isolation: what the wrapper does not contain", () => {
   }
 
   /** The same measurement on the element form: the name in a <bdi> with inline
-   * copy on either side, which is the arrangement the shipped sites do not put it
-   * in. */
+   * copy on either side. */
   async function bdiInlineOrder(name: string): Promise<Array<string>> {
     app.render(
       createElement(
@@ -321,6 +333,44 @@ describe("column-name isolation: what the wrapper does not contain", () => {
     expect(visualOrderWithin(notice, ["pre", "evil", "changed to"])).toEqual([
       "pre",
       "changed to",
+      "evil",
+    ]);
+  });
+
+  test("the ledger's send row does not contain one behind an unmatched PDI", async () => {
+    // The standing ledger's "You will send" row joins the disclosed names with
+    // literal separators into one string value, so it is a sink of the shape the
+    // residual reaches. Driven through the shipped composer and the shipped
+    // Ledger rather than a hand-built row, so what is measured is what the bench
+    // renders beside step 2.
+    const acquired = csvOf([
+      "client_id",
+      "first_name",
+      "last_name",
+      "dob",
+      residualName,
+      "post",
+    ]);
+    app.render(
+      createElement(Ledger, {
+        rows: inviterLedgerRows(editorFromCsv("Dana Okafor", acquired)),
+      }),
+    );
+    await expect
+      .element(page.getByText("You will send", { exact: false }))
+      .toBeInTheDocument();
+
+    const sendRow = [...app.container.querySelectorAll("dl > div")].find(
+      (row) => row.querySelector("dt")?.textContent.startsWith("You will send"),
+    );
+    const value = sendRow?.querySelector("dd") as HTMLElement;
+
+    // The wrapped form, so a row put back on raw names fails here: this half is
+    // the isolation's guard, the order below is the residual's measurement.
+    expect(value.textContent).toContain(isolatedColumnName(residualName));
+    expect(visualOrderWithin(value, ["pre", "evil", "post"])).toEqual([
+      "pre",
+      "post",
       "evil",
     ]);
   });

@@ -36,9 +36,10 @@ const SEMANTIC_TYPES = Object.keys(SEMANTIC_TYPE_LABELS) as Array<SemanticType>;
  * the acceptor's confirm-columns grid show the same names with, so a header
  * cannot read one way where its disclosure is set and another in the chips, the
  * sentence, the notice, or the rail. That module carries what the isolation does
- * and does not contain: the notice is the one sink here that sets literal copy
- * beside the names, so it is where that residual is reachable, and it is
- * measured in test/browser/benchInviterSharing.test.ts.
+ * and does not contain: a sink here that puts literal copy in one text block with
+ * the names -- the notice's separators and its trailing sentence, the summary the
+ * live region speaks -- is of the shape the residual reaches, and the notice is
+ * the one driven in test/browser/benchInviterSharing.test.ts.
  */
 export function MatchingSharingSection({
   metadata,

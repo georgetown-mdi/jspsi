@@ -1249,10 +1249,11 @@ describe("acceptor columns step: one column name across the screen", () => {
 
   test("a header behind an unmatched PDI reorders the panel's own sentence", async () => {
     // The isolate class is the isolation's residual (UAX #9 BD9/X6a), and this
-    // panel puts copy beside a name -- the separators between the names and the
-    // sentence's full stop -- so the residual is reachable here; the inviter's
-    // demotion notice is the other site of that shape, measured in
-    // benchInviterSharing. The unmatched PDI ends the <bdi>'s isolation after
+    // panel puts copy in one text block with the names -- the separators between
+    // them and the sentence's full stop -- so the residual is reachable here;
+    // other sinks of that shape are measured in benchInviterSharing, and
+    // @components/ColumnName carries the limit class both files drive. The
+    // unmatched PDI ends the <bdi>'s isolation after
     // "pre", and the override written after that break carries the name's tail
     // past the name listed after it. Bounded by the trust basis
     // @components/ColumnName records: these are the operator's own headers.
