@@ -18,6 +18,17 @@
 // number has a stable address, and scratch/ is gitignored, so a draft parked
 // there never becomes repository content.
 //
+// THE COUNT IS TAKEN OVER THE BRANCH THE PULL REQUEST IS OPENED FOR, not over
+// the event cwd's HEAD. The repo's by-ref review flow opens pull requests from
+// the main checkout with `--head <branch>` while that checkout sits on staging,
+// where an origin/staging..HEAD count is 0 -- which would silence this reminder
+// on exactly the multi-commit branches it exists for. So when the command
+// carries `--head`, the count is origin/staging..<that ref>: linked worktrees
+// share one object database, so the branch resolves from whichever checkout the
+// command ran in, and no network call is added. A fork-style `owner:branch`
+// value counts what follows the colon. With no `--head`, or a value no ref
+// resolves for, the count falls back to the cwd's HEAD.
+//
 // THE PATH IS COMPUTED HERE rather than described to the session, so the
 // instruction names one absolute file instead of a convention each session
 // re-derives:
@@ -38,7 +49,10 @@
 // STATED LIMIT. What a PostToolUse payload carries for a Bash result is the
 // harness's business and is not asserted here: the PR URL is looked for in every
 // string-valued candidate field, and a payload carrying none of them falls back to
-// the branch key rather than being wrong.
+// the branch key rather than being wrong. `--head` is likewise read off the raw
+// command text rather than a parsed argv, so a `--head` written inside another
+// flag's quoted value is read as if it named the branch; that lands on the
+// unresolvable-ref path, which counts the cwd's HEAD.
 //
 // PostToolUse hooks cannot block -- the command has already run -- so there is no
 // block()/exit(2) path here, only an additionalContext message or nothing. Fail
@@ -57,6 +71,10 @@ const CANDIDATE_FIELDS = ["output", "stdout", "stderr", "content"];
 // survive a trailing path segment or a host that is not github.com.
 const PR_URL = /https?:\/\/[^\s"']+?\/pull\/(\d+)\b/g;
 
+// `--head <branch>` or `--head=<branch>` as `gh pr create` takes it, with the
+// value optionally quoted the way a shell command line carries it.
+const HEAD_FLAG = /--head(?:=|\s+)(?:"([^"]*)"|'([^']*)'|(\S+))/;
+
 function git(cwd, args) {
   return execFileSync("git", args, {
     cwd,
@@ -65,15 +83,26 @@ function git(cwd, args) {
   }).trim();
 }
 
-// Number of commits HEAD carries over the PR base, or null when it cannot be
-// determined (no git, not a repo, origin/staging not fetched).
-function commitCountOverBase(cwd) {
+// Number of commits `ref` carries over the PR base, or null when it cannot be
+// determined (no git, not a repo, origin/staging not fetched, ref unresolvable).
+function commitCountOverBase(cwd, ref) {
   try {
-    const count = Number(git(cwd, ["rev-list", "--count", `${PR_BASE}..HEAD`]));
+    const count = Number(
+      git(cwd, ["rev-list", "--count", `${PR_BASE}..${ref}`, "--"]),
+    );
     return Number.isInteger(count) && count >= 0 ? count : null;
   } catch {
     return null;
   }
+}
+
+// The branch `gh pr create` was told to open the pull request for, or null when
+// the command names none. A fork-style `owner:branch` value keeps the branch.
+function headRefFromCommand(command) {
+  const match = command.match(HEAD_FLAG);
+  if (match === null) return null;
+  const value = (match[1] ?? match[2] ?? match[3]).replace(/^[^:]*:/, "");
+  return value === "" ? null : value;
 }
 
 function candidates(toolResponse) {
@@ -152,7 +181,10 @@ function main() {
   }
 
   const cwd = typeof event.cwd === "string" ? event.cwd : process.cwd();
-  const count = commitCountOverBase(cwd);
+  const headRef = headRefFromCommand(command);
+  const count =
+    (headRef === null ? null : commitCountOverBase(cwd, headRef)) ??
+    commitCountOverBase(cwd, "HEAD");
   if (count === null || count <= 1) process.exit(0);
 
   const key = prNumberKey(event.tool_response) ?? branchKey(cwd);
