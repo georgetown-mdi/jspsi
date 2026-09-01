@@ -1,11 +1,16 @@
-import { normalizeFiledropPath } from "@psilink/core";
+import { compatibilityMessage, normalizeFiledropPath } from "@psilink/core";
 import type {
+  CompatibilityMessageFragment,
   ConnectionConfig,
   FileDropConnectionConfig,
   SFTPConnectionConfig,
 } from "@psilink/core";
 
-import { RECONCILE_UNSET, type ReconcileDiff } from "./config";
+import {
+  RECONCILE_UNSET,
+  reconcileDiffValue,
+  type ReconcileDiff,
+} from "./config";
 import type { RunnableConnectionConfig } from "./connectionFromUrl";
 
 // The port an SFTP connection uses when the config sets none (ssh2's default).
@@ -64,6 +69,12 @@ function pushDirectoryConflicts(
   pathsEqual: (a: string | undefined, b: string | undefined) => boolean,
   field: (key: "path" | "inbound_path" | "outbound_path") => string,
 ): void {
+  // Every locator a conflict line names is treated where it is interpolated: an
+  // accept URL's paths are the inviting party's, and a saved config's own were
+  // copied from that party's endpoint on an earlier acceptance, so neither side
+  // of the comparison is this party's own text.
+  const locator = (value: string | undefined): CompatibilityMessageFragment =>
+    value === undefined ? RECONCILE_UNSET : reconcileDiffValue(value);
   // When the existing config is in the OTHER directory form than the target, the
   // compared field is genuinely unset on the existing side -- but a bare
   // "(unset)" hides the locator the config DOES hold in its own form, which an
@@ -71,17 +82,15 @@ function pushDirectoryConflicts(
   // side with that locator so the conflict shows both forms. Only invoked when
   // the field being rendered is actually unset, so it never fires for a
   // same-form mismatch (where the existing value is shown directly).
-  const existingHint = (): string => {
+  const existingHint = (): CompatibilityMessageFragment => {
     if (have.path !== undefined)
-      return `${RECONCILE_UNSET} (the config uses a single shared path ${have.path})`;
+      return compatibilityMessage`${RECONCILE_UNSET} (the config uses a single shared path ${locator(have.path)})`;
     if (have.inboundPath !== undefined || have.outboundPath !== undefined)
-      return (
-        `${RECONCILE_UNSET} (the config uses a split inbound_path ` +
-        `${have.inboundPath ?? RECONCILE_UNSET}, outbound_path ` +
-        `${have.outboundPath ?? RECONCILE_UNSET})`
-      );
+      return compatibilityMessage`${RECONCILE_UNSET} (the config uses a split inbound_path ${locator(have.inboundPath)}, outbound_path ${locator(have.outboundPath)})`;
     return RECONCILE_UNSET;
   };
+  const shown = (value: string | undefined): CompatibilityMessageFragment =>
+    value === undefined ? existingHint() : reconcileDiffValue(value);
 
   const split =
     want.inboundPath !== undefined || want.outboundPath !== undefined;
@@ -92,8 +101,8 @@ function pushDirectoryConflicts(
     )
       conflicts.push({
         field: field("inbound_path"),
-        existing: have.inboundPath ?? existingHint(),
-        incoming: want.inboundPath,
+        existing: shown(have.inboundPath),
+        incoming: reconcileDiffValue(want.inboundPath),
       });
     if (
       want.outboundPath !== undefined &&
@@ -101,16 +110,16 @@ function pushDirectoryConflicts(
     )
       conflicts.push({
         field: field("outbound_path"),
-        existing: have.outboundPath ?? existingHint(),
-        incoming: want.outboundPath,
+        existing: shown(have.outboundPath),
+        incoming: reconcileDiffValue(want.outboundPath),
       });
     return;
   }
   if (want.path !== undefined && !pathsEqual(have.path, want.path))
     conflicts.push({
       field: field("path"),
-      existing: have.path ?? existingHint(),
-      incoming: want.path,
+      existing: shown(have.path),
+      incoming: reconcileDiffValue(want.path),
     });
 }
 
@@ -172,8 +181,8 @@ export function diffConnectionAgainstTarget(
     if (!hostsEqual(have.host, want.host))
       conflicts.push({
         field: "connection.server.host",
-        existing: have.host,
-        incoming: want.host,
+        existing: reconcileDiffValue(have.host),
+        incoming: reconcileDiffValue(want.host),
       });
     pushDirectoryConflicts(
       conflicts,

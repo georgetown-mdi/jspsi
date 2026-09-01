@@ -9,6 +9,7 @@ import {
   DISPLAY_TRUNCATION_MARKER,
   getDefaultLinkageTerms,
   MAX_NAME_LENGTH,
+  MAX_TEXT_LENGTH,
   MAX_NESTING_DEPTH,
   NestingDepthExceededError,
   parseExchangeSpec,
@@ -23,6 +24,8 @@ import {
   diffLinkageTerms,
   formatReconcileDiffs,
   linkageTermsStandingOf,
+  reconcileConflictMessage,
+  reconcileDiffValue,
   loadConfigLinkageSource,
   persistDisclosedPayloadColumns,
   persistExpectedPartnerDeduplicate,
@@ -1477,19 +1480,35 @@ function cloneTerms(terms: LinkageTerms): LinkageTerms {
   return structuredClone(terms);
 }
 
-// The message `psilink accept` composes around the diff lines when a kept config
-// disagrees with the invitation, rendered the way the CLI's top-level handler
-// renders a thrown UsageError. Composed here in one place so the tests that
-// measure what survives that boundary all measure the same shape.
-function renderedAcceptReconcileError(conflicts: ReconcileDiff[]): string {
+// The message `psilink accept` composes when a kept config disagrees with the
+// invitation, rendered the way the CLI's top-level handler renders a thrown
+// UsageError. Driven through the composer the command itself calls, with the
+// command's own first-party copy, so the tests that measure what survives that
+// boundary measure the shape an operator actually meets.
+const ACCEPT_RECONCILE_SOURCES = {
+  configPath: "./psilink.yaml",
+  against: "the invitation",
+  retryWith: "the same invitation",
+};
+
+// The online shape, whose first-party copy is the longer of the two and so
+// leaves the diff block the smaller share.
+const ONLINE_RECONCILE_SOURCES = {
+  configPath: "./psilink.yaml",
+  against: "the invitation and the connection URL",
+  retryWith: "the same URL and invitation",
+};
+
+function renderedAcceptReconcileError(
+  conflicts: ReconcileDiff[],
+  sources: {
+    configPath: string;
+    against: string;
+    retryWith: string;
+  } = ACCEPT_RECONCILE_SOURCES,
+): string {
   return sanitizeErrorForDisplay(
-    new UsageError(
-      "the configuration file at ./psilink.yaml disagrees with the " +
-        "invitation:\n" +
-        formatReconcileDiffs(conflicts) +
-        "\nResolve the differences (or pass --config-file to write " +
-        "elsewhere), then retry with --accept-terms.",
-    ),
+    new UsageError(reconcileConflictMessage({ ...sources, diffs: conflicts })),
   );
 }
 
@@ -1529,8 +1548,11 @@ test("diffLinkageTerms: an algorithm mismatch is a conflict naming the field", (
   const { conflicts } = diffLinkageTerms(existing, incoming);
   expect(conflicts).toHaveLength(1);
   expect(conflicts[0].field).toBe("algorithm");
-  expect(conflicts[0].existing).toBe("psi-c");
-  expect(conflicts[0].incoming).toBe("psi");
+  // Delimited, like every other value a conflict line names: the enum has no
+  // digit, so the seam's checked bare form declines it and it takes the quoted
+  // one, which costs the reading nothing.
+  expect(conflicts[0].existing).toBe('"psi-c"');
+  expect(conflicts[0].incoming).toBe('"psi"');
 });
 
 test("diffLinkageTerms: a linkage-strategy mismatch is a conflict naming the field", () => {
@@ -1551,8 +1573,8 @@ test("diffLinkageTerms: a linkage-strategy mismatch is a conflict naming the fie
     const { conflicts } = diffLinkageTerms(existing, incoming);
     expect(conflicts).toHaveLength(1);
     expect(conflicts[0].field).toBe("linkage_strategy");
-    expect(conflicts[0].existing).toBe(existingStrategy);
-    expect(conflicts[0].incoming).toBe(incomingStrategy);
+    expect(conflicts[0].existing).toBe(`"${existingStrategy}"`);
+    expect(conflicts[0].incoming).toBe(`"${incomingStrategy}"`);
   }
 });
 
@@ -1705,17 +1727,18 @@ test("diffLinkageTerms: two citations differing only under NFC are a conflict", 
   // terminal, which would leave the operator a conflict they cannot see. They
   // are distinguishable because the display boundary escapes each non-ASCII code
   // point, so the composed and decomposed spellings render differently.
-  const rendered = sanitizeErrorForDisplay(
-    new UsageError(formatReconcileDiffs(conflicts)),
-  );
+  const rendered = renderedAcceptReconcileError(conflicts);
   expect(rendered).toContain("acc\\xe9s-keys");
   expect(rendered).toContain("acce\\u0301s-keys");
 });
 
-test("diffLinkageTerms: citations whose clauses render alike fall back to the full detail", () => {
-  // A set name carrying the clause's own delimiters can render two different
-  // citations identically; the diff then shows the stored values instead of two
-  // identical-looking summaries.
+test("diffLinkageTerms: a set name cannot forge the citation clause's own structure", () => {
+  // Both names are built to spell the clause the conflict line composes around
+  // them -- name, version, " over ", name, version -- which is printable ASCII
+  // throughout, so nothing at the display boundary rewrites it. The two
+  // citations are genuinely different and a plain quote would render them
+  // identically; the seam's doubling grammar is what keeps each name inside one
+  // run, so the pair stays distinguishable and neither name reads as structure.
   const existing = cloneTerms(getDefaultLinkageTerms("Org"));
   const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
   existing.linkageRuleSet = {
@@ -1729,7 +1752,46 @@ test("diffLinkageTerms: citations whose clauses render alike fall back to the fu
   const { conflicts } = diffLinkageTerms(existing, incoming);
   expect(conflicts).toHaveLength(1);
   expect(conflicts[0].existing).not.toBe(conflicts[0].incoming);
-  expect(conflicts[0].existing).toContain("fieldSet");
+  // Each embedded delimiter is doubled, so the run it sits in cannot close on
+  // it, and the clause still carries exactly one " over " per side.
+  expect(conflicts[0].existing).toBe(
+    '"k" 1.0.0 over "a"" 1.0.0 over ""b" 1.0.0',
+  );
+  expect(conflicts[0].incoming).toBe(
+    '"k"" 1.0.0 over ""a" 1.0.0 over "b" 1.0.0',
+  );
+  const rendered = renderedAcceptReconcileError(conflicts);
+  expect(rendered).toContain("then retry with the same invitation.");
+});
+
+test("diffLinkageTerms: the structural-list fallback treats the JSON it falls back to", () => {
+  // A sub-field difference under matching key names falls to the full JSON, and
+  // that JSON carries the same chosen bytes the name-only rendering withheld --
+  // a key element's transform params here -- so it takes the same treatment: a
+  // marker planted inside the structure is replaced, and the whole is one
+  // delimited run rather than loose text spelling the line's own clause.
+  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+  incoming.linkageKeys[0].elements[0].transform = [
+    {
+      function: "noop",
+      params: {
+        note: "-----BEGIN OPENSSH PRIVATE KEY-----",
+        forged: 'x vs required "y',
+      },
+    },
+  ];
+  const { conflicts } = diffLinkageTerms(existing, incoming);
+  const keyConflict = conflicts.find((c) => c.field === "linkage_keys");
+  expect(keyConflict).toBeDefined();
+  expect(keyConflict?.incoming).toContain("elements");
+  expect(keyConflict?.incoming).not.toContain("BEGIN OPENSSH PRIVATE KEY");
+  expect(keyConflict?.incoming).toContain("[redacted private key]");
+  // The whole JSON is one run, so every delimiter inside it is doubled and none
+  // of it can close the run or spell the conflict line's own clause.
+  expect(keyConflict?.incoming.startsWith('"')).toBe(true);
+  expect(keyConflict?.incoming.endsWith('"')).toBe(true);
+  expect(keyConflict?.incoming).not.toContain('x vs required "y');
 });
 
 test("diffLinkageTerms: a private-key marker in a citation cannot truncate the accept error", () => {
@@ -1767,7 +1829,7 @@ test("diffLinkageTerms: a private-key marker in a citation cannot truncate the a
   expect(rendered).toContain("[redacted private key]");
   expect(rendered).toContain("legal_agreement");
   expect(rendered).toContain("MOU-2025-0042");
-  expect(rendered).toContain("then retry with --accept-terms.");
+  expect(rendered).toContain("then retry with the same invitation.");
 });
 
 test("diffLinkageTerms: citation values at the schema's length cannot truncate the accept error", () => {
@@ -1830,19 +1892,19 @@ test("diffLinkageTerms: citation values at the schema's length cannot truncate t
       );
       expect(rendered).toContain("legal_agreement");
       expect(rendered).toContain("MOU-2025-0042");
-      expect(rendered).toContain("then retry with --accept-terms.");
+      expect(rendered).toContain("then retry with the same invitation.");
       // The values were fitted rather than dropped: the operator is told a
-      // citation value was cut, and both halves of both sides are still shown.
+      // citation value was cut, and the conflict line is still there.
       expect(rendered).toContain(DISPLAY_TRUNCATION_MARKER);
-      expect(rendered.split(" over ")).toHaveLength(
-        differing === replacingFirst ? 3 : 1,
-      );
+      expect(rendered).toContain("linkage_rule_set");
       // A pair the fit cannot tell apart says so, rather than showing the
-      // operator two clauses that read alike.
-      if (differing === replacingLast)
+      // operator two sides that read alike.
+      if (differing === replacingLast) {
+        expect(rendered).toContain("(the same text)");
         expect(rendered).toContain(
-          "differ only inside text this display withheld",
+          "differs only inside what this display withheld",
         );
+      }
     }
   }
 });
@@ -1865,14 +1927,298 @@ test("diffLinkageTerms: a citation both sides redact away is reported as withhel
   };
   const { conflicts } = diffLinkageTerms(existing, incoming);
   expect(conflicts).toHaveLength(1);
-  expect(conflicts[0].existing).not.toBe(conflicts[0].incoming);
+  // Both sides come out of the treatment byte-identical: the clause forms match
+  // once the names are replaced, and the full-detail fallback built from the
+  // same values matches too.
+  expect(conflicts[0].existing).toBe(conflicts[0].incoming);
 
   const rendered = renderedAcceptReconcileError(conflicts);
   expect(rendered).not.toContain("BEGIN OPENSSH PRIVATE KEY");
   expect(rendered).not.toContain("BEGIN RSA PRIVATE KEY");
-  expect(rendered).toContain("differ only inside text this display withheld");
+  expect(rendered).toContain("(the same text)");
+  expect(rendered).toContain("differs only inside what this display withheld");
   expect(rendered).toContain("redacted");
-  expect(rendered).toContain("then retry with --accept-terms.");
+  expect(rendered).toContain("then retry with the same invitation.");
+});
+
+// The widest code point the schema's code-point bounds admit at the display
+// boundary: an astral code point escapes to ten characters and spends two of the
+// schema's units, so half the count is the same bound.
+const widestAtSchemaBound = (units: number): string =>
+  "\u{1f600}".repeat(units / 2);
+
+// Two linkage-terms documents that disagree on EVERY field the reconcile
+// compares, each disagreement carrying values at the widest the schema admits,
+// plus the shapes that are hostile rather than merely wide: a name shaped like
+// the display boundary's private-key marker, a name spelling the conflict line's
+// own clause, and a payload description at the free-text bound.
+function maximallyConflictingTerms(): {
+  existing: LinkageTerms;
+  incoming: LinkageTerms;
+} {
+  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+
+  existing.version = "1.0.0";
+  incoming.version = "2.0.0";
+  existing.algorithm = "psi";
+  incoming.algorithm = "psi-c";
+  existing.linkageStrategy = "cascade";
+  incoming.linkageStrategy = "single-pass";
+
+  existing.linkageFields = [
+    { name: widestAtSchemaBound(MAX_NAME_LENGTH), type: "ssn" },
+  ];
+  incoming.linkageFields = [
+    { name: "-----BEGIN OPENSSH PRIVATE KEY-----", type: "ssn" },
+    { name: 'forged" vs required "nothing', type: "ssn" },
+  ];
+
+  existing.linkageKeys[0].elements[0].field = "ssn";
+  incoming.linkageKeys[0].elements[0].field = "ssn_x";
+
+  existing.linkageRuleSet = {
+    fieldSet: { name: widestAtSchemaBound(MAX_NAME_LENGTH), version: "1.0.0" },
+    keySet: { name: widestAtSchemaBound(MAX_NAME_LENGTH), version: "1.0.0" },
+  };
+  incoming.linkageRuleSet = {
+    fieldSet: { name: "county-pii", version: "3.1.0" },
+    keySet: { name: "county-keys", version: "3.1.0" },
+  };
+
+  existing.legalAgreement = {
+    reference: "x".repeat(MAX_NAME_LENGTH),
+    purpose: "Audit and evaluation of the State tutoring program",
+    expirationDate: "2030-01-01",
+  };
+  incoming.legalAgreement = {
+    reference: widestAtSchemaBound(MAX_NAME_LENGTH),
+    purpose: "Audit and evaluation of the State tutoring program",
+    expirationDate: "2031-01-01",
+  };
+
+  existing.payload = { send: [{ name: "note", description: "short" }] };
+  incoming.payload = {
+    send: [{ name: "note", description: "d".repeat(MAX_TEXT_LENGTH) }],
+  };
+
+  return { existing, incoming };
+}
+
+// The connection block's own conflicts, which an online accept appends to the
+// linkage-terms ones in the same message. Composed here rather than driven
+// through diffConnectionAgainstTarget so this file can reach the widest count
+// the two producers together can raise.
+function connectionConflicts(): ReconcileDiff[] {
+  return (
+    [
+      "connection.server.host",
+      "connection.server.inbound_path",
+      "connection.server.outbound_path",
+    ] as const
+  ).map((field) => ({
+    field,
+    existing: reconcileDiffValue("/saved/" + "s".repeat(240)),
+    incoming: reconcileDiffValue("/required/" + "r".repeat(240)),
+  }));
+}
+
+test("the reconcile refusal keeps its recovery step and names every field, at every fragment's worst case", () => {
+  // The acceptance criterion this whole composition exists for: schema-maximal
+  // and hostile values through every fragment AT ONCE -- both sides of the
+  // citation, both legal-agreement references, both structural lists (which fall
+  // to their full-JSON form), a payload description at the free-text bound, and
+  // the connection locators -- and still the operator reads what to do and which
+  // fields to go and look at.
+  const { existing, incoming } = maximallyConflictingTerms();
+  const { conflicts } = diffLinkageTerms(existing, incoming);
+  const all = [...conflicts, ...connectionConflicts()];
+  expect(all.map((d) => d.field)).toEqual([
+    "version",
+    "algorithm",
+    "linkage_strategy",
+    "linkage_fields",
+    "linkage_keys",
+    "linkage_rule_set",
+    "legal_agreement",
+    "payload",
+    "connection.server.host",
+    "connection.server.inbound_path",
+    "connection.server.outbound_path",
+  ]);
+
+  for (const sources of [ACCEPT_RECONCILE_SOURCES, ONLINE_RECONCILE_SOURCES]) {
+    const rendered = renderedAcceptReconcileError(all, sources);
+    // Under the renderer's own cap, which is what says nothing was cut: the
+    // boundary truncates a link that runs past it and appends the marker on
+    // top, so a message this length is one it delivered whole.
+    expect(rendered.length).toBeLessThanOrEqual(
+      COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+    );
+    // The step the operator has to act on, composed ahead of the detail so a
+    // cut can only ever eat the detail.
+    expect(rendered).toContain("Resolve the differences below");
+    expect(rendered).toContain(`then retry with ${sources.retryWith}.`);
+    // Every disagreeing field is named, whatever became of its values.
+    for (const d of all) expect(rendered).toContain(d.field);
+    // Nothing a partner chose survives whole enough to have spent the message:
+    // the marker is replaced and the forged clause cannot be read as one.
+    expect(rendered).not.toContain("BEGIN OPENSSH PRIVATE KEY");
+    expect(rendered).not.toContain('forged" vs required "nothing');
+  }
+});
+
+test("the reconcile refusal shows values whenever the field count leaves room for them", () => {
+  // The same worst-case values over the two conflicts the round that raised this
+  // measured: a citation delta beside a legal-agreement one, both sides of both
+  // at the schema's bound. Few enough fields that the budget still buys detail,
+  // which is what keeps the fields-only form the exception rather than the
+  // reading every refusal degrades to.
+  const { existing, incoming } = maximallyConflictingTerms();
+  const pair = diffLinkageTerms(existing, incoming).conflicts.filter((d) =>
+    ["linkage_rule_set", "legal_agreement"].includes(d.field),
+  );
+  expect(pair).toHaveLength(2);
+
+  const rendered = renderedAcceptReconcileError(pair, ONLINE_RECONCILE_SOURCES);
+  expect(rendered.length).toBeLessThanOrEqual(
+    COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+  );
+  expect(rendered).toContain("then retry with the same URL and invitation.");
+  // Both lines carry values rather than the field name alone, and the values
+  // that fit are shown rather than dropped.
+  expect(rendered).toContain("linkage_rule_set: existing ");
+  expect(rendered).toContain("legal_agreement: existing ");
+  expect(rendered).toContain("county-keys");
+  expect(rendered).toContain(DISPLAY_TRUNCATION_MARKER);
+});
+
+test("an ordinary reconcile refusal is delivered whole, with nothing truncated", () => {
+  // The residual under the arithmetic above: each first-party span fits its
+  // budget by measurement, not by construction, so copy that grew past the cap
+  // would put the cap back on the operator's text. Driven at the sizes a real
+  // run carries, no part of this message is cut at all -- so growing the copy,
+  // or a fragment's ordinary width, fails here rather than silently deleting
+  // the next step.
+  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+  existing.algorithm = "psi-c";
+  incoming.algorithm = "psi";
+  existing.legalAgreement = {
+    reference: "MOU-2025-0042",
+    purpose: "Audit and evaluation of the State tutoring program",
+    expirationDate: "2030-01-01",
+  };
+  incoming.legalAgreement = {
+    reference: "MOU-2026-0117",
+    purpose: "Audit and evaluation of the State tutoring program",
+    expirationDate: "2031-06-30",
+  };
+  const { conflicts } = diffLinkageTerms(existing, incoming);
+  expect(conflicts.map((d) => d.field)).toEqual([
+    "algorithm",
+    "legal_agreement",
+  ]);
+
+  const rendered = renderedAcceptReconcileError(
+    conflicts,
+    ONLINE_RECONCILE_SOURCES,
+  );
+  expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
+  expect(rendered.length).toBeLessThan(COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH);
+  expect(rendered).toContain('existing "psi-c" vs required "psi"');
+  expect(rendered).toContain('"MOU-2025-0042" (expires 2030-01-01)');
+  expect(rendered).toContain('"MOU-2026-0117" (expires 2031-06-30)');
+  expect(rendered).toContain(
+    "Resolve the differences below (or pass --config-file to write elsewhere)",
+  );
+});
+
+test("a linkage field name shaped like a private-key marker cannot swallow the refusal", () => {
+  // The display boundary's private-key rule is fail-closed past a BEGIN marker
+  // carrying no END: it replaces from the marker to the end of the link, and
+  // this whole refusal is one link. A marker in a name the partner chose would
+  // otherwise take every conflict line composed behind it.
+  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+  existing.linkageFields = [{ name: "ssn", type: "ssn" }];
+  incoming.linkageFields = [
+    { name: "-----BEGIN OPENSSH PRIVATE KEY-----", type: "ssn" },
+  ];
+  incoming.legalAgreement = {
+    reference: "MOU-2025-0042",
+    purpose: "Audit and evaluation of the State tutoring program",
+    expirationDate: "2030-01-01",
+  };
+  const { conflicts } = diffLinkageTerms(existing, incoming);
+  expect(conflicts.map((d) => d.field)).toContain("linkage_fields");
+  expect(conflicts.map((d) => d.field)).toContain("legal_agreement");
+
+  const rendered = renderedAcceptReconcileError(conflicts);
+  expect(rendered).not.toContain("BEGIN OPENSSH PRIVATE KEY");
+  expect(rendered).toContain("[redacted private key]");
+  // Everything composed behind the marker survives it.
+  expect(rendered).toContain("legal_agreement");
+  expect(rendered).toContain("MOU-2025-0042");
+  expect(rendered).toContain("then retry with the same invitation.");
+});
+
+test("a payload description at the free-text bound cannot crowd out the refusal", () => {
+  // The description is never rendered by the name-only payload summary, so it
+  // reaches the message only through the full-JSON fallback -- which is exactly
+  // where a value bounded by the schema in code points and by nothing at the
+  // display boundary can spend a whole link.
+  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+  existing.payload = { send: [{ name: "note", description: "short" }] };
+  incoming.payload = {
+    send: [{ name: "note", description: widestAtSchemaBound(MAX_TEXT_LENGTH) }],
+  };
+  incoming.legalAgreement = {
+    reference: "MOU-2025-0042",
+    purpose: "Audit and evaluation of the State tutoring program",
+    expirationDate: "2030-01-01",
+  };
+  const { conflicts } = diffLinkageTerms(existing, incoming);
+  expect(conflicts.map((d) => d.field)).toEqual(["legal_agreement", "payload"]);
+
+  const rendered = renderedAcceptReconcileError(conflicts);
+  expect(rendered.length).toBeLessThanOrEqual(
+    COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+  );
+  expect(rendered).toContain("payload");
+  expect(rendered).toContain("MOU-2025-0042");
+  expect(rendered).toContain("then retry with the same invitation.");
+});
+
+test("a partner-chosen value cannot forge a conflict line's own structure", () => {
+  // Each line is first-party prose an operator reads as psilink's own -- field,
+  // then `existing X vs required Y` -- and a value spelling that clause is
+  // printable ASCII throughout, so nothing at the display boundary rewrites it.
+  // Delimiting is what answers it, and the doubling grammar is what makes the
+  // delimiting hold: a value carrying a delimiter of its own cannot close the
+  // run it sits in.
+  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+  existing.linkageFields = [{ name: "ssn", type: "ssn" }];
+  incoming.linkageFields = [
+    { name: 'ssn" vs required "nothing_to_see_here', type: "ssn" },
+    { name: "a, b", type: "ssn" },
+  ];
+  const { conflicts } = diffLinkageTerms(existing, incoming);
+  const fields = conflicts.find((d) => d.field === "linkage_fields");
+  expect(fields).toBeDefined();
+  // The forged clause is not reproduced: its delimiter is doubled, so the run
+  // carries it as content.
+  expect(fields?.incoming).not.toContain('ssn" vs required "nothing');
+  expect(fields?.incoming).toContain('ssn"" vs required ""nothing');
+  // One entry named `a, b` renders as one run, not as the two the list
+  // separator would otherwise suggest -- the same partition the byte-exact
+  // comparison used to decide the conflict.
+  expect(fields?.incoming).toContain('"a, b"');
+
+  const rendered = renderedAcceptReconcileError(conflicts);
+  expect(rendered).toContain("then retry with the same invitation.");
 });
 
 test("diffLinkageTerms: an un-encodable value does not throw and identical terms still reconcile", () => {
@@ -2248,10 +2594,21 @@ test("diffLinkageTerms: a payload sub-field difference under matching names rend
 });
 
 test("formatReconcileDiffs: renders each field with its existing and required values", () => {
-  const rendered = formatReconcileDiffs([
-    { field: "algorithm", existing: "psi-c", incoming: "psi" },
-    { field: "connection.server.host", existing: "old-host", incoming: "host" },
-  ]);
+  const rendered = formatReconcileDiffs(
+    [
+      {
+        field: "algorithm",
+        existing: reconcileDiffValue("psi-c"),
+        incoming: reconcileDiffValue("psi"),
+      },
+      {
+        field: "connection.server.host",
+        existing: reconcileDiffValue("old-host"),
+        incoming: reconcileDiffValue("host"),
+      },
+    ],
+    COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+  );
   expect(rendered).toContain("algorithm");
   expect(rendered).toContain("psi-c");
   expect(rendered).toContain("connection.server.host");
@@ -2269,13 +2626,16 @@ test("formatReconcileDiffs: escapes partner-controlled values against terminal i
   // boundary rather than on the raw block.
   const rendered = sanitizeErrorForDisplay(
     new Error(
-      formatReconcileDiffs([
-        {
-          field: "connection.server.inbound_path",
-          existing: "/safe/in",
-          incoming: "/drop\x1b[2J\x1b[31m",
-        },
-      ]),
+      formatReconcileDiffs(
+        [
+          {
+            field: "connection.server.inbound_path",
+            existing: reconcileDiffValue("/safe/in"),
+            incoming: reconcileDiffValue("/drop\x1b[2J\x1b[31m"),
+          },
+        ],
+        COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+      ),
     ),
   );
   expect(rendered).not.toContain("\x1b");
@@ -2959,6 +3319,36 @@ test("both halves edited are reported in one warning, each against its own set",
     `its linkage_keys are not drawn from the "${keySet.name}" ` +
       `${keySet.version} this build ships`,
   );
+});
+
+test("a set name in the drift warning cannot forge the clause it is named in", () => {
+  // The warning is first-party prose whose clause an operator reads as
+  // psilink's own -- `<name> <version> this build ships` -- and the set name is
+  // free text whoever authored the config chose. The escape does not reach a
+  // forgery made of printable ASCII, so the name is delimited through the same
+  // seam core's own rule-set message uses; the doubling grammar is what keeps a
+  // name carrying a delimiter of its own from closing its run early.
+  //
+  // Driven on the CITED half, which the warning echoes back verbatim: the half
+  // it reports drift against is this build's own shipped name.
+  const terms = withReorderedKeys(getDefaultLinkageTerms("Agency A"));
+  const keySet = DEFAULT_LINKAGE_RULE_SET.reference.keySet;
+  terms.linkageRuleSet = {
+    fieldSet: { name: 'a" 9.9.9 this build ships, and "b', version: "3.1.0" },
+    keySet,
+  };
+  const warnings = citationWarnings(terms);
+  expect(warnings).toHaveLength(1);
+  expect(warnings[0]).not.toContain('"a" 9.9.9 this build ships, and "b"');
+  expect(warnings[0]).toContain('"a"" 9.9.9 this build ships, and ""b"');
+  // A version that does not meet the seam's checked bare shape takes the
+  // delimited form too, rather than standing in the sentence undelimited.
+  const versionForged = withReorderedKeys(getDefaultLinkageTerms("Agency A"));
+  versionForged.linkageRuleSet = {
+    fieldSet: { name: "county-pii", version: "over" },
+    keySet,
+  };
+  expect(citationWarnings(versionForged)[0]).toContain('"county-pii" "over"');
 });
 
 test("a citation this build cannot resolve draws no warning", () => {

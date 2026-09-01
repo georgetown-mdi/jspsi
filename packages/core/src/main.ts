@@ -96,6 +96,18 @@ export {
   MAX_ERROR_CAUSE_DEPTH,
   CAUSE_DEPTH_ELISION_MARKER,
 } from "./utils/sanitizeErrorForDisplay";
+// The delimiting seam for a linkage-terms value named in an operator-facing
+// diagnostic. Exported because the CLI's reconcile refusal and citation-drift
+// warning name the same class of partner-chosen value in the same clause
+// structure, and a second delimiting grammar there would be the independent
+// re-implementation the shared-primitive rule exists to prevent.
+export {
+  quoteTermsValue,
+  quoteTermsValueList,
+  bareTermsValue,
+  compatibilityMessage,
+} from "./config/compatibilityMessage";
+export type { CompatibilityMessageFragment } from "./config/compatibilityMessage";
 export { reconcileHostKeyFingerprints } from "./hostKeyReconciliation";
 export { describeDecodeError } from "./utils/describeDecodeError";
 export { compileLinearRegex } from "./utils/linearRegex";
