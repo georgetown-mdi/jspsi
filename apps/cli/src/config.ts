@@ -1290,9 +1290,17 @@ const RECONCILE_NOTICE_RESERVE_CEILING = renderedDisplayCost(
  * clip lands wherever `budget` falls, so it can cut inside a delimited run and
  * leave it unterminated ahead of the truncation marker -- which reads as cut,
  * not as a further clause, and cannot manufacture structure the raw value did
- * not already carry, since clipping only removes bytes. And the marker is plain
- * ASCII the escape passes through, so a value carrying its text can claim a cut
- * that did not happen; what an operator can rely on is the marker's ABSENCE.
+ * not already carry, since clipping only removes bytes. Inside a
+ * sub-partitioned clause the cut run can instead read as TERMINATED, by the
+ * next opening delimiter the composition placed after it -- the clause's own
+ * next value or, where the cut value is last on its side, the other side's
+ * opening delimiter -- and what then stands inside it is composed connectives
+ * together with a partner-chosen value that renders undelimited (a checked
+ * bare form, such as a citation's semver), never structure the raw value
+ * forged, since every delimiter inside a value is doubled. And the marker is
+ * plain ASCII the escape passes through, so a value carrying its text can
+ * claim a cut that did not happen; what an operator can rely on is the
+ * marker's ABSENCE.
  *
  * @internal exported for testing; `reconcileConflictMessage` is the caller.
  */
