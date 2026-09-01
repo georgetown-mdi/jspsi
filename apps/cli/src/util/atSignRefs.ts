@@ -218,13 +218,112 @@ function resolveProviderOptionsAtSignRefs(connection: {
 }
 
 /**
+ * The values a connection's `@path` credential references resolve to, read
+ * ahead of the connection they are applied to (see
+ * {@link readConnectionCredentials}). A field is present exactly when the
+ * connection read from carried one, so applying the record never invents a
+ * credential the connection did not set.
+ */
+export interface ResolvedConnectionCredentials {
+  /** The resolved SFTP `server.password`. */
+  password?: string;
+  /** The resolved SFTP `server.privateKey`. */
+  privateKey?: string;
+  /** The resolved SFTP `server.privateKeyPassphrase`. */
+  privateKeyPassphrase?: string;
+}
+
+/**
+ * Read the `@path` credential references on a connection without applying them,
+ * so every local-file refusal is settled at this call: a missing, unreadable, or
+ * empty referenced file is a {@link UsageError} (exit 64) raised here rather
+ * than wherever the resolved connection is built.
+ *
+ * The read is split from the application for a caller whose connection is
+ * mutated in between -- `zero-setup`, where `establishHostKeyTrust` pins a
+ * first-use host key onto the connection and the clone handed to the exchange
+ * must carry that pin while the original keeps its `@path` for persistence.
+ * Reading first is what keeps a run refused over its own credential file from
+ * reaching the host-key probe's transport; cloning after the pin is what carries
+ * the pin into the live connect. A caller with nothing in between uses
+ * {@link resolveConnectionCredentials}, which is the two composed.
+ *
+ * A non-SFTP connection carries no such credential and yields an empty record.
+ */
+export function readConnectionCredentials(
+  connection: ConnectionConfig,
+): ResolvedConnectionCredentials {
+  if (connection.channel !== "sftp") return {};
+  const { server } = connection;
+  const credentials: ResolvedConnectionCredentials = {};
+  if (server.password !== undefined)
+    credentials.password = resolveAtSignRef(server.password);
+  if (server.privateKey !== undefined)
+    credentials.privateKey = resolveAtSignRef(server.privateKey);
+  if (server.privateKeyPassphrase !== undefined)
+    credentials.privateKeyPassphrase = resolveAtSignRef(
+      server.privateKeyPassphrase,
+    );
+  return credentials;
+}
+
+/**
+ * The value read for a credential field the connection sets. Its absence means
+ * the record came from a different connection than the one being applied to, a
+ * pairing no call site makes; failing loudly here beats connecting with the
+ * literal `@path` string as the credential.
+ */
+function readValueFor(value: string | undefined, field: string): string {
+  if (value === undefined)
+    throw new Error(
+      `internal error: the connection credential ${field} was applied ` +
+        `without having been read`,
+    );
+  return value;
+}
+
+/**
+ * Return a clone of `connection` carrying the credential values
+ * {@link readConnectionCredentials} read from it. The input is NOT mutated, so
+ * the caller connects with the clone while persisting the original -- whose
+ * `@path` is still in place -- keeping the secret out of `psilink.yaml`. The
+ * preserved `@path` is re-resolved (by {@link resolveExchangeSpecRefs}) at the
+ * next exchange's config load.
+ *
+ * Pass the connection as it stands at the moment of the live connect: the clone
+ * is taken here, so anything written onto the connection since the read -- a
+ * first-use host-key pin above all -- reaches the exchange.
+ *
+ * A non-SFTP connection is returned as-is rather than cloned, which a caller
+ * that then applies its own overrides to the result relies on.
+ */
+export function applyConnectionCredentials(
+  connection: ConnectionConfig,
+  credentials: ResolvedConnectionCredentials,
+): ConnectionConfig {
+  if (connection.channel !== "sftp") return connection;
+  const resolved = structuredClone(connection);
+  const { server } = resolved;
+  if (server.password !== undefined)
+    server.password = readValueFor(credentials.password, "password");
+  if (server.privateKey !== undefined)
+    server.privateKey = readValueFor(credentials.privateKey, "private key");
+  if (server.privateKeyPassphrase !== undefined)
+    server.privateKeyPassphrase = readValueFor(
+      credentials.privateKeyPassphrase,
+      "private key passphrase",
+    );
+  return resolved;
+}
+
+/**
  * Resolve `@path` credential references on a connection for live use, returning
  * a clone with the SFTP `server.password` / `server.privateKey` /
  * `server.privateKeyPassphrase` fields read from their referenced files. The
- * input is NOT mutated, so a caller can connect with the resolved clone while
- * persisting the original -- whose `@path` is still in place -- keeping the
- * secret out of `psilink.yaml`. The preserved `@path` is re-resolved (by
- * {@link resolveExchangeSpecRefs}) at the next exchange's config load.
+ * read and the clone in one step, for a caller that connects with the result
+ * straight away; a caller that must settle the local-file refusals earlier than
+ * it can build the clone uses {@link readConnectionCredentials} and
+ * {@link applyConnectionCredentials} instead.
  *
  * Only those three fields are resolved: they are the sole credentials a CLI flag
  * (`--server-password` / `--server-private-key` /
@@ -240,14 +339,8 @@ function resolveProviderOptionsAtSignRefs(connection: {
 export function resolveConnectionCredentials(
   connection: ConnectionConfig,
 ): ConnectionConfig {
-  if (connection.channel !== "sftp") return connection;
-  const resolved = structuredClone(connection);
-  const { server } = resolved;
-  if (server.password !== undefined)
-    server.password = resolveAtSignRef(server.password);
-  if (server.privateKey !== undefined)
-    server.privateKey = resolveAtSignRef(server.privateKey);
-  if (server.privateKeyPassphrase !== undefined)
-    server.privateKeyPassphrase = resolveAtSignRef(server.privateKeyPassphrase);
-  return resolved;
+  return applyConnectionCredentials(
+    connection,
+    readConnectionCredentials(connection),
+  );
 }

@@ -807,6 +807,112 @@ test("handler: an input the prepare refuses exits 64 with no host-key probe", as
   }
 });
 
+test("handler: a credential @path naming a missing file exits 64 with no host-key probe", async () => {
+  // The same invariant over the other local refusal the connect path carries: a
+  // `--server-password @path` whose file is not there is decided from this
+  // party's own filesystem, so it must end the run before the host-key step --
+  // whose probe opens a real transport -- is entered. The credential values are
+  // therefore read ahead of that step even though they are applied after it.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerocred-"));
+  const stderrChunks: string[] = [];
+  const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(((
+    chunk: string | Uint8Array,
+  ) => {
+    stderrChunks.push(String(chunk));
+    return true;
+  }) as never);
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    const input = path.join(dir, "input.csv");
+    fs.writeFileSync(
+      input,
+      "first_name,last_name,date_of_birth\nBob,Jones,1990-01-02\n",
+    );
+    vi.mocked(establishHostKeyTrust).mockClear();
+    vi.mocked(runProtocol).mockClear();
+
+    await expect(
+      handler({
+        _: ["sftp://userb@localhost:2222/drop", input],
+        $0: "psilink",
+        "server-password": `@${path.join(dir, "absent-password")}`,
+        "config-file": path.join(dir, "psilink.yaml"),
+        "key-file": path.join(dir, ".psilink.key"),
+        identity: "Tester",
+        record: false,
+        "log-level": "error",
+      } as unknown as Arguments),
+    ).rejects.toThrow("exit:64");
+    expect(stderrChunks.join("")).toContain("cannot read the @-file reference");
+    expect(vi.mocked(establishHostKeyTrust)).not.toHaveBeenCalled();
+    expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
+  } finally {
+    getLogger("psilink").setLevel("silent");
+    stderrSpy.mockRestore();
+    exitSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: the first-use pin reaches the connection the exchange dials", async () => {
+  // The other half of reading the credential files early: the connection handed
+  // to runProtocol is still cloned AFTER the host-key step, so the pin that step
+  // writes onto the original is what the real open() enforces. A clone taken at
+  // the read instead would carry the resolved credential and no pin, and dial an
+  // unverified server -- so the run driven here supplies both.
+  const FP = "SHA256:" + "D".repeat(43);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zeropin-"));
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    const pwFile = path.join(dir, "pw");
+    fs.writeFileSync(pwFile, "s3cret\n");
+    const input = path.join(dir, "input.csv");
+    fs.writeFileSync(
+      input,
+      "first_name,last_name,date_of_birth\nBob,Jones,1990-01-02\n",
+    );
+
+    vi.mocked(establishHostKeyTrust).mockImplementationOnce((async (
+      conn: SFTPConnectionConfig,
+    ) => {
+      conn.server.hostKeyFingerprint = FP;
+    }) as never);
+    let connToRunProtocol: SFTPConnectionConfig | undefined;
+    vi.mocked(runProtocol).mockImplementationOnce((async (
+      ...callArgs: unknown[]
+    ) => {
+      connToRunProtocol = callArgs[0] as SFTPConnectionConfig;
+      return driveCompletedExchange(callArgs, { partnerSaveIntent: false });
+    }) as never);
+
+    await handler({
+      _: ["sftp://userb@localhost:2222/drop", input],
+      $0: "psilink",
+      "server-password": `@${pwFile}`,
+      "config-file": path.join(dir, "psilink.yaml"),
+      "key-file": path.join(dir, ".psilink.key"),
+      identity: "Tester",
+      record: false,
+      "log-level": "silent",
+    } as unknown as Arguments);
+
+    expect(connToRunProtocol?.server.hostKeyFingerprint).toBe(FP);
+    // And the credential read before that step still reached the same object.
+    expect(connToRunProtocol?.server.password).toBe("s3cret");
+  } finally {
+    exitSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // --- linkage strategy selection ----------------------------------------------
 
 test("handler: an unrecognized --linkage-strategy exits 64, naming the valid values", async () => {

@@ -11,6 +11,8 @@ import type {
 } from "@psilink/core";
 
 import {
+  applyConnectionCredentials,
+  readConnectionCredentials,
   resolveAtSignRef,
   resolveAtSignRefs,
   resolveConnectionCredentials,
@@ -159,6 +161,52 @@ test("resolveConnectionCredentials is a no-op on a filedrop connection", () => {
 test("resolveConnectionCredentials surfaces a missing @path file as a UsageError", () => {
   const conn = sftpConn({ host: "h", password: `@${path.join(dir, "gone")}` });
   expect(() => resolveConnectionCredentials(conn)).toThrow(UsageError);
+});
+
+// --- readConnectionCredentials / applyConnectionCredentials ------------------
+
+test("readConnectionCredentials surfaces a missing @path file without touching the connection", () => {
+  // What lets a caller settle the local-file refusal before it does anything
+  // that reaches the network: the read alone raises it, and the connection is
+  // still the unmodified original the caller goes on to pin and persist.
+  const conn = sftpConn({ host: "h", password: `@${path.join(dir, "gone")}` });
+  expect(() => readConnectionCredentials(conn)).toThrow(UsageError);
+  expect(conn.server.password).toBe(`@${path.join(dir, "gone")}`);
+});
+
+test("applyConnectionCredentials carries a mutation made after the read into the clone", () => {
+  // The zero-setup ordering: the credential files are read first, the host-key
+  // step then pins the fingerprint onto the original, and the clone taken here
+  // must carry that pin as well as the resolved secret.
+  const pwFile = path.join(dir, "pw3");
+  fs.writeFileSync(pwFile, "s3cret\n");
+  const original = sftpConn({ host: "h", password: `@${pwFile}` });
+  const credentials = readConnectionCredentials(original);
+  const fingerprint = "SHA256:" + "E".repeat(43);
+  original.server.hostKeyFingerprint = fingerprint;
+
+  const live = applyConnectionCredentials(
+    original,
+    credentials,
+  ) as SFTPConnectionConfig;
+  expect(live.server.hostKeyFingerprint).toBe(fingerprint);
+  expect(live.server.password).toBe("s3cret");
+  expect(original.server.password).toBe(`@${pwFile}`);
+});
+
+test("applyConnectionCredentials refuses a credential the record was not read for", () => {
+  // A record paired with a connection it was not read from would otherwise send
+  // the literal `@path` string as the password. No call site pairs them that
+  // way, so this fails as an internal error rather than connecting.
+  const conn = sftpConn({ host: "h", password: `@${path.join(dir, "pw4")}` });
+  expect(() => applyConnectionCredentials(conn, {})).toThrow(
+    /was applied without having been read/,
+  );
+});
+
+test("applyConnectionCredentials returns a filedrop connection as-is", () => {
+  const conn = { channel: "filedrop", path: "/mnt/share" } as const;
+  expect(applyConnectionCredentials(conn, {})).toBe(conn);
 });
 
 // --- resolveExchangeSpecRefs -------------------------------------------------
