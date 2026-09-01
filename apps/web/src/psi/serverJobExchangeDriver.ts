@@ -815,22 +815,35 @@ function errorCategoryOf(event: RelayEvent): ExchangeErrorCategory {
     : "exchange";
 }
 
+/** Stands in for a relayed link carrying no text of its own. The renderer frames
+ * such a link like any other -- a cause thrown as an empty string is one, and
+ * reaches the relay from a real failure -- so the rebuild below shows the
+ * stand-in rather than closing the gap: a chain rendered one link shorter than
+ * the one the CLI composed reads as a different failure, and its links then name
+ * the wrong causes for each other. */
+export const EMPTY_CHAIN_LINK = "[no message]";
+
 /** Read the display-safe message off an `error` relay event, rebuilding the
  * cause chain from the links the relay carried apart
  * ({@link ERROR_MESSAGE_CHAIN_FIELD}) so a terminal error arrives whole -- its
  * explanation AND the recovery step a later link carries -- rather than cut at
- * whatever the flat `message` field's per-value cap left of it. The flat field
- * is the fallback: an event the relay did not derive a chain for (a
+ * whatever the flat `message` field's per-value cap left of it. A link with no
+ * text is rendered as {@link EMPTY_CHAIN_LINK}, keeping the rebuilt chain the
+ * length the relay carried. The flat field is the fallback, taken when the chain
+ * holds no text at all: an event the relay did not derive a chain for (a
  * manager-synthesized terminal, whose text is one first-party sentence) carries
  * only that. */
 function errorMessageOf(event: RelayEvent): string {
   const chain = event[ERROR_MESSAGE_CHAIN_FIELD];
-  if (Array.isArray(chain)) {
-    const links = chain.filter(
-      (link): link is string => typeof link === "string" && link.length > 0,
+  if (
+    Array.isArray(chain) &&
+    chain.some((link) => typeof link === "string" && link.length > 0)
+  )
+    return joinErrorCauseChain(
+      chain.map((link) =>
+        typeof link === "string" && link.length > 0 ? link : EMPTY_CHAIN_LINK,
+      ),
     );
-    if (links.length > 0) return joinErrorCauseChain(links);
-  }
   const message = event.message;
   return typeof message === "string" && message.length > 0
     ? message

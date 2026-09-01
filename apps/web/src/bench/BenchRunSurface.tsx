@@ -386,6 +386,22 @@ export function NoResultFileInset({
 }
 
 /**
+ * The sink a {@link RunFailure} message is shown through. The seat composes that
+ * message as a cause chain framed by the error renderer's own newline
+ * (`sanitizedFailureMessage` in `./useInviterExchange`), so it reads as a chain
+ * only where that newline lays out as a line break -- what `pre-line` does and
+ * what the default `normal` collapses into a space. Both RunFailure alerts --
+ * this file's `FailureAlert` and `RecoveredExchangePanel`'s own -- show the
+ * message through here rather than styling a span of their own, which is
+ * what makes the RunFailure layout one measurement instead of one per alert:
+ * `test/browser/failureMessageLayout.test.ts` mounts this and counts the line
+ * boxes a two-link chain lands on.
+ */
+export function FailureMessage({ message }: { message: string }) {
+  return <span style={{ whiteSpace: "pre-line" }}>{message}</span>;
+}
+
+/**
  * The failure alert block: the alert takes focus when it appears (so the
  * message is read before anything else), states the category's message, and
  * renders whatever recovery the section supplies as its children. The
@@ -412,7 +428,7 @@ export function FailureAlert({
       tabIndex={-1}
       mb="md"
     >
-      <span style={{ whiteSpace: "pre-line" }}>{failure.message}</span>
+      <FailureMessage message={failure.message} />
       {children}
     </Alert>
   );

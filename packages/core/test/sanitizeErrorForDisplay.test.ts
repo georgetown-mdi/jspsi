@@ -592,6 +592,43 @@ describe("sanitizeErrorChainLinks", () => {
     );
   });
 
+  test("carries an arriving elision marker rather than re-cutting it away", () => {
+    // The renderer appends the marker PAST the last link's cap, so a link that
+    // spent its whole budget arrives over it. Re-escaping the link whole would
+    // charge the marker's own characters to that budget and truncate them off,
+    // delivering a chain that was cut as one that reads complete -- and the
+    // marker's absence is the half an operator can rely on.
+    let err = new Error("innermost");
+    for (let index = 1; index < MAX_ERROR_CAUSE_DEPTH * 2; index++)
+      err = new Error(
+        `${index}`.padEnd(COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH * 2, "w"),
+        { cause: err },
+      );
+    const rendered = sanitizeErrorForDisplay(err);
+    expect(rendered.endsWith(CAUSE_DEPTH_ELISION_MARKER)).toBe(true);
+
+    const links = sanitizeErrorChainLinks(rendered);
+    expect(links).toHaveLength(MAX_ERROR_CAUSE_DEPTH);
+    // The link under the marker is unchanged, its own truncation marker included:
+    // the two losses are independent and both are still stated.
+    expect(links[links.length - 1]).toBe(rendered.split("\ncaused by: ").pop());
+    expect(links[links.length - 1]).toContain(DISPLAY_TRUNCATION_MARKER);
+  });
+
+  test("re-rendering a marked chain is stable across further boundaries", () => {
+    // The relay splits the chain and the seat splits it again, so the pass runs
+    // more than once on the same text: a second pass that re-cut the marker
+    // would leave the fix holding at one boundary and not at two.
+    const last = "y".repeat(COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH);
+    const rendered = joinErrorCauseChain([
+      "the refusal.",
+      `${last} ${CAUSE_DEPTH_ELISION_MARKER}`,
+    ]);
+    const once = sanitizeErrorChainLinks(rendered);
+    expect(once[1]).toBe(`${last} ${CAUSE_DEPTH_ELISION_MARKER}`);
+    expect(sanitizeErrorChainLinks(joinErrorCauseChain(once))).toEqual(once);
+  });
+
   test("escapes every link it admits", () => {
     // The sender's own pass is not trusted: a link arriving with raw bytes is
     // escaped here too, in every position of the chain.

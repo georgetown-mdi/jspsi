@@ -52,6 +52,14 @@ export const MAX_ERROR_CAUSE_DEPTH = 8;
 export const CAUSE_DEPTH_ELISION_MARKER = "...[further causes elided]";
 
 /**
+ * {@link CAUSE_DEPTH_ELISION_MARKER} as it sits on a rendered chain's last link,
+ * behind the single space the append below separates it with. Both the renderer
+ * and the re-render seam write the marker through this constant, so the text a
+ * boundary looks for is the text the renderer put there.
+ */
+const ELISION_SUFFIX = ` ${CAUSE_DEPTH_ELISION_MARKER}`;
+
+/**
  * Separator placed between an error's message and each chained `cause` message.
  * The leading newline is the one control character in the assembled output, and
  * it is deliberate: a fixed formatting byte this module emits (so each cause
@@ -295,8 +303,7 @@ export function sanitizeErrorForDisplay(err: unknown): string {
   // sanitizeForDisplay: the marker is this module's own fixed ASCII, and a link
   // that spent its whole budget must still be able to say the chain went on.
   if (elided)
-    links[links.length - 1] =
-      `${links[links.length - 1]} ${CAUSE_DEPTH_ELISION_MARKER}`;
+    links[links.length - 1] = `${links[links.length - 1]}${ELISION_SUFFIX}`;
   return joinErrorCauseChain(links);
 }
 
@@ -334,6 +341,14 @@ export function joinErrorCauseChain(links: ReadonlyArray<string>): string {
  * The split is exact rather than heuristic, and {@link ERROR_CAUSE_SEPARATOR}
  * carries why: a link's own text cannot forge a boundary.
  *
+ * A chain that arrives already carrying {@link CAUSE_DEPTH_ELISION_MARKER}
+ * leaves still carrying it: the marker is lifted off the last link before that
+ * link is escaped and appended again afterwards, since the renderer appends it
+ * past the cap and re-escaping the link whole would spend the budget on the
+ * marker itself. What that preserves is the marker's ABSENCE, which is the half
+ * an operator can rely on -- a boundary that cut the marker off would deliver a
+ * cut chain reading as the whole failure.
+ *
  * It escapes and does not redact, which is what a re-render boundary does with
  * text somebody else composed: {@link redactPrivateKeyMaterial} runs where a
  * fragment is composed and again per link where the chain is first rendered, and
@@ -343,14 +358,17 @@ export function joinErrorCauseChain(links: ReadonlyArray<string>): string {
  */
 export function sanitizeErrorChainLinks(rendered: string): Array<string> {
   const links = rendered.split(ERROR_CAUSE_SEPARATOR);
-  const kept = links.slice(0, MAX_ERROR_CAUSE_DEPTH).map((link) =>
+  const kept = links.slice(0, MAX_ERROR_CAUSE_DEPTH);
+  const last = kept.length - 1;
+  const arrivedElided = kept[last].endsWith(ELISION_SUFFIX);
+  if (arrivedElided) kept[last] = kept[last].slice(0, -ELISION_SUFFIX.length);
+  const escaped = kept.map((link) =>
     sanitizeForDisplay(link, {
       maxLength: COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
     }),
   ) as Array<string>;
   // Appended after the escape and the cap, exactly as the renderer appends it.
-  if (links.length > MAX_ERROR_CAUSE_DEPTH)
-    kept[kept.length - 1] =
-      `${kept[kept.length - 1]} ${CAUSE_DEPTH_ELISION_MARKER}`;
-  return kept;
+  if (arrivedElided || links.length > MAX_ERROR_CAUSE_DEPTH)
+    escaped[last] = `${escaped[last]}${ELISION_SUFFIX}`;
+  return escaped;
 }
