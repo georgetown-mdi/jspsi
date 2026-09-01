@@ -1869,18 +1869,7 @@ test("diffLinkageTerms: citation values at the schema's length cannot truncate t
   // the fit dropped.
   const longSemver = `1.0.${"9".repeat(MAX_NAME_LENGTH - 4)}`;
   expect(longSemver).toHaveLength(MAX_NAME_LENGTH);
-  const vectors = [
-    // The widest the schema admits: six rendered characters per unit.
-    widestAtSchemaBound(MAX_NAME_LENGTH),
-    // A code point that escapes to four characters, at the schema's maximum.
-    "\u{00e9}".repeat(MAX_NAME_LENGTH),
-    // An astral code point escapes to nine characters here (ten at the widest
-    // of them) and costs two of the schema's units, so half the count is the
-    // same bound.
-    "\u{1f600}".repeat(MAX_NAME_LENGTH / 2),
-    // Nothing to escape: the case where the raw length IS the rendered length.
-    "x".repeat(MAX_NAME_LENGTH),
-  ];
+  const vectors = schemaMaximalNames();
   const replacingFirst = (value: string): string =>
     ["a", ...Array.from(value).slice(1)].join("");
   const replacingLast = (value: string): string =>
@@ -1954,6 +1943,65 @@ test("diffLinkageTerms: citation values at the schema's length cannot truncate t
   }
 });
 
+test("diffLinkageTerms: a legal-agreement reference at the schema's length keeps the expiry", () => {
+  // The reference is partner-chosen text the schema bounds in UTF-16 units,
+  // which is not a display bound, so a reference at that bound outspends the
+  // line's whole slot on its own. Spent left to right it takes all of it and
+  // what the clip deletes is the clause behind it: the operator is left a cut
+  // reference on a line whose two sides differ in the expiry it no longer
+  // names, and no reading of the difference at all. Driven at the bound on both
+  // sides, over every shape the schema admits.
+  for (const vector of schemaMaximalNames()) {
+    const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+    const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+    existing.legalAgreement = {
+      reference: vector,
+      purpose: "Audit and evaluation of the State tutoring program",
+      expirationDate: "2030-01-01",
+    };
+    incoming.legalAgreement = {
+      reference: vector,
+      purpose: "Audit and evaluation of the State tutoring program",
+      expirationDate: "2031-06-30",
+    };
+    // A citation at the same bound beside it, so the legal agreement is fitted
+    // against a line competing for the block rather than holding it alone.
+    existing.linkageRuleSet = {
+      fieldSet: { name: vector, version: "1.0.0" },
+      keySet: { name: vector, version: "1.0.0" },
+    };
+    incoming.linkageRuleSet = {
+      fieldSet: { name: vector, version: "2.0.0" },
+      keySet: { name: vector, version: "2.0.0" },
+    };
+    const { conflicts } = diffLinkageTerms(existing, incoming);
+    expect(conflicts.map((c) => c.field)).toEqual([
+      "linkage_rule_set",
+      "legal_agreement",
+    ]);
+
+    const rendered = renderedAcceptReconcileError(conflicts);
+    // Under the renderer's own cap, which is what says nothing was cut: the
+    // boundary truncates a link that runs past it and appends the marker on
+    // top, so a message this length is one it delivered whole.
+    expect(rendered.length).toBeLessThanOrEqual(
+      COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+    );
+    expect(rendered).toContain("then retry with the same invitation.");
+    // The reference was fitted rather than dropped, and the expiry -- the half
+    // of this line the two sides actually differ in, and the half an operator
+    // can check against their own copy -- survives the fit on both sides.
+    expect(rendered).toContain(DISPLAY_TRUNCATION_MARKER);
+    const sides = conflictValues(rendered, "legal_agreement");
+    expect(sides).toHaveLength(2);
+    expect(sides[0].endsWith("(expires 2030-01-01)")).toBe(true);
+    expect(sides[1].endsWith("(expires 2031-06-30)")).toBe(true);
+    // The reference opened a delimited run of its own rather than being cut
+    // away to the marker alone.
+    for (const side of sides) expect(side.startsWith('"')).toBe(true);
+  }
+});
+
 test("diffLinkageTerms: a citation both sides redact away is reported as withheld", () => {
   // Reaching this takes a marker on BOTH sides, so the config the operator holds
   // carries one too. The two names redact to the same replacement, the clause
@@ -2001,6 +2049,24 @@ test("diffLinkageTerms: a citation both sides redact away is reported as withhel
 // characters at most) but spends two units, so it buys five per unit, and a
 // `\xHH` escape four. Six per unit is therefore the widest the schema admits.
 const widestAtSchemaBound = (units: number): string => "\u0100".repeat(units);
+
+// A name at the schema's bound in each shape a value's rendered cost can take,
+// for the fits driven at their worst case. A function declaration so a test
+// composed above the helper it is built from can still call it.
+function schemaMaximalNames(): string[] {
+  return [
+    // The widest the schema admits: six rendered characters per unit.
+    widestAtSchemaBound(MAX_NAME_LENGTH),
+    // A code point that escapes to four characters, at the schema's maximum.
+    "\u{00e9}".repeat(MAX_NAME_LENGTH),
+    // An astral code point escapes to nine characters here (ten at the widest
+    // of them) and costs two of the schema's units, so half the count is the
+    // same bound.
+    "\u{1f600}".repeat(MAX_NAME_LENGTH / 2),
+    // Nothing to escape: the case where the raw length IS the rendered length.
+    "x".repeat(MAX_NAME_LENGTH),
+  ];
+}
 
 test("the worst-case fixture's values are the widest the schema admits", () => {
   // The helper's name, as a check rather than as its comment: every shape a

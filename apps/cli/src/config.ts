@@ -610,6 +610,36 @@ function reconcileClause(
 }
 
 /**
+ * The side of a conflict on an OPTIONAL block that names no chosen value at all,
+ * as a clause -- so a line whose other side is one can carry a fit for both of
+ * its sides. Nothing here to sub-partition: the placeholder is first-party copy,
+ * held to the slot it was given.
+ */
+const RECONCILE_ABSENT_CLAUSE: ReconcileClause = {
+  text: RECONCILE_UNSET,
+  fit: (budget: number): string => clipToRenderedCost(RECONCILE_UNSET, budget),
+};
+
+/**
+ * One conflict line whose two sides are clauses: the sides themselves, and the
+ * per-side fit beside them.
+ *
+ * Both come from the composition that produced the sides
+ * ({@link reconcileClause}), which is what keeps a fitted side an account of the
+ * same clause the unfitted one is.
+ */
+function reconcileClauseConflict(
+  existing: ReconcileClause,
+  incoming: ReconcileClause,
+): Omit<ReconcileDiff, "field"> {
+  return {
+    existing: existing.text,
+    incoming: incoming.text,
+    fit: { existing: existing.fit, incoming: incoming.fit },
+  };
+}
+
+/**
  * Recursively drop every key whose value is `undefined` from a JSON-like value,
  * preserving the rest of its structure. An explicit `undefined` (which an
  * in-process object built by spread may carry, unlike a Zod-parsed one where
@@ -772,13 +802,10 @@ function renderRuleSetCitationConflict(
   existing: LinkageRuleSetReference,
   incoming: LinkageRuleSetReference,
 ): Omit<ReconcileDiff, "field"> {
-  const existingClause = renderRuleSetCitation(existing);
-  const incomingClause = renderRuleSetCitation(incoming);
-  return {
-    existing: existingClause.text,
-    incoming: incomingClause.text,
-    fit: { existing: existingClause.fit, incoming: incomingClause.fit },
-  };
+  return reconcileClauseConflict(
+    renderRuleSetCitation(existing),
+    renderRuleSetCitation(incoming),
+  );
 }
 
 /**
@@ -979,13 +1006,17 @@ export function diffLinkageTerms(
   // The reference is partner-chosen free text and the expiration date is
   // schema-constrained, so each takes the form its own shape earns rather than
   // the pair being delimited once: a reference reading `X (expires 2030-01-01)`
-  // cannot then be mistaken for the clause this line composes around it.
+  // cannot then be mistaken for the clause this line composes around it. Two
+  // values inside first-party copy is a clause, so the slot divides between them
+  // (reconcileClause): a reference at the schema's length degrades itself rather
+  // than deleting the expiry -- which is both the half the two sides may be
+  // differing in and the half an operator can check against their own copy.
   const renderAgreement = (
     la: LinkageTerms["legalAgreement"],
-  ): CompatibilityMessageFragment =>
+  ): ReconcileClause =>
     la === undefined
-      ? RECONCILE_UNSET
-      : compatibilityMessage`${reconcileDiffValue(la.reference)} (expires ${reconcileDiffBareValue(la.expirationDate)})`;
+      ? RECONCILE_ABSENT_CLAUSE
+      : reconcileClause`${reconcileDiffValue(la.reference)} (expires ${reconcileDiffBareValue(la.expirationDate)})`;
   if (
     canonicalDiffers(
       existing.legalAgreement ?? null,
@@ -993,11 +1024,13 @@ export function diffLinkageTerms(
       "legal agreement",
     )
   )
-    add(
-      "legal_agreement",
-      renderAgreement(existing.legalAgreement),
-      renderAgreement(incoming.legalAgreement),
-    );
+    conflicts.push({
+      field: "legal_agreement",
+      ...reconcileClauseConflict(
+        renderAgreement(existing.legalAgreement),
+        renderAgreement(incoming.legalAgreement),
+      ),
+    });
 
   const renderPayload = (
     p: LinkageTerms["payload"],
