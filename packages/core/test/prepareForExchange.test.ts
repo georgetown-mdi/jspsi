@@ -828,6 +828,14 @@ describe("assertCertificateModePinsPartner", () => {
     ).toThrow(OperatorConfigError);
   });
 
+  test("offers the exchange record as the most a refused run keeps", () => {
+    const refuse = () =>
+      assertCertificateModePinsPartner({ mode: "certificate" });
+    expect(refuse).toThrow(/at most the exchange record of that disclosure/);
+    expect(refuse).toThrow(/where record writing is off, nothing at all/);
+    expect(refuse).not.toThrow(/keeping only the exchange record/);
+  });
+
   test("passes certificate mode with a pin", () => {
     expect(() =>
       assertCertificateModePinsPartner({

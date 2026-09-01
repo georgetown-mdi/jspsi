@@ -506,8 +506,8 @@ export function assertSigningModeImplemented(
  * nothing on file to check it against: {@link assertPartnerCertificateTrusted}
  * rejects unconditionally on an absent pin, which terminates the run. The result
  * and the receipt are written after {@link runExchange} returns, so the operator
- * is left with neither -- keeping only the self-attested record of the disclosure
- * the run had already made, which the throw carries back
+ * is left with neither -- at most the self-attested record of the disclosure the
+ * run had already made, which the throw carries back
  * ({@link exchangeRecordFromFailure}) -- while this party's data is in the
  * partner's hands, and on the leg that sends its `{certificate, signature}` frame
  * first the partner also holds this party's signed receipt.
@@ -515,6 +515,13 @@ export function assertSigningModeImplemented(
  * only ever this party's own config, and no invitation or accept path supplies a
  * pin later (see `config/signing.ts`), so the outcome is settled while the
  * operator is still configuring.
+ *
+ * That record is named as the MOST such a run keeps, never as a promise of one:
+ * whether it reaches disk is the calling front end's record-writing setting (a
+ * CLI run under `--no-record` writes none and keeps nothing at all), and this
+ * gate reads nothing of that setting -- the `signing` block is all it takes, and
+ * a message offering the record outright would name a consolation the operator
+ * does not get.
  *
  * Refused here for the reason its {@link assertSigningModeImplemented} sibling
  * is, and as the same {@link OperatorConfigError}: this is a local configuration
@@ -542,8 +549,9 @@ export function assertCertificateModePinsPartner(
       "after the payloads have crossed, and the certificate the partner " +
       "presents there is refused when nothing is on file to check it against. " +
       "The run would stop having sent this party's data and having written no " +
-      "result and no receipt, keeping only the exchange record of that " +
-      "disclosure. Obtain the partner's fingerprint out-of-band -- they " +
+      "result and no receipt, keeping at most the exchange record of that " +
+      "disclosure -- and, where record writing is off, nothing at all. Obtain " +
+      "the partner's fingerprint out-of-band -- they " +
       "produce it with 'psilink fingerprint' " +
       '-- and set signing.partner_fingerprint, or set signing.mode to "none" ' +
       "to run unsigned until you hold it.",
