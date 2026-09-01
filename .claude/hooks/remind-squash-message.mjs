@@ -145,9 +145,11 @@ function mainCheckoutRoot(cwd) {
 }
 
 const MESSAGE_RULES =
-  "an imperative subject 50 characters or fewer plus a prose body summarizing " +
-  "the whole change, under the repo's Commit Messages rules (no markdown, no " +
-  "board ids, no self-attribution)";
+  "an imperative subject plus a prose body summarizing the whole change, under " +
+  "the Commit Messages rules in CONTRIBUTING.md (no markdown, no board ids, no " +
+  "self-attribution). Measure the subject against that document's 50-character " +
+  'limit WITH the " (#NNNN)" suffix GitHub appends at squash time included, so ' +
+  "the drafted subject itself budgets roughly 42 characters";
 
 function fileReminder(count, path) {
   return (

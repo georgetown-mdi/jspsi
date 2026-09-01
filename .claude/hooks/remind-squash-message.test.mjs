@@ -260,12 +260,19 @@ describe("remind-squash-message hook", () => {
     expect(additionalContext).not.toContain("squash-messages");
   });
 
+  // The subject budget is the rule most easily lost in a later edit of the copy:
+  // GitHub appends " (#NNNN)" when it squash-merges, so a subject drafted to the
+  // full 50 characters lands over the limit.
   it("names the message rules whichever reminder it emits", () => {
     const dir = track(makeRepo(2));
-    const rules = "50 characters or fewer";
-    expect(context(prCreateEvent(dir, ghOutput(5)))).toContain(rules);
+    const rules = ["50-character", '" (#NNNN)"', "42 characters"];
+    const fileContext = context(prCreateEvent(dir, ghOutput(5)));
     execFileSync("git", ["-C", dir, "checkout", "-q", "--detach"]);
-    expect(context(prCreateEvent(dir, { stdout: "" }))).toContain(rules);
+    const printContext = context(prCreateEvent(dir, { stdout: "" }));
+    for (const rule of rules) {
+      expect(fileContext).toContain(rule);
+      expect(printContext).toContain(rule);
+    }
   });
 
   it("names a directory this repository's gitignore covers", () => {
