@@ -29,9 +29,13 @@ function context(payload) {
   return parsed.hookSpecificOutput.additionalContext;
 }
 
-const prCreateEvent = (dir, toolResponse) => ({
+const prCreateEvent = (
+  dir,
+  toolResponse,
+  command = "gh pr create --base staging --title x",
+) => ({
   tool_name: "Bash",
-  tool_input: { command: "gh pr create --base staging --title x" },
+  tool_input: { command },
   tool_response: toolResponse,
   cwd: dir,
 });
@@ -62,6 +66,23 @@ function makeRepo(commitsAheadOfBase, branch = null) {
     git("commit", "-q", "-am", `Change ${i}`);
   }
   return dir;
+}
+
+// Another branch off the base carrying `commitsAheadOfBase` commits of its own,
+// leaving the checkout on the branch it was already on -- the shape a main
+// checkout is in when the by-ref flow opens a PR for a branch it is not on.
+function addBranch(dir, branch, commitsAheadOfBase) {
+  const git = (...args) =>
+    execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" });
+  const checkedOut = git("rev-parse", "--abbrev-ref", "HEAD").trim();
+  git("checkout", "-q", "-b", branch, "origin/staging");
+  for (let i = 0; i < commitsAheadOfBase; i++) {
+    writeFileSync(join(dir, `${branch}-${i}.txt`), `change ${i}\n`);
+    git("add", "--all");
+    git("commit", "-q", "-m", `Change ${i} on ${branch}`);
+  }
+  git("checkout", "-q", checkedOut);
+  return branch;
 }
 
 // A linked worktree nested under .claude/worktrees/ the way the harness places
@@ -146,6 +167,89 @@ describe("remind-squash-message hook", () => {
       join(main, "scratch", "squash-messages", "42.txt"),
     );
     expect(additionalContext).not.toContain(worktree);
+  });
+
+  it("counts the --head branch when the checkout sits at the base", () => {
+    const dir = track(makeRepo(0, "staging"));
+    const branch = addBranch(dir, "branch-under-review", 3);
+    const additionalContext = context(
+      prCreateEvent(
+        dir,
+        ghOutput(1191),
+        `gh pr create --base staging --head ${branch} --title x`,
+      ),
+    );
+    expect(additionalContext).toContain("3 commits");
+    expect(additionalContext).toContain(
+      join(dir, "scratch", "squash-messages", "1191.txt"),
+    );
+  });
+
+  it("counts the branch a fork-style --head=owner:branch names", () => {
+    const dir = track(makeRepo(0, "staging"));
+    const branch = addBranch(dir, "branch-under-review", 3);
+    const additionalContext = context(
+      prCreateEvent(
+        dir,
+        ghOutput(1192),
+        `gh pr create --base staging --head=someone:${branch} --title x`,
+      ),
+    );
+    expect(additionalContext).toContain("3 commits");
+    expect(additionalContext).toContain(
+      join(dir, "scratch", "squash-messages", "1192.txt"),
+    );
+  });
+
+  it("resolves the --head branch from a linked worktree", () => {
+    const main = track(makeRepo(0, "staging"));
+    const branch = addBranch(main, "branch-under-review", 3);
+    const worktree = addWorktree(main, "another-branch");
+    const additionalContext = context(
+      prCreateEvent(
+        worktree,
+        ghOutput(43),
+        `gh pr create --base staging --head ${branch} --title x`,
+      ),
+    );
+    expect(additionalContext).toContain("3 commits");
+    expect(additionalContext).toContain(
+      join(main, "scratch", "squash-messages", "43.txt"),
+    );
+  });
+
+  it("counts the --head branch rather than the cwd HEAD", () => {
+    const dir = track(makeRepo(2, "feature"));
+    const branch = addBranch(dir, "single-commit-branch", 1);
+    const additionalContext = context(
+      prCreateEvent(
+        dir,
+        ghOutput(44),
+        `gh pr create --base staging --head ${branch} --title x`,
+      ),
+    );
+    expect(additionalContext).toBeNull();
+  });
+
+  it("falls back to the cwd HEAD when the --head ref does not resolve", () => {
+    const dir = track(makeRepo(2, "feature"));
+    const additionalContext = context(
+      prCreateEvent(
+        dir,
+        ghOutput(45),
+        "gh pr create --base staging --head no-such-branch --title x",
+      ),
+    );
+    expect(additionalContext).toContain("2 commits");
+    expect(additionalContext).toContain(
+      join(dir, "scratch", "squash-messages", "45.txt"),
+    );
+  });
+
+  it("counts the cwd HEAD when the command carries no --head", () => {
+    const dir = track(makeRepo(0, "staging"));
+    addBranch(dir, "branch-under-review", 3);
+    expect(context(prCreateEvent(dir, ghOutput(46)))).toBeNull();
   });
 
   it("falls back to printing when no key can be determined", () => {
