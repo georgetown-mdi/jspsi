@@ -334,7 +334,7 @@ describe("signaling diagnostics sink", () => {
 
     // An OFFER addressed to a destination id that is not a string: nobody has
     // registered it, and `realm.addMessageToQueue` cannot size a frame carrying
-    // it -- `messageByteSize` throws inside it before the frame is ever queued,
+    // it -- `serializeFrame` throws inside it before the frame is ever queued,
     // so what surfaces here is the shipped wiring's own fault rather than a
     // listener this test attached.
     client.send(

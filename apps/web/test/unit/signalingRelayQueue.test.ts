@@ -31,6 +31,25 @@ const OFFER_PAYLOAD = {
   browser: "chrome",
 };
 
+/** A payload carrying every JSON shape a signaling frame can nest -- objects
+ * inside arrays inside objects, numbers, booleans, null, and non-Latin1 text --
+ * so what the hold returns is compared against more than a string. */
+const NESTED_PAYLOAD = {
+  sdp: {
+    type: "offer",
+    sdp: "v=0\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\n",
+  },
+  candidates: [
+    { candidate: "candidate:1 1 udp 2113937151 127.0.0.1 54321 typ host" },
+    {
+      candidate:
+        "candidate:2 1 tcp 1518280447 127.0.0.1 9 typ host tcptype active",
+    },
+  ],
+  metadata: { label: "linkage-Ā", retries: 3, reliable: true, note: null },
+  connectionId: "dc_7b3e",
+};
+
 interface SignalingFrame {
   type?: unknown;
   src?: unknown;
@@ -140,5 +159,38 @@ describe("relay hold-for-reconnect round trip", () => {
 
     // Nothing was bounced back to the sender: a held frame is not an error.
     expect(sender.frames.map((frame) => frame.type)).toEqual(["OPEN"]);
+  });
+
+  test("delivers a deeply nested payload unchanged through the hold", async () => {
+    // The queue holds a frame in serialized form and reconstitutes it on the
+    // way out, so what a held payload must survive is a round trip through that
+    // form -- nesting, arrays, numbers, booleans, null, and non-Latin1 text
+    // included, not just the one SDP string of the offer above.
+    const broker = await startShippedBroker();
+
+    const absent = await connectCollecting(broker.port, ABSENT_ID);
+    absent.ws.close();
+    await waitFor(() => broker.realm.getClientById(ABSENT_ID) === undefined);
+
+    const sender = await connectCollecting(broker.port, SENDER_ID);
+    sender.ws.send(
+      JSON.stringify({
+        type: "OFFER",
+        dst: ABSENT_ID,
+        payload: NESTED_PAYLOAD,
+      }),
+    );
+
+    await waitFor(
+      () => broker.realm.getMessageQueueById(ABSENT_ID)?.size() === 1,
+    );
+
+    const reconnected = await connectCollecting(broker.port, ABSENT_ID);
+    await waitFor(() =>
+      reconnected.frames.some((frame) => frame.type === "OFFER"),
+    );
+    const offer = reconnected.frames.find((frame) => frame.type === "OFFER")!;
+    expect(offer.src).toBe(SENDER_ID);
+    expect(offer.payload).toEqual(NESTED_PAYLOAD);
   });
 });

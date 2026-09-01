@@ -477,11 +477,11 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
       // Dispatch is absorbed rather than let out, because `ws` calls this handler
       // from inside its own receiver with nothing between it and the socket's
       // `data` event: a throw here is an uncaught exception, and this server is
-      // internet-facing. Reachable rather than theoretical -- the relay sizes a
-      // frame it holds for an absent destination and throws on a non-string id
-      // field (models/messageQueue.ts) -- which is why the report has to name
-      // this server: read as a client frame it points the operator at a peer
-      // sending garbage instead of at the fault.
+      // internet-facing. Reachable rather than theoretical -- the relay
+      // serializes a frame it holds for an absent destination and throws on a
+      // non-string id field (models/messageQueue.ts) -- which is why the report
+      // has to name this server: read as a client frame it points the operator
+      // at a peer sending garbage instead of at the fault.
       try {
         this.emit("message", client, message);
       } catch (e) {

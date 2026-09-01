@@ -1,3 +1,5 @@
+import { Buffer } from "node:buffer";
+
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
@@ -8,12 +10,19 @@ import {
 } from "@psilink/peerjs-broker/models/realm";
 import { CheckBrokenConnections } from "@psilink/peerjs-broker/services/checkBrokenConnections/index";
 import { Client } from "@psilink/peerjs-broker/models/client";
+import { MAX_SIGNALING_PAYLOAD_BYTES } from "@psilink/peerjs-broker/services/webSocketServer/index";
 import { MessageType } from "@psilink/peerjs-broker/enums";
 import { PEER_PING_INTERVAL_MS } from "@psi/rendezvous";
 import defaultConfig from "@psilink/peerjs-broker/config/index";
-import { messageByteSize } from "@psilink/peerjs-broker/models/messageQueue";
+import { serializeFrame } from "@psilink/peerjs-broker/models/messageQueue";
 
 import type { IMessage } from "@psilink/peerjs-broker/models/message";
+
+/** The resident bytes a frame is accounted at, which is what the queue holds
+ * it as: the frame serialized. */
+function accountedBytes(message: IMessage): number {
+  return serializeFrame(message).byteSize;
+}
 
 // Unit coverage for the two gap-2 controls that need no socket: the two-tier
 // liveness reaper (a registered-but-never-heartbeated client is cleared well
@@ -173,6 +182,21 @@ describe("relay message-queue bounds", () => {
     };
   }
 
+  // A structured payload just under the wire cap, of the property-dense nested
+  // shape whose parsed form outweighs its serialized bytes by the widest margin
+  // -- the shape the queue must not hold in parsed form.
+  const NEAR_WIRE_CAP_CHARS = MAX_SIGNALING_PAYLOAD_BYTES - 1024;
+  function densePayload(targetChars: number): unknown {
+    const rows: Array<Record<string, unknown>> = [];
+    let chars = 2;
+    for (let k = 0; chars < targetChars; k += 1) {
+      const row = { k, a: [1, 2, 3], b: { c: "x", d: true } };
+      chars += JSON.stringify(row).length + (rows.length > 0 ? 1 : 0);
+      rows.push(row);
+    }
+    return rows;
+  }
+
   test("caps the number of distinct queued destinations", () => {
     const realm = new Realm();
     // Spray more distinct unregistered destinations than the bound allows.
@@ -206,16 +230,18 @@ describe("relay message-queue bounds", () => {
     // The queue actually filled to within one frame of the cap -- the bound is
     // doing real work, not rejecting at zero.
     expect(queue!.byteSize()).toBeGreaterThan(
-      MAX_QUEUE_BYTES - messageByteSize(bigOfferTo("dst")),
+      MAX_QUEUE_BYTES - accountedBytes(bigOfferTo("dst")),
     );
   });
 
   test("counts resident (UTF-16) bytes, so a non-Latin1 payload cannot evade the cap", () => {
     // V8 stores a string as two bytes per character once it holds any non-Latin1
     // character, so an all-`Ā` payload and an equal-length ASCII payload
-    // have the same heap residency. messageByteSize must size them identically;
+    // have the same heap residency. The accounting must size them identically;
     // a UTF-8 measure would call the ASCII one half the size and let a wide
-    // payload occupy ~2x the cap while measuring under it.
+    // payload occupy ~2x the cap while measuring under it. Both are sized at
+    // the serialized form the queue holds, so each carries the two quotes
+    // `JSON.stringify` puts around a string payload.
     const base = { type: MessageType.OFFER, src: "s", dst: "d" } as const;
     const ascii: IMessage = {
       ...base,
@@ -225,9 +251,9 @@ describe("relay message-queue bounds", () => {
       ...base,
       payload: "Ā".repeat(FRAME_PAYLOAD_CHARS),
     };
-    expect(messageByteSize(ascii)).toBe(messageByteSize(wide));
-    expect(messageByteSize(wide)).toBe(
-      2 * ("OFFER".length + "s".length + "d".length + FRAME_PAYLOAD_CHARS),
+    expect(accountedBytes(ascii)).toBe(accountedBytes(wide));
+    expect(accountedBytes(wide)).toBe(
+      2 * ("OFFER".length + "s".length + "d".length + FRAME_PAYLOAD_CHARS + 2),
     );
 
     // And the queue enforces the cap against a wide-payload spray just the same.
@@ -263,7 +289,7 @@ describe("relay message-queue bounds", () => {
       payload,
     } as unknown as IMessage;
 
-    expect(messageByteSize(offer)).toBe(
+    expect(accountedBytes(offer)).toBe(
       2 * ("OFFER".length + "s".length + "d".length) +
         2 * JSON.stringify(payload).length,
     );
@@ -272,8 +298,89 @@ describe("relay message-queue bounds", () => {
     realm.addMessageToQueue("d", offer);
     const queue = realm.getMessageQueueById("d");
     expect(queue?.size()).toBe(1);
-    expect(queue?.byteSize()).toBe(messageByteSize(offer));
+    expect(queue?.byteSize()).toBe(accountedBytes(offer));
     expect(queue?.readMessage()?.payload).toEqual(payload);
+  });
+
+  test("holds a property-dense payload as the string it was accounted at", () => {
+    // The queue must retain the serialization it counted, not the parsed object
+    // it arrived as: a parsed object of this shape occupies a large multiple of
+    // its serialized bytes, so holding it would leave MAX_QUEUE_BYTES bounding
+    // something other than the memory the process is carrying. Sized at the
+    // wire cap, where that divergence is worth the most to an attacker.
+    const payload = densePayload(NEAR_WIRE_CAP_CHARS);
+    const serialized = JSON.stringify(payload);
+    expect(serialized.length).toBeGreaterThan(
+      MAX_SIGNALING_PAYLOAD_BYTES - 2048,
+    );
+    expect(serialized.length).toBeLessThanOrEqual(MAX_SIGNALING_PAYLOAD_BYTES);
+    const offer = {
+      type: MessageType.OFFER,
+      src: "s",
+      dst: "d",
+      payload,
+    } as unknown as IMessage;
+
+    const realm = new Realm();
+    realm.addMessageToQueue("d", offer);
+    const queue = realm.getMessageQueueById("d")!;
+
+    const [held] = queue.getMessages();
+    expect(held.message.payload).toBe(serialized);
+    // What is held is what was counted -- exactly, field by field, with no
+    // parsed form of the payload left on the queue and no unaccounted field
+    // riding along.
+    expect(Object.keys(held.message).sort()).toEqual([
+      "dst",
+      "payload",
+      "src",
+      "type",
+    ]);
+    expect(held.byteSize).toBe(
+      2 * ("OFFER".length + "s".length + "d".length) +
+        Buffer.byteLength(serialized, "utf16le"),
+    );
+    expect(queue.byteSize()).toBe(held.byteSize);
+
+    // The parsed form is reconstituted for delivery, so the peer that drains
+    // the queue still receives the payload it was sent.
+    expect(queue.readMessage()?.payload).toEqual(payload);
+    expect(queue.byteSize()).toBe(0);
+  });
+
+  test("refuses a structured payload past the cap at the same threshold as an equal string payload", () => {
+    // A dense object and a string that serialize to the same length are held at
+    // the same residency, so the byte cap admits and refuses them identically:
+    // arriving as an object buys no extra room in the queue.
+    const payload = densePayload(NEAR_WIRE_CAP_CHARS);
+    const serialized = JSON.stringify(payload);
+    // JSON.stringify puts two quotes around a string payload, so this string is
+    // held at exactly the object's serialized length.
+    const equivalentString = "x".repeat(serialized.length - 2);
+    expect(JSON.stringify(equivalentString).length).toBe(serialized.length);
+
+    const fill = (payloadValue: unknown): Realm => {
+      const realm = new Realm();
+      for (let i = 0; i < 3; i += 1) {
+        realm.addMessageToQueue("dst", {
+          type: MessageType.OFFER,
+          src: "spammer",
+          dst: "dst",
+          payload: payloadValue,
+        } as unknown as IMessage);
+      }
+      return realm;
+    };
+
+    const objectQueue = fill(payload).getMessageQueueById("dst")!;
+    const stringQueue = fill(equivalentString).getMessageQueueById("dst")!;
+
+    expect(objectQueue.byteSize()).toBe(stringQueue.byteSize());
+    expect(objectQueue.size()).toBe(stringQueue.size());
+    expect(objectQueue.byteSize()).toBeLessThanOrEqual(MAX_QUEUE_BYTES);
+    // A near-wire-cap frame is still holdable, and the cap refuses the frames
+    // behind it rather than the count cap doing the work.
+    expect(objectQueue.size()).toBe(1);
   });
 
   test("caps the resident bytes of a queue sprayed with structured payloads", () => {
@@ -293,7 +400,7 @@ describe("relay message-queue bounds", () => {
     const queue = realm.getMessageQueueById("dst")!;
     expect(queue.byteSize()).toBeLessThanOrEqual(MAX_QUEUE_BYTES);
     expect(queue.byteSize()).toBeGreaterThan(
-      MAX_QUEUE_BYTES - messageByteSize(bigObjectOfferTo("dst")),
+      MAX_QUEUE_BYTES - accountedBytes(bigObjectOfferTo("dst")),
     );
   });
 
@@ -301,17 +408,35 @@ describe("relay message-queue bounds", () => {
     // The id fields are typed string, but `dst` rides inside the peer's own
     // frame and is parsed from untrusted JSON; a non-string one must not slip
     // past the byte accounting (which would otherwise undercount or NaN-poison
-    // the running total) or key a queue of its own. messageByteSize throws on
-    // it, so addMessageToQueue never enqueues such a frame.
+    // the running total) or key a queue of its own. Serializing the frame throws
+    // on it, so addMessageToQueue never enqueues such a frame.
     const malformed = {
       type: MessageType.OFFER,
       src: "s",
       dst: { not: "a string" },
     } as unknown as IMessage;
-    expect(() => messageByteSize(malformed)).toThrow();
+    expect(() => accountedBytes(malformed)).toThrow();
 
     const realm = new Realm();
     expect(() => realm.addMessageToQueue(malformed.dst, malformed)).toThrow();
+    expect(realm.getClientsIdsWithQueue()).toHaveLength(0);
+  });
+
+  test("refuses a payload with no serialized form rather than sizing it zero", () => {
+    // A value `JSON.stringify` leaves undefined has no form the queue can hold
+    // and none it can account, and queuing it at zero bytes would put a frame
+    // in the queue the byte cap never sees. It is refused instead, by the same
+    // throw a malformed id takes to the dispatch-fault route.
+    const unserializable = {
+      type: MessageType.OFFER,
+      src: "s",
+      dst: "d",
+      payload: () => "no wire form",
+    } as unknown as IMessage;
+    expect(() => accountedBytes(unserializable)).toThrow();
+
+    const realm = new Realm();
+    expect(() => realm.addMessageToQueue("d", unserializable)).toThrow();
     expect(realm.getClientsIdsWithQueue()).toHaveLength(0);
   });
 
@@ -324,7 +449,7 @@ describe("relay message-queue bounds", () => {
     const filled = queue.byteSize();
     expect(filled).toBeLessThanOrEqual(MAX_QUEUE_BYTES);
     expect(filled).toBeGreaterThan(
-      MAX_QUEUE_BYTES - messageByteSize(bigOfferTo("dst")),
+      MAX_QUEUE_BYTES - accountedBytes(bigOfferTo("dst")),
     );
 
     // A reconnecting peer drains one frame; its bytes are released and a fresh

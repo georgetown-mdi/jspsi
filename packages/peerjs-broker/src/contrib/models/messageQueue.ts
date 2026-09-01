@@ -2,45 +2,88 @@ import { Buffer } from "node:buffer";
 import type { IMessage } from "./message.ts";
 
 /**
- * Resident bytes of the optional payload, in the same UTF-16 worst-case units
- * `messageByteSize` uses. Every real signaling payload -- an SDP offer or
- * answer, an ICE candidate -- reaches the relay as a parsed JSON object rather
- * than a string, so a structured payload is sized by its serialized form, the
- * bytes that crossed the wire. A value `JSON.stringify` leaves unserialized has
- * no wire form to account for and is sized zero.
+ * A signaling frame in the form the relay queue holds it -- every field a
+ * string, the payload serialized -- paired with the resident bytes those
+ * strings occupy. Pairing the two is what makes `MAX_QUEUE_BYTES` a bound on
+ * real memory rather than on a proxy for it: the bytes counted on the way in
+ * are the bytes retained, so a queued frame cannot occupy a multiple of what it
+ * was charged.
  */
-function payloadByteSize(payload: unknown): number {
-  if (payload === undefined || payload === null) return 0;
-  if (typeof payload === "string") return Buffer.byteLength(payload, "utf16le");
-  const serialized: string | undefined = JSON.stringify(payload);
-  return serialized === undefined
-    ? 0
-    : Buffer.byteLength(serialized, "utf16le");
+export interface SerializedFrame {
+  readonly message: IMessage;
+  readonly byteSize: number;
 }
 
 /**
- * Resident byte size of a queued signaling message, summed over its fields.
+ * Resident byte size of a serialized frame, summed over its string fields.
  * Measured as UTF-16 code units times two (`utf16le`), not UTF-8, because V8
  * stores a JavaScript string as two bytes per code unit the moment it holds any
  * non-Latin1 character (>= U+0100): a UTF-8 measure undercounts such a payload
  * by up to 2x, letting it occupy roughly twice its measured size in the heap.
  * Counting the worst-case two-byte residency bounds a relay reconnect queue's
  * actual memory regardless of payload charset (see `MAX_QUEUE_BYTES`). The
- * optional `payload` dominates; `type`/`src`/`dst` are short ids. A structured
- * payload is accounted by its serialization, which does not model the
- * per-property overhead V8 adds to a parsed object; the residual that leaves on
- * the queue's ceiling is quantified in docs/spec/CHANNEL_SECURITY.md.
- * `Buffer.byteLength` throws on a non-string `type`, `src`, or `dst`, so a
- * frame whose ids are malformed is rejected before it can be queued or key a
- * queue of its own.
+ * payload dominates; `type`/`src`/`dst` are short ids.
  */
-export function messageByteSize(message: IMessage): number {
+function frameByteSize(message: IMessage): number {
   return (
     Buffer.byteLength(message.type, "utf16le") +
     Buffer.byteLength(message.src, "utf16le") +
     Buffer.byteLength(message.dst, "utf16le") +
-    payloadByteSize(message.payload)
+    (message.payload === undefined
+      ? 0
+      : Buffer.byteLength(message.payload, "utf16le"))
   );
+}
+
+/**
+ * Serialize a frame into the form the queue holds it in, accounted at that
+ * form's residency. Every real signaling payload -- an SDP offer or answer, an
+ * ICE candidate -- reaches the relay as a parsed JSON object, whose heap
+ * residency runs a large multiple of the bytes that carried it, so holding the
+ * serialization instead is what keeps a queue's accounted bytes equal to its
+ * retained ones and leaves the parsed form to the collector. Only the four
+ * protocol fields survive, so an extra property hung off a peer's frame is
+ * neither retained nor uncounted.
+ *
+ * `Buffer.byteLength` throws on a non-string `type`, `src`, or `dst`, and a
+ * payload with no JSON form is refused rather than sized zero; either way the
+ * frame is dropped before it can be queued or key a queue of its own, and the
+ * throw surfaces as a `frame-dispatch` diagnostic.
+ */
+export function serializeFrame(message: IMessage): SerializedFrame {
+  const payload =
+    message.payload === undefined ? undefined : JSON.stringify(message.payload);
+
+  if (payload === undefined && message.payload !== undefined) {
+    throw new TypeError("signaling payload has no serialized form");
+  }
+
+  const serialized: IMessage = {
+    type: message.type,
+    src: message.src,
+    dst: message.dst,
+    payload,
+  };
+
+  return { message: serialized, byteSize: frameByteSize(serialized) };
+}
+
+/**
+ * The delivery form of a held frame: the payload parsed back out of the string
+ * the queue holds, so a peer draining a queue receives what a directly relayed
+ * frame would have carried (the transmission handler serializes whatever it is
+ * handed). The parse reads this server's own serialization of a value it
+ * already parsed off the wire, so it re-admits no structure the receive path
+ * did not already accept. `IMessage` types `payload` as a string, which a
+ * structured signaling payload has never been.
+ */
+function reconstituteFrame({ message }: SerializedFrame): IMessage {
+  if (message.payload === undefined) return message;
+
+  return {
+    ...message,
+    payload: JSON.parse(message.payload) as IMessage["payload"],
+  };
 }
 
 export interface IMessageQueue {
@@ -50,23 +93,21 @@ export interface IMessageQueue {
 
   byteSize(): number;
 
-  addMessage(message: IMessage, byteSize?: number): void;
+  addMessage(frame: SerializedFrame): void;
 
   readMessage(): IMessage | undefined;
 
-  getMessages(): IMessage[];
+  getMessages(): SerializedFrame[];
 }
 
 export class MessageQueue implements IMessageQueue {
   private lastReadAt: number = new Date().getTime();
-  private readonly messages: IMessage[] = [];
-  // Byte size of each entry in `messages`, pushed and shifted in lockstep, plus
-  // their running total. This lets the relay bound a queue's resident bytes
-  // without rescanning a payload: each message's size is measured exactly once
-  // (on enqueue) and reused on read, so `messageByteSize` is never recomputed.
-  // Reads decrement the total, so a queue a reconnecting peer drains can accept
-  // fresh frames again rather than staying wedged at the cap.
-  private readonly messageSizes: number[] = [];
+  // Each frame carries the byte size it was accounted at, so the running total
+  // below is maintained without ever re-measuring a payload: a frame is sized
+  // once, where it is serialized. Reads decrement the total, so a queue a
+  // reconnecting peer drains can accept fresh frames again rather than staying
+  // wedged at the cap.
+  private readonly frames: SerializedFrame[] = [];
   private bytes = 0;
 
   public getLastReadAt(): number {
@@ -74,33 +115,30 @@ export class MessageQueue implements IMessageQueue {
   }
 
   public size(): number {
-    return this.messages.length;
+    return this.frames.length;
   }
 
   public byteSize(): number {
     return this.bytes;
   }
 
-  public addMessage(
-    message: IMessage,
-    byteSize: number = messageByteSize(message),
-  ): void {
-    this.bytes += byteSize;
-    this.messages.push(message);
-    this.messageSizes.push(byteSize);
+  public addMessage(frame: SerializedFrame): void {
+    this.bytes += frame.byteSize;
+    this.frames.push(frame);
   }
 
   public readMessage(): IMessage | undefined {
-    if (this.messages.length > 0) {
-      this.lastReadAt = new Date().getTime();
-      this.bytes -= this.messageSizes.shift() ?? 0;
-      return this.messages.shift();
-    }
+    const frame = this.frames.shift();
 
-    return undefined;
+    if (frame === undefined) return undefined;
+
+    this.lastReadAt = new Date().getTime();
+    this.bytes -= frame.byteSize;
+
+    return reconstituteFrame(frame);
   }
 
-  public getMessages(): IMessage[] {
-    return this.messages;
+  public getMessages(): SerializedFrame[] {
+    return this.frames;
   }
 }
