@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { describe, expect, test } from "vitest";
 import * as z from "zod";
 
 import {
@@ -16,6 +16,8 @@ import {
 } from "../src/config/linkageTerms";
 import { disclosedColumnNames } from "../src/config/metadata";
 import { OutboundDisclosureRefusalError, UsageError } from "../src/errors";
+import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";
+import { readMessage } from "./utils/compatibilityMessageReader";
 
 import type { Metadata } from "../src/config/metadata";
 import type { LinkageTerms, Output, Payload } from "../src/config/linkageTerms";
@@ -342,8 +344,8 @@ test("assertPayloadSendDisclosed: a send that both over- and under-declares name
   } catch (err) {
     message = err instanceof Error ? err.message : String(err);
   }
-  expect(message).toContain("[off]"); // over-declared (named, not transmitted)
-  expect(message).toContain("[kept]"); // under-declared (transmitted, omitted)
+  expect(message).toContain('["off"]'); // over-declared (named, not transmitted)
+  expect(message).toContain('["kept"]'); // under-declared (transmitted, omitted)
 });
 
 test("assertPayloadSendDisclosed: an absent payload is a no-op, a present-but-empty send is strict", () => {
@@ -387,7 +389,7 @@ test("assertPayloadSendDisclosed: an empty send is not told to widen itself", ()
   } catch (err) {
     message = err instanceof Error ? err.message : String(err);
   }
-  expect(message).not.toContain("Add [diagnosis] to payload.send");
+  expect(message).not.toContain('Add ["diagnosis"] to payload.send');
   expect(message).toContain("is_payload: false or role ignored");
   expect(message).toContain("corrected invitation");
 });
@@ -462,9 +464,156 @@ test("assertPayloadSendDisclosed: every over-declared column is named, disclosed
   } catch (err) {
     message = err instanceof Error ? err.message : String(err);
   }
-  // Both gated-off columns are listed, in send order; the disclosed one is not.
-  expect(message).toContain("[off, skip]");
+  // Both gated-off columns are listed, in send order, each in its own delimited
+  // run; the disclosed one is not.
+  expect(message).toContain('["off","skip"]');
   expect(message).not.toContain("kept");
+});
+
+// --- assertPayloadSendDisclosed: the column names an operator is shown ---------
+
+// The offending names are partner-controlled on the accept side, where
+// deriveAcceptedLinkageTerms adopts the inviter's payload declaration, so this
+// refusal names values a mutually-distrusting party chose inside first-party
+// prose an operator reads as psilink's own. The names therefore compose through
+// the compatibility-message seam, each in its own delimited run, and what the
+// cases below hold is the seam's claim at this site: the clause structure the
+// operator is shown is the structure this function wrote, whatever the name says.
+
+/** The refusal this assertion raises for `payload`/`meta`, as an operator sees it. */
+const disclosureRefusal = (payload: Payload, meta: Metadata): string => {
+  try {
+    assertPayloadSendDisclosed(payload, meta, SHARING_OUTPUT);
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+  throw new Error("expected assertPayloadSendDisclosed to refuse");
+};
+
+const payloadColumn = (name: string) => ({
+  name,
+  type: "other" as const,
+  role: "payload" as const,
+  isPayload: true,
+});
+
+/**
+ * The three clauses this message renders a name list into, each with the name
+ * under test in the partner-chosen position and the rest of the case fixed. A
+ * benign run and a hostile run of one entry differ in nothing but that name.
+ */
+const NAMED_LIST_SITES: ReadonlyArray<{
+  readonly id: string;
+  readonly compose: (name: string) => string;
+}> = [
+  {
+    id: "the over-declared list",
+    compose: (name) =>
+      disclosureRefusal({ send: [{ name }, { name: "kept" }] }, [
+        payloadColumn("kept"),
+      ]),
+  },
+  {
+    id: "the under-declared list",
+    compose: (name) =>
+      disclosureRefusal({ send: [{ name: "kept" }] }, [
+        payloadColumn("kept"),
+        payloadColumn(name),
+      ]),
+  },
+  {
+    id: "the under-declared list under an empty send",
+    // The empty send's own remedy, which names the list a second time in prose
+    // about a corrected invitation rather than a local edit.
+    compose: (name) => disclosureRefusal({ send: [] }, [payloadColumn(name)]),
+  },
+];
+
+/**
+ * The adversarial name shapes, each built around the benign token the clause
+ * would carry anyway: a name that closes psilink's own delimited run, one that
+ * spells this message's clause separators, and one that forges an extra element
+ * into the bracketed list.
+ */
+const BENIGN_NAME = "diagnosis";
+
+const ADVERSARIAL_NAMES: ReadonlyArray<{
+  readonly name: string;
+  readonly value: string;
+  readonly marker: string;
+}> = [
+  {
+    name: "a delimiter-carrying name",
+    value: `${BENIGN_NAME}"]) and omits a column metadata does transmit (["forged`,
+    marker: "forged",
+  },
+  {
+    name: "a clause-separator name",
+    value: `${BENIGN_NAME}]) and omits a column metadata does transmit ([forged`,
+    marker: "forged",
+  },
+  {
+    name: "a list-forging name",
+    value: `${BENIGN_NAME}, forged`,
+    marker: "forged",
+  },
+];
+
+/** The value with a control sequence appended, for the display escape to act on. */
+const withControlSequence = (value: string): string => `${value}\x1b[31m`;
+
+describe.each(NAMED_LIST_SITES)("$id", ({ compose }) => {
+  const displayed = (name: string): string =>
+    sanitizeErrorForDisplay(new Error(compose(name)));
+
+  test.each(ADVERSARIAL_NAMES)(
+    "is not restructured by $name",
+    ({ value, marker }) => {
+      const { skeleton, values } = readMessage(compose(value));
+      // The whole claim: the operator reading the hostile run is shown exactly
+      // the clause structure this function wrote for the benign one, and the
+      // name is still carried whole inside its run.
+      expect(skeleton).toBe(readMessage(compose(BENIGN_NAME)).skeleton);
+      expect(values).toContain(value);
+      expect(skeleton).not.toContain(marker);
+      expect(skeleton).not.toContain("<unterminated>");
+    },
+  );
+
+  test.each(ADVERSARIAL_NAMES)(
+    "survives the error renderer intact under $name",
+    ({ value, marker }) => {
+      // The delimiting is composed here and the escape runs once at the renderer
+      // that shows the UsageError chain, so the structure has to hold on what
+      // the operator actually sees -- with a control sequence in the name for
+      // the escape to act on.
+      const hostile = withControlSequence(value);
+      const rendered = displayed(hostile);
+      const { skeleton } = readMessage(rendered);
+      expect(skeleton).toBe(readMessage(displayed(BENIGN_NAME)).skeleton);
+      expect(skeleton).not.toContain(marker);
+      expect(skeleton).not.toContain("<unterminated>");
+      expect(rendered).not.toContain("\x1b");
+    },
+  );
+});
+
+test("assertPayloadSendDisclosed: a name carrying the list separator is one element", () => {
+  // A single column named `a, b` and two named `a` and `b` are different
+  // declarations, and the rendering has to show that rather than print the same
+  // bracketed list for both -- otherwise a partner-chosen name forges an element
+  // count the check never computed.
+  const oneComma = disclosureRefusal({ send: [{ name: "a, b" }] }, []);
+  const twoNames = disclosureRefusal(
+    { send: [{ name: "a" }, { name: "b" }] },
+    [],
+  );
+  expect(oneComma).toContain('(["a, b"])');
+  expect(twoNames).toContain('(["a","b"])');
+  expect(readMessage(oneComma).values).toContain("a, b");
+  expect(readMessage(twoNames).values).toEqual(
+    expect.arrayContaining(["a", "b"]),
+  );
 });
 
 test("prepareForExchange: rejects a config whose payload.send over-declares", () => {
