@@ -203,8 +203,8 @@ describe("expandsOnReceiverOnly", () => {
     // Total over the enum: a kind added without an arm fails to compile, and this
     // pins that each existing one is classified rather than defaulted.
     expect(expandsOnReceiverOnly("transpositions")).toBe(true);
+    expect(expandsOnReceiverOnly("adjacent_years")).toBe(true);
     expect(expandsOnReceiverOnly("edit_distances")).toBe(false);
-    expect(expandsOnReceiverOnly("adjacent_years")).toBe(false);
   });
 
   test("reads the kind alone, so both parties classify identically", () => {

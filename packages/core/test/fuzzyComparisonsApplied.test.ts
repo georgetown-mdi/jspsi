@@ -50,7 +50,7 @@ describe("buildKeyStrings: fuzzy comparison expansion", () => {
       ],
     };
     const dataset = makeDataset({ date_of_birth: "19900115" });
-    expect(buildKeyStrings(key, dataset, 0)).toEqual(
+    expect(buildKeyStrings(key, dataset, 0, true)).toEqual(
       new Set(["19900115", "19890115", "19910115"]),
     );
   });
@@ -67,7 +67,7 @@ describe("buildKeyStrings: fuzzy comparison expansion", () => {
       last_name: "SMITH",
       date_of_birth: "19900115",
     });
-    expect(buildKeyStrings(key, dataset, 0)).toEqual(
+    expect(buildKeyStrings(key, dataset, 0, true)).toEqual(
       new Set(["SMITH19900115", "SMITH19890115", "SMITH19910115"]),
     );
   });
@@ -110,7 +110,7 @@ describe("buildKeyStrings: fuzzy comparison expansion", () => {
       ],
     };
     const dataset = makeDataset({ date_of_birth: "01/15/1990" });
-    expect(buildKeyStrings(key, dataset, 0)).toEqual(
+    expect(buildKeyStrings(key, dataset, 0, true)).toEqual(
       new Set(["19900115", "19890115", "19910115"]),
     );
   });
@@ -353,19 +353,33 @@ describe("buildKeyStrings: the expanding side", () => {
   const RECEIVER_ONLY_KIND = "transpositions";
   const BOTH_SIDED_KIND = "edit_distances";
 
-  test("a receiver-only kind expands on the receiver and not on the sender", () => {
-    const key: LinkageKey = {
-      name: "LN",
-      elements: [
-        { field: "last_name", generateFuzzyComparisons: RECEIVER_ONLY_KIND },
-      ],
-    };
-    const dataset = datasetOf({ last_name: "ABC" });
-    expect(buildKeyStrings(key, dataset, 0, true)).toEqual(
-      new Set(["ABC", "BAC", "ACB"]),
-    );
-    expect(buildKeyStrings(key, dataset, 0, false)).toEqual(new Set(["ABC"]));
-  });
+  test.each([
+    {
+      kind: "transpositions" as const,
+      field: "last_name",
+      value: "ABC",
+      onReceiver: ["ABC", "BAC", "ACB"],
+    },
+    {
+      kind: "adjacent_years" as const,
+      field: "date_of_birth",
+      value: "19900115",
+      onReceiver: ["19900115", "19890115", "19910115"],
+    },
+  ])(
+    "$kind expands on the receiver and not on the sender",
+    ({ kind, field, value, onReceiver }) => {
+      const key: LinkageKey = {
+        name: "K",
+        elements: [{ field, generateFuzzyComparisons: kind }],
+      };
+      const dataset = datasetOf({ [field]: value });
+      expect(buildKeyStrings(key, dataset, 0, true)).toEqual(
+        new Set(onReceiver),
+      );
+      expect(buildKeyStrings(key, dataset, 0, false)).toEqual(new Set([value]));
+    },
+  );
 
   test("the both-sided kind expands identically for either role", () => {
     const key: LinkageKey = {

@@ -110,5 +110,5 @@ The index table could carry the count prefix only on the keys that actually fan 
 ## What stays open
 
 - **Cascade fan-out**, via extended per-round frames. It is the door this design deliberately leaves open rather than closes, and it inherits the resolution rule rather than choosing one.
-- **The other candidate producer.** `generate_fuzzy_comparisons` produces per-record candidate sets by the same mechanism and is expected to reuse this candidacy, resolution, and width machinery. Its own bound and its interaction with the 1024-key-string cap are that work's to reconcile.
+- **The other candidate producer.** `generate_fuzzy_comparisons` produces per-record candidate sets by the same mechanism and is expected to reuse this candidacy and resolution machinery. Its width factor and its exceedance fate are specified with the cap in [the width bound](../spec/PROTOCOL.md#the-width-bound-a-per-record-key-candidate-cap).
 - **Deduplicating cardinalities.** The rules here specify the one-to-one case. A many-to-X resolution defines itself through the same cardinality seam, and the sweep's "at most one pair per record" step is the part it replaces.

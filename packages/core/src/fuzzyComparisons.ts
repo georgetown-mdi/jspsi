@@ -137,10 +137,11 @@ export function adjacentYearCandidates(value: string): string[] {
  * moves no term, no terms hash, and no wire byte, extending the receiver-only
  * `swap` directive's precedent.
  *
- * A deletion neighborhood is built by BOTH parties: each side's own deletions
- * are what let a substitution or insertion between the two values meet in the
- * middle (see {@link deletionCandidates}), so expanding one side alone would
- * match on less than the terms declare.
+ * `transpositions` and `adjacent_years` are role-keyed: their candidates are
+ * built on the resolved receiver alone. `edit_distances` is built by BOTH
+ * parties: each side's own deletions are what let a substitution or insertion
+ * between the two values meet in the middle (see {@link deletionCandidates}),
+ * so expanding one side alone would match on less than the terms declare.
  *
  * Total over the kind and pure -- it reads no term, no role, and no row -- so
  * both parties classify a kind identically, and a member added to
@@ -149,9 +150,9 @@ export function adjacentYearCandidates(value: string): string[] {
 export function expandsOnReceiverOnly(kind: GenerateFuzzyComparisons): boolean {
   switch (kind) {
     case "transpositions":
+    case "adjacent_years":
       return true;
     case "edit_distances":
-    case "adjacent_years":
       return false;
   }
 }
