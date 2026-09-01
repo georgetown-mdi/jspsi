@@ -556,11 +556,14 @@ function partnerWidthAboveAgreedNotice(
  * initiator's decision-only frame closes an exchange whose versions both parties
  * have already reconciled, and no reconcile reads it, so it carries none.
  *
- * Exported for the one refusal that fires just PAST this exchange: the
- * invitation-term binding, which `runExchange` applies to the terms this
- * function's caller returned (see `assertPresentedDeduplicateMatchesInvitation`).
- * `abortReasons` is written by the calling code and must stay a fixed literal --
- * the frame is a disclosure to the partner like any other.
+ * Exported for the refusals that fire PAST this exchange, which `runExchange`
+ * applies to the terms this function's caller returned: the invitation-term
+ * binding (`assertPresentedDeduplicateMatchesInvitation`) and the receipt
+ * bindings (`assertReceiptBindingsOrAbort`), the latter again at the signature
+ * swap. Each is one-sided -- the partner derives no refusal of its own -- so
+ * without the abort it waits out its peer-inactivity budget. `abortReasons` is
+ * written by the calling code and must stay a fixed literal: the frame is a
+ * disclosure to the partner like any other.
  */
 export async function sendAbort(
   conn: MessageConnection,

@@ -1994,8 +1994,8 @@ export async function runProtocol(
     // the exchange failed before runExchange returned (exchangeComplete false), and
     // not with a receipt verification error (a distinct security event already
     // surfaced by that error's own kind/message) and not with this party's own
-    // local certificate/terms refusal at the swap gate (a config fault this
-    // party's operator caused, not the partner's absence of signing). The
+    // local certificate/terms refusal (a config fault this party's operator
+    // caused, not the partner's absence of signing). The
     // signed-receipt swap is the last step of runExchange, so a partner that ran
     // without a signing identity sends no receipt frame and this side parks on
     // that receive until the peer timeout -- a drop otherwise indistinguishable

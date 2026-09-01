@@ -18,7 +18,10 @@ import {
   computeCertificateFingerprint,
   generateSigningIdentity,
 } from "../src/signingIdentity";
-import { createMessagePipe } from "../src/connection/messageConnection";
+import {
+  ConnectionError,
+  createMessagePipe,
+} from "../src/connection/messageConnection";
 
 import type {
   DualSignedRecord,
@@ -584,6 +587,50 @@ describe("exchangeSignedReceipt (two-party over the pipe)", () => {
       /different exchange|does not verify/,
     );
   });
+
+  // What a party parked here observes when its partner refuses a binding of its
+  // own just before the swap and aborts (assertReceiptBindingsOrAbort in
+  // exchange.ts). Both roles park on a receive at some point -- the responder
+  // before it sends anything, the initiator after -- so both are driven.
+  for (const parkedRole of ["initiator", "responder"] as const) {
+    test(`the ${parkedRole} ends on a partner abort rather than waiting out its transport`, async () => {
+      const [connParked, connAborting] = createMessagePipe();
+      const shared = content();
+      const parked = exchangeSignedReceipt(
+        connParked,
+        parkedRole,
+        inputsFor(
+          parkedRole === "initiator" ? identityA : identityB,
+          parkedRole === "initiator" ? fingerprintB : fingerprintA,
+          parkedRole === "initiator"
+            ? partnerIdentityForA
+            : partnerIdentityForB,
+          shared,
+        ),
+      ).then(
+        () => {
+          throw new Error("expected the parked party to reject, not return");
+        },
+        (reason: unknown) => reason,
+      );
+      // The initiator sends its own frame first and then parks, so drain it.
+      if (parkedRole === "initiator") await connAborting.receive();
+      await connAborting.send({
+        decision: "abort",
+        abortReasons: [
+          "a signing certificate does not authorize the identity its holder " +
+            "agreed terms under",
+        ],
+      });
+      // The frame is not a receipt, so the parked receive refuses it as a
+      // protocol fault -- with no close, no timeout, and nothing signed.
+      const reason = await parked;
+      expect(reason).toBeInstanceOf(ConnectionError);
+      expect((reason as ConnectionError).kind).toBe("protocol");
+      await connParked.close();
+      await connAborting.close();
+    });
+  }
 });
 
 // --- Serialize / parse -------------------------------------------------------
