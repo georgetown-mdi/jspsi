@@ -20,17 +20,16 @@ import type { CertificateBody } from "@psilink/core";
 // of them runs an exchange.
 //
 // `psilink exchange` REFUSES. Driven end to end, a diverging run cannot leave
-// both parties holding a verifiable receipt on either handshake role: the swap
-// refuses this party's own certificate against its own agreed terms
-// (assertLocalCertificateAuthorizesAgreedIdentity in @psilink/core), and the run
-// ends with no result and no receipt, keeping at most the exchange record of
-// the disclosure already made -- and, where record writing is off (--no-record),
-// nothing at all. That refusal lands only after the payloads have
-// crossed, while this fault is settled while the operator is still configuring,
-// so the run is refused here before any credential, terms, or data are sent --
-// the disposition its sibling certificate-mode faults take
-// (assertCertificateModePinsPartner and assertCertificateModeNamesLocalParty in
-// @psilink/core).
+// both parties holding a verifiable receipt on either handshake role: the
+// exchange refuses this party's own certificate against its own agreed terms
+// (assertLocalCertificateAuthorizesAgreedIdentity in @psilink/core), at the terms
+// exchange and again at the swap, and the run ends with no result and no
+// receipt. Those refusals land only once the connection is open and this party's
+// credentials and terms have gone out, while this fault is settled while the
+// operator is still configuring, so the run is refused here before any
+// credential, terms, or data are sent -- the disposition its sibling
+// certificate-mode faults take (assertCertificateModePinsPartner and
+// assertCertificateModeNamesLocalParty in @psilink/core).
 // packages/core/test/signedReceiptEndToEnd.test.ts drives both role assignments,
 // so the premise behind this refusal is a check rather than a claim.
 //

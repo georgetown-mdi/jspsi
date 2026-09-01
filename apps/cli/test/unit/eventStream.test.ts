@@ -6,8 +6,10 @@ import {
   ConnectionError,
   InternalConsistencyError,
   OperatorConfigError,
+  SIGNING_CERTIFICATE_VERSION,
   StandardizationTermsError,
   UsageError,
+  assertLocalCertificateAuthorizesAgreedIdentity,
   assertSigningModeImplemented,
 } from "@psilink/core";
 
@@ -29,6 +31,7 @@ import {
   type ErrorPhase,
   type StreamEvent,
 } from "../../src/eventStream";
+import { exitCodeForError } from "../../src/util/cli";
 import { openEventStreamWithFdWired } from "../eventStreamTestSupport";
 
 afterEach(() => {
@@ -238,6 +241,36 @@ test("classifies a PREPARE-phase OperatorConfigError as config", () => {
     signingRefusal = thrown;
   }
   expect(classifyTerminalError(signingRefusal, "prepare")).toBe("config");
+});
+
+test("classifies a mid-RUN OperatorConfigError as config, agreeing with its exit code", () => {
+  // The class contract is that a member's message is composed solely of this
+  // party's own content, whatever phase raises it, so the type alone carries the
+  // rule. What the category has to agree with is the exit code: core's local
+  // certificate/terms refusal is raised from the run phase and exits 64, the
+  // do-not-retry code, so reporting it under the retryable `exchange` bucket
+  // would have the two signals disagree on a fault every retry reproduces.
+  let refusal: unknown;
+  try {
+    assertLocalCertificateAuthorizesAgreedIdentity(
+      {
+        version: SIGNING_CERTIFICATE_VERSION,
+        algorithm: "ecdsa-p256-sha256",
+        identity: "Bound Party",
+        publicKey: { kty: "EC", crv: "P-256", x: "eA", y: "eQ" },
+      },
+      "Agreed Party",
+    );
+  } catch (thrown) {
+    refusal = thrown;
+  }
+  expect(refusal).toBeInstanceOf(OperatorConfigError);
+  expect(classifyTerminalError(refusal, "run")).toBe("config");
+  expect(buildErrorEvent(refusal, "run").category).toBe("config");
+  expect(exitCodeForError(refusal)).toBe(64);
+  // The output phase still wins over the type: the exchange succeeded there, and
+  // only local result generation failed.
+  expect(classifyTerminalError(refusal, "output")).toBe("output");
 });
 
 test("classifies a security-kind ConnectionError as security in any phase", () => {

@@ -4,6 +4,7 @@ import PSI from "@openmined/psi.js";
 
 import {
   assertLocalCertificateAuthorizesAgreedIdentity,
+  assertReceiptBindingsOrAbort,
   exchangeRecordFromFailure,
   exchangeRecordOwedButUnbuilt,
   prepareForExchange,
@@ -466,14 +467,16 @@ describe("a party whose certificate is bound away from its agreed terms", () => 
   // handshake role it drew, which no configuration of its own decides: signing
   // first its frame is refused, signing last it is handed a receipt no verifier
   // accepts as though the run had succeeded. Both roles are driven here, against
-  // the same swap-time refusal of this party's own configuration.
+  // the same refusal of this party's own configuration. Both values it compares
+  // are settled the moment the partner's terms arrive, so that is where it lands
+  // and neither role reaches the rounds at all.
   //
   // The certificate is identityA/identityB throughout, bound to "Initiator Co" /
   // "Responder Co"; only the terms identity the diverging party runs under moves.
   const RENAMED = "Renamed In The Config";
 
   for (const divergingRole of ["initiator", "responder"] as const) {
-    test(`as the ${divergingRole}, it refuses before its certificate reaches the wire`, async () => {
+    test(`as the ${divergingRole}, it refuses at terms agreement, before any key or payload row moves`, async () => {
       const divergesFirst = divergingRole === "initiator";
       const [rawInitiator, rawResponder] = createMessagePipe();
       const initiatorSide = recording(rawInitiator);
@@ -523,36 +526,38 @@ describe("a party whose certificate is bound away from its agreed terms", () => 
       expect((raised as Error).message).toContain(
         divergesFirst ? "Initiator Co" : "Responder Co",
       );
-      // The timing, read off the wire: the check sits at the swap, so this
-      // party's payload had crossed -- and its certificate and signature had
-      // not. The role that would otherwise have signed last never presents the
-      // receipt no verifier accepts.
-      expect(diverging.sent.map(frameKind)).toContain("payload");
-      expect(diverging.sent.map(frameKind)).not.toContain("receipt");
-      // The disclosure that did happen is still attested, as every other
-      // termination of the swap is.
-      expect(exchangeRecordFromFailure(raised)?.record.outcome).toBe(
-        "receipt-swap-terminated",
+      // The timing, read off the wire: the terms exchange's own frames went out
+      // and then the abort, and nothing else did -- no linkage key, no payload
+      // row, and no certificate. The initiator sends its terms and the bare
+      // proceed decision before the partner's terms are in hand; the responder's
+      // single frame carries both.
+      expect(diverging.sent.map(frameKind)).toEqual(
+        divergesFirst ? ["terms", "decision", "abort"] : ["terms", "abort"],
       );
+      // Nothing was disclosed, so there is no disclosure to attest: the refusal
+      // carries no exchange record, where the same refusal met at the swap
+      // carries the terminated run's.
+      expect(exchangeRecordFromFailure(raised)).toBeUndefined();
 
-      // The partner parks on a receipt frame that never comes; the swap sends no
-      // abort of its own, so what releases the park is the transport -- here the
-      // local close, standing in for the peer-close or file-sync abort-marker
-      // diagnostic a production transport would deliver. Which kind that close
-      // surfaces depends on how far the leg had got when the pipe went away, so
-      // the load-bearing half alone is pinned: the leg REJECTS, returning no
-      // result, no record, and no receipt.
+      // The partner derives no refusal of its own, so what ends its run is the
+      // abort's arrival rather than an inactivity budget: it settles without the
+      // pipe being closed under it. Its own leg never reached the swap either,
+      // so it holds no receipt.
+      const partnerOutcome = await (divergesFirst ? responder : initiator);
+      expect(partnerOutcome).toBeInstanceOf(Error);
+      const partnerSide = divergesFirst ? responderSide : initiatorSide;
+      expect(partnerSide.sent.map(frameKind)).not.toContain("receipt");
       await rawInitiator.close();
       await rawResponder.close();
-      const partnerOutcome = await (divergesFirst ? responder : initiator);
-      expect(partnerOutcome).toBeInstanceOf(ConnectionError);
     });
   }
 
   test("a certificate that does authorize the agreed identity still signs", async () => {
     // The refusal is the divergence's, not the check's: on the same pair, each
     // party's terms naming the identity its certificate carries, both receipt
-    // frames go out and both sides return the dual-signed record.
+    // frames go out and both sides return the dual-signed record. A
+    // legitimately-configured exchange traverses the terms-exchange binding
+    // untouched: it neither refuses nor aborts anywhere along the way.
     const [rawInitiator, rawResponder] = createMessagePipe();
     const initiatorSide = recording(rawInitiator);
     const responderSide = recording(rawResponder);
@@ -591,8 +596,104 @@ describe("a party whose certificate is bound away from its agreed terms", () => 
     // Both frames went out, so the negative assertions above are not vacuous.
     expect(initiatorSide.sent.map(frameKind)).toContain("receipt");
     expect(responderSide.sent.map(frameKind)).toContain("receipt");
+    // And neither leg aborted anywhere along the way.
+    expect(initiatorSide.sent.map(frameKind)).not.toContain("abort");
+    expect(responderSide.sent.map(frameKind)).not.toContain("abort");
     await rawInitiator.close();
     await rawResponder.close();
+  });
+});
+
+// --- The same bindings at the swap, the point of use -------------------------
+
+describe("the receipt bindings held at the signature swap", () => {
+  // runExchange holds this pair at the terms exchange too, over the same three
+  // values, so nothing reaches the swap copy through it -- these drive the copy
+  // directly, which is what a caller arriving by another route meets.
+
+  /** A connection that records what was sent and never delivers anything. */
+  function collecting(): { conn: MessageConnection; sent: Array<unknown> } {
+    const sent: Array<unknown> = [];
+    return {
+      sent,
+      conn: {
+        send: (data: unknown) => {
+          sent.push(data);
+          return Promise.resolve();
+        },
+        receive: () => new Promise<unknown>(() => {}),
+        close: () => Promise.resolve(),
+      },
+    };
+  }
+
+  const anonymousTerms = { ...firstNameTerms, output: both };
+  const namedTerms = (identity: string) => ({ ...anonymousTerms, identity });
+
+  test("a certificate bound away from the agreed terms aborts, then refuses", async () => {
+    const { conn, sent } = collecting();
+    const raised = await assertReceiptBindingsOrAbort(
+      conn,
+      namedTerms("Renamed In The Config"),
+      namedTerms("Responder Co"),
+      identityA.certificate,
+    ).then(
+      () => {
+        throw new Error("expected the local binding to refuse");
+      },
+      (reason: unknown) => reason,
+    );
+    expect(raised).toBeInstanceOf(OperatorConfigError);
+    // The abort goes out BEFORE the refusal propagates, so the partner parked on
+    // the receipt frame is released by the frame rather than by its inactivity
+    // budget. Its reason is a fixed literal naming neither identity.
+    expect(sent).toEqual([
+      {
+        decision: "abort",
+        abortReasons: [
+          "a signing certificate does not authorize the identity its holder " +
+            "agreed terms under",
+        ],
+      },
+    ]);
+  });
+
+  test("an unnamed party aborts under its own reason", async () => {
+    const { conn, sent } = collecting();
+    const raised = await assertReceiptBindingsOrAbort(
+      conn,
+      namedTerms("Initiator Co"),
+      anonymousTerms,
+      identityA.certificate,
+    ).then(
+      () => {
+        throw new Error("expected the naming binding to refuse");
+      },
+      (reason: unknown) => reason,
+    );
+    expect(raised).toBeInstanceOf(ReceiptVerificationError);
+    expect(sent).toEqual([
+      {
+        decision: "abort",
+        abortReasons: [
+          "a signed receipt names both parties and one side's agreed terms " +
+            "carry no identity",
+        ],
+      },
+    ]);
+  });
+
+  test("a matching pair returns both names and sends nothing", async () => {
+    const { conn, sent } = collecting();
+    await expect(
+      assertReceiptBindingsOrAbort(
+        conn,
+        namedTerms("Initiator Co"),
+        namedTerms("Responder Co"),
+        identityA.certificate,
+      ),
+    ).resolves.toEqual({ local: "Initiator Co", partner: "Responder Co" });
+    expect(sent).toEqual([]);
   });
 });
 

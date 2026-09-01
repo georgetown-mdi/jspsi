@@ -677,9 +677,14 @@ export function assertSignedReceiptNamesBothParties(
  * decides: signing first, its frame is refused and the run terminates; signing
  * last, it sends its frame before the partner can refuse it and returns as a
  * success does, holding that worthless receipt. Neither outcome is representable
- * with the binding held here, beside the partner half
- * {@link exchangeSignedReceipt} already holds at the swap and before this party's
- * certificate or signature reaches the wire.
+ * with the binding held here, the local counterpart of the partner half
+ * {@link exchangeSignedReceipt} holds at the swap.
+ *
+ * Both values it compares are settled before the exchange opens, and the identity
+ * the run agrees terms under is fixed the moment the partner's terms arrive, so
+ * {@link runExchange} applies it there -- before any linkage key or payload row
+ * crosses -- and again at the swap, where a certificate is about to reach the
+ * wire (see {@link assertReceiptBindingsOrAbort}).
  *
  * An {@link OperatorConfigError}, not the {@link ReceiptVerificationError} the
  * swap's other refusals raise, even though it fires where that category owns the
@@ -712,6 +717,86 @@ export function assertLocalCertificateAuthorizesAgreedIdentity(
       `certificate is bound to "${certificate.identity}"; the agreed terms ` +
       `name "${agreedIdentity}".`,
   );
+}
+
+// The abort reasons the two local receipt bindings send. Fixed literals, as every
+// reason on this frame must be: the frame is a disclosure to the partner like any
+// other (see sendAbort). Neither names a value. The first states a fact over the
+// two identities both sides already hold -- each sent the other its own terms --
+// so the only thing it adds is that this side meant to sign, which its receipt
+// frame would have said moments later. The second adds only that this party's own
+// certificate is bound away from the name it agreed terms under, which is this
+// party's own configuration and nothing the partner supplied.
+const UNNAMED_PARTY_ABORT_REASON =
+  "a signed receipt names both parties and one side's agreed terms carry no " +
+  "identity";
+const CERTIFICATE_DIVERGENCE_ABORT_REASON =
+  "a signing certificate does not authorize the identity its holder agreed " +
+  "terms under";
+
+/**
+ * Hold the two receipt bindings that follow from the agreed terms alone -- both
+ * parties named ({@link assertSignedReceiptNamesBothParties}), and this party's
+ * own certificate authorizing the name it agreed terms under
+ * ({@link assertLocalCertificateAuthorizesAgreedIdentity}) -- sending the partner
+ * an abort before either refusal propagates.
+ *
+ * {@link runExchange} applies it at TWO points over the same three values. The
+ * first is the terms exchange, the moment the partner's terms are in hand and
+ * every input is settled: both refusals therefore land before the bootstrap
+ * frame, any linkage key, and any payload row. The second is the signature swap
+ * itself, which cannot build a receipt from an unnamed pair or present a
+ * certificate that authorizes neither name, whatever route reached it. Holding
+ * the pair here rather than at each call site is what keeps the two points from
+ * drifting into different predicates or different abort reasons -- the earlier
+ * refusal admits exactly the runs the later one does.
+ *
+ * Both refusals are ONE-SIDED: a partner that is not signing, or whose own
+ * certificate is bound correctly, derives neither of them, so without the abort
+ * it waits out its whole peer-inactivity budget (a full poll budget on a file
+ * channel, whose drop directory holds the bytes for that whole wait) for rounds
+ * this party will never run. The abort is best-effort and carries a fixed
+ * literal; what ends the partner's run is the frame's ARRIVAL, and where in the
+ * protocol that arrival lands decides what the partner makes of it. From the
+ * swap it reaches a peer awaiting the receipt frame, which refuses it as a
+ * `protocol` {@link ConnectionError}; from the terms exchange it lands where the
+ * invitation-term refusal's does, which
+ * {@link assertPresentedDeduplicateMatchesInvitation}'s call site describes. The
+ * specific fault stays with this party either way.
+ *
+ * Returns the two names, so the swap binds the values this check passed rather
+ * than re-reading a field and reaching for a fallback if it were absent.
+ *
+ * @internal exported for the swap-side abort test, which cannot reach this point
+ *   through `runExchange`: the terms-exchange application refuses the same inputs
+ *   first.
+ */
+export async function assertReceiptBindingsOrAbort(
+  conn: MessageConnection,
+  localTerms: LinkageTerms,
+  partnerTerms: LinkageTerms,
+  certificate: CertificateBody,
+): Promise<{ local: string; partner: string }> {
+  let namedParties: { local: string; partner: string };
+  try {
+    namedParties = assertSignedReceiptNamesBothParties(
+      localTerms,
+      partnerTerms,
+    );
+  } catch (err) {
+    await sendAbort(conn, [UNNAMED_PARTY_ABORT_REASON]);
+    throw err;
+  }
+  try {
+    assertLocalCertificateAuthorizesAgreedIdentity(
+      certificate,
+      namedParties.local,
+    );
+  } catch (err) {
+    await sendAbort(conn, [CERTIFICATE_DIVERGENCE_ABORT_REASON]);
+    throw err;
+  }
+  return namedParties;
 }
 
 /**
@@ -1716,31 +1801,20 @@ export async function runExchange(
     throw err;
   }
 
-  // A run that will sign a receipt needs both parties named, and the partner's
-  // name is settled the moment its terms arrive -- so the pair is held to that
-  // here, at the same point and for the same reason as the deduplicate check
-  // above: before the bootstrap frame, before any linkage key, and before any
-  // payload row moves. The signature swap holds the same condition again at the
-  // point of use. See assertSignedReceiptNamesBothParties.
-  if (willSignReceipt) {
-    try {
-      assertSignedReceiptNamesBothParties(linkageTerms, partnerTerms);
-    } catch (err) {
-      // One-sided, like the deduplicate refusal above: a partner that is not
-      // signing derives no refusal of its own, and would otherwise wait out its
-      // whole peer-inactivity budget for rounds this party will never run. What
-      // the partner makes of the arriving frame is what that block describes.
-      // The reason is a fixed literal over the two identities both sides already
-      // hold -- each sent the other its own terms -- so the only thing it adds
-      // is that this side meant to sign, which its receipt frame would have said
-      // moments later.
-      await sendAbort(conn, [
-        "a signed receipt names both parties and one side's agreed terms " +
-          "carry no identity",
-      ]);
-      throw err;
-    }
-  }
+  // A run that will sign a receipt needs both parties named and its own
+  // certificate bound to the name it agreed terms under. Both are settled the
+  // moment the partner's terms arrive, so both are held here, at the same point
+  // and for the same reason as the deduplicate check above: before the bootstrap
+  // frame, before any linkage key, and before any payload row moves. The
+  // signature swap holds the same pair again at the point of use. See
+  // assertReceiptBindingsOrAbort.
+  if (willSignReceipt)
+    await assertReceiptBindingsOrAbort(
+      conn,
+      linkageTerms,
+      partnerTerms,
+      signingIdentity.certificate,
+    );
 
   // Resolve the matching cardinality from both parties' agreed deduplicate
   // settings as the first step after the terms exchange: the resolution is
@@ -2119,24 +2193,19 @@ export async function runExchange(
       // with no extra messages; see deriveReceiptBinder. Derived before the record
       // is built, so both artifacts carry the one value.
       receiptBinder = await deriveReceiptBinder(sessionKey, "initiator");
-      // The identity binding again, at the point of use: a receipt cannot be built
-      // from a pair either side of which named nobody, whatever route reached this
-      // step. The terms exchange holds the same condition over the same two agreed
-      // terms, so a run reaching here through runExchange was already refused
-      // there; this stands whether or not it was. See
-      // assertSignedReceiptNamesBothParties.
-      const namedParties = assertSignedReceiptNamesBothParties(
+      // The identity bindings again, at the point of use: a receipt cannot be
+      // built from a pair either side of which named nobody, nor signed under a
+      // certificate the partner will authorize against a name it is not bound to,
+      // whatever route reached this step. The terms exchange holds the same pair
+      // over the same three values, so a run reaching here through runExchange was
+      // already refused there; this stands whether or not it was, and its abort
+      // releases a partner parked on a receipt frame this party will never send.
+      // See assertReceiptBindingsOrAbort.
+      const namedParties = await assertReceiptBindingsOrAbort(
+        conn,
         linkageTerms,
         partnerTerms,
-      );
-      // The other half of that binding, on this party's own side: the partner
-      // will authorize the certificate about to go out against the name this
-      // party agreed terms under, so a certificate bound elsewhere is refused
-      // here rather than presented. Held to the name the assertion above just
-      // returned. See assertLocalCertificateAuthorizesAgreedIdentity.
-      assertLocalCertificateAuthorizesAgreedIdentity(
         signingIdentity.certificate,
-        namedParties.local,
       );
       // The receipt content is built from the mutually-verifiable facts directly
       // -- the agreed-terms hash and session-keyed MACs of the two directional

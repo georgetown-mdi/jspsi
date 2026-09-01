@@ -201,27 +201,37 @@ export type StreamEvent =
 
 /**
  * Classify a terminal failure into one of the four {@link ExchangeErrorCategory}
- * values, using the SAME rules the web's `classifyExchangeFailure` applies:
+ * values, over the vocabulary the web front end defines:
  *
  * - `output` phase -> `output` (the exchange already succeeded; only local
  *   result-file generation failed).
- * - `prepare` phase + an {@link OperatorConfigError} -> `config`. Scoped to that
- *   exact base type, NOT any prepare-phase {@link UsageError}: a sibling
- *   prepare-time UsageError can be partner-influenced, so it stays `exchange`
- *   rather than being presented as a purely local configuration fault.
+ * - an {@link OperatorConfigError} in any earlier phase -> `config`. Scoped to
+ *   that exact base type, NOT any {@link UsageError}: a sibling UsageError can be
+ *   partner-influenced, so it stays `exchange` rather than being presented as a
+ *   purely local configuration fault.
  * - a `security`-kind {@link ConnectionError} (any phase) -> `security`.
  * - everything else -> `exchange`.
  *
  * Both discriminants are structural (the error's TYPE / kind and the PHASE), not
  * a claim about which check happened to fire.
+ *
+ * The TYPE alone carries the `config` rule, where the web's
+ * `classifyExchangeFailure` additionally requires its `prepare` phase. What that
+ * category has to agree with here is the exit code, which no front-end alert has:
+ * every member of the class exits 64, the code that tells an operator to change
+ * their own input, while `exchange` is documented as the retryable bucket -- so a
+ * member raised mid-run would have the stream inviting the retry the exit code
+ * refuses, on a fault every attempt reproduces identically. Widening costs the
+ * category nothing it claims: the class contract is that a member's message is
+ * composed solely of this party's own content, phase included, and this stream
+ * emits that message under either category anyway.
  */
 export function classifyTerminalError(
   error: unknown,
   phase: ErrorPhase,
 ): ExchangeErrorCategory {
   if (phase === "output") return "output";
-  if (phase === "prepare" && error instanceof OperatorConfigError)
-    return "config";
+  if (error instanceof OperatorConfigError) return "config";
   return error instanceof ConnectionError && error.kind === "security"
     ? "security"
     : "exchange";
