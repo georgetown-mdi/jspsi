@@ -32,10 +32,11 @@ export const MAX_IDENTITY_LENGTH = 1024;
  *
  * Core's terms-document rule (`TEXT_CONTROL_CHAR_PATTERN`,
  * packages/core/src/config/linkageTerms.ts) draws the same ranges over the four
- * free-text fields of a linkage-terms document, the party `identity` among them:
- * the two must stay identical, since a label accepted here becomes that
- * `identity`. This contract is strictly stricter -- the boundaries that apply it
- * also refuse a leading `-`.
+ * free-text fields of a linkage-terms document, the party `identity` among them,
+ * and a label accepted here becomes that `identity`; the two patterns are held
+ * equal by test/unit/identityLabelParity.test.ts rather than by this note. This
+ * contract is strictly stricter -- the boundaries that apply it also refuse a
+ * leading `-`.
  */
 export const IDENTITY_CONTROL_CHAR_PATTERN =
   // eslint-disable-next-line no-control-regex

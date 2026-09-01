@@ -1,4 +1,5 @@
 import {
+  TEXT_CONTROL_CHAR_PATTERN,
   disclosedColumnNames,
   displayPartyIdentity,
   summarizeInvitation,
@@ -363,6 +364,32 @@ export function acceptorConsentReady(input: {
   name: string;
 }): boolean {
   return acceptorConsentName(input) !== undefined;
+}
+
+/**
+ * What the consent step's name field says about a name the acceptance cannot
+ * adopt: the field's own wording for the rule core holds the value to.
+ */
+export const ACCEPTOR_NAME_CONTROL_CHAR_PROBLEM =
+  "Your name cannot contain control characters (a line break or a tab, for instance)";
+
+/**
+ * The consent step's inline name problem, or undefined for a name this acceptance
+ * can adopt. The committed name becomes the party `identity` of the terms the
+ * acceptance derives, which core refuses outright for a control character
+ * (`deriveAcceptedLinkageTerms`), so the field names it where the operator can
+ * still fix it rather than letting the launch fail as an exchange the surface
+ * would attribute to the invitation or the file.
+ *
+ * Read on the TRIMMED name, which is what the gate commits and what core sees. An
+ * empty name is deliberately not reported here: that is the consent gate's own
+ * refusal, raised at submit rather than at an operator who has not finished
+ * typing.
+ */
+export function acceptorNameProblem(name: string): string | undefined {
+  return TEXT_CONTROL_CHAR_PATTERN.test(name.trim())
+    ? ACCEPTOR_NAME_CONTROL_CHAR_PROBLEM
+    : undefined;
 }
 
 /** The consent-step legal-agreement display: the three sanitized values plus
