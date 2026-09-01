@@ -289,20 +289,34 @@ refills as fast as it drains, because nothing in it can be finished.
 - The line is terminal, not aspirational. "Done is: the checks cover every sink"
   can be observed; "Done is: the surface is hardened" cannot.
 
-The lines drafted so far, each pending the owner's ratification:
+Ratified by the owner:
 
-- **Application Encryption** -- Done is: escape-once-at-the-display-sink and
-  bound-at-composition hold across every operator-facing sink, carried by checks
-  rather than by a fix per fragment.
-- **Partnership identity and consent** -- Done is: no exchange proceeds past a
-  consent surface whose disclosure list and terms binding are unverified, on the
-  invite, accept, and unattended paths alike.
-- **Web Exchange Rework** -- Done is: the reworked screens carry a full
-  invite-to-result exchange in the browser with the interop suite green, and no
-  screen remains on the pre-rework flow.
-- **Agency security review readiness** -- Done is: one agency completes a
-  security review from the published assurance package alone, every claim in it
-  naming the check that keeps it true.
+- **CI and test coverage** (board 10) -- Done is: no prose runtime claim
+  survives in shipped source and no test is held green by a retry or a skip --
+  each claim is a check that fails on the claimed-impossible state, each timing
+  test carries a measured margin.
+- **Issue Orchestration** (board 10) -- Done is: every rule the issue-to-PR flow
+  depends on is enforced by a hook or a check rather than by prose alone, and
+  each `.claude/scripts/` tool the flow invokes either runs in-container or
+  states its out-of-container requirement at the point of use.
+
+Drafted, pending the owner's ratification:
+
+- **Application Encryption** (board 9) -- Done is:
+  escape-once-at-the-display-sink and bound-at-composition hold across every
+  operator-facing sink, carried by checks rather than by a fix per fragment.
+- **Partnership identity and consent** (board 9) -- Done is: no exchange
+  proceeds past a consent surface whose disclosure list and terms binding are
+  unverified, on the invite, accept, and unattended paths alike.
+- **Web Exchange Rework** (board 9) -- Done is: the reworked screens carry a
+  full invite-to-result exchange in the browser with the interop suite green,
+  and no screen remains on the pre-rework flow.
+- **Agency security review readiness** (board 10) -- Done is: one agency
+  completes a security review from the published assurance package alone, every
+  claim in it naming the check that keeps it true.
+- **Core Functionality** (board 9) -- Done is: no linkage term the schema admits
+  is parsed, displayed, or agreed without the run applying it -- every
+  declared-but-inert path implemented or refused.
 
 ## What the PM does NOT do
 
