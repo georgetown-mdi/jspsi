@@ -166,14 +166,8 @@ function OutboundSendCount({ count }: { count: number }) {
 /**
  * One of the invitation's declared payload directions as a list of column names,
  * bounded by count: at most {@link MAX_DECLARED_NAMES_SHOWN} names are painted and
- * the remainder is counted in the shared closing line. The declaration is the
- * partner's, so an invitation at core's `MAX_PAYLOAD_ENTRIES` with every name at the
- * escape's own cut would otherwise paint roughly a megabyte of text behind this
- * screen's details disclosure -- the one screen holding the consent decision.
- *
- * Only what is PAINTED is capped. The direction counts stated always-visible in the
- * core, and the count-only refusals guarding this render, are computed from the whole
- * declared set, so a bounded list never understates how much the invitation declares.
+ * the remainder is counted in the shared closing line; the bound's rationale lives
+ * with that constant.
  *
  * Keyed by index: column order is fixed for a decoded invitation and a sanitized name
  * is not unique. One column per item rather than a joined string -- a
