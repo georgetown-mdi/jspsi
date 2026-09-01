@@ -2830,12 +2830,41 @@ function blockSkeleton(block: string, lineBreak: string): string {
 const quotedCost = (raw: string): number =>
   renderedDisplayCost(quoteTermsValue(raw));
 
+// The spans a conflict line is composed OF, each carried beside a delimiter of
+// the value's own: the field's `: existing `, the two sides' ` vs required `,
+// the citation clause's ` over ` and a version-shaped token to stand before it,
+// the legal agreement's `(expires ` and the date it closes on, and the name
+// list's separator and brackets.
+const FORGED_LINE_UNITS = [
+  '": existing "',
+  '" vs required "',
+  '" over 9.9.9"',
+  '" (expires 2030-01-01)"',
+  '","',
+  '"],["',
+];
+
 // A value of exactly `cost` rendered characters, opening on `lead`. Built out of
-// a unit carrying the seam's own delimiter, so delimiters stand throughout the
-// value and a cut anywhere inside it lands at or beside a doubled pair.
+// the units above, so the value both carries the seam's delimiter throughout --
+// a cut anywhere inside it lands at or beside a doubled pair -- and spells the
+// connectives and punctuation of the line it is placed in, which is what a
+// partner sizing a value to place the cut has to work with. Units are laid down
+// while any of them still fits, so the padding that lands the exact width is
+// shorter than the shortest of them.
 const delimiterCarryingValue = (cost: number, lead: string): string => {
   let raw = lead;
-  while (quotedCost(`${raw}a"b`) <= cost) raw += 'a"b';
+  let index = 0;
+  let stalled = 0;
+  while (stalled < FORGED_LINE_UNITS.length) {
+    const unit = FORGED_LINE_UNITS[index % FORGED_LINE_UNITS.length];
+    index += 1;
+    if (quotedCost(`${raw}${unit}`) > cost) {
+      stalled += 1;
+      continue;
+    }
+    raw += unit;
+    stalled = 0;
+  }
   while (quotedCost(raw) < cost) raw += "x";
   expect(quotedCost(raw)).toBe(cost);
   return raw;
