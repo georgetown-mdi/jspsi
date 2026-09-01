@@ -1,5 +1,11 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -260,12 +266,27 @@ describe("remind-squash-message hook", () => {
     expect(additionalContext).not.toContain("squash-messages");
   });
 
+  // The subject budget is the rule most easily lost in a later edit of the copy:
+  // GitHub appends " (#NNNN)" when it squash-merges, so a subject drafted to the
+  // full 50 characters lands over the limit.
   it("names the message rules whichever reminder it emits", () => {
     const dir = track(makeRepo(2));
-    const rules = "50 characters or fewer";
-    expect(context(prCreateEvent(dir, ghOutput(5)))).toContain(rules);
+    const rules = ["CONTRIBUTING.md", "50-character", '" (#NNNN)"'];
+    const fileContext = context(prCreateEvent(dir, ghOutput(5)));
     execFileSync("git", ["-C", dir, "checkout", "-q", "--detach"]);
-    expect(context(prCreateEvent(dir, { stdout: "" }))).toContain(rules);
+    const printContext = context(prCreateEvent(dir, { stdout: "" }));
+    for (const rule of rules) {
+      expect(fileContext).toContain(rule);
+      expect(printContext).toContain(rule);
+    }
+  });
+
+  it("keeps the subject budget the hook cites in CONTRIBUTING.md", () => {
+    const contributing = readFileSync(
+      join(REPO_ROOT, "CONTRIBUTING.md"),
+      "utf8",
+    );
+    expect(contributing).toContain("roughly 42 characters");
   });
 
   it("names a directory this repository's gitignore covers", () => {
