@@ -179,8 +179,9 @@ function warnIfWindowsAclOverPermissive(
 }
 
 /**
- * Delete every extended (NFSv4) ACL entry on `filePath`, so an owner-only mode
- * is the file's whole access story. A no-op off macOS.
+ * Delete every extended (NFSv4) ACL entry on `targetPath` -- a file or a
+ * directory -- so an owner-only mode is its whole access story. A no-op off
+ * macOS.
  *
  * macOS evaluates a file's extended (NFSv4) ACL independently of its POSIX mode
  * bits, so an ACE inherited from the parent directory grants another principal
@@ -206,6 +207,14 @@ function warnIfWindowsAclOverPermissive(
  * dash-leading operand. There is no shell: the operand is one `execFileSync`
  * argument.
  *
+ * A directory takes the same call for two effects at once: the ACE on the
+ * directory itself goes, and with it the `file_inherit` / `directory_inherit`
+ * flags that would copy it onto everything created inside afterwards, since an
+ * inherited ACE is resolved at creation time from the parent's ACL. The operand
+ * is the directory's own entry -- there is no `-R`, so this never walks a tree,
+ * and a caller stripping a directory it has just created has nothing inside to
+ * walk.
+ *
  * `symlinks` picks which entry the strip acts on, and each caller passes the one
  * that matches how its own write reached the file, so the ACL cleared always
  * belongs to the file the content lands in:
@@ -213,7 +222,10 @@ function warnIfWindowsAclOverPermissive(
  *    writers take it: the temp path is psilink's own, opened `O_EXCL|O_NOFOLLOW`,
  *    so a symlink at it is a link planted in the create window -- following it
  *    would redirect the strip onto another file's ACL while the content goes to
- *    the temp file.
+ *    the temp file. The doctor's `mkdtemp` work directory takes it on the same
+ *    terms: `mkdtemp` created that entry itself, so a symlink at it is a plant,
+ *    and following one would clear an unrelated directory's ACL while the
+ *    credentials file was created under an inheritable ACE that still stood.
  *  - `"follow"` omits `-h`, so `chmod` resolves the path. The writers of an
  *    operator-supplied path take it -- the streaming result CSV and the
  *    `--log-file` descriptor -- because each opens without `O_NOFOLLOW` and acts
@@ -224,21 +236,22 @@ function warnIfWindowsAclOverPermissive(
  * already collapses the POSIX ACL mask, and Windows owner-only enforcement is
  * the `icacls` path. Callers place it where they enforce the mode -- on the
  * temp file before the atomic rename, on the stream's file before any row, on
- * the log descriptor's file before any line -- so nothing a call writes lands
- * while a foreign ACE could still be in force. A failed strip throws, and each
- * caller fails closed on it rather than writing content into a file whose ACL
- * it could not clear.
+ * the log descriptor's file before any line, on the doctor's work directory
+ * before anything is created in it -- so nothing a call writes lands while a
+ * foreign ACE could still be in force. A failed strip throws, and each caller
+ * fails closed on it rather than writing content into a file whose ACL it could
+ * not clear.
  *
  * `reportedPath` names the destination the operator knows in the failure
  * message: the temp-file writers pass theirs, so the message names it rather
  * than the temp file, and a caller stripping the very file it writes leaves it
- * at `filePath`.
+ * at `targetPath`.
  */
 export function stripExtendedAcls(
-  filePath: string,
+  targetPath: string,
   {
     symlinks,
-    reportedPath = filePath,
+    reportedPath = targetPath,
   }: { symlinks: "do-not-follow" | "follow"; reportedPath?: string },
 ): void {
   if (process.platform !== "darwin") return;
@@ -250,9 +263,9 @@ export function stripExtendedAcls(
     // bare errno escaping past the writers' contract. Only a relative path
     // reaches for the working directory, so a removed one cannot refuse a strip
     // whose operand is already absolute.
-    const operand = filePath.startsWith("/")
-      ? filePath
-      : absolutizeAgainstWorkingDirectory(filePath);
+    const operand = targetPath.startsWith("/")
+      ? targetPath
+      : absolutizeAgainstWorkingDirectory(targetPath);
     const args =
       symlinks === "do-not-follow" ? ["-h", "-N", operand] : ["-N", operand];
     execFileSync("/bin/chmod", args, {

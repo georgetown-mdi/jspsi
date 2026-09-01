@@ -138,6 +138,7 @@ content lands in:
 | Temp-file writers (`writeFileOwnerOnly`, `writeFileAtomic`) | `-h -N` | The path is psilink's own temp path, opened with `O_EXCL` and `O_NOFOLLOW`; a symlink at it is one planted in the create window. `-h` acts on the named entry, so following one cannot redirect the strip onto another file's ACL while the content goes to the temp file. |
 | Streamed result CSV (`createOwnerOnlyWriteStream`) | `-N` | The path is an operator-supplied output path, opened without `O_NOFOLLOW` and `fchmod`'d on the descriptor, so a pre-existing symlink there is deliberately followed (see [Result CSV output](#result-csv-output)). `chmod` resolves the path for the same reason: acting on the link node would clear an ACL that governs nothing while the rows landed in a target whose ACEs still stood. Because the strip re-resolves the path rather than acting on the already-`fchmod`'d descriptor -- Node's `fs` exposes no fd-based ACL API -- a destPath swapped between the `fchmod` and the strip aims the two at different files. |
 | `--log-file` descriptor (`configureLogFile`) | `-N` | The path is an operator-supplied flag value, opened `"a"` with neither `O_NOFOLLOW` nor `O_EXCL`, so a symlink there is followed and the lines land in its target. The strip resolves the path for the same reason the streamed CSV's does, and inherits the same known limitation: it re-resolves the path rather than acting on the open descriptor. |
+| `doctor probe` work directory (`runProbe`) | `-h -N` | The path is one `mkdtemp` created itself, so a symlink at it is one planted in the window after that create. `-h` acts on the named entry, so following one cannot clear an unrelated directory's ACL while the credentials file is created under an inheritable ACE that still stands. |
 
 The strip covers every artifact this document's write construction produces --
 the key file, the signing identity, the exchange record and its verification
@@ -149,6 +150,17 @@ withholds. The credentials file is the case where the directory rather than the
 destination carries the ACE: it is written into a `mkdtemp` directory under the
 operator's `TMPDIR`, so an inheritable ACE set there reaches the password
 through it.
+
+That directory is therefore stripped in its own right, at `mkdtemp` and before
+the credentials file exists. Deleting its ACL removes both the ACE on the
+directory an `smbclient` run reads through and the `file_inherit` /
+`directory_inherit` flags that would otherwise copy that ACE onto everything
+created inside it -- the credentials file, the write probe, and the marker file
+-- since an inherited ACE is resolved at creation time from the parent's ACL.
+The operand is the directory's own entry: there is no `-R`, and at that point the
+directory is empty. The credentials file keeps the writer's own strip as well, so
+neither the inheritance nor the file's own ACL depends on the other being
+cleared.
 
 The `--log-file` descriptor is stripped at its own open instead, between that
 open and the installation of the sink that writes the first line -- the same
@@ -165,7 +177,9 @@ Windows: no content is written. The temp-file writers unlink the temp file on th
 way out, so nothing reaches the destination -- and for the `doctor probe`
 credentials file the run goes with it, its whole `mkdtemp` directory removed and
 the checks abandoned, rather than a password being delivered through a file whose
-ACL could not be cleared. The streamed CSV aborts before its
+ACL could not be cleared. A refused strip of the work directory ends the run on
+the same terms one step earlier, the directory removed before the password has
+been composed into a file at all. The streamed CSV aborts before its
 truncate, so an existing destination keeps its rows; only a file that call itself
 created is left behind, empty and already `0600`, mirroring the Windows
 placeholder.

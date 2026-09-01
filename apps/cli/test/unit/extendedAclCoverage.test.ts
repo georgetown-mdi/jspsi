@@ -27,13 +27,14 @@ const plainPosixOnly = test.skipIf(
   process.platform === "darwin" || process.platform === "win32",
 );
 
-// The two owner-only artifacts written outside `fileUtils`' shared writers: the
+// The owner-only artifacts written outside `fileUtils`' shared writers: the
 // `--log-file` descriptor, opened append and stripped in place, and the doctor's
-// smbclient credentials file, routed through `writeFileOwnerOnly`. The writers'
+// smbclient credentials file, routed through `writeFileOwnerOnly` into a
+// `mkdtemp` work directory the doctor strips itself at creation. The writers'
 // own coverage is in fileUtils.test.ts; what these tests hold is that each of
-// these two sites reaches the strip, aims it at the entry its own write reached,
-// and refuses rather than putting a log line or a password into a file whose
-// extended ACL it could not clear.
+// these sites reaches the strip, aims it at the entry its own write reached, and
+// refuses rather than putting a log line or a password into a file, or under a
+// directory, whose extended ACL it could not clear.
 
 // The strip shells out to `/bin/chmod`, so which entry a site aims it at lives
 // in the command line and nowhere else. This records every `execFileSync`
@@ -41,12 +42,14 @@ const plainPosixOnly = test.skipIf(
 // it, so a command-line assertion holds on a host whose `chmod` rejects the macOS
 // flags. With `failure` set it throws that value instead of running the strip,
 // which is how a test puts a failure -- captured from the runtime, never
-// hand-built -- in front of a site on any host. That throw is scoped to the
+// hand-built -- in front of a site on any host, and `failOperand` narrows that
+// throw to one of the strips a single run makes. The throw is scoped to the
 // strip's own command line, so every other command still runs for real.
 const execFile = vi.hoisted(() => ({
   commands: [] as string[][],
   stubbed: false,
   failure: undefined as unknown,
+  failOperand: undefined as RegExp | undefined,
 }));
 
 vi.mock("node:child_process", async (importOriginal) => {
@@ -61,7 +64,12 @@ vi.mock("node:child_process", async (importOriginal) => {
       options?: Parameters<typeof actual.execFileSync>[2],
     ) => {
       execFile.commands.push([file, ...args]);
-      if (execFile.failure !== undefined && isAclStrip(file, args))
+      if (
+        execFile.failure !== undefined &&
+        isAclStrip(file, args) &&
+        (execFile.failOperand === undefined ||
+          execFile.failOperand.test(args[args.length - 1]))
+      )
         throw execFile.failure;
       return execFile.stubbed ? "" : actual.execFileSync(file, args, options);
     },
@@ -95,14 +103,17 @@ afterEach(() => {
   execFile.commands.length = 0;
   execFile.stubbed = false;
   execFile.failure = undefined;
+  execFile.failOperand = undefined;
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-// The extended-ACL entries `ls -le` prints under a file's mode line, each
-// numbered ("0: group:everyone allow read"). An empty array means the file
-// carries no extended ACL at all, which is what each site must produce.
-function readExtendedAcl(filePath: string): string[] {
-  const output = childProcess.execFileSync("/bin/ls", ["-le", filePath], {
+// The extended-ACL entries `ls -lde` prints under a mode line, each numbered
+// ("0: group:everyone allow read"). An empty array means the entry carries no
+// extended ACL at all, which is what each site must produce. `-d` keeps a
+// directory operand listed as itself rather than by its contents, and changes
+// nothing for a file.
+function readExtendedAcl(targetPath: string): string[] {
+  const output = childProcess.execFileSync("/bin/ls", ["-lde", targetPath], {
     encoding: "utf8",
   });
   return output
@@ -175,9 +186,15 @@ function capturedChmodRefusal(args: string[]): NodeJS.ErrnoException {
 
 // Arm the recorder so the strip's `execFileSync` throws `failure` instead of
 // running, putting a site in front of that exact failure on any host.
-function failAclStripWith(failure: unknown): void {
+// `onlyOperand` restricts that to the strips whose operand matches it, which is
+// how a site that strips twice is put in front of a refusal of the second one:
+// the strips it spares are then answered rather than run, since a host whose
+// `chmod` has no `-N` would otherwise refuse the first.
+function failAclStripWith(failure: unknown, onlyOperand?: RegExp): void {
   execFile.commands.length = 0;
   execFile.failure = failure;
+  execFile.failOperand = onlyOperand;
+  execFile.stubbed = onlyOperand !== undefined;
 }
 
 // Arm the recorder and hand back the (empty) log the sites append to.
@@ -380,28 +397,60 @@ describe("the log file's extended ACL", () => {
   });
 });
 
-describe("the doctor credentials file's extended ACL", () => {
+// Watch for the `mkdtemp` directory the doctor holds its credentials file in,
+// which the run removes on its way out: this is the only handle a test has on
+// the path after the fact.
+function recordDoctorWorkDir(): { path?: string } {
+  const seen: { path?: string } = {};
+  const realMkdtemp = fs.mkdtempSync;
+  vi.spyOn(fs, "mkdtempSync").mockImplementation(
+    (...args: Parameters<typeof fs.mkdtempSync>) => {
+      const made = realMkdtemp(...args) as string;
+      if (path.basename(made).startsWith("psilink-doctor-")) seen.path = made;
+      return made;
+    },
+  );
+  return seen;
+}
+
+describe("the doctor credentials directory's and file's extended ACL", () => {
   macOnly(
-    "the credentials file carries no ACE under an inheriting TMPDIR",
+    "nothing under an inheriting TMPDIR carries an ACE: not the work directory, the credentials file, or a file created beside it",
     async () => {
       // The credentials directory is `mkdtemp`'d under the operator's TMPDIR, so
-      // an inheritable ACE there reaches the password file through it.
+      // an inheritable ACE there sits on the directory itself and reaches the
+      // password file through it.
       const tmpRoot = makeAclInheritingDir("doctor-tmp");
+      // Pin both inheritances the strip has to close, so the assertions below
+      // are about the strip and not about a TMPDIR that failed to hand its ACE
+      // down: a directory created under this root carries the ACE, and so does a
+      // file created inside that directory.
+      const controlDir = path.join(tmpRoot, "control-dir");
+      fs.mkdirSync(controlDir);
+      const controlFile = path.join(controlDir, "control");
+      fs.writeFileSync(controlFile, "x", { mode: 0o600 });
+      expect(readExtendedAcl(controlDir)).not.toEqual([]);
+      expect(readExtendedAcl(controlFile)).not.toEqual([]);
+
       const previousTmpdir = process.env.TMPDIR;
       process.env.TMPDIR = tmpRoot;
+      let workDirAcl: string[] | undefined;
+      let createdInsideAcl: string[] | undefined;
       let acl: string[] | undefined;
-      let controlAcl: string[] | undefined;
       let mode: number | undefined;
       try {
         await runProbe(
           INPUT,
           probeDeps((authFile) => {
             if (acl !== undefined) return;
-            // A plain create beside it pins that the directory really does hand
-            // its ACE down, so the assertion below is about the strip.
-            const control = path.join(path.dirname(authFile), "control");
-            fs.writeFileSync(control, "x", { mode: 0o600 });
-            controlAcl = readExtendedAcl(control);
+            const workDir = path.dirname(authFile);
+            // A plain create in the stripped directory, which is how the run
+            // makes its own write probe and marker file in here: an ACE
+            // reaching this one would reach those too.
+            const createdInside = path.join(workDir, "created-inside");
+            fs.writeFileSync(createdInside, "x", { mode: 0o600 });
+            workDirAcl = readExtendedAcl(workDir);
+            createdInsideAcl = readExtendedAcl(createdInside);
             acl = readExtendedAcl(authFile);
             mode = fs.statSync(authFile).mode & 0o777;
           }),
@@ -411,18 +460,20 @@ describe("the doctor credentials file's extended ACL", () => {
         else process.env.TMPDIR = previousTmpdir;
       }
 
-      expect(controlAcl).not.toEqual([]);
+      expect(workDirAcl).toEqual([]);
+      expect(createdInsideAcl).toEqual([]);
       expect(acl).toEqual([]);
       expect(mode).toBe(0o600);
     },
   );
 
-  test("the password goes through the owner-only writer's temp path and strip", async () => {
-    // The credentials file is written through `writeFileOwnerOnly`, so the strip
-    // lands on psilink's own temp path with -h -- following a symlink planted
-    // there would clear another file's ACL while the password went to the temp
-    // file -- and it runs before the password is written, since the writer
-    // strips between its fchmod and its write.
+  test("the work directory is stripped before the credentials file exists, and the password through the owner-only writer's temp path", async () => {
+    // Two strips in the order the run makes them: the directory at `mkdtemp`,
+    // before anything is created in it, and then the writer's own on psilink's
+    // temp path, before the password is written -- the writer strips between its
+    // fchmod and its write. Both carry -h: each entry is one psilink created
+    // itself, so a symlink at it is a plant, and following it would clear an
+    // unrelated ACL while the password landed under one that still stood.
     if (process.platform === "win32") return;
     const commands = recordAclStripCommands();
     let authFile: string | undefined;
@@ -438,24 +489,53 @@ describe("the doctor credentials file's extended ACL", () => {
 
     expect(authFile).toBeDefined();
     expect(commands).toEqual([
+      ["/bin/chmod", "-h", "-N", path.dirname(authFile as string)],
       ["/bin/chmod", "-h", "-N", `${authFile}.tmp.${process.pid}`],
     ]);
   });
 
-  test("a refused strip writes no password and removes the work directory", async () => {
+  test("a refused directory strip removes the directory before a password is composed", async () => {
     if (process.platform === "win32") return;
     failAclStripWith(
       capturedChmodRefusal(["-h", "-N", path.join(dir, "absent")]),
     );
-    let workDir: string | undefined;
-    const realMkdtemp = fs.mkdtempSync;
-    vi.spyOn(fs, "mkdtempSync").mockImplementation(
-      (...args: Parameters<typeof fs.mkdtempSync>) => {
-        const made = realMkdtemp(...args) as string;
-        if (path.basename(made).startsWith("psilink-doctor-")) workDir = made;
-        return made;
-      },
+    const workDir = recordDoctorWorkDir();
+    let authFileSeen = false;
+
+    const thrown = await withPlatformAsync("darwin", () =>
+      runProbe(
+        INPUT,
+        probeDeps(() => {
+          authFileSeen = true;
+        }),
+      ),
+    ).catch((err: unknown) => err);
+
+    expect(workDir.path).toBeDefined();
+    // The refusal names the directory the operator would go clear, and it is the
+    // only strip the run got to make: the credentials write never started, so
+    // nothing was left to reach the temp path's own strip.
+    expect(sanitizeErrorForDisplay(thrown)).toBe(
+      joinErrorCauseChain([
+        `Could not clear extended ACLs on ${workDir.path as string}; inspect ` +
+          "them with `ls -le` and clear them manually with `chmod -N`",
+        `Command failed: /bin/chmod -h -N ${path.join(dir, "absent")}`,
+      ]),
     );
+    expect(execFile.commands).toEqual([
+      ["/bin/chmod", "-h", "-N", workDir.path as string],
+    ]);
+    expect(authFileSeen).toBe(false);
+    expect(fs.existsSync(workDir.path as string)).toBe(false);
+  });
+
+  test("a refused credentials-file strip writes no password and removes the work directory", async () => {
+    if (process.platform === "win32") return;
+    failAclStripWith(
+      capturedChmodRefusal(["-h", "-N", path.join(dir, "absent")]),
+      /\.tmp\.\d+$/,
+    );
+    const workDir = recordDoctorWorkDir();
     let authFileSeen = false;
 
     await expect(
@@ -473,7 +553,7 @@ describe("the doctor credentials file's extended ACL", () => {
     // credentials file, and takes the whole directory with it, so no password
     // reached the disk the run leaves behind.
     expect(authFileSeen).toBe(false);
-    expect(workDir).toBeDefined();
-    expect(fs.existsSync(workDir as string)).toBe(false);
+    expect(workDir.path).toBeDefined();
+    expect(fs.existsSync(workDir.path as string)).toBe(false);
   });
 });
