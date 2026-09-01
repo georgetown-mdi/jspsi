@@ -405,49 +405,37 @@ describe("the --json lines are safe to print as they stand", () => {
   });
 });
 
-// A peer that answers the port with PEM-shaped bytes. Neither route may be the
-// softer one: the excerpt is redacted where it is interpolated on both.
-describe("private-key material is redacted on both routes", () => {
-  const KEY_BODY = "b3BlbnNzaC1rZXktdjEAAAAABG5vbmU";
-  const WHOLE_BLOCK =
-    "HTTP/1.0 200 OK\r\n\r\n-----BEGIN OPENSSH PRIVATE KEY-----\r\n" +
-    `${KEY_BODY}\r\n-----END OPENSSH PRIVATE KEY-----\r\n`;
-  /** The realistic shape: the excerpt bound cuts the block, leaving a BEGIN
-   * marker with no END, which the redaction's fail-closed dangling rule takes. */
-  const TRUNCATED_BLOCK = `HTTP/1.0 200 OK\r\n\r\n-----BEGIN RSA PRIVATE KEY-----\r\n${KEY_BODY}`;
+// A peer that answers the port with PEM-shaped bytes reaches both routes with
+// its private-key material already stripped: the strip runs where the excerpt is
+// produced, ahead of the bound that clips it (driven in
+// test/unit/sftpPeerIdentification.test.ts, and from the wire through to this
+// line in test/integration/backendAgnostic/hostKeyProbePeerIdentification.test.ts).
+// What is asserted here is that neither route treats those bytes a second time,
+// which is what let two consumers of one excerpt disagree about it.
+describe("both routes carry the producer's excerpt as it stands", () => {
+  const PRODUCED_EXCERPT = "HTTP/1.0 200 OK\r\n\r\n[redacted private key]";
 
-  const machineExcerpt = (excerpt: string): string =>
-    (
-      JSON.parse(
-        probeDiagnosisJsonLine({ kind: "non-ssh", shape: "http", excerpt }),
-      ) as { excerpt: string }
-    ).excerpt;
+  test("the machine route emits it byte for byte", () => {
+    const parsed = JSON.parse(
+      probeDiagnosisJsonLine({
+        kind: "non-ssh",
+        shape: "http",
+        excerpt: PRODUCED_EXCERPT,
+      }),
+    ) as { excerpt: string };
+    expect(parsed.excerpt).toBe(PRODUCED_EXCERPT);
+  });
 
-  const humanChain = (excerpt: string): string =>
-    sanitizeErrorForDisplay(
+  test("the human route carries the same bytes, escaped once at its sink", () => {
+    const rendered = sanitizeErrorForDisplay(
       explainPeerIdentificationFailure(
         new Error("Connection lost before handshake"),
-        { kind: "non-ssh", shape: "http", excerpt },
+        { kind: "non-ssh", shape: "http", excerpt: PRODUCED_EXCERPT },
         { host: "sftp.example.org", port: 22 },
       ),
     );
-
-  test.each([
-    ["a whole block", WHOLE_BLOCK],
-    ["a block the excerpt bound truncated", TRUNCATED_BLOCK],
-  ])("the machine route redacts %s", (_name, excerpt) => {
-    const redacted = machineExcerpt(excerpt);
-    expect(redacted).toContain("[redacted private key]");
-    expect(redacted).not.toContain(KEY_BODY);
-    expect(redacted).not.toContain("PRIVATE KEY-----");
-  });
-
-  test.each([
-    ["a whole block", WHOLE_BLOCK],
-    ["a block the excerpt bound truncated", TRUNCATED_BLOCK],
-  ])("the human route redacts %s", (_name, excerpt) => {
-    const rendered = humanChain(excerpt);
-    expect(rendered).toContain("[redacted private key]");
-    expect(rendered).not.toContain(KEY_BODY);
+    expect(rendered).toContain(
+      `first bytes the peer sent, private-key material stripped: ${sanitizeForDisplay(PRODUCED_EXCERPT)}`,
+    );
   });
 });

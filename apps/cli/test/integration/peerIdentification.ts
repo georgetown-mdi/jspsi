@@ -48,7 +48,9 @@ export function expectNonSshAnswerDiagnosis(
   // The peer's bytes ride a link of their own, and no first-party sentence
   // carries them.
   const peerLinks = links.filter((link) =>
-    link.startsWith("first bytes the peer sent:"),
+    link.startsWith(
+      "first bytes the peer sent, private-key material stripped:",
+    ),
   );
   expect(peerLinks).toHaveLength(1);
   expect(peerLinks[0]).toContain("403 Forbidden");
