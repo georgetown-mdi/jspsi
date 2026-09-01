@@ -12,8 +12,13 @@ import "@mantine/core/styles.css";
 
 import { sanitizeForDisplay } from "@psilink/core";
 
+import {
+  demotionNotice,
+  editorFromCsv,
+  editorWithColumnDisclosure,
+  editorWithColumnType,
+} from "@bench/inviterModel";
 import { MatchingSharingSection } from "@bench/MatchingSharingSection";
-import { editorFromCsv } from "@bench/inviterModel";
 
 // The expectations derive their form from this function, so they pin that the
 // section's string sink carries the same form its chips do, not what that form
@@ -25,6 +30,7 @@ import { createAppMount } from "./renderApp";
 import { visualOrderWithin } from "./visualOrder";
 
 import type { AcquiredCsv } from "@bench/inviterModel";
+import type { Metadata } from "@psilink/core";
 
 // The inviter's step 2 states what the partner will receive in two voices at
 // once -- the chip list a sighted operator reads and the live region a screen
@@ -66,16 +72,23 @@ function csvOf(columns: Array<string>): AcquiredCsv {
 
 const csv = csvOf(["client_id", "first_name", "last_name", "dob", bidiColumn]);
 
-function mountColumns(columns: Array<string>) {
+function mountMetadata(metadata: Metadata, announcement: string) {
   const noop = () => undefined;
   app.render(
     createElement(MatchingSharingSection, {
-      metadata: editorFromCsv("Dana Okafor", csvOf(columns)).draft.metadata,
+      metadata,
       onColumnType: noop,
       onColumnDisclosure: noop,
-      announcement: "",
+      announcement,
       onContinue: noop,
     }),
+  );
+}
+
+function mountColumns(columns: Array<string>) {
+  mountMetadata(
+    editorFromCsv("Dana Okafor", csvOf(columns)).draft.metadata,
+    "",
   );
 }
 
@@ -239,10 +252,83 @@ describe("column-name isolation: what the wrapper does not contain", () => {
     expect(await bdiInlineOrder(residualName)).toEqual(["one", "post", "evil"]);
   });
 
-  test("both shipped sites contain it at the block boundary", async () => {
-    // Neither shipped ColumnName site puts inline copy beside the name: the grid
-    // row header and the chip are each the whole of their own block, so the leak
-    // the check above measures has nothing to run over. That structure is the
+  test("the demotion notice names every column the rule displaces at once", async () => {
+    // Why the notice is a site where the residual can reach something: two
+    // alias-inferred identifiers are displaced together when a third column takes
+    // the role, so the notice sets separators between the names and its sentence
+    // after them. Driven through the editing path the step's selects call, so the
+    // shape asserted here is the shape the rule produces.
+    const acquired = csvOf(["id", "identifier", "first_name", "post_id"]);
+    const { editor, demotedIdentifiers } = editorWithColumnDisclosure(
+      editorFromCsv("Dana Okafor", acquired),
+      acquired,
+      "post_id",
+      "identifier",
+    );
+    expect(demotedIdentifiers).toEqual(["id", "identifier"]);
+
+    const notice = demotionNotice(demotedIdentifiers);
+    expect(notice).toContain(
+      `${isolatedColumnName("id")}, ${isolatedColumnName("identifier")} changed`,
+    );
+    mountMetadata(editor.draft.metadata, notice);
+    await expect
+      .element(page.getByText("changed to Ignored", { exact: false }))
+      .toHaveTextContent(notice);
+  });
+
+  test("the demotion notice does not contain one behind an unmatched PDI", async () => {
+    // The same measurement as the string form above, at the shipped sink: the
+    // notice's own trailing copy is what the override runs over. The state is
+    // reached through the two selects the grid offers, in the order an operator
+    // drives them -- retype the residual header to the identifier type, mark it
+    // the record identifier (displacing the seeded post_id), then hand the role
+    // back to post_id -- so the name in the notice is the one the rule displaced
+    // rather than a prop the test chose.
+    const acquired = csvOf([
+      "first_name",
+      "last_name",
+      residualName,
+      "post_id",
+    ]);
+    const typed = editorWithColumnType(
+      editorFromCsv("Dana Okafor", acquired),
+      acquired,
+      residualName,
+      "identifier",
+    );
+    const claimed = editorWithColumnDisclosure(
+      typed.editor,
+      acquired,
+      residualName,
+      "identifier",
+    );
+    const { editor, demotedIdentifiers } = editorWithColumnDisclosure(
+      claimed.editor,
+      acquired,
+      "post_id",
+      "identifier",
+    );
+    expect(demotedIdentifiers).toEqual([residualName]);
+
+    mountMetadata(editor.draft.metadata, demotionNotice(demotedIdentifiers));
+    await expect
+      .element(page.getByText("changed to Ignored", { exact: false }))
+      .toBeInTheDocument();
+    const notice = page
+      .getByText("changed to Ignored", { exact: false })
+      .element();
+    expect(visualOrderWithin(notice, ["pre", "evil", "changed to"])).toEqual([
+      "pre",
+      "changed to",
+      "evil",
+    ]);
+  });
+
+  test("both element sites on the step contain it at the block boundary", async () => {
+    // Neither ColumnName element site here puts inline copy beside the name: the
+    // grid row header and the chip are each the whole of their own block, so the
+    // leak the check above measures has nothing to run over. That structure is the
     // containment, so it is asserted rather than described -- a separator or a
     // marker added inside either block makes the leak reachable and fails here.
     mountColumns([

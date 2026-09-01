@@ -1249,12 +1249,13 @@ describe("acceptor columns step: one column name across the screen", () => {
 
   test("a header behind an unmatched PDI reorders the panel's own sentence", async () => {
     // The isolate class is the isolation's residual (UAX #9 BD9/X6a), and this
-    // panel is the one shipped ColumnName site that puts copy beside a name --
-    // the separators between the names and the sentence's full stop -- so it is
-    // the one site where the residual is reachable. The unmatched PDI ends the
-    // <bdi>'s isolation after "pre", and the override written after that break
-    // carries the name's tail past the name listed after it. Bounded by the trust
-    // basis @components/ColumnName records: these are the operator's own headers.
+    // panel puts copy beside a name -- the separators between the names and the
+    // sentence's full stop -- so the residual is reachable here; the inviter's
+    // demotion notice is the other site of that shape, measured in
+    // benchInviterSharing. The unmatched PDI ends the <bdi>'s isolation after
+    // "pre", and the override written after that break carries the name's tail
+    // past the name listed after it. Bounded by the trust basis
+    // @components/ColumnName records: these are the operator's own headers.
     const residual = "pre\u2069mid\u202Eevil";
     mountStep(["first_name", "last_name", residual, "post"]);
     await expect

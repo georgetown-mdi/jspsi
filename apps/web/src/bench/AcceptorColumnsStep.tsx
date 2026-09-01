@@ -441,10 +441,10 @@ export function AcceptorColumnsStep({
                 {/* The operator's OWN CSV headers, shown through the same
                     ColumnName every column-name surface on this screen uses, so
                     the name here reads exactly as it does in the grid row the
-                    operator marked. This is the one ColumnName site that puts
-                    copy beside a name -- the separators and the full stop -- so
-                    it is the one where the isolate class's residual reaches
-                    something: what the isolation does not contain is stated on
+                    operator marked. This sentence puts copy beside a name -- the
+                    separators and the full stop -- so the isolate class's
+                    residual reaches something here: what the isolation does not
+                    contain, and the other site of this shape, are stated on
                     ColumnName, and driven in benchAccept's panel measurement. */}
                 For each matched row:{" "}
                 {disclosed.map((column, index) => (
