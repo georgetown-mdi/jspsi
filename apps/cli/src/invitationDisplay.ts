@@ -144,10 +144,11 @@ function verdictMarked(
  * carrying the marker before it. The name is quoted, as core's rule-set mismatch
  * message quotes it: it is free text that may carry a space, so an unquoted name
  * reading "hmis-keys 9.9.9" would be indistinguishable from the name plus the
- * schema-constrained semver version beside it. The quoting shares that message's
- * stated limit: sanitization preserves printable ASCII, so a name carrying a
- * double quote of its own can close the quote early and fake the line's structure
- * for a skimming reader.
+ * schema-constrained semver version beside it. The quoting here is plain, not the
+ * doubling grammar core's seam delimits that message's values with, and its own
+ * limit is therefore its own to state: sanitization preserves printable ASCII, so
+ * a name carrying a double quote of its own can close the quote early here and
+ * fake the line's structure for a skimming reader.
  */
 function displayRuleSetCitation(
   emit: ConsentSurfaceSink,

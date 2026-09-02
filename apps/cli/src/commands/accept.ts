@@ -25,11 +25,11 @@ import type {
 
 import {
   diffLinkageTerms,
-  formatReconcileDiffs,
   linkageTermsStandingOf,
   persistExpectedPartnerDeduplicate,
   persistExpectedPayloadColumns,
   persistOutboundPayloadConsent,
+  reconcileConflictMessage,
   warnOnLinkageRuleSetCitationDrift,
   type ReconcileDiff,
 } from "../config";
@@ -879,10 +879,7 @@ function reconcileAcceptConfig(params: {
   const all: ReconcileDiff[] = [...conflicts, ...conn.conflicts];
   if (all.length > 0)
     throw new UsageError(
-      `the configuration file at ${configPath} disagrees with ${against}:\n` +
-        formatReconcileDiffs(all) +
-        `\nResolve the differences (or pass --config-file to write elsewhere), ` +
-        `then retry with ${retryWith}.`,
+      reconcileConflictMessage({ configPath, against, retryWith, diffs: all }),
     );
 
   // A connection field that is "how you reach the same drop" (protocol, port,

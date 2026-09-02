@@ -2,6 +2,7 @@ import fs from "node:fs";
 
 import YAML from "yaml";
 import type {
+  CompatibilityMessageFragment,
   ConnectionConfig,
   ExchangeSpec,
   LinkageRuleSetReference,
@@ -12,13 +13,19 @@ import type {
   Standardization,
 } from "@psilink/core";
 import {
+  bareTermsValue,
   canonicalString,
   CanonicalEncodingError,
   clipToRenderedCost,
+  compatibilityMessage,
+  COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
   DEFAULT_LINKAGE_RULE_SET,
+  DISPLAY_TRUNCATION_MARKER,
   isDrawnFromLinkageRuleSet,
   MAX_NESTING_DEPTH,
   NestingDepthExceededError,
+  quoteTermsValue,
+  quoteTermsValueList,
   redactAndSanitizeForDisplay,
   redactPrivateKeyMaterial,
   renderedDisplayCost,
@@ -459,17 +466,364 @@ export function assertRetainSweepGuard(
 export interface ReconcileDiff {
   /**
    * snake_case field path as it appears in `psilink.yaml` (e.g. `algorithm`,
-   * `linkage_keys`, `connection.server.host`).
+   * `linkage_keys`, `connection.server.host`). First-party text: every producer
+   * supplies a literal, and it is what the conflict line's own structure is
+   * built from.
    */
   field: string;
-  /** Rendering of the value in the pre-existing config; `(unset)` when absent. */
-  existing: string;
+  /**
+   * Rendering of the value in the pre-existing config; `(unset)` when absent.
+   *
+   * A fragment rather than a `string`, so a value somebody else chose cannot be
+   * interpolated into a conflict line without passing the delimiting seam
+   * ({@link reconcileDiffValue} and the renderers beside it, over core's
+   * `quoteTermsValue`). Both sides carry chosen bytes -- the invitation's on the
+   * incoming side, and on the existing side too wherever an earlier acceptance
+   * adopted the inviter's terms into the kept config -- so neither side is
+   * exempt. See {@link formatReconcileDiffs} for what the brand does not cover.
+   */
+  existing: CompatibilityMessageFragment;
   /** Rendering of the value the invitation or URL requires. */
-  incoming: string;
+  incoming: CompatibilityMessageFragment;
+  /**
+   * How each side is fitted where the line's slot cannot hold it whole.
+   *
+   * Absent where a side is ONE delimited run, which has nothing inside it to
+   * partition: the slot's clip degrades that run and takes nothing else with it.
+   * Supplied where a side is a CLAUSE -- several chosen values inside
+   * first-party structure -- so the slot's share is divided among those values
+   * rather than spent left to right on the first of them, which would delete the
+   * structure standing behind it (see {@link reconcileClause}).
+   */
+  fit?: ReconcileDiffFit;
+}
+
+/**
+ * The two sides of one conflict line as claims on the block's budget.
+ *
+ * Carried BESIDE the sides rather than in place of them, and produced by the one
+ * composition that produced those sides ({@link reconcileClause}), so a fitted
+ * side cannot describe a different clause than the unfitted one it replaces.
+ */
+export interface ReconcileDiffFit {
+  existing: ReconcileSideFit;
+  incoming: ReconcileSideFit;
+}
+
+/**
+ * What one side of a conflict line needs, what it cannot go below, and how it
+ * renders at what it is given.
+ *
+ * The two measurements are what makes the block's allocation NEED-AWARE rather
+ * than count-driven ({@link formatReconcileDiffs}): a side takes only `need`,
+ * and what it leaves is available to the sides that exceed their share, so the
+ * count of disagreeing fields no longer decides on its own whether any value is
+ * shown.
+ */
+export interface ReconcileSideFit {
+  /** Rendered cost of this side whole, which is all it can ever spend. */
+  need: number;
+  /**
+   * Least this side can be given and still read as what it is. A side given
+   * less than the smaller of this and its `need` is not fitted at all: its LINE
+   * names its field and drops both values, which costs the operator less than a
+   * clause cut back to punctuation and truncation markers.
+   */
+  minimum: number;
+  /** This side rendered into `budget`. */
+  fit: (budget: number) => string;
 }
 
 /** Placeholder rendered for an absent value in a {@link ReconcileDiff}. */
-export const RECONCILE_UNSET = "(unset)";
+export const RECONCILE_UNSET = compatibilityMessage`(unset)`;
+
+/**
+ * One value somebody else chose, TREATED for a reconcile conflict line: redacted
+ * as private-key material, then rendered as one delimited run through core's
+ * terms-value seam.
+ *
+ * Redaction comes first because the display boundary's private-key rule is
+ * fail-closed past a `BEGIN` marker carrying no `END` -- it replaces from the
+ * marker to the end of the cause-chain link -- and the whole reconcile refusal
+ * is one link, so a marker planted in a linkage-field name would otherwise
+ * consume every conflict line composed behind it. Redacting where the value is
+ * interpolated bounds that rule to the fragment that carried the marker (see
+ * {@link redactPrivateKeyMaterial}).
+ *
+ * Delimiting answers the other half, which redaction and the display escape both
+ * pass over: a conflict line is first-party prose an operator reads as psilink's
+ * own -- `linkage_keys: existing X vs required Y` -- and a value of
+ * `A vs required B` is printable ASCII throughout, so nothing at the display
+ * boundary rewrites it. The seam's doubling grammar makes a value unable to
+ * terminate its own run, so it reads as content rather than as structure the
+ * refusal asserted.
+ *
+ * Neither pass is escaping: the run's bytes stay raw for the single escape the
+ * display sink applies (CONTRIBUTING.md, Operator-facing escaping), and the seam
+ * emits only printable ASCII, which that escape passes through unchanged.
+ */
+export function reconcileDiffValue(
+  value: string,
+): CompatibilityMessageFragment {
+  return quoteTermsValue(redactPrivateKeyMaterial(value));
+}
+
+/**
+ * The same treatment for a value the linkage-terms schema constrains to a shape
+ * no clause boundary is made of -- a semver string, an ISO date -- which core's
+ * checked bare form renders undelimited so the common line reads as prose. The
+ * check runs on the value in hand, so a value that does not meet the shape falls
+ * back to the delimited form rather than being trusted for its field's sake.
+ */
+function reconcileDiffBareValue(value: string): CompatibilityMessageFragment {
+  return bareTermsValue(redactPrivateKeyMaterial(value));
+}
+
+const DISPLAY_TRUNCATION_MARKER_COST = renderedDisplayCost(
+  DISPLAY_TRUNCATION_MARKER,
+);
+
+/**
+ * The delimiter core's seam wraps a terms value in and doubles inside one, read
+ * off the seam rather than restated, so the fit below cannot drift from the
+ * grammar it has to preserve.
+ */
+const TERMS_VALUE_DELIMITER = quoteTermsValue("")[0];
+
+const TERMS_VALUE_DELIMITER_COST = renderedDisplayCost(TERMS_VALUE_DELIMITER);
+
+/**
+ * Fit a composed conflict-line fragment to `budget`, cutting the VALUE inside a
+ * delimited run rather than the run's rendering: the cut never falls between the
+ * two characters of a doubled delimiter, and a cut that lands inside a run
+ * delimits what it kept -- truncation marker inside -- rather than leaving the
+ * run open.
+ *
+ * This is the treatment's own order (redact, clip, delimit) carried to where the
+ * composition happens, and it is what keeps the seam's guarantee over a fitted
+ * line: the run structure an operator reads is the structure this module
+ * composed, at any budget and for any value width. Core's
+ * {@link clipToRenderedCost} cuts the rendered form instead, so a value the
+ * partner sized to land the cut mid-run leaves that run open and everything
+ * composed after it on the line -- the clause's next value, the other side of
+ * the line -- reads at the opposite run parity from the one it was composed at.
+ *
+ * The doubling is why the clip cannot simply be moved ahead of the delimiting: a
+ * raw prefix measured against the budget renders WIDER once its delimiters are
+ * doubled back in. Charging each doubled pair as it is kept is that same clip,
+ * costed at what the run renders to.
+ */
+function fitToRenderedCostClosingRuns(text: string, budget: number): string {
+  if (renderedDisplayCost(text) <= budget) return text;
+  const units = Array.from(text);
+  let kept = "";
+  let cost = 0;
+  let insideRun = false;
+  let index = 0;
+  while (index < units.length) {
+    const unit = units[index];
+    const delimiter = unit === TERMS_VALUE_DELIMITER;
+    const doubled: boolean =
+      delimiter && insideRun && units[index + 1] === TERMS_VALUE_DELIMITER;
+    const taken = doubled ? unit + unit : unit;
+    const nextInsideRun: boolean =
+      delimiter && !doubled ? !insideRun : insideRun;
+    const spent = cost + renderedDisplayCost(taken);
+    // What closing this cut costs is reserved before the unit is kept, so the
+    // run this enters is one the budget can still close.
+    const closing = nextInsideRun ? TERMS_VALUE_DELIMITER_COST : 0;
+    if (spent + DISPLAY_TRUNCATION_MARKER_COST + closing > budget) break;
+    kept += taken;
+    cost = spent;
+    insideRun = nextInsideRun;
+    index += doubled ? 2 : 1;
+  }
+  return `${kept}${DISPLAY_TRUNCATION_MARKER}${insideRun ? TERMS_VALUE_DELIMITER : ""}`;
+}
+
+/**
+ * Least a conflict line may spend on ONE of its two values while still showing
+ * any of that value's own bytes.
+ *
+ * A fitted value pays for its delimiters and, when the fit cuts it, for the
+ * truncation marker, so below this a side renders as punctuation and a marker
+ * with nothing of the value left inside. A line whose sides cannot both be given
+ * this much is named without its values instead ({@link formatReconcileDiffs}),
+ * which is the honest reading of "there is no room for this line's values" and
+ * costs the operator less than a marker.
+ */
+const RECONCILE_MIN_VALUE_BUDGET = 32;
+
+/**
+ * The same floor for ONE value inside a clause, which pays for the marker out of
+ * its own share the way a whole side does.
+ *
+ * Sized off the marker rather than restated, because what makes a share useless
+ * is that the marker consumes it: at or below the marker's cost a clipped value
+ * renders as a run with nothing of its own inside, so a clause given the count
+ * of its values times this floor still shows some of every value's own bytes.
+ * Smaller than the whole-side floor above, since a clause fits several values
+ * into a slot sized for one side and the alternative is dropping the line's
+ * values entirely.
+ */
+const RECONCILE_MIN_CLAUSE_VALUE_BUDGET = DISPLAY_TRUNCATION_MARKER_COST + 8;
+
+/**
+ * Divide `budget` among claims of the given `needs`, need-aware: a claim takes
+ * only what it needs, and what it leaves is available to the claims that exceed
+ * an equal share, so a constraint falls only on the claims too wide for the room
+ * -- never on a claim that was already going to fit.
+ *
+ * Serving the claims in ascending order is what settles that in one pass: every
+ * claim still unserved is at least as wide as the one being served, so an equal
+ * share of what remains is the most the current claim can take without stranding
+ * one behind it, and a claim narrower than that share hands the difference on.
+ */
+function allocateByNeed(needs: readonly number[], budget: number): number[] {
+  const shares = needs.map(() => 0);
+  const ascending = needs
+    .map((_, index) => index)
+    .sort((a, b) => needs[a] - needs[b]);
+  let remaining = Math.max(0, budget);
+  for (let served = 0; served < ascending.length; served += 1) {
+    const share = Math.floor(remaining / (ascending.length - served));
+    if (needs[ascending[served]] > share) {
+      // Every claim still unserved is at least this wide, so they are all
+      // constrained and all take the same share. What the division leaves over
+      // goes unspent rather than to whichever claim happened to be served last:
+      // two claims of equal need are two claims that fit alike, and a line whose
+      // two sides differ by the odd character left over is a line whose sides
+      // were cut at different points for no reason the operator can see.
+      for (let rest = served; rest < ascending.length; rest += 1)
+        shares[ascending[rest]] = share;
+      break;
+    }
+    shares[ascending[served]] = needs[ascending[served]];
+    remaining -= needs[ascending[served]];
+  }
+  return shares;
+}
+
+/**
+ * One side of a conflict line built from more than one value: the clause whole,
+ * what it claims on the block's budget, and the same clause fitted to a budget.
+ */
+export interface ReconcileClause extends ReconcileSideFit {
+  /** Every value at its full width, for a slot that can hold them. */
+  text: CompatibilityMessageFragment;
+}
+
+/**
+ * Compose a conflict line's side as a tagged template, keeping the values apart
+ * from the first-party spans around them so a slot too small for the whole
+ * clause can be divided among the VALUES.
+ *
+ * This is the provenance partition {@link formatReconcileDiffs} applies between
+ * lines, carried one level down into a line: the clause's own spans are
+ * first-party copy, measured where they stand, and what the slot leaves is
+ * shared out among the values it names by the same need-aware rule the block
+ * applies between sides, so a version of five characters cannot hold a quarter
+ * of the slot away from the name beside it. Clipping the composed clause instead
+ * spends the slot left to right, so the first value takes all of it and the
+ * connective, the values behind it, and the clause's second half are deleted -- a
+ * partner-chosen set name at the schema's length would leave the operator a
+ * citation with no version, no `over`, and no field set on either side.
+ * Sub-partitioned, degradation happens INSIDE a value: at any share the clause
+ * still reads as a name, a version, the connective, and the other half, however
+ * little of each survives.
+ *
+ * A share too small for its value degrades that value's own bytes and nothing
+ * around them: the fit cuts inside the run and delimits what it kept
+ * ({@link fitToRenderedCostClosingRuns}), so no cut can leave a run open for the
+ * clause's next value -- or for the other side of the line -- to be read inside.
+ * The fitted form is a plain string rather than a fragment because it is
+ * composed by concatenation rather than through core's tagged template; what
+ * holds the run structure over it is a check on the rendered lines
+ * (`apps/cli/test/unit/config.test.ts`).
+ */
+export function reconcileClause(
+  fixedSpans: TemplateStringsArray,
+  ...values: readonly CompatibilityMessageFragment[]
+): ReconcileClause {
+  const structureCost = renderedDisplayCost(fixedSpans.join(""));
+  const needs = values.map((value) => renderedDisplayCost(value));
+  return {
+    text: compatibilityMessage(fixedSpans, ...values),
+    need: needs.reduce((total, need) => total + need, structureCost),
+    // The spans do not shrink and every value the clause names has to stay
+    // visible inside them, so this is what the clause structurally is. A value
+    // already narrower than the floor asks for its own width instead, which is
+    // the same rule the block applies to a side.
+    minimum: needs.reduce(
+      (total, need) =>
+        total + Math.min(need, RECONCILE_MIN_CLAUSE_VALUE_BUDGET),
+      structureCost,
+    ),
+    fit: (budget: number): string => {
+      const shares = allocateByNeed(needs, Math.max(0, budget - structureCost));
+      let composed: string = fixedSpans[0];
+      for (let index = 0; index < values.length; index += 1)
+        composed +=
+          fitToRenderedCostClosingRuns(values[index], shares[index]) +
+          fixedSpans[index + 1];
+      // A share below what the marker and the run's own delimiters cost leaves
+      // a clipped value wider than its share, so the composed clause is held to
+      // the slot it was given rather than to the sum of the parts it fitted. The
+      // block's floor keeps a fitted line off that shape; this is the backstop
+      // under a budget reached some other way.
+      return fitToRenderedCostClosingRuns(composed, budget);
+    },
+  };
+}
+
+/**
+ * One delimited run as a clause side, for a conflict line whose OTHER side is a
+ * clause: the line's fit covers both sides, and this one has nothing inside it
+ * to partition -- the slot's clip degrades the single run and takes nothing else
+ * with it.
+ */
+export function reconcileValueClause(value: string): ReconcileClause {
+  const text = reconcileDiffValue(value);
+  return {
+    text,
+    need: renderedDisplayCost(text),
+    minimum: RECONCILE_MIN_VALUE_BUDGET,
+    fit: (budget: number): string => fitToRenderedCostClosingRuns(text, budget),
+  };
+}
+
+/**
+ * The side of a conflict on an OPTIONAL block that names no chosen value at all,
+ * as a clause -- so a line whose other side is one can carry a fit for both of
+ * its sides. Nothing here to sub-partition: the placeholder is first-party copy,
+ * so it asks for exactly its own width and is held to the slot it was given.
+ */
+const RECONCILE_ABSENT_CLAUSE: ReconcileClause = {
+  text: RECONCILE_UNSET,
+  need: renderedDisplayCost(RECONCILE_UNSET),
+  minimum: renderedDisplayCost(RECONCILE_UNSET),
+  fit: (budget: number): string =>
+    fitToRenderedCostClosingRuns(RECONCILE_UNSET, budget),
+};
+
+/**
+ * One conflict line whose two sides are clauses: the sides themselves, and the
+ * per-side fit beside them.
+ *
+ * Both come from the composition that produced the sides
+ * ({@link reconcileClause}), which is what keeps a fitted side an account of the
+ * same clause the unfitted one is.
+ */
+export function reconcileClauseConflict(
+  existing: ReconcileClause,
+  incoming: ReconcileClause,
+): Omit<ReconcileDiff, "field"> {
+  return {
+    existing: existing.text,
+    incoming: incoming.text,
+    fit: { existing, incoming },
+  };
+}
 
 /**
  * Recursively drop every key whose value is `undefined` from a JSON-like value,
@@ -530,10 +884,21 @@ function reconcileCanonical(value: unknown): string {
   return canonicalString(withoutUndefinedDeep(value));
 }
 
-/** Render the identifiers of a list of named entries (linkage fields/keys,
- *  payload columns) for a diff line, in the order given. */
-function renderNames(list: ReadonlyArray<{ name: string }>): string {
-  return `[${list.map((e) => e.name).join(", ")}]`;
+/**
+ * Render the identifiers of a list of named entries (linkage fields/keys,
+ * payload columns) for a diff line, in the order given.
+ *
+ * Each name is delimited on its own rather than the joined list being delimited
+ * once, so the rendered list shows the same partition the byte-exact,
+ * element-wise comparison used to decide the conflict: one entry named `a,b`
+ * renders as one run where two entries named `a` and `b` render as two.
+ */
+function renderNames(
+  list: ReadonlyArray<{ name: string }>,
+): CompatibilityMessageFragment {
+  return compatibilityMessage`[${quoteTermsValueList(
+    list.map((e) => redactPrivateKeyMaterial(e.name)),
+  )}]`;
 }
 
 /**
@@ -543,20 +908,27 @@ function renderNames(list: ReadonlyArray<{ name: string }>): string {
  * column's description) -- fall back to the full JSON of each value, so the
  * conflict message shows what actually differs instead of two identical-looking
  * summaries. The JSON is of whatever the caller hands it, not the form the
- * comparison encoded, so the user sees the stored values to edit -- treated
- * where the caller has to treat them before they are shown (see
- * {@link redactAndFitRuleSetCitation}).
+ * comparison encoded, so the user sees the stored values to edit.
+ *
+ * The fallback's JSON carries the same chosen bytes the name-only rendering
+ * withheld, so it takes the same treatment ({@link reconcileDiffValue}) -- over the
+ * serialized text rather than value by value, which reaches a name nested
+ * anywhere inside the structure. Rendering it raw here would put back on the
+ * message the marker and the clause forgery the summary form took out of it.
  */
 function disambiguate(
-  existingRendered: string,
-  incomingRendered: string,
+  existingRendered: CompatibilityMessageFragment,
+  incomingRendered: CompatibilityMessageFragment,
   existingValue: unknown,
   incomingValue: unknown,
-): { existing: string; incoming: string } {
+): {
+  existing: CompatibilityMessageFragment;
+  incoming: CompatibilityMessageFragment;
+} {
   if (existingRendered === incomingRendered)
     return {
-      existing: JSON.stringify(existingValue),
-      incoming: JSON.stringify(incomingValue),
+      existing: reconcileDiffValue(JSON.stringify(existingValue)),
+      incoming: reconcileDiffValue(JSON.stringify(incomingValue)),
     };
   return { existing: existingRendered, incoming: incomingRendered };
 }
@@ -566,7 +938,10 @@ function disambiguate(
 function renderStructural(
   existing: ReadonlyArray<{ name: string }>,
   incoming: ReadonlyArray<{ name: string }>,
-): { existing: string; incoming: string } {
+): {
+  existing: CompatibilityMessageFragment;
+  incoming: CompatibilityMessageFragment;
+} {
   return disambiguate(
     renderNames(existing),
     renderNames(incoming),
@@ -576,157 +951,47 @@ function renderStructural(
 }
 
 /**
- * What one value inside a rule-set citation -- a set's name, or its content
- * version -- may render to where the citation is composed into a conflict line.
+ * Render a rule-set citation for a diff line, keys first -- the order core's own
+ * mismatch message and the drift warning both render the pair in, and built from
+ * the same seam, so the two accounts of one citation cannot drift apart on how a
+ * name is delimited. Unescaped, unlike {@link describeRuleSetCitation}, whose
+ * sink is a `log.warn`: a diff line is composed into a {@link UsageError} and
+ * escaped once where it is shown.
  *
- * The schema bounds those values by CODE-POINT COUNT, which is not a display
- * bound: the boundary expands a code point outside printable ASCII to as many as
- * ten characters, so a name at the schema's bound can render ten times its
- * length -- past the whole budget the renderer gives the one link this message
- * is, taking the conflict lines behind it and the retry step the operator has to
- * act on. Fitting each value where the citation is composed is the discipline
- * the SFTP listing guard's directory link applies for the same reason: a value
- * somebody else chose is bounded at the composition site rather than left to
- * spend whatever the renderer's own cap allows.
- *
- * Sized well above the values a real citation carries -- the built-in's widest
- * is "baseline-pii" at 12 characters, and a semver is shorter still -- so only
- * an anomalous value is clipped, and small enough that the four values one side
- * of the comparison carries leave the message its room (see
- * {@link RULE_SET_CITATION_SIDE_BUDGET}).
+ * All four values stand in ONE clause rather than two halves composed together,
+ * because the sub-partition the fit runs is over the values a clause names
+ * ({@link reconcileClause}): as two nested halves the outer clause would divide
+ * its slot between the halves and each half would then divide again, giving the
+ * name and the version of each side a quarter of the slot the same way, but only
+ * after two rounds of the marker's own cost. One clause of four values is the
+ * same share arithmetic charged once.
  */
-const RULE_SET_CITATION_VALUE_BUDGET = 48;
-
-/**
- * One citation value REDACTED and then fitted to
- * {@link RULE_SET_CITATION_VALUE_BUDGET}, in that order: the clip appends the
- * marker that says a value was cut, so a `BEGIN` marker left in the kept prefix
- * would consume it under the display boundary's fail-closed dangling rule (see
- * {@link clipToRenderedCost}). What is kept is raw, and is escaped once where
- * the error is shown.
- */
-function fitCitationValue(value: string): string {
-  return clipToRenderedCost(
-    redactPrivateKeyMaterial(value),
-    RULE_SET_CITATION_VALUE_BUDGET,
-  );
-}
-
-/**
- * Render a rule-set citation for a diff line, keys first -- the order core's
- * mismatch message and the drift warning both render the pair in. Unescaped,
- * unlike {@link describeRuleSetCitation}, whose sink is a `log.warn`: a diff line
- * is composed into a {@link UsageError} and escaped once where it is shown.
- *
- * Each value is nevertheless redacted and fitted here, because the invitation's
- * side of the comparison is text the partner chose: the display boundary's
- * private-key rule is fail-closed past a `BEGIN` marker carrying no `END`, so a
- * marker planted in a set name would consume the conflict lines and the recovery
- * step composed after it, and a name at the schema's length would crowd out the
- * same text without any marker at all. Neither redacting nor fitting is
- * escaping, so this is not a second escaping altitude (see
- * {@link redactPrivateKeyMaterial}, which states the composition-site rule this
- * follows).
- */
-function renderRuleSetCitation(reference: LinkageRuleSetReference): string {
-  const half = (identity: LinkageSetIdentity): string =>
-    `"${fitCitationValue(identity.name)}" ${fitCitationValue(identity.version)}`;
-  return `${half(reference.keySet)} over ${half(reference.fieldSet)}`;
-}
-
-/**
- * The same citation with each value redacted and fitted, for
- * {@link disambiguate}'s full-JSON fallback. The fallback fires when the two
- * rendered clauses read alike, and it renders the same values, so it takes the
- * same treatment: rendering them raw there would put back on the message the
- * marker and the length {@link renderRuleSetCitation} took out of it.
- */
-function redactAndFitRuleSetCitation(
+function renderRuleSetCitation(
   reference: LinkageRuleSetReference,
-): LinkageRuleSetReference {
-  const half = (identity: LinkageSetIdentity): LinkageSetIdentity => ({
-    name: fitCitationValue(identity.name),
-    version: fitCitationValue(identity.version),
-  });
-  return { fieldSet: half(reference.fieldSet), keySet: half(reference.keySet) };
+): ReconcileClause {
+  return reconcileClause`${reconcileDiffValue(reference.keySet.name)} ${reconcileDiffBareValue(reference.keySet.version)} over ${reconcileDiffValue(reference.fieldSet.name)} ${reconcileDiffBareValue(reference.fieldSet.version)}`;
 }
 
 /**
- * What one side of a citation conflict may render to, whichever form it takes.
- * Computed by rendering a citation whose every value is at
- * {@link RULE_SET_CITATION_VALUE_BUDGET}, so it follows a change to the clause's
- * shape instead of restating one, and the JSON fallback -- whose escaping can
- * widen a fitted value threefold, a `"` costing one character raw and three
- * inside a JSON string the boundary escapes again -- is held to the width the
- * clause form can already reach.
+ * The two sides of a `linkage_rule_set` conflict, each as its clause.
  *
- * This bounds the citation's own contribution to the reconcile message. It is
- * not a bound on the whole message: the conflict lines beside it interpolate
- * values nothing here fits (a linkage field or key name list, a legal-agreement
- * reference), and the operator's own config path leads it. What the citation
- * cannot do is spend the budget those need, which is pinned by a test composing
- * the accept-shaped message with both sides of the citation at their worst case.
- */
-const RULE_SET_CITATION_SIDE_BUDGET = renderedDisplayCost(
-  renderRuleSetCitation({
-    fieldSet: {
-      name: "x".repeat(RULE_SET_CITATION_VALUE_BUDGET),
-      version: "x".repeat(RULE_SET_CITATION_VALUE_BUDGET),
-    },
-    keySet: {
-      name: "x".repeat(RULE_SET_CITATION_VALUE_BUDGET),
-      version: "x".repeat(RULE_SET_CITATION_VALUE_BUDGET),
-    },
-  }),
-);
-
-/**
- * Said of a citation conflict whose two sides render identically because every
- * value that differs between them was withheld from the display -- redacted as
- * private-key material, or clipped for length. Fixed first-party text carrying
- * no bytes from either citation: the pair reaching here is precisely the pair
- * whose own bytes cannot be shown, so the operator is told that rather than
- * shown two clauses that read alike.
- */
-const CITATION_WITHHELD_NOTE =
-  "(these differ only inside text this display withheld: a value redacted as " +
-  "private-key material, or clipped for length)";
-
-/**
- * The two sides of a `linkage_rule_set` conflict, as a reader can tell them
- * apart: the clause form where it distinguishes them, {@link disambiguate}'s
- * full detail where two different citations render the same clause, and
- * {@link CITATION_WITHHELD_NOTE} where even that is identical -- which is what a
- * pair differing only inside redacted or clipped text comes to. Each side is
- * fitted to {@link RULE_SET_CITATION_SIDE_BUDGET} before that last comparison,
- * so a fallback the fit collapsed is caught by it rather than reported as a
- * conflict between two identical values.
+ * No full-detail fallback beside it, unlike the structural lists: the clause is
+ * built from delimited runs and a checked bare form, which no two different
+ * citations can spell alike, so two clauses that read the same are two citations
+ * whose difference redaction took out -- and the full detail of those same
+ * values, redacted the same way, would read alike too. The pair that reaches
+ * that state is reported by {@link formatReconcileDiffs}, which is where the fit
+ * that can also collapse a pair happens; this renderer is deliberately not a
+ * second place that decides it.
  */
 function renderRuleSetCitationConflict(
   existing: LinkageRuleSetReference,
   incoming: LinkageRuleSetReference,
-): { existing: string; incoming: string } {
-  const rendered = disambiguate(
+): Omit<ReconcileDiff, "field"> {
+  return reconcileClauseConflict(
     renderRuleSetCitation(existing),
     renderRuleSetCitation(incoming),
-    redactAndFitRuleSetCitation(existing),
-    redactAndFitRuleSetCitation(incoming),
   );
-  const fitted = {
-    existing: clipToRenderedCost(
-      rendered.existing,
-      RULE_SET_CITATION_SIDE_BUDGET,
-    ),
-    incoming: clipToRenderedCost(
-      rendered.incoming,
-      RULE_SET_CITATION_SIDE_BUDGET,
-    ),
-  };
-  if (fitted.existing !== fitted.incoming) return fitted;
-  return {
-    existing: fitted.existing,
-    incoming: `${fitted.incoming} ${CITATION_WITHHELD_NOTE}`,
-  };
 }
 
 /**
@@ -796,7 +1061,11 @@ export function diffLinkageTerms(
 ): { conflicts: ReconcileDiff[]; warnings: string[] } {
   const conflicts: ReconcileDiff[] = [];
   const warnings: string[] = [];
-  const add = (field: string, a: string, b: string): void => {
+  const add = (
+    field: string,
+    a: CompatibilityMessageFragment,
+    b: CompatibilityMessageFragment,
+  ): void => {
     conflicts.push({ field, existing: a, incoming: b });
   };
 
@@ -850,9 +1119,17 @@ export function diffLinkageTerms(
   // opposed to exact equality, is a cross-cutting concern that belongs in core's
   // validateCompatibility, which also compares version exactly.)
   if (existing.version !== incoming.version)
-    add("version", existing.version, incoming.version);
+    add(
+      "version",
+      reconcileDiffBareValue(existing.version),
+      reconcileDiffBareValue(incoming.version),
+    );
   if (existing.algorithm !== incoming.algorithm)
-    add("algorithm", existing.algorithm, incoming.algorithm);
+    add(
+      "algorithm",
+      reconcileDiffValue(existing.algorithm),
+      reconcileDiffValue(incoming.algorithm),
+    );
   // linkageStrategy is mandatory-consistency exactly like algorithm (core's
   // validateCompatibility aborts on a mismatch), so a reused config whose strategy
   // differs from the invitation's is a conflict, not a silent reuse: without this
@@ -864,7 +1141,11 @@ export function diffLinkageTerms(
   // disclosure surface, so the reused config and the consented strategy stay
   // identical.
   if (existing.linkageStrategy !== incoming.linkageStrategy)
-    add("linkage_strategy", existing.linkageStrategy, incoming.linkageStrategy);
+    add(
+      "linkage_strategy",
+      reconcileDiffValue(existing.linkageStrategy),
+      reconcileDiffValue(incoming.linkageStrategy),
+    );
 
   // Sort linkage fields by name (their order is not significant) before the
   // canonical compare; compare linkage keys in place (their order is). The
@@ -899,17 +1180,29 @@ export function diffLinkageTerms(
       "linkage rule set",
     )
   ) {
-    const r = renderRuleSetCitationConflict(
-      existing.linkageRuleSet,
-      incoming.linkageRuleSet,
-    );
-    add("linkage_rule_set", r.existing, r.incoming);
+    conflicts.push({
+      field: "linkage_rule_set",
+      ...renderRuleSetCitationConflict(
+        existing.linkageRuleSet,
+        incoming.linkageRuleSet,
+      ),
+    });
   }
 
-  const renderAgreement = (la: LinkageTerms["legalAgreement"]): string =>
+  // The reference is partner-chosen free text and the expiration date is
+  // schema-constrained, so each takes the form its own shape earns rather than
+  // the pair being delimited once: a reference reading `X (expires 2030-01-01)`
+  // cannot then be mistaken for the clause this line composes around it. Two
+  // values inside first-party copy is a clause, so the slot divides between them
+  // (reconcileClause): a reference at the schema's length degrades itself rather
+  // than deleting the expiry -- which is both the half the two sides may be
+  // differing in and the half an operator can check against their own copy.
+  const renderAgreement = (
+    la: LinkageTerms["legalAgreement"],
+  ): ReconcileClause =>
     la === undefined
-      ? RECONCILE_UNSET
-      : `${la.reference} (expires ${la.expirationDate})`;
+      ? RECONCILE_ABSENT_CLAUSE
+      : reconcileClause`${reconcileDiffValue(la.reference)} (expires ${reconcileDiffBareValue(la.expirationDate)})`;
   if (
     canonicalDiffers(
       existing.legalAgreement ?? null,
@@ -917,16 +1210,20 @@ export function diffLinkageTerms(
       "legal agreement",
     )
   )
-    add(
-      "legal_agreement",
-      renderAgreement(existing.legalAgreement),
-      renderAgreement(incoming.legalAgreement),
-    );
+    conflicts.push({
+      field: "legal_agreement",
+      ...reconcileClauseConflict(
+        renderAgreement(existing.legalAgreement),
+        renderAgreement(incoming.legalAgreement),
+      ),
+    });
 
-  const renderPayload = (p: LinkageTerms["payload"]): string =>
+  const renderPayload = (
+    p: LinkageTerms["payload"],
+  ): CompatibilityMessageFragment =>
     p === undefined
       ? RECONCILE_UNSET
-      : `send=${renderNames(p.send ?? [])} receive=${renderNames(p.receive ?? [])}`;
+      : compatibilityMessage`send=${renderNames(p.send ?? [])} receive=${renderNames(p.receive ?? [])}`;
   if (
     canonicalDiffers(
       existing.payload ?? null,
@@ -953,23 +1250,306 @@ export function diffLinkageTerms(
 }
 
 /**
- * Render a list of {@link ReconcileDiff} as an indented, human-readable block
- * for a reconciliation error message.
+ * What the operator's own configuration path may render to at the head of the
+ * reconciliation refusal.
  *
- * The rendered values are interpolated raw. Both sides can carry
- * partner-controlled, attacker-shaped strings -- the invitation's linkage
- * field/key names, and (for an online split accept) the inviter's own
- * `inbound_path`/`outbound_path` from the connection endpoint -- but the only
- * caller composes this block into a {@link UsageError}, where the display
- * boundary escapes the whole message once before it reaches the acceptor's
- * terminal.
+ * The path is the operator's own -- a `--config-file` value or the built-in
+ * default -- so this is not an adversary's budget; it is the second half of a
+ * partition BY PROVENANCE, which is what keeps one chooser from spending
+ * another's room. Nothing bounds the path's length, and it is composed ahead of
+ * everything else in the message, so leaving it unfitted would let a long path
+ * (or a path whose bytes escape wide at the display boundary) crowd out the
+ * conflict detail and the recovery step behind it.
+ *
+ * Sized well above any path a real run carries and below what would leave the
+ * diff block without room; a longer one is clipped rather than dropped, since a
+ * path an operator can still recognize the tail of is worth more here than the
+ * few characters the clip saves.
  */
-export function formatReconcileDiffs(diffs: ReconcileDiff[]): string {
-  return diffs
-    .map(
-      (d) => `  - ${d.field}: existing ${d.existing} vs required ${d.incoming}`,
+const RECONCILE_CONFIG_PATH_BUDGET = 128;
+
+/** First-party spans a conflict line is built from, measured rather than
+ *  restated wherever the budget arithmetic needs their cost. */
+const RECONCILE_LINE_PREFIX = "  - ";
+const RECONCILE_LINE_EXISTING = ": existing ";
+const RECONCILE_LINE_INCOMING = " vs required ";
+
+/**
+ * Explains a line whose two sides read alike -- what a pair differing only
+ * inside redacted or clipped bytes comes to -- once for the block rather than
+ * once per line.
+ *
+ * Both sides are still shown as they fitted, rather than the second being
+ * replaced by fixed text saying it matched the first: what the two sides DO
+ * share is the operator's whole reading of a value the display cannot show them,
+ * and a standin deletes it from the side that could have carried it. Its cost is
+ * taken out of the block's budget before the values are re-fitted against it, so
+ * saying this never costs the line that needed it.
+ */
+const RECONCILE_WITHHELD_NOTE =
+  "  (two sides that read alike differ only inside what this display withheld: " +
+  "bytes redacted as private-key material, or clipped for length)";
+
+/**
+ * Explains a line the block named without its values, so a bare field name does
+ * not read as a field with nothing to say about it -- beside lines that carry
+ * both their values, or as the whole block when the room reaches no line's.
+ *
+ * States the reason a line came to that, which is why it is one notice rather
+ * than one per shape: what the block ran out of is room against the WIDTH the
+ * values asked for, whether that was one wide line among short ones or a field
+ * list long enough to leave nothing for any of them. Truncation eats conflict
+ * detail here, which is the whole point of composing the recovery step ahead of
+ * this block (see {@link reconcileConflictMessage}).
+ */
+const RECONCILE_NAMED_ONLY_NOTE =
+  "  (a field named above without its values has values too wide for the room " +
+  "this message has left; every line names a field whose values differ)";
+
+/**
+ * The most the notices below a block can cost it, which is what the last layout
+ * pass reserves so it cannot need more than it was given.
+ */
+const RECONCILE_NOTICE_RESERVE_CEILING = renderedDisplayCost(
+  `\n${RECONCILE_NAMED_ONLY_NOTE}\n${RECONCILE_WITHHELD_NOTE}`,
+);
+
+/**
+ * Render a list of {@link ReconcileDiff} as an indented, human-readable block
+ * for a reconciliation error message, fitted so its rendered cost at the display
+ * boundary is at most `budget`.
+ *
+ * Both sides of every line carry bytes somebody else chose -- the invitation's
+ * linkage field and key names, its rule-set citation and legal-agreement
+ * reference, and (for an online split accept) the inviter's own
+ * `inbound_path`/`outbound_path` from the connection endpoint -- and each has
+ * already been redacted and delimited by the producer that composed it
+ * ({@link reconcileDiffValue}). They are interpolated RAW: the display boundary
+ * escapes the whole message once where it is shown.
+ *
+ * What this adds is the LENGTH half. The schema bounds those values by code
+ * point, which is not a display bound -- one code point escapes to as many as
+ * ten characters -- and it bounds a name list at 256 entries, so a single
+ * conflict line can render past the whole budget the renderer gives the one link
+ * this message is. The budget is therefore shared out, and shared out by NEED:
+ * every line is charged the first-party skeleton it is named by, each side is
+ * measured at what it would actually render to, and what a short value does not
+ * take is available to the long value beside it. A constraint then falls only on
+ * the sides too wide for the room -- eight ordinary disagreements are eight
+ * lines carrying both their values, however many of them there are, because
+ * counting them was never what decided it. A slot whose side is a clause of
+ * several values shares its slot out among those values by the same rule
+ * ({@link reconcileClause}), so what a slot too small to hold everything
+ * degrades is a value rather than the clause structure standing behind it.
+ *
+ * Where a side cannot be given the least it can read as -- a delimited run
+ * showing some of its own bytes, or a clause showing some of every value it
+ * names inside its own connectives -- that LINE names its field and drops both
+ * values, and a first-party notice under the block says so. Degrading the line
+ * whole is what keeps the alternative off the message: a clause cut back to a
+ * column of truncation markers, or to a name with the connective and the second
+ * half deleted behind it. Every disagreeing field is named whatever becomes of
+ * its values, because a field an operator is never told about is a difference
+ * they cannot go and resolve.
+ *
+ * The cut lands wherever `budget` falls, and where that is inside a delimited
+ * run it cuts the value and delimits what it kept, marker inside
+ * ({@link fitToRenderedCostClosingRuns}). So the runs a fitted line shows are
+ * the runs this composition placed, at every budget and every value width: a
+ * value cannot be sized to land the cut where its own bytes would take over the
+ * closing of a run, and nothing composed after a cut value -- the clause's next
+ * value, the other side of the line -- can be read at a run parity it was not
+ * composed at. That is held by a check over the rendered lines rather than by
+ * this paragraph (`apps/cli/test/unit/config.test.ts`).
+ *
+ * One property is recorded rather than closed: the marker is plain ASCII the
+ * escape passes through, and it stands inside the cut value's own run, which is
+ * where a value spelling its text would put it -- so a value can claim a cut
+ * that did not happen. What an operator can rely on is the marker's ABSENCE.
+ *
+ * @internal exported for testing; `reconcileConflictMessage` is the caller.
+ */
+export function formatReconcileDiffs(
+  diffs: ReconcileDiff[],
+  budget: number,
+): string {
+  if (diffs.length === 0) return "";
+
+  const nameOnly = (d: ReconcileDiff): string =>
+    `${RECONCILE_LINE_PREFIX}${d.field}`;
+  // Charged with the line break that follows it, which the display escape widens
+  // like any other control character rather than carrying at its own width. Its
+  // field name is what a line costs even after its values are dropped, so it is
+  // taken off the top rather than shared out.
+  const nameCost = diffs.reduce(
+    (total, d) => total + renderedDisplayCost(`${nameOnly(d)}\n`),
+    0,
+  );
+  // What a line pays on top of its name for carrying values at all.
+  const valueSkeletonCost = renderedDisplayCost(
+    `${RECONCILE_LINE_EXISTING}${RECONCILE_LINE_INCOMING}`,
+  );
+
+  // A side that composed no fit is ONE delimited run, which asks for its own
+  // width and cannot go below what shows any of its bytes.
+  const sideOf = (
+    side: CompatibilityMessageFragment,
+    fit: ReconcileSideFit | undefined,
+  ): ReconcileSideFit =>
+    fit ?? {
+      need: renderedDisplayCost(side),
+      minimum: RECONCILE_MIN_VALUE_BUDGET,
+      fit: (slot: number): string => fitToRenderedCostClosingRuns(side, slot),
+    };
+  // A side already narrower than its own floor asks for its width, not the
+  // floor: it renders whole at what it asked for.
+  const floorOf = (side: ReconcileSideFit): number =>
+    Math.min(side.need, side.minimum);
+  const lines = diffs.map((d) => {
+    const existing = sideOf(d.existing, d.fit?.existing);
+    const incoming = sideOf(d.incoming, d.fit?.incoming);
+    return {
+      diff: d,
+      existing,
+      incoming,
+      floor: valueSkeletonCost + floorOf(existing) + floorOf(incoming),
+    };
+  });
+
+  const layOut = (reserved: number): { block: string; noticeCost: number } => {
+    const pool = budget - reserved - nameCost;
+    // Cheapest first, which shows values on as many lines as the room admits;
+    // ascending order also means the first line that does not fit settles every
+    // line behind it, each of which asks for at least as much.
+    const shown = new Set<number>();
+    let claimed = 0;
+    for (const index of lines
+      .map((_, position) => position)
+      .sort((a, b) => lines[a].floor - lines[b].floor)) {
+      if (claimed + lines[index].floor > pool) break;
+      shown.add(index);
+      claimed += lines[index].floor;
+    }
+
+    // Every shown side holds its floor, and what is left over is shared out
+    // among the sides that asked for more than one by the same need-aware rule.
+    const shownLines = lines.filter((_, index) => shown.has(index));
+    const surplus = allocateByNeed(
+      shownLines.flatMap((line) => [
+        line.existing.need - floorOf(line.existing),
+        line.incoming.need - floorOf(line.incoming),
+      ]),
+      pool - claimed,
+    );
+
+    let withheld = false;
+    let dropped = 0;
+    let position = 0;
+    const rendered = lines.map((line, index) => {
+      if (!shown.has(index)) {
+        dropped += 1;
+        return nameOnly(line.diff);
+      }
+      const existing = line.existing.fit(
+        floorOf(line.existing) + surplus[position * 2],
+      );
+      const incoming = line.incoming.fit(
+        floorOf(line.incoming) + surplus[position * 2 + 1],
+      );
+      position += 1;
+      if (existing === incoming) withheld = true;
+      return (
+        `${nameOnly(line.diff)}${RECONCILE_LINE_EXISTING}${existing}` +
+        `${RECONCILE_LINE_INCOMING}${incoming}`
+      );
+    });
+
+    const notices: string[] = [];
+    if (dropped > 0) notices.push(RECONCILE_NAMED_ONLY_NOTE);
+    if (withheld) notices.push(RECONCILE_WITHHELD_NOTE);
+    return {
+      block: [...rendered, ...notices].join("\n"),
+      noticeCost: notices.reduce(
+        (total, notice) => total + renderedDisplayCost(`\n${notice}`),
+        0,
+      ),
+    };
+  };
+
+  // A notice's own cost comes out of the values' share rather than out of the
+  // budget the layout already spent, so the explanation cannot be what pushes
+  // the block past its bound. Which notices a layout needs is only known once it
+  // is laid out, so a layout needing more than it reserved is laid out again
+  // under what it needed; the last reservation is the most any layout can need,
+  // which is what settles this rather than a further pass.
+  let reserved = 0;
+  let attempt = layOut(reserved);
+  if (attempt.noticeCost > reserved) {
+    reserved = attempt.noticeCost;
+    attempt = layOut(reserved);
+  }
+  if (attempt.noticeCost > reserved)
+    attempt = layOut(RECONCILE_NOTICE_RESERVE_CEILING);
+  // The arithmetic above holds the block inside `budget` for every shape reached
+  // today, which a test pins by asserting no line of a worst-case message is
+  // cut. This is the backstop under it: a producer that adds a wider first-party
+  // skeleton, or a field-name list past what the notices can absorb, is bounded
+  // here rather than silently spending the recovery step's room.
+  return fitToRenderedCostClosingRuns(attempt.block, budget);
+}
+
+/**
+ * The refusal `psilink accept` raises when a pre-existing configuration
+ * disagrees with the invitation (and, online, the connection URL): what
+ * disagreed, and what the operator does about it, composed to one display link.
+ *
+ * The recovery step is composed AHEAD of the diff block, and this is the whole
+ * reason the composition lives here rather than at the throw site. The display
+ * boundary caps a link at {@link COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH} and drops
+ * the tail, so whatever is last is what a cut deletes -- and the step the
+ * operator has to act on is the one part of this message they cannot reconstruct
+ * from their own config. Putting the conflict detail last makes truncation eat
+ * detail, which they can go and read in the two documents themselves.
+ *
+ * The budget is then partitioned by WHO CHOSE THE BYTES, the discipline the SFTP
+ * host-key refusals apply for the same reason: first-party copy is measured
+ * where it stands, the operator's own configuration path is fitted to
+ * {@link RECONCILE_CONFIG_PATH_BUDGET}, and the diff block is handed exactly
+ * what remains ({@link formatReconcileDiffs}), inside which each chooser's
+ * values get an equal share. So no chooser can spend a budget that is not their
+ * own, and the fixed copy's own fit is held by measurement -- pinned by a test
+ * that fails if this message's copy grows past what the cap admits.
+ *
+ * `against` and `retryWith` are the caller's first-party copy naming what the
+ * configuration was compared against and how to retry; they are measured here
+ * rather than assumed, so the block's share follows the wording rather than a
+ * restatement of it.
+ */
+export function reconcileConflictMessage(params: {
+  configPath: string;
+  against: string;
+  retryWith: string;
+  diffs: ReconcileDiff[];
+}): string {
+  const { against, retryWith, diffs } = params;
+  const configPath = clipToRenderedCost(
+    redactPrivateKeyMaterial(params.configPath),
+    RECONCILE_CONFIG_PATH_BUDGET,
+  );
+  const head =
+    `the configuration file at ${configPath} disagrees with ${against}. ` +
+    `Resolve the differences below (or pass --config-file to write elsewhere), ` +
+    `then retry with ${retryWith}. The differences:\n`;
+  return (
+    head +
+    formatReconcileDiffs(
+      diffs,
+      Math.max(
+        0,
+        COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH - renderedDisplayCost(head),
+      ),
     )
-    .join("\n");
+  );
 }
 
 // --- Config writer -----------------------------------------------------------
@@ -1622,19 +2202,21 @@ export function loadConfigLinkageSource(
  *
  * The names are free text whoever authored the config chose, and a `log.warn` is
  * their sink (a value that never becomes an `Error` is escaped at the call site
- * that shows it), so each is escaped here. Each name is quoted, as core's
- * rule-set mismatch message quotes it: a name may carry a space, so an unquoted
- * one reading `hmis-keys 9.9.9` would be indistinguishable from the name plus
- * the version beside it. The quoting is plain, not the doubling grammar core
- * delimits that message's values with, and sanitization preserves printable
- * ASCII -- so a name carrying a double quote of its own can close the quote
- * early here and fake the clause's structure for a skimming reader.
+ * that shows it), so each is escaped here. Delimiting then runs over the escaped
+ * form through core's terms-value seam -- the same grammar core's own rule-set
+ * mismatch message uses -- which is what makes the name's boundaries readable: a
+ * name may carry a space, so an undelimited one reading `hmis-keys 9.9.9` would
+ * be indistinguishable from the name plus the version beside it, and the escape
+ * preserves printable ASCII, so a name carrying a delimiter of its own would
+ * close a plain quote early and forge the clause's structure. The seam doubles
+ * an embedded delimiter instead, so no name can terminate its own run.
+ *
+ * Escaping BEFORE delimiting, not after: the escape truncates its output, and a
+ * truncation applied to an already-delimited run could take the closing
+ * delimiter off it.
  */
 function describeRuleSetHalf(identity: LinkageSetIdentity): string {
-  return (
-    `"${redactAndSanitizeForDisplay(identity.name)}" ` +
-    `${redactAndSanitizeForDisplay(identity.version)}`
-  );
+  return compatibilityMessage`${quoteTermsValue(redactAndSanitizeForDisplay(identity.name))} ${bareTermsValue(redactAndSanitizeForDisplay(identity.version))}`;
 }
 
 /**

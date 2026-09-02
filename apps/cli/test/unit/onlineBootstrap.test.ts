@@ -384,8 +384,10 @@ test("diffConnectionAgainstTarget: a differing split half conflicts on that fiel
   const { conflicts } = diffConnectionAgainstTarget(existing, target);
   expect(conflicts).toHaveLength(1);
   expect(conflicts[0].field).toBe("connection.server.outbound_path");
-  expect(conflicts[0].existing).toBe("/elsewhere");
-  expect(conflicts[0].incoming).toBe("/out");
+  // Delimited where they are composed: an accept URL's paths are the inviting
+  // party's, and a saved config's were copied from that party's endpoint.
+  expect(conflicts[0].existing).toBe('"/elsewhere"');
+  expect(conflicts[0].incoming).toBe('"/out"');
 });
 
 test("diffConnectionAgainstTarget: a shared config against a split target conflicts on both halves, naming the shared path", () => {
@@ -407,7 +409,7 @@ test("diffConnectionAgainstTarget: a shared config against a split target confli
     "connection.outbound_path",
   ]);
   expect(
-    conflicts.every((c) => c.existing.includes("single shared path /mnt/in")),
+    conflicts.every((c) => c.existing.includes('single shared path "/mnt/in"')),
   ).toBe(true);
 });
 
@@ -428,9 +430,9 @@ test("diffConnectionAgainstTarget: a split config against a shared target names 
   expect(conflicts).toHaveLength(1);
   expect(conflicts[0].field).toBe("connection.path");
   expect(conflicts[0].existing).toContain(
-    "split inbound_path /mnt/in, outbound_path /mnt/out",
+    'split inbound_path "/mnt/in", outbound_path "/mnt/out"',
   );
-  expect(conflicts[0].incoming).toBe("/mnt/shared");
+  expect(conflicts[0].incoming).toBe('"/mnt/shared"');
 });
 
 // Each server-block override flag, paired with the option field that carries it,
