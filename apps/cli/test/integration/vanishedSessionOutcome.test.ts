@@ -46,6 +46,13 @@ const inProcessOnly = test.skipIf(selectedBackend() !== "in-process");
 // 60 s these cases would wait a minute longer for the same rejection.
 const STALL_DEADLINE_MS = 3_000;
 
+// A measured margin absorbing millisecond-truncation and timer-fire jitter on a
+// Date.now()-delta taken around this deadline's own setTimeout: 2000 runs of a
+// 100 ms timer, measured 2026-09-02, landed as much as 3 ms below nominal.
+// Subtracted from the deadline before a >= assertion so an elapsed delta reading
+// one tick short of the nominal interval still passes.
+const STALL_DEADLINE_MEASUREMENT_MARGIN_MS = 4;
+
 // How long a case watches a vanished session with nothing outstanding before
 // calling it silent. Nothing schedules server traffic inside it -- see the
 // heartbeat guard each idle case asserts -- so the window's length decides only
@@ -355,7 +362,9 @@ inProcessOnly(
       census.stop();
 
       expect(rejection.error).toBeInstanceOf(TransportOperationStalledError);
-      expect(rejection.elapsedMs).toBeGreaterThanOrEqual(STALL_DEADLINE_MS);
+      expect(rejection.elapsedMs).toBeGreaterThanOrEqual(
+        STALL_DEADLINE_MS - STALL_DEADLINE_MEASUREMENT_MARGIN_MS,
+      );
       expect(census.heard).toEqual([]);
       expect(census.bytesFromServer()).toBe(0);
       expect(adapter.reconnectCount).toBe(0);
@@ -774,7 +783,9 @@ for (const withheld of WITHHELD_REPLY_CASES)
         const rendered = sanitizeErrorForDisplay(outcome.error);
         expect(rendered).toContain(`SFTP ${withheld.operation} stalled`);
         expect(rendered).toContain(withheld.detail);
-        expect(outcome.elapsedMs).toBeGreaterThanOrEqual(STALL_DEADLINE_MS);
+        expect(outcome.elapsedMs).toBeGreaterThanOrEqual(
+          STALL_DEADLINE_MS - STALL_DEADLINE_MEASUREMENT_MARGIN_MS,
+        );
 
         // The server did receive the request and did not answer it, so the
         // rejection is over a request genuinely left outstanding rather than one
