@@ -7,8 +7,10 @@ import {
   LinkageTermsUnsatisfiableError,
   OperatorConfigError,
   StandardizationTermsError,
+  StandardizedDataset,
   UsageError,
   describeResolvedRunShape,
+  getDefaultLinkageTerms,
   runExchange,
 } from "@psilink/core";
 
@@ -33,7 +35,6 @@ import type Peer from "peerjs";
 import type {
   AuthResult,
   ExchangeResult,
-  LinkageTerms,
   MessageConnection,
   PreparedExchange,
   ResolvedRunShape,
@@ -95,6 +96,31 @@ const SHARED_SECRET = "test-shared-secret";
  * to authenticateExchange alongside the secret. */
 const EXPIRES = "2999-01-01T00:00:00.000Z";
 
+/** The agreed terms every stand-in below carries. The lifecycle forwards terms
+ * without reading them. */
+const STUB_LINKAGE_TERMS = getDefaultLinkageTerms("Stand-in Party");
+
+/** The prepared exchange `acquire` hands the lifecycle. runExchange is mocked,
+ * so it is threaded through unread. */
+const STUB_PREPARED = {
+  metadata: [],
+  linkageTerms: STUB_LINKAGE_TERMS,
+  dataset: new StandardizedDataset([]),
+  rawRows: [],
+  rowCount: 0,
+} satisfies PreparedExchange;
+
+/** What a mocked runExchange resolves with. The withheld-table shape (no
+ * association table, no count) is the inert one: the lifecycle hands the result
+ * to the `generateOutput` seam, which every test here replaces. */
+const STUB_EXCHANGE_RESULT = {
+  associationTable: undefined,
+  intersectionCount: undefined,
+  partnerTerms: STUB_LINKAGE_TERMS,
+  resolvedRole: "receiver",
+  partnerPayload: { columns: [], rowIndices: [], rows: [] },
+} satisfies ExchangeResult;
+
 /** Flush pending microtasks (and any queued macrotask) so the owner advances. */
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -146,7 +172,7 @@ function makeResources(overrides?: { peer?: FakePeer; conn?: FakeConn }) {
     peer: peer as unknown as Peer,
     conn: conn as unknown as DataConnection,
     psi: Promise.resolve({} as PSILibrary),
-    prepared: {} as PreparedExchange,
+    prepared: STUB_PREPARED,
   };
   return { acquired, peer, conn };
 }
@@ -194,7 +220,7 @@ describe("runExchangeLifecycle", () => {
       rotatedSecret: "rotated",
       applyEncryption: false,
     } satisfies AuthResult);
-    mockedRunExchange.mockResolvedValue({} as ExchangeResult);
+    mockedRunExchange.mockResolvedValue(STUB_EXCHANGE_RESULT);
   });
 
   test("success: reports the result, then tears down", async () => {
@@ -769,9 +795,10 @@ describe("runExchangeLifecycle", () => {
     const { mc, close } = makeFakeMc();
     mockedOpen.mockResolvedValue(mc);
     // runExchange parks on a receive that the teardown close() will reject.
-    mockedRunExchange.mockImplementation(
-      async (c) => (await c.receive()) as ExchangeResult,
-    );
+    mockedRunExchange.mockImplementation(async (c) => {
+      await c.receive();
+      return STUB_EXCHANGE_RESULT;
+    });
     const controller = new AbortController();
     const { acquired, peer } = makeResources();
     const acquire: Acquire = () => Promise.resolve(acquired);
@@ -886,17 +913,17 @@ describe("runExchangeLifecycle", () => {
     runShape: ResolvedRunShape,
     outcome: "resolve" | "reject" = "resolve",
   ) {
-    return ((
+    return (
       _conn: unknown,
       _role: unknown,
       _prepared: unknown,
       options: RunExchangeOptions,
     ): Promise<ExchangeResult> => {
-      options.onProtocolConfirmed?.({} as LinkageTerms, "receiver", runShape);
+      options.onProtocolConfirmed?.(STUB_LINKAGE_TERMS, "receiver", runShape);
       return outcome === "reject"
         ? Promise.reject(new ConnectionError("connection closed", "closed"))
-        : Promise.resolve({} as ExchangeResult);
-    }) as never;
+        : Promise.resolve(STUB_EXCHANGE_RESULT);
+    };
   }
 
   const OVER_BOUND_SHAPE: ResolvedRunShape = {

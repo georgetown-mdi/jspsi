@@ -482,8 +482,10 @@ test("stripInvitationWhitespace removes the ECMAScript whitespace class", () => 
 });
 
 test("strips a raw input at exactly the raw bound", () => {
-  const atBound = "a".repeat(MAX_RAW_INVITATION_LENGTH);
-  expect(stripInvitationWhitespace(atBound)).toBe(atBound);
+  // All whitespace, so the assertion separates a strip that ran from one the
+  // bound check skipped: a skip would return the input untouched.
+  const atBound = " ".repeat(MAX_RAW_INVITATION_LENGTH);
+  expect(stripInvitationWhitespace(atBound)).toBe("");
 });
 
 test("passes a raw input one character over the raw bound through unchanged", () => {

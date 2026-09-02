@@ -4,7 +4,11 @@ import path from "node:path";
 
 import { vi, test, expect, beforeEach, afterEach } from "vitest";
 
-import type { MessageConnection, PreparedExchange } from "@psilink/core";
+import type {
+  ExchangeResult,
+  MessageConnection,
+  PreparedExchange,
+} from "@psilink/core";
 
 /**
  * `runProtocol`'s webrtc dispatch: the branch that runs the exchange over a data
@@ -45,6 +49,7 @@ vi.mock("@openmined/psi.js", () => ({
 // would otherwise need the WASM stack and a dataset.
 vi.mock("@psilink/core", async (importActual) => {
   const actual = await importActual<typeof import("@psilink/core")>();
+  const stubLinkageTerms = actual.getDefaultLinkageTerms("Acceptor");
   return {
     ...actual,
     getLogger: (_name: string) => ({
@@ -81,7 +86,13 @@ vi.mock("@psilink/core", async (importActual) => {
     ),
     runExchange: vi.fn(async (connection: unknown) => {
       mockState.exchangeConnections.push(connection);
-      return { associationTable: [[], []], partnerPayload: {} };
+      return {
+        associationTable: [[], []],
+        intersectionCount: undefined,
+        partnerTerms: stubLinkageTerms,
+        resolvedRole: "receiver",
+        partnerPayload: { columns: [], rowIndices: [], rows: [] },
+      } satisfies ExchangeResult;
     }),
     describeExchangeStages: vi.fn().mockReturnValue([]),
     buildOutputTable: vi.fn().mockReturnValue({ headers: [], rows: [] }),
@@ -126,8 +137,10 @@ const { WEBRTC_BROKER_HOST_REFUSED, WEBRTC_BROKER_PATH_REFUSED } =
 const { saveKeyFile } = await import("../../src/keyFile");
 const {
   DISPLAY_TRUNCATION_MARKER,
+  StandardizedDataset,
   UsageError,
   generateSharedSecret,
+  getDefaultLinkageTerms,
   sanitizeErrorForDisplay,
 } = await import("@psilink/core");
 
@@ -170,7 +183,13 @@ function linkedConnection(role: "inviter" | "acceptor"): MessageConnection {
   return pair[role];
 }
 
-const minimalPrepared = {} as unknown as PreparedExchange;
+const minimalPrepared = {
+  metadata: [],
+  linkageTerms: getDefaultLinkageTerms("Inviter"),
+  dataset: new StandardizedDataset([]),
+  rawRows: [],
+  rowCount: 0,
+} satisfies PreparedExchange;
 const SECRET = generateSharedSecret();
 
 /** The cross-app conformance fixture: each rendezvous side's key-exchange

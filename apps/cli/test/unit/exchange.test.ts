@@ -13,7 +13,11 @@ import {
   prepareForExchange,
   sanitizeErrorForDisplay,
 } from "@psilink/core";
-import type { InvitationToken, LinkageTerms } from "@psilink/core";
+import type {
+  InvitationToken,
+  LinkageTerms,
+  PreparedExchange,
+} from "@psilink/core";
 import { loadKeyFile, saveKeyFile } from "../../src/keyFile";
 import {
   loadSigningIdentity,
@@ -63,17 +67,30 @@ vi.mock("@psilink/core", async (importActual) => {
     // handler tests exercise this path; loadConfig never calls it. The shape
     // carries the empty linkageFields and linkageKeys the value-constraint sweep
     // (warnOnValueConstraints) reads -- it scopes to key-referenced fields, so it
-    // walks both -- so the sweep is a no-op here rather than tripping on a partial
-    // stub.
+    // walks both -- so the sweep is a no-op here.
     // A FRESH object per call (not a shared mockReturnValue ref), matching the real
     // prepareForExchange: prepareDataset mutates the returned object (it sets
     // expectedPayloadColumns from a committed payload.receive), so a shared ref
     // would leak that field between tests.
-    prepareForExchange: vi.fn(() => ({
-      linkageTerms: { linkageFields: [], linkageKeys: [] },
-      dataset: { getField: () => undefined },
-      rowCount: 0,
-    })),
+    prepareForExchange: vi.fn(
+      () =>
+        ({
+          metadata: [],
+          linkageTerms: {
+            version: "1.0.0",
+            date: "2025-01-01",
+            algorithm: "psi",
+            linkageStrategy: "cascade",
+            output: { expectsOutput: true, shareWithPartner: false },
+            deduplicate: false,
+            linkageFields: [],
+            linkageKeys: [],
+          },
+          dataset: new actual.StandardizedDataset([]),
+          rawRows: [],
+          rowCount: 0,
+        }) satisfies PreparedExchange,
+    ),
   };
 });
 
