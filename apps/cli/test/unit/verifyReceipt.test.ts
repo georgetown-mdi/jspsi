@@ -1617,22 +1617,24 @@ describe("handler", () => {
     expect(exitCode).toBe(0);
   });
 
-  test("an identity file readable by other users is still reported", async () => {
-    if (process.platform === "win32") return;
-    // Taking only the certificate half does not make the file safe to leave
-    // world-readable: the private key is still in it, and the warning names it.
-    const { signedPath, identityPath, pin } = await exchangeArtifacts();
-    fs.chmodSync(identityPath, 0o644);
-    const { stderr, exits } = await runVerify({
-      record: signedPath,
-      "log-level": "warn",
-      "partner-fingerprint": pin,
-      "identity-file": identityPath,
-    });
-    expect(exits).toEqual([]);
-    expect(stderr).toContain("restrict to 0600");
-    expect(stderr).toContain("signing private key");
-  });
+  test.skipIf(process.platform === "win32")(
+    "an identity file readable by other users is still reported",
+    async () => {
+      // Taking only the certificate half does not make the file safe to leave
+      // world-readable: the private key is still in it, and the warning names it.
+      const { signedPath, identityPath, pin } = await exchangeArtifacts();
+      fs.chmodSync(identityPath, 0o644);
+      const { stderr, exits } = await runVerify({
+        record: signedPath,
+        "log-level": "warn",
+        "partner-fingerprint": pin,
+        "identity-file": identityPath,
+      });
+      expect(exits).toEqual([]);
+      expect(stderr).toContain("restrict to 0600");
+      expect(stderr).toContain("signing private key");
+    },
+  );
 
   test("with no identity path named, the own slot is unanchored at exit 0", async () => {
     // No --identity-file and no config, so nothing names this party's identity
@@ -1721,58 +1723,64 @@ describe("handler", () => {
     },
   );
 
-  test("an identity on a read-only directory anchors the slot and is not written", async () => {
-    if (process.platform === "win32") return;
-    // The custody shape a credentials mount has: the file is read and nothing
-    // beside it is written, so the whole directory can be mounted read-only.
-    const { signedPath, identityPath, pin } = await exchangeArtifacts();
-    const readOnlyDir = tmp();
-    const mounted = join(readOnlyDir, "psilink-signing-identity.json");
-    writeFileSync(mounted, readFileSync(identityPath, "utf8"), { mode: 0o600 });
-    fs.chmodSync(mounted, 0o600);
-    const before = fs.readdirSync(readOnlyDir).sort();
-    fs.chmodSync(readOnlyDir, 0o500);
-    try {
-      const { stdout, exits, exitCode } = await runVerify({
+  test.skipIf(process.platform === "win32")(
+    "an identity on a read-only directory anchors the slot and is not written",
+    async () => {
+      // The custody shape a credentials mount has: the file is read and nothing
+      // beside it is written, so the whole directory can be mounted read-only.
+      const { signedPath, identityPath, pin } = await exchangeArtifacts();
+      const readOnlyDir = tmp();
+      const mounted = join(readOnlyDir, "psilink-signing-identity.json");
+      writeFileSync(mounted, readFileSync(identityPath, "utf8"), {
+        mode: 0o600,
+      });
+      fs.chmodSync(mounted, 0o600);
+      const before = fs.readdirSync(readOnlyDir).sort();
+      fs.chmodSync(readOnlyDir, 0o500);
+      try {
+        const { stdout, exits, exitCode } = await runVerify({
+          record: signedPath,
+          "partner-fingerprint": pin,
+          "identity-file": mounted,
+        });
+        expect(exits).toEqual([]);
+        expect(stdout).toContain("is your own signing identity's certificate");
+        expect(exitCode).toBe(0);
+        expect(fs.readdirSync(readOnlyDir).sort()).toEqual(before);
+        expect(fs.readFileSync(mounted, "utf8")).toBe(
+          readFileSync(identityPath, "utf8"),
+        );
+      } finally {
+        fs.chmodSync(readOnlyDir, 0o700);
+      }
+    },
+  );
+
+  test.skipIf(process.platform === "win32")(
+    "a world-readable identity named by the config is still reported",
+    async () => {
+      // The config's identity_file is a path the operator wrote but did not pass
+      // on this command line, and reading it is still a read of a private key, so
+      // the permission nudge fires on that route too.
+      const { signedPath, identityPath, pin } = await exchangeArtifacts();
+      fs.chmodSync(identityPath, 0o644);
+      const configPath = writeYaml(
+        `signing:\n  mode: certificate\n  partner_fingerprint: ${pin}\n` +
+          `  identity_file: ${identityPath}\n`,
+      );
+      const { stdout, stderr, exits, exitCode } = await runVerify({
         record: signedPath,
-        "partner-fingerprint": pin,
-        "identity-file": mounted,
+        "log-level": "warn",
+        "config-file": configPath,
       });
       expect(exits).toEqual([]);
       expect(stdout).toContain("is your own signing identity's certificate");
+      expect(stderr).toContain(identityPath);
+      expect(stderr).toContain("restrict to 0600");
+      expect(stderr).toContain("signing private key");
       expect(exitCode).toBe(0);
-      expect(fs.readdirSync(readOnlyDir).sort()).toEqual(before);
-      expect(fs.readFileSync(mounted, "utf8")).toBe(
-        readFileSync(identityPath, "utf8"),
-      );
-    } finally {
-      fs.chmodSync(readOnlyDir, 0o700);
-    }
-  });
-
-  test("a world-readable identity named by the config is still reported", async () => {
-    if (process.platform === "win32") return;
-    // The config's identity_file is a path the operator wrote but did not pass
-    // on this command line, and reading it is still a read of a private key, so
-    // the permission nudge fires on that route too.
-    const { signedPath, identityPath, pin } = await exchangeArtifacts();
-    fs.chmodSync(identityPath, 0o644);
-    const configPath = writeYaml(
-      `signing:\n  mode: certificate\n  partner_fingerprint: ${pin}\n` +
-        `  identity_file: ${identityPath}\n`,
-    );
-    const { stdout, stderr, exits, exitCode } = await runVerify({
-      record: signedPath,
-      "log-level": "warn",
-      "config-file": configPath,
-    });
-    expect(exits).toEqual([]);
-    expect(stdout).toContain("is your own signing identity's certificate");
-    expect(stderr).toContain(identityPath);
-    expect(stderr).toContain("restrict to 0600");
-    expect(stderr).toContain("signing private key");
-    expect(exitCode).toBe(0);
-  });
+    },
+  );
 
   test("the config's signing block is read once per invocation", async () => {
     // The pin and the identity path are two fields of one block of a

@@ -42,13 +42,15 @@ test("save then load round-trips and preserves the fingerprint", async () => {
   expect(await computeCertificateFingerprint(loaded!.certificate)).toBe(before);
 });
 
-test("saveSigningIdentity writes the file owner-read-only on Unix", async () => {
-  if (process.platform === "win32") return;
-  const idPath = path.join(dir, "signing-identity.json");
-  saveSigningIdentity(idPath, await generateSigningIdentity("Party A"));
-  const mode = fs.statSync(idPath).mode & 0o777;
-  expect(mode).toBe(0o600);
-});
+test.skipIf(process.platform === "win32")(
+  "saveSigningIdentity writes the file owner-read-only on Unix",
+  async () => {
+    const idPath = path.join(dir, "signing-identity.json");
+    saveSigningIdentity(idPath, await generateSigningIdentity("Party A"));
+    const mode = fs.statSync(idPath).mode & 0o777;
+    expect(mode).toBe(0o600);
+  },
+);
 
 test("saveSigningIdentity creates parent directories", async () => {
   const idPath = path.join(dir, "nested", "deeper", "signing-identity.json");
@@ -153,13 +155,12 @@ test("loadSigningCertificate rejects a certificate whose self-signature is broke
   await expect(loadSigningCertificate(idPath)).rejects.toThrow(UsageError);
 });
 
-test.each([
+test.skipIf(process.platform === "win32").each([
   ["loadSigningIdentity", loadSigningIdentity],
   ["loadSigningCertificate", loadSigningCertificate],
 ] as const)(
   "%s warns about an over-permissive file it then refuses",
   async (_name, load) => {
-    if (process.platform === "win32") return;
     // The nudge belongs to the read, not to a parse that succeeded: a document
     // neither loader can make sense of was read off disk all the same, and the
     // private key is in it whether or not this format is recognized.

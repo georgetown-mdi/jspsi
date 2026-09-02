@@ -126,36 +126,38 @@ test("a long configured path leaves the remedy inside the display cap", async ()
 
 // --- read-only custody on the exchange path ----------------------------------
 
-test("the exchange path reads an identity on a read-only directory and writes nothing", async () => {
-  if (process.platform === "win32") return;
-  // The custody property CLI.md, EXCHANGE_REFERENCE.md, SECURITY_DESIGN.md, and
-  // DEPLOYMENT.md all publish, and the whole reason the identity gets a mount of
-  // its own: an exchange reads the file and writes neither it, its directory,
-  // nor anything beside it. verify-receipt's half of the same claim is pinned in
-  // verifyReceipt.test.ts; this is the exchange half.
-  const mount = fs.mkdtempSync(path.join(dir, "mount-"));
-  const identityPath = path.join(mount, "psilink-signing-identity.json");
-  saveSigningIdentity(identityPath, identity, { exclusive: true });
-  const listing = fs.readdirSync(mount).sort();
-  const bytes = fs.readFileSync(identityPath, "utf8");
-  const mtimeMs = fs.statSync(identityPath).mtimeMs;
-  fs.chmodSync(mount, 0o500);
-  try {
-    const resolved = await resolveSigningPersist(
-      { mode: "certificate", identityFile: identityPath },
-      "Party A",
-    );
-    expect(resolved).not.toBeNull();
-    expect(resolved!.identity).toEqual(identity);
-    // The artifacts rather than an EACCES: a run with the privilege to ignore
-    // the mode still has to leave the directory and the file as it found them.
-    expect(fs.readdirSync(mount).sort()).toEqual(listing);
-    expect(fs.readFileSync(identityPath, "utf8")).toBe(bytes);
-    expect(fs.statSync(identityPath).mtimeMs).toBe(mtimeMs);
-  } finally {
-    fs.chmodSync(mount, 0o700);
-  }
-});
+test.skipIf(process.platform === "win32")(
+  "the exchange path reads an identity on a read-only directory and writes nothing",
+  async () => {
+    // The custody property CLI.md, EXCHANGE_REFERENCE.md, SECURITY_DESIGN.md, and
+    // DEPLOYMENT.md all publish, and the whole reason the identity gets a mount of
+    // its own: an exchange reads the file and writes neither it, its directory,
+    // nor anything beside it. verify-receipt's half of the same claim is pinned in
+    // verifyReceipt.test.ts; this is the exchange half.
+    const mount = fs.mkdtempSync(path.join(dir, "mount-"));
+    const identityPath = path.join(mount, "psilink-signing-identity.json");
+    saveSigningIdentity(identityPath, identity, { exclusive: true });
+    const listing = fs.readdirSync(mount).sort();
+    const bytes = fs.readFileSync(identityPath, "utf8");
+    const mtimeMs = fs.statSync(identityPath).mtimeMs;
+    fs.chmodSync(mount, 0o500);
+    try {
+      const resolved = await resolveSigningPersist(
+        { mode: "certificate", identityFile: identityPath },
+        "Party A",
+      );
+      expect(resolved).not.toBeNull();
+      expect(resolved!.identity).toEqual(identity);
+      // The artifacts rather than an EACCES: a run with the privilege to ignore
+      // the mode still has to leave the directory and the file as it found them.
+      expect(fs.readdirSync(mount).sort()).toEqual(listing);
+      expect(fs.readFileSync(identityPath, "utf8")).toBe(bytes);
+      expect(fs.statSync(identityPath).mtimeMs).toBe(mtimeMs);
+    } finally {
+      fs.chmodSync(mount, 0o700);
+    }
+  },
+);
 
 // --- certificate mode naming no identity path --------------------------------
 // The pre-flight family's newest member: like the unpinned-partner and unnamed-

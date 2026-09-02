@@ -294,90 +294,98 @@ describe("the log file's extended ACL", () => {
     },
   );
 
-  test("the strip follows a symlink at the log path, as the open does", () => {
-    // No -h: the path is an operator-supplied flag value the open resolves, so
-    // acting on the link node would clear an ACL that governs nothing while the
-    // lines landed in a target whose ACEs still stood.
-    if (process.platform === "win32") return;
-    const commands = recordAclStripCommands();
-    const logPath = path.join(dir, "posture.log");
+  test.skipIf(process.platform === "win32")(
+    "the strip follows a symlink at the log path, as the open does",
+    () => {
+      // No -h: the path is an operator-supplied flag value the open resolves, so
+      // acting on the link node would clear an ACL that governs nothing while the
+      // lines landed in a target whose ACEs still stood.
+      const commands = recordAclStripCommands();
+      const logPath = path.join(dir, "posture.log");
 
-    const sink = withPlatform("darwin", () => configureLogFile(logPath));
-    sink.close();
+      const sink = withPlatform("darwin", () => configureLogFile(logPath));
+      sink.close();
 
-    expect(commands).toEqual([["/bin/chmod", "-N", logPath]]);
-  });
+      expect(commands).toEqual([["/bin/chmod", "-N", logPath]]);
+    },
+  );
 
-  test("a refused strip writes no line and leaves the diagnostic sink alone", () => {
-    if (process.platform === "win32") return;
-    const logPath = path.join(dir, "refused.log");
-    const sinkBefore = getDiagnosticSink();
-    failAclStripWith(capturedChmodRefusal(["-N", logPath]));
+  test.skipIf(process.platform === "win32")(
+    "a refused strip writes no line and leaves the diagnostic sink alone",
+    () => {
+      const logPath = path.join(dir, "refused.log");
+      const sinkBefore = getDiagnosticSink();
+      failAclStripWith(capturedChmodRefusal(["-N", logPath]));
 
-    const thrown = catchThrown(() =>
-      withPlatform("darwin", () => configureLogFile(logPath)),
-    );
+      const thrown = catchThrown(() =>
+        withPlatform("darwin", () => configureLogFile(logPath)),
+      );
 
-    expect(thrown).toBeInstanceOf(UsageError);
-    // The refusal is reported through configureLogFile's own usage boundary, and
-    // what an operator reads under it is the strip's refusal and the command line
-    // that failed.
-    expect(sanitizeErrorForDisplay(thrown)).toBe(
-      joinErrorCauseChain([
-        `could not secure log file ${logPath}`,
-        `Could not clear extended ACLs on ${logPath}; inspect them with ` +
-          "`ls -le` and clear them manually with `chmod -N`",
-        `Command failed: /bin/chmod -N ${logPath}`,
-      ]),
-    );
-    // The open created the file before the strip ran, so the refusal cannot
-    // leave it absent -- it leaves it empty and already owner-only, mirroring
-    // the streaming writer's placeholder. Nothing was logged into it, because
-    // the sink is installed only after the strip succeeds.
-    expect(fs.readFileSync(logPath, "utf8")).toBe("");
-    expect(fs.statSync(logPath).mode & 0o777).toBe(0o600);
-    expect(getDiagnosticSink()).toBe(sinkBefore);
-  });
+      expect(thrown).toBeInstanceOf(UsageError);
+      // The refusal is reported through configureLogFile's own usage boundary, and
+      // what an operator reads under it is the strip's refusal and the command line
+      // that failed.
+      expect(sanitizeErrorForDisplay(thrown)).toBe(
+        joinErrorCauseChain([
+          `could not secure log file ${logPath}`,
+          `Could not clear extended ACLs on ${logPath}; inspect them with ` +
+            "`ls -le` and clear them manually with `chmod -N`",
+          `Command failed: /bin/chmod -N ${logPath}`,
+        ]),
+      );
+      // The open created the file before the strip ran, so the refusal cannot
+      // leave it absent -- it leaves it empty and already owner-only, mirroring
+      // the streaming writer's placeholder. Nothing was logged into it, because
+      // the sink is installed only after the strip succeeds.
+      expect(fs.readFileSync(logPath, "utf8")).toBe("");
+      expect(fs.statSync(logPath).mode & 0o777).toBe(0o600);
+      expect(getDiagnosticSink()).toBe(sinkBefore);
+    },
+  );
 
-  test("a refused strip leaves an existing log file's content untouched", () => {
-    if (process.platform === "win32") return;
-    const logPath = path.join(dir, "kept.log");
-    fs.writeFileSync(logPath, "PRE-EXISTING LINE\n", { mode: 0o600 });
-    failAclStripWith(capturedChmodRefusal(["-N", path.join(dir, "absent")]));
+  test.skipIf(process.platform === "win32")(
+    "a refused strip leaves an existing log file's content untouched",
+    () => {
+      const logPath = path.join(dir, "kept.log");
+      fs.writeFileSync(logPath, "PRE-EXISTING LINE\n", { mode: 0o600 });
+      failAclStripWith(capturedChmodRefusal(["-N", path.join(dir, "absent")]));
 
-    expect(() =>
-      withPlatform("darwin", () => configureLogFile(logPath)),
-    ).toThrow(/could not secure log file/);
+      expect(() =>
+        withPlatform("darwin", () => configureLogFile(logPath)),
+      ).toThrow(/could not secure log file/);
 
-    expect(fs.readFileSync(logPath, "utf8")).toBe("PRE-EXISTING LINE\n");
-  });
+      expect(fs.readFileSync(logPath, "utf8")).toBe("PRE-EXISTING LINE\n");
+    },
+  );
 
-  test("a refused strip closes the descriptor the open took", () => {
-    // The open owns a descriptor the refusal has to release: nothing else can,
-    // since no sink was installed to close later.
-    if (process.platform === "win32") return;
-    const logPath = path.join(dir, "fd.log");
-    failAclStripWith(capturedChmodRefusal(["-N", logPath]));
-    let openedFd: number | undefined;
-    const realOpen = fs.openSync;
-    const openSpy = vi
-      .spyOn(fs, "openSync")
-      .mockImplementation((...args: Parameters<typeof fs.openSync>) => {
-        openedFd = realOpen(...args);
-        return openedFd;
-      });
-    const closeSpy = vi.spyOn(fs, "closeSync");
+  test.skipIf(process.platform === "win32")(
+    "a refused strip closes the descriptor the open took",
+    () => {
+      // The open owns a descriptor the refusal has to release: nothing else can,
+      // since no sink was installed to close later.
+      const logPath = path.join(dir, "fd.log");
+      failAclStripWith(capturedChmodRefusal(["-N", logPath]));
+      let openedFd: number | undefined;
+      const realOpen = fs.openSync;
+      const openSpy = vi
+        .spyOn(fs, "openSync")
+        .mockImplementation((...args: Parameters<typeof fs.openSync>) => {
+          openedFd = realOpen(...args);
+          return openedFd;
+        });
+      const closeSpy = vi.spyOn(fs, "closeSync");
 
-    expect(() =>
-      withPlatform("darwin", () => configureLogFile(logPath)),
-    ).toThrow(UsageError);
+      expect(() =>
+        withPlatform("darwin", () => configureLogFile(logPath)),
+      ).toThrow(UsageError);
 
-    // The refusing path opens exactly one descriptor, so `openedFd` is
-    // unambiguous; that exact fd is the one closed, not leaked.
-    expect(openSpy).toHaveBeenCalledTimes(1);
-    expect(openedFd).toBeDefined();
-    expect(closeSpy).toHaveBeenCalledWith(openedFd);
-  });
+      // The refusing path opens exactly one descriptor, so `openedFd` is
+      // unambiguous; that exact fd is the one closed, not leaked.
+      expect(openSpy).toHaveBeenCalledTimes(1);
+      expect(openedFd).toBeDefined();
+      expect(closeSpy).toHaveBeenCalledWith(openedFd);
+    },
+  );
 
   plainPosixOnly("no strip is attempted on the host's real platform", () => {
     // The gate is what separates the refusals above from an ordinary run: the
@@ -467,94 +475,100 @@ describe("the doctor credentials directory's and file's extended ACL", () => {
     },
   );
 
-  test("the work directory is stripped before the credentials file exists, and the password through the owner-only writer's temp path", async () => {
-    // Two strips in the order the run makes them: the directory at `mkdtemp`,
-    // before anything is created in it, and then the writer's own on psilink's
-    // temp path, before the password is written -- the writer strips between its
-    // fchmod and its write. Both carry -h: each entry is one psilink created
-    // itself, so a symlink at it is a plant, and following it would clear an
-    // unrelated ACL while the password landed under one that still stood.
-    if (process.platform === "win32") return;
-    const commands = recordAclStripCommands();
-    let authFile: string | undefined;
+  test.skipIf(process.platform === "win32")(
+    "the work directory is stripped before the credentials file exists, and the password through the owner-only writer's temp path",
+    async () => {
+      // Two strips in the order the run makes them: the directory at `mkdtemp`,
+      // before anything is created in it, and then the writer's own on psilink's
+      // temp path, before the password is written -- the writer strips between its
+      // fchmod and its write. Both carry -h: each entry is one psilink created
+      // itself, so a symlink at it is a plant, and following it would clear an
+      // unrelated ACL while the password landed under one that still stood.
+      const commands = recordAclStripCommands();
+      let authFile: string | undefined;
 
-    await withPlatformAsync("darwin", () =>
-      runProbe(
-        INPUT,
-        probeDeps((seen) => {
-          authFile ??= seen;
-        }),
-      ),
-    );
+      await withPlatformAsync("darwin", () =>
+        runProbe(
+          INPUT,
+          probeDeps((seen) => {
+            authFile ??= seen;
+          }),
+        ),
+      );
 
-    expect(authFile).toBeDefined();
-    expect(commands).toEqual([
-      ["/bin/chmod", "-h", "-N", path.dirname(authFile as string)],
-      ["/bin/chmod", "-h", "-N", `${authFile}.tmp.${process.pid}`],
-    ]);
-  });
+      expect(authFile).toBeDefined();
+      expect(commands).toEqual([
+        ["/bin/chmod", "-h", "-N", path.dirname(authFile as string)],
+        ["/bin/chmod", "-h", "-N", `${authFile}.tmp.${process.pid}`],
+      ]);
+    },
+  );
 
-  test("a refused directory strip removes the directory before a password is composed", async () => {
-    if (process.platform === "win32") return;
-    failAclStripWith(
-      capturedChmodRefusal(["-h", "-N", path.join(dir, "absent")]),
-    );
-    const workDir = recordDoctorWorkDir();
-    let authFileSeen = false;
+  test.skipIf(process.platform === "win32")(
+    "a refused directory strip removes the directory before a password is composed",
+    async () => {
+      failAclStripWith(
+        capturedChmodRefusal(["-h", "-N", path.join(dir, "absent")]),
+      );
+      const workDir = recordDoctorWorkDir();
+      let authFileSeen = false;
 
-    const thrown = await withPlatformAsync("darwin", () =>
-      runProbe(
-        INPUT,
-        probeDeps(() => {
-          authFileSeen = true;
-        }),
-      ),
-    ).catch((err: unknown) => err);
-
-    expect(workDir.path).toBeDefined();
-    // The refusal names the operator's temp root rather than the removed work
-    // directory: that is where the inheritable ACE lives, and the mkdtemp path
-    // is already gone by the time the message would be read. The strip's own
-    // operand is still the work directory, asserted below.
-    expect(sanitizeErrorForDisplay(thrown)).toBe(
-      joinErrorCauseChain([
-        `Could not clear extended ACLs on ${os.tmpdir()}; inspect ` +
-          "them with `ls -le` and clear them manually with `chmod -N`",
-        `Command failed: /bin/chmod -h -N ${path.join(dir, "absent")}`,
-      ]),
-    );
-    expect(execFile.commands).toEqual([
-      ["/bin/chmod", "-h", "-N", workDir.path as string],
-    ]);
-    expect(authFileSeen).toBe(false);
-    expect(fs.existsSync(workDir.path as string)).toBe(false);
-  });
-
-  test("a refused credentials-file strip writes no password and removes the work directory", async () => {
-    if (process.platform === "win32") return;
-    failAclStripWith(
-      capturedChmodRefusal(["-h", "-N", path.join(dir, "absent")]),
-      /\.tmp\.\d+$/,
-    );
-    const workDir = recordDoctorWorkDir();
-    let authFileSeen = false;
-
-    await expect(
-      withPlatformAsync("darwin", () =>
+      const thrown = await withPlatformAsync("darwin", () =>
         runProbe(
           INPUT,
           probeDeps(() => {
             authFileSeen = true;
           }),
         ),
-      ),
-    ).rejects.toThrow(/Could not clear extended ACLs on /);
+      ).catch((err: unknown) => err);
 
-    // The refusal lands before the first invocation that would have read the
-    // credentials file, and takes the whole directory with it, so no password
-    // reached the disk the run leaves behind.
-    expect(authFileSeen).toBe(false);
-    expect(workDir.path).toBeDefined();
-    expect(fs.existsSync(workDir.path as string)).toBe(false);
-  });
+      expect(workDir.path).toBeDefined();
+      // The refusal names the operator's temp root rather than the removed work
+      // directory: that is where the inheritable ACE lives, and the mkdtemp path
+      // is already gone by the time the message would be read. The strip's own
+      // operand is still the work directory, asserted below.
+      expect(sanitizeErrorForDisplay(thrown)).toBe(
+        joinErrorCauseChain([
+          `Could not clear extended ACLs on ${os.tmpdir()}; inspect ` +
+            "them with `ls -le` and clear them manually with `chmod -N`",
+          `Command failed: /bin/chmod -h -N ${path.join(dir, "absent")}`,
+        ]),
+      );
+      expect(execFile.commands).toEqual([
+        ["/bin/chmod", "-h", "-N", workDir.path as string],
+      ]);
+      expect(authFileSeen).toBe(false);
+      expect(fs.existsSync(workDir.path as string)).toBe(false);
+    },
+  );
+
+  test.skipIf(process.platform === "win32")(
+    "a refused credentials-file strip writes no password and removes the work directory",
+    async () => {
+      failAclStripWith(
+        capturedChmodRefusal(["-h", "-N", path.join(dir, "absent")]),
+        /\.tmp\.\d+$/,
+      );
+      const workDir = recordDoctorWorkDir();
+      let authFileSeen = false;
+
+      await expect(
+        withPlatformAsync("darwin", () =>
+          runProbe(
+            INPUT,
+            probeDeps(() => {
+              authFileSeen = true;
+            }),
+          ),
+        ),
+      ).rejects.toThrow(/Could not clear extended ACLs on /);
+
+      // The refusal lands before the first invocation that would have read the
+      // credentials file, and takes the whole directory with it, so no password
+      // reached the disk the run leaves behind.
+      expect(authFileSeen).toBe(false);
+      expect(workDir.path).toBeDefined();
+      expect(fs.existsSync(workDir.path as string)).toBe(false);
+    },
+  );
 });

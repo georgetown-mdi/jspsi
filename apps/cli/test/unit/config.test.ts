@@ -789,24 +789,26 @@ test("saveConfig emits snake_case keys and round-trips through parseExchangeSpec
   expect(parseExchangeSpec(YAML.parse(raw))).toEqual(spec);
 });
 
-test("saveConfig writes the config owner-read-only (0600)", () => {
-  // Windows uses a restricted ACL, not POSIX mode bits; fs.statSync reports a
-  // synthetic mode there, so this assertion is Unix-only.
-  if (process.platform === "win32") return;
-  const configPath = path.join(dir, "psilink.yaml");
-  // A spec carrying an inline SFTP credential is exactly why the config must
-  // be owner-only: the 0600 mode is what keeps the password from other users.
-  const spec: ExchangeSpec = {
-    connection: {
-      channel: "sftp",
-      server: { host: "h", username: "u", password: "s3cret-inline" },
-    },
-    linkageTerms: getDefaultLinkageTerms("Agency A"),
-  };
-  saveConfig(configPath, spec);
-  expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
-  expect(fs.readFileSync(configPath, "utf8")).toContain("s3cret-inline");
-});
+test.skipIf(process.platform === "win32")(
+  "saveConfig writes the config owner-read-only (0600)",
+  () => {
+    // Windows uses a restricted ACL, not POSIX mode bits; fs.statSync reports a
+    // synthetic mode there, so this assertion is Unix-only.
+    const configPath = path.join(dir, "psilink.yaml");
+    // A spec carrying an inline SFTP credential is exactly why the config must
+    // be owner-only: the 0600 mode is what keeps the password from other users.
+    const spec: ExchangeSpec = {
+      connection: {
+        channel: "sftp",
+        server: { host: "h", username: "u", password: "s3cret-inline" },
+      },
+      linkageTerms: getDefaultLinkageTerms("Agency A"),
+    };
+    saveConfig(configPath, spec);
+    expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
+    expect(fs.readFileSync(configPath, "utf8")).toContain("s3cret-inline");
+  },
+);
 
 test("saveConfig strips sharedSecret/expires and does not mutate the caller's spec", () => {
   const configPath = path.join(dir, "psilink.yaml");
@@ -891,16 +893,18 @@ test("persistHostKeyFingerprint replaces an existing stored pin (the one-shot re
   expect(parsed.connection.server.host_key_fingerprint).toBe(FP_B);
 });
 
-test("persistHostKeyFingerprint writes the config owner-read-only (0600)", () => {
-  if (process.platform === "win32") return;
-  const configPath = path.join(dir, "psilink.yaml");
-  fs.writeFileSync(
-    configPath,
-    "connection:\n  channel: sftp\n  server:\n    host: h\n",
-  );
-  persistHostKeyFingerprint(configPath, FP_A);
-  expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
-});
+test.skipIf(process.platform === "win32")(
+  "persistHostKeyFingerprint writes the config owner-read-only (0600)",
+  () => {
+    const configPath = path.join(dir, "psilink.yaml");
+    fs.writeFileSync(
+      configPath,
+      "connection:\n  channel: sftp\n  server:\n    host: h\n",
+    );
+    persistHostKeyFingerprint(configPath, FP_A);
+    expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
+  },
+);
 
 test("persistHostKeyFingerprint throws (not silently) on a malformed config", () => {
   const configPath = path.join(dir, "psilink.yaml");
@@ -1262,16 +1266,18 @@ test("persistDisclosedPayloadColumns writes an empty array verbatim (strict disc
   expect(parsed.disclosed_payload_columns).toEqual([]);
 });
 
-test("persistDisclosedPayloadColumns writes the config owner-read-only (0600)", () => {
-  if (process.platform === "win32") return;
-  const configPath = path.join(dir, "psilink.yaml");
-  fs.writeFileSync(
-    configPath,
-    "connection:\n  channel: sftp\n  server:\n    host: h\n",
-  );
-  persistDisclosedPayloadColumns(configPath, ["notes"]);
-  expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
-});
+test.skipIf(process.platform === "win32")(
+  "persistDisclosedPayloadColumns writes the config owner-read-only (0600)",
+  () => {
+    const configPath = path.join(dir, "psilink.yaml");
+    fs.writeFileSync(
+      configPath,
+      "connection:\n  channel: sftp\n  server:\n    host: h\n",
+    );
+    persistDisclosedPayloadColumns(configPath, ["notes"]);
+    expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
+  },
+);
 
 test("persistDisclosedPayloadColumns throws (not silently) on a malformed config", () => {
   const configPath = path.join(dir, "psilink.yaml");
@@ -1382,16 +1388,18 @@ test("persistExpectedPayloadColumns writes an empty array verbatim (strict recei
   expect(parsed.expected_payload_columns).toEqual([]);
 });
 
-test("persistExpectedPayloadColumns writes the config owner-read-only (0600)", () => {
-  if (process.platform === "win32") return;
-  const configPath = path.join(dir, "psilink.yaml");
-  fs.writeFileSync(
-    configPath,
-    "connection:\n  channel: sftp\n  server:\n    host: h\n",
-  );
-  persistExpectedPayloadColumns(configPath, ["diagnosis"]);
-  expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
-});
+test.skipIf(process.platform === "win32")(
+  "persistExpectedPayloadColumns writes the config owner-read-only (0600)",
+  () => {
+    const configPath = path.join(dir, "psilink.yaml");
+    fs.writeFileSync(
+      configPath,
+      "connection:\n  channel: sftp\n  server:\n    host: h\n",
+    );
+    persistExpectedPayloadColumns(configPath, ["diagnosis"]);
+    expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
+  },
+);
 
 test("persistExpectedPayloadColumns throws (not silently) on a malformed config", () => {
   const configPath = path.join(dir, "psilink.yaml");
@@ -1458,16 +1466,18 @@ test("persistExpectedPartnerDeduplicate refreshes a stale declaration", () => {
   expect(YAML.parse(raw).expected_partner_deduplicate).toBe(false);
 });
 
-test("persistExpectedPartnerDeduplicate writes the config owner-read-only (0600)", () => {
-  if (process.platform === "win32") return;
-  const configPath = path.join(dir, "psilink.yaml");
-  fs.writeFileSync(
-    configPath,
-    "connection:\n  channel: sftp\n  server:\n    host: h\n",
-  );
-  persistExpectedPartnerDeduplicate(configPath, true);
-  expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
-});
+test.skipIf(process.platform === "win32")(
+  "persistExpectedPartnerDeduplicate writes the config owner-read-only (0600)",
+  () => {
+    const configPath = path.join(dir, "psilink.yaml");
+    fs.writeFileSync(
+      configPath,
+      "connection:\n  channel: sftp\n  server:\n    host: h\n",
+    );
+    persistExpectedPartnerDeduplicate(configPath, true);
+    expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
+  },
+);
 
 test("persistExpectedPartnerDeduplicate throws (not silently) on a malformed config", () => {
   const configPath = path.join(dir, "psilink.yaml");

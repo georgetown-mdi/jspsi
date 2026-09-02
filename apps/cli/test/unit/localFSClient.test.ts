@@ -616,77 +616,92 @@ describe("symlink refusal in the rendezvous directory", () => {
   // POSIX-only: O_NOFOLLOW is absent on Windows and symlink creation there needs
   // privilege, so the primitive-level assertions are skipped on win32.
 
-  test("list omits both a valid-target and a dangling symlink", async () => {
-    // This is the invariant every rendezvous read rests on: a symlink is never
-    // handed to the read primitive because list() drops it here.
-    if (process.platform === "win32") return;
-    await fs.writeFile(path.join(dir, "real.txt"), "payload");
-    await fs.symlink(path.join(dir, "real.txt"), path.join(dir, "valid-link"));
-    await fs.symlink(
-      path.join(dir, "no-such-target"),
-      path.join(dir, "dangling-link"),
-    );
-    const names = (await client.list(dir)).map((e) => e.name);
-    expect(names).toEqual(["real.txt"]);
-  });
+  test.skipIf(process.platform === "win32")(
+    "list omits both a valid-target and a dangling symlink",
+    async () => {
+      // This is the invariant every rendezvous read rests on: a symlink is never
+      // handed to the read primitive because list() drops it here.
+      await fs.writeFile(path.join(dir, "real.txt"), "payload");
+      await fs.symlink(
+        path.join(dir, "real.txt"),
+        path.join(dir, "valid-link"),
+      );
+      await fs.symlink(
+        path.join(dir, "no-such-target"),
+        path.join(dir, "dangling-link"),
+      );
+      const names = (await client.list(dir)).map((e) => e.name);
+      expect(names).toEqual(["real.txt"]);
+    },
+  );
 
-  test("get refuses a symlink instead of following it to the target", async () => {
-    if (process.platform === "win32") return;
-    const target = path.join(dir, "target.txt");
-    await fs.writeFile(target, "secret-target-contents");
-    const link = path.join(dir, "link-to-target");
-    await fs.symlink(target, link);
-    // Both the unbounded fast path and the bounded path must refuse at the open,
-    // never resolving to the link target's contents.
-    await expect(client.get(link)).rejects.toMatchObject({ code: "ELOOP" });
-    await expect(client.get(link, { maxBytes: 1024 })).rejects.toMatchObject({
-      code: "ELOOP",
-    });
-  });
+  test.skipIf(process.platform === "win32")(
+    "get refuses a symlink instead of following it to the target",
+    async () => {
+      const target = path.join(dir, "target.txt");
+      await fs.writeFile(target, "secret-target-contents");
+      const link = path.join(dir, "link-to-target");
+      await fs.symlink(target, link);
+      // Both the unbounded fast path and the bounded path must refuse at the open,
+      // never resolving to the link target's contents.
+      await expect(client.get(link)).rejects.toMatchObject({ code: "ELOOP" });
+      await expect(client.get(link, { maxBytes: 1024 })).rejects.toMatchObject({
+        code: "ELOOP",
+      });
+    },
+  );
 
-  test("get refuses a dangling symlink at the link itself", async () => {
-    if (process.platform === "win32") return;
-    const link = path.join(dir, "dangling-get");
-    await fs.symlink(path.join(dir, "missing-target"), link);
-    // ELOOP (refused at the link), not ENOENT (which a followed dead link gives).
-    await expect(client.get(link)).rejects.toMatchObject({ code: "ELOOP" });
-  });
+  test.skipIf(process.platform === "win32")(
+    "get refuses a dangling symlink at the link itself",
+    async () => {
+      const link = path.join(dir, "dangling-get");
+      await fs.symlink(path.join(dir, "missing-target"), link);
+      // ELOOP (refused at the link), not ENOENT (which a followed dead link gives).
+      await expect(client.get(link)).rejects.toMatchObject({ code: "ELOOP" });
+    },
+  );
 
-  test("put refuses to write through a symlink and leaves the target intact", async () => {
-    if (process.platform === "win32") return;
-    const target = path.join(dir, "put-target.txt");
-    await fs.writeFile(target, "original");
-    const link = path.join(dir, "put-link");
-    await fs.symlink(target, link);
-    await expect(
-      client.put(Buffer.from("attacker"), link),
-    ).rejects.toMatchObject({ code: "ELOOP" });
-    expect(await fs.readFile(target, "utf8")).toBe("original");
-    // The link itself is untouched -- not truncated or replaced with a file.
-    expect((await fs.lstat(link)).isSymbolicLink()).toBe(true);
-  });
+  test.skipIf(process.platform === "win32")(
+    "put refuses to write through a symlink and leaves the target intact",
+    async () => {
+      const target = path.join(dir, "put-target.txt");
+      await fs.writeFile(target, "original");
+      const link = path.join(dir, "put-link");
+      await fs.symlink(target, link);
+      await expect(
+        client.put(Buffer.from("attacker"), link),
+      ).rejects.toMatchObject({ code: "ELOOP" });
+      expect(await fs.readFile(target, "utf8")).toBe("original");
+      // The link itself is untouched -- not truncated or replaced with a file.
+      expect((await fs.lstat(link)).isSymbolicLink()).toBe(true);
+    },
+  );
 
-  test("createExclusive refuses a symlink pre-planted at the target", async () => {
-    if (process.platform === "win32") return;
-    const target = path.join(dir, "excl-target.txt");
-    await fs.writeFile(target, "original");
-    const link = path.join(dir, "excl-link");
-    await fs.symlink(target, link);
-    // O_EXCL refuses the existing entry (EEXIST); the open never follows the link
-    // to its target, so the target keeps its contents.
-    await expect(client.createExclusive(link)).rejects.toThrow();
-    expect(await fs.readFile(target, "utf8")).toBe("original");
-  });
+  test.skipIf(process.platform === "win32")(
+    "createExclusive refuses a symlink pre-planted at the target",
+    async () => {
+      const target = path.join(dir, "excl-target.txt");
+      await fs.writeFile(target, "original");
+      const link = path.join(dir, "excl-link");
+      await fs.symlink(target, link);
+      // O_EXCL refuses the existing entry (EEXIST); the open never follows the link
+      // to its target, so the target keeps its contents.
+      await expect(client.createExclusive(link)).rejects.toThrow();
+      expect(await fs.readFile(target, "utf8")).toBe("original");
+    },
+  );
 
-  test("ordinary regular-file read and write are unaffected", async () => {
-    if (process.platform === "win32") return;
-    const file = path.join(dir, "plain.bin");
-    await client.put(Buffer.from([1, 2, 3]), file);
-    expect(await client.get(file)).toEqual(Buffer.from([1, 2, 3]));
-    expect(await client.get(file, { maxBytes: 16 })).toEqual(
-      Buffer.from([1, 2, 3]),
-    );
-  });
+  test.skipIf(process.platform === "win32")(
+    "ordinary regular-file read and write are unaffected",
+    async () => {
+      const file = path.join(dir, "plain.bin");
+      await client.put(Buffer.from([1, 2, 3]), file);
+      expect(await client.get(file)).toEqual(Buffer.from([1, 2, 3]));
+      expect(await client.get(file, { maxBytes: 16 })).toEqual(
+        Buffer.from([1, 2, 3]),
+      );
+    },
+  );
 });
 
 // --- connect: retry and timeout ----------------------------------------------
