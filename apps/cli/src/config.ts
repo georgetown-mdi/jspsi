@@ -1629,10 +1629,12 @@ export function saveConfig(configPath: string, spec: ExchangeSpec): void {
  *
  * Fails closed on a non-sftp config: a host-key fingerprint is an sftp-only pin
  * (`connection.server` is the sftp shape), so a `connection.channel` other than
- * `sftp` is rejected with a {@link UsageError} before anything is written. The
- * sole caller {@link establishHostKeyTrust} already no-ops off sftp, so this
- * never fires today; it enforces the invariant at the function for a future
- * direct caller that would otherwise synthesize a bogus pin and a `server`
+ * `sftp` is rejected with a {@link UsageError} before anything is written
+ * (config.test.ts, "persistHostKeyFingerprint rejects a non-sftp config and
+ * leaves the file untouched"). The sole caller {@link establishHostKeyTrust}
+ * returns off sftp before reaching it (hostKeyTrust.test.ts, "is a no-op for a
+ * non-sftp channel"), so the guard holds the invariant at the function itself,
+ * for a direct caller that would otherwise synthesize a bogus pin and a `server`
  * mapping a filedrop/webrtc schema does not expect.
  */
 export function persistHostKeyFingerprint(

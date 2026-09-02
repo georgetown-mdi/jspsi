@@ -128,9 +128,12 @@ export function unavailableKexPrimitives(): readonly KexPrimitive[] {
  * `Host denied` match in {@link SSH2SFTPClientAdapter}).
  *
  * A version that reworded it degrades to ssh2's own bare message, and to a dial
- * that spends its whole reconnect budget on a negotiation that cannot succeed --
- * the behaviour of a match that never fires, never a wrong diagnostic or a dial
- * ended for the wrong reason.
+ * that spends its whole reconnect budget on a negotiation that cannot succeed: a
+ * rejection this fragment does not match is passed through untouched and
+ * recognized as nothing, which is what makes the degradation a missing
+ * diagnostic rather than a wrong one (sftpKexCapability.test.ts, "passes an
+ * unrelated rejection through untouched" and "answers no for an unrelated
+ * rejection and for a non-Error").
  */
 const KEX_NEGOTIATION_FAILURE_FRAGMENT = "no matching key exchange algorithm";
 

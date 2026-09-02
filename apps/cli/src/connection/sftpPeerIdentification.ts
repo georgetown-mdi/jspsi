@@ -122,10 +122,12 @@ export type PeerAnswer =
  * the second, which arrives with `code: "ECONNRESET"` as well.
  *
  * A version that reworded them stops the diagnosis firing and leaves the dial
- * failing exactly as it does today -- the behaviour of a match that never fires.
- * It cannot produce a wrong diagnosis, because the fragment decides only whether
- * to look: what the operator is told comes from the bytes the read observes, and
- * a peer that turns out to be an SSH server is reported as nothing at all.
+ * failing exactly as it does today: an unmatched rejection is handed back as it
+ * stands, and the fragment decides only whether to look -- what the operator is
+ * told comes from the bytes the read observes, and a peer that turns out to be an
+ * SSH server is reported as nothing at all (sftpPeerIdentification.test.ts,
+ * "leaves an unreachable host to the rejection it already has" and "leaves the
+ * rejection alone when the peer identified itself").
  */
 const PRE_IDENTIFICATION_FAILURE_FRAGMENTS = [
   "Connection lost before handshake",
@@ -209,10 +211,12 @@ function classifyPeerAnswer(bytes: Uint8Array): PeerAnswer {
  * reach here having just failed against a peer that answered the port wrongly;
  * a socket that only reads presents nothing at all to either.
  *
- * Best-effort by construction. It runs after the dial has already failed and
- * against a peer that may answer a second connection differently (a load
- * balancer, a round-robin address), so it reports `unobserved` for anything it
- * cannot establish and the caller falls back to the rejection it already had.
+ * Best-effort, and stated as such rather than relied on: it runs after the dial
+ * has already failed and against a peer that may answer a second connection
+ * differently (a load balancer, a round-robin address), so it reports
+ * `unobserved` for anything it cannot establish and the caller falls back to the
+ * rejection it already had (sftpPeerIdentification.test.ts drives the refused
+ * connection and the peer that accepts and then holds the connection open).
  *
  * @internal
  */

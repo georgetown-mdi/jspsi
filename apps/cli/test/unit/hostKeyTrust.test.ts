@@ -97,6 +97,39 @@ test("is a no-op for a non-sftp channel (no host key to establish)", async () =>
   expect(deps.probeCalls).toBe(0);
 });
 
+test("a probe failure propagates unchanged and pins nothing", async () => {
+  // A dial that never reaches a host key -- a refused connection, an
+  // unresolvable name -- rejects out of the probe. There is no recovery here:
+  // the rejection reaches the caller as the error the probe raised, so the
+  // exchange path classifies a connect failure exactly as it would with no trust
+  // step, and neither the prompt nor a pin follows it.
+  const conn = sftpConn();
+  const failure = new Error("connect ECONNREFUSED 203.0.113.9:22");
+  let confirmCalls = 0;
+  const deps: HostKeyTrustDeps = {
+    probe: () => Promise.reject(failure),
+    confirm: () => {
+      confirmCalls++;
+      return Promise.resolve(true);
+    },
+  };
+  process.stdin.isTTY = true; // interactive, so the probe is reached
+  await expect(
+    establishHostKeyTrust(
+      conn,
+      {
+        verbosity: 0,
+        loggerName: "exchange",
+        persistence: { mode: "ephemeral" },
+      },
+      deps,
+    ),
+  ).rejects.toBe(failure);
+  expect(confirmCalls).toBe(0);
+  if (conn.channel === "sftp")
+    expect(conn.server.hostKeyFingerprint).toBeUndefined();
+});
+
 test("is a no-op when a list of host_key_fingerprints is already pinned", async () => {
   // First-use trust gates on the pin being unset (=== undefined), which is
   // value-agnostic: a config already carrying multiple pins (a staged rotation)

@@ -5,11 +5,10 @@
 // somewhere other than this codebase -- the probe's excerpt is a latin1 decode
 // of bytes an untrusted peer sent, and a doctor check's meaning and action
 // interpolate the operator's own SMB_* values and, on two arms, an smbclient
-// NT_STATUS token that is ASCII by construction -- so these lines have to be
-// safe as BYTES, not only valid as JSON: `JSON.stringify` escapes
-// U+0000-U+001F, the quote, and the backslash, which is enough to keep a line
-// one line, but it passes DEL and the C1 range straight through, and a value
-// some other party chose can carry either.
+// NT_STATUS token -- so these lines have to be safe as BYTES, not only valid as
+// JSON: `JSON.stringify` escapes U+0000-U+001F, the quote, and the backslash,
+// which is enough to keep a line one line, but it passes DEL and the C1 range
+// straight through, and a value some other party chose can carry either.
 //
 // One machine-readable stream sits outside that set and is named rather than
 // covered: the opt-in fd-3 NDJSON events (apps/cli/src/eventStream.ts), which

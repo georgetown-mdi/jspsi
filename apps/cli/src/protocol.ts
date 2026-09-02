@@ -512,10 +512,11 @@ export interface RunProtocolResult {
  * online invite/accept callers persist their configuration here, so a handshake
  * that succeeds but whose exchange then fails leaves both the rotated key and
  * the config on disk. A handshake that never succeeds (declined, expired, or
- * unreachable partner) never reaches the hook. The hook may be synchronous or
- * async; it is awaited, so a returned promise is settled before the exchange
- * begins. A failure from the hook -- a synchronous throw or a rejected promise
- * -- is non-fatal: it is logged at error level (so it survives
+ * unreachable partner) never reaches the hook (protocol.test.ts, "runProtocol
+ * does not invoke onAuthenticated when the handshake fails"). The hook may be
+ * synchronous or async; it is awaited, so a returned promise is settled before
+ * the exchange begins. A failure from the hook -- a synchronous throw or a
+ * rejected promise -- is non-fatal: it is logged at error level (so it survives
  * `--log-level=error`) and the exchange still runs, because the data exchange is
  * the irreplaceable two-party operation and must not be aborted by a failure to
  * persist the recoverable config. It is a persistence loss on a completed run,

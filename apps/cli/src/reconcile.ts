@@ -83,9 +83,12 @@ function pushDirectoryConflicts(
   // compared field is genuinely unset on the existing side -- but a bare
   // "(unset)" hides the locator the config DOES hold in its own form, which an
   // operator reads as "my config names no directory at all". Annotate the unset
-  // side with that locator so the conflict shows both forms. Only invoked when
-  // the field being rendered is actually unset, so it never fires for a
-  // same-form mismatch (where the existing value is shown directly).
+  // side with that locator so the conflict shows both forms. Composed only from
+  // the `haveValue === undefined` branch of `conflict` below, its one call site,
+  // so a same-form mismatch renders the existing value directly instead
+  // (onlineBootstrap.test.ts drives both shapes: the two cross-topology cases
+  // name the locator the config holds, and the split outbound_path mismatch
+  // renders that value alone).
   //
   // The hint is a CLAUSE -- first-party copy naming one or two locators the
   // partner chose -- so it is composed as one (reconcileClause) rather than as a
