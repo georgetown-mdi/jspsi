@@ -12,8 +12,8 @@ import type { ConnectionConfig } from "./connection.js";
  * (the allowlist convention in CONTRIBUTING.md), so a channel added to that
  * union is rejected here until its locator fields have been decided. Mirrors the
  * CLI's `ProtocolConnectionConfig` (the channels its transport can run); core
- * cannot see that type, so the two are held in step by hand rather than by a
- * check.
+ * cannot see that type, so the check that the two stay in step lives on the side
+ * that sees both (apps/cli/test/unit/protocolEndpointParity.test.ts).
  */
 export type EndpointSourceConnectionConfig = Extract<
   ConnectionConfig,

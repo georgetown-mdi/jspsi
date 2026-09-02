@@ -2008,6 +2008,16 @@ test("buildDataSpec: without input rows, the spec is just the supplied terms (ac
   expect(termsOnly.standardization).toBeUndefined();
 });
 
+test("buildDataSpec: neither terms nor input rows is refused rather than yielding an empty spec", () => {
+  // Neither CLI path can reach this (offline invite always carries input, accept
+  // always carries the invitation's terms), so the guard exists for a direct
+  // caller: a spec with no linkage terms would otherwise reach the exchange as
+  // terms nobody authored.
+  expect(() => buildDataSpec({ identity: "Agency A" })).toThrow(
+    /requires either terms or input rows/,
+  );
+});
+
 test("buildDataSpec: supplied terms plus input infer metadata and standardization (accept)", () => {
   const inferred = buildDataSpec({
     identity: "Agency C",

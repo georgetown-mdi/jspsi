@@ -124,8 +124,9 @@ export interface SeededConnection {
  * offline accept path, and the offline invite path). When the invitation
  * carries a credential-free `connectionEndpoint`, seed the locator from it and
  * mark the credential field with a `REPLACE_WITH_...` placeholder for the user
- * to fill in (the endpoint never carries credentials, by construction). When it
- * does not, write a clearly-marked `sftp` placeholder the user replaces wholesale.
+ * to fill in (the endpoint type declares no credential field, and core's strict
+ * endpoint schema rejects a document carrying one). When it does not, write a
+ * clearly-marked `sftp` placeholder the user replaces wholesale.
  *
  * The endpoint's `path` is the inviter's own (for `filedrop`, possibly a mount
  * the acceptor must remap); it is written verbatim for the user to review.
@@ -208,7 +209,9 @@ export function connectionFromEndpoint(
         // endpoint to name a directory in one form (path, or the split pair
         // handled above), but `path` is optional in the type, so guard a caller
         // that bypasses decode with a clear error here rather than letting an
-        // undefined path reach connection.ts as an opaque schema failure.
+        // undefined path reach connection.ts as an opaque schema failure
+        // (onlineBootstrap.test.ts, "connectionFromEndpoint: throws on a
+        // filedrop endpoint naming no directory").
         throw new Error(
           "filedrop endpoint has neither a path nor a split " +
             "inbound_path/outbound_path pair",
@@ -538,7 +541,9 @@ export function buildDataSpec(args: {
   if (rows === undefined) {
     if (terms === undefined)
       // Unreachable through the CLI (offline invite always has input, accept
-      // always has terms); guards a future caller against an empty spec.
+      // always has terms); guards a direct caller against an empty spec
+      // (onlineBootstrap.test.ts, "buildDataSpec: neither terms nor input rows
+      // is refused rather than yielding an empty spec").
       throw new Error("buildDataSpec requires either terms or input rows");
     return { linkageTerms: terms };
   }
@@ -645,11 +650,13 @@ export function observedReceivedColumnsForSave(
  * handshake that succeeds but whose data exchange then fails leaves both the
  * rotated key and the config on disk, so the recurring-exchange setup is
  * recoverable without re-inviting. A handshake that never succeeds (declined,
- * expired, or unreachable partner) never reaches the hook, so it still leaves
- * no config behind. A failure of the config write itself is non-fatal: the
- * exchange still runs (see `onAuthenticated`), and the error -- already logged
- * by `runProtocol` -- is returned as `configWriteError` so the caller can report
- * the truthful outcome instead of claiming the config was saved.
+ * expired, or unreachable partner) never reaches the hook (protocol.test.ts,
+ * "runProtocol does not invoke onAuthenticated when the handshake fails"), so it
+ * still leaves no config behind. A failure of the config write itself is
+ * non-fatal: the exchange still runs (see `onAuthenticated`), and the error --
+ * already logged by `runProtocol` -- is returned as `configWriteError` so the
+ * caller can report the truthful outcome instead of claiming the config was
+ * saved.
  *
  * Every persistence this path can lose without losing the exchange -- that
  * config write, the reuse path's two consent-record refreshes, and the
@@ -1180,8 +1187,11 @@ export async function runOnlineBootstrap(params: {
     // reuse run keeps the pre-existing config but still needs `keyPersisted`,
     // since a pre-handshake failure (declined, expired, unreachable) never saves
     // the rotated key -- promising `psilink exchange` there would point at a key
-    // that does not exist. A hook failure (config not written) likewise leaves
-    // `configWritten` false, so it never claims a config that is not there.
+    // that does not exist (onlineBootstrap.test.ts, "runOnlineBootstrap with
+    // reuseExistingConfig does not log a recovery note when the handshake fails
+    // before the key is saved"). A hook failure (config not written) likewise
+    // leaves `configWritten` false, so it never claims a config that is not
+    // there.
     if (configWritten || (params.reuseExistingConfig && keyPersisted))
       getLogger(params.loggerName).error(
         `the configuration at ${params.configPath} and the rotated key at ` +

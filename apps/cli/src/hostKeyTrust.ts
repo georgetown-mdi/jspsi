@@ -202,7 +202,9 @@ export async function establishHostKeyTrust(
 
   // Probe on a throwaway connection (its own adapter): the verifier records the
   // presented key and refuses, so no credential is ever sent and nothing needs
-  // closing. A genuine connect failure (unreachable host) propagates as-is.
+  // closing. A genuine connect failure propagates as it stands, unwrapped and
+  // with nothing pinned (hostKeyTrust.test.ts, "a probe failure propagates
+  // unchanged and pins nothing").
   const presented = await deps.probe(connection, verbosity);
 
   // presented.keyType is the server's choice within the bound core's

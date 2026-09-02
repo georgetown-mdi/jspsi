@@ -154,16 +154,18 @@ export function createCappedSink(
         ),
       );
       chunks.length = 0;
-      // Destroy WITH an error, not bare. ssh2-sftp-client keys its upstream
-      // read-stream teardown off the sink's 'error' event: get(path, dst) pipes
-      // the read stream into the sink, rejects its promise on the sink's 'error',
-      // and destroys the read stream only in that promise's `.finally`. A bare
-      // destroy() emits 'close', not 'error', so get() never settles, `.finally`
-      // never runs, and the server-side read keeps running -- the read stream
-      // leaks until session teardown. The typed terminal error is already on
-      // `result`; this plain Error exists only to abort the transfer at the
-      // server, exactly as the over-cap path's failed write callback does. The
-      // resulting get() rejection lands on the adapter's no-op `fail`.
+      // Destroy WITH an error, not bare: ssh2-sftp-client's get(path, dst) pipes
+      // the read stream into the sink and settles its own promise off the sink's
+      // 'error' event, so a bare destroy() -- which emits 'close', not 'error' --
+      // risks leaving the server-side read running until session teardown. That
+      // counterfactual is a reading of the library, not a measurement against the
+      // pinned stack, so it is the reason for the argument rather than a property
+      // claimed here; what is driven is this side, that the sink is destroyed
+      // with an Error (frameSizeGuard.test.ts, "the idle stall tears down the
+      // upstream read stream, not just the sink"). The typed terminal error is
+      // already on `result`; this plain Error exists only to abort the transfer
+      // at the server, exactly as the over-cap path's failed write callback
+      // does. The resulting get() rejection lands on the adapter's no-op `fail`.
       sink.destroy(new Error("inbound transfer stalled"));
     }, stallDeadlineMs);
     // The idle timer is the safety bound, not real work: it must never keep the

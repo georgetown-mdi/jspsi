@@ -432,9 +432,11 @@ export function iceServersFromConnection(
  *
  * An empty list is NOT passed through as an empty list: to werift an empty
  * `iceServers` and an absent one both mean "use the built-in default", so
- * omitting it keeps the two indistinguishable rather than implying a
- * suppression that does not happen. A non-empty list is passed verbatim, which
- * is what makes it -- and not the default -- the list actually used.
+ * omitting it keeps the two from looking different when they are not. Both arms
+ * are driven in webrtcIceConfiguration.test.ts -- an empty list and no list each
+ * yield `{}` with the warning, and a non-empty list is passed verbatim, which is
+ * what makes it, and not the default, the list actually used. What werift falls
+ * back to when it is given neither is measured by the integration suite.
  */
 export function buildPeerConfiguration(
   iceServers: Array<RTCIceServer> | undefined,
