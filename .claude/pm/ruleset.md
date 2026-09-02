@@ -299,6 +299,9 @@ Ratified by the owner:
   depends on is enforced by a hook or a check rather than by prose alone, and
   each `.claude/scripts/` tool the flow invokes either runs in-container or
   states its out-of-container requirement at the point of use.
+- **Core Functionality** (board 9) -- Done is: no linkage term the schema admits
+  is parsed, displayed, or agreed without the run applying it -- every
+  declared-but-inert path implemented or refused.
 
 Drafted, pending the owner's ratification:
 
@@ -314,9 +317,6 @@ Drafted, pending the owner's ratification:
 - **Agency security review readiness** (board 10) -- Done is: one agency
   completes a security review from the published assurance package alone, every
   claim in it naming the check that keeps it true.
-- **Core Functionality** (board 9) -- Done is: no linkage term the schema admits
-  is parsed, displayed, or agreed without the run applying it -- every
-  declared-but-inert path implemented or refused.
 
 ## What the PM does NOT do
 
