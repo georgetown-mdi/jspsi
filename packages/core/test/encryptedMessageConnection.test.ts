@@ -629,15 +629,6 @@ function parkingInner(): {
   return { inner, sends, receives, sendReached };
 }
 
-async function rejectionOf(p: Promise<unknown>): Promise<unknown> {
-  return p.then(
-    () => {
-      throw new Error("expected a rejection but the promise resolved");
-    },
-    (e: unknown) => e,
-  );
-}
-
 test("a second failure keeps the first latched error rather than replacing it", async () => {
   const { inner, sends, receives, sendReached } = parkingInner();
   const enc = await EncryptedMessageConnection.create(
@@ -661,7 +652,9 @@ test("a second failure keeps the first latched error rather than replacing it", 
   );
 
   sends[0](new Error("second failure: inner send"));
-  expect(await rejectionOf(send)).toBe(first);
+  expect(
+    await expectRejection(send, "transport", /first failure: inner receive/),
+  ).toBe(first);
 
   await enc.close();
 });
@@ -688,7 +681,9 @@ test("send after a failure rejects with the latched error without reaching the t
   // observable proof this rejected before any of that ran; the transport then
   // never sees the frame either.
   expect((enc as unknown as { sendSeq: number }).sendSeq).toBe(0);
-  expect(await rejectionOf(again)).toBe(first);
+  expect(
+    await expectRejection(again, "transport", /inner receive failure/),
+  ).toBe(first);
   expect(sends).toHaveLength(0);
 
   await enc.close();
@@ -712,7 +707,9 @@ test("receive after a failure rejects with the latched error without reaching th
 
   const again = enc.receive();
   expect(receives).toHaveLength(1);
-  expect(await rejectionOf(again)).toBe(first);
+  expect(
+    await expectRejection(again, "transport", /inner receive failure/),
+  ).toBe(first);
 
   await enc.close();
 });
