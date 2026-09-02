@@ -150,11 +150,10 @@ test.skipIf(process.platform === "win32")(
   },
 );
 
-test.skipIf(process.platform === "win32")(
+test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
   "rejects when the parent directory is not writable",
   () => {
-    // root bypasses mode bits, so the probe would succeed; skip there.
-    if (process.getuid?.() === 0) return;
+    // root bypasses mode bits, so the probe would succeed there instead.
     const { log } = makeLogger();
     const readOnlyDir = path.join(dir, "readonly");
     fs.mkdirSync(readOnlyDir);
@@ -170,11 +169,10 @@ test.skipIf(process.platform === "win32")(
   },
 );
 
-test.skipIf(process.platform === "win32")(
+test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
   "falls through to friendly guidance when the key-path lstat fails with EACCES",
   () => {
-    // root bypasses mode bits, so lstat would succeed; skip there.
-    if (process.getuid?.() === 0) return;
+    // root bypasses mode bits, so lstat would succeed there instead.
     // A parent without search/execute permission makes lstat on the child key
     // path throw EACCES. The guard must NOT rethrow that raw errno; it should
     // fall through to the write probe, which classifies the same locked-down-
@@ -257,11 +255,10 @@ test.skipIf(process.platform === "win32")(
   },
 );
 
-test.skipIf(process.platform === "win32")(
+test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
   "rejects a parent that is write+execute but not readable",
   () => {
-    // root bypasses mode bits, so the read-open would succeed; skip there.
-    if (process.getuid?.() === 0) return;
+    // root bypasses mode bits, so the read-open would succeed there instead.
     // A 0o300 (write+execute, no read) parent passes the write probe but would
     // fail saveKeyFile's post-rename fsyncParentDir, which opens the parent for
     // READ -- after the handshake has rotated the secret. The pre-flight must
@@ -296,11 +293,10 @@ test.skipIf(process.platform === "win32")(
   },
 );
 
-test.skipIf(process.platform === "win32")(
+test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
   "reports a parent that cannot be created under a read-only ancestor",
   () => {
-    // root bypasses mode bits, so the mkdir would succeed; skip there.
-    if (process.getuid?.() === 0) return;
+    // root bypasses mode bits, so the mkdir would succeed there instead.
     // A missing parent under a non-writable ancestor: statSync(parent) is
     // ENOENT, then mkdirSync fails with EACCES for a non-symlink reason, so
     // this exercises the "cannot be created" arm with an empty dangling hint
