@@ -357,9 +357,9 @@ Ratified by the owner:
 - **FIPS 140-3 claim** (board 10) -- Done is: every FIPS claim the published
   docs make names the certificate and the shipped provider build that backs it,
   and a check fails when the image's provider drifts from that pin.
-
-Split-on Fan-out (board 9) carries no line of its own; Core Functionality's line
-governs it.
+- **Split-on Fan-out** (board 9) -- Done is: every multi-value key shape the
+  schema admits matches with fan-out under every linkage strategy the schema
+  admits.
 
 Drafted, pending the owner's ratification:
 
