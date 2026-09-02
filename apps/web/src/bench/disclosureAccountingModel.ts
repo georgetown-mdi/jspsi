@@ -320,9 +320,10 @@ export function disclosureEntries(
  * text. A cell beginning with one is prefixed with an apostrophe below, so an
  * exported accounting cannot execute in the reader's spreadsheet on values the
  * partner chose (the agreement purpose and the column names are theirs). The tab
- * and carriage-return leads of this class are unreachable here -- the display
- * boundary has already escaped every non-printable-ASCII code point -- so only the
- * printable leads remain. */
+ * and carriage-return leads of this class do not reach here: the display boundary
+ * escapes every non-printable-ASCII code point first, which
+ * disclosureAccountingModel.test.ts drives on a tab-led and a return-led value, so
+ * only the printable leads remain. */
 const FORMULA_LEAD = /^[=+\-@]/;
 
 /**

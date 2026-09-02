@@ -13,6 +13,12 @@ import {
 } from "@psilink/core";
 
 import {
+  CONFIG_EXCHANGE_FILES,
+  EXCHANGE_FILES_DEFAULT,
+  ZERO_SETUP_EXCHANGE_FILES,
+  exchangeFilesOptions,
+} from "@bench/exchangeFilesModel";
+import {
   CONNECTION_PER_POLL_SHORT_INTERVAL_ADVISORY,
   CONNECTION_TUNING_DEFAULT,
   FILEDROP_CONNECTION_TUNING,
@@ -26,11 +32,6 @@ import {
   withConnectionTuning,
 } from "@bench/connectionTuningModel";
 import {
-  EXCHANGE_FILES_DEFAULT,
-  ZERO_SETUP_EXCHANGE_FILES,
-  exchangeFilesOptions,
-} from "@bench/exchangeFilesModel";
-import {
   composeConfigDocument,
   composeSftpConfigDocument,
   zeroSetupOptionsArgv,
@@ -43,6 +44,7 @@ import {
 } from "../utils/jobFixtures";
 
 import type { ConnectionTuningDraft } from "@bench/connectionTuningModel";
+import type { ExchangeFilesDraft } from "@bench/exchangeFilesModel";
 
 const draft = (
   overrides: Partial<ConnectionTuningDraft> = {},
@@ -494,4 +496,44 @@ describe("the placeholder shows core's own default in the chosen unit", () => {
       expect(defaultPlaceholder(defaultMs, unit)).toBe(expected);
     },
   );
+});
+
+describe("the fields the two cards contribute", () => {
+  /** Every knob the connection card can state, so the comparison below is over
+   * the card's whole surface rather than the fields one draft happens to fill. */
+  const everyTuningKnob = draft({
+    pollInterval: { magnitude: "30", unit: "s" },
+    peerTimeout: { magnitude: "5", unit: "m" },
+    serverConnectTimeout: { magnitude: "45", unit: "s" },
+    maxReconnectAttempts: "3",
+    connectionPerPoll: true,
+  });
+
+  /** The same for the file-handling card, whose block the tuning merges onto. */
+  const everyFileHandlingChoice: ExchangeFilesDraft = {
+    retainFiles: true,
+    timestampInFilename: "on",
+    locklessRendezvous: "on",
+    peerId: "alpha",
+    unexpectedFiles: "warn",
+  };
+
+  test("are disjoint, so the merge overwrites no authored choice", () => {
+    const tuning =
+      connectionTuningOptions(everyTuningKnob, SFTP_CONNECTION_TUNING) ?? {};
+    const files =
+      exchangeFilesOptions(everyFileHandlingChoice, CONFIG_EXCHANGE_FILES) ??
+      {};
+    expect(Object.keys(tuning).length).toBeGreaterThan(0);
+    expect(Object.keys(files).length).toBeGreaterThan(0);
+    expect(Object.keys(tuning).filter((field) => field in files)).toEqual([]);
+    const merged = withConnectionTuning(
+      files,
+      everyTuningKnob,
+      SFTP_CONNECTION_TUNING,
+    );
+    expect(Object.keys(merged ?? {}).sort()).toEqual(
+      [...Object.keys(files), ...Object.keys(tuning)].sort(),
+    );
+  });
 });

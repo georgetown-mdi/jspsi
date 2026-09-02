@@ -93,8 +93,8 @@ export function ManageExchangeOffer({
   const [maxAgeDays, setMaxAgeDays] = useState<number | string>(90);
   const storeAvailable = useManagedStoreAvailability();
 
-  // A successful deposit proves the store was openable, so the confirmation stands
-  // regardless of the probe (it never runs against a store this browser cannot open).
+  // A deposit only succeeds against a store this browser opened, so the
+  // confirmation stands whatever the availability probe below reports.
   if (status === "deposited")
     return (
       <div className={styles.callout}>

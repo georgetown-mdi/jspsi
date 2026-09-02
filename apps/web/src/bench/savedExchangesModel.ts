@@ -127,8 +127,9 @@ function tierStatus(tier: ManagedFailureTier, at: string): string {
       // line stands for both.
       return `Your partner did not arrive (${at})`;
     case "none":
-      // A "none" tier means never-run or a succeeded last run; the caller phrases
-      // those directly and never asks this for them.
+      // A "none" tier is never-run or a succeeded last run, and lastRunStatus --
+      // the only caller -- phrases both before reaching here, so this string reaches
+      // no row (savedExchangesModel.test.ts drives both readings).
       return "";
   }
 }

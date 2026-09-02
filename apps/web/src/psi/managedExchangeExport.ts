@@ -304,8 +304,10 @@ export interface ManagedMigrationDispatch {
  * NOT written here: `anchor.click()` gives no landing signal, so the source stays
  * live until the operator attests the file is saved (a cancelled or failed save
  * leaves it recoverable by exporting again). The source is marked backed-up on
- * dispatch: a spent source has a current artifact by construction (the artifact just
- * written), and it reads green until spent.
+ * dispatch: a spent source has a current artifact -- the one just written -- and it
+ * reads green until spent. managedExchangeExport.test.ts drives that ordering: the
+ * mark lands before a spend is possible, and `confirm` refuses an artifact a
+ * rotation superseded.
  *
  * @throws {Error} if no record with `id` exists.
  * @throws {ZodError} if the stored record or its sibling entry is invalid.
