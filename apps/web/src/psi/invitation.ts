@@ -12,6 +12,7 @@ import {
   getDefaultLinkageTerms,
   inferMetadata,
   overlongDisclosedColumnPositions,
+  stripInvitationWhitespace,
 } from "@psilink/core";
 
 import { emptyColumnPositions } from "./columnNames";
@@ -286,11 +287,17 @@ export function deepLinkFor(origin: string, encoded: string): string {
  * first `#` is the token; a bare code has no `#` and is used as-is. Taking the
  * fragment keeps the confidential token out of any query string, the same reason
  * the inviter places it in the fragment.
+ *
+ * The extracted token is passed through `stripInvitationWhitespace`, which
+ * strips line breaks only up to its raw-length bound; past that bound it hands
+ * the input on unchanged, and `decodeInvitation` refuses it by length at
+ * `/accept`.
  */
 export function tokenFromInput(input: string): string {
   const trimmed = input.trim();
   const hash = trimmed.indexOf("#");
-  return hash === -1 ? trimmed : trimmed.slice(hash + 1);
+  const token = hash === -1 ? trimmed : trimmed.slice(hash + 1);
+  return stripInvitationWhitespace(token);
 }
 
 /**

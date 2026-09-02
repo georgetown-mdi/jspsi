@@ -7,6 +7,7 @@ import {
   INVITATION_LIFETIME_SECONDS,
   MAX_INVITATION_LIFETIME_SECONDS,
   MAX_NAME_LENGTH,
+  MAX_RAW_INVITATION_LENGTH,
   assertPayloadSendDisclosed,
   decodeInvitation,
   disclosedColumnNames,
@@ -21,6 +22,7 @@ import {
   InvitationFileError,
   deepLinkFor,
   generateInvitation,
+  tokenFromInput,
   webrtcEndpointFromLocation,
 } from "../../src/psi/invitation.js";
 import { prepareAcceptedInvitation } from "../../src/psi/acceptInvitation.js";
@@ -1241,5 +1243,54 @@ describe("deepLinkFor", () => {
       "https://example.org/accept#TOKEN123",
     );
     expect(ACCEPT_ROUTE_PATH).toBe("/accept");
+  });
+});
+
+describe("tokenFromInput", () => {
+  test("joins a bare code a mail client hard-wrapped", () => {
+    expect(tokenFromInput("  TOKEN\n123  4\r\n56  ")).toBe("TOKEN123456");
+  });
+
+  test("joins a deep link whose fragment was wrapped", () => {
+    expect(tokenFromInput("https://example.org/accept#TOKEN\n  123\t456")).toBe(
+      "TOKEN123456",
+    );
+  });
+
+  test("a whitespace-only paste is no token at all", () => {
+    expect(tokenFromInput("  \n\t ")).toBe("");
+  });
+
+  test("an over-bound paste does not throw and still returns a string", () => {
+    const oversized = "a".repeat(MAX_RAW_INVITATION_LENGTH + 1);
+    expect(() => tokenFromInput(oversized)).not.toThrow();
+    expect(typeof tokenFromInput(oversized)).toBe("string");
+  });
+
+  test("a wrapped paste of a real invitation still decodes", async () => {
+    const { encoded, sharedSecret } = await generateInvitation({
+      inviterName: "County Health Dept",
+      file: csvStream(),
+      location,
+    });
+    const wrapped = `${encoded.slice(0, 25)}\n  ${encoded.slice(25)}`;
+    const decoded = await decodeInvitation(tokenFromInput(wrapped));
+    expect(decoded.sharedSecret).toBe(sharedSecret);
+  });
+
+  test("an NBSP-wrapped, hard-wrapped paste decodes to the same token", async () => {
+    // The same construction the CLI argv and @-file tests drive through
+    // decodeAndValidateInvitation: leading/trailing U+00A0, an interior
+    // U+2028, and a hard wrap.
+    const { encoded, sharedSecret } = await generateInvitation({
+      inviterName: "County Health Dept",
+      file: csvStream(),
+      location,
+    });
+    const wrapped =
+      `\u00a0${encoded.slice(0, 30)}\n  ${encoded.slice(30, 60)}` +
+      `\u2028${encoded.slice(60)}\u00a0`;
+    const decoded = await decodeInvitation(tokenFromInput(wrapped));
+    expect(decoded.sharedSecret).toBe(sharedSecret);
   });
 });

@@ -11,6 +11,7 @@ import { SHARED_SECRET_REGEX } from "./connection.js";
 import { sanitizeForDisplay } from "../utils/sanitizeForDisplay.js";
 import { pathsResolveToSameDir } from "../utils/pathCompare.js";
 import { parseBoundedJson } from "../utils/boundedJson.js";
+import { fromBase64Url } from "../utils/crypto.js";
 import { boundedArray } from "../utils/boundedArray.js";
 
 // --- Connection endpoint -----------------------------------------------------
@@ -694,21 +695,6 @@ function toBase64Url(bytes: Uint8Array): string {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
 }
 
-function fromBase64Url(str: string): Uint8Array<ArrayBuffer> {
-  const padded = str + "=".repeat((4 - (str.length % 4)) % 4);
-  let binary: string;
-  try {
-    binary = atob(padded.replace(/-/g, "+").replace(/_/g, "/"));
-  } catch {
-    throw new Error("invitation string is not valid base64url");
-  }
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
-}
-
 // --- Encode / Decode ---------------------------------------------------------
 
 // 4 bytes always encodes to exactly 6 unpadded base64url characters (3 bytes ->
@@ -732,6 +718,15 @@ const CHECKSUM_CHARS = 6;
  * produces a token it could not itself decode.
  */
 export const MAX_ENCODED_INVITATION_LENGTH = 64 * 1024;
+
+/**
+ * Bound on a RAW pasted invitation string, checked by
+ * {@link stripInvitationWhitespace} before it does any stripping work. A
+ * hard-wrapped token adds well under 5% whitespace, so double
+ * {@link MAX_ENCODED_INVITATION_LENGTH} stays generous while keeping the strip
+ * itself bounded work rather than unbounded work ahead of the decode boundary.
+ */
+export const MAX_RAW_INVITATION_LENGTH = 2 * MAX_ENCODED_INVITATION_LENGTH;
 
 /**
  * Serializes an {@link InvitationToken} as a base64url string with a
@@ -799,6 +794,38 @@ export async function encodeInvitation(
 }
 
 /**
+ * Removes every character in the ECMAScript `\s` class (the `WhiteSpace` and
+ * `LineTerminator` code points `String.prototype.trim` strips at the edges,
+ * including the non-ASCII ones such as U+00A0 and U+2028) from a pasted
+ * invitation string, at every position -- interior as well as leading and
+ * trailing.
+ *
+ * The normalization the web lobby's paste-to-navigate helper and the CLI
+ * accept seam each apply before {@link decodeInvitation}, which holds a strict
+ * base64url alphabet; the web's hash-fragment decode path does not apply it
+ * and decodes unstripped. A token pasted out of a
+ * hard-wrapped email or chat message carries line breaks and indentation the
+ * wrapping introduced, not anything the inviter encoded, and would otherwise
+ * be refused for them. Stripping the full `\s` class rather than only the
+ * ASCII subset keeps this one implementation in agreement with the seams that
+ * call `String.prototype.trim` ahead of it (the web paste and the CLI
+ * `@`-file reference both do), so a token carrying trim-set whitespace decodes
+ * the same way through every delivery, CLI argv included.
+ *
+ * When `input.length` exceeds {@link MAX_RAW_INVITATION_LENGTH}, `input` is
+ * returned unchanged -- no strip work runs -- so the caller's own decode
+ * boundary ({@link decodeInvitation}'s {@link MAX_ENCODED_INVITATION_LENGTH}
+ * check) is what refuses an oversized paste, with its own precise message.
+ * This function never throws.
+ */
+export function stripInvitationWhitespace(input: string): string {
+  if (input.length > MAX_RAW_INVITATION_LENGTH) {
+    return input;
+  }
+  return input.replace(/\s+/g, "");
+}
+
+/**
  * Decodes an invitation string produced by {@link encodeInvitation}, verifying
  * the checksum and validating the payload against the {@link InvitationToken}
  * schema.
@@ -838,7 +865,16 @@ export async function decodeInvitation(
   const body = encoded.slice(0, -CHECKSUM_CHARS);
   const receivedChecksum = encoded.slice(-CHECKSUM_CHARS);
 
-  const bytes = fromBase64Url(body);
+  let bytes: Uint8Array<ArrayBuffer>;
+  try {
+    bytes = fromBase64Url(body);
+  } catch {
+    // The fixed string rather than the primitive's own message, the same
+    // swallow the JSON parse below applies: nothing derived from a
+    // partner-supplied body reaches an operator-facing display through this
+    // rejection.
+    throw new Error("invitation string is not valid base64url");
+  }
   const hashBuf = await globalThis.crypto.subtle.digest("SHA-256", bytes);
   const expectedChecksum = toBase64Url(new Uint8Array(hashBuf).slice(0, 4));
 

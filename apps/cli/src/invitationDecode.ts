@@ -2,6 +2,7 @@ import {
   describeDecodeError,
   decodeInvitation,
   isInvitationExpired,
+  stripInvitationWhitespace,
   UsageError,
 } from "@psilink/core";
 import type { InvitationToken } from "@psilink/core";
@@ -9,8 +10,9 @@ import type { InvitationToken } from "@psilink/core";
 import { resolveAtSignRefs } from "./util/atSignRefs";
 
 /**
- * Resolve an `@path` reference, decode the invitation (verifying the 4-byte
- * checksum and the Zod schema), and reject an expired token by name. All
+ * Resolve an `@path` reference, strip the whitespace a hard-wrapped paste or a
+ * wrapped `@`-file leaves inside the token, decode the invitation (verifying the
+ * 4-byte checksum and the Zod schema), and reject an expired token by name. All
  * failures are raised as {@link UsageError} (so the CLI exits 64). Shared by the
  * `accept` command's pre-prompt gate and by `exchange --invitation`'s
  * key-file provisioning, so the two decode a partner-supplied invitation through
@@ -34,7 +36,7 @@ export async function decodeAndValidateInvitation(
 
   let token: InvitationToken;
   try {
-    token = await decodeInvitation(encoded);
+    token = await decodeInvitation(stripInvitationWhitespace(encoded));
   } catch (err) {
     throw new UsageError(
       "invalid invitation string: " + describeDecodeError(err),
