@@ -800,8 +800,10 @@ export async function encodeInvitation(
  * invitation string, at every position -- interior as well as leading and
  * trailing.
  *
- * The normalization each accept seam applies before {@link decodeInvitation},
- * which holds a strict base64url alphabet: a token pasted out of a
+ * The normalization the web lobby's paste-to-navigate helper and the CLI
+ * accept seam each apply before {@link decodeInvitation}, which holds a strict
+ * base64url alphabet; the web's hash-fragment decode path does not apply it
+ * and decodes unstripped. A token pasted out of a
  * hard-wrapped email or chat message carries line breaks and indentation the
  * wrapping introduced, not anything the inviter encoded, and would otherwise
  * be refused for them. Stripping the full `\s` class rather than only the
