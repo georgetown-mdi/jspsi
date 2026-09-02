@@ -473,11 +473,12 @@ test("rejects a body carrying the whitespace a wrapped paste leaves", async () =
   expect(decoded.sharedSecret).toBe(baseToken.sharedSecret);
 });
 
-test("stripInvitationWhitespace removes ASCII whitespace and nothing else", () => {
+test("stripInvitationWhitespace removes the ECMAScript whitespace class", () => {
   expect(stripInvitationWhitespace(" ab\n c\td\r\ne ")).toBe("abcde");
-  // A non-ASCII space is not wrapping damage, so it survives for the decoder to
-  // reject rather than being normalized into a token the operator never had.
-  expect(stripInvitationWhitespace("ab\u00a0cd")).toBe("ab\u00a0cd");
+  // The trim-set code points a hard-wrapped or NBSP-padded paste can carry,
+  // stripped at interior positions the same as at the edges.
+  expect(stripInvitationWhitespace("ab\u00a0cd")).toBe("abcd");
+  expect(stripInvitationWhitespace("ab\u2028cd")).toBe("abcd");
 });
 
 test("strips a raw input at exactly the raw bound", () => {
@@ -485,12 +486,18 @@ test("strips a raw input at exactly the raw bound", () => {
   expect(stripInvitationWhitespace(atBound)).toBe(atBound);
 });
 
-test("rejects a raw input one character over the raw bound without stripping", () => {
-  // All whitespace: a strip that ran anyway would return "", not throw.
+test("passes a raw input one character over the raw bound through unchanged", () => {
+  // All whitespace: a strip that ran anyway would return "", not the input
+  // untouched.
   const overBound = " ".repeat(MAX_RAW_INVITATION_LENGTH + 1);
-  expect(() => stripInvitationWhitespace(overBound)).toThrow(
-    "invitation string is not valid base64url",
-  );
+  expect(stripInvitationWhitespace(overBound)).toBe(overBound);
+});
+
+test("decodeInvitation refuses an over-bound raw input with the length message", async () => {
+  const overBound = "a".repeat(MAX_RAW_INVITATION_LENGTH + 1);
+  await expect(
+    decodeInvitation(stripInvitationWhitespace(overBound)),
+  ).rejects.toThrow(/exceeds the maximum length/);
 });
 
 // --- Decode-error message swallows (display-injection backstop) --------------

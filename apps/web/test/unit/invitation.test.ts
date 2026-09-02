@@ -7,6 +7,7 @@ import {
   INVITATION_LIFETIME_SECONDS,
   MAX_INVITATION_LIFETIME_SECONDS,
   MAX_NAME_LENGTH,
+  MAX_RAW_INVITATION_LENGTH,
   assertPayloadSendDisclosed,
   decodeInvitation,
   disclosedColumnNames,
@@ -1260,6 +1261,12 @@ describe("tokenFromInput", () => {
     expect(tokenFromInput("  \n\t ")).toBe("");
   });
 
+  test("an over-bound paste does not throw and still returns a string", () => {
+    const oversized = "a".repeat(MAX_RAW_INVITATION_LENGTH + 1);
+    expect(() => tokenFromInput(oversized)).not.toThrow();
+    expect(typeof tokenFromInput(oversized)).toBe("string");
+  });
+
   test("a wrapped paste of a real invitation still decodes", async () => {
     const { encoded, sharedSecret } = await generateInvitation({
       inviterName: "County Health Dept",
@@ -1267,6 +1274,22 @@ describe("tokenFromInput", () => {
       location,
     });
     const wrapped = `${encoded.slice(0, 25)}\n  ${encoded.slice(25)}`;
+    const decoded = await decodeInvitation(tokenFromInput(wrapped));
+    expect(decoded.sharedSecret).toBe(sharedSecret);
+  });
+
+  test("an NBSP-wrapped, hard-wrapped paste decodes to the same token", async () => {
+    // The same construction the CLI argv and @-file tests drive through
+    // decodeAndValidateInvitation: leading/trailing U+00A0, an interior
+    // U+2028, and a hard wrap.
+    const { encoded, sharedSecret } = await generateInvitation({
+      inviterName: "County Health Dept",
+      file: csvStream(),
+      location,
+    });
+    const wrapped =
+      `\u00a0${encoded.slice(0, 30)}\n  ${encoded.slice(30, 60)}` +
+      `\u2028${encoded.slice(60)}\u00a0`;
     const decoded = await decodeInvitation(tokenFromInput(wrapped));
     expect(decoded.sharedSecret).toBe(sharedSecret);
   });

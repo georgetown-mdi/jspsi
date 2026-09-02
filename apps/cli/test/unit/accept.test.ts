@@ -24,6 +24,7 @@ import {
   MAX_ENDPOINT_HOST_LENGTH,
   MAX_NAME_LENGTH,
   MAX_PAYLOAD_ENTRIES,
+  MAX_RAW_INVITATION_LENGTH,
   parseExchangeSpec,
   reconcileReceivedPayload,
   sanitizeErrorForDisplay,
@@ -326,6 +327,39 @@ test("a hard-wrapped invitation paste decodes at the command level", async () =>
   const wrapped = `${encoded.slice(0, 30)}\n  ${encoded.slice(30, 60)}\n${encoded.slice(60)}`;
   const decoded = await decodeAndValidateInvitation(wrapped);
   expect(decoded.sharedSecret).toBe(token.sharedSecret);
+});
+
+test("an NBSP-wrapped invitation decodes identically on argv and on an @-file reference", async () => {
+  const token = sampleToken(FUTURE());
+  const encoded = await encodeInvitation(token);
+  // Leading and trailing U+00A0, plus an interior U+2028, alongside the usual
+  // hard-wrap: the @-file path's own readFileSync(...).trim() would already
+  // strip the edges, so this pins that argv (no such trim) reaches the same
+  // decoded token through stripInvitationWhitespace alone.
+  const wrapped =
+    `\u00a0${encoded.slice(0, 30)}\n  ${encoded.slice(30, 60)}` +
+    `\u2028${encoded.slice(60)}\u00a0`;
+
+  const viaArgv = await decodeAndValidateInvitation(wrapped);
+
+  const dir = fs.mkdtempSync(
+    path.join(tmpdir(), "psilink-accept-invitation-atfile-"),
+  );
+  const file = path.join(dir, "invitation.txt");
+  fs.writeFileSync(file, wrapped);
+  const viaAtFile = await decodeAndValidateInvitation(`@${file}`);
+
+  expect(viaArgv).toEqual(viaAtFile);
+  expect(viaArgv.sharedSecret).toBe(token.sharedSecret);
+});
+
+test("an argv token over the raw bound is refused with the length message", async () => {
+  const overBound = "a".repeat(MAX_RAW_INVITATION_LENGTH + 1);
+  const err = await decodeAndValidateInvitation(overBound).catch(
+    (e: unknown) => e,
+  );
+  expect(err).toBeInstanceOf(UsageError);
+  expect((err as UsageError).message).toContain("exceeds the maximum length");
 });
 
 test("a checksum mismatch is rejected (before any prompt) with a usage error", async () => {

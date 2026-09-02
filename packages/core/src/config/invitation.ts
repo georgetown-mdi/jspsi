@@ -794,26 +794,33 @@ export async function encodeInvitation(
 }
 
 /**
- * Removes every ASCII whitespace character from a pasted invitation string,
- * interior as well as leading and trailing.
+ * Removes every character in the ECMAScript `\s` class (the `WhiteSpace` and
+ * `LineTerminator` code points `String.prototype.trim` strips at the edges,
+ * including the non-ASCII ones such as U+00A0 and U+2028) from a pasted
+ * invitation string, at every position -- interior as well as leading and
+ * trailing.
  *
  * The normalization each accept seam applies before {@link decodeInvitation},
- * which holds a strict base64url alphabet: a token pasted out of a hard-wrapped
- * email or chat message carries line breaks and indentation the wrapping
- * introduced, not anything the inviter encoded, and would otherwise be refused
- * for them. Only ASCII whitespace is removed -- a non-ASCII space is not
- * wrapping damage, and stays for the decoder to reject. Both accept surfaces
- * call this one implementation, so a token that decodes for one decodes for the
- * other.
+ * which holds a strict base64url alphabet: a token pasted out of a
+ * hard-wrapped email or chat message carries line breaks and indentation the
+ * wrapping introduced, not anything the inviter encoded, and would otherwise
+ * be refused for them. Stripping the full `\s` class rather than only the
+ * ASCII subset keeps this one implementation in agreement with the seams that
+ * call `String.prototype.trim` ahead of it (the web paste and the CLI
+ * `@`-file reference both do), so a token carrying trim-set whitespace decodes
+ * the same way through every delivery, CLI argv included.
  *
- * @throws {Error} if `input` exceeds {@link MAX_RAW_INVITATION_LENGTH}, checked
- *   before any stripping so an oversized paste is refused in bounded work.
+ * When `input.length` exceeds {@link MAX_RAW_INVITATION_LENGTH}, `input` is
+ * returned unchanged -- no strip work runs -- so the caller's own decode
+ * boundary ({@link decodeInvitation}'s {@link MAX_ENCODED_INVITATION_LENGTH}
+ * check) is what refuses an oversized paste, with its own precise message.
+ * This function never throws.
  */
 export function stripInvitationWhitespace(input: string): string {
   if (input.length > MAX_RAW_INVITATION_LENGTH) {
-    throw new Error("invitation string is not valid base64url");
+    return input;
   }
-  return input.replace(/[\t\n\v\f\r ]+/g, "");
+  return input.replace(/\s+/g, "");
 }
 
 /**
