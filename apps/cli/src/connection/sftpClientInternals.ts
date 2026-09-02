@@ -110,9 +110,9 @@ export interface Ssh2SftpClientInternals {
     once?(event: "close", listener: () => void): void;
     removeListener?(event: "close", listener: () => void): void;
     // Node's own EventEmitter ceiling control, driven once at construction to
-    // seat {@link SHARED_SSH2_CLIENT_MAX_EVENT_LISTENERS}. Optional on the same
-    // terms as the members above: an upgrade that relocates the Client warns
-    // rather than failing a dial over a diagnostic threshold.
+    // seat `SHARED_SSH2_CLIENT_MAX_EVENT_LISTENERS` (ssh2SftpAdapter.ts). Optional
+    // on the same terms as the members above: an upgrade that relocates the Client
+    // warns rather than failing a dial over a diagnostic threshold.
     setMaxListeners?(n: number): void;
     end?(): void;
   };
