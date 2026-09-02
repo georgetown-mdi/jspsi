@@ -3,15 +3,21 @@ name: Nightly Platform Tests
 # Scheduled nightly run of the CLI unit suite on platforms the pull-request gate
 # does not cover. cli_build_and_test.yaml runs only on ubuntu-latest, so every
 # darwin-gated test in apps/cli/test/unit -- extendedAclCoverage.test.ts's
-# macOnly sites, fileUtils.test.ts's darwin describe -- has never executed on any
-# CI leg, only skipped. macOS minutes are free on a public repository, so this
-# workflow buys that coverage back on a nightly cadence rather than adding a
-# required runner class to every pull request.
+# macOnly sites, fileUtils.test.ts's darwin describe -- and every win32-gated
+# test -- fileUtils.test.ts's "Windows owner-only ACL" describe, otherwise held
+# by the manual procedure in docs/TESTING.md alone -- has never executed on any
+# CI leg, only skipped. macOS and Windows minutes are both free on a public
+# repository, so this workflow buys that coverage back on a nightly cadence
+# rather than adding a required runner class to every pull request.
 #
-# Structured for two platform jobs: macOS today, a Windows leg to follow in a
-# later change. Each job runs npm test -w apps/cli (the CLI's unit project) on
-# its own runs-on platform, so a platform-gated test executes rather than skips
-# on the leg that actually has that platform.
+# Two platform jobs, macOS and Windows. Each job runs npm test -w apps/cli (the
+# CLI's unit project) on its own runs-on platform, so a platform-gated test
+# executes rather than skips on the leg that actually has that platform.
+#
+# Whether the CLI's native dependency (@openmined/psi.js, a vendored prebuild)
+# installs and builds on a Windows runner at all had never been driven before
+# this job; the windows job's timeout is sized for that uncertainty, and a
+# build failure there is this leg's first finding, not a reason to drop it.
 #
 # Runs only on schedule and manual workflow_dispatch -- never on push or
 # pull_request -- so the PR gate is unaffected. Promoting this to a required
@@ -57,6 +63,25 @@ jobs:
           # A scheduled workflow otherwise takes the default branch, but staging
           # is promoted to main slowly, so checking out main here would catch a
           # regression late. staging is the branch this nightly exists to watch.
+          ref: staging
+      # Pins Node, installs from the lockfile, and builds @psilink/core so the
+      # unit tests run against the compiled fork in dist/.
+      - uses: ./.github/actions/setup
+      - name: Unit tests (CLI)
+        run: npm test -w apps/cli
+
+  windows:
+    name: CLI unit tests (Windows)
+    runs-on: windows-latest
+    # Generous relative to the macOS leg: an npm install on windows-latest runs
+    # markedly slower than on macos-latest or ubuntu-latest, and the native
+    # dependency's install path on this platform is untested going in -- see
+    # the comment at the top of this file.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # See the macOS job's identical step above.
           ref: staging
       # Pins Node, installs from the lockfile, and builds @psilink/core so the
       # unit tests run against the compiled fork in dist/.
