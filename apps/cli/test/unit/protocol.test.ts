@@ -546,36 +546,38 @@ test("rejects before opening a connection when onAuthenticated is passed on an u
   ).rejects.toThrow("only valid on an authenticated exchange");
 });
 
-test("rejects before opening a connection when keyFilePath parent is not writable", async () => {
-  // 0o555 = r-x for all; the current user cannot write into the directory, so
-  // saveKeyFile would fail after the key exchange. The pre-flight should catch this. Skip
-  // if running as root (CI sometimes does), since root bypasses mode bits.
-  if (process.getuid?.() === 0) return;
-  const readOnlyDir = path.join(tmpDir, "readonly");
-  fs.mkdirSync(readOnlyDir);
-  fs.chmodSync(readOnlyDir, 0o555);
-  try {
-    await expect(
-      runProtocol(
-        {
-          channel: "filedrop",
-          path: dropDir,
-        },
-        {
-          sharedSecret: TOKEN_A,
-          keyFilePath: path.join(readOnlyDir, "key.json"),
-        },
-        minimalPrepared,
-        undefined,
-        -1,
-        "test",
-      ),
-    ).rejects.toThrow("not writable");
-  } finally {
-    // Restore mode so afterEach can rm -rf the tmp dir.
-    fs.chmodSync(readOnlyDir, 0o755);
-  }
-});
+test.skipIf(process.getuid?.() === 0)(
+  "rejects before opening a connection when keyFilePath parent is not writable",
+  async () => {
+    // 0o555 = r-x for all; the current user cannot write into the directory, so
+    // saveKeyFile would fail after the key exchange. The pre-flight should catch
+    // this. Root bypasses mode bits, so the probe would succeed there instead.
+    const readOnlyDir = path.join(tmpDir, "readonly");
+    fs.mkdirSync(readOnlyDir);
+    fs.chmodSync(readOnlyDir, 0o555);
+    try {
+      await expect(
+        runProtocol(
+          {
+            channel: "filedrop",
+            path: dropDir,
+          },
+          {
+            sharedSecret: TOKEN_A,
+            keyFilePath: path.join(readOnlyDir, "key.json"),
+          },
+          minimalPrepared,
+          undefined,
+          -1,
+          "test",
+        ),
+      ).rejects.toThrow("not writable");
+    } finally {
+      // Restore mode so afterEach can rm -rf the tmp dir.
+      fs.chmodSync(readOnlyDir, 0o755);
+    }
+  },
+);
 
 test("rejects before opening a connection when keyFilePath parent exists but is a regular file", async () => {
   // statSync resolves the parent successfully but isDirectory() returns false.

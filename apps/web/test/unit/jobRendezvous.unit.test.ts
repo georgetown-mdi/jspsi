@@ -1648,31 +1648,33 @@ describe("rendezvousStartupWarnings emptiness branch", () => {
       }
   });
 
-  test("an unlistable mount says so rather than reading as empty", () => {
-    if (process.getuid?.() === 0) return;
-    const rendezvous = tempDir("rendezvous");
-    fs.writeFileSync(path.join(rendezvous, "console-hello.json"), "");
-    fs.chmodSync(rendezvous, 0o300);
-    try {
-      const dataRoot = tempDir("data");
-      const warnings = rendezvousStartupWarnings(
-        rendezvous,
-        "shared",
-        tempDir("input"),
-        dataRoot,
-        path.join(dataRoot, "current-job"),
-        SWEEP_OFF,
-      );
-      expect(
-        warnings.some((warning) => warning.includes("cannot be listed")),
-      ).toBe(true);
-      expect(warnings.some((warning) => warning.includes("is not empty"))).toBe(
-        false,
-      );
-    } finally {
-      fs.chmodSync(rendezvous, 0o700);
-    }
-  });
+  test.skipIf(process.getuid?.() === 0)(
+    "an unlistable mount says so rather than reading as empty",
+    () => {
+      const rendezvous = tempDir("rendezvous");
+      fs.writeFileSync(path.join(rendezvous, "console-hello.json"), "");
+      fs.chmodSync(rendezvous, 0o300);
+      try {
+        const dataRoot = tempDir("data");
+        const warnings = rendezvousStartupWarnings(
+          rendezvous,
+          "shared",
+          tempDir("input"),
+          dataRoot,
+          path.join(dataRoot, "current-job"),
+          SWEEP_OFF,
+        );
+        expect(
+          warnings.some((warning) => warning.includes("cannot be listed")),
+        ).toBe(true);
+        expect(
+          warnings.some((warning) => warning.includes("is not empty")),
+        ).toBe(false);
+      } finally {
+        fs.chmodSync(rendezvous, 0o700);
+      }
+    },
+  );
 });
 
 // Every notice the preflight can raise, on every leg it can be raised for, driven
