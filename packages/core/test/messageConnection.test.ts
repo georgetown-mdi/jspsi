@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import {
   ConnectionError,
+  DEFAULT_INACTIVITY_TIMEOUT_MS,
   QueuedMessageConnection,
   asConnectionError,
   createMessagePipe,
@@ -267,6 +268,29 @@ test("fromEventConnection: a silent peer trips the inactivity deadline", async (
   // The deadline latches a terminal state observed by later calls.
   await expect(connB.receive()).rejects.toBeInstanceOf(ConnectionError);
   await expect(connB.send("x")).rejects.toBeInstanceOf(ConnectionError);
+});
+
+test("fromEventConnection: a transport that names no timeout still gets the default deadline", async () => {
+  vi.useFakeTimers();
+  try {
+    const [, eventB] = makeEventConnections();
+    // No inactivityTimeoutMs: the bridge is what arms the default, so a
+    // transport built through it is bounded without the caller opting in.
+    const connB = fromEventConnection(eventB);
+    const received = connB.receive();
+    let settled = false;
+    const watched = received.then(
+      () => (settled = true),
+      () => (settled = true),
+    );
+    await vi.advanceTimersByTimeAsync(DEFAULT_INACTIVITY_TIMEOUT_MS - 1);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await watched;
+    await expectRejectionKind(received, "transport");
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("fromEventConnection: a supplied inactivityHint is appended to the silence error", async () => {

@@ -1051,3 +1051,29 @@ test.each(aeadVectors.vectors)(
     ).toBe(BigInt(vector.sequence));
   },
 );
+
+test("setInboundFrameCap reaches the inner transport's read gate", async () => {
+  // The decorator keeps its own static MAX_FRAME_SIZE_BYTES check and relies on
+  // the inner read gate to refuse an over-cap frame before it is read into
+  // memory, so the per-exchange cap must arrive there rather than stopping at
+  // this layer.
+  const [, rawLocal] = createMessagePipe();
+  const caps: Array<number | undefined> = [];
+  const inner: MessageConnection = {
+    send: (data) => rawLocal.send(data),
+    receive: (timeoutMs) => rawLocal.receive(timeoutMs),
+    close: () => rawLocal.close(),
+    setInboundFrameCap: (maxBytes) => caps.push(maxBytes),
+  };
+  const conn = await EncryptedMessageConnection.create(
+    inner,
+    SESSION_KEY,
+    "responder",
+  );
+
+  conn.setInboundFrameCap(4096);
+  conn.setInboundFrameCap(undefined);
+
+  expect(caps).toEqual([4096, undefined]);
+  await conn.close();
+});

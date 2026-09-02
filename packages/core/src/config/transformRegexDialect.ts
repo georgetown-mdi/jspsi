@@ -15,13 +15,14 @@ import {
 //
 // Those patterns execute under the linear-time engine (utils/linearRegex.ts), so
 // a catastrophic-backtracking pattern can no longer hang the single JavaScript
-// thread: backtracking blow-up is impossible by construction. What remains is a
+// thread: the engine matches in time linear in the input, driven over the former
+// blow-up patterns in linearRegex.test.ts. What remains is a
 // dialect-conformance gate: a pattern OUTSIDE the engine's dialect (one re2js
 // cannot compile -- a backreference, a lookaround, an unsupported escape) must be
 // rejected at terms validation, before any per-row execution and before both
 // parties commit to terms they could not evaluate identically. This is fail
-// closed and BY CONSTRUCTION -- a pattern that compiles cannot backtrack
-// catastrophically. The normative dialect is pinned in docs/spec/PROTOCOL.md
+// closed: a pattern that compiles runs on that engine and nothing else runs at
+// all. The normative dialect is pinned in docs/spec/PROTOCOL.md
 // ("Transform regular-expression dialect").
 //
 // `parse_date` is deliberately NOT screened here: it is not a raw-pattern step,

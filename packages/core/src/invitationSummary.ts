@@ -432,10 +432,11 @@ export interface InvitationKeySummary {
    * (fuzzy)"). Deduped by the full entry (label + marker) so a truncated and a
    * whole-value element of the same field stay distinct. Each entry is a fixed
    * compact label for the element's schema-validated type plus a fixed marker; an
-   * unresolved field would fall back to its sanitized identifier, but a dangling
-   * field reference is rejected at decode, so that fallback is unreachable for a
-   * decoded token (and cosmetic-only if ever reached -- the renderer joins these
-   * for display). The honest anchor a partner-controlled key {@link name} cannot
+   * unresolved field would fall back to its sanitized identifier, but an element
+   * naming an undeclared field is refused by the terms schema (pinned in
+   * linkageTerms.test.ts), so a decoded token carries no such element -- and the
+   * fallback is cosmetic-only if ever reached, since the renderer joins these
+   * for display. The honest anchor a partner-controlled key {@link name} cannot
    * misrepresent; the swap "either order" note is carried by {@link hasSwap}.
    *
    * A swap re-attributes markers to the receiver's terms: each swapped element

@@ -142,8 +142,9 @@ export interface ConsentProbeShape {
    * Copy every surface MUST NOT render for this shape's variant: the sentence
    * another shape of the same field owes, which this one's run does not make.
    * Without it a surface could render one sentence for every shape and satisfy
-   * that shape's required copy while stating a disclosure that does not happen
-   * in the other.
+   * that shape's required copy while stating a disclosure the other shape's run
+   * does not make -- which linkageTermConsentCoverage.test.ts holds each variant
+   * to.
    */
   forbiddenVariantCopy: ReadonlyArray<string>;
 }

@@ -11,8 +11,9 @@ import type { ConnectionConfig } from "./connection.js";
  * channels are named one by one rather than aliasing {@link ConnectionConfig}
  * (the allowlist convention in CONTRIBUTING.md), so a channel added to that
  * union is rejected here until its locator fields have been decided. Mirrors the
- * CLI's `ProtocolConnectionConfig` (the channels its transport can run) so the
- * two agree by construction.
+ * CLI's `ProtocolConnectionConfig` (the channels its transport can run); core
+ * cannot see that type, so the two are held in step by hand rather than by a
+ * check.
  */
 export type EndpointSourceConnectionConfig = Extract<
   ConnectionConfig,

@@ -222,10 +222,10 @@ export function isRecognizedLoopFile(
   // Our own messages carry a variable counter/byte-count terminal whose exact
   // name the receiver cannot predict, so they stay anchored to the numeric
   // grammar token. Scoped to our OWN prefix: a peer numeric-terminal file is
-  // the message scan's job -- poll() routes or rejects it above and it never
-  // falls here -- so recognizing one here would be unreachable today and a
-  // false "recognized" for a future caller consulting this baseline directly
-  // (e.g. a `<peerId>-foo-5.json` the scan rejects as malformed).
+  // the message scan's job (poll() routes or rejects it above), so recognizing
+  // one here would be a false "recognized" for a caller consulting this
+  // baseline directly -- e.g. `<peerId>-foo-5.json`, which the retain-mode scan
+  // reads no NNN from (both pinned in fileSyncMessageLoop.test.ts).
   if (ownPrefixed && /^\d+$/.test(token)) return true;
   if (token !== "ack") return false;
   // An ack marker is `<writerId>-<originalName>-ack.json`. Recognize it only

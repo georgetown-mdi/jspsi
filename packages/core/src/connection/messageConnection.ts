@@ -216,10 +216,11 @@ interface SendGuard {
 const DEFAULT_CAPACITY = 1024;
 
 // Maximum time a parked receive() will wait for the next inbound message
-// before the connection is failed as a silent-peer transport drop. Applied by
-// fromEventConnection so every real transport is protected by construction;
-// the lower-level QueuedMessageConnection leaves it unset (no deadline) unless
-// a caller opts in.
+// before the connection is failed as a silent-peer transport drop.
+// fromEventConnection arms it for a caller that names no timeout, so every
+// transport built through that bridge is bounded (pinned in
+// messageConnection.test.ts); the lower-level QueuedMessageConnection leaves it
+// unset (no deadline) unless a caller opts in.
 export const DEFAULT_INACTIVITY_TIMEOUT_MS = 120_000;
 
 /**
@@ -425,10 +426,10 @@ export class QueuedMessageConnection implements MessageConnection {
 
   // Reject every in-flight send with the terminal error and clear its guard.
   // Called by every terminal transition (fail/finish/close) so a hand-off still
-  // outstanding when the connection goes terminal -- and orphaned, so its own
-  // then() never fires -- has its awaited send() rejected here rather than left
-  // hanging with the ref'd guard swept but the promise unsettled. The send-side
-  // twin of rejectWaiters.
+  // outstanding when the connection goes terminal -- orphaned, with nothing left
+  // to settle its own then() -- has its awaited send() rejected here rather than
+  // left hanging with the ref'd guard swept but the promise unsettled (driven in
+  // messageConnection.test.ts). The send-side twin of rejectWaiters.
   private failSends(error: ConnectionError): void {
     const guards = this.pendingSends;
     if (guards.size === 0) return;

@@ -278,12 +278,12 @@ interface Options {
   unexpectedFiles?: "error" | "warn" | "ignore";
   // CLI-only, NON-persistable runtime controls for the entry sweep
   // (--sweep-exchange-files / --force-retain-sweep). Deliberately NOT mirrored
-  // on FileSyncOptions / the Zod config schema: anything there is persistable in
-  // psilink.yaml by construction, which contradicts "invocation-scoped, never
-  // persisted". They reach this type only through the constructor's
-  // Partial<Options> (the verbose/joinerRecoveryMs precedent), never from
-  // config.options in open(). The CLI command layer threads them on a path
-  // separate from config construction (see docs/spec/FILE_SYNC.md).
+  // on FileSyncOptions / the Zod config schema, where anything is persistable in
+  // psilink.yaml, contradicting "invocation-scoped, never persisted": a config
+  // spelling either flag resolves none of it (pinned in connection.test.ts).
+  // They reach this type through the constructor's Partial<Options> alone (the
+  // verbose/joinerRecoveryMs precedent). The CLI command layer threads them on a
+  // path separate from config construction (see docs/spec/FILE_SYNC.md).
   sweepExchangeFiles: boolean;
   // Escalation of sweepExchangeFiles: permits the sweep to wipe a directory that
   // shows a retain signal (a durable audit transcript). Meaningless without
@@ -1649,8 +1649,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   // for content, so the body is zero bytes (no serialized empty envelope). The
   // name is a pure function of this party's id and the acknowledged file's fixed
   // name, so a re-write after a reprocess yields the identical name and cannot
-  // create a duplicate file (idempotent by construction). Returns the final
-  // marker filename (without directory).
+  // create a duplicate file (driven in fileSyncConnection.test.ts). Returns the
+  // final marker filename (without directory).
   private async writeAck(dir: string, originalName: string): Promise<string> {
     const name = ackMarkerName(this.id, originalName);
     const tempFile = `temp-${uuidv4()}.tmp`;

@@ -1391,8 +1391,9 @@ export class FileSyncRendezvous {
               // BilateralModeMismatchError (exit 64) stays the surfaced root
               // cause rather than the close's ConnectionClosedError (exit 69):
               // the diverging flag is the actionable cause the operator must
-              // fix, and the close-during-mismatch case is unreachable except
-              // under a signal anyway (where neither code is the exit code).
+              // fix, and a close arriving inside this retry is a deliberate
+              // local shutdown -- the only rejector of deps.wait, per the
+              // reasoning above -- where neither code is the exit code.
               // Log the cut-short retry so a close-during-mismatch is
               // diagnosable in debug logs, mirroring the exhausted-budget
               // path's degradation message in the else branch below.

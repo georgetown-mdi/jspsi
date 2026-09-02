@@ -62,8 +62,8 @@ const ABORT_MARKER_WRITE_BUDGET_MS = 5000;
 // only in the uncommon case where the orchestrator is busy with a long LOCAL
 // step (e.g. a large match) when the connection faults in the background, so it
 // does not observe the fault -- and thus does not resolve the decision -- within
-// the grace. That path is benign by construction, NOT a correctness gap: the
-// marker write is best-effort and every write op is bounded by
+// the grace. That path is benign, NOT a correctness gap: the marker write is
+// best-effort and every write op is bounded by
 // ABORT_MARKER_WRITE_BUDGET_MS, so however this close() interleaves with a late
 // catch (which may even find abortArmed already cleared and skip the write
 // entirely), the marker either lands or it does not, and a no-marker outcome

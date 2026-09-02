@@ -15,8 +15,9 @@ import { RE2JS } from "re2js";
 // backtracking ("ReDoS") pattern on `new RegExp` would hang that thread -- a
 // browser-tab freeze on the web path, a hung process on the CLI. re2js is an
 // RE2-semantics engine (a Thompson NFA / lazy DFA): its matching is linear in the
-// input length and it has no backtracking, so the blow-up is impossible BY
-// CONSTRUCTION rather than screened for heuristically.
+// input length and it has no backtracking, so the blow-up is closed by the engine
+// rather than screened for heuristically -- linearRegex.test.ts drives the former
+// blow-up patterns through it.
 //
 // re2js is pure JavaScript, so the SAME engine build runs identically in the CLI
 // (Node) and the web (browser). Both parties and both build targets therefore
