@@ -46,6 +46,8 @@ The `webrtc` posture is also a compatibility requirement rather than only a judg
 
 The one case that would change this is a transport leg an intermediary terminates -- concretely, a WebSocket-to-TCP proxy carrying a party's traffic, which would put a third party inside the confidential channel. No such transport exists. If one lands, the request bit is how the party behind it asks for the wrap, and the web side's hard refusal of a true request is what would be revisited then. No negotiation mechanism is built for that case in advance.
 
+The limit that leaves is the browser path's, and it is a stated one: a web exchange carries no application-layer encryption of its own, so every frame's confidentiality is the data channel's DTLS and nothing above it. Both connection shapes the web app can form keep that DTLS end to end -- a direct path, and a TURN-relayed one, which forwards without terminating -- so the limit binds only against an intermediary-terminated leg of the kind above, which no shipped configuration can put in the path.
+
 ## IV construction and SP 800-38D conformance
 
 The 96-bit IV is the deterministic construction of [SP 800-38D](https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf) (November 2007) section 8.2.1, laid out as that section suggests for the default 96-bit IV length: the leading 32 bits hold the fixed field and the trailing 64 bits hold the invocation field. Read against section 8.2.1's own stated requirements, the construction **satisfies** them, with one qualification -- stated at the end of this section -- on what the all-zero fixed field rests on.

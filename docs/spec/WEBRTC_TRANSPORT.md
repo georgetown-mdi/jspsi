@@ -318,6 +318,15 @@ actually used. An empty or absent list means "use the default"; it does not mean
 nothing is configured, what it discloses, and the unreachable-entry idiom for
 gathering host candidates only -- are in [CLI.md](../CLI.md#webrtc-exchanges).
 
+`connection.provider_options` is inert on this channel: no transport on either
+side reads it, so no key in it reaches the PeerJS client, the peer connection,
+or the ICE configuration above, and the only honored form of the map is the SFTP
+channel's, filtered through a default-deny allowlist
+([EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md#connectionprovider_options)).
+That allowlist rather than a verbatim passthrough is what a consumer here would
+be held to, since an opaque map reaching the broker or peer options could
+otherwise move where this side connects.
+
 ## Application-layer encryption
 
 The `webrtc` channel carries `request_encryption: false`: a data channel is
