@@ -302,9 +302,6 @@ Ratified by the owner:
 - **Core Functionality** (board 9) -- Done is: no linkage term the schema admits
   is parsed, displayed, or agreed without the run applying it -- every
   declared-but-inert path implemented or refused.
-
-Drafted, pending the owner's ratification:
-
 - **Application Encryption** (board 9) -- Done is:
   escape-once-at-the-display-sink and bound-at-composition hold across every
   operator-facing sink, carried by checks rather than by a fix per fragment.
@@ -317,6 +314,56 @@ Drafted, pending the owner's ratification:
 - **Agency security review readiness** (board 10) -- Done is: one agency
   completes a security review from the published assurance package alone, every
   claim in it naming the check that keeps it true.
+- **Signed Exchange Receipts** (board 9) -- Done is: every exchange that moves a
+  payload yields a record whose signing identity was pinned and verified before
+  the send, and no identity divergence or certificate mismatch is discoverable
+  only after the fact.
+- **Sync Tool** (board 9) -- Done is: no interruption of a file-drop or SFTP
+  exchange -- crash, restart, dropped endpoint, or a peer that never arrives --
+  leaves a run wedged or a working directory unresumable, and every wait is
+  bounded by a measured value rather than a constant.
+- **CLI WebRTC Transport** (board 9) -- Done is: a CLI party completes a real
+  WebRTC exchange with a browser party through a deployed broker, including a
+  relayed (TURN) path, with every wait bounded by a measured value rather than a
+  constant, and the broker's provenance, deployment shape, and runtime surface
+  are decided rather than inherited from the vendored server.
+- **Linkage rule sets** (board 9) -- Done is: an operator picks a built-in rule
+  set at authoring time, and no rule set that reaches a partner can carry a term
+  that fails at the mint or whose per-row cost is unbounded.
+- **Scheduled exchanges** (board 9) -- Done is: a recurring exchange configured
+  in the browser runs to completion unattended for a full schedule period with
+  no operator intervention and no manual recovery, and a failed or missed run
+  reaches the operator before their next visit.
+- **Guided Setup** (board 9) -- Done is: an operator on a stock Windows host
+  completes file-drop setup from the launcher alone, verified on a real host,
+  with no step requiring a hand-edited config or a shell.
+- **Console engine** (board 9) -- Done is: the console conducts every channel
+  the CLI conducts from the one mounted working directory, and each run's
+  outcome reaches its caller as a classified event rather than as log text, and
+  every route, refusal, and disclosure the job API exposes is described in
+  docs/spec/SERVER_JOB_API.md, with no claim the deployment does not exhibit.
+- **Recurring Exchange Setup** (board 9) -- Done is: an operator configures and
+  re-runs a recurring exchange from the commands' own output -- channel,
+  connection block, options, and credentials all established by the provisioning
+  path, with no hand-transcribed credential and no hunt across documents.
+- **Clean CLI stdout/stderr separation** (board 9) -- Done is: every surface the
+  operator must read or act on -- result, prompt, decision, outcome -- renders
+  identically at every log level, with diagnostic furniture confined to the
+  diagnostic stream.
+- **Dependency supply chain** (board 10) -- Done is: every image and package the
+  build or a shipped artifact resolves is pinned by digest or exact version and
+  held there by a drift check -- no unpinned reference is reachable from a
+  release.
+- **FIPS 140-3 claim** (board 10) -- Done is: every FIPS claim the published
+  docs make names the certificate and the shipped provider build that backs it,
+  and a check fails when the image's provider drifts from that pin.
+
+Split-on Fan-out (board 9) carries no line of its own; Core Functionality's line
+governs it.
+
+Drafted, pending the owner's ratification:
+
+None at present.
 
 ## What the PM does NOT do
 

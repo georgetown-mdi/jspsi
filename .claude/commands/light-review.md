@@ -54,7 +54,14 @@ any prior head caught -- union coverage makes narrowing impossible. A claim that
 either rule ("cannot be bypassed", "no way to", "genuinely binds", or a post-narrowing
 claim scoped to prior heads' union coverage) is a defective contract: stop and rewrite
 it first. A round run on a totality claim can only gate, because the reviewer's job is
-to find the counterexample the claim's own wording promises does not exist.
+to find the counterexample the claim's own wording promises does not exist. A claim
+names WHICH fixed message, error class, or UI state results only when that message or
+state was measured to exist on `origin/staging` first; otherwise it states the property
+(refuses, does not throw, renders without crashing) and leaves the resulting surface to
+the reviewer's measurement. A claim naming an unmeasured message is a defective
+contract of the same kind as a totality claim -- three of six refutations in the
+2026-09-02 review program were of this kind, each costing a role round -- so stop and
+rewrite it.
 
 A plan-stage contract -- claims about a design rather than the code -- must include
 the premise claim, that the plan solves the right problem, among CLAIMS; commit the
