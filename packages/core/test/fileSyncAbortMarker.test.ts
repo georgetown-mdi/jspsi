@@ -18,6 +18,10 @@ import { toBase64Url } from "../src/utils/crypto";
 // fake-timer "hung write" assertion advances past the same window the code uses.
 const WRITE_BUDGET_MS = 5000;
 
+// Mirrored from the production constant ABORT_MARKER_MAX_BYTES (module-private)
+// so the boundary pair below plants markers exactly on and one byte past it.
+const MARKER_MAX_BYTES = 1024;
+
 const TOKEN_SELF = new Uint8Array(32).fill(0x11);
 const TOKEN_PEER = new Uint8Array(32).fill(0x22);
 
@@ -189,6 +193,20 @@ function plantPeerMarker(
         token: toBase64Url(token as Uint8Array<ArrayBuffer>),
       }),
     ),
+  );
+}
+
+// Plants a peer marker that would verify, padded with insignificant JSON
+// whitespace to occupy exactly `size` bytes in the listing, so a test can sit on
+// the pre-get() cap rather than well above it.
+function plantPaddedPeerMarker(files: Map<string, Buffer>, size: number): void {
+  const body = JSON.stringify({ version: 1, token: toBase64Url(TOKEN_PEER) });
+  const padding = size - body.length;
+  if (padding < 0)
+    throw new Error(`a verifying marker cannot fit in ${size} bytes`);
+  files.set(
+    peerMarkerPath,
+    Buffer.from(`${body.slice(0, -1)}${" ".repeat(padding)}}`),
   );
 }
 
@@ -407,6 +425,29 @@ test("an oversized planted marker is refused at the pre-get() size check and nev
   const errors = await pollAndCollectErrors(conn);
   expect(errors).toHaveLength(0);
   expect(ops.some((o) => o === `get:${peerMarkerName}`)).toBe(false);
+});
+
+test("a marker listed at exactly the size cap is read and verified", async () => {
+  const { client, files, ops } = makeAbortTestClient();
+  const conn = await makeArmedConn(client, { peerId: PEER_ID });
+  // The cap is the largest ACCEPTED size, so a marker sitting on it must still
+  // be read: paired with the one-byte-over case below, this pins the comparison
+  // as strictly-greater rather than greater-or-equal.
+  plantPaddedPeerMarker(files, MARKER_MAX_BYTES);
+
+  const errors = await pollAndCollectErrors(conn);
+  expect(ops).toContain(`get:${peerMarkerName}`);
+  expect(errors[0]).toBeInstanceOf(PeerAbortError);
+});
+
+test("a marker listed one byte over the size cap is refused before any get()", async () => {
+  const { client, files, ops } = makeAbortTestClient();
+  const conn = await makeArmedConn(client, { peerId: PEER_ID });
+  plantPaddedPeerMarker(files, MARKER_MAX_BYTES + 1);
+
+  const errors = await pollAndCollectErrors(conn);
+  expect(errors).toHaveLength(0);
+  expect(ops).not.toContain(`get:${peerMarkerName}`);
 });
 
 test("a malformed (non-JSON / wrong-version) marker is ignored", async () => {

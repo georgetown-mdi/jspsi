@@ -56,6 +56,27 @@ test("deriveAbortToken outputs never collide with the AEAD key from the same ses
   }
 });
 
+test("deriveAbortToken known-answer vector pins the HKDF info string", async () => {
+  // Expected bytes were computed independently with Node's
+  // crypto.hkdfSync("sha256", ikm, salt, info, 32) where ikm is sessionKeyA,
+  // salt is 32 zero bytes, and info is "psilink-abort-token-v1:<role>". Any
+  // accidental change to the prefix, the ":" delimiter, or a role label changes
+  // these bytes and trips this test -- including a swap to another live label
+  // ("psilink-aead-v1:<role>"), which the cross-derivation distinctness tests
+  // above cannot see because it still differs from every AEAD_CONTEXTS label.
+  const initiator = await deriveAbortToken(sessionKeyA, "initiator");
+  expect(Array.from(initiator)).toEqual([
+    201, 98, 150, 196, 136, 40, 110, 199, 175, 117, 106, 141, 23, 111, 121, 63,
+    242, 123, 11, 85, 9, 146, 193, 206, 139, 139, 6, 86, 167, 89, 93, 206,
+  ]);
+
+  const responder = await deriveAbortToken(sessionKeyA, "responder");
+  expect(Array.from(responder)).toEqual([
+    136, 136, 194, 178, 242, 75, 147, 103, 35, 109, 242, 54, 24, 59, 74, 128,
+    98, 246, 108, 95, 211, 75, 130, 59, 230, 216, 246, 180, 192, 14, 210, 15,
+  ]);
+});
+
 test("deriveAbortToken rejects an untyped role outside the frozen allowlist", async () => {
   await expect(
     // Cast past the compile-time type to exercise the runtime guard a plain-JS
