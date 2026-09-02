@@ -24,6 +24,7 @@ from a direction still open to a decision taken and built.
 | [fips-variant-image.md](fips-variant-image.md) | Decided, built, and published. |
 | [key-establishment-fips-boundary.md](key-establishment-fips-boundary.md) | Decided and implemented. |
 | [linkage-rule-grounding.md](linkage-rule-grounding.md) | Proposal, pending adoption -- nothing here is adopted or shipped. |
+| [lockless-rendezvous-barrier.md](lockless-rendezvous-barrier.md) | Weighed and set aside; the shipped symmetric barrier stands. |
 | [one-sided-disclosure.md](one-sided-disclosure.md) | Resolved - shipped as the opt-in `single-pass` linkage strategy (the cascade stays the default). |
 | [operator-message-control-characters.md](operator-message-control-characters.md) | Decided and built. |
 | [prebuild-provenance.md](prebuild-provenance.md) | Decided, built, and armed against a fork that attests. |
@@ -35,6 +36,7 @@ from a direction still open to a decision taken and built.
 | [sftp-adapter-state-machine.md](sftp-adapter-state-machine.md) | Shipped. |
 | [shared-consent-summary.md](shared-consent-summary.md) | Shipped. |
 | [signing-identity-custody.md](signing-identity-custody.md) | Decided and built, by a 3-panelist design panel converging 3-0. |
+| [web-server-runtime-role.md](web-server-runtime-role.md) | Direction recorded; no removal scheduled. |
 
 Each note carries the full status statement at its own top; this table is a pointer, not a restatement.
 
