@@ -105,110 +105,23 @@ const CLIENT_CLOSE_TIMEOUT_MS = 5_000;
 // operator-configurable, like every other SFTP liveness bound.
 const FORCED_CLOSE_TIMEOUT_MS = 1_000;
 
-// Upper bound (ms) on how long one session transition waits for the transition
-// ahead of it before giving up its own turn (see
-// {@link SSH2SFTPClientAdapter.runTransition}). ONE number for all five kinds,
-// and it bounds the WAIT rather than the transition being waited on: a ceiling on
-// the dial instead would put a teardown's wait at
-// `(max_reconnect_attempts + 1) * server_connect_timeout_ms` plus the
-// inter-attempt delays -- around two minutes at the defaults, and unbounded above
-// as the operator raises the connect timeout, which is neither teardown-scale nor
-// a number the wait owns.
-//
-// The value: above the 6 s a legitimate release can spend
-// (CLIENT_CLOSE_TIMEOUT_MS then FORCED_CLOSE_TIMEOUT_MS), so a teardown queued
-// behind a normal release does not give up on it prematurely. That is a
-// relationship between three independent constants, so it is DRIVEN -- by the unit
-// test whose release "spends its whole close budget" with a teardown queued behind
-// it -- rather than left to the arithmetic here. And teardown-scale in the sense
-// FileTransportClient.end's contract requires: this bound plus the forced close it
-// ends in is an order of magnitude below the dial budget an unbounded wait would
-// ride. It owes nothing to the budget end()'s CALLER holds, which can be smaller
-// (core races end() against one a low peer_timeout_ms puts under this bound):
-// abandoning that wait closes nothing, while the abandon here runs on its own
-// timer and drives the destroy either way, so a caller that gave up waiting is
-// still left an exited process rather than a half-open socket -- also driven, by
-// the unit test whose caller gives up first. Deliberately not
-// operator-configurable, like every other SFTP liveness bound.
+// Upper bound (ms) on a queued session transition's wait for the transition
+// ahead of it. Derivation: docs/spec/CHANNEL_SECURITY.md, "The
+// session-transition lock".
 const TRANSITION_ACQUIRE_TIMEOUT_MS = 10_000;
 
 /**
- * Upper bound on how many unperformed cleanup deletes of the protocol's own
- * in-flight temp file the connection-per-poll mode records for re-issue (see
- * {@link SSH2SFTPClientAdapter.deferCleanupDelete}). The record exists because
- * the never-reject cleanup delete sits outside the recovery chokepoint and so
- * outside the session gate that chokepoint applies: issued across an idle
- * boundary it reaches no session, and the file it was to remove would otherwise
- * survive the run.
- *
- * Overflow REFUSES the new record rather than evicting an older one, which is a
- * shape this file has nowhere else -- every other cap here fails loudly instead,
- * and neither failing nor evicting fits a best-effort list whose caller must
- * never see a rejection. Refusing degrades the overflowing cleanup to exactly the
- * behavior it had before the record existed (its file survives the run), and
- * cannot discard a record already destined for the drain, whereas evicting the
- * oldest would turn a cleanup this adapter had already promised to re-issue into
- * a silent loss. It fires only where a drain has repeatedly failed to reach the
- * server, so it is logged at debug rather than warned: the operator hears about
- * an unreachable server from the operation that needed it, not from a
- * best-effort sweep.
- *
- * The value: a run records at most one entry per temp-file cleanup that could not
- * be performed, and each cycle-start re-establishment drains the whole set, so a
- * healthy run holds zero or one. Sized well above that so the cap is reached only
- * by a server that has stopped answering deletes entirely, and small enough that
- * the paths held are bounded memory. Deliberately not operator-configurable, like
- * every other bound in this file.
+ * Cap on the connection-per-poll record of unperformed cleanup deletes of the
+ * protocol's own in-flight temp file; overflow refuses rather than evicts.
+ * Derivation: docs/spec/CHANNEL_SECURITY.md, "The deferred cleanup-delete
+ * record".
  */
 export const MAX_DEFERRED_CLEANUP_DELETES = 64;
 
 /**
- * How many times ONE RECORDING of a cleanup delete is re-issued before that
- * recording gives up and its file is left behind
- * ({@link SSH2SFTPClientAdapter.reissueCleanupDelete}).
- *
- * A budget is needed because a re-issue's failure is what records the path
- * again, and nothing in that loop distinguishes a server briefly unreachable at
- * one boundary from a delete that can never succeed -- the peer-owned temp under
- * a sticky-bit directory the entry sweep still attempts. Without a budget the
- * second is retried once per re-establishment for the life of the exchange, and
- * with the record full that is a whole record's worth of extra DELETE round trips
- * per poll cycle against the partner's server.
- *
- * What it bounds is that recording rather than the path for the connection's
- * life. Giving up remembers nothing about the path, so a path handed to
- * {@link SSH2SFTPClientAdapter.safeDelete} again is recorded afresh with the
- * whole budget, by either route into the record (the delete's own rejection, and
- * the release reading taken before it); and a path re-recorded while its own
- * re-issue is still in flight keeps the budget that re-record wrote, since an
- * entry already standing is left alone rather than taking the failing re-issue's
- * decrement. What a run actually pays for that turns on which call site offers
- * the path, and today only one offers an undeletable temp at all: core sweeps
- * orphaned temps in the rendezvous entry scan, which runs once per exchange and
- * not once per poll cycle. Such a temp is therefore recorded once and costs that
- * sweep's own attempt plus MAX_DEFERRED_CLEANUP_REISSUES re-issues spread over
- * the re-establishments that follow -- a few round trips for the whole run. A
- * caller that re-offered the same path every cycle would pay that attempt plus
- * one re-issue per cycle instead, each re-offer being a fresh recording; the cap
- * above is what bounds how many recordings stand at once either way.
- * Remembering a given-up path as a
- * tombstone would make the budget per path per connection and is deliberately not
- * done -- a tombstone consumes a cap slot, which is how a peer would crowd the
- * send path's own cleanups out of the record.
- *
- * It is not what keeps this mode's per-cycle session either: an idle release is
- * kept from being pinned off by the re-issue's exclusion from the tracked()
- * bracket (see reissueCleanupDelete), which holds with or without a budget.
- *
- * The value: the record's healthy path succeeds on the first re-issue, so the
- * budget is what covers a transient failure, and the re-establishments it spans
- * are the poll cycles the exchange is made of. Two retries past that first
- * re-issue is enough for a server unreachable across consecutive boundaries and
- * short enough that a permanently-refused path costs a handful of round trips per
- * recording rather than a run's worth. Exhausting it degrades that cleanup to
- * exactly the behavior it had before the record existed (its file survives the
- * run), which is also what the cap above does on overflow. Deliberately not
- * operator-configurable, like every other bound in this file.
+ * Re-issue budget for ONE RECORDING of a cleanup delete, after which that
+ * recording gives up and its file is left behind. Derivation:
+ * docs/spec/CHANNEL_SECURITY.md, "The deferred cleanup-delete record".
  *
  * @internal exported for the adapter's own tests
  */
@@ -240,27 +153,9 @@ const MAX_SPLIT_SCOPE_ENTRY_SWEEP_DELETES = 2 * MAX_DIRECTORY_ENTRIES;
 /**
  * Listeners the shared ssh2 `Client` can carry on one event name for work
  * running BESIDE the widest fan, counted into
- * {@link SHARED_SSH2_CLIENT_MAX_EVENT_LISTENERS}.
- *
- * MEASURED rather than summed. Nothing constrains core to a fixed set of work
- * beside a fan, so this is a best-effort backstop held to evidence rather than
- * an exhaustive count, and the concurrency named below is what it is meant to
- * COVER rather than a list of addends. What holds it up: an ordinary two-party
- * exchange and its connection-per-poll variant are driven with a listener probe
- * on this emitter, and the widest headroom either party spends above its idle
- * baseline is asserted to stay within this term
- * (`sharedClientListenerCeiling.test.ts`). Both shapes spend 2 of the 3, on
- * `'close'` and at teardown: the pair ssh2-sftp-client's `end()` parks while it
- * waits the close out -- its own close handler, plus the per-operation `'close'`
- * bracket the `end()` call itself takes.
- *
- * What the term is meant to cover is that teardown pair together with the
- * application heartbeat's `realPath(".")` beat, the poll loop's own operation,
- * and a `send()` resuming from the protocol continuation alongside that loop.
- * Which of those can be in flight together is core's business rather than this
- * adapter's, which is why the term rests on the driven shapes instead of on that
- * list. Under-counting it costs one spurious `MaxListenersExceededWarning` line
- * on stderr and nothing else.
+ * {@link SHARED_SSH2_CLIENT_MAX_EVENT_LISTENERS}. MEASURED rather than summed;
+ * the runs behind it are in docs/spec/DEPENDENCY_PINS.md, "Upgrading the SFTP
+ * Stack".
  *
  * @internal exported for the adapter's own tests
  */
@@ -309,35 +204,9 @@ const PEAK_SHARED_CLIENT_LISTENERS_PER_EVENT =
 
 /**
  * Ceiling this adapter raises on its shared ssh2 `Client`'s per-event listener
- * count, in place of Node's default of 10.
- *
- * ssh2-sftp-client brackets each operation it issues with one `'end'`, one
- * `'close'` and one `'error'` listener on the ONE `Client` it holds for this
- * adapter's whole life, and removes the three when that operation settles, so
- * concurrent operations stack them linearly and a fan of nine crosses the
- * default. What Node prints then is a `MaxListenersExceededWarning` -- emitted
- * through `process.emitWarning` and so landing on stderr past this project's
- * logger and past every verbosity control an operator has -- announcing a
- * "possible EventEmitter memory leak" about a fan that is bounded and comes back
- * off. The ceiling was never what would catch a real leak here either: it fires
- * at most once per emitter and event name and says nothing about whether the
- * listeners came off again, so the accounting itself is pinned as a check
- * instead -- a peak at the fan's width plus the persistent listeners, and an
- * exact return to those persistent listeners once the fan settles.
- *
- * Seated AT {@link PEAK_SHARED_CLIENT_LISTENERS_PER_EVENT} rather than one above
- * it, because Node warns only STRICTLY above a ceiling: an emitter whose maximum
- * is `n` is silent at `n` listeners and warns on the `n + 1`th. So every fan the
- * derivation enumerates, all of them at their bounds at once, is silent, and the
- * first listener past the enumeration is what warns. That boundary is Node's
- * behavior rather than this project's, so it is driven as a check
- * (`sharedClientListenerCeiling.test.ts`) rather than assumed here.
- *
- * DERIVED, so it moves when the bounds it is built from move rather than being a
- * hand-picked number to revisit. Crossing it costs a spurious warning and nothing
- * else, so it is a diagnostic threshold rather than a bound anything rests on.
- * The measured behavior behind all of this, and what an `ssh2` /
- * `ssh2-sftp-client` bump re-confirms, are in docs/spec/DEPENDENCY_PINS.md.
+ * count, in place of Node's default of 10. The derivation, the measured
+ * behavior behind it, and what an ssh2 / ssh2-sftp-client bump re-confirms are
+ * in docs/spec/DEPENDENCY_PINS.md, "Upgrading the SFTP Stack".
  *
  * @internal exported for the adapter's own tests
  */
@@ -347,34 +216,9 @@ export const SHARED_SSH2_CLIENT_MAX_EVENT_LISTENERS =
 /**
  * Per-operation deadline (ms) a drain re-issue is held to
  * ({@link SSH2SFTPClientAdapter.reissueCleanupDelete}) in place of the
- * {@link SFTP_STALL_DEADLINE_MS} every other round trip carries, and so -- the
- * re-issues being concurrent -- the bound on the whole drain
- * ({@link SSH2SFTPClientAdapter.drainDeferredCleanupDeletes}).
- *
- * It exists because of WHERE the drain sits rather than what it costs. Core
- * forwards `ensureConnected` unwrapped and awaits it inside `close()`, so the
- * drain's wait lands on teardown and on the recovery gate's first attempt after
- * an idle gap, above which no budget applies -- {@link CLIENT_CLOSE_TIMEOUT_MS}
- * and {@link FORCED_CLOSE_TIMEOUT_MS} bound `end()`, and core's terminal-frame
- * drain begins after this call. Without this bound a server that ACCEPTS delete
- * requests and WITHHOLDS their callbacks would add a whole
- * {@link SFTP_STALL_DEADLINE_MS} to every close, an order of magnitude above the
- * teardown bounds beneath it.
- *
- * Cutting a re-issue short at this bound loses nothing real: against a server
- * withholding delete callbacks the delete would not have taken effect anyway, and
- * the expiry is a rejection like any other, so the path is offered back to the
- * record for the next re-establishment -- on the same capped, budgeted terms as
- * any other record, which is what "offered" rather than "kept" says.
- *
- * The value is teardown-scale, sized against the close budget the drain sits
- * directly above ({@link CLIENT_CLOSE_TIMEOUT_MS} then
- * {@link FORCED_CLOSE_TIMEOUT_MS}), so a best-effort sweep cannot dominate the
- * teardown it precedes. It is NOT that budget reused: that one waits out a
- * transport close, which is local and completes in milliseconds, while this one
- * waits out real server round trips that an honest but distant partner takes
- * longer to answer -- so the two would not move together. Deliberately not
- * operator-configurable, like every other bound in this file.
+ * {@link SFTP_STALL_DEADLINE_MS} every other round trip carries, and so the
+ * bound on the whole drain. Derivation: docs/spec/CHANNEL_SECURITY.md, "The
+ * deferred cleanup-delete record".
  */
 const DEFERRED_CLEANUP_DRAIN_TIMEOUT_MS = 5_000;
 
@@ -1219,43 +1063,10 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     return this.ledger.heldBoundaryStretchCount;
   }
 
-  // Acquire this adapter's one session-transition lock and run `transition` under
-  // it. Every point at which the adapter dials a session or closes one goes
-  // through here, so two can never overlap on the one shared Ssh2SftpClient
-  // (ssh2-sftp-client shares connection-level listeners, so two handshakes -- or a
-  // handshake and a teardown -- at once is unsafe).
-  //
-  // The queue slot is taken SYNCHRONOUSLY, before the returned promise exists, so
-  // transitions run in the order their methods were called in and inserting a
-  // microtask anywhere on a transition path cannot change which one wins. The lock
-  // is NOT reentrant: a transition body drives the locked worker
-  // ({@link connectLocked}), never the public method that acquires.
-  //
-  // The teardown latch is read here and nowhere else. A non-teardown transition
-  // that reaches the front of the queue with `closing` set does not run its body
-  // and returns its caller's `skipped` value, so end() -- which latches
-  // synchronously before enqueuing -- skips everything queued behind it, while
-  // whatever was already running is waited out by end()'s own FIFO position.
-  // The queue is released in a `finally`, so a transition that rejects frees it
-  // rather than pinning every later one.
-  //
-  // The acquire is bounded, once, by TRANSITION_ACQUIRE_TIMEOUT_MS, and a waiter
-  // whose bound expires NEVER proceeds into its own session action: it abandons its
-  // own transition through the disposition its kind states
-  // (ABANDONED_TRANSITION_DISPOSITION). Proceeding would trade a bounded park for
-  // two handshakes -- or a handshake alongside a close -- on the one shared client,
-  // the state this lock exists to prevent. Above that bound, what stands over a
-  // transition is whatever its caller in core carries: the first dial passes
-  // through unwrapped (it carries its own per-attempt connect deadline), as do the
-  // two cycle-boundary signals (neither is a peer round trip); end() is wrapped in
-  // core's own short teardown budget; and a recovery re-dial rides the operation
-  // that drove it -- the per-operation peer-inactivity budget, or at teardown the
-  // smaller abort-marker write budget or the terminal-frame drain's remaining
-  // window (docs/spec/CHANNEL_SECURITY.md enumerates the three). Those are core's
-  // behavior, not this package's, and restating them here as data would be a copy
-  // nothing executes: packages/core/test/fileSyncConnection.test.ts is where they
-  // are pinned, by driving a never-settling end() against the teardown budget and
-  // never-settling cycle-boundary signals past many peer budgets.
+  // Acquire this adapter's one session-transition lock and run `transition`
+  // under it. The ordering, the teardown latch, the bounded acquire and each
+  // kind's abandoned disposition are in docs/spec/CHANNEL_SECURITY.md, "The
+  // session-transition lock".
   private runTransition<T>(transition: SessionTransition<T>): Promise<T> {
     const predecessor = this.transitionTail;
     let leaveQueue!: () => void;
@@ -1566,31 +1377,9 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   }
 
   // Bracket one ATTEMPT of a server-driven operation with the heartbeat's
-  // activity accounting: opStarted before it runs, opSettled when it settles
-  // (either way). This both resets the idle window on real traffic and marks the
-  // session busy, so the heartbeat never issues a concurrent keepalive while a
-  // round trip is on the wire. finally() preserves the operation's value and
-  // rejection unchanged. The epoch token opStarted returns is handed back to
-  // opSettled so an attempt whose session was torn down mid-flight (a reconnect
-  // advanced the heartbeat's epoch) cannot decrement the new session's in-flight
-  // count when it finally settles.
-  //
-  // It is deliberately per-attempt rather than per-operation, which is why it
-  // stays here instead of moving up to runOperation's span: what it answers is
-  // whether a round trip is ON THE WIRE, and across a recovery arm none of this
-  // operation's is. Widening it would leave the re-issue unmarked -- the arm's own
-  // re-dial re-arms the heartbeat from scratch, zeroing the in-flight count -- so
-  // a keepalive could be posted alongside the very round trip the bracket exists
-  // to keep one away from.
-  //
-  // Three server round trips do not pass here at all: the heartbeat's keepalive
-  // (see sendKeepalive), the best-effort handle close a listing fires once it has
-  // settled (whose loss the listing accounts for), and the drain's re-issue of a
-  // recorded cleanup delete, which a release MAY tear because the record survives
-  // the tear (see reissueCleanupDelete). Which call sites those are is a check
-  // rather than this sentence: scripts/sftp-tracked-round-trips.test.mjs parses
-  // this file and fails on any request-issuing site outside this bracket that is
-  // not one of the three.
+  // activity accounting. Why per-attempt, and the three round trips outside it,
+  // are in docs/spec/CHANNEL_SECURITY.md, "The outstanding-operation hold on an
+  // idle boundary".
   private tracked<T>(op: Promise<T>): Promise<T> {
     const epoch = this.heartbeat.opStarted();
     return op.finally(() => {
@@ -1642,41 +1431,10 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     );
   }
 
-  // Attach a single guarded 'error' listener to the raw ssh2 SFTPWrapper.
-  //
-  // This and the other internal-ssh2 premises this adapter relies on are
-  // enumerated, with the dependency source files to re-read and the
-  // integration-test command to run, in the "Upgrading the SFTP Stack" checklist
-  // in docs/spec/DEPENDENCY_PINS.md. Re-verify them on any ssh2 /
-  // ssh2-sftp-client upgrade.
-  //
-  // ssh2's Client.sftp() attaches a setup-time 'error' listener to the wrapper
-  // but strips it (removeListeners() inside onReady) before handing the wrapper
-  // back, and ssh2-sftp-client attaches 'error' handlers only to the SSH Client
-  // and to per-operation read/write streams -- never to the wrapper itself. So
-  // after connect() the wrapper carries no 'error' listener. A hostile or dead
-  // SFTP server (in scope under docs/spec/CHANNEL_SECURITY.md) that
-  // returns a malformed SFTP reply packet drives ssh2's doFatalSFTPError ->
-  // sftp.emit('error', err) on a listener-free EventEmitter, which Node turns
-  // into an uncaught exception that crashes the CLI -- skipping lock/temp-file
-  // cleanup and the typed exit-code mapping. The size guards bound memory and
-  // the liveness guards bound time, but a crash is neither; this listener closes
-  // that last hostile-server vector.
-  //
-  // Handling the 'error' leaves the session dead but the process alive. A fatal
-  // packet that rides in on the in-flight request itself is not failed by ssh2's
-  // cleanupRequests (that request's entry is already gone by then), so the
-  // in-flight op hangs until this adapter's own 60 s wall-clock deadline fires --
-  // the deadline, not cleanupRequests, is what bounds it, and it must not be
-  // removed on the assumption that cleanupRequests covers in-flight ops. Capturing
-  // the cause in fatalSftpError then bounds the NEXT op: it consults
-  // deadSessionError at entry and rejects with the real reason instead of issuing
-  // a request the dead wrapper can never answer.
-  //
-  // Guarding on the wrapper's object identity attaches exactly once per wrapper: a
-  // repeated connect() on the same live wrapper is a no-op (no duplicate listener,
-  // no MaxListenersExceeded warning), while the fresh wrapper a reconnect mints
-  // gets its own listener.
+  // Attach a single guarded 'error' listener to the raw ssh2 SFTPWrapper, once
+  // per wrapper instance. What it closes, and what bounds an in-flight operation
+  // after it fires, are in docs/spec/CHANNEL_SECURITY.md, "SFTP fatal-packet
+  // crash safety".
   private attachFatalErrorListener(
     sftp: NonNullable<Ssh2SftpClientInternals["sftp"]>,
   ): void {
@@ -1701,33 +1459,16 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   }
 
   // Answer the SSH server's keyboard-interactive authentication prompts with the
-  // configured password. Enabled by connection.server.keyboard_interactive (core
-  // sets `tryKeyboard` and keeps `password` in the connect options) for a server
-  // that disables the direct `password` auth method but accepts the same secret
-  // over keyboard-interactive.
+  // configured password. The ssh2 behaviors it rests on, and what a bump
+  // re-verifies, are in docs/spec/DEPENDENCY_PINS.md, "Upgrading the SFTP
+  // Stack".
   //
-  // Attached to the underlying ssh2 Client (an EventEmitter) exactly once per
-  // adapter; the Client is reused across reconnects, so the listener persists.
-  // The password is read from the live connect options (this.options) at answer
-  // time, NOT captured at attach time: connect() refreshes this.options on every
-  // (re)connect, so the listener always answers with the CURRENT credential and a
-  // future reconnect under a different credential can never be answered with a
-  // stale secret (a check, not a comment, standing in for "the password never
-  // changes across an adapter's reconnects"). A non-string password answers empty,
+  // The password is read from the live connect options at answer time, NOT
+  // captured at attach time, so a reconnect under a different credential can
+  // never be answered with a stale secret. A non-string password answers empty,
   // which fails auth cleanly rather than sending `undefined`; it is unreachable
   // from a product connect (the connect() gate attaches only when it saw a string
-  // password, and reconnects reuse the same options). Every prompt is answered
-  // with the same password: a non-interactive tool has a single stored secret, so
-  // a genuine multi-prompt or one-time-code challenge is not satisfiable here and
-  // simply fails auth (ssh2 auto-responds to a zero-prompt request itself, so this
-  // listener only fires when the server actually asks). The password is passed
-  // straight to ssh2's finish callback and never logged.
-  //
-  // Without this listener a server that requests keyboard-interactive would stall
-  // the handshake until ssh2's readyTimeout (ssh2 emits the event and waits for a
-  // response that never comes), so the connect-time guard fails loudly if the
-  // ssh2 Client no longer exposes on() rather than letting that silent stall
-  // return as an opaque timeout.
+  // password, and reconnects reuse the same options).
   private attachKeyboardInteractive(): void {
     if (this.keyboardInteractiveAttached) return;
     const client = (this.client as unknown as Ssh2SftpClientInternals).client;
@@ -1757,33 +1498,10 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     this.keyboardInteractiveAttached = true;
   }
 
-  // Watch the ssh2 Client's transport lifecycle so the recovery re-dial can tell a
-  // transport whose events have ALL been delivered from one that still owes its
-  // 'close'. Nothing on the socket distinguishes the two: on the pinned versions a
-  // torn high-level operation rejects on the Client's 'end' with the socket already
-  // destroyed AND already past its own 'close', a full event before the Client's
-  // 'close' lands (measured; see docs/spec/DEPENDENCY_PINS.md), so a socket read at
-  // that moment is identical to one taken after the whole sequence has run. The
-  // events themselves are the only reading that separates them.
-  //
-  // Attached to the underlying ssh2 Client exactly once per adapter, on the same
-  // terms as the keyboard-interactive handler above: the Client is constructed once
-  // by ssh2-sftp-client and reused across every reconnect, so per-dial listeners
-  // would stack until Node reported a leak.
-  //
-  // Best-effort by contract, and the one place this differs from the
-  // keyboard-interactive attach: a Client with no on() leaves nothing to watch,
-  // and the attach degrades rather than failing the dial a relocated EventEmitter
-  // surface costs nothing else. What it must NOT do is leave the retirement a
-  // false reading -- the flag stands at its unwritten default, which is the same
-  // value a delivered sequence leaves, so the two are told apart by
-  // transportLifecycleWatched and an unwatched Client reads as `unreadable`. The
-  // retirement takes the conservative branch on that reading and warns there, for
-  // the reason this whole path exists: a dial issued into an owed 'close' is
-  // failed by the library's connect-time listeners, and treating "cannot tell" as
-  // "nothing owed" is what would turn a relocated EventEmitter surface into the
-  // broken recovery. The seams the retirement DRIVES are checked where they are
-  // driven and warn there.
+  // Watch the ssh2 Client's transport lifecycle so the recovery re-dial can tell
+  // a transport whose events have ALL been delivered from one that still owes
+  // its 'close'. The measured ordering, and what an unwatchable Client costs,
+  // are in docs/spec/DEPENDENCY_PINS.md, "Upgrading the SFTP Stack".
   private watchTransportLifecycle(): void {
     if (this.transportLifecycleWatched) return;
     const client = (this.client as unknown as Ssh2SftpClientInternals).client;
@@ -1857,48 +1575,10 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     );
   }
 
-  // The outermost layer around a recovery-wrapped op -- every server-driven op but
-  // safeDelete and a put whose source cannot be re-issued: it runs the op once and,
-  // if that rejection is a CLEAN session loss, re-dials the connection ONCE and
-  // re-issues the op ONCE before giving up. An SFTP server that enforces a
-  // max-session or idle cap the operator cannot change drops the one long-lived
-  // session mid-exchange (observed at ~10 min); recovery makes that drop
-  // transparent by re-dialing (reusing the pinned host key and stored credentials,
-  // no re-prompt) and re-running the operation.
-  //
-  // ONE round per op invocation, never a loop: if the re-issued op ALSO hits a
-  // clean loss it rejects terminally. The whole of it runs inside the operation's
-  // outstanding span, which runOperation opened at issue, so no idle boundary
-  // reached here closes a session this arm is still using -- covering the two
-  // windows that would each cost a landed publish: between the re-dial and the
-  // re-issue, where a boundary would close the session just dialed and the
-  // re-issue would reject with a dead-session error no resolver reads; and
-  // between the re-issue's rejection and the destination probe rename() answers
-  // it with, where a torn probe reads as "the rename did not land".
-  //
-  // What the re-dial rests on is narrower than op seriality, which core does not
-  // offer: a send resuming from the protocol continuation issues its operations
-  // alongside the poll cycle's own, so another operation can be unsettled while
-  // this re-dial runs. The re-dial neither waits for one nor is made unsound by
-  // one. THIS operation's first attempt has settled -- this catch is where it
-  // settled -- and what the re-dial replaces is the SESSION, so an operation
-  // unsettled at that moment was issued against the session being torn down:
-  // connect()'s heartbeat re-arm is synchronous with the dial that establishes the
-  // replacement and advances the heartbeat epoch, which is what keeps such a
-  // straggler's late settlement off the fresh session's in-flight count (see
-  // tracked() and ./sftpHeartbeat's epoch field). The unit case pinning that this
-  // re-dial does not drain an outstanding operation is where the concurrent state
-  // is constructed.
-  //
-  // The op+re-dial is enclosed by boundTransport's per-op peerTimeoutMs budget in
-  // core (a Promise.race), which is the terminal ceiling against a pathological
-  // instant-drop server, so no bespoke total-time timer is added here.
-  //
-  // This arm accounts for nothing itself. The loss it recovers from is charged by
-  // the transition that ends the generation -- for a partner-side drop, the
-  // re-dial's own critical section (see redialForRecovery) -- so a fan of arms
-  // over one lost session neither races for the charge nor needs a gate to keep
-  // the ones past the first out of it.
+  // The outermost layer around a recovery-wrapped op: run it once and, on a
+  // clean session loss, re-dial ONCE and re-issue ONCE before giving up. What
+  // triggers it, what stays terminal, and what each bound protects are in
+  // docs/spec/CHANNEL_SECURITY.md, "SFTP mid-exchange session recovery".
   private withSessionRecovery<T>(
     op: () => Promise<T>,
     reissue: (op: () => Promise<T>) => Promise<T> = (run) => run(),
@@ -1942,49 +1622,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     });
   }
 
-  // The connection-per-poll session precondition, applied at withSessionRecovery --
-  // the chokepoint the recovery-wrapped ops pass through. It is owned here, not by
-  // the callers in core, because the release that creates the gap is owned here: a
-  // precondition spread over call sites in another package is an invariant held by
-  // discipline, and every site that forgets it (a send resuming from the protocol
-  // continuation, a retain-mode ack write) reopens this hole.
-  //
-  // It runs at operation ENTRY, so it covers an operation ISSUED once a release
-  // is RUNNING. Both readings below are written from inside the release's own
-  // transition, so an operation issued while that release is still QUEUED behind
-  // another transition reads neither and is issued against the still-live
-  // session: it is in the on-the-wire class, not the covered one. No gate at entry
-  // can cover that class at all, and it is not this gate's to cover -- the release
-  // itself keeps a boundary reached with a counted operation outstanding (see
-  // runTransition), so no release closes over one. Two operations do not reach this
-  // gate in any case -- safeDelete, whose never-reject contract puts it outside
-  // recovery, and a put whose source cannot be re-issued (a one-shot stream, or
-  // flags:"a") -- and both are counted by that precondition, which reaches past the
-  // recovery-wrapped operations (runOperation opens the span for every data-plane entry, recovery-wrapped or not). That
-  // covers each of them only where it was ISSUED before the boundary; for the
-  // cleanup delete, one issued AFTER the release reaches no session at all, and
-  // what covers that -- for the protocol's own temp write, the one file no other
-  // mechanism in the run sweeps -- is not this gate but the record the delete
-  // leaves for the next re-establishment to drain (see deferCleanupDelete).
-  //
-  // Returns undefined -- no gate, not even a microtask -- whenever the mode is off
-  // or no release has intervened, so the default held-session mode runs exactly as
-  // it did. Otherwise it re-establishes through ensureConnected before the first
-  // attempt, which queues behind a release still in flight (an operation must not
-  // race the close: ssh2-sftp-client clears its session property from the ssh2
-  // Client's 'close', so in that window an operation is admitted by a session that
-  // still reads live onto a transport end() has already ended -- it cannot
-  // complete, and rides to the stall deadline, which is terminal). Re-establishing
-  // here both keeps the deliberate release out of the recovery path's accounting
-  // and spares one guaranteed-failed operation per idle gap.
-  //
-  // Best-effort by contract: a dial failure here resolves rather than rejecting,
-  // because the gate is a precondition and not the operation -- the attempt that
-  // follows is what decides the outcome, and its own recovery round surfaces a
-  // transient failure with the real error rather than this one. Nothing is
-  // swallowed for good -- a fatal dial condition (a host-key rejection) surfaces one
-  // step later out of the recovery path's own dial, which is what keeps the
-  // fail-closed host-key behavior.
+  // The connection-per-poll session precondition, applied at the recovery
+  // chokepoint. Which operations it covers, why it is adapter-owned rather than
+  // spread over core's call sites, and its best-effort contract are in
+  // docs/spec/CHANNEL_SECURITY.md, "Operations concurrent with a re-dial or a
+  // release".
   private reestablishAfterIdleRelease(): Promise<void> | undefined {
     if (!this.idleReleaseLeftNoSession()) return undefined;
     return this.ensureConnected().then(
@@ -2065,36 +1707,16 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     );
   }
 
-  // Surface a transparently-recovered mid-exchange session drop to the operator at
-  // default verbosity: silent recovery would hide a partner whose SFTP server
-  // chronically caps session lifetime, exactly the case this feature exists for.
-  // Paced like every other repeating condition here (see the ledger's pacedWarn);
-  // in the default mode the LAST re-dial the budget permits is also due a line,
-  // because with a budget below that cadence's interval (the default 3 is) the
-  // escalation step never fires and the operator would otherwise go from one early
-  // warning straight to the terminal error. Each message then reads the re-dial in
-  // the mode the operator is running -- the two differ in likely cause, remedy, and
-  // bound, so one blended line would misdescribe both:
-  //   Default: the drop is the classic partner-side session cap, the remedy is
-  //   --connection-per-poll, and the remaining budget is stated so "the exchange
-  //   continues" is not read as open-ended (exhausting it is terminal, see
-  //   midExchangeReconnectBudgetExhaustedError).
-  //   Connection-per-poll: every line here reports a loss that was the PARTNER's.
-  //   The mode's own release-and-re-dial lifecycle is exempt -- only a release that
-  //   was itself what ended the session records the deliberatelyReleased reading
-  //   that keeps it off these lines, and a unit case pins an ordinary cycle
-  //   warning nothing -- while a
-  //   partner drop a release closed over instead (see releaseForIdle) is one of the
-  //   two causes below rather than a third, the release closing only at a poll-cycle
-  //   boundary, so the drop it closed over cut inside a cycle. Which of the two it
-  //   was is not distinguishable from inside the adapter -- the per-cycle session
-  //   lifetime is a property of the POLL LOOP, and the rendezvous that precedes it
-  //   holds one session across its waits, so a cap can cut either. Both are named
-  //   with the remedy for each, and the rendezvous case is called out as the mode
-  //   working so an operator who chose it for a capping server is not sent after
-  //   their link. It quotes no budget (the cap does not charge this mode) and names
-  //   the per-operation peer-inactivity ceiling that does bound it.
-  // Nothing beyond that is disclosed.
+  // Surface a transparently-recovered mid-exchange session drop to the operator
+  // at default verbosity; what is counted, charged and warned is in
+  // docs/spec/CHANNEL_SECURITY.md, "What the accounting counts".
+  //
+  // Paced like every other repeating condition here (see the ledger's
+  // pacedWarn), plus the LAST re-dial the budget permits: with a budget below
+  // that cadence's interval (the default 3 is) the escalation step never fires,
+  // and the operator would go from one early warning straight to the terminal
+  // error. Each mode reads the re-dial its own way -- the two differ in likely
+  // cause, remedy and bound, so one blended line would misdescribe both.
   private warnSessionRecovered(): void {
     const count = this.ledger.midExchangeReconnectCount;
     if (this.ephemeralSessions) {
@@ -2153,58 +1775,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     );
   }
 
-  // Decide whether an op rejection is the session loss recovery re-dials on. Every
-  // condition is post-state, not error-message matching: ssh2-sftp-client clears
-  // its `sftp` session property on a clean close/end (its per-operation temp
-  // listeners null it on either event, its global one only on 'close'), so a
-  // cleared property is the reliable signal that the session dropped -- unifying
-  // the adapter's own `!sftp` throw in list()/createExclusive() with
-  // ssh2-sftp-client's ERR_NOT_CONNECTED ("No SFTP connection available")
-  // rejection on the high-level get/put/delete/rename/exists. Terminal (never
-  // re-dialed), in order:
-  //   - a teardown is latched, or no connect has succeeded yet (nothing to re-dial
-  //     with);
-  //   - a fatal SFTP protocol error killed the session (the wrapper is destroyed
-  //     and cannot recover -- fatalSftpError, deadSessionError());
-  //   - a memory bound (FrameSizeExceededError / DirectoryListingBoundsError),
-  //     whose re-issue would re-read the very oversized reply the bound refused;
-  //   - a rejection against a session that is still live over a transport that is
-  //     still live too: an app-level failure or a stall, not a loss. Re-dialing on
-  //     a stall would hand a withholding server a free liveness reset, so a
-  //     timeout over a live transport is never a reconnect trigger;
-  //   - a liveness stall on a CLEARED session, for the same reason.
-  // A live session over an ENDED transport is the one reading that is a loss
-  // whatever the operation rejected with. The transport can carry nothing, so the
-  // rejection is the deadline's whichever way it came, and the session property
-  // says only that no 'close' reached ssh2-sftp-client's global listener to clear
-  // it -- which a partner that drops the SFTP session and withholds its connection
-  // close produces on the pinned versions (see docs/spec/DEPENDENCY_PINS.md).
-  // Recovering it means clearing that session first, which is the re-dial's own
-  // forced close (see redialForRecovery).
-  //
-  // No connection-per-poll idle release brings an operation of its own to these
-  // readings. One ISSUED while a release is RUNNING never reaches them:
-  // withSessionRecovery's gate waits the release out and re-establishes before the
-  // first attempt. One ALREADY ON THE WIRE -- including one issued while the
-  // release was still queued, the same class -- is what the release's own
-  // precondition keeps the boundary for (see runTransition), so no release closes
-  // over a counted one. What the ordering premise below carries is every OTHER tear
-  // of an outstanding op: a server-side drop, and the terminal close.
-  //
-  // At the pinned versions such a tear reads as the loss it is, for a narrower
-  // reason than the transport event alone: ssh2 fails outstanding channel requests
-  // ONLY from the socket's 'close' handler (the socket's 'end' emits and cleans the
-  // protocol up but leaves them outstanding), and it does so after its own
-  // emit('close') has already run. Both ssh2-sftp-client listeners that emit
-  // reaches -- the per-operation temp closeListener and the constructor's global
-  // one -- clear `sftp`, so by the time the rejection is delivered the session
-  // always reads cleared. Its global 'end' listener does NOT clear `sftp`, which
-  // is a separate premise the release's peer-teardown check rests on (see
-  // releaseForIdle).
-  //
-  // A host-key mismatch on the re-dial is terminal for free: it surfaces inside
-  // redialForRecovery -> connectLocked, whose retry predicate already treats "Host
-  // denied" as terminal, so the rejection propagates rather than being re-issued.
+  // Decide whether an op rejection is the session loss recovery re-dials on --
+  // every condition post-state, never error-message matching. The trigger, the
+  // readings that stay terminal, and the live-session-over-an-ended-transport
+  // case are in docs/spec/CHANNEL_SECURITY.md, "What is re-dialed, and what
+  // stays terminal".
   private shouldRecoverFromSessionLoss(error: unknown): boolean {
     if (this.closing) return false;
     if (this.originalConnectOptions === undefined) return false;
@@ -2239,43 +1814,10 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     return Boolean(internals.sftp) && this.sessionTransportEnded(internals);
   }
 
-  // Re-dial the dropped session with the full original options. It must go
-  // through the same locked dial sequence connect() runs, never a bare
-  // client.connect(): that sequence re-runs on the FRESH wrapper -- re-attaching
-  // the guarded fatal-'error' listener (a listener-free wrapper would turn the
-  // next malformed packet into a process crash), clearing fatalSftpError,
-  // re-running the enforcing fail-closed host-key verifier that rides the options,
-  // re-verifying the raw sftp methods, advancing the heartbeat epoch, and
-  // re-applying setNoDelay/keepalive. The dead client is NOT end()'d first:
-  // ssh2-sftp-client's end() would latch its endCalled flag, permanently disabling
-  // the global 'close' listener that clears this.sftp -- which would stop a LATER
-  // idle drop from being detected and defeat recovery of the repeated drops this
-  // targets. The dial runs only over a CLEARED session, which is what keeps
-  // ssh2-sftp-client's "already connected" guard from firing: a loss that left the
-  // session property set is cleared by the forced close below before the dial, and
-  // a forced close that did not clear it does not reach the dial at all.
-  //
-  // The whole precondition runs INSIDE the transition, not at the acquire: the
-  // retained connect options are written by connectLocked, which is another
-  // transition's body, so reading them from outside the lock reads state a
-  // transition owns and can be stale by the time this one runs -- a concurrently
-  // requested re-dial would then be refused before it ever took a queue slot. The
-  // acquire itself stays synchronous (runTransition takes the slot with no
-  // preceding await), so request order is unchanged.
-  //
-  // Reports what the caller is left to do with the operation it was recovering
-  // (see RecoveryRedialOutcome), which is what keeps a re-dial that established
-  // nothing out of the reconnect counters and the operator warning: both the
-  // declined forms -- a teardown latched ahead of it, and a wait it gave up --
-  // establish none.
-  //
-  // This body is also where a partner-side drop is CHARGED, because it is the
-  // transition that ends the lost generation: nothing before it observed the
-  // session go, and a fan of arms over one drop all arrive here at a queue that
-  // admits them one at a time, so the generation check inside recordLoss is what
-  // makes the charge once-per-loss without any high-water mark or accounted set.
-  // The cumulative budget is read and spent in the same critical section, so what
-  // holds the cap is the lock rather than the queue's coalescing.
+  // Re-dial the dropped session through the same locked dial sequence connect()
+  // runs, never a bare client.connect(), and charge the lost generation here.
+  // docs/spec/CHANNEL_SECURITY.md, "What is re-dialed, and what stays terminal"
+  // and "What the accounting counts".
   private redialForRecovery(): Promise<RecoveryRedialOutcome> {
     return this.runTransition<RecoveryRedialOutcome>({
       kind: "redialForRecovery",
@@ -2371,47 +1913,10 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     return "sessionLive";
   }
 
-  // Retire the transport the dropped session ran on, so the re-dial that follows
-  // meets neither of the two states ssh2-sftp-client's connect() cannot survive.
-  // Both are reached by a partner-side mid-exchange drop, and each on its own is
-  // enough to fail the dial:
-  //   - The session property is still SET, which the partner that drops the SFTP
-  //     session and withholds its connection close leaves behind: the library
-  //     clears it only from the ssh2 Client's 'close', and its connect() rejects
-  //     outright while it is set. Destroying the socket needs nothing from the peer
-  //     and drives that 'close'.
-  //   - The transport still owes the Client its 'close'. A high-level operation is
-  //     torn by the 'end' and rejects on it -- ssh2-sftp-client's per-operation
-  //     listeners clear the session on either event -- so recovery is entered a
-  //     full event before the 'close', and a dial issued there is failed by the
-  //     library's own connect-time listeners ("Unexpected close event") while the
-  //     handshake it started runs on unowned. That abandoned session's later events
-  //     fail the next dial in turn, so the whole re-dial budget burns out with the
-  //     operation's session loss replaced by a connect error. Waiting the 'close'
-  //     out is what keeps the dial off it (the census over that socket state is
-  //     test/integration/dialDeferral.test.ts).
-  // The mechanism is the connection-per-poll release's
-  // ({@link forceCloseEndedTransport}); the accounting is not -- this boundary is a
-  // partner-side drop, counted and warned as one by the recovery path, never as an
-  // idle release.
-  //
-  // Costs nothing in the ordinary case: a raw-wrapper operation is torn by the
-  // 'close' itself, so both readings are already settled by the time recovery runs
-  // and this returns without driving anything. That shortcut needs a POSITIVE
-  // reading that the lifecycle sequence was delivered, never merely the absence of
-  // an owed-close reading: on a Client the lifecycle watch could not attach to,
-  // the absence means "cannot tell", and taking it for "nothing owed" puts the
-  // dial into the very window this method exists to keep it out of. So an
-  // unreadable lifecycle warns and falls through to the forced close, which
-  // retires an owed 'close' and, on a transport whose 'close' had already landed,
-  // costs the wait out of FORCED_CLOSE_TIMEOUT_MS that the shortcut saves (a
-  // 'close' listener armed after the event never resolves early).
-  //
-  // Every way it can fail warns, naming what broke and this project's upgrade
-  // checklist, and leaves the operation to fail with the loss it was already
-  // failing with: recovery that cannot retire the transport degrades to the
-  // terminal outcome it had before, and must not replace the operation's own error
-  // with one of its own.
+  // Retire the transport the dropped session ran on, so the re-dial meets
+  // neither state ssh2-sftp-client's connect() cannot survive. Both states, the
+  // shortcut's positive reading, and what each way it can fail warns are in
+  // docs/spec/CHANNEL_SECURITY.md, "SFTP mid-exchange session recovery".
   private async retireTransportForRedial(
     held: HeldSessionTransition,
     internals: Ssh2SftpClientInternals,
@@ -2784,46 +2289,12 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   }
 
   // What the dial sequence hands its caller when the dial failed: the rejection
-  // it already had, or -- for a dial that ended before the peer identified itself
-  // as an SSH server -- that rejection re-raised with what a bounded,
-  // credential-free read of the peer's first bytes says about it. The pinned
-  // stack reports a proxy answering with an HTML page, a TLS service, and a
-  // firewall closing the connection in front of the server all as the same
-  // `Connection lost before handshake`, which reads exactly like an unreachable
-  // host; the diagnosis names what answered. See ./sftpPeerIdentification, which
-  // owns the gate, the read, and the copy.
-  //
-  // Seated in connectLocked because that is the one path to ssh2's connect, and
-  // it is the ONLY layer that diagnoses: the first dial, the connection-per-poll
-  // cycle-start re-dial, the recovery re-dial, the teardown's, and core's
-  // credential-free host-key probe -- which dials this adapter as its raw client
-  // -- all reach it here. A wrapper around one of those callers would diagnose a
-  // rejection this has already diagnosed, opening a second read of the same peer
-  // (the gate walks the cause chain, so the buried rejection still matches);
-  // the probe's two entry points therefore add no diagnosis of their own, and
-  // the read count per diagnosed failure is a check in
-  // test/integration/dialPeerIdentification.test.ts. It runs inside the session
-  // transition the dial holds, adding the read budget -- 2 s, clamped to the
-  // connect's own -- to a dial that has already failed, which is a fifth of what
-  // a transition waiting behind it is allowed to wait
-  // (TRANSITION_ACQUIRE_TIMEOUT_MS) and is spent once for the connection.
-  //
-  // Four conditions have to hold before the read is opened, and each is a check
-  // rather than a note because each is a way this could be wrong:
-  //   - The connection's one diagnosis is unspent (see peerAnswerDiagnosisSpent),
-  //     which is what keeps a cycle-start re-dial from re-dialing the peer every
-  //     tick.
-  //   - No teardown is under way. An abandoning teardown destroys the transport
-  //     beneath a dial in flight and that dial rejects with the very wording this
-  //     gates on, so a diagnosis there would read a peer about a close of this
-  //     adapter's own making -- and spend the operator's one diagnosis, and up to
-  //     the read budget of teardown wall clock, doing it.
-  //   - The failure is not one this adapter already classifies as terminal (see
-  //     isFatalDialError), which keeps that classification independent of the
-  //     fragment list the gate below rests on: a host-key rejection and an
-  //     unperformable key exchange keep the message it reads, unwrapped, however
-  //     that list grows or the stack rewords itself.
-  //   - The endpoint the dial used can be reproduced from the options it used.
+  // it already had, or one re-raised with what a bounded, credential-free read
+  // of the peer's first bytes says about it (see ./sftpPeerIdentification, which
+  // owns the gate, the read and the copy). Why it is seated at this one layer,
+  // and the constraints the read runs under, are in
+  // docs/spec/CHANNEL_SECURITY.md, "SFTP host-key verification", under
+  // "Diagnosing a peer that never identifies itself".
   private async diagnoseDialFailure(
     error: unknown,
     connectOptions: Ssh2SftpClient.ConnectOptions,
@@ -2860,31 +2331,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   }
 
   /**
-   * Ends the connection for good (see {@link FileTransportClient.end}).
-   *
-   * Closing an SFTP connection is a two-party act: this side disconnects and the
-   * server closes the connection. ssh2-sftp-client's `end()` settles only from
-   * the ssh2 Client's `'close'`, which a partner that accepts the disconnect and
-   * then goes quiet never produces -- so the wait is bounded here by
-   * {@link CLIENT_CLOSE_TIMEOUT_MS} and, past it, the connection is closed from
-   * this side (see {@link forceCloseTerminalTransport}). An `end()` that REJECTS
-   * closed nothing either, so it reaches that same close and the rejection is
-   * re-raised only behind it. Common to BOTH session modes: nothing on this path
-   * is gated on connection-per-poll. A partner that does close is unchanged -- its
-   * `end()` resolves inside the bound and returns with no added wait.
-   *
-   * Runs at most once per connection (see the class `terminalClose` field): a
-   * repeat or concurrent call -- the re-entrant one {@link withSessionRecovery}
-   * issues when a re-dial lands inside a teardown is the concurrent case -- awaits
-   * that same close and returns when it is complete, never over a connection still
-   * being closed.
-   *
-   * Teardown takes the session-transition queue like every other transition (see
-   * {@link runTransition}), so it neither pre-empts a dial or an idle release that
-   * is already running nor lets one begin behind it. That wait is bounded like
-   * every other, and teardown is the one kind whose expiry still closes something:
-   * it gives up ssh2-sftp-client's `end()` and closes the transport from this side
-   * (see {@link forceCloseAbandonedTeardown}).
+   * Ends the connection for good (see {@link FileTransportClient.end}), at most
+   * once per connection and under the session-transition queue like every other
+   * transition. Its two bounds, the forced close behind them, and the degraded
+   * branches are in docs/spec/CHANNEL_SECURITY.md, "The connection's terminal
+   * close".
    */
   async end(): Promise<void> {
     // Latch teardown and memoize the close in one synchronous step, before the
@@ -3132,50 +2583,10 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   /**
    * Connection-per-poll idle-boundary RELEASE (see the class `ephemeralSessions`
    * field and {@link FileTransportClient.releaseForIdle}). Closes the SFTP
-   * session NON-TERMINALLY so the next cycle's {@link ensureConnected} re-dials,
-   * without latching this adapter's `closing` (which would disable recovery) and
-   * without going through ssh2-sftp-client's `end()`.
-   *
-   * It drives the underlying ssh2 Client's own `end()`, not ssh2-sftp-client's:
-   * the latter latches `endCalled`, permanently disabling the constructor's
-   * global 'close' listener that clears `this.sftp` on a later server-driven drop
-   * -- the within-cycle recovery floor (retained in this mode) relies on that
-   * listener. Closing the ssh2 Client instead fires the same global 'close'
-   * listener with `endCalled` still false, clearing `this.sftp` and leaving the
-   * adapter in the exact cleared-session state a server drop produces, ready to
-   * re-dial. A no-op when the mode is off, during teardown, or when no session is
-   * live. Awaits the 'close' so the release is complete before the loop idles.
-   *
-   * A partner that accepts the disconnect and never closes the connection leaves
-   * that 'close' outstanding past the bound, on a transport `end()` has already
-   * ended. The release does not hand that state to the next cycle -- it forces the
-   * socket closed itself, so the session clears and the cycle re-dials (see
-   * {@link forceCloseEndedTransport}).
-   *
-   * The poll loop AWAITS this call and core forwards it unwrapped (see
-   * {@link runTransition}), so nothing above bounds it: its own duration is the
-   * loop's liveness bound, and the whole of that duration is bounded here. The
-   * close carries the {@link CLIENT_CLOSE_TIMEOUT_MS} ceiling, the forced close
-   * that may follow it the {@link FORCED_CLOSE_TIMEOUT_MS} one, and the acquire
-   * that precedes both the {@link TRANSITION_ACQUIRE_TIMEOUT_MS} one -- past which
-   * the release declines, having closed nothing, under a paced warning, and the
-   * loop cycles on rather than stalling to the peer-inactivity ceiling.
-   *
-   * The whole body, forced close included, holds the transition lock, so an
-   * operation ISSUED while it runs re-establishes the session through
-   * {@link withSessionRecovery}'s gate instead of racing the close or reporting the
-   * deliberate absence as a server drop. An operation already ON THE WIRE reaches
-   * no gate at entry, so this release does not begin at all while one is
-   * outstanding: {@link runTransition} keeps the boundary, the operation completes
-   * on the session it was issued against, and the first boundary past its
-   * settlement releases as usual. Each boundary it straddles costs the mode one
-   * idle gap and draws no warning -- a concurrent `send()` straddling a boundary
-   * is ordinary rather than anomalous -- though the run's totals are kept
-   * ({@link heldBoundaryCount}, {@link heldBoundaryStretchCount}); and it is a
-   * hold, not a drain: the release returns instead of awaiting the operation, so
-   * nothing above it waits any longer than it would have. An operation carrying no
-   * adapter-side deadline holds every boundary until the exchange ends; the hold's
-   * bound is the operation's, and {@link runTransition} states which have one.
+   * session NON-TERMINALLY so the next cycle's {@link ensureConnected} re-dials.
+   * Its bounds, the outstanding-operation hold that can defer it, and what each
+   * outcome records are in docs/spec/CHANNEL_SECURITY.md, "The
+   * outstanding-operation hold on an idle boundary".
    */
   releaseForIdle(): Promise<void> {
     if (!this.ephemeralSessions) return Promise.resolve();
@@ -3332,33 +2743,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     const seams = this.resolveTransportCloseSeams(internals);
     if ("missing" in seams) throw this.transportCloseSeamError(seams.missing);
     const { end, once, removeListener, socket } = seams;
-    // WHO ended this transport is the entry classification, and the three answers
-    // are not two. Its session reading is recorded BEFORE the close is driven: an
-    // operation already on the wire is torn by that close and reaches session
-    // recovery while this release is still running, and the boundary is what tells
-    // that recovery whose loss it suffered. A release that raises below has ended
-    // nothing and leaves the session reading live, which runTransition takes the
-    // reading back over on the way out, so the next drop stays classifiable as the
-    // drop it is.
-    //
-    // `readableEnded` is the PEER having started the teardown: its FIN has already
-    // been consumed, so ssh2 has emitted 'end' and the 'close' is on its way, and
-    // the end() below closes nothing. ssh2-sftp-client's global 'end' listener
-    // leaves `sftp` set, so the release runs its course as usual, over a session
-    // the peer has already taken.
-    //
-    // `writableEnded` without it is this side's half ended with no FIN back, before
-    // this release has driven its own end(), so something other than this release
-    // ended it -- the shape it is read for is a partner that dropped the SFTP
-    // session while withholding its connection close, whose SSH_MSG_DISCONNECT ssh2
-    // answers by ending its own socket (see sessionTransportEnded). What the reading
-    // establishes is only that the end was not this release's, which is what the
-    // classification turns on. The session is still this release's to take, and the
-    // reading recorded says so for the gate an operation issued after it passes --
-    // but the LOSS is not this release's doing, so it is charged to the partner.
-    //
-    // Neither half ended is the ordinary release, whose own end() below is what
-    // ends the transport.
+    // WHO ended this transport is the entry classification, recorded BEFORE the
+    // close is driven so an operation that close tears reads the boundary. How
+    // the two half-close flags are read is in docs/spec/DEPENDENCY_PINS.md,
+    // "Upgrading the SFTP Stack"; what each reading records, counts and warns
+    // is in docs/spec/CHANNEL_SECURITY.md, "What the accounting counts".
     const entry: IdleBoundaryOutcome =
       socket.readableEnded === true
         ? "closedByPeer"
@@ -3650,36 +3039,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   /**
    * Connection-per-poll cycle-START reconnect (see
    * {@link FileTransportClient.ensureConnected}). Re-establishes the session
-   * {@link releaseForIdle} released, reusing the retained full connect options
-   * (pinned host key, stored credentials, reconnect bound) with NO re-prompt and
-   * NO re-pinning: the dial re-runs the enforcing fail-closed host-key verifier
-   * that rides those options, so a server presenting a different key on a re-dial
-   * is still rejected. Resolves `true` once a session is live, `false` on a
-   * transient dial failure (the caller skips this cycle and retries next tick),
-   * and rejects only on a fatal condition -- a host-key rejection, or a key
-   * exchange this process cannot perform (see {@link isFatalDialError}) -- that
-   * terminates the exchange. A no-op returning `true` when the mode is off,
-   * during teardown, or when a session is already live. A dial that fails once
-   * teardown has been latched reports the same `false` and reports nothing to the
-   * operator -- this run has no next tick, and the failure may be the teardown's
-   * own destroy settling this very dial. The fatal classification takes
-   * precedence over that silence, inside the window as out.
-   *
-   * Core forwards it unwrapped (see {@link runTransition}), so its acquire of the
-   * transition lock -- which is what keeps two handshakes, or a handshake and a
-   * close, off the one shared Ssh2SftpClient -- is bounded by that lock's own
-   * {@link TRANSITION_ACQUIRE_TIMEOUT_MS} and nothing else. Past it the re-dial
-   * reports the same `false` a transient dial failure reports, under a paced
-   * warning, so the loop skips this cycle and retries on the next tick.
-   *
-   * Once a session is live it also re-issues whatever cleanup deletes an earlier
-   * idle gap left unperformed (see {@link drainDeferredCleanupDeletes}), which is
-   * why the drain is here and not inside the transition: it must run with the
-   * transition lock released, and every re-establishment in a run passes through
-   * this method. The drain is FENCED and the dial is not: core's poll loop treats
-   * a rejection from here as a terminal dial error, which is right for the fatal
-   * dial rejections above and wrong for a best-effort cleanup sweep, so the
-   * sweep's outcome cannot decide the exchange's.
+   * {@link releaseForIdle} released, reusing the retained connect options with
+   * no re-prompt and no re-pinning, and drains the deferred cleanup deletes
+   * behind it. What it resolves, rejects and warns is in
+   * docs/spec/CHANNEL_SECURITY.md, "SFTP mid-exchange session recovery" and
+   * "The deferred cleanup-delete record".
    */
   ensureConnected(): Promise<boolean> {
     if (!this.ephemeralSessions) return Promise.resolve(true);
@@ -3800,38 +3164,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
 
   /**
    * Lists a remote directory under the directory-listing bounds (see
-   * {@link ./listingGuard}), enforced at the transport read layer.
-   *
-   * It does NOT delegate to ssh2-sftp-client's `list()`: that passes the
-   * directory PATH to `sftp.readdir`, which internally loops readdir until EOF
-   * and accumulates the entire listing into one array before returning, so a
-   * hostile directory's full (attacker-controlled) entry set is already resident
-   * by the time any check could run. Instead this opens a directory handle and
-   * reads one server batch at a time, applying the count and filename-length
-   * checks as entries arrive, so an oversized or hostile directory is refused
-   * before the full listing is materialized -- the SFTP path carries the
-   * in-scope adversary (the server admin), so it must be bounded as firmly as
-   * the local one. A single READDIR response is itself bounded by the SSH
-   * transport's maximum packet size, so the bounded allocation is at most the
-   * cap plus one batch.
-   *
-   * The session is reached via the same internal `sftp` property
-   * createExclusive() uses; see its comment for the access-via-internals
-   * rationale and the connect-time guard against an upstream API rename.
-   *
-   * The streamed read is bounded for liveness as well as for size. A hostile
-   * server admin (in scope under docs/spec/CHANNEL_SECURITY.md) can
-   * hang this read indefinitely -- by returning valid but empty (count = 0)
-   * non-EOF readdir batches forever, which advance neither size bound and never
-   * signal EOF, or by withholding a readdir/close callback entirely so the call
-   * never settles. Both are bounded here: a total readdir round-trip cap
-   * ({@link MAX_LISTING_READDIR_BATCHES}) fails the progress-free flood, and a
-   * whole-operation wall-clock deadline ({@link SFTP_STALL_DEADLINE_MS}) fails the
-   * withheld-callback case (the only one no batch count can catch). Each surfaces
-   * a typed terminal {@link TransportOperationStalledError} (a `UsageError`, so
-   * the poll loop treats it as terminal) and closes the open directory handle on
-   * the way out rather than leaking it. The same liveness class on {@link get}
-   * and {@link createExclusive} is bounded by {@link withSftpOperationDeadline}.
+   * {@link ./listingGuard}), enforced at the transport read layer rather than by
+   * delegating to ssh2-sftp-client's `list()`. The bounds, why the read is
+   * batched, and the liveness caps over it are in
+   * docs/spec/CHANNEL_SECURITY.md, "Directory-listing bound" and
+   * "Per-operation liveness bounds".
    */
   list(path: string): Promise<FileInfo[]> {
     return this.runOperation({ recovery: "verbatim" }, () =>
@@ -4278,39 +3615,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   safeDelete(path: string): Promise<void> {
     // safeDelete must never reject (callers use it inside catch blocks, see the
     // FileTransportClient contract), so a dead session is a best-effort no-op
-    // that RESOLVES rather than rejecting like the other guarded methods. This
-    // is the realistic teardown path: a fatal protocol error stops the poll loop,
-    // then close() -> cleanup() -> safeDelete drives a delete against the still-
-    // alive hostile server, whose destroyed channel would buffer the request and
-    // never call back -- hanging the whole teardown. Short-circuiting here returns
-    // at once. (delete() above rejects instead: its callers want the error
-    // surfaced, whereas safeDelete's must never see one.)
-    //
-    // The OTHER stall -- a server that withholds the delete callback WITHOUT a
-    // preceding fatal error, so the short-circuit above does not fire -- is bounded
-    // by the same 60 s per-op deadline as delete()/rename()/exists(), so a hostile
-    // server cannot stall teardown to the coarse whole-exchange budget while every
-    // other write op fast-fails in 60 s. The never-reject contract is preserved by
-    // swallowing BOTH the delete's own error and the deadline's
-    // TransportOperationStalledError in the one trailing rejection arm: safeDelete
-    // still always resolves, just within 60 s rather than the budget. The
-    // whole-exchange budget (withTransportBudgetVoid in FileSyncConnection)
-    // remains the backstop beneath. No retry within the operation: a best-effort
-    // cleanup delete does not need one, exactly as delete() does not, and what
-    // re-issues a cleanup that did not take effect is the drain rather than a
-    // loop here.
-    //
-    // What that arm does before it resolves is offer the cleanup to the record
-    // for re-issue (see deferCleanupDelete, which admits only the protocol's own
-    // temp-<uuidv4()>.tmp and leaves every other path issued-once and best-effort):
-    // the rejection is this side's only evidence that the file is still there, and
-    // it is evidence core cannot read, since safeDelete resolves either way. It
-    // rides alongside the reading taken at issue time below rather than replacing
-    // it -- either alone would leave the record resting on a premise about the
-    // library, and the two together do not. What that redundancy costs, where the
-    // reading fires over a delete that then succeeds (a concurrent dial
-    // re-established the session under it), is one delete of an already-absent
-    // file at the next re-establishment, which then clears the record.
+    // that RESOLVES rather than rejecting like the other guarded methods. The
+    // entry guard, the deadline that bounds a withheld callback beneath it, and
+    // what the rejection arm offers to the record are in
+    // docs/spec/CHANNEL_SECURITY.md, "SFTP fatal-packet crash safety" and "The
+    // deferred cleanup-delete record".
     if (this.fatalSftpError !== undefined) return Promise.resolve();
     // Taken BEFORE the delete is issued, because what it reads is a boundary the
     // delete itself does not move: the release that took the session away is
@@ -4334,47 +3643,10 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   }
 
   // Record a cleanup delete that was not performed, so the next point at which a
-  // session exists re-issues it. Connection-per-poll only: the default
-  // held-session mode keeps no record and runs no drain, so it costs that mode
-  // neither state nor a round trip.
-  //
-  // The never-reject contract is what makes this the adapter's problem rather
-  // than the caller's. safeDelete resolves whether the file went away or not, so
-  // core cannot tell a performed cleanup from one issued into an idle gap, and a
-  // precondition spread over core's call sites would be an invariant held by
-  // discipline -- the same reason the recovery-wrapped operations' session gate is
-  // owned here (see reestablishAfterIdleRelease).
-  //
-  // ONLY the protocol's own in-flight writes are admitted: temp-<uuidv4()>.tmp,
-  // the message and ack shape, and temp-hello-<uuidv4()>.tmp, the rendezvous
-  // hello publish's -- both of them isProtocolTempName. safeDelete is handed
-  // durable protocol files too -- the shared rendezvous lock, and names read back
-  // from a listing of the directory the PEER writes into -- and a record is keyed
-  // on a PATH re-issued at an arbitrary later point, so admitting one of those
-  // would let a transiently-failed delete remove whatever has since come to
-  // occupy that name (a fresh authenticated abort marker the peer wrote in the
-  // interim, say). The temp shapes are what make the deferral sound: each name
-  // carries its own per-file v4 UUID, so the path a re-issue reaches is the file
-  // it was issued for or nothing. That holds for the hello shape as much as the
-  // message one, and the only hello temp reaching this record is one this party
-  // wrote itself, from the publish's own failure path -- the entry sweep applies
-  // a narrower predicate and never hands a listed hello temp to safeDelete (see
-  // docs/spec/CHANNEL_SECURITY.md). Every other path keeps the plain best-effort
-  // behavior -- issued once and never recorded. The grammar is core's own
-  // recognizer rather than a copy of it here, so the transport cannot drift from
-  // the sweeps that produce and remove these files.
-  //
-  // Refusing past the cap rather than evicting is deliberate; see
-  // MAX_DEFERRED_CLEANUP_DELETES.
-  //
-  // `reissuesLeft` is what a re-issue's own failure re-records with, one below
-  // what it ran with; a fresh record from safeDelete gets the whole budget. An
-  // exhausted budget is given up on HERE rather than at the re-issue, so every
-  // route back into the record passes the same shape and cap checks. Giving up
-  // ends that RECORDING and leaves nothing behind about the path, so the budget
-  // is not per path per connection -- a deliberate shape, and what it costs
-  // against a temp this party can never delete is in
-  // MAX_DEFERRED_CLEANUP_REISSUES.
+  // session exists re-issues it. Connection-per-poll only. What is admitted to
+  // the record, why that narrowing makes deferral sound, and the cap and budget
+  // over it are in docs/spec/CHANNEL_SECURITY.md, "The deferred cleanup-delete
+  // record".
   private deferCleanupDelete(
     path: string,
     reissuesLeft = MAX_DEFERRED_CLEANUP_REISSUES,
@@ -4406,38 +3678,10 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   }
 
   // Re-issue every recorded cleanup delete, at a point where a session exists.
-  // Hooked at the tail of ensureConnected() -- OUTSIDE the transition, so it
-  // neither dials nor closes under another transition's lock -- which is the one
-  // seam every re-establishment in a run passes through: the cycle-start re-dial
-  // the poll loop drives, the one core's close() drives before the terminal-frame
-  // drain, and the recovery chokepoint's own session gate (see
-  // reestablishAfterIdleRelease), which is what sweeps the record when an ordinary
-  // data-plane op is the first thing to follow the idle gap. That op waits the
-  // drain out before its first attempt, which the concurrent re-issues below and
-  // the gate's best-effort contract keep bounded.
-  //
-  // What is deliberately not hooked is redialForRecovery, a different re-dial: it
-  // runs inside an operation's own recovery arm, under that operation's budget,
-  // and whatever it leaves recorded is drained by one of the three above.
-  //
-  // Four states drain nothing, each for its own reason. A fatal SFTP error means
-  // the wrapper is destroyed and a request posted to it never calls back, which
-  // is exactly what safeDelete's own short-circuit refuses to do -- so a cleanup
-  // recorded BEFORE that error is not reintroduced by this drain afterwards. A
-  // latched teardown means end() is already closing the client and a delete
-  // issued now would race that close. No live session means there is nothing to
-  // issue onto, and the record keeps for the next re-establishment. An empty
-  // record means the mode's own healthy path, which must cost no round trip.
-  //
-  // The re-issues go out CONCURRENTLY, and each is bounded by
-  // DEFERRED_CLEANUP_DRAIN_TIMEOUT_MS rather than by the per-operation deadline
-  // every other round trip carries, so the whole drain is bounded by that one
-  // value -- which is what its position demands, its wait landing on core's
-  // close() and on the recovery gate's first attempt after an idle gap, neither
-  // of which has a budget over it. A re-issue that fails, the expiry of that
-  // bound included, is recorded again through the same capped record and against
-  // the budget that recording carried, so neither the record nor one recording's
-  // retries grow without bound.
+  // Hooked at the tail of ensureConnected(), OUTSIDE the transition. The seams
+  // it covers, the states that drain nothing, and the bound over the concurrent
+  // re-issues are in docs/spec/CHANNEL_SECURITY.md, "The deferred
+  // cleanup-delete record".
   private drainDeferredCleanupDeletes(): Promise<void> {
     if (this.deferredCleanupDeletes.size === 0) return Promise.resolve();
     if (this.fatalSftpError !== undefined) return Promise.resolve();
@@ -4464,42 +3708,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   }
 
   // One re-issued cleanup delete, on the same never-reject terms as safeDelete's
-  // own, and resolving whatever happens. A failure offers the path back to the
-  // record rather than dropping it -- a server that is briefly unreachable at one
-  // cycle boundary is reachable at the next -- against a budget of re-issues, so
-  // what ends a record is a delete this adapter saw succeed or a budget spent.
-  // Offered rather than kept: the re-record runs the same cap the first record
-  // did, so a full record refuses it like any other.
-  //
-  // It is the one round trip in this file deliberately issued OUTSIDE the
-  // tracked() bracket while its settlement is still owed, which is a statement
-  // about the idle-boundary release: a release MAY tear this operation off the
-  // wire, where the only other unbracketed round trip it can reach -- a listing's
-  // best-effort handle close, fired once that listing has already settled -- is
-  // work no guarantee is owed for, its tear costing what a withheld close
-  // callback costs anyway. Two things make the re-issue's tear sound. The record
-  // survives it -- the torn delete rejects, which offers the path back for the
-  // next re-establishment -- so the work is not lost, only deferred, which is the
-  // very thing the record exists to do. And a torn DELETE of this party's own
-  // temp cannot leave a state its re-issue misreads: the server either performed
-  // the unlink or did not, and the re-issue's notFoundOK reads the first as the
-  // success it is -- a library behaviour, so the integration suite drives it
-  // against a real server (a recorded temp that was never created, re-issued and
-  // cleared) rather than resting on this sentence. Counting it instead is what
-  // pins the mode off: the count is the release's precondition, so a server that
-  // accepts DELETE and withholds its callback would hold every boundary through
-  // the re-issue's whole deadline, and each held boundary leaves the session
-  // live for the next re-establishment to drain and re-issue again.
-  // The bracket's other duty does not reach here either: the heartbeat is never
-  // armed in the mode that keeps this record, so there is no keepalive for an
-  // uncounted round trip to draw alongside it. Both halves of that are checks
-  // rather than this sentence -- the unit suite drives a whole idle stretch in
-  // this mode with no keepalive firing, and a failed cleanup delete in the
-  // default mode with nothing recorded.
-  //
-  // The allowance is registered, with this reason, in
-  // scripts/sftp-tracked-round-trips.test.mjs, which fails on an unbracketed
-  // round trip that is not one of the three it names.
+  // own, and resolving whatever happens. Why it is issued OUTSIDE the tracked()
+  // bracket, and why a release may tear it, are in
+  // docs/spec/CHANNEL_SECURITY.md, "The deferred cleanup-delete record". The
+  // allowance is registered, with that reason, in
+  // scripts/sftp-tracked-round-trips.test.mjs.
   private reissueCleanupDelete(
     path: string,
     reissuesLeft: number,
