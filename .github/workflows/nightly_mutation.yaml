@@ -1,0 +1,77 @@
+name: Nightly Mutation Tests
+
+# Scheduled nightly mutation-testing run over the core security-bearing files --
+# packages/core/src/auth.ts, connection/abortMarker.ts, and
+# connection/encryptedMessageConnection.ts. Stryker mutates each of them and
+# re-runs packages/core's unit tier per mutant, so what this leg reports is
+# whether a test DISTINGUISHES the mutated behavior, not whether a line was
+# executed. It fails when any one file scores below the floor committed beside
+# it in packages/core/stryker.config.mjs; scripts/stryker-security.mjs is the
+# runner, and `npm run test:mutation` is the same run locally.
+#
+# Nightly rather than per-PR: each mutant costs a suite run, so the corpus takes
+# minutes even at three files, and the merge-time path stays fast. Runs only on
+# `schedule` and manual `workflow_dispatch` -- never on push or pull_request --
+# so the PR gate is unaffected.
+
+on:
+  schedule:
+    # 03:43 UTC nightly: off the hour per GitHub's guidance on top-of-hour
+    # scheduler congestion, clear of the 04:17 nightly in
+    # nightly_core_stress.yaml, and clear of the Monday 05:30-05:47 weekly
+    # window (codeql.yaml, image_smoke.yaml, dependency_audit.yaml). Two GitHub
+    # behaviors to know: a `schedule` trigger only fires from the workflow as it
+    # exists on the default branch, so no nightly runs until this file lands
+    # there (use the manual dispatch below to exercise it before then); and
+    # GitHub disables a scheduled workflow after ~60 days without repo activity,
+    # emailing the last committer -- re-enable it from the Actions tab if a
+    # long-quiet repo needs this guard back.
+    - cron: "43 3 * * *"
+  # On-demand run, e.g. to confirm a floor after landing tests that raise it.
+  workflow_dispatch:
+
+# One mutation run at a time per ref; do not cancel an in-flight run (it is
+# doing real, minutes-long work) -- this only guards a manual dispatch racing
+# the nightly schedule.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+# Least privilege: this test job only needs to read the repo.
+permissions:
+  contents: read
+
+jobs:
+  mutation:
+    name: Core security-file mutation score
+    runs-on: ubuntu-latest
+    # Upper bound on a hung run. The work fits well under this: the corpus
+    # measures around two minutes plus install and the core build, and any
+    # single mutant that reaches two minutes is failed as a timeout by the
+    # Stryker configuration rather than left to run.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # A scheduled workflow runs from the default branch, so the ref cannot
+          # be left implicit: the floors are committed against `staging`, which
+          # is what this leg measures. A dispatch started from another branch
+          # still measures `staging` -- measure a branch with `npm run
+          # test:mutation` in a checkout of it.
+          ref: staging
+      # Pins Node, installs from the lockfile, and builds @psilink/core. The
+      # mutation runner needs the installed tree: Stryker's vitest runner
+      # resolves vitest through the repository root's package.json.
+      - uses: ./.github/actions/setup
+      - name: Mutation score against the committed floors
+        run: npm run test:mutation
+      # The reports carry the surviving mutants themselves -- which line, which
+      # mutation, and which tests ran against it -- which is what a raised or
+      # dropped score has to be read against. Uploaded on failure above all,
+      # since that is the run somebody has to diagnose.
+      - name: Upload the mutation report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: core-security-mutation-report
+          path: ${{ runner.temp }}/psilink-stryker/reports/

@@ -8,7 +8,7 @@ The commands to run each suite are in
 [CONTRIBUTING.md](../CONTRIBUTING.md#testing). This document is the reference
 behind them: the integration-test backends and profiles, the console sentinel,
 the browser-suite plumbing, where shared test material lives, and the coverage
-rationale.
+and mutation-testing rationale.
 
 ## Integration tests
 
@@ -663,3 +663,51 @@ rather than blocking merges. Do not add a `thresholds` line to the Vitest
 coverage config. If coverage gating is ever wanted, it is scoped to
 `packages/core` and expressed as diff/patch coverage (coverage of the lines a PR
 changes), never an absolute whole-repo percentage -- and even that stays opt-in.
+
+## Mutation testing
+
+A nightly leg mutates the three core security-bearing files --
+`packages/core/src/auth.ts`, `src/connection/abortMarker.ts`, and
+`src/connection/encryptedMessageConnection.ts` -- and re-runs `packages/core`'s
+unit tier against every mutant. It measures something the coverage report above
+cannot: a line can be executed by a test that passes just as happily when the
+line's behavior is changed, and the mutation score counts only the mutants some
+test actually distinguishes. That is the gap it exists for -- a
+domain-separation label, a fail-closed guard, an error `kind` a caller branches
+on, each of them reading as covered while nothing pins it.
+
+```sh
+npm run test:mutation
+```
+
+The run takes a couple of minutes against an installed tree (`npm ci` plus the
+core build). Stryker is deliberately not a repository dependency -- it drags in
+a second copy of Vitest and its own TypeScript -- so
+`scripts/stryker-security.mjs` installs it into a private prefix under the work
+directory: `$RUNNER_TEMP` in CI, the system temp directory locally, and
+`PSILINK_STRYKER_WORK_DIR` overrides both. The HTML and JSON reports are written
+there too, so nothing lands in the working tree; the nightly workflow
+([`.github/workflows/nightly_mutation.yaml`](../.github/workflows/nightly_mutation.yaml))
+checks out `staging` explicitly and uploads both as a run artifact.
+
+### The floors
+
+`packages/core/stryker.config.mjs` carries the corpus and each file's committed
+floor in one table: the keys are the files to mutate, the values their minimum
+mutation score in whole percent. The gate is per file rather than Stryker's
+whole-run `thresholds.break`, so a file whose tests were gutted cannot be
+carried by the others; the leg fails naming the file, its score, and its floor.
+
+- **Raising a floor.** When tests land that raise a file's score, raise its floor
+  to the new score rounded down to a whole percent. The runner prints the value
+  to use for each file that has moved above its floor.
+- **Never lowering one.** A floor is not lowered to make a red leg green: a drop
+  means a test that used to distinguish the mutated behavior no longer does,
+  which is the finding the leg exists to report.
+- **Widening the corpus.** Adding a fourth file is one line in the table, with
+  the floor that file measures when it is added.
+
+Do not chase the score itself. The survivors these floors sit above are error
+and log message text and private bookkeeping flags with no external observer,
+which a test can only pin by asserting the exact wording -- worth doing where an
+operator acts on the text, not as a way to move the number.
