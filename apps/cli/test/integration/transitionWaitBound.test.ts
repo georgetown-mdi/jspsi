@@ -10,13 +10,16 @@ import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
 import { selectedBackend, startInProcessSftpServer } from "../sftpServer";
 import { serverAuth } from "../sftpServer/testContext";
 
-// The two unattended failures the bounded session-transition wait exists for,
-// driven against the real stack rather than a mock: a teardown and an idle release
-// each enqueued behind a re-dial that will not settle. The partner is a server that
-// accepts the TCP connection and never completes the SSH handshake, so the dial
-// ahead of them spends its whole budget -- four attempts at the 30 s connect
-// deadline plus the inter-attempt delays, about two minutes at the defaults, more
-// than an order of magnitude past the bound each of these waits is held to.
+// The unattended failures the bounded session-transition wait exists for, driven
+// against the real stack rather than a mock: a teardown, an idle release and a
+// mid-exchange recovery re-dial, each enqueued behind a dial that will not settle.
+// The partner is a server that accepts the TCP connection and never completes the
+// SSH handshake, so the dial ahead of them spends its whole budget -- four
+// attempts at the 30 s connect deadline plus the inter-attempt delays, about two
+// minutes at the defaults, more than an order of magnitude past the bound each of
+// these waits is held to. The last group also drives the other way a queued
+// transition ends without running: reaching the front of the queue with the
+// teardown latch already set.
 //
 // Only the in-process backend can be made to stall its handshake (a native sshd
 // cannot), so this runs there and stands up its own server to reach the session
@@ -379,6 +382,205 @@ inProcessOnly(
     } finally {
       await fsp.rm(dir, { recursive: true, force: true });
       await srv.stop();
+    }
+  },
+  TEST_TIMEOUT_MS,
+);
+
+// The stable opening of the rejection an operation gets when the library holds no
+// session: what both cases below expect their queued operation to end with, rather
+// than with anything the transition queue produced.
+const SESSION_NOT_OPEN = "SFTP session is not open";
+
+/** An adapter whose recovery re-dial is parked against a stalling server. */
+interface ParkedRedial {
+  srv: Awaited<ReturnType<typeof startInProcessSftpServer>>;
+  adapter: SSH2SFTPClientAdapter;
+  /** The served directory, as the client names it over SFTP. */
+  remote: string;
+  /** Dials the adapter has issued so far. */
+  dials: () => number;
+  /** Dials issued before the drop, so a case reads the ones that followed. */
+  dialsBeforeDrop: number;
+  /** The operation the drop tore, whose recovery re-dial is the parked one. */
+  torn: Promise<unknown>;
+  /**
+   * End the parked dial from the server's own side, with the stall disarmed so a
+   * re-attempt handshakes normally. What follows is either a recovered session or
+   * a dial the teardown latch refuses, depending on what the case did meanwhile;
+   * both warn, so a case calls this inside its own log capture.
+   */
+  releaseParkedDial: () => void;
+  cleanup: () => Promise<void>;
+}
+
+// Bring an adapter to the state both cases below start from: a live session the
+// server drops under an operation, whose recovery re-dial then parks against a
+// server that accepts the TCP connection and never completes the handshake. That
+// parked re-dial holds the session-transition lock for the whole of its dial
+// budget, so anything enqueued after it is a transition queued behind one that
+// will not settle -- which is the only way a recovery re-dial of its own reaches
+// either the bounded-wait abandon or the teardown-latch skip.
+async function parkRecoveryRedial(label: string): Promise<ParkedRedial> {
+  const srv = await startInProcessSftpServer();
+  const dir = await fsp.mkdtemp(path.join(srv.handle.backingDir, `${label}-`));
+  const remote = `${srv.handle.remoteRoot}/${path.basename(dir)}`;
+  const adapter = new SSH2SFTPClientAdapter();
+  const dials = countDials(adapter);
+  await adapter.connect({
+    host: srv.handle.host,
+    port: srv.handle.port,
+    ...serverAuth(srv.handle.usera),
+  });
+  // One settled round trip, so the drop below lands on a session proven live.
+  await adapter.list(remote);
+  const dialsBeforeDrop = dials();
+  // From here every handshake is one a re-dial completed, which is what a case
+  // reads to say nothing established a session behind the parked dial.
+  srv.sessionControls.resetHandshakeCount();
+  // Armed before the drop, so the re-dial the drop triggers is the first dial the
+  // stall meets and is the one that parks.
+  srv.sessionControls.stallHandshakeOnConnect = true;
+  srv.sessionControls.dropActiveAfterOps(1);
+  const torn = adapter.list(remote).catch((err: unknown) => err);
+  // Read from the server rather than after a delay: a client's socket exists from
+  // the moment it starts connecting, so only the server's own count says the
+  // stall has taken hold of the re-dial rather than of nothing yet.
+  await waitFor(() => srv.sessionControls.stalledConnectionCount() >= 1);
+  const releaseParkedDial = (): void => {
+    srv.sessionControls.stallHandshakeOnConnect = false;
+    srv.sessionControls.closeStalledConnections();
+  };
+  return {
+    srv,
+    adapter,
+    remote,
+    dials,
+    dialsBeforeDrop,
+    torn,
+    releaseParkedDial,
+    cleanup: async () => {
+      srv.sessionControls.stopStallingHandshakes();
+      releaseParkedDial();
+      await adapter.end().catch(() => {});
+      await fsp.rm(dir, { recursive: true, force: true });
+      await srv.stop();
+    },
+  };
+}
+
+inProcessOnly(
+  "a recovery re-dial enqueued behind one that will not settle declines at the " +
+    "bound and reports the session loss",
+  async () => {
+    const parked = await parkRecoveryRedial("queued-redial");
+    const { adapter, remote } = parked;
+    try {
+      // The whole case runs under one capture, the parked dial's release
+      // included: what that release lands is a re-dial that recovered a dropped
+      // session, and it warns the operator about the drop as it should.
+      const [outcome, logs] = await withCapturedLogs(
+        async () => {
+          // This operation finds no session, so its own recovery re-dial is
+          // enqueued behind the parked one and waits out the acquire bound.
+          const started = Date.now();
+          const error = await adapter.list(remote).then(
+            () => undefined,
+            (err: unknown) => err,
+          );
+          // Read where the declining re-dial left them, before the release below
+          // lets the parked one land and move them.
+          const declined = {
+            error,
+            elapsedMs: Date.now() - started,
+            dials: parked.dials(),
+            midExchangeReconnects: adapter.midExchangeReconnectCount,
+            handshakes: parked.srv.sessionControls.handshakeCount(),
+          };
+          parked.releaseParkedDial();
+          await parked.torn;
+          return declined;
+        },
+        (level) => level === "WARN" || level === "ERROR",
+      );
+
+      // It gave up at the bound rather than riding the parked dial's whole
+      // budget, which is more than an order of magnitude longer.
+      expect(outcome.elapsedMs).toBeGreaterThan(WAIT_FLOOR_MS);
+      expect(outcome.elapsedMs).toBeLessThan(WAIT_CEILING_MS);
+      // A declined re-dial reports nothing of its own: the operation fails with
+      // the session loss it already had, which names the drop and its remedies.
+      expect(String(outcome.error)).toContain(SESSION_NOT_OPEN);
+      // Nothing was dialed or established for it. The parked attempt is the only
+      // dial past the drop, and no handshake completed behind it.
+      expect(outcome.dials).toBe(parked.dialsBeforeDrop + 1);
+      expect(outcome.handshakes).toBe(0);
+      // And nothing was charged for it: the budget counts sessions LOST, and the
+      // re-dial that found this one gone had already charged it.
+      expect(outcome.midExchangeReconnects).toBe(1);
+      expect(logs.filter((entry) => entry.level === "ERROR")).toEqual([]);
+    } finally {
+      await parked.cleanup();
+    }
+  },
+  TEST_TIMEOUT_MS,
+);
+
+inProcessOnly(
+  "a recovery re-dial that reaches the front of the queue after the teardown " +
+    "latch establishes nothing",
+  async () => {
+    const parked = await parkRecoveryRedial("redial-races-teardown");
+    const { adapter, remote } = parked;
+    try {
+      const [outcome, logs] = await withCapturedLogs(
+        async () => {
+          const queued = adapter.list(remote).then(
+            () => undefined,
+            (err: unknown) => err,
+          );
+          // Let that operation's re-dial reach the queue behind the parked one
+          // before the latch is set, so what skips it is the teardown latch and
+          // not the entry check of a transition that was never queued.
+          await new Promise((resolve) => setTimeout(resolve, 250));
+
+          // The teardown latches synchronously, before its own transition is
+          // enqueued, so the queued re-dial reads it when its turn comes.
+          const closed = adapter.end();
+          // Settle the parked dial the partner's way, so the queue moves while
+          // the latch stands. The retry loop reads the latch between attempts,
+          // so nothing re-dials behind it.
+          parked.releaseParkedDial();
+
+          const started = Date.now();
+          const error = await queued;
+          const skipped = {
+            error,
+            settledMs: Date.now() - started,
+            dials: parked.dials(),
+            midExchangeReconnects: adapter.midExchangeReconnectCount,
+            handshakes: parked.srv.sessionControls.handshakeCount(),
+          };
+          await parked.torn;
+          await closed;
+          return skipped;
+        },
+        (level) => level === "WARN" || level === "ERROR",
+      );
+
+      // Skipped on sight rather than waited out: it never spent the acquire
+      // bound, which is what separates this from the case above.
+      expect(outcome.settledMs).toBeLessThan(WAIT_FLOOR_MS);
+      expect(String(outcome.error)).toContain(SESSION_NOT_OPEN);
+      // Nothing was dialed or established past the parked attempt, so no session
+      // outlived the close, and nothing further was charged: the loss was
+      // charged once, by the re-dial that found it.
+      expect(outcome.dials).toBe(parked.dialsBeforeDrop + 1);
+      expect(outcome.handshakes).toBe(0);
+      expect(outcome.midExchangeReconnects).toBe(1);
+      expect(logs.filter((entry) => entry.level === "ERROR")).toEqual([]);
+    } finally {
+      await parked.cleanup();
     }
   },
   TEST_TIMEOUT_MS,

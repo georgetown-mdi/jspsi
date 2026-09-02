@@ -247,6 +247,15 @@ inProcessOnly(
       // this adapter's own deliberate boundary.
       expect(receiverAdapter.reconnectCount).toBe(0);
       expect(receiverAdapter.midExchangeReconnectCount).toBe(0);
+      // The ledger those counters are drawn from attributes the run the same
+      // way, which is what says the zero above is an absence of partner drops
+      // rather than an absence of accounting: every session this run ended was
+      // its own boundary's, and no data operation was re-issued over one.
+      const receiverAccounting = receiverAdapter.sessionAccounting;
+      expect(receiverAccounting.losses.partner).toBe(0);
+      expect(receiverAccounting.losses.fatal).toBe(0);
+      expect(receiverAccounting.losses.deliberate).toBeGreaterThanOrEqual(2);
+      expect(receiverAdapter.transportRetryCount).toBe(0);
       // The operator hears about the partner that never closes, once -- the
       // warning is rate-escalated after the first, so a server that behaves this
       // way every cycle does not fill the log.
@@ -338,6 +347,17 @@ inProcessOnly(
       // boundary has an operator line of its own instead.
       expect(adapter.reconnectCount).toBe(1);
       expect(adapter.midExchangeReconnectCount).toBe(1);
+      // And the ledger behind them charges that one session to the partner and
+      // to nothing else, so the counters above are one reading of a single
+      // recorded cause rather than two tallies that happen to agree. The
+      // exists() this ran is not a data operation, so nothing was re-issued.
+      expect(adapter.sessionAccounting.losses).toEqual({
+        partner: 1,
+        deliberate: 0,
+        teardown: 0,
+        fatal: 0,
+      });
+      expect(adapter.transportRetryCount).toBe(0);
       expect(
         logs.filter((entry) => entry.message.includes("dropped mid-exchange")),
       ).toEqual([]);
