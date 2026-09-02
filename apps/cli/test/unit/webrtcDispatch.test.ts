@@ -6,7 +6,6 @@ import { vi, test, expect, beforeEach, afterEach } from "vitest";
 
 import type {
   ExchangeResult,
-  LinkageTerms,
   MessageConnection,
   PreparedExchange,
 } from "@psilink/core";
@@ -50,16 +49,7 @@ vi.mock("@openmined/psi.js", () => ({
 // would otherwise need the WASM stack and a dataset.
 vi.mock("@psilink/core", async (importActual) => {
   const actual = await importActual<typeof import("@psilink/core")>();
-  const stubLinkageTerms: LinkageTerms = {
-    version: "1.0.0",
-    date: "2025-01-01",
-    algorithm: "psi",
-    linkageStrategy: "cascade",
-    output: { expectsOutput: true, shareWithPartner: false },
-    deduplicate: false,
-    linkageFields: [],
-    linkageKeys: [],
-  };
+  const stubLinkageTerms = actual.getDefaultLinkageTerms("Acceptor");
   return {
     ...actual,
     getLogger: (_name: string) => ({
@@ -150,6 +140,7 @@ const {
   StandardizedDataset,
   UsageError,
   generateSharedSecret,
+  getDefaultLinkageTerms,
   sanitizeErrorForDisplay,
 } = await import("@psilink/core");
 
@@ -194,16 +185,7 @@ function linkedConnection(role: "inviter" | "acceptor"): MessageConnection {
 
 const minimalPrepared = {
   metadata: [],
-  linkageTerms: {
-    version: "1.0.0",
-    date: "2025-01-01",
-    algorithm: "psi",
-    linkageStrategy: "cascade",
-    output: { expectsOutput: true, shareWithPartner: false },
-    deduplicate: false,
-    linkageFields: [],
-    linkageKeys: [],
-  },
+  linkageTerms: getDefaultLinkageTerms("Inviter"),
   dataset: new StandardizedDataset([]),
   rawRows: [],
   rowCount: 0,

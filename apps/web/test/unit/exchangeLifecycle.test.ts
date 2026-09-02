@@ -10,6 +10,7 @@ import {
   StandardizedDataset,
   UsageError,
   describeResolvedRunShape,
+  getDefaultLinkageTerms,
   runExchange,
 } from "@psilink/core";
 
@@ -34,7 +35,6 @@ import type Peer from "peerjs";
 import type {
   AuthResult,
   ExchangeResult,
-  LinkageTerms,
   MessageConnection,
   PreparedExchange,
   ResolvedRunShape,
@@ -97,18 +97,8 @@ const SHARED_SECRET = "test-shared-secret";
 const EXPIRES = "2999-01-01T00:00:00.000Z";
 
 /** The agreed terms every stand-in below carries. The lifecycle forwards terms
- * without reading them, so the values are arbitrary; the construction is
- * complete so a change to core's shape fails this suite's typecheck. */
-const STUB_LINKAGE_TERMS: LinkageTerms = {
-  version: "1.0.0",
-  date: "2025-01-01",
-  algorithm: "psi",
-  linkageStrategy: "cascade",
-  output: { expectsOutput: true, shareWithPartner: false },
-  deduplicate: false,
-  linkageFields: [],
-  linkageKeys: [],
-};
+ * without reading them. */
+const STUB_LINKAGE_TERMS = getDefaultLinkageTerms("Stand-in Party");
 
 /** The prepared exchange `acquire` hands the lifecycle. runExchange is mocked,
  * so it is threaded through unread. */
