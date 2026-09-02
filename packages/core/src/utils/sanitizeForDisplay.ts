@@ -159,7 +159,9 @@ export function sanitizeForDisplay(
   // than split. The cap bounds the OUTPUT length, not the number of code points
   // read: an escape can expand a code point to ten characters, so a code-point
   // cap would let the output run to ~10x. A code point is appended only if its
-  // whole escape fits, so the output never ends mid-escape.
+  // whole escape fits, so the output never ends mid-escape; a cut that would
+  // leave a fragment of a marker a treatment already put in the value backs off
+  // to before it ({@link trimPartialControlCharacterMarker}).
   let out = "";
   let truncated = false;
   for (const ch of value) {
@@ -185,7 +187,172 @@ export function sanitizeForDisplay(
     out += piece;
   }
 
-  return (truncated ? out + DISPLAY_TRUNCATION_MARKER : out) as Displayable;
+  return (
+    truncated
+      ? trimPartialControlCharacterMarker(out) + DISPLAY_TRUNCATION_MARKER
+      : out
+  ) as Displayable;
+}
+
+/**
+ * How {@link replaceControlCharactersForDisplay} renders one control character:
+ * its code point in two lowercase hex digits, inside angle brackets.
+ *
+ * Angle brackets rather than the escape's own `\xHH` shape, and this is the
+ * whole point of the marker rather than a matter of taste. Every control
+ * character is a code point at or below U+009F, so two digits always suffice and
+ * the marker is the same four characters wide the escape would have rendered it
+ * -- a budget measured over a treated value is the budget the untreated one
+ * asked for.
+ *
+ * It contains NO BACKSLASH, which is what keeps it unreachable from a value's
+ * own printable bytes: {@link sanitizeForDisplay} doubles a literal backslash, so
+ * a value that spells an escape sequence character by character arrives showing
+ * two of them. A marker built out of the escape's alphabet would instead be
+ * spelled by exactly the bytes it is meant to be distinguishable from.
+ *
+ * Being printable ASCII, the marker is not authenticated and cannot be: the
+ * escape passes its text through unchanged, so a value that spells the marker
+ * renders identically to one that carried the character it names. That is the
+ * same open class {@link DISPLAY_TRUNCATION_MARKER} carries. What the marker's
+ * presence claims is only "this stands where a control character or its spelling
+ * did"; what an operator can rely on is the converse -- a control character a
+ * composition placed ITSELF still renders as the escape's `\xHH`, which no
+ * treated value can produce.
+ *
+ * Its domain is the control class and nothing wider, refused rather than
+ * rendered: {@link PARTIAL_CONTROL_CHARACTER_MARKERS} is read off that same
+ * class, so a marker for a code point outside it -- six characters wide for one
+ * above U+00FF -- would have prefixes the back-off does not cover, leaving
+ * standing exactly the fragment the pair exists to prevent.
+ */
+export function controlCharacterMarker(codePoint: number): string {
+  if (!CONTROL_CHARACTER.test(String.fromCodePoint(codePoint)))
+    throw new RangeError(
+      `control-character marker is defined over the control class only, not U+${codePoint.toString(16)}`,
+    );
+  return `<${codePoint.toString(16).padStart(2, "0")}>`;
+}
+
+/**
+ * Every control character (Unicode `Cc`: U+0000-U+001F and U+007F-U+009F), which
+ * is the class a first-party composition builds its own structure out of -- the
+ * line breaks separating a block's lines.
+ */
+const CONTROL_CHARACTERS = /\p{Cc}/gu;
+
+/**
+ * The same class as a whole-string test over one character, built from the
+ * pattern above rather than restated so the emitter's domain and the class the
+ * treatment rewrites cannot drift apart. A separate regex because the global one
+ * carries `lastIndex` state that a `test` call would advance.
+ */
+const CONTROL_CHARACTER = new RegExp(`^${CONTROL_CHARACTERS.source}$`, "u");
+
+/**
+ * Replace every control character in a value somebody else chose with
+ * {@link controlCharacterMarker}, at the site where the value is interpolated
+ * into a first-party composition.
+ *
+ * This is the third per-value treatment beside redaction and delimiting, and it
+ * answers what neither of those does. Delimiting keeps a value from spelling the
+ * clause structure around it in PRINTABLE bytes. It says nothing about a
+ * composition whose own structure is a control character -- a block that
+ * separates its lines with `\n` and is escaped whole where it is shown -- because
+ * the escape renders the composition's line break and a value's own to the SAME
+ * `\xHH` token, and neither the delimiters nor the escape distinguishes them.
+ * Replacing the value's leaves the escape's `\xHH` output producible only by the
+ * composition itself.
+ *
+ * Replacement, not escaping: the output carries no backslash and no character
+ * outside printable ASCII, so the sink's single {@link sanitizeForDisplay} pass
+ * has nothing left to rewrite and a treated fragment is not double-escaped (see
+ * CONTRIBUTING.md, Operator-facing escaping). It is the same shape as
+ * {@link ./sanitizeErrorForDisplay.redactPrivateKeyMaterial}, which likewise
+ * rewrites content at the composition site without becoming a second escaping
+ * altitude, and it is idempotent for the same reason: the replacement carries no
+ * control character of its own.
+ *
+ * Applied BEFORE any fit, which is what the order buys: a fit measures the
+ * rendered form, so a fragment fitted after this is fitted to what the operator
+ * is shown rather than to a width the treatment then changes. Its order against
+ * redaction is not load-bearing -- the private-key patterns span `[\s\S]` and
+ * their markers carry no control character, so neither treatment can make or
+ * unmake the other's match -- and that is held by a check rather than by this
+ * sentence (`packages/core/test/sanitizeForDisplay.test.ts`). For DISPLAY only,
+ * like every treatment beside it: a comparison, a hash, or a stored value takes
+ * the raw string.
+ */
+export function replaceControlCharactersForDisplay(value: string): string {
+  return value.replace(CONTROL_CHARACTERS, (character) =>
+    controlCharacterMarker(character.codePointAt(0)!),
+  );
+}
+
+/**
+ * Every proper, non-empty prefix of a marker
+ * ({@link replaceControlCharactersForDisplay}) -- what a cut landing inside one
+ * leaves behind. Read off the treatment by running it over the code points it
+ * rewrites, rather than restating the marker's shape, so a change to that shape
+ * cannot leave the back-off below matching the old one.
+ */
+const PARTIAL_CONTROL_CHARACTER_MARKERS: ReadonlySet<string> = new Set(
+  Array.from({ length: 0xa0 }, (_unused, codePoint) =>
+    String.fromCodePoint(codePoint),
+  ).flatMap((character) => {
+    const treated = replaceControlCharactersForDisplay(character);
+    if (treated === character) return [];
+    return Array.from({ length: treated.length - 1 }, (_unused, index) =>
+      treated.slice(0, index + 1),
+    );
+  }),
+);
+
+const LONGEST_PARTIAL_CONTROL_CHARACTER_MARKER = Math.max(
+  ...Array.from(PARTIAL_CONTROL_CHARACTER_MARKERS, (partial) => partial.length),
+);
+
+/**
+ * `text` with ONE trailing fragment of a control-character marker removed, so a
+ * routine that cut `text` to a budget hands on whole markers or none.
+ *
+ * A marker is four printable characters standing where a control character was,
+ * and a cut taken by length or by rendered cost knows nothing about it: cut down
+ * to `<`, `<0`, or `<0a`, what the operator meets is neither the value's bytes
+ * nor the marker, and the truncation marker that follows says only that
+ * something was dropped. Backing the cut off to before the marker's opening `<`
+ * undershoots the budget by up to three characters, which every caller's
+ * arithmetic already treats as an upper bound.
+ *
+ * One fragment is all a cut can leave, which is why this is a single back-off
+ * and not a loop: a whole marker ends in `>`, a character no proper prefix of a
+ * marker holds, so removing the longest matching tail removes exactly the split
+ * marker's prefix and cannot expose a second one behind it. Repeated, it would
+ * instead walk back over a run of marker SHAPES a value spelled in its own
+ * printable bytes and delete them without bound -- a value that is nothing else
+ * rendering as the truncation marker alone, below the floor of its own bytes
+ * every caller's arithmetic gives a value it shows.
+ *
+ * The back-off is keyed on the marker's SHAPE, which a value's own printable
+ * bytes can spell just as well: a value ending in a literal `<0a` is backed off
+ * over exactly as a cut marker is. That is the same open class the marker itself
+ * carries -- nothing in a treated string distinguishes the two -- and it costs
+ * the same three characters. Bounded to one, it leaves a residual: kept text can
+ * still END in marker-shaped literal characters, which are the value's own bytes
+ * shown faithfully rather than a marker the treatment split.
+ */
+export function trimPartialControlCharacterMarker(text: string): string {
+  for (
+    let length = Math.min(
+      LONGEST_PARTIAL_CONTROL_CHARACTER_MARKER,
+      text.length,
+    );
+    length > 0;
+    length -= 1
+  )
+    if (PARTIAL_CONTROL_CHARACTER_MARKERS.has(text.slice(-length)))
+      return text.slice(0, text.length - length);
+  return text;
 }
 
 /**
@@ -225,7 +392,10 @@ export function renderedDisplayCost(fragment: string): number {
  *
  * `value` arrives raw, and a code point is kept only when its WHOLE rendered
  * cost fits, so the clip falls on a code-point boundary and what the sink then
- * escapes can never end inside a partial escape sequence.
+ * escapes can never end inside a partial escape sequence. A clip that would end
+ * inside a marker a treatment already put in `value` backs off to before it
+ * ({@link trimPartialControlCharacterMarker}), which is why the budget is an
+ * upper bound rather than a width the result meets.
  *
  * Redact BEFORE clipping
  * ({@link ./sanitizeErrorForDisplay.redactPrivateKeyMaterial}), never after: the
@@ -249,7 +419,7 @@ export function clipToRenderedCost(value: string, budget: number): string {
     kept += ch;
     cost = next;
   }
-  return `${kept}${DISPLAY_TRUNCATION_MARKER}`;
+  return `${trimPartialControlCharacterMarker(kept)}${DISPLAY_TRUNCATION_MARKER}`;
 }
 
 /**

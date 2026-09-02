@@ -32,6 +32,7 @@ import { pipelineAlwaysDrops } from "../src/standardization";
 import {
   DISPLAY_TRUNCATION_MARKER,
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+  controlCharacterMarker,
   sanitizeForDisplay,
 } from "../src/utils/sanitizeForDisplay";
 import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";
@@ -2309,9 +2310,12 @@ test("a partner reference with an ANSI/control sequence is neutralized", () => {
     e.includes("legal agreement reference mismatch"),
   );
   expect(msg).toBeDefined();
-  // The raw ESC is gone (no terminal injection); it survives only as visible text.
+  // The raw ESC is gone (no terminal injection); it survives as the seam's own
+  // visible marker rather than as the escape's `\xHH`, which is what a control
+  // character psilink itself composed renders to.
   expect(rendered(msg!)).not.toContain("\x1b");
-  expect(rendered(msg!)).toContain("\\x1b");
+  expect(rendered(msg!)).not.toContain("\\x1b");
+  expect(rendered(msg!)).toContain(controlCharacterMarker(0x1b));
   // The trusted local value is intact and the mismatch is still reported.
   expect(rendered(msg!)).toContain('"MOU-001"');
 });
@@ -2377,7 +2381,8 @@ test("a partner payload column name with a control sequence is neutralized", () 
   const msg = errors.find((e) => e.includes("payload mismatch"));
   expect(msg).toBeDefined();
   expect(rendered(msg!)).not.toContain("\x1b");
-  expect(rendered(msg!)).toContain("\\x1b");
+  expect(rendered(msg!)).not.toContain("\\x1b");
+  expect(rendered(msg!)).toContain(controlCharacterMarker(0x1b));
 });
 
 test("the empty-receive diagnostic neutralizes a partner-supplied send column name", () => {
@@ -2395,7 +2400,8 @@ test("the empty-receive diagnostic neutralizes a partner-supplied send column na
   expect(msg).toBeDefined();
   expect(msg).toContain("local declared an empty payload.receive");
   expect(rendered(msg!)).not.toContain("\x1b");
-  expect(rendered(msg!)).toContain("\\x1b");
+  expect(rendered(msg!)).not.toContain("\\x1b");
+  expect(rendered(msg!)).toContain(controlCharacterMarker(0x1b));
 });
 
 // --- deduplicate: no cross-party consistency check ---------------------------

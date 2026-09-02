@@ -25,6 +25,7 @@ from a direction still open to a decision taken and built.
 | [key-establishment-fips-boundary.md](key-establishment-fips-boundary.md) | Decided and implemented. |
 | [linkage-rule-grounding.md](linkage-rule-grounding.md) | Proposal, pending adoption -- nothing here is adopted or shipped. |
 | [one-sided-disclosure.md](one-sided-disclosure.md) | Resolved - shipped as the opt-in `single-pass` linkage strategy (the cascade stays the default). |
+| [operator-message-control-characters.md](operator-message-control-characters.md) | Decided and built. |
 | [prebuild-provenance.md](prebuild-provenance.md) | Decided, built, and armed against a fork that attests. |
 | [psi-c-count-only.md](psi-c-count-only.md) | Decided and built. |
 | [receipt-run-binding.md](receipt-run-binding.md) | Resolved - built. |

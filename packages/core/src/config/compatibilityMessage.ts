@@ -23,11 +23,24 @@
 // rewrites, so a delimited fragment survives the display boundary byte for byte
 // and neither pass doubles the other's work.
 //
+// Beside the delimiting, and for the same reason at a different altitude of the
+// message, the seam TREATS the control characters inside a value
+// (`replaceControlCharactersForDisplay`). A composition whose own structure is a
+// control character -- a block separating its lines with `\n`, escaped whole
+// where it is shown -- renders that structure through the same `\xHH` the escape
+// gives a value's own line break, which is a boundary the delimiters do not
+// distinguish and the escape does not either. Replacing the value's leaves that
+// token producible only by the composition. Like the delimiting, it is not a
+// second escaping altitude: it emits printable ASCII with no backslash in it, so
+// the sink's single pass finds nothing left to rewrite.
+//
 // The brand is what makes the sweep hold. `validateCompatibility` accumulates
 // `CompatibilityMessageFragment`, not `string`, so a raw value interpolated into
 // a diagnostic -- an existing message edited, or a new mismatch check added --
 // does not compile. The two constructors are total and both safe, so there is no
 // "trust me" entry point a later reader has to police.
+
+import { replaceControlCharactersForDisplay } from "../utils/sanitizeForDisplay.js";
 
 declare const compatibilityMessageBrand: unique symbol;
 
@@ -50,10 +63,12 @@ declare const compatibilityMessageBrand: unique symbol;
  * `as CompatibilityMessageFragment` assertion. It exists only in the type system
  * -- no value carries the property at runtime.
  *
- * It claims delimiting, not escaping: the value inside a quoted run is the raw
- * partner value, still carrying whatever control characters or confusables it
- * arrived with, because the single-altitude rule assigns that pass to the display
- * sink. What the brand guarantees is that the value cannot leave its run.
+ * It claims delimiting and control-character treatment, not escaping: the value
+ * inside a quoted run is the raw partner value but for its control characters,
+ * still carrying whatever confusables and non-ASCII it arrived with, because the
+ * single-altitude rule assigns that pass to the display sink. What the brand
+ * guarantees is that the value can neither leave its run nor render as a control
+ * character the composition around it placed.
  */
 export type CompatibilityMessageFragment = string & {
   readonly [compatibilityMessageBrand]: true;
@@ -90,7 +105,9 @@ export const MAX_BARE_TERMS_VALUE_LENGTH = 64;
  * Chosen as the shape that cannot participate in a clause boundary at all. It
  * excludes {@link TERMS_VALUE_DELIMITER}, so such a value cannot close a
  * delimiter, and it excludes `,`, `[`, and `]`, the payload list's own
- * punctuation.
+ * punctuation. It is printable throughout, so a value carrying a control
+ * character takes the quoted form and is treated there rather than reaching a
+ * composition undelimited and untreated.
  *
  * The digit is what stops it spelling a connective. Excluding the space makes a
  * bare value exactly one whitespace-delimited token, but that alone does not keep
@@ -112,7 +129,8 @@ export const MAX_BARE_TERMS_VALUE_LENGTH = 64;
 export const BARE_TERMS_VALUE_PATTERN = /^[A-Za-z0-9._-]*[0-9][A-Za-z0-9._-]*$/;
 
 /**
- * Render a terms value as one delimited run: wrapped in
+ * Render a terms value as one delimited run: its control characters replaced
+ * ({@link replaceControlCharactersForDisplay}), then wrapped in
  * {@link TERMS_VALUE_DELIMITER}, with every delimiter inside it doubled.
  *
  * The doubling is the whole of the grammar -- scanning forward from the opening
@@ -122,11 +140,12 @@ export const BARE_TERMS_VALUE_PATTERN = /^[A-Za-z0-9._-]*[0-9][A-Za-z0-9._-]*$/;
  * clause's connective, its separator, or a delimiter of its own therefore reads
  * as content of one value rather than as structure the diagnostic asserted.
  *
- * Every character it adds is printable ASCII, which the display escape passes
+ * Every character it emits is printable ASCII, which the display escape passes
  * through unchanged, so the run's boundaries survive to the operator exactly as
- * composed. What can still cut a run is the display boundary's own truncation
- * (`COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH`), which drops the tail of an over-long
- * link: an operator then meets an unterminated run followed by
+ * composed and no byte of the value renders as a control character the
+ * composition placed. What can still cut a run is the display boundary's own
+ * truncation (`COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH`), which drops the tail of
+ * an over-long link: an operator then meets an unterminated run followed by
  * `DISPLAY_TRUNCATION_MARKER`, which reads as cut rather than as a further
  * clause.
  *
@@ -135,11 +154,11 @@ export const BARE_TERMS_VALUE_PATTERN = /^[A-Za-z0-9._-]*[0-9][A-Za-z0-9._-]*$/;
  * compared, hashed, nor stored.
  */
 export function quoteTermsValue(value: string): CompatibilityMessageFragment {
-  const escaped = value.replaceAll(
+  const doubled = replaceControlCharactersForDisplay(value).replaceAll(
     TERMS_VALUE_DELIMITER,
     TERMS_VALUE_DELIMITER + TERMS_VALUE_DELIMITER,
   );
-  return `${TERMS_VALUE_DELIMITER}${escaped}${TERMS_VALUE_DELIMITER}` as CompatibilityMessageFragment;
+  return `${TERMS_VALUE_DELIMITER}${doubled}${TERMS_VALUE_DELIMITER}` as CompatibilityMessageFragment;
 }
 
 /**
