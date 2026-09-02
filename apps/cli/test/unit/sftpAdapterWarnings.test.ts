@@ -67,8 +67,8 @@ const ESCAPED_ONCE = "/remote/a\\\\b\\x1b[31m-ack.json";
 const ESCAPED_TWICE = "/remote/a\\\\\\\\b\\\\x1b[31m-ack.json";
 
 // The warning builders, which take counters and a first-party bound and nothing
-// else: the whole set, so one added without an altitude row fails the sweep
-// below rather than joining it silently.
+// else. Hand-listed: a builder added to the module joins the sweep below only
+// once its row is added here, so add the row with the builder.
 const WARNING_BUILDERS: ReadonlyArray<
   readonly [string, (n: number) => string]
 > = [
