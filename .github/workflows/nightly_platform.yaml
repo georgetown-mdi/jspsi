@@ -1,0 +1,65 @@
+name: Nightly Platform Tests
+
+# Scheduled nightly run of the CLI unit suite on platforms the pull-request gate
+# does not cover. cli_build_and_test.yaml runs only on ubuntu-latest, so every
+# darwin-gated test in apps/cli/test/unit -- extendedAclCoverage.test.ts's
+# macOnly sites, fileUtils.test.ts's darwin describe -- has never executed on any
+# CI leg, only skipped. macOS minutes are free on a public repository, so this
+# workflow buys that coverage back on a nightly cadence rather than adding a
+# required runner class to every pull request.
+#
+# Structured for two platform jobs: macOS today, a Windows leg to follow in a
+# later change. Each job runs npm test -w apps/cli (the CLI's unit project) on
+# its own runs-on platform, so a platform-gated test executes rather than skips
+# on the leg that actually has that platform.
+#
+# Runs only on schedule and manual workflow_dispatch -- never on push or
+# pull_request -- so the PR gate is unaffected. Promoting this to a required
+# per-PR check is a later one-line call once it has stayed green.
+
+on:
+  schedule:
+    # 04:37 UTC nightly, off the hour per GitHub's guidance to avoid top-of-hour
+    # congestion on the shared scheduler, and clear of the other nightly and
+    # weekly scans: nightly_core_stress.yaml's 04:17, and the weekly Monday scans
+    # in codeql.yaml, image_smoke.yaml and dependency_audit.yaml starting at
+    # 05:30. Two GitHub behaviors to know: a `schedule` trigger only fires from
+    # the workflow as it exists on the default branch, so no nightly runs until
+    # this file lands there (use the manual dispatch below to exercise it before
+    # then); and GitHub disables a scheduled workflow after ~60 days without repo
+    # activity, emailing the last committer -- re-enable it from the Actions tab
+    # if a long-quiet repo needs this guard back.
+    - cron: "37 4 * * *"
+  # On-demand run, e.g. to confirm a platform fix without waiting for the
+  # schedule, or to exercise this workflow before it has reached the default
+  # branch (a schedule trigger only fires from there).
+  workflow_dispatch:
+
+# One run at a time per ref; do not cancel an in-flight run (it is doing real,
+# minutes-long work) -- this only guards a manual dispatch racing the nightly
+# schedule.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+# Least privilege: these test jobs only need to read the repo.
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: CLI unit tests (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # A scheduled workflow otherwise takes the default branch, but staging
+          # is promoted to main slowly, so checking out main here would catch a
+          # regression late. staging is the branch this nightly exists to watch.
+          ref: staging
+      # Pins Node, installs from the lockfile, and builds @psilink/core so the
+      # unit tests run against the compiled fork in dist/.
+      - uses: ./.github/actions/setup
+      - name: Unit tests (CLI)
+        run: npm test -w apps/cli
