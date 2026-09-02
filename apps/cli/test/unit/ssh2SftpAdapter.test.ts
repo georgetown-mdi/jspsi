@@ -15,11 +15,11 @@ import {
   sanitizeErrorForDisplay,
 } from "@psilink/core";
 
+import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
 import {
   MAX_DEFERRED_CLEANUP_DELETES,
   MAX_DEFERRED_CLEANUP_REISSUES,
-  SSH2SFTPClientAdapter,
-} from "../../src/connection/ssh2SftpAdapter";
+} from "../../src/connection/sftpDeferredCleanup";
 import {
   SFTP_REDIAL_WARN_INTERVAL,
   SftpAdapterLedger,
@@ -63,21 +63,29 @@ const releasableClient = () =>
     end: () => {},
   });
 
-// The cleanup deletes the adapter has recorded for re-issue, in record order.
-// Private state with no public surface: what it holds decides whether a later
+// The record of cleanup deletes the adapter is holding for re-issue. Private
+// state with no public surface: what it holds decides whether a later
 // re-establishment re-issues the delete, and its size is the bound the cap
 // enforces, neither of which is observable from outside until the drain runs.
+const deferredCleanupRecord = (
+  adapter: SSH2SFTPClientAdapter,
+): ReadonlyMap<string, number> =>
+  (
+    adapter as unknown as {
+      deferredCleanupDeletes: { recorded: ReadonlyMap<string, number> };
+    }
+  ).deferredCleanupDeletes.recorded;
+
+// The recorded paths, in record order.
 const deferredCleanupPaths = (adapter: SSH2SFTPClientAdapter): string[] => [
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ...((adapter as any).deferredCleanupDeletes as Map<string, number>).keys(),
+  ...deferredCleanupRecord(adapter).keys(),
 ];
 
 // The re-issues each recorded path has left, in record order: the budget that
 // decides whether a cleanup delete the server will never let succeed is retried
 // again or given up on.
 const deferredCleanupBudgets = (adapter: SSH2SFTPClientAdapter): number[] => [
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ...((adapter as any).deferredCleanupDeletes as Map<string, number>).values(),
+  ...deferredCleanupRecord(adapter).values(),
 ];
 
 // A remote path naming the protocol's own in-flight write, temp-<uuidv4()>.tmp:
@@ -5392,14 +5400,15 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     await adapter.safeDelete(recorded);
     expect(deferredCleanupPaths(adapter)).toEqual([recorded]);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const drain = (adapter as any).drainDeferredCleanupDeletes;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (adapter as any).drainDeferredCleanupDeletes = () =>
-      Promise.reject(new Error("the sweep blew up"));
+    const cleanupRecord = (
+      adapter as unknown as {
+        deferredCleanupDeletes: { drain: () => Promise<void> };
+      }
+    ).deferredCleanupDeletes;
+    const drain = cleanupRecord.drain;
+    cleanupRecord.drain = () => Promise.reject(new Error("the sweep blew up"));
     await expect(adapter.ensureConnected()).resolves.toBe(true);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (adapter as any).drainDeferredCleanupDeletes = drain;
+    cleanupRecord.drain = drain;
 
     // With the real drain restored and the record still standing, a fatal
     // host-key rejection reaches the caller and nothing is swept onto the

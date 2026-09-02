@@ -16,10 +16,8 @@ import {
   PutSource,
   TransportOperationStalledError,
   getLoggerForVerbosity,
-  isProtocolTempName,
   retryPromise,
   sanitizeErrorForDisplay,
-  redactAndSanitizeForDisplay,
 } from "@psilink/core";
 
 import { createCappedSink } from "./frameSizeGuard";
@@ -69,6 +67,10 @@ import type {
   Ssh2SftpClientInternals,
   Ssh2SftpError,
 } from "./sftpClientInternals";
+import {
+  MAX_DEFERRED_CLEANUP_DELETES,
+  DeferredCleanupDeletes,
+} from "./sftpDeferredCleanup";
 import {
   IDLE_BOUNDARY_ENDS_THE_GENERATION,
   SESSION_BOUNDARY_READINGS,
@@ -128,23 +130,6 @@ const FORCED_CLOSE_TIMEOUT_MS = 1_000;
 // ahead of it. Derivation: docs/spec/CHANNEL_SECURITY.md, "The
 // session-transition lock".
 const TRANSITION_ACQUIRE_TIMEOUT_MS = 10_000;
-
-/**
- * Cap on the connection-per-poll record of unperformed cleanup deletes of the
- * protocol's own in-flight temp file; overflow refuses rather than evicts.
- * Derivation: docs/spec/CHANNEL_SECURITY.md, "The deferred cleanup-delete
- * record".
- */
-export const MAX_DEFERRED_CLEANUP_DELETES = 64;
-
-/**
- * Re-issue budget for ONE RECORDING of a cleanup delete, after which that
- * recording gives up and its file is left behind. Derivation:
- * docs/spec/CHANNEL_SECURITY.md, "The deferred cleanup-delete record".
- *
- * @internal exported for the adapter's own tests
- */
-export const MAX_DEFERRED_CLEANUP_REISSUES = 3;
 
 /**
  * Deletes core's rendezvous entry sweep can put on the shared ssh2 `Client` in
@@ -231,15 +216,6 @@ const PEAK_SHARED_CLIENT_LISTENERS_PER_EVENT =
  */
 export const SHARED_SSH2_CLIENT_MAX_EVENT_LISTENERS =
   PEAK_SHARED_CLIENT_LISTENERS_PER_EVENT;
-
-/**
- * Per-operation deadline (ms) a drain re-issue is held to
- * ({@link SSH2SFTPClientAdapter.reissueCleanupDelete}) in place of the
- * {@link SFTP_STALL_DEADLINE_MS} every other round trip carries, and so the
- * bound on the whole drain. Derivation: docs/spec/CHANNEL_SECURITY.md, "The
- * deferred cleanup-delete record".
- */
-const DEFERRED_CLEANUP_DRAIN_TIMEOUT_MS = 5_000;
 
 // How a bounded teardown wait ended (see
 // SSH2SFTPClientAdapter.awaitBoundedTeardown). `settled` is the only one meaning
@@ -410,13 +386,6 @@ type SessionTransition<T> =
       abandoned: () => T;
     };
 
-// The final segment of a remote path. SFTP paths are POSIX-separated on the wire
-// whatever either end's platform is, so a backslash is an ordinary character in a
-// remote filename here and must not be read as a separator. A path with no
-// separator at all is its own basename.
-const remoteBasename = (path: string): string =>
-  path.slice(path.lastIndexOf("/") + 1);
-
 export class SSH2SFTPClientAdapter implements FileTransportClient {
   private client: Ssh2SftpClient;
   private options: Ssh2SftpClient.ConnectOptions | undefined;
@@ -583,24 +552,9 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // default (the whole-exchange single-session model). See
   // docs/notes/connection-per-poll-sftp.md.
   private readonly ephemeralSessions: boolean;
-  // Paths of the protocol's own in-flight temp writes whose cleanup delete was
-  // not performed, kept for re-issue at the next point a session exists (see
-  // deferCleanupDelete, which is where the shape is enforced, and
-  // drainDeferredCleanupDeletes). Populated only in connection-per-poll mode,
-  // where the never-reject cleanup delete -- outside the recovery chokepoint, and
-  // so outside the session gate that chokepoint applies -- can be issued into an
-  // idle gap and reach no session at all. Only the adapter can tell that no-op
-  // from a real delete: safeDelete resolves either way, so its caller in core
-  // cannot. Keyed by path because the same path recorded twice is one cleanup,
-  // and because the drain removes by identity; the value is the re-issues that
-  // path has left (see MAX_DEFERRED_CLEANUP_REISSUES), carried on the record
-  // rather than in a counter of its own so an entry cannot outlive its budget.
-  private readonly deferredCleanupDeletes = new Map<string, number>();
-  // The drain currently running, so a second call joins it rather than issuing a
-  // second delete for the same path. Cleared when it settles, which is what lets
-  // a later re-establishment drain a record made after this one took its
-  // snapshot.
-  private deferredCleanupDrain: Promise<void> | undefined;
+  // The cleanup deletes this adapter could not perform, kept for re-issue at the
+  // next point a session exists. Its own module: {@link ./sftpDeferredCleanup}.
+  private readonly deferredCleanupDeletes: DeferredCleanupDeletes;
 
   /**
    * `options.verbosity` sets the adapter's log verbosity (default 1).
@@ -684,6 +638,12 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     this.heartbeat = new SftpHeartbeat({
       ping: () => this.sendKeepalive(),
       log: this.log,
+    });
+    this.deferredCleanupDeletes = new DeferredCleanupDeletes({
+      enabled: this.ephemeralSessions,
+      log: { debug: (message: string) => this.log.debug(message) },
+      issueDelete: (path) => this.reissueCleanupDelete(path),
+      canDrain: () => this.canDrainDeferredCleanup(),
     });
   }
 
@@ -1288,8 +1248,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // per-operation bound before failing; consulting the captured error rejects at
   // once with the real cause instead. safeDelete shares the same fatalSftpError
   // check but RESOLVES (its never-reject contract); see it for why, and see
-  // drainDeferredCleanupDeletes for why a cleanup recorded before that error is
-  // not re-issued after it.
+  // canDrainDeferredCleanup for why a cleanup recorded before that error is not
+  // re-issued after it.
   private deadSessionError(
     operation: string,
     path: string,
@@ -2585,7 +2545,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     if (!this.ephemeralSessions) return Promise.resolve(true);
     return this.reestablishSession().then(async (live) => {
       if (live)
-        await this.drainDeferredCleanupDeletes().then(
+        await this.deferredCleanupDeletes.drain().then(
           () => {},
           () => {},
         );
@@ -3150,7 +3110,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // Taken BEFORE the delete is issued, because what it reads is a boundary the
     // delete itself does not move: the release that took the session away is
     // already behind this call.
-    if (this.idleReleaseLeftNoSession()) this.deferCleanupDelete(path);
+    if (this.idleReleaseLeftNoSession())
+      this.deferredCleanupDeletes.record(path);
     return this.runOperation({ recovery: "none" }, () =>
       this.tracked(
         this.boundByDeadline(
@@ -3161,104 +3122,33 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         ).then(
           () => {},
           () => {
-            this.deferCleanupDelete(path);
+            this.deferredCleanupDeletes.record(path);
           },
         ),
       ),
     );
   }
 
-  // Record a cleanup delete that was not performed, so the next point at which a
-  // session exists re-issues it. Connection-per-poll only. What is admitted to
-  // the record, why that narrowing makes deferral sound, and the cap and budget
-  // over it are in docs/spec/CHANNEL_SECURITY.md, "The deferred cleanup-delete
-  // record".
-  private deferCleanupDelete(
-    path: string,
-    reissuesLeft = MAX_DEFERRED_CLEANUP_REISSUES,
-  ): void {
-    if (!this.ephemeralSessions) return;
-    if (!isProtocolTempName(remoteBasename(path))) return;
-    if (reissuesLeft <= 0) {
-      this.log.debug(
-        `a cleanup delete was re-issued ${MAX_DEFERRED_CLEANUP_REISSUES} ` +
-          `times on this SFTP connection without succeeding, so it is not ` +
-          `recorded again and its file is left behind: ` +
-          redactAndSanitizeForDisplay(path),
-      );
-      return;
-    }
-    // An entry already standing keeps the budget it holds: a decrement arriving
-    // from a re-issue whose path was re-recorded while it was in flight is
-    // discarded rather than applied to that newer recording.
-    if (this.deferredCleanupDeletes.has(path)) return;
-    if (this.deferredCleanupDeletes.size >= MAX_DEFERRED_CLEANUP_DELETES) {
-      this.log.debug(
-        `${MAX_DEFERRED_CLEANUP_DELETES} cleanup deletes are already recorded ` +
-          `for re-issue on this SFTP connection, so this one is not recorded ` +
-          `and its file is left behind: ${redactAndSanitizeForDisplay(path)}`,
-      );
-      return;
-    }
-    this.deferredCleanupDeletes.set(path, reissuesLeft);
+  // Whether the record's drain may be issued now: a fatal SFTP protocol error
+  // leaves a wrapper on which a posted request never calls back -- the very thing
+  // the cleanup delete's own short-circuit refuses to do -- a latched teardown
+  // has end() already closing the client, and with no live session the record
+  // keeps for the next re-establishment. Each is in
+  // docs/spec/CHANNEL_SECURITY.md, "The deferred cleanup-delete record".
+  private canDrainDeferredCleanup(): boolean {
+    if (this.fatalSftpError !== undefined) return false;
+    if (this.closing) return false;
+    return this.hasLiveSession();
   }
 
-  // Re-issue every recorded cleanup delete, at a point where a session exists.
-  // Hooked at the tail of ensureConnected(), OUTSIDE the transition. The seams
-  // it covers, the states that drain nothing, and the bound over the concurrent
-  // re-issues are in docs/spec/CHANNEL_SECURITY.md, "The deferred
-  // cleanup-delete record".
-  private drainDeferredCleanupDeletes(): Promise<void> {
-    if (this.deferredCleanupDeletes.size === 0) return Promise.resolve();
-    if (this.fatalSftpError !== undefined) return Promise.resolve();
-    if (this.closing) return Promise.resolve();
-    if (!this.hasLiveSession()) return Promise.resolve();
-    // A drain already running holds the snapshot it took; a record made after
-    // that snapshot is left for the next re-establishment rather than issued
-    // alongside it, so no path is deleted twice concurrently and this cannot
-    // re-enter itself.
-    this.deferredCleanupDrain ??= this.runDeferredCleanupDrain().finally(() => {
-      this.deferredCleanupDrain = undefined;
-    });
-    return this.deferredCleanupDrain;
-  }
-
-  private runDeferredCleanupDrain(): Promise<void> {
-    const recorded = [...this.deferredCleanupDeletes];
-    this.deferredCleanupDeletes.clear();
-    return Promise.all(
-      recorded.map(([path, reissuesLeft]) =>
-        this.reissueCleanupDelete(path, reissuesLeft),
-      ),
-    ).then(() => {});
-  }
-
-  // One re-issued cleanup delete, on the same never-reject terms as safeDelete's
-  // own, and resolving whatever happens. Why it is issued OUTSIDE the tracked()
-  // bracket, and why a release may tear it, are in
-  // docs/spec/CHANNEL_SECURITY.md, "The deferred cleanup-delete record". The
+  // The round trip a re-issued cleanup delete makes, kept here rather than in the
+  // record so it stays where the adapter's two source checks examine it. Why it
+  // is issued OUTSIDE the tracked() bracket, and why a release may tear it, are
+  // in docs/spec/CHANNEL_SECURITY.md, "The deferred cleanup-delete record". The
   // allowance is registered, with that reason, in
   // scripts/sftp-tracked-round-trips.test.mjs.
-  private reissueCleanupDelete(
-    path: string,
-    reissuesLeft: number,
-  ): Promise<void> {
-    return withSftpOperationDeadline(
-      this.client.delete(path, true).then(() => {}),
-      DEFERRED_CLEANUP_DRAIN_TIMEOUT_MS,
-      () =>
-        transportOperationStalledError(
-          "file delete",
-          path,
-          `did not complete within ${DEFERRED_CLEANUP_DRAIN_TIMEOUT_MS} ms ` +
-            "(the server withheld the delete response)",
-        ),
-    ).then(
-      () => {},
-      () => {
-        this.deferCleanupDelete(path, reissuesLeft - 1);
-      },
-    );
+  private reissueCleanupDelete(path: string): Promise<void> {
+    return this.client.delete(path, true).then(() => {});
   }
 
   rename(fromPath: string, toPath: string): Promise<void> {

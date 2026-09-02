@@ -13,11 +13,11 @@ import {
 } from "@psilink/core";
 import { withCapturedLogs } from "@psilink/core/testing";
 
+import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
 import {
   MAX_DEFERRED_CLEANUP_DELETES,
   MAX_DEFERRED_CLEANUP_REISSUES,
-  SSH2SFTPClientAdapter,
-} from "../../src/connection/ssh2SftpAdapter";
+} from "../../src/connection/sftpDeferredCleanup";
 import { SftpAdapterLedger } from "../../src/connection/sftpAdapterLedger";
 import { selectedBackend, startInProcessSftpServer } from "../sftpServer";
 import { serverAuth } from "../sftpServer/testContext";
@@ -96,8 +96,10 @@ const outstandingOperations = (adapter: SSH2SFTPClientAdapter): number =>
 // trip, which is exactly what a bounded retry budget must stop it doing.
 const deferredCleanupPaths = (adapter: SSH2SFTPClientAdapter): string[] => [
   ...(
-    adapter as unknown as { deferredCleanupDeletes: Map<string, number> }
-  ).deferredCleanupDeletes.keys(),
+    adapter as unknown as {
+      deferredCleanupDeletes: { recorded: ReadonlyMap<string, number> };
+    }
+  ).deferredCleanupDeletes.recorded.keys(),
 ];
 
 // Whether the adapter's session property still reads set over a transport whose
