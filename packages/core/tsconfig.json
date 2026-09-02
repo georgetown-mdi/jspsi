@@ -4,7 +4,8 @@
     "src/**/*.ts",
     "test/**/*.ts",
     "rollup.config.ts",
-    "vitest.config.ts"
+    "vitest.config.ts",
+    "vitest.stryker.config.ts"
   ],
   "compilerOptions": {
     "module": "esnext",
