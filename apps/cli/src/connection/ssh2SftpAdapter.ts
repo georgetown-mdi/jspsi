@@ -15,8 +15,6 @@ import {
   PutOptions,
   PutSource,
   TransportOperationStalledError,
-  TransportPublishIndeterminateError,
-  UsageError,
   getLoggerForVerbosity,
   isProtocolTempName,
   retryPromise,
@@ -77,6 +75,22 @@ import {
   idleBoundarySessionReading,
 } from "./sftpIdleBoundary";
 import type { SessionBoundary } from "./sftpIdleBoundary";
+import {
+  SFTP_SESSION_CLOSED_MESSAGE,
+  cycleRedialDeclinedWarning,
+  deadSessionOperationError,
+  forcedIdleReleaseWarning,
+  idleReleaseDeclinedWarning,
+  idleReleaseDidNotCloseWarning,
+  indeterminatePublishError,
+  midExchangeReconnectBudgetExhaustedError,
+  partnerDropAtIdleBoundaryWarning,
+  remainingMidExchangeRedials,
+  sessionRecoveredEphemeralWarning,
+  sessionRecoveredHeldWarning,
+  transitionWaitExpiredError,
+  unreadableTransportLifecycleWarning,
+} from "./sftpAdapterWarnings";
 
 // SSH_FX_FAILURE: the generic SFTPv3 status (4) a server returns when an
 // operation did not take effect for a reason it does not further classify. The
@@ -275,7 +289,7 @@ type TransportCloseReading = "owed" | "delivered" | "unreadable";
 // under the adapter's one transition lock (see
 // SSH2SFTPClientAdapter.runTransition), so none can overlap another on the one
 // shared Ssh2SftpClient.
-type SessionTransitionKind =
+export type SessionTransitionKind =
   | "connect"
   | "ensureConnected"
   | "redialForRecovery"
@@ -395,16 +409,6 @@ type SessionTransition<T> =
       // simply did not get its turn.
       abandoned: () => T;
     };
-
-// list() and createExclusive() both run only after connect() has already
-// verified the 'sftp' session and every method it drives (see the guard
-// there), so a falsy session at either site means the connection was closed
-// or dropped after that successful connect, never an API change. Shared here
-// so the two throw sites cannot drift apart.
-const SFTP_SESSION_CLOSED_MESSAGE =
-  "SFTP session is not open: the connection was closed or dropped after a " +
-  "successful connect (typically a server idle or session-time-limit " +
-  "policy, or a network drop), so this operation cannot run.";
 
 // The final segment of a remote path. SFTP paths are POSIX-separated on the wire
 // whatever either end's platform is, so a backslash is an ordinary character in a
@@ -949,7 +953,10 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     const disposition = ABANDONED_TRANSITION_DISPOSITION[transition.kind];
     switch (disposition) {
       case "rejects":
-        throw this.transitionWaitExpiredError(transition.kind);
+        throw transitionWaitExpiredError(
+          transition.kind,
+          TRANSITION_ACQUIRE_TIMEOUT_MS,
+        );
       case "forcesTheTransportClosed":
         this.forceCloseAbandonedTeardown();
         return this.abandonedTransitionValue(transition);
@@ -975,20 +982,6 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
           `returns its own value, but the transition carries none`,
       );
     return transition.abandoned();
-  }
-
-  // The abandon of a wait that has no benign value to report: a dial cannot report
-  // a session it did not establish. Names the bound, and is deliberately distinct
-  // from the teardown latch's "already been closed" refusal -- that connection was
-  // closed on purpose, whereas this one was never opened.
-  private transitionWaitExpiredError(kind: SessionTransitionKind): Error {
-    return new Error(
-      `this SFTP connection's ${kind} waited ` +
-        `${TRANSITION_ACQUIRE_TIMEOUT_MS} ms for the session transition ahead ` +
-        `of it and gave up: a dial cannot run alongside another transition on ` +
-        `the one shared client, so nothing was dialed. Open a new connection ` +
-        `to retry.`,
-    );
   }
 
   // Whether ssh2-sftp-client is holding an SFTP session. It clears the property on
@@ -1279,27 +1272,13 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     return this.transportAwaitingClose ? "owed" : "delivered";
   }
 
-  // Reported on the terms every other seam failure on this path is: what broke,
-  // what it costs, and this project's upgrade checklist. Paced to once per adapter
-  // because the condition is the installed version's rather than any one drop's,
-  // so a second copy carries nothing the first did not.
+  // Paced to once per adapter because the condition is the installed version's
+  // rather than any one drop's, so a second copy carries nothing the first did
+  // not.
   private warnUnreadableTransportLifecycle(): void {
     if (this.transportLifecycleUnreadableWarned) return;
     this.transportLifecycleUnreadableWarned = true;
-    this.log.warn(
-      `Re-dialing an SFTP session the partner's server dropped mid-exchange ` +
-        `means telling a connection that still owes ssh2 its 'close' from one ` +
-        `whose events have all been delivered, which is watched through ` +
-        `ssh2's client.on() -- not available after connect(), so there is no ` +
-        `reading to take. Rather than dial into a window it cannot see, every ` +
-        `mid-exchange re-dial this exchange closes the connection from this ` +
-        `side first and waits up to ${FORCED_CLOSE_TIMEOUT_MS} ms for that ` +
-        `close, which costs that wait on a connection that had already ` +
-        `closed. The installed ssh2 / ssh2-sftp-client version may have ` +
-        `renamed, relocated, or removed it - re-verify the internal premises ` +
-        `per the "Upgrading the SFTP Stack" checklist in ` +
-        `docs/spec/DEPENDENCY_PINS.md`,
-    );
+    this.log.warn(unreadableTransportLifecycleWarning(FORCED_CLOSE_TIMEOUT_MS));
   }
 
   // A terminal error built from a previously captured fatal SFTP-protocol error,
@@ -1310,24 +1289,15 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // once with the real cause instead. safeDelete shares the same fatalSftpError
   // check but RESOLVES (its never-reject contract); see it for why, and see
   // drainDeferredCleanupDeletes for why a cleanup recorded before that error is
-  // not re-issued after it. A typed TransportOperationStalledError (a UsageError)
-  // so the poll loop and the rendezvous gate treat it as terminal, the same as
-  // every other liveness bound.
-  //
-  // The captured error's message is the one fragment of this refusal the SERVER
-  // chose, so it is handed over as the builder's server-reported fragment rather
-  // than composed into the first-party sentence naming it: on one link those bytes
-  // would spend the sentence's budget and could compose framing of their own that
-  // read as this side's.
+  // not re-issued after it.
   private deadSessionError(
     operation: string,
     path: string,
   ): TransportOperationStalledError | undefined {
     if (this.fatalSftpError === undefined) return undefined;
-    return transportOperationStalledError(
+    return deadSessionOperationError(
       operation,
       path,
-      "the SFTP session was killed by a fatal server protocol error",
       this.fatalSftpError.message,
     );
   }
@@ -1427,43 +1397,6 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     );
   }
 
-  // The terminal error surfaced when the cumulative mid-exchange reconnection
-  // budget (max_reconnect_attempts) is exhausted in the default held-session mode.
-  // A UsageError so every op path treats it as terminal -- the poll loop stops on a
-  // UsageError, and the consume-delete retry rethrows one rather than swallowing it
-  // as a transient hiccup -- and so the CLI maps it to a non-zero exit. The message
-  // names the partner-server drop, states the exhaustion in the unit the budget
-  // spends -- sessions LOST, as the ledger's live tally rather than the configured
-  // maximum, so this line and doCleanup's end-of-run summary read the same counter
-  // and the terminal loss charged before the throw cannot put them off by one --
-  // and gives the two remedies by their
-  // operator-reachable names (the flag and the config field); it carries no
-  // partner-controlled text. A budget of zero gets its own opening clause: there is
-  // no allowance to describe as spent, so it names the first drop terminal instead.
-  private midExchangeReconnectBudgetExhaustedError(): UsageError {
-    const max = this.operativeMaxReconnectAttempts();
-    const lost = this.ledger.midExchangeReconnectCount;
-    const budgetClause =
-      max === 0
-        ? `max_reconnect_attempts=0 permits no mid-exchange reconnection, so ` +
-          `this first drop is terminal and the exchange cannot continue`
-        : `the mid-exchange reconnection budget is exhausted: ` +
-          `${lost} ${lost === 1 ? "session" : "sessions"} lost over the whole ` +
-          `exchange against a max_reconnect_attempts=${max} budget, and every ` +
-          `session lost spent one whether its re-dial succeeded, failed, or ` +
-          `was refused, so the exchange cannot continue`;
-    return new UsageError(
-      `The SFTP session dropped mid-exchange and ${budgetClause}. The partner's ` +
-        `SFTP server is dropping the held session -- typically a server-enforced ` +
-        `session-duration or idle limit you cannot change. Raise ` +
-        `max_reconnect_attempts if the link is merely flaky, or switch this ` +
-        `connection to connection-per-poll mode (--connection-per-poll, or ` +
-        `connection_per_poll: true in the connection options) if the server caps ` +
-        `session lifetime: it dials a fresh session each poll cycle instead of ` +
-        `holding one for the whole exchange.`,
-    );
-  }
-
   // Surface a transparently-recovered mid-exchange session drop to the operator
   // at default verbosity; what is counted, charged and warned is in
   // docs/spec/CHANNEL_SECURITY.md, "What the accounting counts".
@@ -1477,57 +1410,16 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   private warnSessionRecovered(): void {
     const count = this.ledger.midExchangeReconnectCount;
     if (this.ephemeralSessions) {
-      this.ledger.pacedWarn(
-        count,
-        () =>
-          `The SFTP session dropped mid-exchange and was transparently ` +
-          `re-dialed (${count} ${count === 1 ? "session" : "sessions"} lost to ` +
-          `the partner so far this exchange); the exchange continues. ` +
-          "Connection-per-poll dials a fresh session per poll cycle, so this is " +
-          "either a drop within a poll cycle -- the link or the partner's server " +
-          "faulting mid-cycle, which is what to investigate -- or a rendezvous " +
-          "wait, which runs before the poll loop starts cycling and holds one " +
-          "session throughout, so the partner's session-lifetime, idle, or " +
-          "operation cap cut it. The rendezvous case needs nothing from you: the " +
-          "re-dial is this mode working and the exchange survives the cap. These " +
-          "re-dials are not charged against max_reconnect_attempts; each " +
-          "operation remains bounded by the peer-inactivity timeout " +
-          "(peer_timeout_ms), which ends the exchange if they stop it from " +
-          "making progress.",
+      this.ledger.pacedWarn(count, () =>
+        sessionRecoveredEphemeralWarning(count),
       );
       return;
     }
     const budget = this.operativeMaxReconnectAttempts();
-    const remaining = Math.max(budget - count, 0);
+    const remaining = remainingMidExchangeRedials(budget, count);
     this.ledger.pacedWarn(
       count,
-      () => {
-        const recovered =
-          count === 1
-            ? "The SFTP session dropped mid-exchange and was transparently " +
-              "re-dialed; the exchange continues."
-            : `The SFTP session has now dropped mid-exchange ${count} times ` +
-              `this exchange; this drop was transparently re-dialed and the ` +
-              `exchange continues.`;
-        const budgetLeft =
-          remaining === 0
-            ? `That was the last re-dial allowed by ` +
-              `max_reconnect_attempts=${budget}: the next mid-exchange drop ends ` +
-              `the exchange.`
-            : `${remaining} further mid-exchange re-dial` +
-              `${remaining === 1 ? " is" : "s are"} allowed by ` +
-              `max_reconnect_attempts=${budget} before the exchange fails.`;
-        return (
-          `${recovered} This is typically the partner's SFTP server enforcing a ` +
-          `session-duration or idle limit you cannot change. Because the default ` +
-          `mode holds one SFTP session open for the whole exchange, it will keep ` +
-          `recurring regardless of your settings; --connection-per-poll, which ` +
-          `dials a fresh session each poll cycle instead of holding one, is the ` +
-          `real fix for that case, and a longer poll interval ` +
-          `(--polling-frequency) helps only if the server is instead reacting to ` +
-          `how often this exchange queries it. ${budgetLeft}`
-        );
-      },
+      () => sessionRecoveredHeldWarning(count, budget),
       remaining === 0,
     );
   }
@@ -1632,7 +1524,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       this.ledger.midExchangeReconnectCount >=
         this.operativeMaxReconnectAttempts();
     const charged = this.ledger.recordLoss(this.ledger.liveGeneration, cause);
-    if (budgetSpent) throw this.midExchangeReconnectBudgetExhaustedError();
+    if (budgetSpent)
+      throw midExchangeReconnectBudgetExhaustedError(
+        this.ledger.midExchangeReconnectCount,
+        this.operativeMaxReconnectAttempts(),
+      );
     return charged && cause === "partner";
   }
 
@@ -2423,52 +2319,20 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     count: number,
   ): void {
     if (outcome === "declined")
-      this.ledger.pacedWarn(
-        count,
-        () =>
-          `The connection-per-poll idle release did not close the SFTP session: ` +
-          `another session transition on this connection -- typically a dial ` +
-          `against an unresponsive server -- did not complete within the ` +
-          `release's ${TRANSITION_ACQUIRE_TIMEOUT_MS} ms wait, and closing the ` +
-          `session alongside it would corrupt the one shared client. The session ` +
-          `may still be live and held across this idle gap; the next poll cycle ` +
-          `releases again and the exchange continues (${count} idle ` +
-          `${count === 1 ? "boundary" : "boundaries"} released nothing this way ` +
-          `so far this exchange).`,
+      this.ledger.pacedWarn(count, () =>
+        idleReleaseDeclinedWarning(count, TRANSITION_ACQUIRE_TIMEOUT_MS),
       );
     if (outcome === "didNotClose")
       // Unpaced deliberately: this is the one degraded outcome with no run
       // total, so every occurrence is its own record.
-      this.log.warn(
-        "The connection-per-poll idle release did not close the SFTP session " +
-          "and its transport is still writable, which the ssh2 client's end() " +
-          "should have ended: the session may still be live and held across " +
-          "this idle gap, which is the one thing this mode exists to prevent. " +
-          "Check the ssh2 changelog.",
-      );
+      this.log.warn(idleReleaseDidNotCloseWarning());
   }
 
-  // The partner's server ended a session at an idle boundary with nothing of this
-  // side's on the wire, so no operation was torn and no recovery re-dial ran: the
-  // next cycle simply dials again. Counted as the lost session it is, and reported
-  // on the shared cadence because a server that caps session lifetime does this
-  // every cycle. Deliberately not the recovery line's wording -- nothing was
-  // transparently re-dialed here, and the remedy differs.
+  // Counted as the lost session it is, and reported on the shared cadence because
+  // a server that caps session lifetime does this every cycle.
   private warnPartnerDropAtIdleBoundary(): void {
     const count = this.ledger.countPartnerDropAtBoundary();
-    this.ledger.pacedWarn(
-      count,
-      () =>
-        `The partner's SFTP server ended the SFTP session before this ` +
-        `connection-per-poll idle boundary rather than in answer to it, with ` +
-        `nothing of this side's on the wire, so no operation was interrupted ` +
-        `and the next poll cycle dials a fresh session; the exchange continues ` +
-        `(${count} idle ${count === 1 ? "boundary" : "boundaries"} met a ` +
-        `session the partner had already ended so far this exchange). This is ` +
-        `typically a server-enforced session-duration, idle or operation limit ` +
-        `you cannot change, which connection-per-poll is the mode for: these ` +
-        `sessions are not charged against max_reconnect_attempts.`,
-    );
+    this.ledger.pacedWarn(count, () => partnerDropAtIdleBoundaryWarning(count));
   }
 
   // The locked body of releaseForIdle. Taking the transition lock for the whole of
@@ -2699,24 +2563,13 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     return !internals.sftp;
   }
 
-  // Report an idle boundary the connection-per-poll release closed itself. A
-  // partner that never closes forces one every cycle, so the line takes the shared
-  // warn cadence. Nothing leaks, and a loss suffered at one of these boundaries is
-  // reported by its own line or by the path that recovered it rather than by this
-  // one, so pacing it costs the operator nothing.
+  // A partner that never closes forces one of these every cycle, so the line takes
+  // the shared warn cadence. Nothing leaks, and a loss suffered at one of these
+  // boundaries is reported by its own line or by the path that recovered it rather
+  // than by this one, so pacing it costs the operator nothing.
   private warnForcedRelease(): void {
     const count = this.ledger.forcedReleaseCount;
-    this.ledger.pacedWarn(
-      count,
-      () =>
-        `The partner's SFTP server did not close the connection within the ` +
-        `connection-per-poll idle release's bound -- a server that leaves ` +
-        `connections half-open, or one merely slower to answer than the ` +
-        `bound allows for. The release closed it from this side and the next ` +
-        `poll cycle dials a fresh session; the exchange continues (${count} ` +
-        `idle ${count === 1 ? "boundary" : "boundaries"} closed this way so ` +
-        `far this exchange).`,
-    );
+    this.ledger.pacedWarn(count, () => forcedIdleReleaseWarning(count));
   }
 
   /**
@@ -2791,24 +2644,14 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     });
   }
 
-  // The cycle-start re-dial gave up its wait for the transition ahead of it: it
-  // dialed nothing, so this cycle carries no session and the poll loop skips it.
   // Counted apart from the idle release's decline (warnIdleReleaseDeclined) though
   // core drives both signals once per poll cycle: one stuck transition declines
   // both, and a shared count would pace each line on the other's occurrences and
   // misstate both numbers.
   private warnCycleRedialDeclined(): void {
     const count = this.ledger.countDeclinedCycleRedial();
-    this.ledger.pacedWarn(
-      count,
-      () =>
-        `ephemeral SFTP re-dial declined: another session transition on this ` +
-        `connection did not complete within the re-dial's ` +
-        `${TRANSITION_ACQUIRE_TIMEOUT_MS} ms wait, and dialing alongside it ` +
-        `would corrupt the one shared client; skipping this poll cycle and ` +
-        `retrying on the next tick (${count} ` +
-        `${count === 1 ? "cycle" : "cycles"} skipped this way so far this ` +
-        `exchange)`,
+    this.ledger.pacedWarn(count, () =>
+      cycleRedialDeclinedWarning(count, TRANSITION_ACQUIRE_TIMEOUT_MS),
     );
   }
 
@@ -3479,44 +3322,10 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
               );
               if (sourceHeld) throw error;
             }
-            throw this.indeterminatePublishError(error, toPath);
+            throw indeterminatePublishError(error, toPath);
           }),
       },
       () => this.renameOnce(fromPath, toPath),
-    );
-  }
-
-  // The rejection for a publish whose fate the transport cannot settle: a
-  // mid-operation drop tore the rename, and what the recovery could read of the
-  // aftermath is the state a landed-then-consumed publish and an unlanded one
-  // share. It stays a rejection -- nothing here reports an unpublished write as
-  // sent.
-  //
-  // Names the publish rather than a message, and prescribes no next step:
-  // rename() is shared machinery, and the four publishes reaching it -- the
-  // message loop's send(), its ack, the rendezvous joining->hello rename, and the
-  // abort marker -- share no remedy, so this carries no recovery-hint tag either.
-  // The one caller whose remedy is established re-raises this as its own tagged
-  // error holding this one as the `cause` (FileSyncMessageLoop's send()).
-  //
-  // Written to survive the display boundary, which caps each error in a rendered
-  // cause chain at COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH: the sentence the operator
-  // must act on leads, and the destination -- named because what this party
-  // published may now be in the peer's hands under it -- comes last, where the
-  // cap costs least.
-  // The re-issue's own error is carried only as the `cause`, so the SFTP status
-  // it names is rendered on its own line under its own cap rather than spending
-  // this message's. `toPath` is partner-derived on the ack and rendezvous rename
-  // paths, so it is escaped like every other path this app puts in an error.
-  private indeterminatePublishError(
-    error: unknown,
-    toPath: string,
-  ): TransportPublishIndeterminateError {
-    return new TransportPublishIndeterminateError(
-      `the publish may or may not have reached the partner: it was cut off ` +
-        `mid-operation and could not be confirmed afterwards. ` +
-        `Destination: ${toPath}`,
-      { cause: error },
     );
   }
 
