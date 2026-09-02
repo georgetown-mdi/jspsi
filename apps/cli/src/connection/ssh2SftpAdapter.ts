@@ -1175,10 +1175,12 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   //
   // The password is read from the live connect options at answer time, NOT
   // captured at attach time, so a reconnect under a different credential can
-  // never be answered with a stale secret. A non-string password answers empty,
-  // which fails auth cleanly rather than sending `undefined`; it is unreachable
-  // from a product connect (the connect() gate attaches only when it saw a string
-  // password, and reconnects reuse the same options).
+  // never be answered with a stale secret. The non-string arm answers empty
+  // rather than sending `undefined`; connect()'s gate attaches only over a string
+  // password, and a re-dial answers from the same retained options, both driven
+  // in ssh2SftpAdapter.test.ts ("does not attach a handler when tryKeyboard is
+  // set but the password is not a string", "re-dial reuses the retained connect
+  // options (no re-prompt / same key + credentials)").
   private attachKeyboardInteractive(): void {
     if (this.keyboardInteractiveAttached) return;
     const client = (this.client as unknown as Ssh2SftpClientInternals).client;
@@ -1362,10 +1364,12 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // docs/spec/CHANNEL_SECURITY.md, "What the accounting counts".
   //
   // Paced like every other repeating condition here (see the ledger's
-  // pacedWarn), plus the LAST re-dial the budget permits: with a budget below
-  // that cadence's interval (the default 3 is) the escalation step never fires,
-  // and the operator would go from one early warning straight to the terminal
-  // error. Each mode reads the re-dial its own way -- the two differ in likely
+  // pacedWarn), plus the LAST re-dial the budget permits, which is what keeps a
+  // budget below that cadence's interval (the default 3 is) from taking the
+  // operator from one early warning straight to the terminal error:
+  // ssh2SftpAdapter.test.ts, "warns on the last permitted re-dial, even below the
+  // escalation interval", drives the default budget and reads exactly those two
+  // lines. Each mode reads the re-dial its own way -- the two differ in likely
   // cause, remedy and bound, so one blended line would misdescribe both.
   private warnSessionRecovered(): void {
     const count = this.ledger.midExchangeReconnectCount;
@@ -2580,20 +2584,25 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
           // This run is closing, so there is no next tick to retry on -- and the
           // dial may have failed BECAUSE of the teardown: an abandoning teardown
           // destroys the transport beneath a dial in flight, and that rejection
-          // carries the same error a genuine peer close does. Warning about a
-          // transient partner failure and promising a retry that cannot happen
-          // would report this adapter's own close as the partner's. What closed the
-          // connection is reported by the teardown that closed it. Read in the
-          // catch and not before the dial: a dial during teardown but ahead of
-          // end()'s latch -- the abort-marker write's re-establish -- still needs
-          // this warning.
+          // carries the same error a genuine peer close does, so a line here would
+          // report this adapter's own close as the partner's and offer a retry no
+          // tick will run. What closed the connection is reported by the teardown
+          // that closed it; the silence is driven in sftpKexFastFail.test.ts, "a
+          // dial the teardown settled reports nothing and skips, on such a host
+          // too". Read in the catch and not before the dial: a dial during
+          // teardown but ahead of end()'s latch -- the abort-marker write's
+          // re-establish -- still needs this warning.
           if (this.closing) return false;
           // A transient dial failure (server briefly unreachable, connection
-          // refused, auth exhaustion) is not fatal in this mode: report it and let
-          // the poll loop skip this cycle and retry on the next tick. The
-          // exchange's peer-inactivity ceiling terminates the run if dials keep
-          // failing for the whole budget, so an indefinitely-unreachable server
-          // still fails loudly.
+          // refused, auth exhaustion) is not fatal in this mode: report it and
+          // skip the cycle rather than throwing. ssh2SftpAdapter.test.ts, "a
+          // transient dial failure returns false (skip the cycle), not a throw",
+          // holds this arm, and ephemeralSessionExchange.test.ts drives the
+          // consequence end to end -- the exchange rides the failed cycles out and
+          // delivers on a later one. Nothing here bounds a streak that never
+          // resolves: that is the consumer's peer-inactivity ceiling, whose
+          // reading of a dial failing tick after tick is in
+          // docs/spec/DEPENDENCY_PINS.md, "Upgrading the SFTP Stack".
           this.log.warn(
             "ephemeral SFTP re-dial failed; skipping this poll cycle and " +
               `retrying on the next tick: ${sanitizeErrorForDisplay(error)}`,
@@ -3243,14 +3252,17 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
             // method entry. A fatal SFTP protocol error can land in the gap
             // between attempts (an unsolicited malformed packet, or a malformed
             // reply to a just-completed attempt): it sets fatalSftpError but
-            // leaves no in-flight request for ssh2's cleanupRequests to fail. The
-            // next attempt would then buffer its request on the
-            // destroyed-but-socket-alive channel, whose callback never fires, and
-            // hang until the consumer's whole-exchange budget -- defeating, for
-            // the retried rename, the prompt-failure guarantee this guard gives
-            // every other server-driven op. Re-checking turns it into a prompt
-            // TransportOperationStalledError, which is not status 4 and so ends
-            // the retry rather than being re-issued.
+            // leaves no in-flight request for ssh2's cleanupRequests to fail.
+            // Re-checking turns that into a prompt TransportOperationStalledError,
+            // which is not status 4 and so ends the retry rather than being
+            // re-issued -- ssh2SftpAdapter.test.ts, "stops retrying when a fatal
+            // session error lands between attempts". What an unguarded attempt
+            // costs is measured at method ENTRY, where sftpConnection.test.ts puts
+            // rename and every other server-driven op to a real still-alive server
+            // socket whose SFTP channel has been destroyed. Landing the fatal
+            // error inside the 100 ms inter-attempt window is a race no server can
+            // be held to, so that window is held by the unit suite's hand-modelled
+            // client, on the standing docs/TESTING.md gives that model.
             const dead = this.deadSessionError("file rename", fromPath);
             if (dead) return Promise.reject(dead);
             // Bound each attempt's server round-trip: a withheld rename callback
