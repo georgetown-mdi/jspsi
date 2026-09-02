@@ -248,12 +248,13 @@ describe("verdictViewModel: tampered record (honest ambiguity)", () => {
     const { record, keys } = await fixtures();
     const reconstructed = reconstructForFixture(record);
     // Alter a commitment so it no longer opens against the re-supplied data.
+    const original = record.commitments.localPayloadSent;
+    const altered = (original[0] === "A" ? "B" : "A") + original.slice(1);
     const tampered: ExchangeRecord = {
       ...record,
       commitments: {
         ...record.commitments,
-        localPayloadSent:
-          record.commitments.localPayloadSent.slice(0, -2) + "AA",
+        localPayloadSent: altered,
       },
     };
     const report = await verifyExchangeRecord(tampered, keys, {

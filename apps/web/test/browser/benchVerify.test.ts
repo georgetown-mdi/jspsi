@@ -351,12 +351,13 @@ describe("verify receipt bench", () => {
 
   test("a tampered record renders the honest altered-or-wrong-file failed state", async () => {
     const { record, keys } = await buildFixture();
+    const original = record.commitments.localPayloadSent;
+    const altered = (original[0] === "A" ? "B" : "A") + original.slice(1);
     const tampered: ExchangeRecord = {
       ...record,
       commitments: {
         ...record.commitments,
-        localPayloadSent:
-          record.commitments.localPayloadSent.slice(0, -2) + "AA",
+        localPayloadSent: altered,
       },
     };
     await mountVerifyBench();
