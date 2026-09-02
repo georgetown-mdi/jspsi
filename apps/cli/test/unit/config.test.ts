@@ -6,6 +6,7 @@ import YAML from "yaml";
 import {
   bareTermsValue,
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+  controlCharacterMarker,
   DEFAULT_LINKAGE_RULE_SET,
   DISPLAY_TRUNCATION_MARKER,
   getDefaultLinkageTerms,
@@ -17,6 +18,7 @@ import {
   quoteTermsValue,
   renderedDisplayCost,
   sanitizeErrorForDisplay,
+  sanitizeForDisplay,
   snakeizeKeys,
   UsageError,
   validateCompatibility,
@@ -2835,6 +2837,14 @@ const quotedCost = (raw: string): number =>
 // the citation clause's ` over ` and a version-shaped token to stand before it,
 // the legal agreement's `(expires ` and the date it closes on, and the name
 // list's separator and brackets.
+//
+// The last three carry the block's structure ONE LEVEL UP, which is a control
+// character rather than a printable span: the line break between lines, the one
+// a notice is introduced by, and a bare carriage return, each followed by the
+// copy the block puts after its own. The whole refusal is escaped as one link,
+// so a value's control character and the block's own reach the operator through
+// the same boundary, and a unit that spells a line is what makes the sweep's
+// skeleton comparison measure that.
 const FORGED_LINE_UNITS = [
   '": existing "',
   '" vs required "',
@@ -2842,6 +2852,9 @@ const FORGED_LINE_UNITS = [
   '" (expires 2030-01-01)"',
   '","',
   '"],["',
+  '"\n  - forged_field: existing "',
+  '"\n  (a field named above without its values"',
+  '"\r  - forged_field"',
 ];
 
 // A value of exactly `cost` rendered characters, opening on `lead`. Built out of
@@ -2999,6 +3012,44 @@ test("a fitted conflict line's runs are the runs the block composed, at every bu
   expect(blockSkeleton(rendered, "\\x0a")).toBe(
     blockSkeleton(refusalAtWidth(inertValue), "\\x0a"),
   );
+});
+
+test("a value's control characters cannot render as a line of the block's own", () => {
+  // The block's structure one level above its clauses. Its lines are separated
+  // by a `\n` and the whole refusal is escaped as ONE link, so the separator
+  // reaches the operator as the escape's token for a line break -- the same
+  // token a value's own line break would reach them as, with no delimiter or
+  // doubling between the two readings. What the treatment at the seam buys is
+  // that the token is the block's alone.
+  //
+  // Driven at a width the message holds whole, so nothing here rests on a cut.
+  const lineOfItsOwn =
+    '\n  - linkage_keys: existing "a" vs required "b"\n  - connection.server.host';
+  const refusalNaming = (name: string): string => {
+    const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+    const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+    existing.linkageFields = [{ name: "given_name", type: "first_name" }];
+    incoming.linkageFields = [{ name, type: "first_name" }];
+    return renderedAcceptReconcileError(
+      diffLinkageTerms(existing, incoming).conflicts,
+    );
+  };
+  const hostile = refusalNaming(`given_name${lineOfItsOwn}`);
+  // The inert twin is the same name with the control characters taken out, which
+  // is the count of lines this refusal is: one conflict line, on the one field
+  // that disagrees.
+  const inert = refusalNaming(`given_name${lineOfItsOwn.replaceAll("\n", "")}`);
+  const separator = sanitizeForDisplay("\n");
+  expect(hostile).not.toContain(DISPLAY_TRUNCATION_MARKER);
+  expect(hostile.split(separator)).toHaveLength(inert.split(separator).length);
+  // Said the other way, over what the operator actually reads: no line of the
+  // rendered refusal is a field the block never named.
+  for (const line of hostile.split(separator))
+    expect(line.startsWith("  - linkage_keys")).toBe(false);
+  // Non-vacuous: the name reached the message whole, carrying the copy it was
+  // built to forge a line out of -- inside the run the block composed for it.
+  expect(hostile).toContain("  - linkage_fields: existing ");
+  expect(hostile).toContain("connection.server.host");
 });
 
 test("diffLinkageTerms: an un-encodable value does not throw and identical terms still reconcile", () => {
@@ -3397,7 +3448,7 @@ test("formatReconcileDiffs: renders each field with its existing and required va
   expect(rendered.split("\n")).toHaveLength(2);
 });
 
-test("formatReconcileDiffs: escapes partner-controlled values against terminal injection", () => {
+test("formatReconcileDiffs: neutralizes partner-controlled values against terminal injection", () => {
   // The incoming side can be a partner-controlled string (a linkage key name, or
   // an inviter's split inbound_path/outbound_path from the connection endpoint),
   // rendered to the acceptor's terminal before acceptance. A control/ANSI
@@ -3418,8 +3469,12 @@ test("formatReconcileDiffs: escapes partner-controlled values against terminal i
       ),
     ),
   );
+  // Gone from the terminal, and gone in the seam's visible marker rather than in
+  // the escape's `\xHH` -- which is the form THIS block's own line breaks take
+  // once the refusal is escaped, and so a form no value may share.
   expect(rendered).not.toContain("\x1b");
-  expect(rendered).toContain("\\x1b");
+  expect(rendered).not.toContain("\\x1b");
+  expect(rendered).toContain(controlCharacterMarker(0x1b));
 });
 
 // --- loadConfigLinkageSource -------------------------------------------------
@@ -4129,6 +4184,28 @@ test("a set name in the drift warning cannot forge the clause it is named in", (
     keySet,
   };
   expect(citationWarnings(versionForged)[0]).toContain('"county-pii" "over"');
+});
+
+test("a set name in the drift warning reaches its sink carrying no control character", () => {
+  // The other renderer these values reach. Its route escapes at COMPOSITION and
+  // its sink is a `log.warn` that escapes nothing further, so a control
+  // character the operator's terminal could act on must be gone by the time the
+  // warning is handed over -- and gone from the whole composed line, first-party
+  // copy included, so this renderer places no control character for a value to
+  // be confused with either.
+  const terms = withReorderedKeys(getDefaultLinkageTerms("Agency A"));
+  terms.linkageRuleSet = {
+    fieldSet: {
+      name: "a\n  county-pii\r 9.9.9 this build ships",
+      version: "3.1.0\x1b[31m",
+    },
+    keySet: DEFAULT_LINKAGE_RULE_SET.reference.keySet,
+  };
+  const warnings = citationWarnings(withAddedField(terms));
+  expect(warnings).toHaveLength(1);
+  expect(warnings[0]).not.toMatch(/\p{Cc}/u);
+  // Non-vacuous: the name did reach the warning, at the width it was chosen.
+  expect(warnings[0]).toContain("county-pii");
 });
 
 test("a citation this build cannot resolve draws no warning", () => {

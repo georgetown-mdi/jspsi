@@ -2,6 +2,9 @@ import { describe, expect, test } from "vitest";
 
 import {
   sanitizeForDisplay,
+  controlCharacterMarker,
+  renderedDisplayCost,
+  replaceControlCharactersForDisplay,
   DISPLAY_TRUNCATION_MARKER,
   DEFAULT_MAX_DISPLAY_LENGTH,
 } from "../src/utils/sanitizeForDisplay";
@@ -137,5 +140,64 @@ describe("sanitizeForDisplay", () => {
     // boundary rather than splitting "\u{1f60...".
     const out = sanitizeForDisplay("\u{1f600}".repeat(5), { maxLength: 20 });
     expect(out).toBe("\\u{1f600}".repeat(2) + DISPLAY_TRUNCATION_MARKER);
+  });
+});
+
+describe("replaceControlCharactersForDisplay", () => {
+  // Every control character, driven rather than sampled: the class is small
+  // enough to enumerate, and what the treatment claims is a property of all of
+  // it rather than of the line break it was written for.
+  const CONTROL_CHARACTERS = Array.from({ length: 0xa0 }, (_, codePoint) =>
+    String.fromCodePoint(codePoint),
+  ).filter((character) => /\p{Cc}/u.test(character));
+
+  test("covers the whole control class and nothing else", () => {
+    expect(CONTROL_CHARACTERS.length).toBe(65);
+    for (const character of CONTROL_CHARACTERS)
+      expect(replaceControlCharactersForDisplay(character)).toBe(
+        controlCharacterMarker(character.codePointAt(0)!),
+      );
+    // A printable byte, a backslash, a confusable, a bidi override, a
+    // zero-width space, and an astral code point are left to the escape, which
+    // renders each visibly and none of them as anything a composition's own
+    // structure is made of.
+    for (const untouched of ["a", "\\", "а", "‮", "​", "\u{1f600}"])
+      expect(replaceControlCharactersForDisplay(untouched)).toBe(untouched);
+  });
+
+  test("the marker is printable ASCII the escape passes through", () => {
+    // What keeps the treatment from becoming a second escaping altitude: the
+    // sink's pass finds nothing to rewrite, so a treated fragment escaped there
+    // is byte-identical to itself.
+    for (const character of CONTROL_CHARACTERS) {
+      const marker = controlCharacterMarker(character.codePointAt(0)!);
+      expect(sanitizeForDisplay(marker)).toBe(marker);
+      expect(marker).not.toContain("\\");
+    }
+  });
+
+  test("no marker is a token the escape writes for a control character", () => {
+    // The whole point of the marker's shape. A composition builds its own
+    // structure out of control characters and is escaped where it is shown, so
+    // a value able to render the escape's token for one could stand in that
+    // structure's place.
+    const escaped = new Set(
+      CONTROL_CHARACTERS.map((character) => sanitizeForDisplay(character)),
+    );
+    for (const character of CONTROL_CHARACTERS) {
+      const treated = replaceControlCharactersForDisplay(character);
+      for (const token of escaped) expect(treated).not.toContain(token);
+    }
+  });
+
+  test("a treated value costs the display what the untreated one asked for", () => {
+    // A budget is measured over a fragment after this runs, so parity is not
+    // load-bearing -- but a marker WIDER than the escape's own token would
+    // quietly buy a chooser room in every message that fits one, so it is
+    // pinned rather than left to the arithmetic.
+    for (const character of CONTROL_CHARACTERS)
+      expect(
+        renderedDisplayCost(replaceControlCharactersForDisplay(character)),
+      ).toBe(renderedDisplayCost(character));
   });
 });

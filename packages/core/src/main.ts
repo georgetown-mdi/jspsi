@@ -78,6 +78,8 @@ export {
   displayText,
   renderedDisplayCost,
   clipToRenderedCost,
+  controlCharacterMarker,
+  replaceControlCharactersForDisplay,
   DISPLAY_TRUNCATION_MARKER,
   DEFAULT_MAX_DISPLAY_LENGTH,
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,

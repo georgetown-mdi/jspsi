@@ -189,6 +189,78 @@ export function sanitizeForDisplay(
 }
 
 /**
+ * How {@link replaceControlCharactersForDisplay} renders one control character:
+ * its code point in two lowercase hex digits, inside angle brackets.
+ *
+ * Angle brackets rather than the escape's own `\xHH` shape, and this is the
+ * whole point of the marker rather than a matter of taste. Every control
+ * character is a code point at or below U+009F, so two digits always suffice and
+ * the marker is the same four characters wide the escape would have rendered it
+ * -- a budget measured over a treated value is the budget the untreated one
+ * asked for.
+ *
+ * It contains NO BACKSLASH, which is what keeps it unreachable from a value's
+ * own printable bytes: {@link sanitizeForDisplay} doubles a literal backslash, so
+ * a value that spells an escape sequence character by character arrives showing
+ * two of them. A marker built out of the escape's alphabet would instead be
+ * spelled by exactly the bytes it is meant to be distinguishable from.
+ *
+ * Being printable ASCII, the marker is not authenticated and cannot be: the
+ * escape passes its text through unchanged, so a value that spells the marker
+ * renders identically to one that carried the character it names. That is the
+ * same open class {@link DISPLAY_TRUNCATION_MARKER} carries. What the marker's
+ * presence claims is only "this stands where a control character or its spelling
+ * did"; what an operator can rely on is the converse -- a control character a
+ * composition placed ITSELF still renders as the escape's `\xHH`, which no
+ * treated value can produce.
+ */
+export function controlCharacterMarker(codePoint: number): string {
+  return `<${codePoint.toString(16).padStart(2, "0")}>`;
+}
+
+/**
+ * Every control character (Unicode `Cc`: U+0000-U+001F and U+007F-U+009F), which
+ * is the class a first-party composition builds its own structure out of -- the
+ * line breaks separating a block's lines.
+ */
+const CONTROL_CHARACTERS = /\p{Cc}/gu;
+
+/**
+ * Replace every control character in a value somebody else chose with
+ * {@link controlCharacterMarker}, at the site where the value is interpolated
+ * into a first-party composition.
+ *
+ * This is the third per-value treatment beside redaction and delimiting, and it
+ * answers what neither of those does. Delimiting keeps a value from spelling the
+ * clause structure around it in PRINTABLE bytes. It says nothing about a
+ * composition whose own structure is a control character -- a block that
+ * separates its lines with `\n` and is escaped whole where it is shown -- because
+ * the escape renders the composition's line break and a value's own to the SAME
+ * `\xHH` token, and neither the delimiters nor the escape distinguishes them.
+ * Replacing the value's leaves the escape's `\xHH` output producible only by the
+ * composition itself.
+ *
+ * Replacement, not escaping: the output carries no backslash and no character
+ * outside printable ASCII, so the sink's single {@link sanitizeForDisplay} pass
+ * has nothing left to rewrite and a treated fragment is not double-escaped (see
+ * CONTRIBUTING.md, Operator-facing escaping). It is the same shape as
+ * {@link ./sanitizeErrorForDisplay.redactPrivateKeyMaterial}, which likewise
+ * rewrites content at the composition site without becoming a second escaping
+ * altitude, and it is idempotent for the same reason: the replacement carries no
+ * control character of its own.
+ *
+ * Applied AFTER redaction, so the private-key patterns still see the line breaks
+ * a PEM block arrives with, and BEFORE any fit, so what a budget measures is what
+ * the operator is shown. For DISPLAY only, like every treatment beside it: a
+ * comparison, a hash, or a stored value takes the raw string.
+ */
+export function replaceControlCharactersForDisplay(value: string): string {
+  return value.replace(CONTROL_CHARACTERS, (character) =>
+    controlCharacterMarker(character.codePointAt(0)!),
+  );
+}
+
+/**
  * What a RAW fragment costs once a display boundary escapes it, which is not its
  * own length: {@link sanitizeForDisplay} expands a code point outside printable
  * ASCII to as many as ten characters and doubles a literal backslash, so budget

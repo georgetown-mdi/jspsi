@@ -29,6 +29,7 @@ import {
   redactAndSanitizeForDisplay,
   redactPrivateKeyMaterial,
   renderedDisplayCost,
+  replaceControlCharactersForDisplay,
   safeParseConnectionConfig,
   safeParseFileSyncOptions,
   safeParseLinkageTerms,
@@ -558,9 +559,17 @@ export const RECONCILE_UNSET = compatibilityMessage`(unset)`;
  * terminate its own run, so it reads as content rather than as structure the
  * refusal asserted.
  *
- * Neither pass is escaping: the run's bytes stay raw for the single escape the
- * display sink applies (CONTRIBUTING.md, Operator-facing escaping), and the seam
- * emits only printable ASCII, which that escape passes through unchanged.
+ * The seam's control-character treatment answers the same half one level up,
+ * where this block's structure is a `\n` rather than a printable connective: the
+ * whole refusal is escaped as ONE link, so the block's own line breaks reach the
+ * operator as the escape's `\xHH` and a value's own would reach them as the same
+ * token. Treated, that token is the composition's alone (see
+ * {@link replaceControlCharactersForDisplay}).
+ *
+ * None of the three passes is escaping: the run's bytes stay raw for the single
+ * escape the display sink applies (CONTRIBUTING.md, Operator-facing escaping),
+ * and the seam emits only printable ASCII, which that escape passes through
+ * unchanged.
  */
 export function reconcileDiffValue(
   value: string,
@@ -1325,7 +1334,10 @@ const RECONCILE_NOTICE_RESERVE_CEILING = renderedDisplayCost(
  * `inbound_path`/`outbound_path` from the connection endpoint -- and each has
  * already been redacted and delimited by the producer that composed it
  * ({@link reconcileDiffValue}). They are interpolated RAW: the display boundary
- * escapes the whole message once where it is shown.
+ * escapes the whole message once where it is shown. That is also why the `\n`
+ * this block separates its lines with is structure only the block can place --
+ * the escape renders it and a value's own line break alike, and the treatment at
+ * the seam is what leaves the rendered token unshared.
  *
  * What this adds is the LENGTH half. The schema bounds those values by code
  * point, which is not a display bound -- one code point escapes to as many as
@@ -1524,6 +1536,13 @@ export function formatReconcileDiffs(
  * configuration was compared against and how to retry; they are measured here
  * rather than assumed, so the block's share follows the wording rather than a
  * restatement of it.
+ *
+ * The path takes the block's per-value treatments in the block's own order --
+ * redacted, then its control characters replaced, then fitted -- though it is the
+ * operator's own value rather than a chooser this message defends against. The
+ * uniformity is the point: "this fragment is the operator's, so it may keep a
+ * line break" is a premise about provenance that no check holds and a later
+ * caller silently breaks, and treating it costs a path that has none nothing.
  */
 export function reconcileConflictMessage(params: {
   configPath: string;
@@ -1533,7 +1552,9 @@ export function reconcileConflictMessage(params: {
 }): string {
   const { against, retryWith, diffs } = params;
   const configPath = clipToRenderedCost(
-    redactPrivateKeyMaterial(params.configPath),
+    replaceControlCharactersForDisplay(
+      redactPrivateKeyMaterial(params.configPath),
+    ),
     RECONCILE_CONFIG_PATH_BUDGET,
   );
   const head =

@@ -21,6 +21,8 @@ import {
 } from "../src/utils/sanitizeErrorForDisplay";
 import {
   WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
+  controlCharacterMarker,
+  replaceControlCharactersForDisplay,
   sanitizeForDisplay,
 } from "../src/utils/sanitizeForDisplay";
 import { readMessage } from "./utils/compatibilityMessageReader";
@@ -76,6 +78,43 @@ describe("quoteTermsValue", () => {
       expect(sanitizeForDisplay(quoted)).toBe(quoted);
     }
   });
+
+  test("no value renders as a control character the composition placed", () => {
+    // The delimiting above bounds what a value can do in PRINTABLE bytes. This
+    // is the same bound one level up, where a composition's own structure is a
+    // control character -- a block that separates its lines with `\n` and is
+    // escaped whole where it is shown. The escape renders that line break and a
+    // value's own alike, so the seam replaces the value's; every control
+    // character is covered rather than the line break alone, since which ones a
+    // composition builds structure from is not this module's to know.
+    for (let codePoint = 0; codePoint <= 0x9f; codePoint += 1) {
+      const character = String.fromCodePoint(codePoint);
+      if (!/\p{Cc}/u.test(character)) continue;
+      const quoted = quoteTermsValue(`a${character}b`);
+      const where = `U+${codePoint.toString(16).padStart(4, "0")}`;
+      expect(quoted, where).toBe(`"a${controlCharacterMarker(codePoint)}b"`);
+      // What the operator meets: the escape has nothing left to act on, and the
+      // token it writes for a composition's own control character is nowhere in
+      // the run.
+      expect(sanitizeForDisplay(quoted), where).toBe(quoted);
+      expect(sanitizeForDisplay(quoted), where).not.toContain(
+        sanitizeForDisplay(character),
+      );
+    }
+  });
+
+  test("the treatment is idempotent and adds no run boundary of its own", () => {
+    // It runs at a composition site, and a value may pass more than one before
+    // it is shown (a fragment redacted and delimited by a producer, then carried
+    // into a wider clause), so a second pass must be a no-op rather than a
+    // second marker over the first.
+    const value = "a\nb\tc\x7fd";
+    const once = replaceControlCharactersForDisplay(value);
+    expect(replaceControlCharactersForDisplay(once)).toBe(once);
+    expect(once).not.toContain(TERMS_VALUE_DELIMITER);
+    expect(once).not.toContain("\\");
+    expect(quoteTermsValue(value)).toBe(`"${once}"`);
+  });
 });
 
 describe("bareTermsValue", () => {
@@ -100,7 +139,13 @@ describe("bareTermsValue", () => {
       "0".repeat(MAX_BARE_TERMS_VALUE_LENGTH + 1),
     ]) {
       expect(bareTermsValue(value)).toBe(quoteTermsValue(value));
-      expect(readMessage(bareTermsValue(value)).values).toEqual([value]);
+      // Recovered as the seam renders it, which is the raw value but for the
+      // control characters the quoted branch treats: the bare branch is where a
+      // value would otherwise reach a clause both undelimited and untreated, so
+      // the ANSI case above is what pins that it cannot.
+      expect(readMessage(bareTermsValue(value)).values).toEqual([
+        replaceControlCharactersForDisplay(value),
+      ]);
     }
   });
 
@@ -394,8 +439,19 @@ const renderForRoute = ({ route, message }: RoutedDiagnostic): string =>
         maxLength: WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
       });
 
-/** What ONE escape pass writes for the ESC the hostile values below carry. */
-const ONCE_ESCAPED_ESC = "\\x1b";
+/**
+ * A code point outside printable ASCII that is NOT a control character, which is
+ * what the escape-count assertions below count passes with.
+ *
+ * The escape rewrites it and the seam's control-character treatment does not, so
+ * it is the one class of byte that still reaches the display boundary from
+ * inside a value: a control character would be replaced at composition and count
+ * no passes at all.
+ */
+const NON_ASCII_CODE_POINT = "é";
+
+/** What ONE escape pass writes for {@link NON_ASCII_CODE_POINT}. */
+const ONCE_ESCAPED_NON_ASCII = "\\xe9";
 
 /**
  * What a SECOND pass writes over that, the first pass's backslash doubled. It
@@ -403,7 +459,21 @@ const ONCE_ESCAPED_ESC = "\\x1b";
  * is satisfied by either: a single-pass route is pinned by the absence of this
  * one, and the two-pass route by its presence.
  */
+const TWICE_ESCAPED_NON_ASCII = "\\\\xe9";
+
+/**
+ * How a COMPOSITION's own control character renders once a route has escaped it,
+ * for the ESC the hostile values below carry -- the token a value must not be
+ * able to produce, since a composition builds its structure (a block's line
+ * breaks) out of exactly these.
+ */
+const ESCAPED_ESC = "\\x1b";
+
+/** What a SECOND escape pass writes over that, the first pass's backslash doubled. */
 const TWICE_ESCAPED_ESC = "\\\\x1b";
+
+/** The same ESC as the seam's treatment renders it, read off the constructor. */
+const TREATED_ESC = controlCharacterMarker(0x1b);
 
 /**
  * Every VALUE SLOT of every compatibility diagnostic that names a terms value,
@@ -960,10 +1030,12 @@ const clauseSkeleton = (rendered: string, value: string): string => {
 };
 
 /**
- * The value the display-route assertions use: the shape with a control sequence
- * appended, so the escape they run through has something to act on.
+ * The value the display-route assertions use: the shape with an ANSI control
+ * sequence and a non-ASCII code point appended, so the route they run through
+ * carries one byte the seam treats and one the escape acts on.
  */
-const withControlSequence = (shaped: string): string => `${shaped}\x1b[31m`;
+const withControlSequence = (shaped: string): string =>
+  `${shaped}\x1b[31m${NON_ASCII_CODE_POINT}`;
 
 /** The shapes that reach `diagnostic` at all, by its own stated predicate. */
 const shapesReaching = (
@@ -1062,20 +1134,40 @@ describe.each(SWEPT)("$id", (diagnostic) => {
       );
       if (marker !== undefined) expect(renderedSkeleton).not.toContain(marker);
       if (diagnostic.verbatim !== false) {
+        // The control character is gone from the operator's text, and gone in a
+        // form a composition's own control character cannot be confused with.
+        // Which form differs by route, because the two escape in a different
+        // ORDER, and each is what the property rests on there.
+        expect(rendered).not.toContain("\x1b");
+        if (routed.route === "errors") {
+          // Composed raw and escaped once at the renderer, so a composition's
+          // own control character IS the once-escaped token. The seam's
+          // treatment is what keeps a value from spelling it.
+          expect(rendered).not.toContain(ESCAPED_ESC);
+          expect(rendered).toContain(TREATED_ESC);
+        } else {
+          // Escaped at composition, ahead of the seam, so nothing is left for
+          // the treatment to act on and the sink's second pass doubles the
+          // backslash the first wrote. The value's control character therefore
+          // arrives one backslash wider than a composition's own would -- the
+          // doubling CHANNEL_SECURITY.md records for this route, standing here
+          // as the same distinction.
+          expect(rendered).toContain(TWICE_ESCAPED_ESC);
+        }
         // The escape acted inside the run and left the run's boundaries
         // untouched, and it ran as many times as this route escapes: once at
         // the error renderer, or -- on the warnings route -- once at composition
-        // and once at the sink, the second pass doubling the backslash the
-        // first wrote. That doubling is reachable here because
+        // and once at the sink. Counted on a non-ASCII code point rather than a
+        // control character, which no longer reaches the escape from inside a
+        // value on the errors route. That doubling is reachable here because
         // validateCompatibility's signature admits terms no schema parsed; a
         // date that came through the terms schema carries no byte the escape
         // rewrites at all, which linkageTerms.test.ts pins.
-        expect(rendered).not.toContain("\x1b");
         if (routed.route === "errors") {
-          expect(rendered).toContain(ONCE_ESCAPED_ESC);
-          expect(rendered).not.toContain(TWICE_ESCAPED_ESC);
+          expect(rendered).toContain(ONCE_ESCAPED_NON_ASCII);
+          expect(rendered).not.toContain(TWICE_ESCAPED_NON_ASCII);
         } else {
-          expect(rendered).toContain(TWICE_ESCAPED_ESC);
+          expect(rendered).toContain(TWICE_ESCAPED_NON_ASCII);
         }
       }
     },
