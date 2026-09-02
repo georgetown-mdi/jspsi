@@ -10,10 +10,12 @@ import {
   displayText,
   distinctLinkageRuleSetVerdicts,
   LINKAGE_RULE_SET_VERDICT_COPY,
+  MAX_DECLARED_NAMES_SHOWN,
   PROPOSED_NOT_APPLIED_NOTES,
   redactAndSanitizeForDisplay,
   summarizeInvitation,
   UNRECOGNIZED_TRANSFORM_NOTE,
+  unshownDeclaredNamesLine,
 } from "@psilink/core";
 
 import { singlePassDisclosureNotice } from "./onlineBootstrap";
@@ -306,6 +308,35 @@ function logList(
   entries: ReadonlyArray<string>,
 ): void {
   for (const entry of entries) emit(`${indent}- ${entry}`);
+}
+
+/**
+ * One declared payload direction's column names, painted at most
+ * {@link MAX_DECLARED_NAMES_SHOWN} deep and closed by the shared line counting the
+ * names it left out. Only the declared payload directions take the count bound:
+ * every other list {@link logList} renders is already bounded at its source or is
+ * this party's own, and a declared direction is the one that reaches
+ * `MAX_PAYLOAD_ENTRIES` names of partner text.
+ *
+ * The bound is on what is PAINTED. The direction's label, its "(none)" case, and
+ * everything else the prompt derives from the declaration read the whole set, so a
+ * cut list never understates what the operator is consenting to.
+ *
+ * The closing line is first-party text and carries no bullet, while a painted name
+ * always does and cannot break its own line (`sanitizeForDisplay` neutralizes every
+ * control code point). That prefix is what keeps a declared name reading exactly as
+ * this sentence from passing for it -- the terminal analogue of the list container
+ * the web surfaces distinguish it by.
+ */
+function logDeclaredPayloadList(
+  emit: ConsentSurfaceSink,
+  indent: string,
+  names: ReadonlyArray<string>,
+): void {
+  logList(emit, indent, names.slice(0, MAX_DECLARED_NAMES_SHOWN));
+  const unshownCount = names.length - MAX_DECLARED_NAMES_SHOWN;
+  if (unshownCount > 0)
+    emit(`${indent}${unshownDeclaredNamesLine(unshownCount)}`);
 }
 
 /**
@@ -870,7 +901,7 @@ export function displayInvitation(params: {
     if (summary.payload.send.length === 0) emit(`  ${label}: (none)`);
     else {
       emit(`  ${label}:`);
-      logList(emit, "    ", summary.payload.send);
+      logDeclaredPayloadList(emit, "    ", summary.payload.send);
     }
   }
   // The opposite direction: the columns the inviter requests FROM this party for
@@ -886,7 +917,7 @@ export function displayInvitation(params: {
     if (summary.payload.receive.length === 0) emit(`  ${label}: (none)`);
     else {
       emit(`  ${label}:`);
-      logList(emit, "    ", summary.payload.receive);
+      logDeclaredPayloadList(emit, "    ", summary.payload.receive);
     }
   }
 

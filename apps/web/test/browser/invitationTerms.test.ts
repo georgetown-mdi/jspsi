@@ -14,18 +14,16 @@ import {
   DEFAULT_MAX_DISPLAY_LENGTH,
   DISPLAY_TRUNCATION_MARKER,
   LINKAGE_RULE_SET_VERDICT_COPY,
+  MAX_DECLARED_NAMES_SHOWN,
   MAX_NAME_LENGTH,
   MAX_PAYLOAD_ENTRIES,
   UNRECOGNIZED_TRANSFORM_NOTE,
   getDefaultLinkageTerms,
   linkageRuleSetVerdictNote,
   sanitizeForDisplay,
+  unshownDeclaredNamesLine,
 } from "@psilink/core";
 
-import {
-  MAX_DECLARED_NAMES_SHOWN,
-  unshownDeclaredNamesLine,
-} from "@components/declaredNameBound";
 import { InvitationTerms } from "@components/InvitationTerms";
 
 import {

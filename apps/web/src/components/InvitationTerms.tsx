@@ -21,6 +21,7 @@ import {
   DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
   DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
   LINKAGE_RULE_SET_VERDICT_COPY,
+  MAX_DECLARED_NAMES_SHOWN,
   OUTBOUND_SEND_NO_PAYLOAD_SENTENCE,
   PROPOSED_NOT_APPLIED_NOTES,
   UNRECOGNIZED_TRANSFORM_NOTE,
@@ -28,12 +29,8 @@ import {
   linkageRuleSetVerdictNote,
   sanitizeForDisplay,
   summarizeInvitation,
-} from "@psilink/core";
-
-import {
-  MAX_DECLARED_NAMES_SHOWN,
   unshownDeclaredNamesLine,
-} from "@components/declaredNameBound";
+} from "@psilink/core";
 
 import { ColumnChips } from "@components/ColumnChips";
 
