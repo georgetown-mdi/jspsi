@@ -205,11 +205,12 @@ export function sanitizeForDisplay(
  * -- a budget measured over a treated value is the budget the untreated one
  * asked for.
  *
- * It contains NO BACKSLASH, which is what keeps it unreachable from a value's
- * own printable bytes: {@link sanitizeForDisplay} doubles a literal backslash, so
- * a value that spells an escape sequence character by character arrives showing
- * two of them. A marker built out of the escape's alphabet would instead be
- * spelled by exactly the bytes it is meant to be distinguishable from.
+ * It contains NO BACKSLASH, which is what keeps a value's own printable bytes
+ * from spelling it: {@link sanitizeForDisplay} doubles a literal backslash (see
+ * sanitizeForDisplay.test.ts), so a value that spells an escape sequence
+ * character by character arrives showing two of them. A marker built out of the
+ * escape's alphabet would instead be spelled by exactly the bytes it is meant
+ * to be distinguishable from.
  *
  * Being printable ASCII, the marker is not authenticated and cannot be: the
  * escape passes its text through unchanged, so a value that spells the marker

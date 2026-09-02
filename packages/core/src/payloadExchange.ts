@@ -129,8 +129,9 @@ const payloadWireSchema = z.discriminatedUnion("hasData", [
       // string length", ~3.5M on Zod 4.4.3) building its error string from one
       // issue per element. receiveParsed catches that harmlessly as
       // ConnectionError("protocol"), but the single-issue validators below cap
-      // issue accumulation at one regardless of count (utils/singleIssueArray.ts)
-      // so the burn never happens. A count `.max()` is wrong for `rowIndices`
+      // issue accumulation at one regardless of count (utils/singleIssueArray.ts),
+      // which payloadExchange.test.ts drives at a count that would otherwise
+      // build that string. A count `.max()` is wrong for `rowIndices`
       // (one per matched record, legitimately in the millions like `rows`) and
       // unnecessary for `columns`; both predicates stand in for the element schema
       // they replace -- typeof-string for `z.string()`, Number.isSafeInteger and
@@ -466,9 +467,10 @@ export function assertPayloadSendDisclosed(
  * declaration read here. This is the same output gate
  * {@link assertPayloadSendDisclosed} applies to its empty case.
  *
- * The offending name is not echoed -- it is by construction longer than a readable
- * message -- so the error names the input column positions, as
- * {@link inferMetadata}'s empty-name refusal does.
+ * The offending name is not echoed -- it broke a length bound, so it is longer
+ * than a readable message -- and the error names the input column positions
+ * instead, as {@link inferMetadata}'s empty-name refusal does. The refusal is
+ * held to naming positions and never the name in disclosedNameBound.test.ts.
  *
  * @param output This party's own output declaration, from the same
  *   {@link LinkageTerms} the metadata is prepared against. Required rather than

@@ -146,8 +146,9 @@ export function installCapturedLogsInterceptor(): void {
  * Limitations: messages below loglevel's current threshold are never delivered to
  * `methodFactory` (loglevel assigns `noop` directly) and will not be captured. A
  * `getLoggerForVerbosity` logger never sets a level more verbose than the current
- * root, so a `.debug()` line stays unreachable at `verbose: 1` until the root itself
- * is raised (e.g. `logLibrary.setLevel("trace")`) before the logger is constructed.
+ * root, so a `.debug()` line at `verbose: 1` is captured only once the root itself
+ * is raised (e.g. `logLibrary.setLevel("trace")`) before the logger is constructed
+ * -- driven in capturedLogs.test.ts.
  * Separately, a named logger created before the interceptor is installed binds to
  * the pre-install factory and bypasses capture -- call `installCapturedLogsInterceptor`
  * from test setup, ahead of any logger, to close that creation-order gap (the CLI

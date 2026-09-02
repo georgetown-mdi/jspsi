@@ -18,7 +18,10 @@ import {
   serializeFileSyncMessage,
   MESSAGE_TYPE_OBJECT,
 } from "../src/connection/fileSyncFraming";
-import { ackMarkerName } from "../src/connection/fileSyncNames";
+import {
+  ackMarkerName,
+  parseTimestampedMessageNNN,
+} from "../src/connection/fileSyncNames";
 import { MAX_FRAME_SIZE_BYTES } from "../src/connection/frameSize";
 import { cancellableDelay } from "../src/connection/fileSyncConstants";
 import {
@@ -165,6 +168,11 @@ describe("isRecognizedLoopFile", () => {
   test("an own numeric terminal is recognized but a peer numeric terminal is not", () => {
     expect(recognized("alice-100.json")).toBe(true);
     expect(recognized("bob-100.json")).toBe(false);
+    // The malformed peer shape this scoping keeps out: the retain-mode message
+    // scan reads no NNN from it, so it is the scan's rejection rather than a
+    // file this baseline calls legitimate.
+    expect(recognized("bob-foo-5.json")).toBe(false);
+    expect(parseTimestampedMessageNNN("bob-foo-5.json")).toBeUndefined();
   });
 
   test("an ack is recognized only when its inner target is a legal name", () => {

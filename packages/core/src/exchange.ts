@@ -2102,13 +2102,12 @@ export async function runExchange(
   // steps below -- the received-payload reconciliation and the signed-receipt
   // swap after it -- fail into this party's owed record rather than discarding
   // it (docs/spec/PROTOCOL.md, Self-attested record); what runs between those
-  // two windows is uncaught, over locally built values, so a throw there
-  // (unreachable today) would escape with no record and no mark set. A
-  // statement added to this region must join one of the two guarded windows,
-  // or the region must gain a single enclosing guard, or it opens that hole
-  // rather than closing it. A holder rather than a bare `unknown`, so a thrown
-  // `undefined` still reads as a failure and cannot pass for a run that got
-  // through.
+  // two windows is uncaught, over locally built values, so a throw there would
+  // escape with no record and no mark set. A statement added to this region
+  // must join one of the two guarded windows, or the region must gain a single
+  // enclosing guard, or it opens that hole rather than closing it. A holder
+  // rather than a bare `unknown`, so a thrown `undefined` still reads as a
+  // failure and cannot pass for a run that got through.
   let postDisclosureFailure: { error: unknown } | undefined;
 
   // Received-payload enforcement, fail-closed before the result is returned (so a

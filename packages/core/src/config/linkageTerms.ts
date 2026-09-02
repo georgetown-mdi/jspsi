@@ -273,7 +273,8 @@ export const MAX_PAD_LEFT_LENGTH = 256;
  * and output stay cheap. The format's MM/DD tokens expand into adjacent
  * `(\d{1,2})` groups that catastrophically backtrack on the JavaScript engine, but
  * `parse_date` compiles its regex under the linear-time engine
- * (standardization.ts), which bounds that by construction -- so this cap is a
+ * (standardization.ts), which bounds that -- a former-ReDoS format is driven in
+ * linkageTerms.test.ts and linearRegex.test.ts -- so this cap is a
  * work-SIZE ceiling, no longer the backstop against a backtracking blow-up it once
  * shared with a separate screen. Enforced by a per-step refine on
  * {@link TransformStep}'s schema before any row runs. A DoS ceiling on the partner

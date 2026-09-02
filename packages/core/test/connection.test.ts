@@ -1250,6 +1250,30 @@ test("connection_per_poll is schema-accepted on filedrop (inert; the CLI warns)"
   expect(result.success).toBe(true);
 });
 
+// --- FileSyncOptions: the invocation-scoped sweep flags are not persistable ---
+
+test("a persisted options block resolves neither sweep flag", () => {
+  // --sweep-exchange-files / --force-retain-sweep reach FileSyncConnection
+  // through its constructor alone. Mirroring either onto FileSyncOptions would
+  // make it persistable in psilink.yaml, which is what this refuses to allow:
+  // a config spelling them resolves no such flag for the connection to read.
+  const options = safeParseFileSyncOptions({
+    sweep_exchange_files: true,
+    force_retain_sweep: true,
+  });
+  expect(options.success).toBe(true);
+  expect(options.data).not.toHaveProperty("sweepExchangeFiles");
+  expect(options.data).not.toHaveProperty("forceRetainSweep");
+
+  const config = parseConnectionConfig({
+    ...sftpBase,
+    path: "/exchange",
+    options: { sweep_exchange_files: true, force_retain_sweep: true },
+  });
+  expect(config.options).not.toHaveProperty("sweepExchangeFiles");
+  expect(config.options).not.toHaveProperty("forceRetainSweep");
+});
+
 // --- generateSharedSecret ----------------------------------------------------
 
 test("generateSharedSecret always matches SHARED_SECRET_REGEX", () => {

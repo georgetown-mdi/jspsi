@@ -315,9 +315,10 @@ export class UnknownStandardizationFunctionError extends UsageError {
  * deliberately omitted rather than set for family symmetry: the tag exists only
  * to make the CLI suppress its generic post-handshake "retry without
  * re-inviting" advisory, and a mode mismatch is detected at rendezvous, before
- * authentication starts, so that advisory never fires for it -- a tag here would
- * read as load-bearing while suppressing nothing. (Were detection ever to move
- * after the handshake, this class is where the tag would belong.)
+ * authentication starts, so there is no advisory for a tag to suppress -- it
+ * would read as load-bearing while suppressing nothing (the untagged shape is
+ * pinned in errors.test.ts). (Were detection ever to move after the handshake,
+ * this class is where the tag would belong.)
  */
 export class BilateralModeMismatchError extends UsageError {
   constructor(message: string) {

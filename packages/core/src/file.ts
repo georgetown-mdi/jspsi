@@ -647,9 +647,9 @@ export function loadCSVColumns(file: LocalFile): Promise<Array<string>> {
  *
  * The sample holds only non-empty (after-trim) values, capped at `sampleLimit`.
  * Set the cap to {@link inferDateFormat}'s own non-empty-value scan cap and the
- * sampled inference is identical to a full-column scan by construction: that scan
- * never consumes past the cap either, so the first `sampleLimit` non-empty values
- * are the exact prefix it would see.
+ * sampled inference matches a full-column scan: that scan never consumes past the
+ * cap either, so the first `sampleLimit` non-empty values are the exact prefix it
+ * would see (the two are compared in inferDateInputFormat.test.ts).
  *
  * Parsed inline (no `worker`), like the loaders above. Resolves with the header
  * field list (empty when the file has no header), the column `selectColumn`

@@ -248,8 +248,9 @@ export const YEAR_FORMAT_TOKENS: readonly DateFormatToken[] = ["YYYY", "YY"];
  * two-digit `yy <= 68` resolves into the 2000s, otherwise into the 1900s, so the
  * window is 1969-2068 (the POSIX two-digit-year convention). This is a normative
  * protocol CONSTANT, not a clock read or a per-party value: both parties resolve
- * every `YY` against this same number by construction, so a boundary year cannot
- * split across centuries and silently miss the match. The trade is a fixed cutoff
+ * every `YY` against this same number, so a boundary year cannot split across
+ * centuries and silently miss the match (the window's edges are pinned in
+ * standardization.test.ts). The trade is a fixed cutoff
  * rather than a moving "not in the future" one -- a value can resolve to a year not
  * yet reached -- which does not affect linkage because both sides resolve it
  * identically. The exact window is specified in PROTOCOL.md.
@@ -268,9 +269,9 @@ interface ParsedDateFormat {
  * {@link TWO_DIGIT_YEAR_PIVOT}: a value at or below the pivot maps to the 2000s,
  * otherwise to the 1900s. With the pivot at 68 the window is 1969-2068, so `68`
  * -> `2068`, `69` -> `1969`, `00` -> `2000`, and `99` -> `1999`. The pivot is a
- * protocol constant, identical on both parties by construction, so a `YY` value
- * never silently changes century between runs or across parties -- there is no
- * clock read and no per-party reference anywhere in this path.
+ * protocol constant read from this module on both parties, so a `YY` value never
+ * silently changes century between runs or across parties -- there is no clock
+ * read and no per-party reference anywhere in this path.
  */
 function resolveTwoDigitYear(twoDigit: string): string {
   const value = Number(twoDigit);
@@ -331,7 +332,9 @@ function tokenizeDateFormat(format: string): DateFormatSegment[] {
 // engine; that is why parseDateFactory compiles this source under the linear-time
 // engine (compileLinearRegex), not `new RegExp`, even though the format is not a
 // raw `tier: "regex"` pattern. The expansion is harmless under a non-backtracking
-// engine, so no separate screen is needed -- the engine bounds it by construction.
+// engine, so no separate screen is needed: linearRegex.test.ts drives that
+// adjacent-group expansion through compileLinearRegex, which is what this source
+// is compiled with.
 function parseDateFormat(inputFormat: string): ParsedDateFormat {
   const order: DateFormatToken[] = [];
   let regexStr = "";
@@ -448,7 +451,8 @@ function parseDateFactory(params: Params): StandardizingFn {
   // Compile the anchored source under the linear-time engine, not `new RegExp`:
   // the MM/DD tokens expand into adjacent `(\d{1,2})` groups that backtrack
   // catastrophically on the JavaScript engine, so a partner-controlled format
-  // would otherwise hang the per-row loop. The engine bounds this by construction.
+  // would otherwise hang the per-row loop; linearRegex.test.ts drives that
+  // expansion through compileLinearRegex.
   const re = compileLinearRegex(source);
 
   return (s) => {
@@ -3026,9 +3030,10 @@ export function assertFanOutImplemented(
  * {@link resolveFieldColumns} binding the exchange's {@link buildStandardizedDataset}
  * uses: a field is producible exactly when the shared resolution bound it to a
  * column that is present in `columns`. The checker does not re-derive the
- * binding itself, so it cannot diverge from the runtime -- the HIGH-severity
- * direction (a field the builder cannot produce but the checker passes) is
- * impossible by construction.
+ * binding itself, so it cannot diverge from the runtime: there is one
+ * resolution rather than two, leaving the HIGH-severity direction (a field the
+ * builder cannot produce but the checker passes) no second reading to arise
+ * from.
  *
  * Because the binding is shared, the resolution rules apply unchanged: an
  * explicit standardization preempts the type fallback (a field whose explicit
@@ -3590,11 +3595,13 @@ function readParsedDateRun(
  * fails to compile, or one that inflates a probe past that ceiling -- takes the
  * COLLAPSE word rather than the milder one: the window's breadth is unknown, and
  * understating it is the only harmful direction on a consent surface. That closes
- * the milder-word evasion by construction -- an inviter cannot make one probe
- * unmeasurable to drop the marker while every real date still collapses onto one
- * constant. A legitimate partial-date transform does not cross the ceiling and is
- * not an unknown function, so it still measures cleanly and keeps its true milder
- * word; only a pathological or exchange-time-throwing pipeline takes the wider one.
+ * the milder-word evasion -- an inviter cannot make one probe unmeasurable to
+ * drop the marker while every real date still collapses onto one constant (a
+ * probe inflated past the ceiling is driven in standardization.test.ts). A
+ * legitimate partial-date transform does not cross the ceiling and is not an
+ * unknown function, so it still measures cleanly and keeps its true milder
+ * word; only a pathological or exchange-time-throwing pipeline takes the wider
+ * one.
  *
  * The limit it keeps is a value-DEPENDENT drop the terms cannot settle, and it
  * runs in the over-claiming direction alone. A `filter_regex` or `null_if`
@@ -4212,9 +4219,10 @@ export interface ConstraintViolation {
  * (1) ReDoS: matching against an attacker-chosen pattern on the native `RegExp`
  * engine could backtrack catastrophically and hang the single, non-interruptible
  * thread. The class is compiled under the linear-time engine the transform-regex
- * paths use ({@link compileLinearRegex}, re2js) instead, so the blow-up is
- * impossible by construction -- no partner pattern ever touches the backtracking
- * engine -- and a pattern that engine cannot compile is treated as "cannot check"
+ * paths use ({@link compileLinearRegex}, re2js) instead, so no partner pattern
+ * reaches the backtracking engine on this path (a crafted breakout is driven
+ * through the check in standardization.test.ts)
+ * -- and a pattern that engine cannot compile is treated as "cannot check"
  * (no violation, fail-open) rather than throwing. {@link NameConstraintsSchema}
  * validates the class under this SAME engine, so for a decoded token that fail-open
  * is a backstop, not a path: a class that would not compile here is rejected at

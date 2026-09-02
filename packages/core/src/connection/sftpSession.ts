@@ -206,9 +206,10 @@ export class SftpSession {
    * distinction matters -- ssh2 honors more than the canonical names (`hostname`
    * is an alias for `host` and takes precedence over it; `user` is an alias for
    * `username`) and treats keys case-sensitively, so a deny-list would have to
-   * enumerate every synonym and casing to be safe, whereas default-deny covers
-   * them all by construction. This is also why providerOptions can be left
-   * un-normalized.
+   * enumerate every synonym and casing to be safe, whereas default-deny drops
+   * each of them unnamed -- fileSyncConnection.test.ts drives the host and
+   * credential overrides through it. This is also why providerOptions can be
+   * left un-normalized.
    */
   private applyProviderOptions(
     connectOptions: Record<string, unknown>,
