@@ -10,6 +10,7 @@ import {
   MAX_ENCODED_INVITATION_LENGTH,
   MAX_ENDPOINT_HOST_LENGTH,
   MAX_ENDPOINT_PATH_LENGTH,
+  stripInvitationWhitespace,
 } from "../src/config/invitation";
 import type {
   ConnectionEndpoint,
@@ -440,10 +441,49 @@ test("rejects invalid base64url characters in the body", async () => {
   );
 });
 
+test("rejects an out-of-alphabet body character before the checksum comparison", async () => {
+  // Everything else about this token is well-formed, so a decoder that reached
+  // the checksum would report a mismatch instead.
+  const encoded = await encodeInvitation(baseToken);
+  const planted = encoded.slice(0, 4) + "!" + encoded.slice(5);
+  await expect(decodeInvitation(planted)).rejects.toThrow(
+    "invitation string is not valid base64url",
+  );
+});
+
+test("rejects a body whose length is not a valid base64 length", async () => {
+  // Seven characters: a one-character body ahead of the six-character checksum
+  // slot, a length no base64 encoding produces.
+  await expect(decodeInvitation("AAAAAAA")).rejects.toThrow(
+    "invitation string is not valid base64url",
+  );
+});
+
+test("rejects a body carrying the whitespace a wrapped paste leaves", async () => {
+  // The strictness the accept seams normalize for: whitespace inside the token
+  // is refused here, and stripInvitationWhitespace is what makes the same paste
+  // decode. Pinning both halves keeps the seams and the decoder in agreement.
+  const encoded = await encodeInvitation(baseToken);
+  const wrapped = `${encoded.slice(0, 20)}\n  ${encoded.slice(20)}`;
+  await expect(decodeInvitation(wrapped)).rejects.toThrow(
+    "invitation string is not valid base64url",
+  );
+  const decoded = await decodeInvitation(stripInvitationWhitespace(wrapped));
+  expect(decoded.sharedSecret).toBe(baseToken.sharedSecret);
+});
+
+test("stripInvitationWhitespace removes ASCII whitespace and nothing else", () => {
+  expect(stripInvitationWhitespace(" ab\n c\td\r\ne ")).toBe("abcde");
+  // A non-ASCII space is not wrapping damage, so it survives for the decoder to
+  // reject rather than being normalized into a token the operator never had.
+  expect(stripInvitationWhitespace("ab\u00a0cd")).toBe("ab\u00a0cd");
+});
+
 // --- Decode-error message swallows (display-injection backstop) --------------
 
-// decodeInvitation deliberately catches the JSON.parse and atob failures and
-// rethrows a FIXED string rather than the engine's message, because those
+// decodeInvitation deliberately catches the JSON.parse and base64url-decode
+// failures and rethrows a FIXED string rather than the underlying message,
+// because those
 // messages can quote partner-controlled input bytes. That thrown .message is
 // relayed verbatim by describeDecodeError for a non-Zod Error. Its load-bearing
 // consumer is the web accept page's operator-facing alert (apps/web
@@ -505,16 +545,17 @@ test("decodeInvitation swallows the JSON.parse error, never relaying partner byt
   );
 });
 
-test("decodeInvitation swallows the atob error, throwing only the fixed string", async () => {
-  // Reach the atob catch through the real decode path: the body (everything but
-  // the trailing 6-char checksum slot) carries the planted bytes, all outside the
-  // base64url alphabet, so atob throws. Deliberately NO planted-bytes loop here,
-  // unlike the JSON test: Node's atob never echoes its input (its message is the
-  // fixed "Invalid character"), so no input byte can reach the thrown message
-  // even with the swallow removed -- a not.toContain assertion would pass
-  // vacuously and falsely imply this path is as load-bearing as the JSON one. The
-  // regression guard is the fixed string itself: relaying atob's message (or one
-  // that interpolated the offending input) changes it and fails the toBe below.
+test("decodeInvitation swallows the base64url decode error, throwing only the fixed string", async () => {
+  // Reach the decode catch through the real path: the body (everything but the
+  // trailing 6-char checksum slot) carries the planted bytes, all outside the
+  // base64url alphabet, so the shared primitive rejects it. Deliberately NO
+  // planted-bytes loop here, unlike the JSON test: neither the primitive's
+  // message nor Node's atob beneath it echoes the input, so no input byte can
+  // reach the thrown message even with the swallow removed -- a not.toContain
+  // assertion would pass vacuously and falsely imply this path is as
+  // load-bearing as the JSON one. The regression guard is the fixed string
+  // itself: relaying the primitive's message (or one that interpolated the
+  // offending input) changes it and fails the toBe below.
   const encoded = PLANTED_DISPLAY_BYTES.join("") + "AAAAAA";
 
   const err = await decodeInvitation(encoded).catch((e: unknown) => e);

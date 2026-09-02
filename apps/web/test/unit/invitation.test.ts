@@ -21,6 +21,7 @@ import {
   InvitationFileError,
   deepLinkFor,
   generateInvitation,
+  tokenFromInput,
   webrtcEndpointFromLocation,
 } from "../../src/psi/invitation.js";
 import { prepareAcceptedInvitation } from "../../src/psi/acceptInvitation.js";
@@ -1241,5 +1242,32 @@ describe("deepLinkFor", () => {
       "https://example.org/accept#TOKEN123",
     );
     expect(ACCEPT_ROUTE_PATH).toBe("/accept");
+  });
+});
+
+describe("tokenFromInput", () => {
+  test("joins a bare code a mail client hard-wrapped", () => {
+    expect(tokenFromInput("  TOKEN\n123  4\r\n56  ")).toBe("TOKEN123456");
+  });
+
+  test("joins a deep link whose fragment was wrapped", () => {
+    expect(tokenFromInput("https://example.org/accept#TOKEN\n  123\t456")).toBe(
+      "TOKEN123456",
+    );
+  });
+
+  test("a whitespace-only paste is no token at all", () => {
+    expect(tokenFromInput("  \n\t ")).toBe("");
+  });
+
+  test("a wrapped paste of a real invitation still decodes", async () => {
+    const { encoded, sharedSecret } = await generateInvitation({
+      inviterName: "County Health Dept",
+      file: csvStream(),
+      location,
+    });
+    const wrapped = `${encoded.slice(0, 25)}\n  ${encoded.slice(25)}`;
+    const decoded = await decodeInvitation(tokenFromInput(wrapped));
+    expect(decoded.sharedSecret).toBe(sharedSecret);
   });
 });

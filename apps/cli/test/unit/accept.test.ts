@@ -318,6 +318,16 @@ test("encode/decode round-trips an invitation at the command level", async () =>
   );
 });
 
+test("a hard-wrapped invitation paste decodes at the command level", async () => {
+  const token = sampleToken(FUTURE());
+  const encoded = await encodeInvitation(token);
+  // What a token pasted out of a wrapping mail client carries: line breaks and
+  // the indentation of a quoted reply, none of it part of the invitation.
+  const wrapped = `${encoded.slice(0, 30)}\n  ${encoded.slice(30, 60)}\n${encoded.slice(60)}`;
+  const decoded = await decodeAndValidateInvitation(wrapped);
+  expect(decoded.sharedSecret).toBe(token.sharedSecret);
+});
+
 test("a checksum mismatch is rejected (before any prompt) with a usage error", async () => {
   const encoded = await encodeInvitation(
     sampleToken(new Date(Date.now() + 3_600_000).toISOString()),
