@@ -2892,6 +2892,28 @@ const inertValue = (cost: number, lead: string): string => {
   return raw;
 };
 
+// A fragment of the seam's marker left standing where a cut fell, read off the
+// markers the units above are treated into rather than restated: the marker is
+// four printable characters put where a value's control character was, so a cut
+// inside one shows the operator neither the character it names nor the value's
+// own bytes.
+const MARKER_FRAGMENTS = ["\n", "\r"].flatMap((character) => {
+  const marker = controlCharacterMarker(character.codePointAt(0)!);
+  return Array.from({ length: marker.length - 1 }, (_unused, index) =>
+    marker.slice(0, index + 1),
+  );
+});
+
+// Every place in `rendered` where a cut left one, which is the text a truncation
+// marker directly follows.
+const fragmentsBeforeCuts = (rendered: string): string[] =>
+  rendered
+    .split(DISPLAY_TRUNCATION_MARKER)
+    .slice(0, -1)
+    .flatMap((before) =>
+      MARKER_FRAGMENTS.filter((fragment) => before.endsWith(fragment)),
+    );
+
 // Terms disagreeing on the shapes a cut can fall in: a delimited name list, a
 // clause of four values, and a clause whose first value is followed by first-
 // party copy and a bare date. Each value is built by `value`, wide enough that
@@ -2987,6 +3009,9 @@ test("a fitted conflict line's runs are the runs the block composed, at every bu
     expect(blockSkeleton(hostile, "\n"), where).toBe(
       blockSkeleton(benign, "\n"),
     );
+    // The seam's markers are the other unit the cut may not fall inside: what a
+    // fitted line carries of them is whole markers or none.
+    expect(fragmentsBeforeCuts(hostile), where).toEqual([]);
     sawCut ||= hostile.includes(DISPLAY_TRUNCATION_MARKER);
     sawNamedOnly ||= hostile.includes("too wide for the room");
   }
@@ -3008,6 +3033,7 @@ test("a fitted conflict line's runs are the runs the block composed, at every bu
   };
   const rendered = refusalAtWidth(delimiterCarryingValue);
   expect(rendered).toContain(DISPLAY_TRUNCATION_MARKER);
+  expect(fragmentsBeforeCuts(rendered)).toEqual([]);
   expect(blockSkeleton(rendered, "\\x0a")).not.toContain("<unterminated>");
   expect(blockSkeleton(rendered, "\\x0a")).toBe(
     blockSkeleton(refusalAtWidth(inertValue), "\\x0a"),

@@ -144,9 +144,8 @@ export const BARE_TERMS_VALUE_PATTERN = /^[A-Za-z0-9._-]*[0-9][A-Za-z0-9._-]*$/;
  * through unchanged, so the run's boundaries survive to the operator exactly as
  * composed and no byte of the value renders as a control character the
  * composition placed. What can still cut a run is the display boundary's own
- * truncation
- * (`COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH`), which drops the tail of an over-long
- * link: an operator then meets an unterminated run followed by
+ * truncation (`COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH`), which drops the tail of
+ * an over-long link: an operator then meets an unterminated run followed by
  * `DISPLAY_TRUNCATION_MARKER`, which reads as cut rather than as a further
  * clause.
  *

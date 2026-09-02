@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import {
   sanitizeForDisplay,
+  clipToRenderedCost,
   controlCharacterMarker,
   renderedDisplayCost,
   replaceControlCharactersForDisplay,
@@ -199,5 +200,107 @@ describe("replaceControlCharactersForDisplay", () => {
       expect(
         renderedDisplayCost(replaceControlCharactersForDisplay(character)),
       ).toBe(renderedDisplayCost(character));
+  });
+});
+
+describe("a cut lands outside a control-character marker", () => {
+  // The marker is four printable characters standing where a control character
+  // was, and both cut routines below measure in units smaller than that: a
+  // budget landing between them would show the operator a fragment of a token
+  // that is neither the value's own bytes nor the marker.
+  const LEAD = "x".repeat(20);
+  // Long enough that every budget spanning the marker still cuts, rather than
+  // reaching the end of the value and returning it whole.
+  const TAIL = "y".repeat(DISPLAY_TRUNCATION_MARKER.length + 6);
+  const MARKER = controlCharacterMarker("\n".codePointAt(0)!);
+  const treated = replaceControlCharactersForDisplay(`${LEAD}\n${TAIL}`);
+
+  // What a cut may not leave in front of the truncation marker, read off the
+  // marker rather than restated: any proper prefix of it.
+  const FRAGMENTS = Array.from(
+    { length: MARKER.length - 1 },
+    (_unused, index) => MARKER.slice(0, index + 1),
+  );
+  const endsInAFragment = (rendered: string): boolean => {
+    const kept = rendered.endsWith(DISPLAY_TRUNCATION_MARKER)
+      ? rendered.slice(0, -DISPLAY_TRUNCATION_MARKER.length)
+      : rendered;
+    return FRAGMENTS.some((fragment) => kept.endsWith(fragment));
+  };
+
+  test("the value places the marker where a budget can be walked across it", () => {
+    expect(treated).toBe(`${LEAD}${MARKER}${TAIL}`);
+    // Every character of it is printable ASCII, so a character of the treated
+    // value costs the escape one and the two routines' units line up with the
+    // offsets below.
+    expect(renderedDisplayCost(treated)).toBe(treated.length);
+  });
+
+  test("sanitizeForDisplay's own truncation backs off to before the marker", () => {
+    // The cut walked across the marker's four positions. Landing inside it
+    // undershoots the cap by up to three characters -- the cap bounds the
+    // output rather than being met by it -- and the marker is shown whole only
+    // where the whole of it fits.
+    const keptAt = (offset: number): string =>
+      sanitizeForDisplay(treated, { maxLength: LEAD.length + offset });
+    for (const offset of [0, 1, 2, 3])
+      expect(keptAt(offset)).toBe(LEAD + DISPLAY_TRUNCATION_MARKER);
+    expect(keptAt(MARKER.length)).toBe(
+      LEAD + MARKER + DISPLAY_TRUNCATION_MARKER,
+    );
+  });
+
+  test("clipToRenderedCost backs off to before the marker", () => {
+    // The same walk on the routine that clips to a RENDERED cost, whose budget
+    // pays for the truncation marker out of itself.
+    const keptAt = (offset: number): string =>
+      clipToRenderedCost(
+        treated,
+        DISPLAY_TRUNCATION_MARKER.length + LEAD.length + offset,
+      );
+    for (const offset of [0, 1, 2, 3])
+      expect(keptAt(offset)).toBe(LEAD + DISPLAY_TRUNCATION_MARKER);
+    expect(keptAt(MARKER.length)).toBe(
+      LEAD + MARKER + DISPLAY_TRUNCATION_MARKER,
+    );
+  });
+
+  test("at no width does either routine leave a fragment of a marker", () => {
+    // Said over every width rather than at the four offsets above: a value the
+    // partner sized decides where the cut falls, so the property is read across
+    // all of them.
+    let sawWholeMarker = false;
+    let sawCut = false;
+    for (let width = 0; width <= treated.length + 4; width += 1) {
+      const escaped = sanitizeForDisplay(treated, { maxLength: width });
+      const clipped = clipToRenderedCost(treated, width);
+      expect(endsInAFragment(escaped), `maxLength ${width}`).toBe(false);
+      expect(endsInAFragment(clipped), `budget ${width}`).toBe(false);
+      sawWholeMarker ||= escaped.includes(MARKER) && clipped.includes(MARKER);
+      sawCut ||=
+        escaped.endsWith(DISPLAY_TRUNCATION_MARKER) &&
+        clipped.endsWith(DISPLAY_TRUNCATION_MARKER);
+    }
+    // Non-vacuous: the sweep covered widths that cut the value and widths that
+    // held the whole marker.
+    expect(sawWholeMarker).toBe(true);
+    expect(sawCut).toBe(true);
+  });
+
+  test("a value spelling a marker in its own bytes is backed off over too", () => {
+    // The open class the marker carries: nothing in a treated string tells a
+    // marker from a value that spelled one character by character, so the
+    // back-off reads the shape and moves the cut for either. It costs the same
+    // three characters, and what it cannot do is leave the operator a fragment
+    // whose provenance they would have to guess at.
+    const literal = `${LEAD}${MARKER}${TAIL}`;
+    expect(replaceControlCharactersForDisplay(literal)).toBe(literal);
+    expect(sanitizeForDisplay(literal, { maxLength: LEAD.length + 2 })).toBe(
+      LEAD + DISPLAY_TRUNCATION_MARKER,
+    );
+    // A `<` the value carries mid-run is not a cut and is left alone.
+    expect(sanitizeForDisplay(`a<b${LEAD}`, { maxLength: 4 })).toBe(
+      "a<b" + LEAD[0] + DISPLAY_TRUNCATION_MARKER,
+    );
   });
 });

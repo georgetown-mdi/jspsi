@@ -1158,8 +1158,8 @@ describe.each(SWEPT)("$id", (diagnostic) => {
         // untouched, and it ran as many times as this route escapes: once at
         // the error renderer, or -- on the warnings route -- once at composition
         // and once at the sink. Counted on a non-ASCII code point rather than a
-        // control character, which no longer reaches the escape from inside a
-        // value on the errors route. That doubling is reachable here because
+        // control character, which the seam replaces ahead of the escape on the
+        // errors route. That doubling is reachable here because
         // validateCompatibility's signature admits terms no schema parsed; a
         // date that came through the terms schema carries no byte the escape
         // rewrites at all, which linkageTerms.test.ts pins.

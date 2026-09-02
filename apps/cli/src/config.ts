@@ -37,6 +37,7 @@ import {
   snakeizeKey,
   snakeizeKeys,
   StandardizationSchema,
+  trimPartialControlCharacterMarker,
   UsageError,
   withRetainModeImplications,
 } from "@psilink/core";
@@ -621,6 +622,12 @@ const TERMS_VALUE_DELIMITER_COST = renderedDisplayCost(TERMS_VALUE_DELIMITER);
  * raw prefix measured against the budget renders WIDER once its delimiters are
  * doubled back in. Charging each doubled pair as it is kept is that same clip,
  * costed at what the run renders to.
+ *
+ * The seam's control-character markers are the other unit a cut may not fall
+ * inside, and they are backed off out of the kept prefix
+ * ({@link trimPartialControlCharacterMarker}) before the marker and any closing
+ * delimiter are appended -- so the budget bounds this rather than being met by
+ * it, and the run the walk above ended in is still the run this closes.
  */
 function fitToRenderedCostClosingRuns(text: string, budget: number): string {
   if (renderedDisplayCost(text) <= budget) return text;
@@ -647,7 +654,7 @@ function fitToRenderedCostClosingRuns(text: string, budget: number): string {
     insideRun = nextInsideRun;
     index += doubled ? 2 : 1;
   }
-  return `${kept}${DISPLAY_TRUNCATION_MARKER}${insideRun ? TERMS_VALUE_DELIMITER : ""}`;
+  return `${trimPartialControlCharacterMarker(kept)}${DISPLAY_TRUNCATION_MARKER}${insideRun ? TERMS_VALUE_DELIMITER : ""}`;
 }
 
 /**

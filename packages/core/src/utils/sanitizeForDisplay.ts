@@ -159,7 +159,9 @@ export function sanitizeForDisplay(
   // than split. The cap bounds the OUTPUT length, not the number of code points
   // read: an escape can expand a code point to ten characters, so a code-point
   // cap would let the output run to ~10x. A code point is appended only if its
-  // whole escape fits, so the output never ends mid-escape.
+  // whole escape fits, so the output never ends mid-escape; a cut that would
+  // leave a fragment of a marker a treatment already put in the value backs off
+  // to before it ({@link trimPartialControlCharacterMarker}).
   let out = "";
   let truncated = false;
   for (const ch of value) {
@@ -185,7 +187,11 @@ export function sanitizeForDisplay(
     out += piece;
   }
 
-  return (truncated ? out + DISPLAY_TRUNCATION_MARKER : out) as Displayable;
+  return (
+    truncated
+      ? trimPartialControlCharacterMarker(out) + DISPLAY_TRUNCATION_MARKER
+      : out
+  ) as Displayable;
 }
 
 /**
@@ -261,6 +267,71 @@ export function replaceControlCharactersForDisplay(value: string): string {
 }
 
 /**
+ * Every proper, non-empty prefix of a marker
+ * ({@link replaceControlCharactersForDisplay}) -- what a cut landing inside one
+ * leaves behind. Read off the treatment by running it over the code points it
+ * rewrites, rather than restating the marker's shape, so a change to that shape
+ * cannot leave the back-off below matching the old one.
+ */
+const PARTIAL_CONTROL_CHARACTER_MARKERS: ReadonlySet<string> = new Set(
+  Array.from({ length: 0xa0 }, (_unused, codePoint) =>
+    String.fromCodePoint(codePoint),
+  ).flatMap((character) => {
+    const treated = replaceControlCharactersForDisplay(character);
+    if (treated === character) return [];
+    return Array.from({ length: treated.length - 1 }, (_unused, index) =>
+      treated.slice(0, index + 1),
+    );
+  }),
+);
+
+const LONGEST_PARTIAL_CONTROL_CHARACTER_MARKER = Math.max(
+  ...Array.from(PARTIAL_CONTROL_CHARACTER_MARKERS, (partial) => partial.length),
+);
+
+/**
+ * `text` with any trailing fragment of a control-character marker removed, so a
+ * routine that cut `text` to a budget hands on whole markers or none.
+ *
+ * A marker is four printable characters standing where a control character was,
+ * and a cut taken by length or by rendered cost knows nothing about it: cut down
+ * to `<`, `<0`, or `<0a`, what the operator meets is neither the value's bytes
+ * nor the marker, and the truncation marker that follows says only that
+ * something was dropped. Backing the cut off to before the marker's opening `<`
+ * undershoots the budget by up to three characters, which every caller's
+ * arithmetic already treats as an upper bound.
+ *
+ * The back-off is keyed on the marker's SHAPE, which a value's own printable
+ * bytes can spell just as well: a value ending in a literal `<0a` is backed off
+ * over exactly as a cut marker is. That is the same open class the marker itself
+ * carries -- nothing in a treated string distinguishes the two -- and it costs
+ * the same three characters. It applies until nothing at the end matches, so a
+ * prefix whose tail is a run of such shapes keeps none of them, down to a value
+ * that is nothing else and renders as the truncation marker alone.
+ */
+export function trimPartialControlCharacterMarker(text: string): string {
+  let kept = text;
+  let trimmed = true;
+  while (trimmed) {
+    trimmed = false;
+    for (
+      let length = Math.min(
+        LONGEST_PARTIAL_CONTROL_CHARACTER_MARKER,
+        kept.length,
+      );
+      length > 0;
+      length -= 1
+    )
+      if (PARTIAL_CONTROL_CHARACTER_MARKERS.has(kept.slice(-length))) {
+        kept = kept.slice(0, kept.length - length);
+        trimmed = true;
+        break;
+      }
+  }
+  return kept;
+}
+
+/**
  * What a RAW fragment costs once a display boundary escapes it, which is not its
  * own length: {@link sanitizeForDisplay} expands a code point outside printable
  * ASCII to as many as ten characters and doubles a literal backslash, so budget
@@ -297,7 +368,10 @@ export function renderedDisplayCost(fragment: string): number {
  *
  * `value` arrives raw, and a code point is kept only when its WHOLE rendered
  * cost fits, so the clip falls on a code-point boundary and what the sink then
- * escapes can never end inside a partial escape sequence.
+ * escapes can never end inside a partial escape sequence. A clip that would end
+ * inside a marker a treatment already put in `value` backs off to before it
+ * ({@link trimPartialControlCharacterMarker}), which is why the budget is an
+ * upper bound rather than a width the result meets.
  *
  * Redact BEFORE clipping
  * ({@link ./sanitizeErrorForDisplay.redactPrivateKeyMaterial}), never after: the
@@ -321,7 +395,7 @@ export function clipToRenderedCost(value: string, budget: number): string {
     kept += ch;
     cost = next;
   }
-  return `${kept}${DISPLAY_TRUNCATION_MARKER}`;
+  return `${trimPartialControlCharacterMarker(kept)}${DISPLAY_TRUNCATION_MARKER}`;
 }
 
 /**
