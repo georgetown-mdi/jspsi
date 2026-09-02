@@ -11,10 +11,10 @@ import { withCapturedLogs } from "@psilink/core/testing";
 import { MAX_DIRECTORY_ENTRIES } from "../../src/connection/listingGuard";
 import {
   CONCURRENT_OPERATIONS_BESIDE_A_FAN,
-  MAX_DEFERRED_CLEANUP_DELETES,
   SHARED_SSH2_CLIENT_MAX_EVENT_LISTENERS,
   SSH2SFTPClientAdapter,
 } from "../../src/connection/ssh2SftpAdapter";
+import { MAX_DEFERRED_CLEANUP_DELETES } from "../../src/connection/sftpDeferredCleanup";
 import { selectedBackend } from "../sftpServer";
 import { serverAuth, sftpServer } from "../sftpServer/testContext";
 
@@ -666,9 +666,9 @@ inProcessOnly(
       }
       const recorded = (
         party.adapter as unknown as {
-          deferredCleanupDeletes: Map<string, number>;
+          deferredCleanupDeletes: { recorded: ReadonlyMap<string, number> };
         }
-      ).deferredCleanupDeletes;
+      ).deferredCleanupDeletes.recorded;
 
       await withCapturedLogs(
         async () => {
