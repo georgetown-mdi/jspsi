@@ -37,11 +37,11 @@
 //
 // --cache DIR writes every API response under DIR and reads them back on a
 // later run, so re-analyzing a sample (or changing the output) costs no API
-// calls. --offline refuses to call `gh` at all and fails on a cache miss,
-// which is how a re-analysis proves it re-read the recorded sample rather than
-// quietly measuring today's runs instead.
+// calls. --offline makes no request at all and fails on a cache miss, which is
+// how a re-analysis proves it re-read the recorded sample rather than quietly
+// measuring today's runs instead.
 //
-// The computation is pure and lives above the `gh` calls, so the colocated
+// The computation is pure and lives above the fetch layer, so the colocated
 // test drives it on a fixture. Run it with the rest of the scripts project:
 // `npx vitest run --project scripts` (or `npm run test:scripts`).
 
@@ -50,6 +50,8 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { githubToken } from "./lib/projectItems.mjs";
 
 /** Pull-request runs sampled when the command line names no count. */
 export const DEFAULT_RUN_SAMPLE = 300;
@@ -229,7 +231,7 @@ export function summarizeJobs(attempts, requiredSet) {
   for (const attempt of attempts) {
     for (const job of attempt.jobs) {
       if (job.conclusion === "skipped") continue;
-      const key = `${attempt.workflowName} ${job.name}`;
+      const key = `${attempt.workflowName}\u0000${job.name}`;
       let entry = byKey.get(key);
       if (!entry) {
         entry = {
@@ -474,6 +476,9 @@ export function buildReport(sample) {
           .map((s) => s.pullRequest)
           .filter((n) => typeof n === "number"),
       ).size,
+      runsRequested: sample.runsRequested ?? null,
+      runsSampled: sample.runsSampled ?? null,
+      windowExhausted: sample.windowExhausted === true,
       from: earliest(createdTimes),
       to: latest(createdTimes),
     },
@@ -515,10 +520,14 @@ function table(headers, rows) {
 /** The human-readable report: the same numbers `--json` emits, as tables. */
 export function renderReport(report) {
   const out = [];
+  const shortfall = report.sample.windowExhausted
+    ? `, run listing exhausted at ${report.sample.runsSampled} of the ` +
+      `${report.sample.runsRequested} runs asked for`
+    : "";
   out.push(
     `${report.repo} -- pull-request checks against ${report.base}`,
     `sample: ${report.sample.runAttempts} run attempts over ${report.sample.headShas} head shas ` +
-      `(${report.sample.pullRequests} pull requests), ${report.sample.from} .. ${report.sample.to}`,
+      `(${report.sample.pullRequests} pull requests), ${report.sample.from} .. ${report.sample.to}${shortfall}`,
     "",
     "Required check contexts (live branch ruleset):",
   );
@@ -614,12 +623,16 @@ export function renderReport(report) {
             formatSeconds(step.p90Seconds),
             formatSeconds(step.maxSeconds),
           ]),
-          [
-            `(${job.steps.length - shown.length} steps under 3s)`,
-            formatSeconds(rest),
-            "-",
-            "-",
-          ],
+          ...(job.steps.length > shown.length
+            ? [
+                [
+                  `(${job.steps.length - shown.length} steps under 3s)`,
+                  formatSeconds(rest),
+                  "-",
+                  "-",
+                ],
+              ]
+            : []),
         ],
       ),
     );
@@ -639,28 +652,80 @@ export function renderReport(report) {
   return out.join("\n") + "\n";
 }
 
-function ghJson(path, { cacheDir, offline }) {
-  const key = createHash("sha256").update(path).digest("hex").slice(0, 32);
-  const cacheFile = cacheDir === null ? null : join(cacheDir, `${key}.json`);
-  if (cacheFile !== null) {
+const GITHUB_API_ROOT = "https://api.github.com";
+// GitHub rejects API requests without a User-Agent; identify this script.
+const USER_AGENT = "psilink-measure-pr-checks";
+
+/**
+ * Pages of the pull-request run listing one measurement scans, 100 runs each,
+ * bounding the API spend of a large `runs` argument at 4,000 scanned runs. A
+ * sample that runs the window out before it has the runs it was asked for says
+ * so on the report rather than passing a short sample off as the whole request.
+ */
+export const MAX_RUN_PAGES = 40;
+
+/**
+ * A live API reader: a REST path (no leading slash) in, parsed JSON out. Node
+ * `fetch` rather than a `gh api` subprocess, the shape lib/projectItems.mjs
+ * uses, because gh's network subcommands fail inside the command sandbox. The
+ * token is resolved on the first request, so a replay served entirely from the
+ * cache needs no credential.
+ */
+export function createApiRequest() {
+  let token = null;
+  return async (path) => {
+    token ??= githubToken();
+    const url = `${GITHUB_API_ROOT}/${path}`;
+    let res;
+    let text;
     try {
-      return JSON.parse(readFileSync(cacheFile, "utf8"));
-    } catch {
-      // Not cached yet; fall through to the API unless --offline forbids it.
+      res = await fetch(url, {
+        headers: {
+          Accept: "application/vnd.github+json",
+          Authorization: `Bearer ${token}`,
+          "User-Agent": USER_AGENT,
+        },
+      });
+      text = await res.text();
+    } catch (err) {
+      throw new Error(`GET ${url} failed: ${err.message}`, { cause: err });
     }
-  }
-  if (offline) throw new Error(`no cached response for ${path}`);
-  const run = spawnSync("gh", ["api", path], {
-    encoding: "utf8",
-    maxBuffer: 256 * 1024 * 1024,
-  });
-  if (run.error) throw new Error(`could not run gh: ${run.error.message}`);
-  if (run.status !== 0) {
-    throw new Error(`gh api ${path} failed: ${String(run.stderr).trim()}`);
-  }
-  const parsed = JSON.parse(run.stdout);
-  if (cacheFile !== null) writeFileSync(cacheFile, JSON.stringify(parsed));
-  return parsed;
+    if (!res.ok) {
+      throw new Error(
+        `GET ${url} failed with HTTP ${res.status}: ${text.slice(0, 300)}`,
+      );
+    }
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new Error(
+        `GET ${url} returned non-JSON (HTTP ${res.status}): ${text.slice(0, 300)}`,
+      );
+    }
+  };
+}
+
+/**
+ * The --cache DIR / --offline replay contract around a request: a recorded
+ * response answers without a call, a fresh one is written back under the hash
+ * of its path, and --offline fails on a miss.
+ */
+function cachingRequest(request, { cacheDir, offline }) {
+  return async (path) => {
+    const key = createHash("sha256").update(path).digest("hex").slice(0, 32);
+    const cacheFile = cacheDir === null ? null : join(cacheDir, `${key}.json`);
+    if (cacheFile !== null) {
+      try {
+        return JSON.parse(readFileSync(cacheFile, "utf8"));
+      } catch {
+        // Not cached yet; fall through to the API unless --offline forbids it.
+      }
+    }
+    if (offline) throw new Error(`no cached response for ${path}`);
+    const parsed = await request(path);
+    if (cacheFile !== null) writeFileSync(cacheFile, JSON.stringify(parsed));
+    return parsed;
+  };
 }
 
 function normalizeJobs(payload) {
@@ -669,7 +734,6 @@ function normalizeJobs(payload) {
     createdAt: job.created_at ?? null,
     startedAt: job.started_at ?? null,
     completedAt: job.completed_at ?? null,
-    status: job.status,
     conclusion: job.conclusion ?? null,
     steps: (job.steps ?? []).map((step) => ({
       name: step.name,
@@ -680,9 +744,19 @@ function normalizeJobs(payload) {
   }));
 }
 
-function collectSample({ repo, base, runs: wanted, cacheDir, offline }) {
-  const api = (path) => ghJson(path, { cacheDir, offline });
-  const rules = api(`repos/${repo}/rules/branches/${base}`);
+/**
+ * The normalized sample buildReport computes from, fetched a page of runs at a
+ * time until `runs` of them are held or the MAX_RUN_PAGES window runs out.
+ * `request` is the path -> JSON reader, injectable so the test drives the
+ * collection on fixtures rather than the live API.
+ * @internal
+ */
+export async function collectSample(
+  { repo, base, runs: wanted, cacheDir = null, offline = false },
+  { request = createApiRequest() } = {},
+) {
+  const api = cachingRequest(request, { cacheDir, offline });
+  const rules = await api(`repos/${repo}/rules/branches/${base}`);
 
   const baseOfSha = new Map();
   const prOfSha = new Map();
@@ -690,8 +764,8 @@ function collectSample({ repo, base, runs: wanted, cacheDir, offline }) {
   let selected = 0;
   let page = 1;
 
-  while (page <= 40) {
-    const listing = api(
+  while (page <= MAX_RUN_PAGES) {
+    const listing = await api(
       `repos/${repo}/actions/runs?event=pull_request&per_page=100&page=${page}`,
     );
     const workflowRuns = listing.workflow_runs ?? [];
@@ -707,24 +781,28 @@ function collectSample({ repo, base, runs: wanted, cacheDir, offline }) {
       }
       if (run.status !== "completed") continue;
       if (!baseOfSha.has(run.head_sha)) {
-        const pulls = api(`repos/${repo}/commits/${run.head_sha}/pulls`);
-        const pull = Array.isArray(pulls) ? pulls[0] : undefined;
+        const pulls = await api(`repos/${repo}/commits/${run.head_sha}/pulls`);
+        // A sha can sit on more than one pull request; attribute it to the one
+        // against the measured base, or to none, rather than to whichever the
+        // API happens to list first.
+        const pull = Array.isArray(pulls)
+          ? (pulls.find((entry) => entry?.base?.ref === base) ?? null)
+          : null;
         baseOfSha.set(run.head_sha, pull?.base?.ref ?? null);
         prOfSha.set(run.head_sha, pull?.number ?? null);
       }
       if (baseOfSha.get(run.head_sha) !== base) continue;
 
       if (!shas.has(run.head_sha)) {
+        const checks = await api(
+          `repos/${repo}/commits/${run.head_sha}/check-runs?per_page=100`,
+        );
         shas.set(run.head_sha, {
           sha: run.head_sha,
           pullRequest: prOfSha.get(run.head_sha),
           runs: [],
-          checkRuns: (
-            api(`repos/${repo}/commits/${run.head_sha}/check-runs?per_page=100`)
-              .check_runs ?? []
-          ).map((check) => ({
+          checkRuns: (checks.check_runs ?? []).map((check) => ({
             name: check.name,
-            appSlug: check.app?.slug ?? null,
             startedAt: check.started_at ?? null,
             completedAt: check.completed_at ?? null,
             conclusion: check.conclusion ?? null,
@@ -738,7 +816,9 @@ function collectSample({ repo, base, runs: wanted, cacheDir, offline }) {
         const isLast = attempt === attemptCount;
         const meta = isLast
           ? run
-          : api(`repos/${repo}/actions/runs/${run.id}/attempts/${attempt}`);
+          : await api(
+              `repos/${repo}/actions/runs/${run.id}/attempts/${attempt}`,
+            );
         const jobsPath = isLast
           ? `repos/${repo}/actions/runs/${run.id}/jobs?per_page=100&filter=latest`
           : `repos/${repo}/actions/runs/${run.id}/attempts/${attempt}/jobs?per_page=100`;
@@ -746,13 +826,11 @@ function collectSample({ repo, base, runs: wanted, cacheDir, offline }) {
           runId: run.id,
           workflowName: run.name,
           headSha: run.head_sha,
-          headBranch: run.head_branch,
           attempt,
           superseded: !isLast,
           runCreatedAt: meta.created_at ?? run.created_at,
           runStartedAt: meta.run_started_at ?? null,
-          conclusion: meta.conclusion ?? null,
-          jobs: normalizeJobs(api(jobsPath)),
+          jobs: normalizeJobs(await api(jobsPath)),
         });
       }
       selected += 1;
@@ -764,23 +842,37 @@ function collectSample({ repo, base, runs: wanted, cacheDir, offline }) {
     base,
     fetchedAt: new Date().toISOString(),
     rules,
+    runsRequested: wanted,
+    runsSampled: selected,
+    windowExhausted: selected < wanted,
     shas: [...shas.values()],
   };
 }
 
+/**
+ * The `owner/name` a GitHub remote URL names, or null for a URL that names no
+ * GitHub repository. Both remote forms git writes: `git@github.com:owner/name.git`
+ * and `https://github.com/owner/name`, with or without the `.git` suffix.
+ */
+export function repoFromRemoteUrl(url) {
+  const match =
+    /^(?:git@github\.com:|(?:https?|ssh):\/\/(?:[^@/]+@)?github\.com\/)([^/]+)\/([^/]+?)(?:\.git)?\/?$/.exec(
+      String(url ?? "").trim(),
+    );
+  return match === null ? null : `${match[1]}/${match[2]}`;
+}
+
 function resolveRepo(explicit) {
   if (explicit !== null) return explicit;
-  const run = spawnSync(
-    "gh",
-    ["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
-    {
-      encoding: "utf8",
-    },
-  );
-  if (run.error || run.status !== 0) {
+  const run = spawnSync("git", ["config", "--get", "remote.origin.url"], {
+    encoding: "utf8",
+  });
+  const repo =
+    run.error || run.status !== 0 ? null : repoFromRemoteUrl(run.stdout);
+  if (repo === null) {
     throw new Error("could not resolve the repository; pass --repo OWNER/REPO");
   }
-  return run.stdout.trim();
+  return repo;
 }
 
 // CLI entry: only runs when invoked directly, so the test can import the pure
@@ -794,7 +886,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   try {
     if (parsed.cacheDir !== null)
       mkdirSync(parsed.cacheDir, { recursive: true });
-    const sample = collectSample({ ...parsed, repo: resolveRepo(parsed.repo) });
+    const sample = await collectSample({
+      ...parsed,
+      repo: resolveRepo(parsed.repo),
+    });
     const report = buildReport(sample);
     process.stdout.write(
       parsed.asJson

@@ -1,16 +1,23 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 import {
   buildReport,
+  collectSample,
   criticalPath,
   criticalPathForSha,
   DEFAULT_RUN_SAMPLE,
   earliest,
   formatSeconds,
   latest,
+  MAX_RUN_PAGES,
   median,
   parseArgs,
   percentile,
   renderReport,
+  repoFromRemoteUrl,
   requiredContextsFromRules,
   secondsBetween,
   summarizeJobs,
@@ -27,7 +34,6 @@ function job(name, { queued, started, ran, conclusion = "success" }) {
     createdAt: queued,
     startedAt,
     completedAt: new Date(Date.parse(startedAt) + ran * 1000).toISOString(),
-    status: "completed",
     conclusion,
   };
 }
@@ -37,21 +43,18 @@ function attempt(workflowName, headSha, createdAt, jobs, extra = {}) {
     runId: 1,
     workflowName,
     headSha,
-    headBranch: "topic",
     attempt: 1,
     superseded: false,
     runCreatedAt: createdAt,
     runStartedAt: createdAt,
-    conclusion: "success",
     jobs,
     ...extra,
   };
 }
 
-function check(name, completedAt, appSlug = "github-actions") {
+function check(name, completedAt) {
   return {
     name,
-    appSlug,
     startedAt: completedAt,
     completedAt,
     conclusion: "success",
@@ -79,6 +82,9 @@ const SAMPLE = {
   base: "staging",
   fetchedAt: "2026-09-02T20:00:00Z",
   rules: RULES,
+  runsRequested: 5,
+  runsSampled: 5,
+  windowExhausted: false,
   shas: [
     {
       sha: "aaa",
@@ -107,11 +113,7 @@ const SAMPLE = {
       ],
       checkRuns: [
         check("Typecheck, Lint, Format", "2026-09-01T10:04:10Z"),
-        check(
-          "Code scanning",
-          "2026-09-01T10:02:00Z",
-          "github-advanced-security",
-        ),
+        check("Code scanning", "2026-09-01T10:02:00Z"),
         check("Test", "2026-09-01T10:10:20Z"),
       ],
     },
@@ -129,11 +131,7 @@ const SAMPLE = {
       ],
       checkRuns: [
         check("Typecheck, Lint, Format", "2026-09-02T10:05:20Z"),
-        check(
-          "Code scanning",
-          "2026-09-02T10:09:00Z",
-          "github-advanced-security",
-        ),
+        check("Code scanning", "2026-09-02T10:09:00Z"),
       ],
     },
     {
@@ -151,7 +149,7 @@ const SAMPLE = {
               ran: 120,
             }),
           ],
-          { superseded: true, conclusion: "failure" },
+          { superseded: true },
         ),
         attempt("Static Checks", "ccc", "2026-09-02T11:00:00Z", [
           job("Typecheck, Lint, Format", {
@@ -163,11 +161,7 @@ const SAMPLE = {
       ],
       checkRuns: [
         check("Typecheck, Lint, Format", "2026-09-02T11:13:00Z"),
-        check(
-          "Code scanning",
-          "2026-09-02T11:02:00Z",
-          "github-advanced-security",
-        ),
+        check("Code scanning", "2026-09-02T11:02:00Z"),
       ],
     },
   ],
@@ -425,7 +419,6 @@ describe("summarizeSteps", () => {
         createdAt: base,
         startedAt: base,
         completedAt: base,
-        status: "completed",
         conclusion: "success",
         steps: [
           step("Setup", 55, base),
@@ -439,7 +432,6 @@ describe("summarizeSteps", () => {
         createdAt: base,
         startedAt: base,
         completedAt: base,
-        status: "completed",
         conclusion: "success",
         steps: [step("Setup", 5, base)],
       },
@@ -481,9 +473,25 @@ describe("buildReport", () => {
       runAttempts: 5,
       headShas: 3,
       pullRequests: 3,
+      runsRequested: 5,
+      runsSampled: 5,
+      windowExhausted: false,
       from: "2026-09-01T10:00:00Z",
       to: "2026-09-02T11:00:00Z",
     });
+  });
+
+  it("says on the sample line when the run listing ran out first", () => {
+    const short = buildReport({
+      ...SAMPLE,
+      runsRequested: 600,
+      runsSampled: 5,
+      windowExhausted: true,
+    });
+    expect(short.sample.windowExhausted).toBe(true);
+    expect(renderReport(short)).toContain(
+      "run listing exhausted at 5 of the 600 runs asked for",
+    );
   });
 
   it("says of each required context whether an Actions job produces it", () => {
@@ -515,5 +523,305 @@ describe("buildReport", () => {
     expect(text).toContain("Heavy Suite / Test");
     expect(text).toContain("1 superseded attempts across 1 shas");
     expect(text.endsWith("\n")).toBe(true);
+  });
+});
+
+describe("renderReport step tables", () => {
+  const base = "2026-09-01T10:00:00Z";
+  const step = (name, seconds) => ({
+    name,
+    startedAt: base,
+    completedAt: new Date(Date.parse(base) + seconds * 1000).toISOString(),
+    conclusion: "success",
+  });
+  const renderWithSteps = (steps) =>
+    renderReport(
+      buildReport({
+        repo: "owner/repo",
+        base: "staging",
+        fetchedAt: base,
+        rules: RULES,
+        runsRequested: 1,
+        runsSampled: 1,
+        windowExhausted: false,
+        shas: [
+          {
+            sha: "aaa",
+            pullRequest: 10,
+            runs: [
+              attempt("Static Checks", "aaa", base, [
+                {
+                  name: "Typecheck, Lint, Format",
+                  createdAt: base,
+                  startedAt: base,
+                  completedAt: base,
+                  conclusion: "success",
+                  steps,
+                },
+              ]),
+            ],
+            checkRuns: [],
+          },
+        ],
+      }),
+    );
+
+  it("leaves the trailer row out when every step is already shown", () => {
+    const text = renderWithSteps([step("Setup", 55), step("Typecheck", 30)]);
+    expect(text).toContain("Steps of Static Checks / Typecheck, Lint, Format");
+    expect(text).not.toContain("steps under 3s");
+  });
+
+  it("folds the steps under 3s into one trailer row", () => {
+    const text = renderWithSteps([
+      step("Setup", 55),
+      step("Typecheck", 30),
+      step("Blink", 2),
+    ]);
+    expect(text).toContain("(1 steps under 3s)");
+  });
+});
+
+describe("repoFromRemoteUrl", () => {
+  it("reads owner/name out of both remote forms git writes", () => {
+    expect(repoFromRemoteUrl("git@github.com:georgetown-mdi/jspsi.git")).toBe(
+      "georgetown-mdi/jspsi",
+    );
+    expect(repoFromRemoteUrl("https://github.com/georgetown-mdi/jspsi")).toBe(
+      "georgetown-mdi/jspsi",
+    );
+    expect(
+      repoFromRemoteUrl("https://github.com/georgetown-mdi/jspsi.git\n"),
+    ).toBe("georgetown-mdi/jspsi");
+  });
+
+  it("returns null for a remote naming no GitHub repository", () => {
+    expect(repoFromRemoteUrl("git@gitlab.com:owner/name.git")).toBeNull();
+    expect(repoFromRemoteUrl("/srv/git/bare.git")).toBeNull();
+    expect(repoFromRemoteUrl(null)).toBeNull();
+  });
+});
+
+describe("collectSample", () => {
+  const REPO = "owner/repo";
+  const RUNS_PAGE = (page) =>
+    `repos/${REPO}/actions/runs?event=pull_request&per_page=100&page=${page}`;
+
+  /** A request that serves a fixture route table (or a function), recording paths. */
+  function fixtureRequest(routes) {
+    const paths = [];
+    const request = async (path) => {
+      paths.push(path);
+      const payload =
+        typeof routes === "function" ? routes(path) : routes[path];
+      if (payload === undefined) throw new Error(`unexpected request: ${path}`);
+      return payload;
+    };
+    return { paths, request };
+  }
+
+  const apiRun = (id, sha, createdAt, extra = {}) => ({
+    id,
+    name: "Static Checks",
+    head_sha: sha,
+    status: "completed",
+    created_at: createdAt,
+    run_attempt: 1,
+    ...extra,
+  });
+
+  const apiJobs = (completedAt) => ({
+    jobs: [
+      {
+        name: "Typecheck, Lint, Format",
+        created_at: "2026-09-01T10:00:00Z",
+        started_at: "2026-09-01T10:00:00Z",
+        completed_at: completedAt,
+        conclusion: "success",
+        steps: [],
+      },
+    ],
+  });
+
+  const jobsPath = (id) =>
+    `repos/${REPO}/actions/runs/${id}/jobs?per_page=100&filter=latest`;
+  const checkRunsPath = (sha) =>
+    `repos/${REPO}/commits/${sha}/check-runs?per_page=100`;
+  const checkRuns = (sha) => ({
+    check_runs: [
+      {
+        name: "Typecheck, Lint, Format",
+        started_at: "2026-09-01T10:00:00Z",
+        completed_at: "2026-09-01T10:04:00Z",
+        conclusion: "success",
+        app: { slug: `ignored-for-${sha}` },
+      },
+    ],
+  });
+
+  it("admits every run of the sha that met the request, and none of the next", async () => {
+    const { paths, request } = fixtureRequest({
+      [`repos/${REPO}/rules/branches/staging`]: RULES,
+      [RUNS_PAGE(1)]: {
+        workflow_runs: [
+          apiRun(1, "aaa", "2026-09-01T10:00:00Z"),
+          apiRun(2, "aaa", "2026-09-01T10:05:00Z"),
+          apiRun(3, "bbb", "2026-09-01T11:00:00Z"),
+        ],
+      },
+      [`repos/${REPO}/commits/aaa/pulls`]: [
+        { number: 10, base: { ref: "staging" } },
+      ],
+      [checkRunsPath("aaa")]: checkRuns("aaa"),
+      [jobsPath(1)]: apiJobs("2026-09-01T10:04:00Z"),
+      [jobsPath(2)]: apiJobs("2026-09-01T10:09:00Z"),
+    });
+
+    const sample = await collectSample(
+      { repo: REPO, base: "staging", runs: 1 },
+      { request },
+    );
+
+    expect(sample.shas).toHaveLength(1);
+    expect(sample.shas[0].sha).toBe("aaa");
+    expect(sample.shas[0].runs.map((run) => run.runId)).toEqual([1, 2]);
+    expect(sample.runsSampled).toBe(2);
+    expect(sample.windowExhausted).toBe(false);
+    // The next sha is not touched at all, not merely dropped from the sample.
+    expect(paths.some((path) => path.includes("bbb"))).toBe(false);
+  });
+
+  it("attributes a sha to the pull request against the measured base", async () => {
+    const { request } = fixtureRequest({
+      [`repos/${REPO}/rules/branches/staging`]: RULES,
+      [RUNS_PAGE(1)]: {
+        workflow_runs: [
+          apiRun(1, "aaa", "2026-09-01T10:00:00Z"),
+          apiRun(2, "bbb", "2026-09-01T11:00:00Z"),
+        ],
+      },
+      [RUNS_PAGE(2)]: { workflow_runs: [] },
+      [`repos/${REPO}/commits/aaa/pulls`]: [
+        { number: 20, base: { ref: "main" } },
+        { number: 21, base: { ref: "staging" } },
+      ],
+      [`repos/${REPO}/commits/bbb/pulls`]: [
+        { number: 22, base: { ref: "main" } },
+      ],
+      [checkRunsPath("aaa")]: checkRuns("aaa"),
+      [jobsPath(1)]: apiJobs("2026-09-01T10:04:00Z"),
+    });
+
+    const sample = await collectSample(
+      { repo: REPO, base: "staging", runs: 50 },
+      { request },
+    );
+
+    expect(sample.shas.map((entry) => entry.pullRequest)).toEqual([21]);
+  });
+
+  it("measures the attempts below a rerun's last one and marks them superseded", async () => {
+    const { request } = fixtureRequest({
+      [`repos/${REPO}/rules/branches/staging`]: RULES,
+      [RUNS_PAGE(1)]: {
+        workflow_runs: [
+          apiRun(7, "aaa", "2026-09-01T10:20:00Z", { run_attempt: 2 }),
+        ],
+      },
+      [RUNS_PAGE(2)]: { workflow_runs: [] },
+      [`repos/${REPO}/commits/aaa/pulls`]: [
+        { number: 10, base: { ref: "staging" } },
+      ],
+      [checkRunsPath("aaa")]: checkRuns("aaa"),
+      [`repos/${REPO}/actions/runs/7/attempts/1`]: {
+        created_at: "2026-09-01T10:00:00Z",
+        run_started_at: "2026-09-01T10:00:00Z",
+      },
+      [`repos/${REPO}/actions/runs/7/attempts/1/jobs?per_page=100`]: apiJobs(
+        "2026-09-01T10:04:00Z",
+      ),
+      [jobsPath(7)]: apiJobs("2026-09-01T10:24:00Z"),
+    });
+
+    const sample = await collectSample(
+      { repo: REPO, base: "staging", runs: 50 },
+      { request },
+    );
+
+    expect(
+      sample.shas[0].runs.map((run) => ({
+        attempt: run.attempt,
+        superseded: run.superseded,
+        runCreatedAt: run.runCreatedAt,
+      })),
+    ).toEqual([
+      {
+        attempt: 1,
+        superseded: true,
+        runCreatedAt: "2026-09-01T10:00:00Z",
+      },
+      {
+        attempt: 2,
+        superseded: false,
+        runCreatedAt: "2026-09-01T10:20:00Z",
+      },
+    ]);
+  });
+
+  it("stops at the page cap and records the window it ran out of", async () => {
+    // Every page holds a run against another base, so the request is never met
+    // and only the cap ends the loop.
+    const { paths, request } = fixtureRequest((path) => {
+      if (path === `repos/${REPO}/rules/branches/staging`) return RULES;
+      if (path.startsWith(`repos/${REPO}/actions/runs?`)) {
+        return { workflow_runs: [apiRun(1, "zzz", "2026-09-01T10:00:00Z")] };
+      }
+      if (path === `repos/${REPO}/commits/zzz/pulls`) {
+        return [{ number: 30, base: { ref: "main" } }];
+      }
+      return undefined;
+    });
+
+    const sample = await collectSample(
+      { repo: REPO, base: "staging", runs: 5 },
+      { request },
+    );
+
+    expect(sample.windowExhausted).toBe(true);
+    expect(sample.runsSampled).toBe(0);
+    expect(sample.runsRequested).toBe(5);
+    expect(sample.shas).toEqual([]);
+    expect(
+      paths.filter((path) => path.startsWith(`repos/${REPO}/actions/runs?`)),
+    ).toHaveLength(MAX_RUN_PAGES);
+  });
+
+  it("replays a cached response and refuses a miss when offline", async () => {
+    const cacheDir = mkdtempSync(join(tmpdir(), "measure-pr-checks-"));
+    const routes = {
+      [`repos/${REPO}/rules/branches/staging`]: RULES,
+      [RUNS_PAGE(1)]: { workflow_runs: [] },
+    };
+    const live = fixtureRequest(routes);
+    await collectSample(
+      { repo: REPO, base: "staging", runs: 1, cacheDir },
+      { request: live.request },
+    );
+    expect(live.paths.length).toBeGreaterThan(0);
+
+    const replay = fixtureRequest(routes);
+    const cached = await collectSample(
+      { repo: REPO, base: "staging", runs: 1, cacheDir, offline: true },
+      { request: replay.request },
+    );
+    expect(cached.rules).toEqual(RULES);
+    expect(replay.paths).toEqual([]);
+
+    await expect(
+      collectSample(
+        { repo: REPO, base: "main", runs: 1, cacheDir, offline: true },
+        { request: replay.request },
+      ),
+    ).rejects.toThrow(/no cached response for/);
   });
 });
