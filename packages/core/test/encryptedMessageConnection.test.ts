@@ -580,6 +580,166 @@ test("a receive-path transport failure latches the wrapper", async () => {
   expect(onSend).toBe(first);
 });
 
+// --- Key material boundary ----------------------------------------------------
+
+test("the derived AES-GCM keys are imported non-extractable", async () => {
+  const [enc] = await makeEncryptedPair();
+  const keys = enc as unknown as { sendKey: CryptoKey; recvKey: CryptoKey };
+  for (const key of [keys.sendKey, keys.recvKey]) {
+    // Non-extractable is what keeps the raw AEAD key bytes inside the crypto
+    // subsystem: WebCrypto refuses to hand them back at all, so a caller (or a
+    // later bug) cannot read the key material out of a live connection.
+    expect(key.extractable).toBe(false);
+    await expect(crypto.subtle.exportKey("raw", key)).rejects.toThrow();
+  }
+});
+
+// --- Re-entry after the failure latch -----------------------------------------
+
+// An inner connection whose send() and receive() park until the test settles
+// them, each with an error object of the test's choosing. The in-memory pipe
+// cannot stand in here: its own terminal state caches one error and hands that
+// same object to every later call, so a wrapper that dropped the latch and
+// re-drove the transport would be indistinguishable from one that held it.
+function parkingInner(): {
+  inner: MessageConnection;
+  sends: Array<(reason: unknown) => void>;
+  receives: Array<(reason: unknown) => void>;
+  sendReached: () => Promise<void>;
+} {
+  const sends: Array<(reason: unknown) => void> = [];
+  const receives: Array<(reason: unknown) => void> = [];
+  let announceSend: (() => void) | undefined;
+  const inner: MessageConnection = {
+    send: () =>
+      new Promise<void>((_resolve, reject) => {
+        sends.push(reject);
+        announceSend?.();
+      }),
+    receive: () =>
+      new Promise<unknown>((_resolve, reject) => {
+        receives.push(reject);
+      }),
+    close: () => Promise.resolve(),
+  };
+  const sendReached = () =>
+    new Promise<void>((resolve) => {
+      announceSend = resolve;
+    });
+  return { inner, sends, receives, sendReached };
+}
+
+async function rejectionOf(p: Promise<unknown>): Promise<unknown> {
+  return p.then(
+    () => {
+      throw new Error("expected a rejection but the promise resolved");
+    },
+    (e: unknown) => e,
+  );
+}
+
+test("a second failure keeps the first latched error rather than replacing it", async () => {
+  const { inner, sends, receives, sendReached } = parkingInner();
+  const enc = await EncryptedMessageConnection.create(
+    inner,
+    SESSION_KEY,
+    "initiator",
+  );
+
+  // Both calls pass the already-failed entry guard while the wrapper is still
+  // healthy, so both reach the latch - the only way a second fail() runs.
+  const parked = sendReached();
+  const send = enc.send({ x: 1 });
+  const receive = enc.receive();
+  await parked;
+
+  receives[0](new Error("first failure: inner receive"));
+  const first = await expectRejection(
+    receive,
+    "transport",
+    /first failure: inner receive/,
+  );
+
+  sends[0](new Error("second failure: inner send"));
+  expect(await rejectionOf(send)).toBe(first);
+
+  await enc.close();
+});
+
+test("send after a failure rejects with the latched error without reaching the transport", async () => {
+  const { inner, sends, receives } = parkingInner();
+  const enc = await EncryptedMessageConnection.create(
+    inner,
+    SESSION_KEY,
+    "initiator",
+  );
+
+  const receive = enc.receive();
+  receives[0](new Error("inner receive failure"));
+  const first = await expectRejection(
+    receive,
+    "transport",
+    /inner receive failure/,
+  );
+
+  const again = enc.send({ x: 1 });
+  // The dead wrapper answers from the latch alone. The sequence counter advances
+  // synchronously once a send starts encrypting, so an unconsumed counter is the
+  // observable proof this rejected before any of that ran; the transport then
+  // never sees the frame either.
+  expect((enc as unknown as { sendSeq: number }).sendSeq).toBe(0);
+  expect(await rejectionOf(again)).toBe(first);
+  expect(sends).toHaveLength(0);
+
+  await enc.close();
+});
+
+test("receive after a failure rejects with the latched error without reaching the transport", async () => {
+  const { inner, receives } = parkingInner();
+  const enc = await EncryptedMessageConnection.create(
+    inner,
+    SESSION_KEY,
+    "initiator",
+  );
+
+  const receive = enc.receive();
+  receives[0](new Error("inner receive failure"));
+  const first = await expectRejection(
+    receive,
+    "transport",
+    /inner receive failure/,
+  );
+
+  const again = enc.receive();
+  expect(receives).toHaveLength(1);
+  expect(await rejectionOf(again)).toBe(first);
+
+  await enc.close();
+});
+
+test("a receive parked when the wrapper latches surfaces the inner failure as transport", async () => {
+  const { inner, receives } = parkingInner();
+  const enc = await EncryptedMessageConnection.create(
+    inner,
+    SESSION_KEY,
+    "initiator",
+  );
+
+  const parkedReceive = enc.receive();
+  // close() latches the wrapper "usage" while the receive is still parked at the
+  // transport. The rejection that follows is that teardown's own cancellation,
+  // so it is classified by the transport it came from rather than re-latched.
+  const closing = enc.close();
+  receives[0](new Error("inner receive cancelled by teardown"));
+
+  await expectRejection(
+    parkedReceive,
+    "transport",
+    /inner receive cancelled by teardown/,
+  );
+  await closing;
+});
+
 // --- close --------------------------------------------------------------------
 
 test("close latches the wrapper dead and delegates to the inner connection", async () => {
