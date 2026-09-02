@@ -3,8 +3,11 @@ import {
   ALLOWED_TOOLS,
   DISALLOWED_TOOLS,
   claudeArgs,
+  commitCountArgs,
+  parseCommitCount,
   parsePrNumber,
   prompt,
+  refusal,
 } from "./squash-message.mjs";
 
 describe("squash-message argument parsing", () => {
@@ -35,6 +38,44 @@ describe("squash-message prompt", () => {
     expect(prompt(928)).toBe(
       "Please use the commit history, the PR body, and @CONTRIBUTING.md to write a short squash-and-merge commit message for PR #928.",
     );
+  });
+});
+
+describe("squash-message single-commit guard", () => {
+  it("refuses a one-commit pull request, naming the reason", () => {
+    const refused = refusal(928, 1);
+    expect(refused).toContain("#928");
+    expect(refused).toContain("one commit");
+    expect(refused).toContain("squash-merges");
+  });
+
+  it("drafts for two or more commits, and for an unknown count", () => {
+    for (const count of [2, 3, 17, null]) {
+      expect(refusal(928, count), String(count)).toBeNull();
+    }
+  });
+
+  it("reads the count from a read-only gh view of the PR", () => {
+    const args = commitCountArgs(928);
+    expect(args.slice(0, 3)).toEqual(["pr", "view", "928"]);
+    expect(args).toContain("commits");
+    for (const arg of args) expect(arg).not.toMatch(/merge|edit|close/i);
+  });
+
+  it("takes a plain integer count and nothing else", () => {
+    expect(parseCommitCount("1\n")).toBe(1);
+    expect(parseCommitCount(" 12 ")).toBe(12);
+    for (const stdout of [
+      "",
+      undefined,
+      null,
+      "no pull requests found",
+      "1 commit",
+      "-1",
+      '{"commits":[{}]}',
+    ]) {
+      expect(parseCommitCount(stdout), JSON.stringify(stdout)).toBeNull();
+    }
   });
 });
 
