@@ -324,9 +324,17 @@ function logList(
  *
  * The closing line is first-party text and carries no bullet, while a painted name
  * always does and cannot break its own line (`sanitizeForDisplay` neutralizes every
- * control code point). That prefix is what keeps a declared name reading exactly as
- * this sentence from passing for it -- the terminal analogue of the list container
- * the web surfaces distinguish it by.
+ * control code point). Among the lines this EMITS, that prefix is what keeps a
+ * declared name reading exactly as this sentence from passing for it -- the terminal
+ * analogue of the list container the web surfaces distinguish it by.
+ *
+ * The distinction is at the emitted line, not at the terminal ROW: soft wrap starts
+ * a continuation row at column 0, and the escape passes an ASCII space verbatim, so
+ * a name padded to the wrap boundary reproduces the bare count row byte for byte at
+ * a matching width. That residual is stated rather than closed -- any printable
+ * prefix is equally fakeable, the renderer cannot know the terminal's width, and the
+ * genuine line still prints exactly once per bounded direction, which is the signal
+ * left to recover the true remainder from.
  */
 function logDeclaredPayloadList(
   emit: ConsentSurfaceSink,

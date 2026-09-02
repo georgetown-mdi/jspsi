@@ -2853,6 +2853,12 @@ const DECLARED_RECEIVE_HEADING =
  * escaped display allowance: the shape that decides whether the operator can still
  * reach the question this prompt is asking.
  *
+ * The count deliberately overdrives what the intake path can deliver, to pin the
+ * cap's arithmetic at the schema ceiling rather than at whatever an encoded token
+ * happens to fit: `decodeInvitation` refuses an encoded invitation above
+ * `MAX_ENCODED_INVITATION_LENGTH` (64 KiB) before it parses, which holds a declared
+ * list to roughly 346 names of this shape.
+ *
  * The filler is ordinary content rather than an attack, and outside printable
  * ASCII: U+00E9 LATIN SMALL LETTER E WITH ACUTE is what a real declaration carries
  * and it escapes at this sink, so a name of them spends the allowance in full.
@@ -2868,20 +2874,26 @@ function floodedDeclaration(prefix: string): Array<{ name: string }> {
 
 test("displayInvitation: bounds each declared payload list by count and states the remainder", () => {
   // Both declared directions carry partner free text at core's MAX_PAYLOAD_ENTRIES
-  // ceiling, so painting one whole puts around a megabyte of terminal between the
-  // operator and the consent decision below it -- usability denial rather than
-  // injection, the names being escaped.
+  // ceiling, above what intake can deliver so the arithmetic is pinned at the schema
+  // bound; what an invitation actually reaches through the 64 KiB decode cap is
+  // roughly 346 names of this shape, some 93 KB of painted text and a thousand-odd
+  // terminal rows between the operator and the consent decision below -- usability
+  // denial rather than injection, the names being escaped.
   const log = getLogger("accept-display-declared-bound-test");
   log.setLevel("silent");
 
-  // What the whole prompt may paint with both declarations flooded. An ABSOLUTE
-  // number, deliberately not derived from MAX_DECLARED_NAMES_SHOWN: a ceiling that
-  // scaled with the cap would hold at any cap, including none, which is the change
-  // this check exists to catch. It leaves several thousand characters of headroom
-  // over what the surface measures today, so a copy edit elsewhere on the prompt
-  // does not trip it, and stays far under the megabyte the same declaration paints
-  // uncapped -- the difference between scrolling past the terms and never reaching
-  // the question.
+  // What THIS fixture may paint: a sample token's blocks with both declared payload
+  // directions flooded, which is what the count bound governs. It is not a bound on
+  // everything the prompt can render -- the linkage-key block, up to
+  // MAX_LINKAGE_ENTRIES (256) keys of MAX_KEY_ELEMENTS (256) elements each through
+  // the uncapped logList path, stays the larger partner-controlled render on this
+  // surface and this fixture does not exercise it. An ABSOLUTE number, deliberately
+  // not derived from MAX_DECLARED_NAMES_SHOWN: a ceiling that scaled with the cap
+  // would hold at any cap, including none, which is the change this check exists to
+  // catch. It leaves several thousand characters of headroom over what this fixture
+  // measures today, so a copy edit elsewhere on the prompt does not trip it, and
+  // stays far under what the same declaration paints uncapped -- the difference
+  // between scrolling past the terms and never reaching the question.
   const PROMPT_CEILING = 20_000;
 
   const base = sampleToken(FUTURE());
@@ -2920,7 +2932,10 @@ test("displayInvitation: bounds each declared payload list by count and states t
 
   // What the same declaration would paint uncapped, measured rather than argued
   // from the constants: the bound is only worth pinning against the size it
-  // replaces.
+  // replaces. That magnitude belongs to the schema ceiling this fixture drives, not
+  // to anything an invitation delivers -- one carrying it never decodes -- and the
+  // reachable worst case the bound forecloses is the ~93 KB, a thousand-odd rows,
+  // that the 64 KiB decode cap does leave room for.
   const uncappedSize = [...send, ...receive].reduce(
     (total, column) => total + sanitizeForDisplay(column.name).length,
     0,
@@ -2956,11 +2971,13 @@ test("displayInvitation: bounds each declared payload list by count and states t
 
 test("displayInvitation: a declared name reading as the count line stays a list entry", () => {
   // sanitizeForDisplay passes printable ASCII verbatim, so a partner can declare a
-  // column named exactly as the sentence closing its own bounded list. The bullet
-  // is what tells them apart on a line-oriented terminal, which has no container to
-  // place one inside and the other outside: a painted name always carries the
-  // bullet, and cannot break its own line to shed it, while the first-party count
-  // line never does.
+  // column named exactly as the sentence closing its own bounded list. The bullet is
+  // what tells them apart among the emitted lines, a line-oriented sink having no
+  // container to place one inside and the other outside: a painted name always
+  // carries the bullet, and cannot break its own line to shed it, while the
+  // first-party count line never does. What a terminal ROW shows is outside what
+  // this asserts -- soft wrap can reproduce the bare count row from a padded name,
+  // the stated limit on logDeclaredPayloadList.
   const log = getLogger("accept-display-count-line-impostor-test");
   log.setLevel("silent");
   const impostor = unshownDeclaredNamesLine(
