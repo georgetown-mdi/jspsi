@@ -8,6 +8,7 @@ import {
   INVITATION_LIFETIME_SECONDS,
   MAX_INVITATION_LIFETIME_SECONDS,
   MAX_ENCODED_INVITATION_LENGTH,
+  MAX_RAW_INVITATION_LENGTH,
   MAX_ENDPOINT_HOST_LENGTH,
   MAX_ENDPOINT_PATH_LENGTH,
   stripInvitationWhitespace,
@@ -477,6 +478,19 @@ test("stripInvitationWhitespace removes ASCII whitespace and nothing else", () =
   // A non-ASCII space is not wrapping damage, so it survives for the decoder to
   // reject rather than being normalized into a token the operator never had.
   expect(stripInvitationWhitespace("ab\u00a0cd")).toBe("ab\u00a0cd");
+});
+
+test("strips a raw input at exactly the raw bound", () => {
+  const atBound = "a".repeat(MAX_RAW_INVITATION_LENGTH);
+  expect(stripInvitationWhitespace(atBound)).toBe(atBound);
+});
+
+test("rejects a raw input one character over the raw bound without stripping", () => {
+  // All whitespace: a strip that ran anyway would return "", not throw.
+  const overBound = " ".repeat(MAX_RAW_INVITATION_LENGTH + 1);
+  expect(() => stripInvitationWhitespace(overBound)).toThrow(
+    "invitation string is not valid base64url",
+  );
 });
 
 // --- Decode-error message swallows (display-injection backstop) --------------

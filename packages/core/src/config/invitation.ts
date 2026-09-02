@@ -720,6 +720,15 @@ const CHECKSUM_CHARS = 6;
 export const MAX_ENCODED_INVITATION_LENGTH = 64 * 1024;
 
 /**
+ * Bound on a RAW pasted invitation string, checked by
+ * {@link stripInvitationWhitespace} before it does any stripping work. A
+ * hard-wrapped token adds well under 5% whitespace, so double
+ * {@link MAX_ENCODED_INVITATION_LENGTH} stays generous while keeping the strip
+ * itself bounded work rather than unbounded work ahead of the decode boundary.
+ */
+export const MAX_RAW_INVITATION_LENGTH = 2 * MAX_ENCODED_INVITATION_LENGTH;
+
+/**
  * Serializes an {@link InvitationToken} as a base64url string with a
  * 4-byte truncated-SHA-256 checksum appended for transcription-error
  * detection. The checksum provides no security guarantee; the key exchange handles
@@ -796,8 +805,14 @@ export async function encodeInvitation(
  * wrapping damage, and stays for the decoder to reject. Both accept surfaces
  * call this one implementation, so a token that decodes for one decodes for the
  * other.
+ *
+ * @throws {Error} if `input` exceeds {@link MAX_RAW_INVITATION_LENGTH}, checked
+ *   before any stripping so an oversized paste is refused in bounded work.
  */
 export function stripInvitationWhitespace(input: string): string {
+  if (input.length > MAX_RAW_INVITATION_LENGTH) {
+    throw new Error("invitation string is not valid base64url");
+  }
   return input.replace(/[\t\n\v\f\r ]+/g, "");
 }
 
