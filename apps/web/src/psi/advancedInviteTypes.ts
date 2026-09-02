@@ -98,10 +98,11 @@ export interface DraftKey {
  * - `"partner"` -- only the partner receives; the inviter is the helper.
  *
  * This is the editor's representation of the {@link Output} pair. Modeling it as
- * a 3-value choice (rather than two independent booleans) makes the forbidden
- * "neither party receives" combination unrepresentable by construction: there is
- * no draft state that maps to `{ expectsOutput: false, shareWithPartner: false }`,
- * which `validateCompatibility` rejects ("neither party expects output").
+ * a 3-value choice (rather than two independent booleans) is what keeps the
+ * forbidden "neither party receives" combination out of a draft: no direction maps
+ * to `{ expectsOutput: false, shareWithPartner: false }`, which
+ * `validateCompatibility` rejects ("neither party expects output"), and
+ * advancedInviteTypes.test.ts drives every direction against that pair.
  */
 export type OutputDirection = "both" | "inviter" | "partner";
 

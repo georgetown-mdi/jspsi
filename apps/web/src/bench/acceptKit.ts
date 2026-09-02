@@ -17,8 +17,9 @@
  * rendezvous's two folder names), which is free text held to the sheet's ASCII
  * contract by {@link printable}, and this build's public release version, which
  * is interpolated only in the release shape {@link RELEASE_VERSION} admits.
- * Everything else is fixed text, so no secret, no invitation token, and no path
- * from the inviter's machine or container can reach the sheet by construction.
+ * Everything else is fixed text: {@link AcceptKitInput} declares only those two
+ * kinds and two selector booleans, so no secret, no invitation token, and no path
+ * from the inviter's machine or container has a field to arrive in.
  *
  * What the exchange's own settings contribute is therefore a SELECTOR and never
  * a value: {@link AcceptKitInput.retainFiles} and

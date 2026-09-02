@@ -89,10 +89,10 @@ function previewFor(value: string): string {
  * clipboard (announced through a polite status region), and a disclosure
  * toggle expands an in-place readonly textarea holding the full value for the
  * cases where the clipboard cannot be used. The reveal never persists: a fresh
- * mount is collapsed. Client-only by construction (both surfaces mount from a
- * handler, so neither server-renders); the `typeof navigator` check is
- * defence-in-depth and hides the button on non-secure origins, where
- * `navigator.clipboard` is undefined -- the reveal remains for a manual copy.
+ * mount is collapsed. Both surfaces mount from a handler rather than at first
+ * render; the `typeof navigator` check is what holds the copy path together
+ * wherever the render runs, and it hides the button on non-secure origins too,
+ * where `navigator.clipboard` is undefined -- the reveal remains for a manual copy.
  */
 export function CopyRow({
   label,

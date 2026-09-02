@@ -43,6 +43,7 @@ import {
   sealEditor,
   spineProblems,
   transportChooserCopy,
+  transportRunMode,
   unsealEditor,
 } from "@bench/inviterModel";
 
@@ -55,7 +56,11 @@ import { SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT } from "@bench/filedropRendezvousCh
 // apps/web/test/unit/columnNameDisplay.test.ts.
 import { isolatedColumnName } from "@components/ColumnName";
 
-import type { AcquiredCsv, InviterCreateGates } from "@bench/inviterModel";
+import type {
+  AcquiredCsv,
+  InviterCreateGates,
+  Transport,
+} from "@bench/inviterModel";
 import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
 
 // A right-to-left override, written as an escape so the source carries no raw
@@ -851,6 +856,41 @@ describe("availableTransports matrix", () => {
       runMode: "save-file",
       authoringRequired: false,
     });
+  });
+
+  test("models every transport on every build, so no reader falls back", () => {
+    // transportRunMode answers `browser` for a transport the matrix does not
+    // model. Whether that answer can ever be given is this matrix's property, so
+    // it is checked here rather than assumed at the reader: a build that stopped
+    // offering a card would otherwise report it as a live browser exchange.
+    const everyTransport: Record<Transport, true> = {
+      browser: true,
+      sftp: true,
+      filedrop: true,
+    };
+    const transports = Object.keys(everyTransport) as Array<Transport>;
+    for (const consoleBuild of [false, true])
+      for (const sftpConfigured of [false, true])
+        for (const rendezvous of [false, true])
+          for (const saveFilePreferred of [false, true]) {
+            const available = availableTransports(
+              consoleBuild,
+              sftpConfigured,
+              rendezvous,
+              saveFilePreferred,
+            );
+            expect(
+              available.options.map((option) => option.transport).sort(),
+            ).toEqual([...transports].sort());
+            for (const transport of transports) {
+              const option = available.options.find(
+                (entry) => entry.transport === transport,
+              );
+              expect(transportRunMode(available, transport)).toBe(
+                option?.runMode,
+              );
+            }
+          }
   });
 
   test("console with a rendezvous mount and no sftp server defaults to filedrop", () => {

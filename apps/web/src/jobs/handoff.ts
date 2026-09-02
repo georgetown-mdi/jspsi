@@ -25,8 +25,9 @@ import type { JobSftpServerEntry } from "./sftpServer";
  * in, while the machine-specific paths are shown as clearly-labelled placeholders
  * the operator sets for their own machine.
  *
- * Two hard invariants hold by construction, enforced by the compose helpers below
- * and pinned by tests:
+ * Two hard invariants are enforced by the compose helpers below and driven in
+ * jobHandoff.unit.test.ts (the placeholdered credential and rendezvous paths) and
+ * jobHandoffParity.unit.test.ts (the template's keys are exactly the routed ones):
  * - No shared secret, key-file body, or inline credential value is ever present:
  *   the exchange config the compose functions emit carries the credential only as
  *   an `@path` reference (the secret rides the key file), and the zero-setup

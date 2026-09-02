@@ -132,9 +132,10 @@ export function createBufferingRequestRouter(
  * a per-request error reply -- see {@link ./psiCrypto.worker}) fires `onerror`, and a
  * reply that fails structured-clone deserialization fires `onmessageerror` instead of
  * `onmessage`/`onerror` -- with no handler it is silently dropped and the pending call
- * hangs, so route it to `onError` too. `onmessageerror` is unreachable for today's
- * cloneable replies (byte arrays and index lists), but a boundary hardening mirroring
- * the CLI handle's `messageerror` routing.
+ * hangs, so route it to `onError` too. Today's replies all clone (byte arrays and
+ * index lists), so that route is a backstop rather than a live path -- one
+ * psiCryptoController.test.ts drives with the other fault events, mirroring the CLI
+ * handle's `messageerror` routing.
  */
 export function createPsiCryptoWorkerHandle(
   worker: PsiCryptoWorker,

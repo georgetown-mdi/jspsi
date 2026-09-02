@@ -749,9 +749,9 @@ export function importedConstraintDivergenceMessage(
   );
   for (const generated of rebuilt.linkageFields) {
     const imported = importedByName.get(generated.name);
-    // A generated field the import did not name cannot occur for a name-matched
-    // rebuild; were it to, its declaration is the editor's, not the document's, so
-    // there is nothing imported for it to diverge from -- skip it.
+    // The comparison is scoped to name-matched pairs: a generated field the import
+    // did not name takes its declaration from the editor rather than the document,
+    // so there is nothing imported for it to diverge from -- skip it.
     if (imported === undefined) continue;
     if (canonicalString(generated) !== canonicalString(imported))
       return (

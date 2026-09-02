@@ -217,8 +217,9 @@ export function availableTransports(
 }
 
 /** The run mode of a chosen transport in an {@link AvailableTransports} matrix;
- * `browser` when the matrix does not model the transport (unreachable for the
- * closed {@link Transport} set, but keeps callers total). */
+ * `browser` when the matrix does not model the transport, which keeps callers
+ * total. That every build models all three -- so this answer is the matrix's own
+ * and never the fallback -- is checked in benchInviterModel.test.ts. */
 export function transportRunMode(
   available: AvailableTransports,
   transport: Transport,

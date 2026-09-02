@@ -584,8 +584,9 @@ export interface AcceptorPayloadDeclarationConflict {
  * written into the exchange record whatever the output direction. That cannot
  * contradict the same panel either, and by construction rather than by a second
  * gate here -- `LinkageTermsSchema` refuses a non-empty `payload.receive` alongside
- * `expectsOutput: false`, so an invitation carrying one never reaches this step (the
- * unit suite drives that refusal, which is what keeps this ungated).
+ * `expectsOutput: false`, so an invitation carrying one never reaches this step
+ * (packages/core/test/linkageTerms.test.ts drives that refusal, which is what
+ * keeps this ungated).
  */
 export function acceptorPayloadDeclarationConflict(
   invitationTerms: LinkageTerms,

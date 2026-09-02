@@ -453,7 +453,8 @@ export function ManagedRunSurface({ id }: { id: string }) {
   // and spends this device's copy -- but only once the operator attests the file is
   // saved (a dismissed save leaves the source live). Both read the current record and
   // mark backed-up atomically, so the source reads green after a backup and a spent
-  // copy carries a current artifact by construction.
+  // copy carries a current artifact -- the ordering managedExchangeExport.test.ts
+  // drives, marking before a spend is possible and refusing a superseded artifact.
   function backUp() {
     if (record === undefined || exportBusy) return;
     setExportBusy(true);

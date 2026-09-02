@@ -123,7 +123,8 @@ export function startManagedScheduleRuntime(
   const { signal } = options;
   // An abort listener attached to a signal that has ALREADY aborted never fires,
   // so a runtime started on one would keep its interval for the life of the
-  // page with nothing left to clear it.
+  // page with nothing left to clear it. managedScheduleRuntime.test.ts drives a
+  // start on an aborted signal and holds it to scheduling nothing at all.
   if (signal.aborted) return;
   const tick = options.tick ?? tickManagedSchedules;
   const seams = options.seams ?? browserScheduleTickSeams(signal);

@@ -8,16 +8,29 @@ import {
 import type { Output } from "@psilink/core";
 import type { OutputDirection } from "../../src/psi/advancedInviteTypes.js";
 
-const DIRECTIONS: ReadonlyArray<OutputDirection> = [
-  "both",
-  "inviter",
-  "partner",
-];
+/** Every direction the editor can hold, as a total record so a fourth one cannot
+ * be added without this suite naming it. */
+const EVERY_DIRECTION: Record<OutputDirection, true> = {
+  both: true,
+  inviter: true,
+  partner: true,
+};
+
+const DIRECTIONS = Object.keys(
+  EVERY_DIRECTION,
+) as ReadonlyArray<OutputDirection>;
 
 describe("outputForDirection / directionForOutput", () => {
   test("directionForOutput inverts outputForDirection on every valid direction", () => {
     for (const direction of DIRECTIONS) {
       expect(directionForOutput(outputForDirection(direction))).toBe(direction);
+    }
+  });
+
+  test("no direction the editor can hold maps to the forbidden pair", () => {
+    for (const direction of DIRECTIONS) {
+      const output = outputForDirection(direction);
+      expect(output.expectsOutput || output.shareWithPartner).toBe(true);
     }
   });
 

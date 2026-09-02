@@ -84,8 +84,10 @@ const MAX_WINDOW_REACH_MS =
  * Every instant returned is renderable, so neither surface carries a fallback for
  * a schedule whose windows no calendar has: the record schema caps `intervalDays`
  * and `windowSeconds`, which bounds how far past `now` a window can fall, and the
- * guard below bounds `now` itself. That pairing is what makes an unrenderable
- * window unreachable rather than merely unlikely.
+ * guard below bounds `now` itself. Both halves are driven rather than asserted:
+ * scheduleSurfacingModel.test.ts sweeps the schema's own ceilings at the extremes
+ * of the instant range, where an under-counted reach reaches `Intl` as an invalid
+ * date and throws.
  *
  * @throws {RangeError} if the schedule's lattice is unusable -- an anchor that is
  *   not a UTC instant, or a period or width outside the record schema's bounds

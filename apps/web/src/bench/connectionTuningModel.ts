@@ -194,8 +194,9 @@ export function connectionTuningOptions(
 /**
  * Merge the connection-tuning block onto another authored block (the file-handling
  * card's), so the two cards contribute to the one `options` object a job intent
- * carries. The fields are disjoint by construction -- each card owns its own -- so
- * the merge cannot silently overwrite a choice. Returns undefined when neither
+ * carries. Each card owns its own fields, so the merge overwrites no authored
+ * choice; that the two field sets stay disjoint is checked over both cards' whole
+ * surfaces in connectionTuningModel.test.ts. Returns undefined when neither
  * card contributed anything, keeping the "an untouched form composes no options
  * block at all" property.
  */

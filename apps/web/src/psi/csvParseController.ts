@@ -274,10 +274,10 @@ function parseInWorker(
         reject(errorFromWorkerEvent(event, "CSV parse worker failed")),
       );
     // A reply that fails to deserialize on this thread fires onmessageerror, not
-    // onmessage/onerror; without a handler the promise would hang. Unreachable for the
-    // current all-primitive reply shape (an all-string CSVRow tree), but wired so the
-    // one-shot's never-hang guarantee holds if a future reply ever gains an
-    // uncloneable field.
+    // onmessage/onerror; without a handler the promise would hang. No reply this
+    // worker sends today can fail to clone (an all-string CSVRow tree), so this is a
+    // backstop rather than a live path -- one csvParseController.test.ts drives, so
+    // the never-hang guarantee holds if a reply ever gains an uncloneable field.
     worker.onmessageerror = () =>
       settle(() =>
         reject(new Error("CSV parse worker reply could not be deserialized")),
