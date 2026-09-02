@@ -27,8 +27,15 @@ runs:
       # its cache; this covers the bytes in the tree, catching a swapped or
       # corrupted vendored artifact before install. See lib/*.tgz.sha256. Offline
       # and dependency-free, which is why it stays ahead of the provenance check
-      # below and of npm ci.
-      run: sha256sum -c lib/openmined-psi.js-*.tgz.sha256
+      # below and of npm ci. Stock macOS runners ship shasum, not sha256sum, so
+      # this falls back to `shasum -a 256` there; both read the same sidecar
+      # format under -c.
+      run: |
+        if command -v sha256sum >/dev/null 2>&1; then
+          sha256sum -c lib/openmined-psi.js-*.tgz.sha256
+        else
+          shasum -a 256 -c lib/openmined-psi.js-*.tgz.sha256
+        fi
       shell: bash
     - name: Verify vendored native tarball provenance
       # The sidecar above is written in the same psilink commit as the bytes it
