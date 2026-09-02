@@ -17,13 +17,13 @@ import {
   IconCircleCheck,
 } from "@tabler/icons-react";
 
-import { OUTBOUND_SEND_NO_PAYLOAD_SENTENCE } from "@psilink/core";
-
-import { ColumnName, isolatedColumnName } from "@components/ColumnName";
 import {
   MAX_DECLARED_NAMES_SHOWN,
+  OUTBOUND_SEND_NO_PAYLOAD_SENTENCE,
   unshownDeclaredNamesLine,
-} from "@components/declaredNameBound";
+} from "@psilink/core";
+
+import { ColumnName, isolatedColumnName } from "@components/ColumnName";
 import { MetadataGrid } from "@components/MetadataGrid";
 import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
 import { useOnlineStatus } from "@components/useOnlineStatus";

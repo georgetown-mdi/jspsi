@@ -13,6 +13,7 @@ import "@mantine/core/styles.css";
 import {
   DEFAULT_MAX_DISPLAY_LENGTH,
   DISPLAY_TRUNCATION_MARKER,
+  MAX_DECLARED_NAMES_SHOWN,
   MAX_NAME_LENGTH,
   MAX_PAYLOAD_ENTRIES,
   sanitizeForDisplay,
@@ -25,8 +26,6 @@ import {
 } from "@bench/acceptorColumnsModel";
 
 import { AcceptorColumnsStep } from "@bench/AcceptorColumnsStep";
-
-import { MAX_DECLARED_NAMES_SHOWN } from "@components/declaredNameBound";
 
 // The grid labels its controls through this helper, so a query for one derives the
 // expected label from it rather than restating the isolate as literal characters.

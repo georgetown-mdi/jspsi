@@ -12,6 +12,7 @@ import {
   DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
   DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
   DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
+  DEFAULT_MAX_DISPLAY_LENGTH,
   DISPLAY_TRUNCATION_MARKER,
   encodeInvitation,
   getDefaultLinkageTerms,
@@ -19,7 +20,10 @@ import {
   getLogger,
   inferMetadata,
   LINKAGE_RULE_SET_VERDICT_COPY,
+  MAX_DECLARED_NAMES_SHOWN,
   MAX_ENDPOINT_HOST_LENGTH,
+  MAX_NAME_LENGTH,
+  MAX_PAYLOAD_ENTRIES,
   parseExchangeSpec,
   reconcileReceivedPayload,
   sanitizeErrorForDisplay,
@@ -27,6 +31,7 @@ import {
   setDiagnosticSink,
   summarizeInvitation,
   UNRECOGNIZED_TRANSFORM_NOTE,
+  unshownDeclaredNamesLine,
   UsageError,
 } from "@psilink/core";
 import {
@@ -2886,6 +2891,162 @@ test("displayInvitation: the inviter's request-from-acceptor receive shows names
   expect(lines(withReceive(undefined))).not.toContain(
     "the inviting party requests from you",
   );
+});
+
+// The headings the two declared payload directions render under when the inviter
+// authored them, spelled out rather than derived, for the reason the labels above
+// are: a marker that silently changed vocabulary must redden the assertion.
+const DECLARED_SEND_HEADING =
+  "  columns you will receive (your partner's word):";
+const DECLARED_RECEIVE_HEADING =
+  "  columns the inviting party requests from you (your partner's word):";
+
+/**
+ * A declaration at core's own ceiling, every name long enough to spend the whole
+ * escaped display allowance: the shape that decides whether the operator can still
+ * reach the question this prompt is asking.
+ *
+ * The count deliberately overdrives what the intake path can deliver, to pin the
+ * cap's arithmetic at the schema ceiling rather than at whatever an encoded token
+ * happens to fit: `decodeInvitation` refuses an encoded invitation above
+ * `MAX_ENCODED_INVITATION_LENGTH` (64 KiB) before it parses, which holds a declared
+ * list to roughly 346 names of this shape.
+ *
+ * The filler is ordinary content rather than an attack, and outside printable
+ * ASCII: U+00E9 LATIN SMALL LETTER E WITH ACUTE is what a real declaration carries
+ * and it escapes at this sink, so a name of them spends the allowance in full.
+ * Written as an escape rather than a raw byte, so a test about an invisible
+ * expansion is itself readable.
+ */
+function floodedDeclaration(prefix: string): Array<{ name: string }> {
+  const filler = "\u00E9".repeat(MAX_NAME_LENGTH);
+  return Array.from({ length: MAX_PAYLOAD_ENTRIES }, (_, index) => ({
+    name: `${prefix}${index}-${filler}`,
+  }));
+}
+
+test("displayInvitation: bounds each declared payload list by count and states the remainder", () => {
+  // Both declared directions carry partner free text at core's MAX_PAYLOAD_ENTRIES
+  // ceiling, above what intake can deliver so the arithmetic is pinned at the schema
+  // bound; what an invitation actually reaches through the 64 KiB decode cap is
+  // roughly 346 names of this shape, some 93 KB of painted text and a thousand-odd
+  // terminal rows between the operator and the consent decision below -- usability
+  // denial rather than injection, the names being escaped.
+  const log = getLogger("accept-display-declared-bound-test");
+  log.setLevel("silent");
+
+  // What THIS fixture may paint: a sample token's blocks with both declared payload
+  // directions flooded, which is what the count bound governs. It is not a bound on
+  // everything the prompt can render -- the linkage-key block, up to
+  // MAX_LINKAGE_ENTRIES (256) keys of MAX_KEY_ELEMENTS (256) elements each through
+  // the uncapped logList path, stays the larger partner-controlled render on this
+  // surface and this fixture does not exercise it. An ABSOLUTE number, deliberately
+  // not derived from MAX_DECLARED_NAMES_SHOWN: a ceiling that scaled with the cap
+  // would hold at any cap, including none, which is the change this check exists to
+  // catch. It leaves several thousand characters of headroom over what this fixture
+  // measures today, so a copy edit elsewhere on the prompt does not trip it, and
+  // stays far under what the same declaration paints uncapped -- the difference
+  // between scrolling past the terms and never reaching the question.
+  const PROMPT_CEILING = 20_000;
+
+  const base = sampleToken(FUTURE());
+  const send = floodedDeclaration("send");
+  const receive = floodedDeclaration("receive");
+  const rendered = renderDisplayInvitation(log, {
+    ...base,
+    linkageTerms: { ...base.linkageTerms, payload: { send, receive } },
+  });
+  const lines = rendered.split("\n");
+  const countLine = `    ${unshownDeclaredNamesLine(
+    MAX_PAYLOAD_ENTRIES - MAX_DECLARED_NAMES_SHOWN,
+  )}`;
+
+  for (const heading of [DECLARED_SEND_HEADING, DECLARED_RECEIVE_HEADING]) {
+    // Per direction, not in total: each list carries its own cap, so one flooded
+    // declaration cannot spend the other's allowance.
+    const entries = entriesUnder(lines, heading);
+    expect(entries).toHaveLength(MAX_DECLARED_NAMES_SHOWN);
+    // The premise, asserted rather than assumed: each painted name spends the whole
+    // per-value allowance and is cut at it, so what is measured here is the worst
+    // case and not a mild one.
+    for (const entry of entries) {
+      expect(entry.endsWith(DISPLAY_TRUNCATION_MARKER)).toBe(true);
+      expect(entry.length).toBeGreaterThan(DEFAULT_MAX_DISPLAY_LENGTH);
+    }
+    // Directly under the last painted name of this direction, stating this
+    // direction's whole remainder, so a cut list cannot drop its tail silently.
+    expect(lines[lines.indexOf(heading) + MAX_DECLARED_NAMES_SHOWN + 1]).toBe(
+      countLine,
+    );
+  }
+  // Once per bounded direction across the whole surface: neither block repeats the
+  // sentence nor borrows the other's remainder.
+  expect(lines.filter((line) => line === countLine)).toHaveLength(2);
+
+  // What the same declaration would paint uncapped, measured rather than argued
+  // from the constants: the bound is only worth pinning against the size it
+  // replaces. That magnitude belongs to the schema ceiling this fixture drives, not
+  // to anything an invitation delivers -- one carrying it never decodes -- and the
+  // reachable worst case the bound forecloses is the ~93 KB, a thousand-odd rows,
+  // that the 64 KiB decode cap does leave room for.
+  const uncappedSize = [...send, ...receive].reduce(
+    (total, column) => total + sanitizeForDisplay(column.name).length,
+    0,
+  );
+  expect(uncappedSize).toBeGreaterThan(1_000_000);
+  expect(rendered.length).toBeLessThanOrEqual(PROMPT_CEILING);
+
+  // A realistic declaration is a handful of columns, and paints entire with no
+  // count line at all. Exactly at the cap as well as under it: the boundary is
+  // where an off-by-one would cut a list it should have painted whole, or count a
+  // remainder of nothing.
+  for (const width of [
+    MAX_DECLARED_NAMES_SHOWN - 1,
+    MAX_DECLARED_NAMES_SHOWN,
+  ]) {
+    const columns = Array.from({ length: width }, (_, index) => ({
+      name: `col${index}`,
+    }));
+    const whole = renderDisplayInvitation(log, {
+      ...base,
+      linkageTerms: {
+        ...base.linkageTerms,
+        payload: { send: columns, receive: columns },
+      },
+    });
+    for (const heading of [DECLARED_SEND_HEADING, DECLARED_RECEIVE_HEADING])
+      expect(entriesUnder(whole.split("\n"), heading)).toEqual(
+        columns.map((column) => column.name),
+      );
+    expect(whole).not.toContain("not shown here");
+  }
+});
+
+test("displayInvitation: a declared name reading as the count line stays a list entry", () => {
+  // sanitizeForDisplay passes printable ASCII verbatim, so a partner can declare a
+  // column named exactly as the sentence closing its own bounded list. The bullet is
+  // what tells them apart among the emitted lines, a line-oriented sink having no
+  // container to place one inside and the other outside: a painted name always
+  // carries the bullet, and cannot break its own line to shed it, while the
+  // first-party count line never does. What a terminal ROW shows is outside what
+  // this asserts -- soft wrap can reproduce the bare count row from a padded name,
+  // the stated limit on logDeclaredPayloadList.
+  const log = getLogger("accept-display-count-line-impostor-test");
+  log.setLevel("silent");
+  const impostor = unshownDeclaredNamesLine(
+    MAX_PAYLOAD_ENTRIES - MAX_DECLARED_NAMES_SHOWN,
+  );
+  const send = floodedDeclaration("send");
+  send[0] = { name: impostor };
+  const base = sampleToken(FUTURE());
+  const lines = renderDisplayInvitation(log, {
+    ...base,
+    linkageTerms: { ...base.linkageTerms, payload: { send } },
+  }).split("\n");
+
+  expect(entriesUnder(lines, DECLARED_SEND_HEADING)[0]).toBe(impostor);
+  expect(lines.filter((line) => line === `    - ${impostor}`)).toHaveLength(1);
+  expect(lines.filter((line) => line === `    ${impostor}`)).toHaveLength(1);
 });
 
 test("displayInvitation: shows the acceptor's own outbound send, one column per line", () => {

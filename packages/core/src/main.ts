@@ -171,6 +171,13 @@ export type {
   ConsentFactId,
   LinkageRuleSetVerdictReader,
 } from "./consentFacts.js";
+// The count every acceptance surface paints a partner-declared name list under,
+// and the sentence a bounded list closes on: one cut and one wording across the
+// CLI accept prompt and the two web surfaces.
+export {
+  MAX_DECLARED_NAMES_SHOWN,
+  unshownDeclaredNamesLine,
+} from "./declaredNameBound.js";
 // Which proposed settings today's exchange actually applies. Read by the summary
 // above (to flag a proposed-but-not-applied term) and by the web app's linkage-
 // terms editor and import path.
