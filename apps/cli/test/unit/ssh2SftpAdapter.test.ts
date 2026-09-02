@@ -460,6 +460,28 @@ describe("keyboard-interactive", () => {
     expect(keyboardAttaches(client)).toBe(0);
   });
 
+  test("does not attach a handler when tryKeyboard is set but the password is not a string", async () => {
+    // The answer handler reads this.options.password and answers "" for anything
+    // that is not a string, which would put an empty password to the server. The
+    // connect() gate is what keeps that arm out of reach, and it tests the TYPE
+    // rather than mere presence: connect() takes a Record<string, unknown>, so a
+    // direct adapter caller -- the only caller the config schema's string-typed
+    // password does not already constrain -- reaches the same skip an absent
+    // password takes.
+    const adapter = new SSH2SFTPClientAdapter();
+    const { client } = keyboardClient();
+    installClient(adapter, client);
+
+    await adapter.connect({
+      host: "sftp.example.org",
+      password: 1234,
+      tryKeyboard: true,
+      maxReconnectAttempts: 0,
+    });
+
+    expect(keyboardAttaches(client)).toBe(0);
+  });
+
   test("attaches the handler exactly once across repeated connects", async () => {
     // The ssh2 Client is reused across reconnects; the handler must be attached
     // once, or repeated connects would stack duplicate listeners.
