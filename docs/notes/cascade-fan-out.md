@@ -10,14 +10,14 @@ _Status: directed, spec pending. `split_on` fan-out ships under
 [PROTOCOL.md](../spec/PROTOCOL.md#linkage-strategies-cascade-and-single-pass)
 ("Linkage strategies: cascade and single-pass") and
 [Fan-out runs under single-pass only](../spec/PROTOCOL.md#fan-out-runs-under-single-pass-only),
-and stays the shipped behavior until the realization lands. This note records
-the design panel's finding on why the cascade's existing frames cannot carry
-the same realization and the protocol sketch weighed for a future cascade
-fan-out. The finding is that the naive approach is defective, not that fan-out
-under `cascade` is infeasible, and the sketch below is the basis for the spec
-item "Specify cascade fan-out as per-round resolution frames", which precedes
-the implementation and carries the realization forward. See
-[docs/notes/README.md](README.md)._
+and that refusal stays the shipped behavior until the realization lands. This
+note records the design panel's finding on why the cascade's existing frames
+cannot carry the same realization and the protocol sketch weighed for a
+future cascade fan-out. The finding is that the naive approach is defective,
+not that fan-out under `cascade` is infeasible, and the sketch below is the
+basis for the spec item "Specify cascade fan-out as per-round resolution
+frames", which precedes the implementation and carries the realization
+forward. See [docs/notes/README.md](README.md)._
 
 This is design rationale. Nothing here binds an implementation; the normative
 rows live in
@@ -80,7 +80,7 @@ combination the schema admits. Realizing cascade fan-out is a larger,
 protocol-version-covered change to the round loop with no correctness result
 worked out yet, not a gap in coverage of shipped behavior; that result is
 what "Specify cascade fan-out as per-round resolution frames" carries, and it
-precedes the implementation. This note exists so that spec starts from the
+precedes the implementation. This note exists so that the spec starts from the
 timing defect above rather than re-discovering it, and reproduces the
 resolution rule
 [PROTOCOL.md](../spec/PROTOCOL.md#fan-out-matching-multi-value-key-candidates)
