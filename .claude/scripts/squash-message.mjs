@@ -14,6 +14,15 @@
 // Usage:
 //   node squash-message.mjs <pr-number>
 //
+// A pull request carrying ONE commit is refused rather than drafted for: GitHub
+// squash-merges it with that commit's own message, so a drafted one is discarded
+// on merge and the writing belongs in the commit instead. The count is `gh pr
+// view --json commits`, the list GitHub squashes, rather than a local revision
+// walk that would depend on which checkout the script ran from. A `gh` that
+// cannot answer -- absent, unauthenticated, offline -- leaves the count unknown,
+// which says so on stderr and drafts anyway: the guard is defense in depth for a
+// manual run, not the reason the script exists.
+//
 // GENERATION ONLY. The run is given a read-only tool allowance -- reading files,
 // `git log`, `git show`, `gh pr view`, and `gh pr diff` -- and `gh pr merge`,
 // `gh pr edit`, and `git push` are named on the deny list besides. Nothing here
@@ -86,6 +95,43 @@ export function parsePrNumber(argv) {
   return Number.isInteger(number) && number > 0 ? number : null;
 }
 
+/** The `gh` argument vector that reports how many commits a pull request carries. */
+export function commitCountArgs(prNumber) {
+  return [
+    "pr",
+    "view",
+    String(prNumber),
+    "--json",
+    "commits",
+    "--jq",
+    ".commits | length",
+  ];
+}
+
+/**
+ * The count in `gh`'s stdout, or null when it is not a plain non-negative
+ * integer. Anything else -- an error message, empty output, a JSON blob from a
+ * `gh` whose flags moved -- is an unknown count rather than a number coerced
+ * out of it.
+ */
+export function parseCommitCount(stdout) {
+  const text = String(stdout ?? "").trim();
+  return /^\d+$/.test(text) ? Number(text) : null;
+}
+
+/**
+ * The reason to refuse `prNumber`, or null when there is a message worth
+ * drafting. A null `commitCount` is an unknown count, which does not refuse.
+ */
+export function refusal(prNumber, commitCount) {
+  if (commitCount !== 1) return null;
+  return (
+    `PR #${prNumber} carries one commit, so GitHub squash-merges it with that ` +
+    "commit's own message and a drafted one would be discarded. Amend the " +
+    "commit instead.\n"
+  );
+}
+
 /** The `claude` argument vector. The prompt is not in it; it goes on stdin. */
 export function claudeArgs() {
   return [
@@ -105,6 +151,24 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const prNumber = parsePrNumber(process.argv.slice(2));
   if (prNumber === null) {
     process.stderr.write("Usage: node squash-message.mjs <pr-number>\n");
+    process.exit(2);
+  }
+  const counted = spawnSync("gh", commitCountArgs(prNumber), {
+    cwd: ROOT,
+    encoding: "utf8",
+  });
+  const commitCount =
+    !counted.error && counted.status === 0
+      ? parseCommitCount(counted.stdout)
+      : null;
+  if (commitCount === null) {
+    process.stderr.write(
+      "could not read the pull request's commit count from gh; drafting without the single-commit check\n",
+    );
+  }
+  const refused = refusal(prNumber, commitCount);
+  if (refused !== null) {
+    process.stderr.write(refused);
     process.exit(2);
   }
   const run = spawnSync("claude", claudeArgs(), {
