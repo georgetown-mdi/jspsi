@@ -107,23 +107,39 @@ function installToolchain(typescriptVersion) {
   console.log(
     `stryker-security: installing the toolchain into ${toolchainDir}`,
   );
-  execFileSync(
-    "npm",
-    [
-      "install",
-      "--no-audit",
-      "--no-fund",
-      // None of these packages builds anything at install time, and the leg has
-      // no reason to run a lifecycle script from a tree the repository does not
-      // otherwise depend on.
-      "--ignore-scripts",
-      ...Object.entries(wanted).map(([name, version]) => `${name}@${version}`),
-    ],
-    { cwd: toolchainDir, stdio: "inherit" },
-  );
+  try {
+    execFileSync(
+      "npm",
+      [
+        "install",
+        "--no-audit",
+        "--no-fund",
+        // None of these packages builds anything at install time, and the leg has
+        // no reason to run a lifecycle script from a tree the repository does not
+        // otherwise depend on.
+        "--ignore-scripts",
+        ...Object.entries(wanted).map(
+          ([name, version]) => `${name}@${version}`,
+        ),
+      ],
+      { cwd: toolchainDir, stdio: "inherit" },
+    );
+  } catch (error) {
+    fail(
+      `installing the toolchain into ${toolchainDir} failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
-function scoreOf(mutants) {
+/**
+ * The killed/timeout/survived/no-coverage tally and mutation-score ratio for
+ * one file's mutants, the mutation-testing report definition: timeout counts
+ * as killed (it is a mutant a test run distinguished, just slowly); no
+ * coverage counts as survived (nothing reached it to distinguish it). Mutants
+ * outside both -- compile error, runtime error, ignored -- are outside the
+ * ratio entirely, which is why `denominator` can be zero.
+ */
+export function scoreOf(mutants) {
   const count = (status) =>
     mutants.filter((mutant) => mutant.status === status).length;
   const killed = count("Killed") + count("Timeout");
@@ -131,113 +147,154 @@ function scoreOf(mutants) {
   return { killed, denominator, score: (killed / denominator) * 100 };
 }
 
-const { default: strykerConfig, scoreFloors } = await import(
-  pathToFileURL(configPath).href
-);
-
-const typescriptVersion = readPackageVersion(
-  join(repoRoot, "node_modules", "typescript"),
-);
-if (typescriptVersion === undefined) {
-  fail(
-    "no typescript in node_modules -- run `npm ci` (and `npm run build -w packages/core`) before this leg",
-  );
+/**
+ * The whole per-file gate: every file in `scoreFloors` checked against the
+ * Stryker JSON report, with no I/O of its own. Returns the summary rows for
+ * the report (one per file the score could be computed for, each already
+ * carrying its display verdict and any raised-floor suggestion) and the
+ * failure messages -- a file missing from the report, a file whose mutants
+ * all fell outside the ratio, and a file below its committed floor all add to
+ * `failures` rather than a row, so `failures.length > 0` is the single signal
+ * the entry point below exits non-zero on.
+ */
+export function evaluateFloors(report, scoreFloors) {
+  const rows = [];
+  const failures = [];
+  for (const [file, floor] of Object.entries(scoreFloors)) {
+    const mutants = report.files?.[file]?.mutants;
+    if (mutants === undefined) {
+      failures.push(
+        `${file}: the report carries no mutants for this file. It is listed in packages/core/stryker.config.mjs, so either it was renamed or moved without the configuration following, or Stryker could not mutate it.`,
+      );
+      continue;
+    }
+    const { killed, denominator, score } = scoreOf(mutants);
+    if (denominator === 0) {
+      failures.push(
+        `${file}: every mutant was excluded from the score (compile error, runtime error, or ignored), so the floor cannot be checked.`,
+      );
+      continue;
+    }
+    const belowFloor = score < floor;
+    const raisedFloor = Math.floor(score);
+    rows.push({
+      file,
+      floor,
+      score,
+      killed,
+      denominator,
+      verdict: belowFloor ? "BELOW FLOOR" : "ok",
+      raisedFloorSuggestion: raisedFloor > floor ? raisedFloor : undefined,
+    });
+    if (belowFloor) {
+      failures.push(
+        `${file}: mutation score ${score.toFixed(2)}% is below its committed floor of ${floor}% (${killed} of ${denominator} mutants killed).`,
+      );
+    }
+  }
+  return { rows, failures };
 }
 
-mkdirSync(reportDir, { recursive: true });
-installToolchain(typescriptVersion);
+async function runCheck() {
+  const { default: strykerConfig, scoreFloors } = await import(
+    pathToFileURL(configPath).href
+  );
 
-writeFileSync(
-  derivedConfigPath,
-  `${JSON.stringify(
-    {
-      ...strykerConfig,
-      // Absolute so the runner resolves the real configuration file rather than
-      // a path relative to the sandbox vitest is rooted at.
-      vitest: {
-        ...strykerConfig.vitest,
-        configFile: join(repoRoot, strykerConfig.vitest.configFile),
+  const typescriptVersion = readPackageVersion(
+    join(repoRoot, "node_modules", "typescript"),
+  );
+  if (typescriptVersion === undefined) {
+    fail(
+      "no typescript in node_modules -- run `npm ci` (and `npm run build -w packages/core`) before this leg",
+    );
+  }
+
+  mkdirSync(reportDir, { recursive: true });
+  installToolchain(typescriptVersion);
+
+  writeFileSync(
+    derivedConfigPath,
+    `${JSON.stringify(
+      {
+        ...strykerConfig,
+        // Absolute so the runner resolves the real configuration file rather than
+        // a path relative to the sandbox vitest is rooted at.
+        vitest: {
+          ...strykerConfig.vitest,
+          configFile: join(repoRoot, strykerConfig.vitest.configFile),
+        },
+        tempDirName: join(workDir, "tmp"),
+        htmlReporter: { fileName: htmlReportPath },
+        jsonReporter: { fileName: jsonReportPath },
       },
-      tempDirName: join(workDir, "tmp"),
-      htmlReporter: { fileName: htmlReportPath },
-      jsonReporter: { fileName: jsonReportPath },
-    },
-    undefined,
-    2,
-  )}\n`,
-);
-
-try {
-  execFileSync(
-    process.execPath,
-    [
-      join(
-        toolchainDir,
-        "node_modules",
-        "@stryker-mutator",
-        "core",
-        "bin",
-        "stryker.js",
-      ),
-      "run",
-      derivedConfigPath,
-    ],
-    { cwd: repoRoot, stdio: "inherit" },
+      undefined,
+      2,
+    )}\n`,
   );
-} catch (error) {
-  fail(`Stryker exited with status ${error.status ?? "unknown"}`);
-}
 
-if (!existsSync(jsonReportPath)) {
-  fail(`Stryker wrote no JSON report at ${jsonReportPath}`);
-}
-const report = JSON.parse(readFileSync(jsonReportPath, "utf8"));
+  try {
+    execFileSync(
+      process.execPath,
+      [
+        join(
+          toolchainDir,
+          "node_modules",
+          "@stryker-mutator",
+          "core",
+          "bin",
+          "stryker.js",
+        ),
+        "run",
+        derivedConfigPath,
+      ],
+      { cwd: repoRoot, stdio: "inherit" },
+    );
+  } catch (error) {
+    fail(`Stryker exited with status ${error.status ?? "unknown"}`);
+  }
 
-const rows = [];
-const failures = [];
-for (const [file, floor] of Object.entries(scoreFloors)) {
-  const mutants = report.files?.[file]?.mutants;
-  if (mutants === undefined) {
-    failures.push(
-      `${file}: the report carries no mutants for this file. It is listed in packages/core/stryker.config.mjs, so either it was renamed or moved without the configuration following, or Stryker could not mutate it.`,
-    );
-    continue;
+  if (!existsSync(jsonReportPath)) {
+    fail(`Stryker wrote no JSON report at ${jsonReportPath}`);
   }
-  const { killed, denominator, score } = scoreOf(mutants);
-  if (denominator === 0) {
-    failures.push(
-      `${file}: every mutant was excluded from the score (compile error, runtime error, or ignored), so the floor cannot be checked.`,
-    );
-    continue;
-  }
-  rows.push({ file, floor, score, killed, denominator });
-  if (score < floor) {
-    failures.push(
-      `${file}: mutation score ${score.toFixed(2)}% is below its committed floor of ${floor}% (${killed} of ${denominator} mutants killed).`,
+  let report;
+  try {
+    report = JSON.parse(readFileSync(jsonReportPath, "utf8"));
+  } catch (error) {
+    fail(
+      `could not read the JSON report at ${jsonReportPath}: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-}
 
-console.log("\nMutation score against the committed floors:");
-for (const row of rows) {
-  const verdict = row.score < row.floor ? "BELOW FLOOR" : "ok";
-  console.log(
-    `  ${row.file}: ${row.score.toFixed(2)}% (floor ${row.floor}%, ${row.killed}/${row.denominator} killed) -- ${verdict}`,
-  );
-  const raisedFloor = Math.floor(row.score);
-  if (raisedFloor > row.floor) {
+  const { rows, failures } = evaluateFloors(report, scoreFloors);
+
+  console.log("\nMutation score against the committed floors:");
+  for (const row of rows) {
     console.log(
-      `    the floor for this file can be raised to ${raisedFloor}% in packages/core/stryker.config.mjs`,
+      `  ${row.file}: ${row.score.toFixed(2)}% (floor ${row.floor}%, ${row.killed}/${row.denominator} killed) -- ${row.verdict}`,
     );
+    if (row.raisedFloorSuggestion !== undefined) {
+      console.log(
+        `    the floor for this file can be raised to ${row.raisedFloorSuggestion}% in packages/core/stryker.config.mjs`,
+      );
+    }
+  }
+  console.log(
+    `\nHTML report: ${htmlReportPath}\nJSON report: ${jsonReportPath}`,
+  );
+
+  if (failures.length > 0) {
+    console.error("");
+    for (const failure of failures)
+      console.error(`stryker-security: ${failure}`);
+    console.error(
+      "\nA floor is raised when tests raise the score, never lowered to make this leg green: a drop means a test that used to distinguish the mutated behavior no longer does.",
+    );
+    process.exit(1);
   }
 }
-console.log(`\nHTML report: ${htmlReportPath}\nJSON report: ${jsonReportPath}`);
 
-if (failures.length > 0) {
-  console.error("");
-  for (const failure of failures) console.error(`stryker-security: ${failure}`);
-  console.error(
-    "\nA floor is raised when tests raise the score, never lowered to make this leg green: a drop means a test that used to distinguish the mutated behavior no longer does.",
-  );
-  process.exit(1);
+// Only when invoked directly, so the test imports the pure gating functions
+// without installing the toolchain, running Stryker, or touching the network.
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  await runCheck();
 }
