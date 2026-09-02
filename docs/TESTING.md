@@ -68,9 +68,11 @@ hands each test its connection details, per-party credentials, and rendezvous
 paths. The in-process backend adds two surfaces a real `sshd` cannot offer:
 
 - Fault injection -- a malformed NAME or DATA packet, a request accepted and
-  never answered, transient RENAME failures, capped READDIR batches, and a NAME
-  reply of a chosen width (the hook the pinned stack's reply wall is measured
-  through; see
+  never answered, transient RENAME failures, capped READDIR batches, a run of
+  READDIR batches carrying neither an entry nor end-of-directory (the
+  progress-free flood the listing's round-trip cap exists for, and the only
+  shape that reaches it), and a NAME reply of a chosen width (the hook the
+  pinned stack's reply wall is measured through; see
   [docs/spec/DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md#upgrading-the-sftp-stack-ssh2--ssh2-sftp-client)).
 - `sessionControls.ts`, the session-lifecycle hub -- lifetime, op-count, and
   idle caps that drop a live session, one-shot drops armed on the Nth further
@@ -118,6 +120,38 @@ decided one graduates into the suite with the PR relying on the answer, written
 as a test driven by this harness -- not left in `scratch/`. The premise is
 load-bearing once a change is built on it, and a premise no suite re-checks goes
 stale silently at the next pinned bump of either package.
+
+#### What the real-server legs cannot reach
+
+The controls above take the SFTP adapter a long way, but not everywhere. Three
+classes of its behaviour are held by the unit suite's hand-modelled
+`ssh2-sftp-client` alone, and stay there. Each is a limit of what a server can be
+made to do, not a gap waiting for a case, so a plan that decomposes the adapter
+has to keep the model for them rather than promise to retire it:
+
+- **The API-drift feature detects.** The adapter reaches through
+  `ssh2-sftp-client` to the `ssh2` client, its socket and the raw SFTP session
+  (`client._sock.destroy()`, `client.on()`/`once()`/`removeListener()`,
+  `client.end()`, `setNoDelay`/`setKeepAlive`, and `sftp.open`/`close`/`opendir`/
+  `readdir`), and guards each reach so a version that relocated one degrades with
+  a named warning instead of throwing. What those guards test is this process's
+  own dependency tree, not anything on the wire, so no server, fault injection or
+  hardened profile can make one true while the pinned versions expose everything
+  they check. They exist to fire at the next bump, which is exactly the "does the
+  API still look like this" question that belongs to a model rather than to a
+  measurement.
+- **`createExclusive`'s SFTPv4+ `FILE_ALREADY_EXISTS` (status 11) arm.** Driven
+  against both backends, an exclusive-create collision reports SFTPv3's
+  ambiguous `SSH_FX_FAILURE` (status 4) and nothing else -- the in-process
+  `ssh2.Server` double and OpenSSH's `internal-sftp` agree -- which the adapter
+  resolves through its own existence check. Reaching the status-11 normalization
+  means fabricating a status no server here sends, so it would take a new
+  fault injection rather than a new case.
+- **`put`/`putOnce`'s string-path and one-shot `ReadableStream` sources.**
+  Nothing server-side distinguishes either from the `Buffer` path, and no call
+  site in this app hands one: every `FileSyncConnection` put passes a `Buffer` or
+  a chunk list. A real-server case would have to call the adapter directly with a
+  string or a stream to reach them, which is what the unit suite already does.
 
 The CLI's WebRTC transport is a project of its own, `webrtc`, holding the files
 under `apps/cli/test/integration/webrtc/`:

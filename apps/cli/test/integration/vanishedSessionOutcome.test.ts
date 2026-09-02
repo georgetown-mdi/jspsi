@@ -7,6 +7,7 @@ import { expect, test } from "vitest";
 import {
   DEFAULT_MAX_RECONNECT_ATTEMPTS,
   TransportOperationStalledError,
+  sanitizeErrorForDisplay,
 } from "@psilink/core";
 import { withCapturedLogs } from "@psilink/core/testing";
 
@@ -15,19 +16,24 @@ import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
 import { selectedBackend, startInProcessSftpServer } from "../sftpServer";
 import { serverAuth } from "../sftpServer/testContext";
 
-// What the adapter does with a partner server that VANISHES: a live session that
-// stops answering mid-exchange with no close, no reset and nothing further on the
-// wire. Every other partner failure this suite drives ends the transport one way
-// or another, so the client learns of it from the transport itself; this one it
-// can learn of only from its own liveness deadline, and a stall is deliberately
-// never a reconnect trigger (docs/spec/CHANNEL_SECURITY.md). The recorded
-// outcome is the deliverable, so each case observes the ssh2 Client, the socket
-// beneath it, and the server's own request meter rather than reasoning about the
-// adapter.
+// What the adapter does with a partner server that goes SILENT rather than
+// failing: nothing closes, nothing resets, and no further byte arrives, so the
+// client can learn of it only from its own liveness deadline -- and a stall is
+// deliberately never a reconnect trigger (docs/spec/CHANNEL_SECURITY.md). The
+// recorded outcome is the deliverable, so each case observes the ssh2 Client, the
+// socket beneath it, and the server's own request meter rather than reasoning
+// about the adapter.
 //
-// Only the in-process backend can be made to vanish (a native sshd cannot be told
-// to stop answering), so these run there and stand up their own server to reach
-// the session controls -- the shared globalSetup server hands the workers only its
+// Two shapes of that silence run here, one per control. The VANISH silences the
+// whole session: a live session that stops answering mid-exchange, which the
+// first group drives. The WITHHELD REPLY silences one request: the server accepts
+// it, answers every other request on the same channel, and never writes that
+// one's status -- which is what strands a single metadata round trip or a single
+// transfer, and is the group at the end of this file.
+//
+// Only the in-process backend offers either (a native sshd cannot be told to stop
+// answering), so these run there and stand up their own server to reach the
+// session controls -- the shared globalSetup server hands the workers only its
 // connection details. The withheld-close partner, which is the nearest neighbour
 // and a materially different case (it fires only in answer to the client's own
 // disconnect, and it ends the transport), is heldSessionWithheldClose.test.ts and
@@ -35,9 +41,9 @@ import { serverAuth } from "../sftpServer/testContext";
 const inProcessOnly = test.skipIf(selectedBackend() !== "in-process");
 
 // The per-operation liveness deadline, lowered through the adapter's @internal
-// test seam. A vanished session never answers, so this is what ends an operation
-// outstanding across one; at the production 60 s these cases would wait a minute
-// longer for the same rejection.
+// test seam. Neither a vanished session nor a withheld reply ever answers, so
+// this is what ends an operation outstanding across either; at the production
+// 60 s these cases would wait a minute longer for the same rejection.
 const STALL_DEADLINE_MS = 3_000;
 
 // How long a case watches a vanished session with nothing outstanding before
@@ -202,9 +208,11 @@ async function dialSecondConnection(
   };
 }
 
-interface VanishFixture {
+interface SilencedFixture {
   srv: Awaited<ReturnType<typeof startInProcessSftpServer>>;
   adapter: SSH2SFTPClientAdapter;
+  /** The served directory on the host, where a case plants what it drives. */
+  dir: string;
   /** The served directory, as the client names it over SFTP. */
   remote: string;
   cleanup: () => Promise<void>;
@@ -214,10 +222,10 @@ interface VanishFixture {
 // single settled round trip. exists() rather than list(): the listing guard closes
 // its directory handle fire-and-forget once list() has resolved, so a trailing
 // CLOSE would land inside the measured window a case opens right after this.
-async function startVanishFixture(
+async function startSilencedFixture(
   label: string,
   options: { ephemeralSessions?: boolean } = {},
-): Promise<VanishFixture> {
+): Promise<SilencedFixture> {
   const srv = await startInProcessSftpServer();
   const dir = await fsp.mkdtemp(path.join(srv.handle.backingDir, `${label}-`));
   const remote = `${srv.handle.remoteRoot}/${path.basename(dir)}`;
@@ -236,11 +244,14 @@ async function startVanishFixture(
   return {
     srv,
     adapter,
+    dir,
     remote,
     cleanup: async () => {
       // Ahead of any disconnect: a client's end() awaits a close a vanished
-      // server can never send, so teardown would otherwise spend the adapter's
-      // whole close bound on every case.
+      // server can never send, and a withheld reply left standing would strand
+      // the teardown's own round trip, so teardown would otherwise spend the
+      // adapter's whole close bound on every case.
+      srv.inject.withholdOn = null;
       srv.sessionControls.restoreVanishedSessions();
       await adapter.end().catch(() => {});
       await fsp.rm(dir, { recursive: true, force: true });
@@ -254,7 +265,7 @@ inProcessOnly(
     "own deadline, with nothing reaching the client",
   async () => {
     const { srv, adapter, remote, cleanup } =
-      await startVanishFixture("held-outstanding");
+      await startSilencedFixture("held-outstanding");
     const census = watchForLostSession(adapter);
     try {
       const [rejection, logs] = await withCapturedLogs(
@@ -307,7 +318,7 @@ inProcessOnly(
   "a held session vanishing with nothing outstanding is invisible until the " +
     "next operation pays the deadline",
   async () => {
-    const { srv, adapter, remote, cleanup } = await startVanishFixture(
+    const { srv, adapter, remote, cleanup } = await startSilencedFixture(
       "held-nothing-outstanding",
     );
     const census = watchForLostSession(adapter);
@@ -362,7 +373,7 @@ inProcessOnly(
   "a connection-per-poll session vanishing under an operation strands it too, " +
     "and the next idle boundary closes over it",
   async () => {
-    const { srv, adapter, remote, cleanup } = await startVanishFixture(
+    const { srv, adapter, remote, cleanup } = await startSilencedFixture(
       "per-poll-outstanding",
       { ephemeralSessions: true },
     );
@@ -423,7 +434,7 @@ inProcessOnly(
   "a connection-per-poll session vanishing with nothing outstanding costs " +
     "only the idle boundary's forced close",
   async () => {
-    const { srv, adapter, remote, cleanup } = await startVanishFixture(
+    const { srv, adapter, remote, cleanup } = await startSilencedFixture(
       "per-poll-nothing-outstanding",
       { ephemeralSessions: true },
     );
@@ -485,7 +496,8 @@ inProcessOnly(
     // Without it a census taken from the wrong emitter, or one whose listeners
     // never fired, would report silence for a server that was closing sessions
     // normally.
-    const { srv, adapter, cleanup } = await startVanishFixture("drop-control");
+    const { srv, adapter, cleanup } =
+      await startSilencedFixture("drop-control");
     const census = watchForLostSession(adapter);
     try {
       srv.sessionControls.dropActiveAfterMs(1);
@@ -520,7 +532,7 @@ inProcessOnly(
 inProcessOnly(
   "unstalling another connection's dial releases a vanished session whole",
   async () => {
-    const { srv, adapter, remote, cleanup } = await startVanishFixture(
+    const { srv, adapter, remote, cleanup } = await startSilencedFixture(
       "stall-release-vanished",
     );
     const census = watchForLostSession(adapter);
@@ -585,7 +597,7 @@ inProcessOnly(
 inProcessOnly(
   "releasing another connection's withheld close releases a vanished session whole",
   async () => {
-    const { srv, adapter, remote, cleanup } = await startVanishFixture(
+    const { srv, adapter, remote, cleanup } = await startSilencedFixture(
       "withhold-release-vanished",
     );
     const census = watchForLostSession(adapter);
@@ -659,3 +671,131 @@ inProcessOnly(
   },
   TEST_TIMEOUT_MS,
 );
+
+/**
+ * One request the server accepts and never answers, and the stall the adapter is
+ * expected to raise for it. Each drives ONE operation on an otherwise healthy
+ * session, so what ends it can only be that operation's own deadline.
+ */
+interface WithheldReplyCase {
+  /** The operation as the case name reads it. */
+  what: string;
+  /** The SFTP opcode the server accepts and leaves unanswered. */
+  opcode: string;
+  /** The operation the adapter names in the stall it raises. */
+  operation: string;
+  /** The withheld-response clause that stall carries. */
+  detail: string;
+  /** Whatever the driven operation needs, planted under the served directory. */
+  plant?: (dir: string) => Promise<void>;
+  drive: (adapter: SSH2SFTPClientAdapter, remote: string) => Promise<unknown>;
+}
+
+// The metadata round trips whose bound is a flat whole-operation deadline, plus
+// the uncapped read, whose own deadline is the only bound it has (the capped read
+// the transport actually issues bounds the idle GAP between chunks instead, and is
+// driven by the exchange cases elsewhere in this suite). The opcode each names is
+// the request the server sees, so a library that reached the same operation over a
+// different one fails here rather than passing on a stall nothing withheld.
+const WITHHELD_REPLY_CASES: WithheldReplyCase[] = [
+  {
+    what: "a rename",
+    opcode: "RENAME",
+    operation: "file rename",
+    detail: "the server withheld the rename response",
+    plant: (dir) => fsp.writeFile(path.join(dir, "from.json"), "{}"),
+    drive: (adapter, remote) =>
+      adapter.rename(`${remote}/from.json`, `${remote}/to.json`),
+  },
+  {
+    what: "a delete",
+    opcode: "REMOVE",
+    operation: "file delete",
+    detail: "the server withheld the delete response",
+    plant: (dir) => fsp.writeFile(path.join(dir, "doomed.json"), "{}"),
+    drive: (adapter, remote) => adapter.delete(`${remote}/doomed.json`),
+  },
+  {
+    what: "an existence check",
+    // LSTAT, not STAT: which of the two the pinned ssh2-sftp-client's exists()
+    // puts on the wire is the library's choice, and this is the leg that reads
+    // it from the server rather than assuming it.
+    opcode: "LSTAT",
+    operation: "existence check",
+    detail: "the server withheld the stat response",
+    plant: (dir) => fsp.writeFile(path.join(dir, "present.json"), "{}"),
+    drive: (adapter, remote) => adapter.exists(`${remote}/present.json`),
+  },
+  {
+    what: "an exclusive create",
+    opcode: "OPEN",
+    operation: "exclusive create",
+    detail: "the server withheld the open, existence-check, or close response",
+    drive: (adapter, remote) => adapter.createExclusive(`${remote}/lock.json`),
+  },
+  {
+    what: "an uncapped read",
+    opcode: "READ",
+    operation: "file read",
+    detail: "the server withheld the transfer",
+    plant: (dir) =>
+      fsp.writeFile(path.join(dir, "payload.bin"), Buffer.alloc(4096, 7)),
+    drive: (adapter, remote) => adapter.get(`${remote}/payload.bin`),
+  },
+];
+
+for (const withheld of WITHHELD_REPLY_CASES)
+  inProcessOnly(
+    `${withheld.what} the server accepts and never answers ends on the ` +
+      `adapter's own deadline, with the session left live`,
+    async () => {
+      const { srv, adapter, dir, remote, cleanup } =
+        await startSilencedFixture("withheld-reply");
+      try {
+        await withheld.plant?.(dir);
+        srv.sessionControls.requests.reset();
+
+        const [outcome, logs] = await withCapturedLogs(
+          async () => {
+            srv.inject.withholdOn = withheld.opcode;
+            const started = Date.now();
+            const error = await withheld.drive(adapter, remote).then(
+              () => undefined,
+              (err: unknown) => err,
+            );
+            return { error, elapsedMs: Date.now() - started };
+          },
+          (level) => level === "WARN" || level === "ERROR",
+        );
+
+        // The deadline is what ended it, and it named the operation and the
+        // response the server kept.
+        expect(outcome.error).toBeInstanceOf(TransportOperationStalledError);
+        const rendered = sanitizeErrorForDisplay(outcome.error);
+        expect(rendered).toContain(`SFTP ${withheld.operation} stalled`);
+        expect(rendered).toContain(withheld.detail);
+        expect(outcome.elapsedMs).toBeGreaterThanOrEqual(STALL_DEADLINE_MS);
+
+        // The server did receive the request and did not answer it, so the
+        // rejection is over a request genuinely left outstanding rather than one
+        // the client never issued.
+        const meter = srv.sessionControls.requests.read();
+        const received = meter.receivedByOp[withheld.opcode] ?? 0;
+        expect(received).toBeGreaterThanOrEqual(1);
+        expect(meter.answeredByOp[withheld.opcode] ?? 0).toBeLessThan(received);
+
+        // A stall is never a reconnect trigger: the session the request was
+        // issued on is still established, nothing re-dialed, and the operator is
+        // told nothing beyond the rejection the caller already has.
+        expect(sessionReadsEstablished(adapter)).toBe(true);
+        expect(srv.sessionControls.handshakeCount()).toBe(0);
+        expect(adapter.reconnectCount).toBe(0);
+        expect(adapter.midExchangeReconnectCount).toBe(0);
+        expect(logs).toEqual([]);
+      } finally {
+        srv.inject.withholdOn = null;
+        await cleanup();
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );

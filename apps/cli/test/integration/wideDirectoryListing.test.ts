@@ -2,11 +2,17 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 
 import { expect, test } from "vitest";
+import {
+  DirectoryListingBoundsError,
+  TransportOperationStalledError,
+  sanitizeErrorForDisplay,
+} from "@psilink/core";
 import { withCapturedLogs } from "@psilink/core/testing";
 
 import {
   MAX_DIRECTORY_ENTRIES,
   MAX_FILENAME_LENGTH,
+  MAX_LISTING_READDIR_BATCHES,
 } from "../../src/connection/listingGuard";
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
 import {
@@ -27,6 +33,12 @@ import { serverAuth } from "../sftpServer/testContext";
 // The knob is driven alongside the default because it is the footgun: a cap
 // wider than one packet must still deliver every entry rather than being taken
 // literally and losing the reply.
+//
+// Each of the three enforced bounds is then driven one step PAST, where the
+// adapter refuses instead of enumerating: an entry too many, a served name a
+// character too long, and a flood of batches that carry neither an entry nor
+// end-of-directory. Being able to serve the bound is what makes crossing it a
+// measurement of the refusal rather than of the backend.
 //
 // Only the in-process backend exposes the batch knob and the server-side request
 // meter these read (see test/sftpServer/types.ts), so these run there and stand
@@ -70,7 +82,10 @@ function missingFrom(
 
 interface ListingRun {
   planted: string[];
+  /** The entry names the listing reported, empty where it was refused. */
   listed: string[];
+  /** The refusal the listing raised, undefined where it completed. */
+  error: unknown;
   readdirRoundTrips: number;
 }
 
@@ -84,10 +99,16 @@ async function driveListing({
   count,
   nameLength,
   batchCap,
+  oversizeName,
+  emptyNonEofBatches,
 }: {
   count: number;
   nameLength: number;
   batchCap: number;
+  /** Served in place of the first READDIR batch, where a case arms one. */
+  oversizeName?: string;
+  /** Progress-free batches served ahead of the listing, where a case arms them. */
+  emptyNonEofBatches?: number;
 }): Promise<ListingRun> {
   const srv = await startInProcessSftpServer();
   const adapter = new SSH2SFTPClientAdapter({ verbosity: -1 });
@@ -97,7 +118,7 @@ async function driveListing({
     await plant(dir, planted);
     const remote = `${srv.handle.remoteRoot}/${path.basename(dir)}`;
     srv.inject.readdirBatchSize = batchCap;
-    const [listed] = await withCapturedLogs(
+    const [settled] = await withCapturedLogs(
       async () => {
         await adapter.connect({
           host: srv.handle.host,
@@ -105,13 +126,23 @@ async function driveListing({
           ...serverAuth(srv.handle.usera),
         });
         srv.sessionControls.requests.reset();
-        return (await adapter.list(remote)).map((entry) => entry.name);
+        if (oversizeName !== undefined)
+          srv.inject.oversizeNameOnNextReaddir = oversizeName;
+        if (emptyNonEofBatches !== undefined)
+          srv.inject.emptyNonEofReaddirBatches = emptyNonEofBatches;
+        return await adapter.list(remote).then(
+          (entries) => ({
+            listed: entries.map((entry) => entry.name),
+            error: undefined as unknown,
+          }),
+          (error: unknown) => ({ listed: [] as string[], error }),
+        );
       },
       () => true,
     );
     return {
       planted,
-      listed,
+      ...settled,
       readdirRoundTrips:
         srv.sessionControls.requests.read().receivedByOp.READDIR ?? 0,
     };
@@ -205,6 +236,91 @@ inProcessOnly(
     expect(missingFrom(run.planted, run.listed)).toEqual([]);
     expect(run.listed).toHaveLength(MAX_DIRECTORY_ENTRIES);
     expect(run.readdirRoundTrips).toBeGreaterThan(1);
+  },
+  TEST_TIMEOUT_MS,
+);
+
+inProcessOnly(
+  `a directory one entry past ${MAX_DIRECTORY_ENTRIES} is refused rather than ` +
+    `enumerated`,
+  async () => {
+    // The smallest fixture that crosses the bound: the guard checks the count
+    // before it takes each entry, so the entry after the bound is the one
+    // refused, and a directory of exactly the bound is the passing case above.
+    const run = await driveListing({
+      count: MAX_DIRECTORY_ENTRIES + 1,
+      nameLength: 24,
+      batchCap: 0,
+    });
+
+    expect(run.error).toBeInstanceOf(DirectoryListingBoundsError);
+    expect(sanitizeErrorForDisplay(run.error)).toContain(
+      `contains more than ${MAX_DIRECTORY_ENTRIES} entries`,
+    );
+    // Refused off the wire rather than after the whole directory was read: the
+    // listing gave up mid-stream, so the entries past the bound were never taken
+    // into memory.
+    expect(run.listed).toEqual([]);
+    expect(run.readdirRoundTrips).toBeGreaterThan(1);
+  },
+  TEST_TIMEOUT_MS,
+);
+
+inProcessOnly(
+  `a served name one character past ${MAX_FILENAME_LENGTH} is refused`,
+  async () => {
+    // The name bound is the one an honest filesystem cannot cross -- every
+    // mainstream one caps a component at 255 -- so it is reached through the
+    // backend's oversize-name injection rather than by planting a file: a
+    // synthesized READDIR name is the only way a real server produces one, and
+    // it is what the guard exists for.
+    const overLength = "x".repeat(MAX_FILENAME_LENGTH + 1);
+    const run = await driveListing({
+      count: 0,
+      nameLength: 24,
+      batchCap: 0,
+      oversizeName: overLength,
+    });
+
+    expect(run.error).toBeInstanceOf(DirectoryListingBoundsError);
+    const rendered = sanitizeErrorForDisplay(run.error);
+    expect(rendered).toContain(
+      `filename is ${overLength.length} characters, exceeding the maximum of ` +
+        `${MAX_FILENAME_LENGTH}`,
+    );
+    // Only a leading slice of the server's name is relayed, so the refusal
+    // cannot carry an attacker-sized string onward.
+    expect(rendered).not.toContain(overLength);
+    expect(run.listed).toEqual([]);
+  },
+  TEST_TIMEOUT_MS,
+);
+
+inProcessOnly(
+  `a listing flooded past ${MAX_LISTING_READDIR_BATCHES} progress-free readdir ` +
+    `batches is refused`,
+  async () => {
+    // The round-trip cap is the LIVENESS sibling of the two size bounds above,
+    // and the only listing failure a well-formed reply can drive without ever
+    // carrying an entry: each batch says "more to come" and delivers nothing, so
+    // neither size bound advances and the listing would recurse without end.
+    // Armed one batch past the cap, which is the smallest flood that crosses it.
+    const run = await driveListing({
+      count: 0,
+      nameLength: 24,
+      batchCap: 0,
+      emptyNonEofBatches: MAX_LISTING_READDIR_BATCHES + 1,
+    });
+
+    expect(run.error).toBeInstanceOf(TransportOperationStalledError);
+    expect(sanitizeErrorForDisplay(run.error)).toContain(
+      `made no progress over ${MAX_LISTING_READDIR_BATCHES} readdir round-trips`,
+    );
+    expect(run.listed).toEqual([]);
+    // Counted at the server, which is what says the cap bit where the adapter
+    // says it does: the batch past the cap is refused before another readdir
+    // goes out, so the flood costs exactly the cap and not one round trip more.
+    expect(run.readdirRoundTrips).toBe(MAX_LISTING_READDIR_BATCHES);
   },
   TEST_TIMEOUT_MS,
 );

@@ -233,6 +233,7 @@ export async function startInProcessSftpServer(): Promise<InProcessSftpServer> {
     withholdOn: null,
     renameFailuresRemaining: 0,
     readdirBatchSize: 0,
+    emptyNonEofReaddirBatches: 0,
   };
 
   const sessionControls = createSftpSessionControls();
@@ -710,6 +711,14 @@ function attachSftpHandlers(
         ]),
       );
       return;
+    }
+    if (inject.emptyNonEofReaddirBatches > 0) {
+      // A NAME reply carrying no entry and no end-of-directory status: the batch
+      // advances the listing by nothing while telling the client there is more
+      // to come. Written through the server's own name() so the frame is the
+      // stack's, not this file's.
+      inject.emptyNonEofReaddirBatches -= 1;
+      return sftp.name(reqid, []);
     }
     if (h.pos >= h.names.length) return sftp.status(reqid, STATUS_CODE.EOF);
 

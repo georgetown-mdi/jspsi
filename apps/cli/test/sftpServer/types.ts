@@ -134,6 +134,18 @@ export interface SftpFaultInjection {
    * of that many entries per round trip.
    */
   readdirBatchSize: number;
+  /**
+   * Answer this many further READDIRs with an EMPTY NAME batch -- no entry, and
+   * no end-of-directory status -- before serving the directory normally. Each
+   * such reply advances the listing by nothing while telling the client there is
+   * more to come, which is the progress-free flood the adapter's readdir
+   * round-trip cap exists for and the ONLY shape that reaches it: a conformant
+   * server's every non-EOF batch carries at least one name, so the entry-count
+   * bound refuses such a listing long before the round-trip one could bite.
+   * Decremented per batch served, so a case arms exactly the number of
+   * round trips it means to drive; 0 leaves READDIR normal.
+   */
+  emptyNonEofReaddirBatches: number;
 }
 
 /**
