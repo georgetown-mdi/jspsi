@@ -26,10 +26,10 @@ import type { WebRTCEndpoint } from "./invitation.js";
  * `keyboardInteractive`. A credential is therefore unrepresentable in a
  * mint-layer input, so it cannot reach the minted file even by mistake -- the
  * type is the enforcement, not a runtime strip, and exchangeFile.test.ts sweeps
- * a maximal minted YAML for any credential field regardless. The minted config
- * seeds the one SSH identity field (`username`) with an obvious
- * `REPLACE_WITH_...` placeholder for the operator to fill in (see
- * {@link mintExchangeFile}).
+ * a maximal minted YAML for the password, private-key, and authentication
+ * spellings regardless. The minted config seeds the one SSH identity field
+ * (`username`) with an obvious `REPLACE_WITH_...` placeholder for the operator
+ * to fill in (see {@link mintExchangeFile}).
  */
 export interface SftpExchangeLocator {
   channel: "sftp";

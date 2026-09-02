@@ -3597,9 +3597,11 @@ function readParsedDateRun(
  * understating it is the only harmful direction on a consent surface. That closes
  * the milder-word evasion -- an inviter cannot make one probe unmeasurable to
  * drop the marker while every real date still collapses onto one constant (a
- * probe inflated past the ceiling is driven in standardization.test.ts). A legitimate partial-date transform does not cross the ceiling and is
- * not an unknown function, so it still measures cleanly and keeps its true milder
- * word; only a pathological or exchange-time-throwing pipeline takes the wider one.
+ * probe inflated past the ceiling is driven in standardization.test.ts). A
+ * legitimate partial-date transform does not cross the ceiling and is not an
+ * unknown function, so it still measures cleanly and keeps its true milder
+ * word; only a pathological or exchange-time-throwing pipeline takes the wider
+ * one.
  *
  * The limit it keeps is a value-DEPENDENT drop the terms cannot settle, and it
  * runs in the over-claiming direction alone. A `filter_regex` or `null_if`
