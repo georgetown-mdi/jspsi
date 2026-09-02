@@ -24,6 +24,7 @@ import {
 } from "@psilink/core";
 
 import { transportOperationStalledError } from "./sftpLivenessGuard";
+import type { SessionTransitionKind } from "./ssh2SftpAdapter";
 
 /**
  * `list()` and `createExclusive()` both run only after `connect()` has already
@@ -48,7 +49,7 @@ export const SFTP_SESSION_CLOSED_MESSAGE =
  * @param acquireTimeoutMs - The wait the transition gave up after.
  */
 export function transitionWaitExpiredError(
-  kind: string,
+  kind: SessionTransitionKind,
   acquireTimeoutMs: number,
 ): Error {
   return new Error(

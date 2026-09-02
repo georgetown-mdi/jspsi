@@ -289,7 +289,7 @@ type TransportCloseReading = "owed" | "delivered" | "unreadable";
 // under the adapter's one transition lock (see
 // SSH2SFTPClientAdapter.runTransition), so none can overlap another on the one
 // shared Ssh2SftpClient.
-type SessionTransitionKind =
+export type SessionTransitionKind =
   | "connect"
   | "ensureConnected"
   | "redialForRecovery"
