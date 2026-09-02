@@ -2838,14 +2838,23 @@ const quotedCost = (raw: string): number =>
 // the legal agreement's `(expires ` and the date it closes on, and the name
 // list's separator and brackets.
 //
-// The last three carry the block's structure ONE LEVEL UP, which is a control
+// Three of them carry the block's structure ONE LEVEL UP, which is a control
 // character rather than a printable span: the line break between lines, the one
 // a notice is introduced by, and a bare carriage return, each followed by the
 // copy the block puts after its own. The whole refusal is escaped as one link,
 // so a value's control character and the block's own reach the operator through
 // the same boundary, and a unit that spells a line is what makes the sweep's
 // skeleton comparison measure that.
+//
+// The first is an adjacent run of the SHAPES the seam's markers are cut back to,
+// spelled in the value's own printable bytes: a cut anywhere in it lands beside
+// one, which is what a back-off walked over a run rather than over the cut's own
+// marker would erase. It leads the units so every value carries it, at the
+// offsets the narrowest budgets cut. Its shape is a prefix of a marker the block
+// never places here -- no unit carries a U+007F -- so the fragment check below
+// stays a statement about markers the treatment put in the value.
 const FORGED_LINE_UNITS = [
+  '"<7<7<7"',
   '": existing "',
   '" vs required "',
   '" over 9.9.9"',
@@ -2892,6 +2901,19 @@ const inertValue = (cost: number, lead: string): string => {
   return raw;
 };
 
+// The same width spelled END TO END in the shape a marker is cut back to, so a
+// cut at ANY offset lands beside one rather than at the offsets the units above
+// happen to place. What this measures against the inert twin of the same width
+// is the back-off's reach: taken over a run of the shapes rather than over the
+// cut's own marker, it deletes the value's own bytes without bound.
+const markerShapedValue = (cost: number, lead: string): string => {
+  let raw = lead;
+  while (quotedCost(`${raw}<7`) <= cost) raw += "<7";
+  while (quotedCost(raw) < cost) raw += "x";
+  expect(quotedCost(raw)).toBe(cost);
+  return raw;
+};
+
 // A fragment of the seam's marker left standing where a cut fell, read off the
 // markers the units above are treated into rather than restated: the marker is
 // four printable characters put where a value's control character was, so a cut
@@ -2903,6 +2925,19 @@ const MARKER_FRAGMENTS = ["\n", "\r"].flatMap((character) => {
     marker.slice(0, index + 1),
   );
 });
+
+// The back-off to before a marker's opening `<`, read off a marker rather than
+// restated: what a cut landing inside one costs the value it cut.
+const MARKER_BACK_OFF = controlCharacterMarker("\n".codePointAt(0)!).length - 1;
+
+// The most a cut may cost a value against inert bytes of the same width: that
+// back-off, plus the one character a cut that would fall between the two halves
+// of a doubled delimiter leaves unspent. Both are bounded per cut, which is the
+// property a back-off taken over a RUN of marker shapes does not have.
+const MAX_UNDERSHOOT_PER_CUT = MARKER_BACK_OFF + 1;
+
+const cutsIn = (rendered: string): number =>
+  rendered.split(DISPLAY_TRUNCATION_MARKER).length - 1;
 
 // Every place in `rendered` where a cut left one, which is the text a truncation
 // marker directly follows.
@@ -2985,6 +3020,7 @@ test("a fitted conflict line's runs are the runs the block composed, at every bu
     ];
   };
   const hostileDiffs = diffsFor(delimiterCarryingValue);
+  const shapedDiffs = diffsFor(markerShapedValue);
   const inertDiffs = diffsFor(inertValue);
   expect(hostileDiffs.map((d) => d.field)).toEqual([
     "linkage_fields",
@@ -3002,18 +3038,28 @@ test("a fitted conflict line's runs are the runs the block composed, at every bu
   let sawCut = false;
   let sawNamedOnly = false;
   for (let budget = 0; budget <= renderedDisplayCost(whole); budget += 1) {
-    const hostile = formatReconcileDiffs(hostileDiffs, budget);
     const benign = formatReconcileDiffs(inertDiffs, budget);
     const where = `budget ${budget}`;
-    expect(blockSkeleton(hostile, "\n"), where).not.toContain("<unterminated>");
-    expect(blockSkeleton(hostile, "\n"), where).toBe(
-      blockSkeleton(benign, "\n"),
-    );
-    // The seam's markers are the other unit the cut may not fall inside: what a
-    // fitted line carries of them is whole markers or none.
-    expect(fragmentsBeforeCuts(hostile), where).toEqual([]);
-    sawCut ||= hostile.includes(DISPLAY_TRUNCATION_MARKER);
-    sawNamedOnly ||= hostile.includes("too wide for the room");
+    for (const diffs of [hostileDiffs, shapedDiffs]) {
+      const hostile = formatReconcileDiffs(diffs, budget);
+      expect(blockSkeleton(hostile, "\n"), where).not.toContain(
+        "<unterminated>",
+      );
+      expect(blockSkeleton(hostile, "\n"), where).toBe(
+        blockSkeleton(benign, "\n"),
+      );
+      // The seam's markers are the other unit the cut may not fall inside: what
+      // a fitted line carries of them is whole markers or none.
+      expect(fragmentsBeforeCuts(hostile), where).toEqual([]);
+      // And what that back-off costs is bounded per cut: the hostile block
+      // renders what the inert one does, less what each of its cuts pays.
+      expect(
+        renderedDisplayCost(benign) - renderedDisplayCost(hostile),
+        where,
+      ).toBeLessThanOrEqual(MAX_UNDERSHOOT_PER_CUT * cutsIn(benign));
+      sawCut ||= hostile.includes(DISPLAY_TRUNCATION_MARKER);
+      sawNamedOnly ||= hostile.includes("too wide for the room");
+    }
   }
   // Non-vacuous in both directions: the sweep covered budgets that cut a value
   // and budgets that left a line named without its values.
@@ -3031,13 +3077,83 @@ test("a fitted conflict line's runs are the runs the block composed, at every bu
       diffLinkageTerms(terms.existing, terms.incoming).conflicts,
     );
   };
-  const rendered = refusalAtWidth(delimiterCarryingValue);
-  expect(rendered).toContain(DISPLAY_TRUNCATION_MARKER);
-  expect(fragmentsBeforeCuts(rendered)).toEqual([]);
-  expect(blockSkeleton(rendered, "\\x0a")).not.toContain("<unterminated>");
-  expect(blockSkeleton(rendered, "\\x0a")).toBe(
-    blockSkeleton(refusalAtWidth(inertValue), "\\x0a"),
-  );
+  const benign = refusalAtWidth(inertValue);
+  for (const value of [delimiterCarryingValue, markerShapedValue]) {
+    const rendered = refusalAtWidth(value);
+    expect(rendered).toContain(DISPLAY_TRUNCATION_MARKER);
+    expect(fragmentsBeforeCuts(rendered)).toEqual([]);
+    expect(blockSkeleton(rendered, "\\x0a")).not.toContain("<unterminated>");
+    expect(blockSkeleton(rendered, "\\x0a")).toBe(
+      blockSkeleton(benign, "\\x0a"),
+    );
+    expect(
+      renderedDisplayCost(benign) - renderedDisplayCost(rendered),
+    ).toBeLessThanOrEqual(MAX_UNDERSHOOT_PER_CUT * cutsIn(benign));
+  }
+});
+
+test("a side spelling the marker's shape still renders its own bytes", () => {
+  // A shown side reads as some of the value's own bytes -- that is what the
+  // floor buys, and what a back-off walked over a RUN of marker shapes takes
+  // away: the shapes are the partner's own printable text, so a side spelling
+  // them end to end would render as punctuation and a truncation marker at a
+  // budget that shows the same width of anything else. Driven through the real
+  // block against the inert twin of the same width, which takes the same slot,
+  // the same share, and the same cut.
+  const conflictsNaming = (name: string, required: string): ReconcileDiff[] => {
+    const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+    const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+    existing.linkageFields = [{ name, type: "ssn" }];
+    incoming.linkageFields = [{ name: required, type: "ssn" }];
+    const { conflicts } = diffLinkageTerms(existing, incoming);
+    expect(conflicts.map((d) => d.field)).toEqual(["linkage_fields"]);
+    return conflicts;
+  };
+  const shaped = conflictsNaming("<0".repeat(60), "<1".repeat(60));
+  const inert = conflictsNaming("x".repeat(120), "y".repeat(120));
+  // Each side's own bytes counted by the alphabet it is built out of, none of
+  // which the first-party skeleton or the truncation marker spells.
+  const alphabets = [
+    ["<0", "<1"],
+    ["x", "y"],
+  ];
+  const ownBytes = (line: string, alphabet: string[]): number[] =>
+    line
+      .split(": existing ")[1]
+      .split(" vs required ")
+      .map(
+        (side, index) =>
+          Array.from(side).filter((character) =>
+            alphabet[index].includes(character),
+          ).length,
+      );
+
+  let sawCut = false;
+  const whole = formatReconcileDiffs(shaped, Number.MAX_SAFE_INTEGER);
+  for (let budget = 0; budget <= renderedDisplayCost(whole); budget += 1) {
+    const rendered = [shaped, inert].map((diffs) =>
+      formatReconcileDiffs(diffs, budget),
+    );
+    const where = `budget ${budget}`;
+    // What admits a line's values is the widths of its sides, which the two
+    // share, so a budget shows them for both or for neither.
+    expect(rendered[0].includes(": existing "), where).toBe(
+      rendered[1].includes(": existing "),
+    );
+    if (!rendered[0].includes(": existing ")) continue;
+    const [shapedSides, inertSides] = rendered.map((line, index) =>
+      ownBytes(line, alphabets[index]),
+    );
+    for (let side = 0; side < shapedSides.length; side += 1) {
+      expect(shapedSides[side], where).toBeGreaterThan(0);
+      expect(shapedSides[side], where).toBeGreaterThanOrEqual(
+        inertSides[side] - MARKER_BACK_OFF,
+      );
+    }
+    sawCut ||= rendered[0].includes(DISPLAY_TRUNCATION_MARKER);
+  }
+  // Non-vacuous: the sweep covered budgets that cut the shaped value.
+  expect(sawCut).toBe(true);
 });
 
 test("a value's control characters cannot render as a line of the block's own", () => {

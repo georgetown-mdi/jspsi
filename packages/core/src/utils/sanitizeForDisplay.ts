@@ -219,8 +219,18 @@ export function sanitizeForDisplay(
  * did"; what an operator can rely on is the converse -- a control character a
  * composition placed ITSELF still renders as the escape's `\xHH`, which no
  * treated value can produce.
+ *
+ * Its domain is the control class and nothing wider, refused rather than
+ * rendered: {@link PARTIAL_CONTROL_CHARACTER_MARKERS} is read off that same
+ * class, so a marker for a code point outside it -- six characters wide for one
+ * above U+00FF -- would have prefixes the back-off does not cover, leaving
+ * standing exactly the fragment the pair exists to prevent.
  */
 export function controlCharacterMarker(codePoint: number): string {
+  if (!CONTROL_CHARACTER.test(String.fromCodePoint(codePoint)))
+    throw new RangeError(
+      `control-character marker is defined over the control class only, not U+${codePoint.toString(16)}`,
+    );
   return `<${codePoint.toString(16).padStart(2, "0")}>`;
 }
 
@@ -230,6 +240,14 @@ export function controlCharacterMarker(codePoint: number): string {
  * line breaks separating a block's lines.
  */
 const CONTROL_CHARACTERS = /\p{Cc}/gu;
+
+/**
+ * The same class as a whole-string test over one character, built from the
+ * pattern above rather than restated so the emitter's domain and the class the
+ * treatment rewrites cannot drift apart. A separate regex because the global one
+ * carries `lastIndex` state that a `test` call would advance.
+ */
+const CONTROL_CHARACTER = new RegExp(`^${CONTROL_CHARACTERS.source}$`, "u");
 
 /**
  * Replace every control character in a value somebody else chose with
@@ -255,10 +273,15 @@ const CONTROL_CHARACTERS = /\p{Cc}/gu;
  * altitude, and it is idempotent for the same reason: the replacement carries no
  * control character of its own.
  *
- * Applied AFTER redaction, so the private-key patterns still see the line breaks
- * a PEM block arrives with, and BEFORE any fit, so what a budget measures is what
- * the operator is shown. For DISPLAY only, like every treatment beside it: a
- * comparison, a hash, or a stored value takes the raw string.
+ * Applied BEFORE any fit, which is what the order buys: a fit measures the
+ * rendered form, so a fragment fitted after this is fitted to what the operator
+ * is shown rather than to a width the treatment then changes. Its order against
+ * redaction is not load-bearing -- the private-key patterns span `[\s\S]` and
+ * their markers carry no control character, so neither treatment can make or
+ * unmake the other's match -- and that is held by a check rather than by this
+ * sentence (`packages/core/test/sanitizeForDisplay.test.ts`). For DISPLAY only,
+ * like every treatment beside it: a comparison, a hash, or a stored value takes
+ * the raw string.
  */
 export function replaceControlCharactersForDisplay(value: string): string {
   return value.replace(CONTROL_CHARACTERS, (character) =>
@@ -290,7 +313,7 @@ const LONGEST_PARTIAL_CONTROL_CHARACTER_MARKER = Math.max(
 );
 
 /**
- * `text` with any trailing fragment of a control-character marker removed, so a
+ * `text` with ONE trailing fragment of a control-character marker removed, so a
  * routine that cut `text` to a budget hands on whole markers or none.
  *
  * A marker is four printable characters standing where a control character was,
@@ -301,34 +324,35 @@ const LONGEST_PARTIAL_CONTROL_CHARACTER_MARKER = Math.max(
  * undershoots the budget by up to three characters, which every caller's
  * arithmetic already treats as an upper bound.
  *
+ * One fragment is all a cut can leave, which is why this is a single back-off
+ * and not a loop: a whole marker ends in `>`, a character no proper prefix of a
+ * marker holds, so removing the longest matching tail removes exactly the split
+ * marker's prefix and cannot expose a second one behind it. Repeated, it would
+ * instead walk back over a run of marker SHAPES a value spelled in its own
+ * printable bytes and delete them without bound -- a value that is nothing else
+ * rendering as the truncation marker alone, below the floor of its own bytes
+ * every caller's arithmetic gives a value it shows.
+ *
  * The back-off is keyed on the marker's SHAPE, which a value's own printable
  * bytes can spell just as well: a value ending in a literal `<0a` is backed off
  * over exactly as a cut marker is. That is the same open class the marker itself
  * carries -- nothing in a treated string distinguishes the two -- and it costs
- * the same three characters. It applies until nothing at the end matches, so a
- * prefix whose tail is a run of such shapes keeps none of them, down to a value
- * that is nothing else and renders as the truncation marker alone.
+ * the same three characters. Bounded to one, it leaves a residual: kept text can
+ * still END in marker-shaped literal characters, which are the value's own bytes
+ * shown faithfully rather than a marker the treatment split.
  */
 export function trimPartialControlCharacterMarker(text: string): string {
-  let kept = text;
-  let trimmed = true;
-  while (trimmed) {
-    trimmed = false;
-    for (
-      let length = Math.min(
-        LONGEST_PARTIAL_CONTROL_CHARACTER_MARKER,
-        kept.length,
-      );
-      length > 0;
-      length -= 1
-    )
-      if (PARTIAL_CONTROL_CHARACTER_MARKERS.has(kept.slice(-length))) {
-        kept = kept.slice(0, kept.length - length);
-        trimmed = true;
-        break;
-      }
-  }
-  return kept;
+  for (
+    let length = Math.min(
+      LONGEST_PARTIAL_CONTROL_CHARACTER_MARKER,
+      text.length,
+    );
+    length > 0;
+    length -= 1
+  )
+    if (PARTIAL_CONTROL_CHARACTER_MARKERS.has(text.slice(-length)))
+      return text.slice(0, text.length - length);
+  return text;
 }
 
 /**

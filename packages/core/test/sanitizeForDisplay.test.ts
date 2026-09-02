@@ -6,9 +6,11 @@ import {
   controlCharacterMarker,
   renderedDisplayCost,
   replaceControlCharactersForDisplay,
+  trimPartialControlCharacterMarker,
   DISPLAY_TRUNCATION_MARKER,
   DEFAULT_MAX_DISPLAY_LENGTH,
 } from "../src/utils/sanitizeForDisplay";
+import { redactPrivateKeyMaterial } from "../src/utils/sanitizeErrorForDisplay";
 
 describe("sanitizeForDisplay", () => {
   test("passes an ordinary ASCII value through unchanged", () => {
@@ -144,14 +146,14 @@ describe("sanitizeForDisplay", () => {
   });
 });
 
-describe("replaceControlCharactersForDisplay", () => {
-  // Every control character, driven rather than sampled: the class is small
-  // enough to enumerate, and what the treatment claims is a property of all of
-  // it rather than of the line break it was written for.
-  const CONTROL_CHARACTERS = Array.from({ length: 0xa0 }, (_, codePoint) =>
-    String.fromCodePoint(codePoint),
-  ).filter((character) => /\p{Cc}/u.test(character));
+// Every control character, driven rather than sampled: the class is small
+// enough to enumerate, and what the treatment claims is a property of all of it
+// rather than of the line break it was written for.
+const CONTROL_CHARACTERS = Array.from({ length: 0xa0 }, (_, codePoint) =>
+  String.fromCodePoint(codePoint),
+).filter((character) => /\p{Cc}/u.test(character));
 
+describe("replaceControlCharactersForDisplay", () => {
   test("covers the whole control class and nothing else", () => {
     expect(CONTROL_CHARACTERS.length).toBe(65);
     for (const character of CONTROL_CHARACTERS)
@@ -200,6 +202,60 @@ describe("replaceControlCharactersForDisplay", () => {
       expect(
         renderedDisplayCost(replaceControlCharactersForDisplay(character)),
       ).toBe(renderedDisplayCost(character));
+  });
+
+  test("the emitter emits only markers the back-off covers", () => {
+    // The pairing between the two: what makes a cut inside a marker recoverable
+    // is that every proper prefix of every marker is a shape the back-off knows,
+    // and both sides are read off the same class. A code point outside it would
+    // render SIX characters wide -- `<1234>` -- whose prefixes the back-off does
+    // not cover, leaving `abc<123` standing where a cut fell, which is the
+    // fragment the pair exists to prevent. So it is refused rather than emitted.
+    for (const character of CONTROL_CHARACTERS) {
+      const marker = controlCharacterMarker(character.codePointAt(0)!);
+      expect(marker.length).toBe(4);
+      for (let offset = 1; offset < marker.length; offset += 1)
+        expect(
+          trimPartialControlCharacterMarker(`abc${marker.slice(0, offset)}`),
+          marker,
+        ).toBe("abc");
+    }
+    for (let codePoint = 0; codePoint <= 0x200; codePoint += 1)
+      if (!/\p{Cc}/u.test(String.fromCodePoint(codePoint)))
+        expect(
+          () => controlCharacterMarker(codePoint),
+          `U+${codePoint.toString(16)}`,
+        ).toThrow(RangeError);
+    for (const outside of [0x1234, 0x10ffff, -1, 1.5])
+      expect(() => controlCharacterMarker(outside), `${outside}`).toThrow(
+        RangeError,
+      );
+  });
+
+  test("either order against redaction renders the same bytes", () => {
+    // What the treatment's place in the composition order does NOT rest on. The
+    // private-key patterns span every character class and their markers carry no
+    // control character, so neither pass can make or unmake the other's match --
+    // held here rather than by a sentence in the docstring, which could not tell
+    // a real dependency from an assumed one.
+    const body = "MIIByteslookingsecret0123456789ABCDEFabcdef+/wEHEHE";
+    const block = `-----BEGIN OPENSSH PRIVATE KEY-----\n${body}\n-----END OPENSSH PRIVATE KEY-----`;
+    for (const text of [
+      block,
+      `could not load key: ${block}\nretry`,
+      block.replace(/\n/g, "\r\n"),
+      `dangling\r\n${block.slice(0, 60)}`,
+      `-----BEGIN PRIVATE KEY-----${body}-----END PRIVATE KEY-----`,
+    ]) {
+      const redactedFirst = replaceControlCharactersForDisplay(
+        redactPrivateKeyMaterial(text),
+      );
+      expect(redactedFirst).toContain("[redacted private key]");
+      expect(redactedFirst).not.toContain(body);
+      expect(
+        redactPrivateKeyMaterial(replaceControlCharactersForDisplay(text)),
+      ).toBe(redactedFirst);
+    }
   });
 });
 
@@ -301,6 +357,63 @@ describe("a cut lands outside a control-character marker", () => {
     // A `<` the value carries mid-run is not a cut and is left alone.
     expect(sanitizeForDisplay(`a<b${LEAD}`, { maxLength: 4 })).toBe(
       "a<b" + LEAD[0] + DISPLAY_TRUNCATION_MARKER,
+    );
+  });
+
+  test("the back-off is one marker wide, whatever it lands beside", () => {
+    // What bounds it: a whole marker ends in `>`, a character no proper prefix
+    // of a marker holds, so one back-off removes the split marker's prefix and
+    // cannot expose a second one behind it. Read over the emitter's whole
+    // domain, at every cut inside a marker, and behind leads ending in a whole
+    // marker and in marker SHAPES the lead spells in its own bytes.
+    for (const lead of [LEAD, `${LEAD}${MARKER}`, `${LEAD}<0`, `${LEAD}<`])
+      for (const character of CONTROL_CHARACTERS) {
+        const marker = controlCharacterMarker(character.codePointAt(0)!);
+        for (let offset = 1; offset < marker.length; offset += 1)
+          expect(
+            trimPartialControlCharacterMarker(lead + marker.slice(0, offset)),
+            `${JSON.stringify(lead)} cut at ${offset} of ${marker}`,
+          ).toBe(lead);
+      }
+    expect(trimPartialControlCharacterMarker("abc<0<0<0")).toBe("abc<0<0");
+  });
+
+  test("a value that spells the shape end to end keeps all but a cut's three", () => {
+    // The residual the bound admits, and the floor it holds. A tail of
+    // marker-shaped bytes is the partner's own text, so a cut costs it the three
+    // characters a split marker costs and not the run: backing off over the run
+    // would leave a value that is nothing else rendering as the truncation
+    // marker alone, with none of the bytes the budget was going to show. Read
+    // against an inert value of the same width at every width, which is what the
+    // budget would have shown for anything else.
+    const shaped = "<0".repeat(150);
+    const inert = "x".repeat(shaped.length);
+    const kept = (rendered: string): string =>
+      rendered.endsWith(DISPLAY_TRUNCATION_MARKER)
+        ? rendered.slice(0, -DISPLAY_TRUNCATION_MARKER.length)
+        : rendered;
+    const backOff = MARKER.length - 1;
+    for (let width = 0; width <= 64; width += 1) {
+      expect(
+        kept(sanitizeForDisplay(shaped, { maxLength: width })).length,
+        `maxLength ${width}`,
+      ).toBeGreaterThanOrEqual(
+        kept(sanitizeForDisplay(inert, { maxLength: width })).length - backOff,
+      );
+      expect(
+        kept(clipToRenderedCost(shaped, width)).length,
+        `budget ${width}`,
+      ).toBeGreaterThanOrEqual(
+        kept(clipToRenderedCost(inert, width)).length - backOff,
+      );
+    }
+    // The two widths the shape costs the most at, spelled out: the escape's own
+    // cap, and a clip whose budget pays for the truncation marker out of itself.
+    expect(sanitizeForDisplay("<".repeat(300))).toBe(
+      "<".repeat(DEFAULT_MAX_DISPLAY_LENGTH - 1) + DISPLAY_TRUNCATION_MARKER,
+    );
+    expect(clipToRenderedCost(`${"b".repeat(10)}${"<0".repeat(40)}`, 60)).toBe(
+      `${"b".repeat(10)}${"<0".repeat(17)}${DISPLAY_TRUNCATION_MARKER}`,
     );
   });
 });
