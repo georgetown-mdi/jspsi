@@ -30,15 +30,18 @@ import type { ManagedInputSource } from "../../src/psi/managedInputHandle.js";
 import type { DataConnection } from "peerjs";
 import type Peer from "peerjs";
 
+import type * as PsilinkCore from "@psilink/core";
 import type {
   ExchangeResult,
   HandshakeRole,
   LinkageTerms,
   MessageConnection,
+  PsiBackendSelection,
   RendezvousRole,
   ResolvedRunShape,
   RunExchangeOptions,
 } from "@psilink/core";
+import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 import type { PeerCloseOutcome } from "../../src/psi/waitForPeerClose.js";
 import type { RunOutputs } from "@bench/runOutputs";
 
@@ -139,10 +142,15 @@ vi.mock("@openmined/psi.js/psi_wasm_web", () => ({
   default: () => Promise.resolve({}),
 }));
 vi.mock("@psilink/core", async (importOriginal) => {
-  const actual = await importOriginal<Record<string, unknown>>();
+  const actual = await importOriginal<typeof PsilinkCore>();
   return {
     ...actual,
-    loadPsiBackend: vi.fn(() => Promise.resolve({ library: {} })),
+    loadPsiBackend: vi.fn(() =>
+      Promise.resolve({
+        library: {} as PSILibrary,
+        backend: "wasm",
+      } satisfies PsiBackendSelection),
+    ),
     runExchange: vi.fn(() => Promise.resolve({})),
   };
 });
