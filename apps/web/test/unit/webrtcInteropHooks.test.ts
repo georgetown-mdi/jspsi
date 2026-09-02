@@ -9,16 +9,21 @@ import { useAcceptorExchange } from "../../src/bench/useAcceptorExchange.js";
 import { useInviterExchange } from "../../src/bench/useInviterExchange.js";
 import { waitForIncomingConnection } from "../../src/psi/waitForConnection.js";
 
+import type * as PsilinkCore from "@psilink/core";
 import type {
   HandshakeRole,
   InvitationToken,
+  LinkageTerms,
   MessageConnection,
+  PreparedExchange,
+  PsiBackendSelection,
   RendezvousRole,
   WebRTCEndpoint,
 } from "@psilink/core";
 import type { AcceptorLaunch } from "../../src/bench/useAcceptorExchange.js";
 import type { DataConnection } from "peerjs";
 import type { GeneratedInvitation } from "../../src/psi/invitation.js";
+import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 import type Peer from "peerjs";
 
 /**
@@ -134,13 +139,37 @@ vi.mock("@openmined/psi.js/psi_wasm_web", () => ({
   default: () => Promise.resolve({}),
 }));
 vi.mock("@psilink/core", async (importOriginal) => {
-  const actual = await importOriginal<Record<string, unknown>>();
+  const actual = await importOriginal<typeof PsilinkCore>();
+  const stubLinkageTerms: LinkageTerms = {
+    version: "1.0.0",
+    date: "2026-01-01",
+    algorithm: "psi",
+    linkageStrategy: "single-pass",
+    output: { expectsOutput: false, shareWithPartner: false },
+    deduplicate: false,
+    linkageFields: [],
+    linkageKeys: [],
+  };
   return {
     ...actual,
-    loadPsiBackend: vi.fn(() => Promise.resolve({ library: {} })),
+    loadPsiBackend: vi.fn(() =>
+      Promise.resolve({
+        library: {} as PSILibrary,
+        backend: "wasm",
+      } satisfies PsiBackendSelection),
+    ),
     // The rows and terms are not this file's subject, so the prepared exchange
     // is a stand-in and the stage tree built from it is empty.
-    prepareForExchange: vi.fn(() => ({})),
+    prepareForExchange: vi.fn(
+      () =>
+        ({
+          metadata: [],
+          linkageTerms: stubLinkageTerms,
+          dataset: new actual.StandardizedDataset([]),
+          rawRows: [],
+          rowCount: 0,
+        }) satisfies PreparedExchange,
+    ),
     describeExchangeStages: vi.fn(() => []),
   };
 });
