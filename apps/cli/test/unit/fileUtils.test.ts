@@ -194,76 +194,90 @@ describe("writeFileOwnerOnly", () => {
     expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual([]);
   });
 
-  test("writes owner-only (0600) on POSIX", () => {
-    if (process.platform === "win32") return;
-    const p = path.join(dir, "secret");
-    writeFileOwnerOnly(p, "x");
-    expect(fs.statSync(p).mode & 0o777).toBe(0o600);
-  });
+  test.skipIf(process.platform === "win32")(
+    "writes owner-only (0600) on POSIX",
+    () => {
+      const p = path.join(dir, "secret");
+      writeFileOwnerOnly(p, "x");
+      expect(fs.statSync(p).mode & 0o777).toBe(0o600);
+    },
+  );
 
-  test("does not write through a symlink pre-planted at the temp path", () => {
-    // POSIX symlink-follow hardening; the Windows branch already creates its
-    // placeholder with O_CREAT | O_EXCL. A symlink sitting at the temp path
-    // before the writer runs is removed by the writer's stale-temp unlink, so
-    // the secret lands in the destination, never the link's target.
-    if (process.platform === "win32") return;
-    const dest = path.join(dir, "secret");
-    const target = path.join(dir, "attacker-target");
-    fs.writeFileSync(target, "original-target");
-    const tmp = `${dest}.tmp.${process.pid}`;
-    fs.symlinkSync(target, tmp);
-    writeFileOwnerOnly(dest, "secret-content");
-    expect(fs.readFileSync(target, "utf8")).toBe("original-target");
-    expect(fs.readFileSync(dest, "utf8")).toBe("secret-content");
-  });
+  test.skipIf(process.platform === "win32")(
+    "does not write through a symlink pre-planted at the temp path",
+    () => {
+      // POSIX symlink-follow hardening; the Windows branch already creates its
+      // placeholder with O_CREAT | O_EXCL. A symlink sitting at the temp path
+      // before the writer runs is removed by the writer's stale-temp unlink, so
+      // the secret lands in the destination, never the link's target.
+      const dest = path.join(dir, "secret");
+      const target = path.join(dir, "attacker-target");
+      fs.writeFileSync(target, "original-target");
+      const tmp = `${dest}.tmp.${process.pid}`;
+      fs.symlinkSync(target, tmp);
+      writeFileOwnerOnly(dest, "secret-content");
+      expect(fs.readFileSync(target, "utf8")).toBe("original-target");
+      expect(fs.readFileSync(dest, "utf8")).toBe("secret-content");
+    },
+  );
 
-  test("refuses a symlink planted in the temp-path create window", () => {
-    if (process.platform === "win32") return;
-    const dest = path.join(dir, "secret");
-    const target = path.join(dir, "attacker-target");
-    fs.writeFileSync(target, "original-target");
-    const tmp = `${dest}.tmp.${process.pid}`;
-    plantSymlinkInCreateWindow(tmp, target);
-    // The exclusive, non-following create must refuse the planted link rather
-    // than write the secret through to its target.
-    expect(() => writeFileOwnerOnly(dest, "secret-content")).toThrow();
-    expect(fs.readFileSync(target, "utf8")).toBe("original-target");
-    expect(fs.existsSync(dest)).toBe(false);
-    // the catch-path cleanup removes the planted link (not its target)
-    expect(fs.existsSync(tmp)).toBe(false);
-    expect(fs.existsSync(target)).toBe(true);
-  });
+  test.skipIf(process.platform === "win32")(
+    "refuses a symlink planted in the temp-path create window",
+    () => {
+      const dest = path.join(dir, "secret");
+      const target = path.join(dir, "attacker-target");
+      fs.writeFileSync(target, "original-target");
+      const tmp = `${dest}.tmp.${process.pid}`;
+      plantSymlinkInCreateWindow(tmp, target);
+      // The exclusive, non-following create must refuse the planted link rather
+      // than write the secret through to its target.
+      expect(() => writeFileOwnerOnly(dest, "secret-content")).toThrow();
+      expect(fs.readFileSync(target, "utf8")).toBe("original-target");
+      expect(fs.existsSync(dest)).toBe(false);
+      // the catch-path cleanup removes the planted link (not its target)
+      expect(fs.existsSync(tmp)).toBe(false);
+      expect(fs.existsSync(target)).toBe(true);
+    },
+  );
 
-  test("fsyncs the temp file before the rename and the parent dir after it (POSIX)", () => {
-    // The directory fsync opens a directory handle, which Node's fs cannot do on
-    // Windows; the directory-flush path is POSIX-only by design.
-    if (process.platform === "win32") return;
-    const dest = path.join(dir, "secret");
-    const tmp = `${dest}.tmp.${process.pid}`;
-    const events = recordDurabilitySyncs();
+  test.skipIf(process.platform === "win32")(
+    "fsyncs the temp file before the rename and the parent dir after it (POSIX)",
+    () => {
+      // The directory fsync opens a directory handle, which Node's fs cannot do on
+      // Windows; the directory-flush path is POSIX-only by design.
+      const dest = path.join(dir, "secret");
+      const tmp = `${dest}.tmp.${process.pid}`;
+      const events = recordDurabilitySyncs();
 
-    writeFileOwnerOnly(dest, "x");
+      writeFileOwnerOnly(dest, "x");
 
-    // data flushed before the rename, the directory entry flushed after it
-    expect(events).toEqual([`fsync:${tmp}`, "rename", `fsync:${dir}`]);
-    expect(fs.readFileSync(dest, "utf8")).toBe("x");
-    // exercising the durability syncs leaves no orphaned temp file
-    expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual([]);
-  });
+      // data flushed before the rename, the directory entry flushed after it
+      expect(events).toEqual([`fsync:${tmp}`, "rename", `fsync:${dir}`]);
+      expect(fs.readFileSync(dest, "utf8")).toBe("x");
+      // exercising the durability syncs leaves no orphaned temp file
+      expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual(
+        [],
+      );
+    },
+  );
 
-  test("with exclusive, fsyncs the temp file before the link and the parent dir after it (POSIX)", () => {
-    if (process.platform === "win32") return;
-    const dest = path.join(dir, "secret");
-    const tmp = `${dest}.tmp.${process.pid}`;
-    const events = recordDurabilitySyncs();
+  test.skipIf(process.platform === "win32")(
+    "with exclusive, fsyncs the temp file before the link and the parent dir after it (POSIX)",
+    () => {
+      const dest = path.join(dir, "secret");
+      const tmp = `${dest}.tmp.${process.pid}`;
+      const events = recordDurabilitySyncs();
 
-    writeFileOwnerOnly(dest, "only", { exclusive: true });
+      writeFileOwnerOnly(dest, "only", { exclusive: true });
 
-    // the exclusive create-if-absent (linkSync) gets the same fsync bracketing
-    expect(events).toEqual([`fsync:${tmp}`, "link", `fsync:${dir}`]);
-    expect(fs.readFileSync(dest, "utf8")).toBe("only");
-    expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual([]);
-  });
+      // the exclusive create-if-absent (linkSync) gets the same fsync bracketing
+      expect(events).toEqual([`fsync:${tmp}`, "link", `fsync:${dir}`]);
+      expect(fs.readFileSync(dest, "utf8")).toBe("only");
+      expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual(
+        [],
+      );
+    },
+  );
 });
 
 // --- writeFileAtomic ---------------------------------------------------------
@@ -282,62 +296,76 @@ describe("writeFileAtomic", () => {
     expect(fs.readFileSync(p, "utf8")).toBe("second");
   });
 
-  test("writes world-readable (0644) by default on POSIX", () => {
-    if (process.platform === "win32") return;
-    const p = path.join(dir, "cert.json");
-    writeFileAtomic(p, "x");
-    expect(fs.statSync(p).mode & 0o777).toBe(0o644);
-  });
+  test.skipIf(process.platform === "win32")(
+    "writes world-readable (0644) by default on POSIX",
+    () => {
+      const p = path.join(dir, "cert.json");
+      writeFileAtomic(p, "x");
+      expect(fs.statSync(p).mode & 0o777).toBe(0o644);
+    },
+  );
 
-  test("honors an explicit mode and leaves no temp file behind", () => {
-    if (process.platform === "win32") return;
-    const p = path.join(dir, "cert.json");
-    writeFileAtomic(p, "x", 0o600);
-    expect(fs.statSync(p).mode & 0o777).toBe(0o600);
-    expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual([]);
-  });
+  test.skipIf(process.platform === "win32")(
+    "honors an explicit mode and leaves no temp file behind",
+    () => {
+      const p = path.join(dir, "cert.json");
+      writeFileAtomic(p, "x", 0o600);
+      expect(fs.statSync(p).mode & 0o777).toBe(0o600);
+      expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual(
+        [],
+      );
+    },
+  );
 
-  test("does not write through a symlink pre-planted at the temp path", () => {
-    // POSIX symlink-follow hardening, mirroring writeFileOwnerOnly.
-    if (process.platform === "win32") return;
-    const dest = path.join(dir, "cert.json");
-    const target = path.join(dir, "attacker-target");
-    fs.writeFileSync(target, "original-target");
-    const tmp = `${dest}.tmp.${process.pid}`;
-    fs.symlinkSync(target, tmp);
-    writeFileAtomic(dest, "public-content");
-    expect(fs.readFileSync(target, "utf8")).toBe("original-target");
-    expect(fs.readFileSync(dest, "utf8")).toBe("public-content");
-  });
+  test.skipIf(process.platform === "win32")(
+    "does not write through a symlink pre-planted at the temp path",
+    () => {
+      // POSIX symlink-follow hardening, mirroring writeFileOwnerOnly.
+      const dest = path.join(dir, "cert.json");
+      const target = path.join(dir, "attacker-target");
+      fs.writeFileSync(target, "original-target");
+      const tmp = `${dest}.tmp.${process.pid}`;
+      fs.symlinkSync(target, tmp);
+      writeFileAtomic(dest, "public-content");
+      expect(fs.readFileSync(target, "utf8")).toBe("original-target");
+      expect(fs.readFileSync(dest, "utf8")).toBe("public-content");
+    },
+  );
 
-  test("refuses a symlink planted in the temp-path create window", () => {
-    if (process.platform === "win32") return;
-    const dest = path.join(dir, "cert.json");
-    const target = path.join(dir, "attacker-target");
-    fs.writeFileSync(target, "original-target");
-    const tmp = `${dest}.tmp.${process.pid}`;
-    plantSymlinkInCreateWindow(tmp, target);
-    expect(() => writeFileAtomic(dest, "public-content")).toThrow();
-    expect(fs.readFileSync(target, "utf8")).toBe("original-target");
-    expect(fs.existsSync(dest)).toBe(false);
-    // the catch-path cleanup removes the planted link (not its target)
-    expect(fs.existsSync(tmp)).toBe(false);
-    expect(fs.existsSync(target)).toBe(true);
-  });
+  test.skipIf(process.platform === "win32")(
+    "refuses a symlink planted in the temp-path create window",
+    () => {
+      const dest = path.join(dir, "cert.json");
+      const target = path.join(dir, "attacker-target");
+      fs.writeFileSync(target, "original-target");
+      const tmp = `${dest}.tmp.${process.pid}`;
+      plantSymlinkInCreateWindow(tmp, target);
+      expect(() => writeFileAtomic(dest, "public-content")).toThrow();
+      expect(fs.readFileSync(target, "utf8")).toBe("original-target");
+      expect(fs.existsSync(dest)).toBe(false);
+      // the catch-path cleanup removes the planted link (not its target)
+      expect(fs.existsSync(tmp)).toBe(false);
+      expect(fs.existsSync(target)).toBe(true);
+    },
+  );
 
-  test("fsyncs the temp file before the rename and the parent dir after it (POSIX)", () => {
-    // Durability parity with writeFileOwnerOnly, via the shared fsyncParentDir.
-    if (process.platform === "win32") return;
-    const dest = path.join(dir, "cert.json");
-    const tmp = `${dest}.tmp.${process.pid}`;
-    const events = recordDurabilitySyncs();
+  test.skipIf(process.platform === "win32")(
+    "fsyncs the temp file before the rename and the parent dir after it (POSIX)",
+    () => {
+      // Durability parity with writeFileOwnerOnly, via the shared fsyncParentDir.
+      const dest = path.join(dir, "cert.json");
+      const tmp = `${dest}.tmp.${process.pid}`;
+      const events = recordDurabilitySyncs();
 
-    writeFileAtomic(dest, "x");
+      writeFileAtomic(dest, "x");
 
-    expect(events).toEqual([`fsync:${tmp}`, "rename", `fsync:${dir}`]);
-    expect(fs.readFileSync(dest, "utf8")).toBe("x");
-    expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual([]);
-  });
+      expect(events).toEqual([`fsync:${tmp}`, "rename", `fsync:${dir}`]);
+      expect(fs.readFileSync(dest, "utf8")).toBe("x");
+      expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual(
+        [],
+      );
+    },
+  );
 });
 
 // --- createOwnerOnlyWriteStream ----------------------------------------------
@@ -355,84 +383,92 @@ function writeAndClose(stream: fs.WriteStream, text: string): Promise<void> {
 }
 
 describe("createOwnerOnlyWriteStream", () => {
-  test("creates the file owner-only (0600) regardless of umask (POSIX)", async () => {
-    if (process.platform === "win32") return;
-    // The fchmod forces exactly 0600 whatever the process umask, including the
-    // 0o022 under which the prior unprotected createWriteStream left it 0644.
-    for (const umask of [0o022, 0o077, 0o000]) {
-      const prev = process.umask(umask);
-      try {
-        const p = path.join(dir, `out-${umask.toString(8)}.csv`);
-        await writeAndClose(createOwnerOnlyWriteStream(p), "a,b\n1,2\n");
-        expect(fs.statSync(p).mode & 0o777).toBe(0o600);
-        expect(fs.readFileSync(p, "utf8")).toBe("a,b\n1,2\n");
-      } finally {
-        process.umask(prev);
+  test.skipIf(process.platform === "win32")(
+    "creates the file owner-only (0600) regardless of umask (POSIX)",
+    async () => {
+      // The fchmod forces exactly 0600 whatever the process umask, including the
+      // 0o022 under which the prior unprotected createWriteStream left it 0644.
+      for (const umask of [0o022, 0o077, 0o000]) {
+        const prev = process.umask(umask);
+        try {
+          const p = path.join(dir, `out-${umask.toString(8)}.csv`);
+          await writeAndClose(createOwnerOnlyWriteStream(p), "a,b\n1,2\n");
+          expect(fs.statSync(p).mode & 0o777).toBe(0o600);
+          expect(fs.readFileSync(p, "utf8")).toBe("a,b\n1,2\n");
+        } finally {
+          process.umask(prev);
+        }
       }
-    }
-  });
+    },
+  );
 
-  test("tightens a pre-existing world/group-readable file to 0600 (POSIX)", async () => {
-    if (process.platform === "win32") return;
-    const p = path.join(dir, "stale.csv");
-    fs.writeFileSync(p, "stale,data\n");
-    // writeFileSync's mode is umask-masked; force 0644 so the test starts from a
-    // genuinely over-permissive file the writer must tighten.
-    fs.chmodSync(p, 0o644);
-    expect(fs.statSync(p).mode & 0o777).toBe(0o644);
+  test.skipIf(process.platform === "win32")(
+    "tightens a pre-existing world/group-readable file to 0600 (POSIX)",
+    async () => {
+      const p = path.join(dir, "stale.csv");
+      fs.writeFileSync(p, "stale,data\n");
+      // writeFileSync's mode is umask-masked; force 0644 so the test starts from a
+      // genuinely over-permissive file the writer must tighten.
+      fs.chmodSync(p, 0o644);
+      expect(fs.statSync(p).mode & 0o777).toBe(0o644);
 
-    await writeAndClose(createOwnerOnlyWriteStream(p), "fresh,data\n");
+      await writeAndClose(createOwnerOnlyWriteStream(p), "fresh,data\n");
 
-    expect(fs.statSync(p).mode & 0o777).toBe(0o600);
-    expect(fs.readFileSync(p, "utf8")).toBe("fresh,data\n");
-  });
+      expect(fs.statSync(p).mode & 0o777).toBe(0o600);
+      expect(fs.readFileSync(p, "utf8")).toBe("fresh,data\n");
+    },
+  );
 
-  test("preserves an existing file's content when the mode cannot be secured (POSIX)", () => {
-    // Simulates fchmod failing as it would on a file owned by another user
-    // (EPERM): the writer must refuse rather than leave PII at relaxed
-    // permissions, and -- because it opens without O_TRUNC -- must not have
-    // emptied the existing file before that failure.
-    if (process.platform === "win32") return;
-    const p = path.join(dir, "foreign.csv");
-    fs.writeFileSync(p, "original,content\n");
-    vi.spyOn(fs, "fchmodSync").mockImplementation(() => {
-      throw Object.assign(new Error("EPERM"), { code: "EPERM" });
-    });
-
-    expect(() => createOwnerOnlyWriteStream(p)).toThrow("EPERM");
-
-    expect(fs.readFileSync(p, "utf8")).toBe("original,content\n");
-  });
-
-  test("closes the descriptor if truncation fails rather than leaking it (POSIX)", () => {
-    // fchmod succeeds but the truncate (which runs before createWriteStream takes
-    // ownership of the fd) fails: the writer must close the open descriptor on the
-    // way out rather than leak it.
-    if (process.platform === "win32") return;
-    const p = path.join(dir, "trunc-fail.csv");
-    let openedFd: number | undefined;
-    const realOpen = fs.openSync;
-    const openSpy = vi
-      .spyOn(fs, "openSync")
-      .mockImplementation((...args: Parameters<typeof fs.openSync>) => {
-        openedFd = realOpen(...args);
-        return openedFd;
+  test.skipIf(process.platform === "win32")(
+    "preserves an existing file's content when the mode cannot be secured (POSIX)",
+    () => {
+      // Simulates fchmod failing as it would on a file owned by another user
+      // (EPERM): the writer must refuse rather than leave PII at relaxed
+      // permissions, and -- because it opens without O_TRUNC -- must not have
+      // emptied the existing file before that failure.
+      const p = path.join(dir, "foreign.csv");
+      fs.writeFileSync(p, "original,content\n");
+      vi.spyOn(fs, "fchmodSync").mockImplementation(() => {
+        throw Object.assign(new Error("EPERM"), { code: "EPERM" });
       });
-    const closeSpy = vi.spyOn(fs, "closeSync");
-    vi.spyOn(fs, "ftruncateSync").mockImplementation(() => {
-      throw Object.assign(new Error("EINVAL"), { code: "EINVAL" });
-    });
 
-    expect(() => createOwnerOnlyWriteStream(p)).toThrow("EINVAL");
+      expect(() => createOwnerOnlyWriteStream(p)).toThrow("EPERM");
 
-    // The failing path opens exactly one descriptor, so `openedFd` is
-    // unambiguous; that exact fd is the one closed, not leaked. The
-    // called-once assertion pins the single-open assumption: were a second open
-    // ever added before the truncate, this would catch the now-ambiguous capture.
-    expect(openSpy).toHaveBeenCalledTimes(1);
-    expect(openedFd).toBeDefined();
-    expect(closeSpy).toHaveBeenCalledWith(openedFd);
-  });
+      expect(fs.readFileSync(p, "utf8")).toBe("original,content\n");
+    },
+  );
+
+  test.skipIf(process.platform === "win32")(
+    "closes the descriptor if truncation fails rather than leaking it (POSIX)",
+    () => {
+      // fchmod succeeds but the truncate (which runs before createWriteStream takes
+      // ownership of the fd) fails: the writer must close the open descriptor on the
+      // way out rather than leak it.
+      const p = path.join(dir, "trunc-fail.csv");
+      let openedFd: number | undefined;
+      const realOpen = fs.openSync;
+      const openSpy = vi
+        .spyOn(fs, "openSync")
+        .mockImplementation((...args: Parameters<typeof fs.openSync>) => {
+          openedFd = realOpen(...args);
+          return openedFd;
+        });
+      const closeSpy = vi.spyOn(fs, "closeSync");
+      vi.spyOn(fs, "ftruncateSync").mockImplementation(() => {
+        throw Object.assign(new Error("EINVAL"), { code: "EINVAL" });
+      });
+
+      expect(() => createOwnerOnlyWriteStream(p)).toThrow("EINVAL");
+
+      // The failing path opens exactly one descriptor, so `openedFd` is
+      // unambiguous; that exact fd is the one closed, not leaked. The
+      // called-once assertion pins the single-open assumption: were a second open
+      // ever added before the truncate, this would catch the now-ambiguous capture.
+      expect(openSpy).toHaveBeenCalledTimes(1);
+      expect(openedFd).toBeDefined();
+      expect(closeSpy).toHaveBeenCalledWith(openedFd);
+    },
+  );
 });
 
 // --- macOS extended ACL ------------------------------------------------------
@@ -728,24 +764,26 @@ describe("extended-ACL strip failure", () => {
     },
   );
 
-  test("createOwnerOnlyWriteStream leaves a destination it created empty and owner-only", () => {
-    // The other half of the case above: the open creates the destination before
-    // the strip runs, so a refusal cannot leave it untouched -- it leaves it
-    // there. The writer does not delete a path the operator named, mirroring the
-    // Windows branch's placeholder, and the mode is already secured, so what
-    // stays behind is an empty owner-only file rather than a readable one.
-    // Driven from a captured failure rather than the host's own `chmod` so the
-    // shape is pinned on macOS too, where a real strip would succeed.
-    if (process.platform === "win32") return;
-    const p = path.join(dir, "new-result.csv");
-    failAclStripWith(capturedChmodRefusal());
-    withPlatform("darwin", () => {
-      expect(() => createOwnerOnlyWriteStream(p)).toThrow(STRIP_REFUSAL);
-    });
-    expect(fs.existsSync(p)).toBe(true);
-    expect(fs.readFileSync(p, "utf8")).toBe("");
-    expect(fs.statSync(p).mode & 0o777).toBe(0o600);
-  });
+  test.skipIf(process.platform === "win32")(
+    "createOwnerOnlyWriteStream leaves a destination it created empty and owner-only",
+    () => {
+      // The other half of the case above: the open creates the destination before
+      // the strip runs, so a refusal cannot leave it untouched -- it leaves it
+      // there. The writer does not delete a path the operator named, mirroring the
+      // Windows branch's placeholder, and the mode is already secured, so what
+      // stays behind is an empty owner-only file rather than a readable one.
+      // Driven from a captured failure rather than the host's own `chmod` so the
+      // shape is pinned on macOS too, where a real strip would succeed.
+      const p = path.join(dir, "new-result.csv");
+      failAclStripWith(capturedChmodRefusal());
+      withPlatform("darwin", () => {
+        expect(() => createOwnerOnlyWriteStream(p)).toThrow(STRIP_REFUSAL);
+      });
+      expect(fs.existsSync(p)).toBe(true);
+      expect(fs.readFileSync(p, "utf8")).toBe("");
+      expect(fs.statSync(p).mode & 0o777).toBe(0o600);
+    },
+  );
 
   stripFailureOnly(
     "the same writes succeed on the host's real platform",
@@ -779,111 +817,14 @@ describe("extended-ACL strip failure", () => {
 // the way. Every failure below is captured from the runtime, so what these
 // assertions classify is the shape Node produces rather than a model of it.
 describe("extended-ACL strip failure reporting", () => {
-  test("a chmod that ran and refused keeps the ACL remedy and carries its cause", () => {
-    if (process.platform === "win32") return;
-    const refused = capturedChmodRefusal();
-    // The discriminant: a child that ran to completion reports its exit status.
-    expect(typeof refused.status).toBe("number");
-    failAclStripWith(refused);
-    const dest = path.join(dir, "secret");
-
-    const thrown = catchThrown(() =>
-      withPlatform("darwin", () => writeFileOwnerOnly(dest, "x")),
-    ) as Error;
-
-    expect(thrown.message).toMatch(/^Could not clear extended ACLs on /);
-    expect(thrown.message).toContain(dest);
-    expect(thrown.message).toContain("ls -le");
-    expect(thrown.message).toContain("chmod -N");
-    expect(thrown.cause).toBe(refused);
-  });
-
-  test("a strip that never ran is reported apart from an ACL that resisted clearing", () => {
-    if (process.platform === "win32") return;
-    const unexecutable = path.join(dir, "not-executable");
-    fs.writeFileSync(unexecutable, "", { mode: 0o600 });
-    const failures = {
-      "missing binary": capturedExecFileFailure(() =>
-        childProcess.execFileSync(path.join(dir, "no-such-chmod"), [], {
-          stdio: "ignore",
-        }),
-      ),
-      "exec the OS refused": capturedExecFileFailure(() =>
-        childProcess.execFileSync(unexecutable, [], { stdio: "ignore" }),
-      ),
-    };
-    // Each arrives with its own errno and no exit status, which is what the
-    // refusal reads: the two stay distinguishable to an operator through the
-    // cause, without the message having to enumerate them.
-    expect(
-      new Set(Object.values(failures).map((failure) => failure.code)).size,
-    ).toBe(2);
-
-    for (const [label, failure] of Object.entries(failures)) {
-      expect(failure.status ?? null).toBeNull();
-      expect(failure.signal ?? null).toBeNull();
-      failAclStripWith(failure);
-      const dest = path.join(dir, `secret-${label.replace(/\s+/g, "-")}`);
-
-      const thrown = catchThrown(() =>
-        withPlatform("darwin", () => writeFileOwnerOnly(dest, "x")),
-      ) as Error;
-
-      expect(thrown.message).toMatch(
-        /^Could not run the extended-ACL strip on /,
-      );
-      expect(thrown.message).toContain(dest);
-      expect(thrown.message).not.toContain("chmod -N");
-      expect(thrown.cause).toBe(failure);
-      expect(fs.existsSync(dest)).toBe(false);
-    }
-  });
-
-  test("both timeout shapes keep the ACL remedy and leave the write refused", () => {
-    // The 5 s timeout kills a child that was spawned: `chmod -N` may already
-    // have altered an existing destination's ACL when the kill lands, so this is
-    // the case where the operator most wants `ls -le` and `chmod -N`. Node
-    // reports that kill in two shapes and the refusal has to read both as a
-    // `chmod` that ran: a child that dies on the signal carries the termination
-    // signal and no exit status, while one that ignores `SIGTERM` outlives the
-    // kill and carries the status it exits with -- `0` among them -- and no
-    // signal. A strip that never ran is what carries neither field.
-    if (process.platform === "win32") return;
-    const shapes = {
-      "died on the signal": {
-        binary: "/bin/sleep",
-        failure: capturedExecFileFailure(() =>
-          childProcess.execFileSync("/bin/sleep", ["5"], {
-            stdio: "ignore",
-            timeout: 50,
-          }),
-        ),
-      },
-      "outlived the kill": {
-        binary: "/bin/sh",
-        failure: capturedExecFileFailure(() =>
-          childProcess.execFileSync(
-            "/bin/sh",
-            ["-c", "trap '' TERM; sleep 1"],
-            {
-              stdio: "ignore",
-              timeout: 100,
-            },
-          ),
-        ),
-      },
-    };
-    expect(shapes["died on the signal"].failure.status ?? null).toBeNull();
-    expect(typeof shapes["died on the signal"].failure.signal).toBe("string");
-    // The shape the classification turns on: a status of zero is still a status,
-    // so a `chmod` that outlasted the kill must not read as one that never ran.
-    expect(shapes["outlived the kill"].failure.status).toBe(0);
-    expect(shapes["outlived the kill"].failure.signal ?? null).toBeNull();
-
-    for (const [label, { binary, failure }] of Object.entries(shapes)) {
-      expect(failure.code).toBe("ETIMEDOUT");
-      failAclStripWith(failure);
-      const dest = path.join(dir, `secret-${label.replace(/\s+/g, "-")}`);
+  test.skipIf(process.platform === "win32")(
+    "a chmod that ran and refused keeps the ACL remedy and carries its cause",
+    () => {
+      const refused = capturedChmodRefusal();
+      // The discriminant: a child that ran to completion reports its exit status.
+      expect(typeof refused.status).toBe("number");
+      failAclStripWith(refused);
+      const dest = path.join(dir, "secret");
 
       const thrown = catchThrown(() =>
         withPlatform("darwin", () => writeFileOwnerOnly(dest, "x")),
@@ -892,85 +833,197 @@ describe("extended-ACL strip failure reporting", () => {
       expect(thrown.message).toMatch(/^Could not clear extended ACLs on /);
       expect(thrown.message).toContain(dest);
       expect(thrown.message).toContain("ls -le");
-      expect(thrown.cause).toBe(failure);
-      // A timeout's cause is Node's spawn-failure text, which names the binary
-      // and no operand -- so unlike the completed-child refusal below, this
-      // route discloses no path beyond the destination the message already
-      // names. The binary is the captured failure's own, standing in for
-      // `/bin/chmod` on a host whose `chmod` cannot be made to hang.
+      expect(thrown.message).toContain("chmod -N");
+      expect(thrown.cause).toBe(refused);
+    },
+  );
+
+  test.skipIf(process.platform === "win32")(
+    "a strip that never ran is reported apart from an ACL that resisted clearing",
+    () => {
+      const unexecutable = path.join(dir, "not-executable");
+      fs.writeFileSync(unexecutable, "", { mode: 0o600 });
+      const failures = {
+        "missing binary": capturedExecFileFailure(() =>
+          childProcess.execFileSync(path.join(dir, "no-such-chmod"), [], {
+            stdio: "ignore",
+          }),
+        ),
+        "exec the OS refused": capturedExecFileFailure(() =>
+          childProcess.execFileSync(unexecutable, [], { stdio: "ignore" }),
+        ),
+      };
+      // Each arrives with its own errno and no exit status, which is what the
+      // refusal reads: the two stay distinguishable to an operator through the
+      // cause, without the message having to enumerate them.
+      expect(
+        new Set(Object.values(failures).map((failure) => failure.code)).size,
+      ).toBe(2);
+
+      for (const [label, failure] of Object.entries(failures)) {
+        expect(failure.status ?? null).toBeNull();
+        expect(failure.signal ?? null).toBeNull();
+        failAclStripWith(failure);
+        const dest = path.join(dir, `secret-${label.replace(/\s+/g, "-")}`);
+
+        const thrown = catchThrown(() =>
+          withPlatform("darwin", () => writeFileOwnerOnly(dest, "x")),
+        ) as Error;
+
+        expect(thrown.message).toMatch(
+          /^Could not run the extended-ACL strip on /,
+        );
+        expect(thrown.message).toContain(dest);
+        expect(thrown.message).not.toContain("chmod -N");
+        expect(thrown.cause).toBe(failure);
+        expect(fs.existsSync(dest)).toBe(false);
+      }
+    },
+  );
+
+  test.skipIf(process.platform === "win32")(
+    "both timeout shapes keep the ACL remedy and leave the write refused",
+    () => {
+      // The 5 s timeout kills a child that was spawned: `chmod -N` may already
+      // have altered an existing destination's ACL when the kill lands, so this is
+      // the case where the operator most wants `ls -le` and `chmod -N`. Node
+      // reports that kill in two shapes and the refusal has to read both as a
+      // `chmod` that ran: a child that dies on the signal carries the termination
+      // signal and no exit status, while one that ignores `SIGTERM` outlives the
+      // kill and carries the status it exits with -- `0` among them -- and no
+      // signal. A strip that never ran is what carries neither field.
+      const shapes = {
+        "died on the signal": {
+          binary: "/bin/sleep",
+          failure: capturedExecFileFailure(() =>
+            childProcess.execFileSync("/bin/sleep", ["5"], {
+              stdio: "ignore",
+              timeout: 50,
+            }),
+          ),
+        },
+        "outlived the kill": {
+          binary: "/bin/sh",
+          failure: capturedExecFileFailure(() =>
+            childProcess.execFileSync(
+              "/bin/sh",
+              ["-c", "trap '' TERM; sleep 1"],
+              {
+                stdio: "ignore",
+                timeout: 100,
+              },
+            ),
+          ),
+        },
+      };
+      expect(shapes["died on the signal"].failure.status ?? null).toBeNull();
+      expect(typeof shapes["died on the signal"].failure.signal).toBe("string");
+      // The shape the classification turns on: a status of zero is still a status,
+      // so a `chmod` that outlasted the kill must not read as one that never ran.
+      expect(shapes["outlived the kill"].failure.status).toBe(0);
+      expect(shapes["outlived the kill"].failure.signal ?? null).toBeNull();
+
+      for (const [label, { binary, failure }] of Object.entries(shapes)) {
+        expect(failure.code).toBe("ETIMEDOUT");
+        failAclStripWith(failure);
+        const dest = path.join(dir, `secret-${label.replace(/\s+/g, "-")}`);
+
+        const thrown = catchThrown(() =>
+          withPlatform("darwin", () => writeFileOwnerOnly(dest, "x")),
+        ) as Error;
+
+        expect(thrown.message).toMatch(/^Could not clear extended ACLs on /);
+        expect(thrown.message).toContain(dest);
+        expect(thrown.message).toContain("ls -le");
+        expect(thrown.cause).toBe(failure);
+        // A timeout's cause is Node's spawn-failure text, which names the binary
+        // and no operand -- so unlike the completed-child refusal below, this
+        // route discloses no path beyond the destination the message already
+        // names. The binary is the captured failure's own, standing in for
+        // `/bin/chmod` on a host whose `chmod` cannot be made to hang.
+        expect(sanitizeErrorForDisplay(thrown)).toBe(
+          joinErrorCauseChain([
+            thrown.message,
+            `spawnSync ${binary} ETIMEDOUT`,
+          ]),
+        );
+        // The pointer is about an ACL that may be half-cleared, not about content:
+        // the write is refused outright, leaving the destination absent and no
+        // temp file behind, the same on-disk state every other refusal leaves.
+        expect(fs.existsSync(dest)).toBe(false);
+        expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual(
+          [],
+        );
+      }
+    },
+  );
+
+  test.skipIf(process.platform === "win32")(
+    "a working directory removed underfoot refuses rather than raising a bare errno",
+    () => {
+      // Building the operand is itself a step that can fail: `process.cwd()`
+      // throws once the working directory is gone. Node caches that value and only
+      // reaches the OS again after a `chdir` invalidates the cache, so the removal
+      // has to land after the chdir and before the strip -- which is where the
+      // stream writer's fchmod sits. The `uv_cwd` assertion is what proves the
+      // window was hit: had the cache still been warm, the strip would have run
+      // and the cause would be a `chmod` failure instead.
+      const gone = path.join(dir, "gone");
+      fs.mkdirSync(gone);
+      const realFchmod = fs.fchmodSync.bind(fs);
+      vi.spyOn(fs, "fchmodSync").mockImplementationOnce((fd, mode) => {
+        realFchmod(fd, mode);
+        fs.rmSync(gone, { recursive: true });
+      });
+      const previousCwd = process.cwd();
+      let thrown: unknown;
+      process.chdir(gone);
+      try {
+        thrown = catchThrown(() =>
+          withPlatform("darwin", () =>
+            createOwnerOnlyWriteStream("result.csv"),
+          ),
+        );
+      } finally {
+        process.chdir(previousCwd);
+      }
+
+      expect((thrown as Error).message).toBe(
+        "Could not run the extended-ACL strip on result.csv; no content was written",
+      );
+      expect((thrown as Error).cause).toBeDefined();
+      expect(((thrown as Error).cause as NodeJS.ErrnoException).syscall).toBe(
+        "uv_cwd",
+      );
+    },
+  );
+
+  test.skipIf(process.platform === "win32")(
+    "the rendered refusal shows the failed command line, temp path included",
+    () => {
+      // What the operator actually reads: the refusal, then the failure it carries
+      // as its `cause` rendered as the display sink's own chain link. That second
+      // line is `execFileSync`'s command line, so it discloses the temp path the
+      // writer strips -- the destination plus this process's pid -- which is the
+      // one operator-visible detail the cause adds beyond the errno.
+      const dest = path.join(dir, "secret");
+      const temp = `${dest}.tmp.${process.pid}`;
+      const refused = capturedChmodRefusal(temp);
+      failAclStripWith(refused);
+
+      const thrown = catchThrown(() =>
+        withPlatform("darwin", () => writeFileOwnerOnly(dest, "x")),
+      );
+
       expect(sanitizeErrorForDisplay(thrown)).toBe(
-        joinErrorCauseChain([thrown.message, `spawnSync ${binary} ETIMEDOUT`]),
+        joinErrorCauseChain([
+          `Could not clear extended ACLs on ${dest}; inspect them with ` +
+            "`ls -le` and clear them manually with `chmod -N`",
+          `Command failed: /bin/chmod -h -N ${temp}`,
+        ]),
       );
-      // The pointer is about an ACL that may be half-cleared, not about content:
-      // the write is refused outright, leaving the destination absent and no
-      // temp file behind, the same on-disk state every other refusal leaves.
-      expect(fs.existsSync(dest)).toBe(false);
-      expect(fs.readdirSync(dir).filter((n) => n.includes(".tmp."))).toEqual(
-        [],
-      );
-    }
-  });
-
-  test("a working directory removed underfoot refuses rather than raising a bare errno", () => {
-    // Building the operand is itself a step that can fail: `process.cwd()`
-    // throws once the working directory is gone. Node caches that value and only
-    // reaches the OS again after a `chdir` invalidates the cache, so the removal
-    // has to land after the chdir and before the strip -- which is where the
-    // stream writer's fchmod sits. The `uv_cwd` assertion is what proves the
-    // window was hit: had the cache still been warm, the strip would have run
-    // and the cause would be a `chmod` failure instead.
-    if (process.platform === "win32") return;
-    const gone = path.join(dir, "gone");
-    fs.mkdirSync(gone);
-    const realFchmod = fs.fchmodSync.bind(fs);
-    vi.spyOn(fs, "fchmodSync").mockImplementationOnce((fd, mode) => {
-      realFchmod(fd, mode);
-      fs.rmSync(gone, { recursive: true });
-    });
-    const previousCwd = process.cwd();
-    let thrown: unknown;
-    process.chdir(gone);
-    try {
-      thrown = catchThrown(() =>
-        withPlatform("darwin", () => createOwnerOnlyWriteStream("result.csv")),
-      );
-    } finally {
-      process.chdir(previousCwd);
-    }
-
-    expect((thrown as Error).message).toBe(
-      "Could not run the extended-ACL strip on result.csv; no content was written",
-    );
-    expect((thrown as Error).cause).toBeDefined();
-    expect(((thrown as Error).cause as NodeJS.ErrnoException).syscall).toBe(
-      "uv_cwd",
-    );
-  });
-
-  test("the rendered refusal shows the failed command line, temp path included", () => {
-    // What the operator actually reads: the refusal, then the failure it carries
-    // as its `cause` rendered as the display sink's own chain link. That second
-    // line is `execFileSync`'s command line, so it discloses the temp path the
-    // writer strips -- the destination plus this process's pid -- which is the
-    // one operator-visible detail the cause adds beyond the errno.
-    if (process.platform === "win32") return;
-    const dest = path.join(dir, "secret");
-    const temp = `${dest}.tmp.${process.pid}`;
-    const refused = capturedChmodRefusal(temp);
-    failAclStripWith(refused);
-
-    const thrown = catchThrown(() =>
-      withPlatform("darwin", () => writeFileOwnerOnly(dest, "x")),
-    );
-
-    expect(sanitizeErrorForDisplay(thrown)).toBe(
-      joinErrorCauseChain([
-        `Could not clear extended ACLs on ${dest}; inspect them with ` +
-          "`ls -le` and clear them manually with `chmod -N`",
-        `Command failed: /bin/chmod -h -N ${temp}`,
-      ]),
-    );
-  });
+    },
+  );
 });
 
 // --- extended-ACL strip: symlink posture -------------------------------------
@@ -988,164 +1041,181 @@ function recordAclStripCommands(): string[][] {
 }
 
 describe("extended-ACL strip symlink posture", () => {
-  test("the temp-file writers strip the temp path without following a symlink", () => {
-    // -h keeps the strip on the named entry: the temp path is psilink's own and
-    // a symlink at it is an attacker's, so following one would aim the strip at
-    // another file's ACL while the content went to the temp file.
-    if (process.platform === "win32") return;
-    const commands = recordAclStripCommands();
-    const secret = path.join(dir, "secret");
-    const cert = path.join(dir, "cert.json");
+  test.skipIf(process.platform === "win32")(
+    "the temp-file writers strip the temp path without following a symlink",
+    () => {
+      // -h keeps the strip on the named entry: the temp path is psilink's own and
+      // a symlink at it is an attacker's, so following one would aim the strip at
+      // another file's ACL while the content went to the temp file.
+      const commands = recordAclStripCommands();
+      const secret = path.join(dir, "secret");
+      const cert = path.join(dir, "cert.json");
 
-    withPlatform("darwin", () => {
-      writeFileOwnerOnly(secret, "x");
-      writeFileAtomic(cert, "x");
-    });
-
-    expect(commands).toEqual([
-      ["/bin/chmod", "-h", "-N", `${secret}.tmp.${process.pid}`],
-      ["/bin/chmod", "-h", "-N", `${cert}.tmp.${process.pid}`],
-    ]);
-  });
-
-  test("the streaming writer strips the destination through a symlink", async () => {
-    // No -h: destPath is an operator-supplied path the open and the fchmod both
-    // resolve, so the strip has to resolve it too or it clears the ACL of a link
-    // node while the rows land in a target whose ACEs still stand.
-    if (process.platform === "win32") return;
-    const commands = recordAclStripCommands();
-    const dest = path.join(dir, "result.csv");
-
-    const stream = withPlatform("darwin", () =>
-      createOwnerOnlyWriteStream(dest),
-    );
-
-    expect(commands).toEqual([["/bin/chmod", "-N", dest]]);
-    await writeAndClose(stream, "a,b\n1,2\n");
-  });
-
-  test("absolutizes a relative dash-leading destination for the chmod operand", () => {
-    // No `--` separator exists to keep a dash-leading operand out of the option
-    // position (see the comment on stripExtendedAcls); absolutizing the operand
-    // is what guarantees that instead, on a relative path too.
-    if (process.platform === "win32") return;
-    const commands = recordAclStripCommands();
-    const cwd = process.cwd();
-    process.chdir(dir);
-    let expected: string;
-    try {
-      // Built from the working directory the writer itself prefixes, which the
-      // kernel reports canonicalized: under a symlinked TMPDIR (macOS's
-      // /var -> /private/var) it is not the mkdtemp path this test holds.
-      expected = `${process.cwd()}/-dashed-secret.tmp.${process.pid}`;
       withPlatform("darwin", () => {
-        writeFileOwnerOnly("-dashed-secret", "x");
+        writeFileOwnerOnly(secret, "x");
+        writeFileAtomic(cert, "x");
       });
-    } finally {
-      process.chdir(cwd);
-    }
 
-    expect(commands).toHaveLength(1);
-    const operand = commands[0][commands[0].length - 1];
-    expect(operand.startsWith("/")).toBe(true);
-    expect(operand).toBe(expected);
-  });
+      expect(commands).toEqual([
+        ["/bin/chmod", "-h", "-N", `${secret}.tmp.${process.pid}`],
+        ["/bin/chmod", "-h", "-N", `${cert}.tmp.${process.pid}`],
+      ]);
+    },
+  );
 
-  test("a working directory of `/` leaves the operand one leading separator", () => {
-    // The root is the one working directory that already ends in a separator, so
-    // the plain prefix would emit `//name` -- a leading `//` POSIX leaves to the
-    // implementation. The prefix drops the root's own separator instead, and
-    // nothing else about the operand changes: the rest of the path is still the
-    // writer's own bytes.
-    if (process.platform === "win32") return;
-    const commands = recordAclStripCommands();
-    // Relative to the root, so the kernel resolves it back into this test's
-    // directory while the writer sees a path it has to absolutize.
-    const relative = `${path.relative("/", dir)}/rooted-secret`;
-    const cwd = process.cwd();
-    process.chdir("/");
-    try {
-      withPlatform("darwin", () => writeFileOwnerOnly(relative, "x"));
-    } finally {
-      process.chdir(cwd);
-    }
+  test.skipIf(process.platform === "win32")(
+    "the streaming writer strips the destination through a symlink",
+    async () => {
+      // No -h: destPath is an operator-supplied path the open and the fchmod both
+      // resolve, so the strip has to resolve it too or it clears the ACL of a link
+      // node while the rows land in a target whose ACEs still stand.
+      const commands = recordAclStripCommands();
+      const dest = path.join(dir, "result.csv");
 
-    expect(commands).toEqual([
-      ["/bin/chmod", "-h", "-N", `/${relative}.tmp.${process.pid}`],
-    ]);
-    expect(fs.readFileSync(path.join(dir, "rooted-secret"), "utf8")).toBe("x");
-  });
+      const stream = withPlatform("darwin", () =>
+        createOwnerOnlyWriteStream(dest),
+      );
 
-  test("an absolute destination strips with the working directory removed", async () => {
-    // An absolute path is already the operand, so nothing about it needs the
-    // working directory -- and a strip that reached for one anyway would refuse
-    // every write on a host whose working directory has been removed, since
-    // `process.cwd()` throws there once a `chdir` has invalidated Node's cached
-    // value. The removal lands in the stream writer's fchmod, the step before
-    // the strip -- the same window the relative-path refusal above is driven
-    // through, so the two differ only in whether the path needed a prefix.
-    if (process.platform === "win32") return;
-    const commands = recordAclStripCommands();
-    const gone = path.join(dir, "gone");
-    fs.mkdirSync(gone);
-    const dest = path.join(dir, "result.csv");
-    const realFchmod = fs.fchmodSync.bind(fs);
-    vi.spyOn(fs, "fchmodSync").mockImplementationOnce((fd, mode) => {
-      realFchmod(fd, mode);
-      fs.rmSync(gone, { recursive: true });
-    });
-    const previousCwd = process.cwd();
-    let stream: fs.WriteStream;
-    process.chdir(gone);
-    try {
-      stream = withPlatform("darwin", () => createOwnerOnlyWriteStream(dest));
-    } finally {
-      process.chdir(previousCwd);
-    }
+      expect(commands).toEqual([["/bin/chmod", "-N", dest]]);
+      await writeAndClose(stream, "a,b\n1,2\n");
+    },
+  );
 
-    expect(commands).toEqual([["/bin/chmod", "-N", dest]]);
-    await writeAndClose(stream, "a,b\n1,2\n");
-    expect(fs.readFileSync(dest, "utf8")).toBe("a,b\n1,2\n");
-  });
+  test.skipIf(process.platform === "win32")(
+    "absolutizes a relative dash-leading destination for the chmod operand",
+    () => {
+      // No `--` separator exists to keep a dash-leading operand out of the option
+      // position (see the comment on stripExtendedAcls); absolutizing the operand
+      // is what guarantees that instead, on a relative path too.
+      const commands = recordAclStripCommands();
+      const cwd = process.cwd();
+      process.chdir(dir);
+      let expected: string;
+      try {
+        // Built from the working directory the writer itself prefixes, which the
+        // kernel reports canonicalized: under a symlinked TMPDIR (macOS's
+        // /var -> /private/var) it is not the mkdtemp path this test holds.
+        expected = `${process.cwd()}/-dashed-secret.tmp.${process.pid}`;
+        withPlatform("darwin", () => {
+          writeFileOwnerOnly("-dashed-secret", "x");
+        });
+      } finally {
+        process.chdir(cwd);
+      }
 
-  test("an operand keeps a `..` segment that only the kernel can resolve", async () => {
-    // `out/link` is a symlink to a sibling directory, so `out/link/../x` names
-    // dir/x to the kernel and dir/out/x to any lexical collapse of the `..`.
-    // Each writer's own open takes the kernel's answer, so its strip has to aim
-    // at the same file: the operand carries the `link/..` segment through
-    // verbatim rather than being normalized or realpath'd on the way to chmod.
-    if (process.platform === "win32") return;
-    const commands = recordAclStripCommands();
-    fs.mkdirSync(path.join(dir, "out"));
-    fs.mkdirSync(path.join(dir, "elsewhere"));
-    fs.symlinkSync(path.join(dir, "elsewhere"), path.join(dir, "out", "link"));
-    const streamed = `${dir}/out/link/../result.csv`;
-    const secret = `${dir}/out/link/../secret`;
+      expect(commands).toHaveLength(1);
+      const operand = commands[0][commands[0].length - 1];
+      expect(operand.startsWith("/")).toBe(true);
+      expect(operand).toBe(expected);
+    },
+  );
 
-    const stream = withPlatform("darwin", () =>
-      createOwnerOnlyWriteStream(streamed),
-    );
-    await writeAndClose(stream, "a,b\n1,2\n");
-    withPlatform("darwin", () => writeFileOwnerOnly(secret, "x"));
+  test.skipIf(process.platform === "win32")(
+    "a working directory of `/` leaves the operand one leading separator",
+    () => {
+      // The root is the one working directory that already ends in a separator, so
+      // the plain prefix would emit `//name` -- a leading `//` POSIX leaves to the
+      // implementation. The prefix drops the root's own separator instead, and
+      // nothing else about the operand changes: the rest of the path is still the
+      // writer's own bytes.
+      const commands = recordAclStripCommands();
+      // Relative to the root, so the kernel resolves it back into this test's
+      // directory while the writer sees a path it has to absolutize.
+      const relative = `${path.relative("/", dir)}/rooted-secret`;
+      const cwd = process.cwd();
+      process.chdir("/");
+      try {
+        withPlatform("darwin", () => writeFileOwnerOnly(relative, "x"));
+      } finally {
+        process.chdir(cwd);
+      }
 
-    expect(commands).toEqual([
-      ["/bin/chmod", "-N", streamed],
-      ["/bin/chmod", "-h", "-N", `${secret}.tmp.${process.pid}`],
-    ]);
-    // Both writes landed where the kernel resolves their paths, and nothing
-    // landed at the lexically collapsed one.
-    expect(fs.readFileSync(path.join(dir, "result.csv"), "utf8")).toBe(
-      "a,b\n1,2\n",
-    );
-    expect(fs.readFileSync(path.join(dir, "secret"), "utf8")).toBe("x");
-    expect(fs.readdirSync(path.join(dir, "out"))).toEqual(["link"]);
-    // The streamed operand still names the file the rows went into; the temp
-    // writer's operand named a temp file the rename has since consumed.
-    const operand = commands[0][commands[0].length - 1];
-    expect(fs.statSync(operand).ino).toBe(
-      fs.statSync(path.join(dir, "result.csv")).ino,
-    );
-  });
+      expect(commands).toEqual([
+        ["/bin/chmod", "-h", "-N", `/${relative}.tmp.${process.pid}`],
+      ]);
+      expect(fs.readFileSync(path.join(dir, "rooted-secret"), "utf8")).toBe(
+        "x",
+      );
+    },
+  );
+
+  test.skipIf(process.platform === "win32")(
+    "an absolute destination strips with the working directory removed",
+    async () => {
+      // An absolute path is already the operand, so nothing about it needs the
+      // working directory -- and a strip that reached for one anyway would refuse
+      // every write on a host whose working directory has been removed, since
+      // `process.cwd()` throws there once a `chdir` has invalidated Node's cached
+      // value. The removal lands in the stream writer's fchmod, the step before
+      // the strip -- the same window the relative-path refusal above is driven
+      // through, so the two differ only in whether the path needed a prefix.
+      const commands = recordAclStripCommands();
+      const gone = path.join(dir, "gone");
+      fs.mkdirSync(gone);
+      const dest = path.join(dir, "result.csv");
+      const realFchmod = fs.fchmodSync.bind(fs);
+      vi.spyOn(fs, "fchmodSync").mockImplementationOnce((fd, mode) => {
+        realFchmod(fd, mode);
+        fs.rmSync(gone, { recursive: true });
+      });
+      const previousCwd = process.cwd();
+      let stream: fs.WriteStream;
+      process.chdir(gone);
+      try {
+        stream = withPlatform("darwin", () => createOwnerOnlyWriteStream(dest));
+      } finally {
+        process.chdir(previousCwd);
+      }
+
+      expect(commands).toEqual([["/bin/chmod", "-N", dest]]);
+      await writeAndClose(stream, "a,b\n1,2\n");
+      expect(fs.readFileSync(dest, "utf8")).toBe("a,b\n1,2\n");
+    },
+  );
+
+  test.skipIf(process.platform === "win32")(
+    "an operand keeps a `..` segment that only the kernel can resolve",
+    async () => {
+      // `out/link` is a symlink to a sibling directory, so `out/link/../x` names
+      // dir/x to the kernel and dir/out/x to any lexical collapse of the `..`.
+      // Each writer's own open takes the kernel's answer, so its strip has to aim
+      // at the same file: the operand carries the `link/..` segment through
+      // verbatim rather than being normalized or realpath'd on the way to chmod.
+      const commands = recordAclStripCommands();
+      fs.mkdirSync(path.join(dir, "out"));
+      fs.mkdirSync(path.join(dir, "elsewhere"));
+      fs.symlinkSync(
+        path.join(dir, "elsewhere"),
+        path.join(dir, "out", "link"),
+      );
+      const streamed = `${dir}/out/link/../result.csv`;
+      const secret = `${dir}/out/link/../secret`;
+
+      const stream = withPlatform("darwin", () =>
+        createOwnerOnlyWriteStream(streamed),
+      );
+      await writeAndClose(stream, "a,b\n1,2\n");
+      withPlatform("darwin", () => writeFileOwnerOnly(secret, "x"));
+
+      expect(commands).toEqual([
+        ["/bin/chmod", "-N", streamed],
+        ["/bin/chmod", "-h", "-N", `${secret}.tmp.${process.pid}`],
+      ]);
+      // Both writes landed where the kernel resolves their paths, and nothing
+      // landed at the lexically collapsed one.
+      expect(fs.readFileSync(path.join(dir, "result.csv"), "utf8")).toBe(
+        "a,b\n1,2\n",
+      );
+      expect(fs.readFileSync(path.join(dir, "secret"), "utf8")).toBe("x");
+      expect(fs.readdirSync(path.join(dir, "out"))).toEqual(["link"]);
+      // The streamed operand still names the file the rows went into; the temp
+      // writer's operand named a temp file the rename has since consumed.
+      const operand = commands[0][commands[0].length - 1];
+      expect(fs.statSync(operand).ino).toBe(
+        fs.statSync(path.join(dir, "result.csv")).ino,
+      );
+    },
+  );
 });
 
 // --- Windows owner-only ACL --------------------------------------------------

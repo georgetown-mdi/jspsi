@@ -45,12 +45,15 @@ test("reads an @file reference and trims surrounding whitespace", () => {
   expect(resolveAtSignRefs(`@${p}`)).toBe("s3cret");
 });
 
-test("expands a leading ~ in an @file reference", () => {
-  if (process.platform === "win32") return; // os.homedir() ignores $HOME here
-  process.env.HOME = dir;
-  fs.writeFileSync(path.join(dir, "id_rsa"), "KEYDATA\n");
-  expect(resolveAtSignRefs("@~/id_rsa")).toBe("KEYDATA");
-});
+test.skipIf(process.platform === "win32")(
+  "expands a leading ~ in an @file reference",
+  () => {
+    // os.homedir() ignores $HOME here
+    process.env.HOME = dir;
+    fs.writeFileSync(path.join(dir, "id_rsa"), "KEYDATA\n");
+    expect(resolveAtSignRefs("@~/id_rsa")).toBe("KEYDATA");
+  },
+);
 
 test("recurses into objects and arrays", () => {
   const p = path.join(dir, "v.txt");
@@ -260,19 +263,23 @@ test("resolveExchangeSpecRefs resolves @path credential and opaque fields on an 
   );
 });
 
-test("resolveExchangeSpecRefs expands a leading ~ in an @path private key", () => {
-  if (process.platform === "win32") return; // os.homedir() ignores $HOME here
-  process.env.HOME = dir;
-  fs.writeFileSync(path.join(dir, "id_rsa"), "KEYDATA\n");
-  const spec = parseSpec({
-    connection: {
-      channel: "sftp",
-      server: { host: "h", private_key: "@~/id_rsa" },
-    },
-  });
-  const conn = resolveExchangeSpecRefs(spec).connection as SFTPConnectionConfig;
-  expect(conn.server.privateKey).toBe("KEYDATA");
-});
+test.skipIf(process.platform === "win32")(
+  "resolveExchangeSpecRefs expands a leading ~ in an @path private key",
+  () => {
+    // os.homedir() ignores $HOME here
+    process.env.HOME = dir;
+    fs.writeFileSync(path.join(dir, "id_rsa"), "KEYDATA\n");
+    const spec = parseSpec({
+      connection: {
+        channel: "sftp",
+        server: { host: "h", private_key: "@~/id_rsa" },
+      },
+    });
+    const conn = resolveExchangeSpecRefs(spec)
+      .connection as SFTPConnectionConfig;
+    expect(conn.server.privateKey).toBe("KEYDATA");
+  },
+);
 
 test("resolveExchangeSpecRefs resolves an @path private key passphrase (companion to the encrypted key)", () => {
   const spec = parseSpec({

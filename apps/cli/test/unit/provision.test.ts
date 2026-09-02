@@ -124,17 +124,19 @@ test("provisionConfigAndKey omits expires when absent", () => {
   expect(loadKeyFile(keyPath)?.expires).toBeUndefined();
 });
 
-test("provisionConfigAndKey writes the key file with mode 0600", () => {
-  // Windows uses a restricted ACL, not POSIX mode bits; fs.statSync reports a
-  // synthetic mode there, so this assertion is Unix-only (mirrors saveKeyFile).
-  if (process.platform === "win32") return;
-  provisionConfigAndKey(
-    sampleSpec(),
-    { sharedSecret: TOKEN },
-    { configPath, keyPath },
-  );
-  expect(fs.statSync(keyPath).mode & 0o777).toBe(0o600);
-});
+test.skipIf(process.platform === "win32")(
+  "provisionConfigAndKey writes the key file with mode 0600",
+  () => {
+    // Windows uses a restricted ACL, not POSIX mode bits; fs.statSync reports a
+    // synthetic mode there, so this assertion is Unix-only (mirrors saveKeyFile).
+    provisionConfigAndKey(
+      sampleSpec(),
+      { sharedSecret: TOKEN },
+      { configPath, keyPath },
+    );
+    expect(fs.statSync(keyPath).mode & 0o777).toBe(0o600);
+  },
+);
 
 // --- both files / defaults ---------------------------------------------------
 
@@ -224,30 +226,32 @@ test("provisionConfigAndKey marks the error when the config rollback also fails"
   }
 });
 
-test("provisionConfigAndKey writes no key file when the config write fails", () => {
-  // Induce a config-write failure with a non-writable destination directory.
-  // POSIX-permission-based; Windows ignores the directory mode, so Unix-only.
-  if (process.platform === "win32") return;
-  const ro = path.join(dir, "ro");
-  fs.mkdirSync(ro);
-  fs.chmodSync(ro, 0o500); // r-x: lstat sees children as absent, but writes EACCES
-  try {
-    const badConfig = path.join(ro, "psilink.yaml");
-    // keyPath is in a writable directory; it must stay unwritten because the
-    // config write fails first (saveConfig runs before saveKeyFile).
-    expect(() =>
-      provisionConfigAndKey(
-        sampleSpec(),
-        { sharedSecret: TOKEN },
-        { configPath: badConfig, keyPath },
-      ),
-    ).toThrow();
-    expect(fs.existsSync(badConfig)).toBe(false);
-    expect(fs.existsSync(keyPath)).toBe(false);
-  } finally {
-    fs.chmodSync(ro, 0o700); // restore so afterEach cleanup can remove it
-  }
-});
+test.skipIf(process.platform === "win32")(
+  "provisionConfigAndKey writes no key file when the config write fails",
+  () => {
+    // Induce a config-write failure with a non-writable destination directory.
+    // POSIX-permission-based; Windows ignores the directory mode, so Unix-only.
+    const ro = path.join(dir, "ro");
+    fs.mkdirSync(ro);
+    fs.chmodSync(ro, 0o500); // r-x: lstat sees children as absent, but writes EACCES
+    try {
+      const badConfig = path.join(ro, "psilink.yaml");
+      // keyPath is in a writable directory; it must stay unwritten because the
+      // config write fails first (saveConfig runs before saveKeyFile).
+      expect(() =>
+        provisionConfigAndKey(
+          sampleSpec(),
+          { sharedSecret: TOKEN },
+          { configPath: badConfig, keyPath },
+        ),
+      ).toThrow();
+      expect(fs.existsSync(badConfig)).toBe(false);
+      expect(fs.existsSync(keyPath)).toBe(false);
+    } finally {
+      fs.chmodSync(ro, 0o700); // restore so afterEach cleanup can remove it
+    }
+  },
+);
 
 // --- reuseExistingConfig -----------------------------------------------------
 

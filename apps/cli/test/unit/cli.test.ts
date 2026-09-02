@@ -701,118 +701,124 @@ function logCollector(): {
   };
 }
 
-test("writeOutput: writes the result CSV owner-only (0600) on POSIX", async () => {
-  // The result CSV is the most sensitive artifact the tool produces, so a file
-  // path must be created owner-only rather than inherit a world/group-readable
-  // umask default (the prior unprotected createWriteStream left it 0644 here).
-  // Awaiting the returned promise guarantees the rows are flushed, so the read
-  // and stat are deterministic with no polling.
-  if (process.platform === "win32") return;
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-writeoutput-"));
-  // 0o022 is the umask under which the old write produced a world-readable 0644.
-  const prevUmask = process.umask(0o022);
-  try {
-    const out = path.join(dir, "results.csv");
-    await writeOutput(
-      out,
-      ["a", "b"],
-      [
-        ["1", "2"],
-        ["3", "4"],
-      ],
-      logCollector(),
+test.skipIf(process.platform === "win32")(
+  "writeOutput: writes the result CSV owner-only (0600) on POSIX",
+  async () => {
+    // The result CSV is the most sensitive artifact the tool produces, so a file
+    // path must be created owner-only rather than inherit a world/group-readable
+    // umask default (the prior unprotected createWriteStream left it 0644 here).
+    // Awaiting the returned promise guarantees the rows are flushed, so the read
+    // and stat are deterministic with no polling.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-writeoutput-"));
+    // 0o022 is the umask under which the old write produced a world-readable 0644.
+    const prevUmask = process.umask(0o022);
+    try {
+      const out = path.join(dir, "results.csv");
+      await writeOutput(
+        out,
+        ["a", "b"],
+        [
+          ["1", "2"],
+          ["3", "4"],
+        ],
+        logCollector(),
+      );
+      expect(fs.readFileSync(out, "utf8")).toBe("a,b\n1,2\n3,4\n");
+      expect(fs.statSync(out).mode & 0o777).toBe(0o600);
+    } finally {
+      process.umask(prevUmask);
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
+
+test.skipIf(process.platform === "win32")(
+  "writeOutput: a mid-write stream error rejects rather than crashing",
+  async () => {
+    // A write that fails after the stream opens (here a Writable whose first write
+    // errors) must surface as a rejected promise the caller's error boundary can
+    // map to an exit code -- not an unhandled 'error' event that crashes the
+    // process. Asserting the rejection is itself the proof it was handled: an
+    // unguarded 'error' would tear the worker down instead.
+    const dir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "psilink-writeoutput-err-"),
     );
-    expect(fs.readFileSync(out, "utf8")).toBe("a,b\n1,2\n3,4\n");
-    expect(fs.statSync(out).mode & 0o777).toBe(0o600);
-  } finally {
-    process.umask(prevUmask);
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("writeOutput: a mid-write stream error rejects rather than crashing", async () => {
-  // A write that fails after the stream opens (here a Writable whose first write
-  // errors) must surface as a rejected promise the caller's error boundary can
-  // map to an exit code -- not an unhandled 'error' event that crashes the
-  // process. Asserting the rejection is itself the proof it was handled: an
-  // unguarded 'error' would tear the worker down instead.
-  if (process.platform === "win32") return;
-  const dir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "psilink-writeoutput-err-"),
-  );
-  try {
-    vi.spyOn(fs, "createWriteStream").mockImplementation((...args) => {
-      // createOwnerOnlyWriteStream has already opened a real fd and handed it in;
-      // close it so the substitute stream does not leak it.
-      const fd = (args[1] as { fd?: number } | undefined)?.fd;
-      if (typeof fd === "number") fs.closeSync(fd);
-      return new Writable({
-        write(_chunk, _enc, cb) {
-          cb(new Error("disk full"));
-        },
-      }) as unknown as fs.WriteStream;
-    });
-    await expect(
-      writeOutput(
-        path.join(dir, "results.csv"),
-        ["a"],
-        [["1"]],
-        logCollector(),
-      ),
-    ).rejects.toThrow("disk full");
-  } finally {
-    vi.restoreAllMocks();
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("writeOutput: a close-time failure rejects rather than reporting success", async () => {
-  // A networked or userspace filesystem (NFS/CIFS/FUSE) and a full disk both
-  // defer their error to the close(2) after the last flushed write -- after
-  // 'finish', which every row having been handed to the stream fires regardless.
-  // Resolving there would report a truncated result CSV as written, and the
-  // attested resultSize is computed in memory, so nothing downstream would catch
-  // it. The substitute models exactly that: writes succeed, the destroy that
-  // follows end() fails, so 'finish' fires and then 'error'. The rejection is
-  // the proof the promise waits for the close.
-  if (process.platform === "win32") return;
-  const dir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "psilink-writeoutput-close-"),
-  );
-  try {
-    let finished = false;
-    vi.spyOn(fs, "createWriteStream").mockImplementation((...args) => {
-      const fd = (args[1] as { fd?: number } | undefined)?.fd;
-      if (typeof fd === "number") fs.closeSync(fd);
-      const stream = new Writable({
-        write(_chunk, _enc, cb) {
-          cb();
-        },
-        destroy(_err, cb) {
-          cb(new Error("no space left on device"));
-        },
+    try {
+      vi.spyOn(fs, "createWriteStream").mockImplementation((...args) => {
+        // createOwnerOnlyWriteStream has already opened a real fd and handed it in;
+        // close it so the substitute stream does not leak it.
+        const fd = (args[1] as { fd?: number } | undefined)?.fd;
+        if (typeof fd === "number") fs.closeSync(fd);
+        return new Writable({
+          write(_chunk, _enc, cb) {
+            cb(new Error("disk full"));
+          },
+        }) as unknown as fs.WriteStream;
       });
-      stream.on("finish", () => {
-        finished = true;
+      await expect(
+        writeOutput(
+          path.join(dir, "results.csv"),
+          ["a"],
+          [["1"]],
+          logCollector(),
+        ),
+      ).rejects.toThrow("disk full");
+    } finally {
+      vi.restoreAllMocks();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
+
+test.skipIf(process.platform === "win32")(
+  "writeOutput: a close-time failure rejects rather than reporting success",
+  async () => {
+    // A networked or userspace filesystem (NFS/CIFS/FUSE) and a full disk both
+    // defer their error to the close(2) after the last flushed write -- after
+    // 'finish', which every row having been handed to the stream fires regardless.
+    // Resolving there would report a truncated result CSV as written, and the
+    // attested resultSize is computed in memory, so nothing downstream would catch
+    // it. The substitute models exactly that: writes succeed, the destroy that
+    // follows end() fails, so 'finish' fires and then 'error'. The rejection is
+    // the proof the promise waits for the close.
+    const dir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "psilink-writeoutput-close-"),
+    );
+    try {
+      let finished = false;
+      vi.spyOn(fs, "createWriteStream").mockImplementation((...args) => {
+        const fd = (args[1] as { fd?: number } | undefined)?.fd;
+        if (typeof fd === "number") fs.closeSync(fd);
+        const stream = new Writable({
+          write(_chunk, _enc, cb) {
+            cb();
+          },
+          destroy(_err, cb) {
+            cb(new Error("no space left on device"));
+          },
+        });
+        stream.on("finish", () => {
+          finished = true;
+        });
+        return stream as unknown as fs.WriteStream;
       });
-      return stream as unknown as fs.WriteStream;
-    });
-    await expect(
-      writeOutput(
-        path.join(dir, "results.csv"),
-        ["a"],
-        [["1"]],
-        logCollector(),
-      ),
-    ).rejects.toThrow("no space left on device");
-    // 'finish' did fire: the rejection came from the close that followed it, not
-    // from a stream that never flushed.
-    expect(finished).toBe(true);
-  } finally {
-    vi.restoreAllMocks();
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
+      await expect(
+        writeOutput(
+          path.join(dir, "results.csv"),
+          ["a"],
+          [["1"]],
+          logCollector(),
+        ),
+      ).rejects.toThrow("no space left on device");
+      // 'finish' did fire: the rejection came from the close that followed it, not
+      // from a stream that never flushed.
+      expect(finished).toBe(true);
+    } finally {
+      vi.restoreAllMocks();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
 
 // --- writeOutput: redirected-stdout permission notice ------------------------
 

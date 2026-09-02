@@ -73,21 +73,23 @@ test("configureLogFile: opens in append mode, preserving existing content", () =
   );
 });
 
-test("configureLogFile: a newly created log file is owner-only (no group/world access)", () => {
-  // The log can hold partner identity, linkage keys, and data categories, so it
-  // is created owner-only rather than inheriting a world-readable umask default.
-  // Assert the disclosure-relevant invariant (no group/world bits) rather than an
-  // exact mode, since a restrictive umask may tighten 0o600 further but never
-  // widen it. POSIX permissions only.
-  if (process.platform === "win32") return;
-  const logPath = path.join(tmpDir, "perms.log");
-  const sink = configureLogFile(logPath);
-  logLibrary.setDefaultLevel(logLibrary.levels.INFO);
-  getLogger("logfile-test-perms").info("line");
-  sink.close();
+test.skipIf(process.platform === "win32")(
+  "configureLogFile: a newly created log file is owner-only (no group/world access)",
+  () => {
+    // The log can hold partner identity, linkage keys, and data categories, so it
+    // is created owner-only rather than inheriting a world-readable umask default.
+    // Assert the disclosure-relevant invariant (no group/world bits) rather than an
+    // exact mode, since a restrictive umask may tighten 0o600 further but never
+    // widen it. POSIX permissions only.
+    const logPath = path.join(tmpDir, "perms.log");
+    const sink = configureLogFile(logPath);
+    logLibrary.setDefaultLevel(logLibrary.levels.INFO);
+    getLogger("logfile-test-perms").info("line");
+    sink.close();
 
-  expect(fs.statSync(logPath).mode & 0o077).toBe(0);
-});
+    expect(fs.statSync(logPath).mode & 0o077).toBe(0);
+  },
+);
 
 test("configureLogFile: a long message is written whole, not truncated by a short write", () => {
   // writeAll loops over a partial fs.writeSync, so a large serialized argument

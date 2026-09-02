@@ -687,31 +687,34 @@ test("does not mutate the caller-supplied auth object when trimming whitespace f
   expect(auth.keyFilePath).toBe(originalPath);
 }, 20_000);
 
-test("rejects before opening a connection when keyFilePath parent is a dangling symlink", async () => {
-  // statSync follows symlinks, so a dangling-symlink parent surfaces as
-  // ENOENT. The lstat probe distinguishes "dangling symlink" from "missing
-  // path" and the message must include the dangling-symlink hint.
-  if (process.platform === "win32") return; // symlink semantics differ on Win
-  const target = path.join(tmpDir, "missing-target");
-  const link = path.join(tmpDir, "dangling-link");
-  fs.symlinkSync(target, link);
-  await expect(
-    runProtocol(
-      {
-        channel: "filedrop",
-        path: dropDir,
-      },
-      {
-        sharedSecret: TOKEN_A,
-        keyFilePath: path.join(link, "key.json"),
-      },
-      minimalPrepared,
-      undefined,
-      -1,
-      "test",
-    ),
-  ).rejects.toThrow("dangling");
-});
+test.skipIf(process.platform === "win32")(
+  "rejects before opening a connection when keyFilePath parent is a dangling symlink",
+  async () => {
+    // statSync follows symlinks, so a dangling-symlink parent surfaces as
+    // ENOENT. The lstat probe distinguishes "dangling symlink" from "missing
+    // path" and the message must include the dangling-symlink hint.
+    // symlink semantics differ on Win
+    const target = path.join(tmpDir, "missing-target");
+    const link = path.join(tmpDir, "dangling-link");
+    fs.symlinkSync(target, link);
+    await expect(
+      runProtocol(
+        {
+          channel: "filedrop",
+          path: dropDir,
+        },
+        {
+          sharedSecret: TOKEN_A,
+          keyFilePath: path.join(link, "key.json"),
+        },
+        minimalPrepared,
+        undefined,
+        -1,
+        "test",
+      ),
+    ).rejects.toThrow("dangling");
+  },
+);
 
 test("rejects and cleans up when conn.open() itself throws (opened=false cleanup path)", async () => {
   // Uses a path that does not exist so that LocalFSClient.connect() ->
