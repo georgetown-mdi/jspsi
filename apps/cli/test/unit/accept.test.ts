@@ -45,6 +45,7 @@ import type {
   ConsentFact,
   Displayable,
   InvitationToken,
+  LinkageRuleSetReference,
   LinkageStrategy,
   LinkageTerms,
   TransformStep,
@@ -2629,6 +2630,58 @@ test("displayInvitation: the rule-set citation reads as the partner's word, and 
   expect(uncited).not.toContain("linkage rule set");
   for (const verdict of ["consistent", "contradicted", "unchecked"] as const)
     expect(uncited).not.toContain(LINKAGE_RULE_SET_VERDICT_COPY[verdict].note);
+});
+
+test("displayInvitation: a cited set name cannot render another citation's line", () => {
+  // The name is delimited through core's terms-value seam, which doubles a
+  // delimiter inside a run, so a name carrying one cannot end its own value: what
+  // the operator reads is the whole name, never the line a citation of a shorter
+  // name at another version produces.
+  const log = getLogger("accept-display-rule-set-delimiter-test");
+  log.setLevel("silent");
+  const base = sampleToken(FUTURE());
+  const cite = (linkageRuleSet: LinkageRuleSetReference): string =>
+    renderDisplayInvitation(log, {
+      ...base,
+      linkageTerms: { ...base.linkageTerms, linkageRuleSet },
+    });
+  // Neither citation names a set this build ships -- the first by version, the
+  // second by name -- so both render under one marker and the pair of lines
+  // differs in nothing but how the name is rendered.
+  const marker = LINKAGE_RULE_SET_VERDICT_COPY.unchecked.marker;
+  const imitated = {
+    keys: `    keys (${marker}): "hmis-keys" 9.9.9`,
+    fields: `    fields (${marker}): "baseline-pii" 9.9.9`,
+  };
+  const imitatedLines = cite({
+    fieldSet: { name: "baseline-pii", version: "9.9.9" },
+    keySet: { name: "hmis-keys", version: "9.9.9" },
+  }).split("\n");
+  expect(imitatedLines).toContain(imitated.keys);
+  expect(imitatedLines).toContain(imitated.fields);
+
+  const rendered = cite({
+    fieldSet: { name: 'baseline-pii" 9.9.9', version: "1.0.0" },
+    keySet: { name: 'hmis-keys" 9.9.9', version: "1.0.0" },
+  });
+  expect(rendered.split("\n")).toContain(
+    `    keys (${marker}): "hmis-keys"" 9.9.9" 1.0.0`,
+  );
+  expect(rendered.split("\n")).toContain(
+    `    fields (${marker}): "baseline-pii"" 9.9.9" 1.0.0`,
+  );
+  expect(rendered).not.toContain(imitated.keys);
+  expect(rendered).not.toContain(imitated.fields);
+
+  // The version renders undelimited on the strength of the shape the terms schema
+  // holds it to, and that shape is re-checked on the value in hand: one outside it
+  // renders delimited instead, rather than standing in the line unattributed.
+  expect(
+    cite({
+      fieldSet: { name: "baseline-pii", version: "1.0.0" },
+      keySet: { name: "hmis-keys", version: '1.0.0" 9.9.9' },
+    }).split("\n"),
+  ).toContain(`    keys (${marker}): "hmis-keys" "1.0.0"" 9.9.9"`);
 });
 
 test("displayInvitation: each citation half carries this build's own verdict on it", () => {
