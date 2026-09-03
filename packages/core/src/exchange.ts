@@ -49,6 +49,7 @@ import { InProcessPsiEngine } from "./psiEngine.js";
 import {
   partyFansOut,
   psiElementBounds,
+  SINGLE_PASS_LOCAL_REMEDY,
   singlePassDatasetExceedsCap,
 } from "./connection/frameSize.js";
 import {
@@ -1155,13 +1156,15 @@ export function prepareForExchange(
   // An OperatorConfigError, joining the membership rule the front ends key their
   // actionable config category off -- a decision taken for this check, not for
   // this file's prepare-time refusals as a class. What it fires on is this party's
-  // OWN record count, whichever seat it holds, and every remedy the message names
-  // is a configuration that party can change: fewer keys, fewer records, smaller
-  // batches, one less fan-out. The message interpolates no name at all -- fixed
-  // prose over two counts and a fixed constant -- so nothing partner-authored
-  // rides it on the accept path, where the agreed key count is adopted from the
-  // invitation. That is what separates it from the prepare-time refusals that stay
-  // plain UsageErrors: assertAlgorithmImplemented and the element-transform arm of
+  // OWN record count, whichever seat it holds, and the remedies the message names
+  // are that party's own to take: fewer records, smaller batches, one less
+  // fan-out. The key count is named as the agreed term it is, so an acceptor is
+  // not sent to narrow a set its invitation carried. The message interpolates no
+  // name at all -- fixed prose over two counts and a fixed constant -- so
+  // nothing partner-authored rides it on the accept path, where the agreed key
+  // count is adopted from the invitation. That is what separates it from the
+  // prepare-time refusals that stay plain UsageErrors:
+  // assertAlgorithmImplemented and the element-transform arm of
   // assertFanOutImplemented refuse a value the accept path adopts wholesale and no
   // local change can fix, and assertLinkageTermsSatisfiable carries the agreed
   // terms' own field and key names on its cause links. The authoritative
@@ -1204,8 +1207,7 @@ export function prepareForExchange(
     throw new OperatorConfigError(
       `single-pass linkage cannot carry this dataset: ${declaredRecordCount} ` +
         `declared record(s) across ${linkageTerms.linkageKeys.length} linkage ` +
-        "key(s) exceed the single-pass ceiling. Reduce the number of linkage " +
-        "keys or the record count, or split the dataset into smaller batches." +
+        `key(s) exceed the single-pass ceiling. ${SINGLE_PASS_LOCAL_REMEDY}` +
         (partyFansOut(linkageTerms.linkageKeys.length, { effectiveKeyCount }) ||
         dataset.declaresFanOut
           ? " A linkage key whose elements expand counts its whole declared " +

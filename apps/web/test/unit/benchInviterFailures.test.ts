@@ -214,9 +214,9 @@ describe("failureFor", () => {
   test("the prepare-time ceiling refusal reaches the operator with its remedies", () => {
     // core types the single-pass ceiling pre-flight as an OperatorConfigError, so
     // this alert surfaces the refusal's own text rather than swallowing it in the
-    // generic exchange copy. Its remedies -- fewer keys or records, smaller
-    // batches -- are the whole value of showing it, and they name only counts and
-    // this party's own configuration. Driven from the refusal core actually
+    // generic exchange copy. Its remedies -- fewer records, smaller batches, and
+    // terms re-agreed for the key count that is not this party's alone to change
+    // -- are the whole value of showing it. Driven from the refusal core actually
     // raises, so the alert is checked against the real text rather than a copy of
     // it that could drift; the other half of the path, a prepare-phase
     // OperatorConfigError reaching this builder as `config` at all, is pinned in

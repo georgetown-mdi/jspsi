@@ -955,6 +955,7 @@ const INVITATION_PREFLIGHT_MESSAGING: LinkagePreflightMessaging = {
   blockConsequence: RUN_BLOCK_CONSEQUENCE,
   blockRemedy:
     "or ask your partner for an invitation with different linkage terms.",
+  termsStanding: "agreed",
 };
 
 // --- Handler -----------------------------------------------------------------

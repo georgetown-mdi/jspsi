@@ -212,13 +212,15 @@ function disclosedColumnsFor(
  * ({@link checkLinkageSatisfiability}), whose grading is core's and whose copy is
  * each caller's.
  *
- * Both halves differ from the run paths' because the operator's position does.
+ * Every part differs from the run paths' because the operator's position does.
  * Nothing runs here, so what a block prevents is disclosing an invitation, not
  * exchanging a short set of keys; and the inviter AUTHORED these terms, so the
  * remedy is their own configuration rather than the out-of-band renegotiation the
  * accept and exchange paths point at -- there is no partner to renegotiate with
- * until this invitation is sent. `configPath` names the file the terms came from,
- * composed raw: the CLI's error boundary escapes the rendered chain once.
+ * until this invitation is sent. That is the same reason the terms stand as a
+ * draft: the shortfall this seat states counts linkage keys nobody has agreed to.
+ * `configPath` names the file the terms came from, composed raw: the CLI's error
+ * boundary escapes the rendered chain once.
  */
 function mintPreflightMessaging(configPath: string): LinkagePreflightMessaging {
   return {
@@ -228,6 +230,7 @@ function mintPreflightMessaging(configPath: string): LinkagePreflightMessaging {
       "configuration's own exchange refuses to run, discovered only after " +
       "they had accepted them.",
     blockRemedy: `then generate the invitation again; these terms come from ${configPath}.`,
+    termsStanding: "draft",
   };
 }
 

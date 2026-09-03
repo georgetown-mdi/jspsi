@@ -15,6 +15,7 @@ import {
   checkLinkageSatisfiability,
   RUN_BLOCK_CONSEQUENCE,
   warnColumnsTheInvitationWillNotAccept,
+  type LinkagePreflightMessaging,
 } from "../../src/commands/linkagePreflight";
 
 // Minimal logger stub for warnColumnsTheInvitationWillNotAccept, the one export
@@ -34,7 +35,21 @@ const messaging = {
   source: "invitation",
   blockConsequence: RUN_BLOCK_CONSEQUENCE,
   blockRemedy: "request a fresh invitation.",
-};
+  termsStanding: "agreed",
+} satisfies LinkagePreflightMessaging;
+
+// The mint seat: the operator's own terms, which no partner holds yet. Its
+// consequence and remedy are `invite`'s own (mintPreflightMessaging), reproduced
+// here in the shape that seat passes so the wording this file pins is the wording
+// that seat renders.
+const mintMessaging = {
+  source: "configuration",
+  blockConsequence:
+    "Generating an invitation would hand your partner terms that this " +
+    "configuration's own exchange refuses to run.",
+  blockRemedy: "then generate the invitation again.",
+  termsStanding: "draft",
+} satisfies LinkagePreflightMessaging;
 
 // A single date_of_birth field bound to a present "dob" column, so the key is
 // always shape-satisfiable; the element transform decides whether it is dead.
@@ -67,10 +82,11 @@ const deadDobElement = {
 function refusalRenderedForDisplay(
   columns: string[],
   terms: LinkageTerms,
+  seat: LinkagePreflightMessaging = messaging,
 ): string {
   let thrown: unknown;
   try {
-    checkLinkageSatisfiability(columns, terms, messaging);
+    checkLinkageSatisfiability(columns, terms, seat);
   } catch (err) {
     thrown = err;
   }
@@ -85,8 +101,12 @@ function refusalRenderedForDisplay(
 }
 
 // The rendered refusal split into the cause links the operator reads, in order.
-function refusalLinks(columns: string[], terms: LinkageTerms): string[] {
-  return refusalRenderedForDisplay(columns, terms).split("\ncaused by: ");
+function refusalLinks(
+  columns: string[],
+  terms: LinkageTerms,
+  seat: LinkagePreflightMessaging = messaging,
+): string[] {
+  return refusalRenderedForDisplay(columns, terms, seat).split("\ncaused by: ");
 }
 
 test("an input satisfying every declared key passes", () => {
@@ -204,6 +224,55 @@ test("a dead key beside a column-unsatisfiable one is refused, naming both cause
   );
   expect(links).toContain("linkage key that drops every record: DOB");
   expect(links).toContain("unsatisfied field: ssn (ssn)");
+});
+
+// --- the standing each seat states -------------------------------------------
+
+// The two seats share one grading and one fragment, and differ in whether a
+// partner is already held to these terms. Pinned per seat, and against each
+// other's wording, so a later edit to one cannot re-cross the other: the accept
+// seat may not stop calling the keys agreed, and the mint seat may not start.
+test("the accept seat counts the keys as agreed, because both parties are", () => {
+  const links = refusalLinks(
+    ["dob"],
+    dobTerms([{ function: "parse_date", params: { inputFormat: "MM/DD" } }]),
+  );
+  expect(links[0]).toContain(
+    "the cleaning declared for the one agreed linkage key drops every record",
+  );
+});
+
+test("the mint seat states the same shortfall without claiming an agreement", () => {
+  const links = refusalLinks(
+    ["dob"],
+    dobTerms([{ function: "parse_date", params: { inputFormat: "MM/DD" } }]),
+    mintMessaging,
+  );
+  expect(links[0]).toContain(
+    "the cleaning declared for the one linkage key drops every record",
+  );
+  // Nobody has agreed to these terms and nobody has seen them, so neither the
+  // fragment nor the remedy may address a partnership that does not exist yet.
+  expect(links[0]).not.toContain("agreed linkage key");
+  expect(links.join("\n")).not.toContain("ask your partner");
+  expect(links[1]).toBe(
+    `Correct the cleaning steps those keys declare, ${mintMessaging.blockRemedy}`,
+  );
+});
+
+test("the mint seat's keyless refusal asks the operator to declare, not to agree", () => {
+  const links = refusalLinks(
+    ["dob"],
+    { ...dobTerms(), linkageKeys: [] },
+    mintMessaging,
+  );
+  expect(links[0]).toContain(
+    "the configuration's linkage terms declare no linkage key",
+  );
+  expect(links[1]).toBe(
+    "Declare at least one linkage key in these terms, " +
+      mintMessaging.blockRemedy,
+  );
 });
 
 test("terms declaring no linkage key at all are refused", () => {

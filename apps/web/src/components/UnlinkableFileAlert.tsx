@@ -42,7 +42,10 @@ function missingFieldsDetail(fields: ReadonlyArray<LinkageField>): string {
  * The first-party copy around it presupposes no partner and no agreement already
  * struck -- it names the terms and the files on both sides -- so it reads the same
  * for a seat minting terms from the operator's own columns and one held to terms an
- * invitation carried.
+ * invitation carried. The fragment is taken on the `"draft"` standing for that
+ * reason: every seat that renders this alert holds terms no partner has yet, so
+ * counting the shortfall against AGREED keys would claim an agreement the
+ * surrounding sentences are careful not to.
  *
  * The return shape is the structural {@link AlertContent} (`{ title, message }`)
  * every caller assigns into its error state and renders through the shared alert
@@ -62,7 +65,7 @@ export function unlinkableFileAlert(refusal: LinkageRefusal): AlertContent {
     title: "This file cannot satisfy the linkage terms",
     message:
       "An exchange runs every linkage key its terms declare, and " +
-      `${summarizeLinkageShortfall(refusal.verdict)}` +
+      `${summarizeLinkageShortfall(refusal.verdict, "draft")}` +
       missingFieldsDetail(refusal.verdict.unsatisfiedFields) +
       ". It would be refused before any data left this device. Choose a file " +
       "that satisfies every linkage key in the terms, or set terms that " +

@@ -23,6 +23,7 @@ import {
 } from "../src/errors";
 import {
   MAX_SINGLE_PASS_CELLS,
+  SINGLE_PASS_LOCAL_REMEDY,
   singlePassDatasetExceedsCap,
 } from "../src/connection/frameSize";
 import {
@@ -628,6 +629,11 @@ describe("prepareForExchange: the single-pass ceiling pre-flight", () => {
     expect(prepare).toThrow(OperatorConfigError);
     expect(prepare).toThrow(/exceed the single-pass ceiling/);
     expect(prepare).not.toThrow(/removing a fan-out/);
+    // The pre-flight and the authoritative two-party gate state one remedy, so an
+    // acceptor is not told here to narrow keys it did not choose and told the
+    // opposite mid-run.
+    expect(prepare).toThrow(SINGLE_PASS_LOCAL_REMEDY);
+    expect(prepare).not.toThrow(/Reduce the number of linkage keys/);
   });
 
   test("an over-ceiling fan-out config is offered the fan-out remedy the ceiling has for it", () => {

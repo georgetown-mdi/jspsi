@@ -4074,6 +4074,20 @@ export function decideLinkageTermsVerdict(
 }
 
 /**
+ * Where the terms a shortfall is stated against stand between the two parties, so
+ * the shared fragment fits the seat that renders it:
+ *
+ * - `"agreed"` -- both parties are held to these terms: an acceptor's adopted
+ *   invitation, or a configuration an established exchange runs under. The keys
+ *   are named as agreed, because narrowing them is an out-of-band step rather
+ *   than an edit this operator can make.
+ * - `"draft"` -- the operator's own terms, which no partner holds yet: the
+ *   pre-invitation mint seats, where there is nobody to have agreed anything and
+ *   the keys are the operator's own to change.
+ */
+export type LinkageTermsStanding = "agreed" | "draft";
+
+/**
  * State, in one sentence fragment, how a verdict falls short of its terms: which
  * of the declared linkage keys the input's columns cannot produce, and which of
  * them declare cleaning that drops every record.
@@ -4084,6 +4098,10 @@ export function decideLinkageTermsVerdict(
  * counts against the whole declared set rather than the other clause's remainder,
  * so a refusal carrying one clause reads as well as one carrying both.
  *
+ * `standing` is the one thing the fragment takes from its seat: it is required
+ * rather than defaulted so a new caller states where its terms stand instead of
+ * inheriting a partnership it may not have (see {@link LinkageTermsStanding}).
+ *
  * The fragment is fixed copy and counts only. Names are terms content --
  * partner-authored on every accept path -- and each caller places them on cause
  * links of its own.
@@ -4093,14 +4111,16 @@ export function decideLinkageTermsVerdict(
  */
 export function summarizeLinkageShortfall(
   verdict: LinkageTermsVerdict,
+  standing: LinkageTermsStanding,
 ): string {
   const total = verdict.keys.length;
+  const qualifier = standing === "agreed" ? "agreed " : "";
   const keysPhrase = (count: number): string =>
     total === 1
-      ? "the one agreed linkage key"
+      ? `the one ${qualifier}linkage key`
       : count === total
-        ? `all ${total} agreed linkage keys`
-        : `${count} of the ${total} agreed linkage keys`;
+        ? `all ${total} ${qualifier}linkage keys`
+        : `${count} of the ${total} ${qualifier}linkage keys`;
   const shortfalls: string[] = [];
   if (verdict.unsatisfiableKeys.length > 0)
     shortfalls.push(
@@ -4126,6 +4146,11 @@ export function summarizeLinkageShortfall(
  * is settled with the partner out of band rather than run anyway. The remedy is
  * therefore stated as new terms or a conforming input, never as a retry: the same
  * input refuses identically every time.
+ *
+ * The summary is stated on the `"agreed"` standing: this is the boundary of a run,
+ * and a run is held to the terms its partner is held to, whoever authored them.
+ * The seats that hold terms no partner has yet state the same shortfall in their
+ * own first-party copy, ahead of this.
  *
  * The summary carries only fixed copy and counts. The field and key names are
  * terms content -- partner-authored on every accept path -- so each category rides
@@ -4182,11 +4207,11 @@ export function assertLinkageTermsSatisfiable(
 
   throw new LinkageTermsUnsatisfiableError(
     `this input cannot satisfy every linkage key the agreed terms declare: ` +
-      `${summarizeLinkageShortfall(verdict)}. The exchange is refused before any ` +
-      "credential, terms, or data are sent: it would match on fewer keys " +
-      "than both parties agreed to while its exchange record still names " +
-      "every field those terms declare. Settle the shortfall with your " +
-      "partner out of band -- agree terms over the keys and fields both " +
+      `${summarizeLinkageShortfall(verdict, "agreed")}. The exchange is ` +
+      "refused before any credential, terms, or data are sent: it would match " +
+      "on fewer keys than both parties agreed to while its exchange record " +
+      "still names every field those terms declare. Settle the shortfall with " +
+      "your partner out of band -- agree terms over the keys and fields both " +
       "files can supply, and run the exchange under those -- or run it with " +
       "an input file that satisfies the terms already agreed.",
     details.length > 0

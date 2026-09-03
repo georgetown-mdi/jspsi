@@ -35,6 +35,7 @@ import {
   parseDateInputDropsEveryRecord,
   STANDARDIZATION_FUNCTION_NAMES,
   type FieldValue,
+  type LinkageTermsStanding,
 } from "../src/standardization";
 import * as standardizationModule from "../src/standardization";
 import { ESC, PRINTABLE_ASCII, RLO } from "../src/displayEscapingFixtures";
@@ -6744,8 +6745,15 @@ describe("summarizeLinkageShortfall", () => {
       { name: "DOB", elements: [dobElement] },
     ],
   });
-  const summarize = (columns: string[], terms: LinkageTerms): string =>
-    summarizeLinkageShortfall(decideLinkageTermsVerdict(columns, terms));
+  const summarize = (
+    columns: string[],
+    terms: LinkageTerms,
+    standing: LinkageTermsStanding = "agreed",
+  ): string =>
+    summarizeLinkageShortfall(
+      decideLinkageTermsVerdict(columns, terms),
+      standing,
+    );
 
   test("a lone declared key is named as the one it is", () => {
     expect(
@@ -6788,7 +6796,53 @@ describe("summarizeLinkageShortfall", () => {
     );
   });
 
-  test("the run-boundary refusal states the fragment verbatim", () => {
+  // A seat holding terms no partner has yet counts the same keys without calling
+  // them agreed: the shortfall is the operator's own draft falling short of its
+  // own file, and there is nobody to have agreed to anything. Each count shape is
+  // driven on both standings so an edit to one cannot quietly re-cross the other.
+  test("a draft seat states the same counts and claims no agreement", () => {
+    expect(
+      summarize(
+        ["dob"],
+        {
+          ...twoKeyTerms({ field: "ssn" }, { field: "dob" }),
+          linkageKeys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
+        },
+        "draft",
+      ),
+    ).toBe("the one linkage key cannot be produced from this input's columns");
+
+    expect(
+      summarize(
+        ["ssn", "dob"],
+        twoKeyTerms(
+          { field: "ssn", transform: deadTransform },
+          { field: "dob", transform: deadTransform },
+        ),
+        "draft",
+      ),
+    ).toBe("the cleaning declared for all 2 linkage keys drops every record");
+
+    expect(
+      summarize(
+        ["dob"],
+        twoKeyTerms(
+          { field: "ssn" },
+          { field: "dob", transform: deadTransform },
+        ),
+        "draft",
+      ),
+    ).toBe(
+      "1 of the 2 linkage keys cannot be produced from this input's columns, " +
+        "and the cleaning declared for 1 of the 2 linkage keys drops every " +
+        "record",
+    );
+  });
+
+  // The run boundary is an agreed seat: whoever authored the terms, the run it
+  // guards is one a partner is held to as well, so it states the fragment with the
+  // agreement named -- which `summarize` defaults to here.
+  test("the run-boundary refusal states the agreed fragment verbatim", () => {
     const terms = twoKeyTerms(
       { field: "ssn" },
       { field: "dob", transform: deadTransform },
