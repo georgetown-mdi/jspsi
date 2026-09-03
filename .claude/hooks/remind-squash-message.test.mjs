@@ -315,6 +315,41 @@ describe("remind-squash-message hook", () => {
     expect(additionalContext).toBeNull();
   });
 
+  // Deliberate divergence from singleCreateReminder, which falls back to
+  // counting the cwd's HEAD when a --head ref does not resolve: within a
+  // pair that fallback would misattribute another PR's commit count, so an
+  // unresolvable ref drops its pair instead. Pin that by giving the cwd HEAD
+  // enough commits that the fallback, if it fired, would produce a reminder.
+  it("drops a pair whose --head ref does not resolve, without falling back to the cwd HEAD count", () => {
+    const dir = track(makeRepo(2, "feature"));
+    const single = addBranch(dir, "single-commit-branch", 1);
+    const additionalContext = context(
+      prCreateEvent(
+        dir,
+        ghOutput(200) + ghOutput(201),
+        twoCreates("no-such-branch", single),
+      ),
+    );
+    expect(additionalContext).toBeNull();
+  });
+
+  // Deliberate divergence from singleCreateReminder, which falls back to
+  // printReminder when no file path can be named. multiCreateReminder
+  // resolves the main checkout root once, up front, and returns null the
+  // moment that fails -- before it ever looks at a single pair -- rather
+  // than falling back to printing whatever counts it could still gather.
+  it("returns nothing for a multi-create when the main checkout root cannot be determined, without falling back to printing", () => {
+    const dir = track(mkdtempSync(join(tmpdir(), "remind-squash-nogit-")));
+    const additionalContext = context(
+      prCreateEvent(
+        dir,
+        ghOutput(202) + ghOutput(203),
+        twoCreates("branch-a", "branch-b"),
+      ),
+    );
+    expect(additionalContext).toBeNull();
+  });
+
   it("falls back to printing when no key can be determined", () => {
     const dir = track(makeRepo(2));
     execFileSync("git", ["-C", dir, "checkout", "-q", "--detach"]);
