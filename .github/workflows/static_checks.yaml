@@ -1,22 +1,32 @@
 name: Static Checks
 
-# Repo-wide typecheck, lint, and format gate for every pull request. Kept
-# separate from the build/test workflows (cli_build_and_test.yaml,
-# eb_build_and_test.yaml), which are path-scoped to one app and run the heavier
-# unit/integration suites. These checks span the whole monorepo -- a type error
-# in a test file, an eslint violation, or prettier drift can land in any
-# workspace -- so this workflow is intentionally NOT path-filtered.
+# Repo-wide static gate for every pull request. Kept separate from the
+# build/test workflows (cli_build_and_test.yaml, eb_build_and_test.yaml), which
+# are path-scoped to one app and run the heavier unit/integration suites. These
+# checks span the whole monorepo -- a type error in a test file, an eslint
+# violation, or prettier drift can land in any workspace -- so this workflow is
+# intentionally NOT path-filtered.
 #
 # `npm run typecheck` runs each workspace's noEmit tsconfig, including the
 # tsconfig.test.json files that cover test sources (the build/composite configs
 # exclude test/ so test code never reaches the emitted dist). It resolves
 # @psilink/core from the built package, so packages/core is built first.
 #
-# The job's `name:` is its required-status-check identity on main and staging,
-# which is why it stays `Typecheck, Lint, Format` even as steps accumulate past
-# those three. The Merge gate identities step below holds that identity against
-# the branch rules whenever the run has a token that can read them, and states a
+# Two jobs, two required-status-check identities. `Typecheck, Lint, Format`
+# carries only the three checks it names, so the context holding the merge
+# gate's critical path is the one a contributor iterates on; `Guards, Scripts,
+# Audit` carries the repo-wide guard checks, the scripts suite, and the
+# production dependency audit, in parallel with it. Each job's `name:` is its
+# identity on main and staging, which is why neither is renamed as steps
+# accumulate past what it enumerates. The second identity is carried by the
+# `staging` and `main` rulesets, an edit made on the GitHub side rather than
+# here; while it is absent that job runs on every pull request without gating a
+# merge. The Merge gate identities step below holds both identities against the
+# branch rules whenever the run has a token that can read them, and states a
 # skip when it does not.
+#
+# Both jobs pay the setup action, since the second holds every check that reads
+# node_modules and the vectors check that reads the @psilink/core build.
 
 on:
   pull_request:
@@ -47,6 +57,17 @@ jobs:
         run: npm run lint
       - name: Format check
         run: npm run formatcheck
+
+  repo-guards:
+    name: Guards, Scripts, Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Pins Node, installs from the lockfile, and builds @psilink/core. Most
+      # steps below read their parsers and fixtures out of the install; the
+      # vectors check reads the built dist, since its generators import the
+      # package the way the apps do.
+      - uses: ./.github/actions/setup
       # Resolves every Markdown link/anchor across the repo (docs/ overview,
       # docs/spec/ technical, and the root governance files), failing on a dead
       # path or dead heading anchor. This is the forcing function that keeps the
@@ -326,6 +347,6 @@ jobs:
       # reported by dependency_audit.yaml rather than gated here.
       #
       # Last, so an advisory standing open over the production tree does not mask
-      # the typecheck, lint, and format results every contributor iterates on.
+      # this job's other results.
       - name: Dependency audit (production scope)
         run: npm audit --omit=dev -w packages/core -w apps/cli -w apps/web
