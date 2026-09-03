@@ -362,6 +362,11 @@ Ratified by the owner:
 - **Split-on Fan-out** (board 9) -- Done is: every multi-value key shape the
   schema admits matches with fan-out under every linkage strategy the schema
   admits.
+- **Exchange-provisioned infrastructure** (board 9) -- Done is: a psilink
+  exchange reaches its peer-coordination and relay endpoints at a deployment
+  separate from the web app's, with credentials minted per exchange, and a CLI
+  party on a UDP-blocked network completes an exchange with a browser party
+  through it.
 
 Drafted, pending the owner's ratification:
 
