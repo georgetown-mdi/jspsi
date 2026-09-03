@@ -72,11 +72,12 @@ const OUTBOUND_CONSENT_QUESTION =
  * before it addresses a terminal the next line asks a question on.
  *
  * Redacting at this composition rather than leaving it to the sinks is what
- * makes the two sinks agree: {@link consentSurfaceSink} sends each line to
- * `log.info`, where core's prefixer strips key material per argument, and -- when
- * a prompt follows -- to `writePromptLine`, which runs no pass at all. A name
- * shaped like armor would otherwise read as the replacement in the log and
- * verbatim at the question it is answered against.
+ * makes the two sinks agree: {@link consentSurfaceSink} sends a line to
+ * `writePromptLine`, which runs no pass at all, wherever a prompt follows, and to
+ * `log.info`, where core's prefixer strips key material per argument, wherever
+ * the log is the one recording it. A name shaped like armor would otherwise read
+ * as the replacement in the log and verbatim at the question it is answered
+ * against.
  */
 function displayOutboundColumns(
   emit: ConsentSurfaceSink,
@@ -132,9 +133,10 @@ function displayOutboundColumns(
  * could answer.
  *
  * The set is rendered through {@link consentSurfaceSink}, the same routing the
- * acceptance display uses: every line goes to the log, and when a prompt follows,
- * to the terminal it asks on as well -- so the columns cannot be routed to a
- * `--log-file` while the question is asked somewhere they are not.
+ * acceptance display uses: where a prompt follows, the columns go to the terminal
+ * it asks on, plain and at every level, and the log keeps its own copy only where
+ * that copy lands elsewhere -- so the columns cannot be routed to a `--log-file`
+ * while the question is asked somewhere they are not.
  *
  * @throws {UsageError} when the confirmation is owed and cannot be given, or is
  *   declined (exit 64) -- a local configuration decision taken before any

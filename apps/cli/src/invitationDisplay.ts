@@ -1,5 +1,3 @@
-import logLibrary from "loglevel";
-
 import {
   CONSENT_BASIS_MARKERS,
   CONSENT_FACTS,
@@ -43,46 +41,37 @@ import type {
 export type ConsentSurfaceSink = (line: string) => void;
 
 /**
- * The level a consent line takes in the log, and with it the threshold its
- * prompt copy is decided against. `info` is the surface itself; `warn` is for a
- * line an operator has to read even at a level that has already dropped the
- * surface -- the notice an acceptance raises for an `--identity` its kept
- * configuration overrides.
+ * The level a consent line takes where the log records it. `info` is the surface
+ * itself; `warn` is for a line an operator has to read even at a level that has
+ * already dropped the surface -- the notice an acceptance raises for an
+ * `--identity` its kept configuration overrides.
  */
 export type ConsentSurfaceLevel = "info" | "warn";
-
-const CONSENT_SURFACE_LOG_LEVELS: Record<ConsentSurfaceLevel, number> = {
-  info: logLibrary.levels.INFO,
-  warn: logLibrary.levels.WARN,
-};
 
 /**
  * The sink {@link displayInvitation} renders through, resolved from what the
  * operator chose for diagnostics and whether acceptance will stop to ask them.
  *
- * Every line goes to the log, so an operator's `--log-file` and `--log-level`
- * keep routing the surface exactly as they route every other diagnostic -- this
- * is not an exemption of the surface from log routing. When acceptance will
- * PROMPT, each line additionally goes to the prompt's own sink
- * ({@link writePromptLine}) unless the log would already have put it there, so
- * the terms the y/N question asks about cannot have been routed somewhere the
- * question is not. `--log-file` therefore shows the terms on the terminal and
- * still records them in the file; a level above the line's own still shows it at
- * the prompt and still keeps it out of the log.
+ * When acceptance will PROMPT, every line goes to the prompt's own sink
+ * ({@link writePromptLine}) at every `--log-level`, plain: the terms the y/N
+ * question asks about are text the operator reads to answer it rather than a
+ * diagnostic record, so they render byte for byte the same whatever the operator
+ * set the log to, and the timestamp-level-context prefix -- about 50 of an
+ * 80-column console's columns -- stays off them. The log's own copy is written
+ * only where it lands somewhere other than the terminal the question is asked on,
+ * which is what a `--log-file` makes it: the file keeps the run's record, and
+ * nothing prints the multi-screen outline to the terminal twice. The level still
+ * governs that recorded copy, so `--log-file` under a level above the line's own
+ * records nothing while the prompt is shown the surface regardless.
  *
- * The extra write is conditional because on the default path -- stderr sink at
- * `info` -- the log's own output already lands where the prompt asks, and an
- * unconditional copy would print the whole multi-screen outline twice. The level
- * half reads the logger's own level, not the parsed `--log-level`, so a path that
- * adjusts the level after the logger is built cannot desync the two. The sink half
- * has no such reading available -- an installed diagnostic sink is an opaque
- * function that cannot be asked where it writes -- so it takes the parsed
- * `--log-file`, and a caller must feed that same value to `configureLogging`.
+ * When nothing asks -- `--consent-to-terms` -- there is no question for the terms
+ * to be read beside, so they stay ordinary diagnostic output on the routing the
+ * operator chose: `--log-file` captures them for the unattended run's record and
+ * a level above the line's own drops them.
  *
- * `level` moves both halves together: a `warn` sink logs at `warn` and compares
- * the logger's level against `warn`, so a line the log still records is not
- * copied to the prompt it already reached. A sink of one level per line is what
- * keeps the two halves from disagreeing about which routing drops it.
+ * The prompt/log split reads the parsed `--log-file` rather than asking the
+ * installed diagnostic sink where it writes, which an opaque function cannot be
+ * asked, so a caller must feed that same value to `configureLogging`.
  */
 export function consentSurfaceSink(params: {
   log: ReturnType<typeof getLogger>;
@@ -92,12 +81,12 @@ export function consentSurfaceSink(params: {
 }): ConsentSurfaceSink {
   const { log, logFile, willPrompt, level = "info" } = params;
   return (line: string) => {
-    log[level](line);
-    if (!willPrompt) return;
-    const logReachesPrompt =
-      logFile === undefined &&
-      log.getLevel() <= CONSENT_SURFACE_LOG_LEVELS[level];
-    if (!logReachesPrompt) writePromptLine(line);
+    if (!willPrompt) {
+      log[level](line);
+      return;
+    }
+    if (logFile !== undefined) log[level](line);
+    writePromptLine(line);
   };
 }
 

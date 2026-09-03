@@ -27,6 +27,7 @@ import {
   MAX_RAW_INVITATION_LENGTH,
   parseExchangeSpec,
   reconcileReceivedPayload,
+  redactPrivateKeyMaterial,
   sanitizeErrorForDisplay,
   sanitizeForDisplay,
   setDiagnosticSink,
@@ -1897,9 +1898,15 @@ async function acceptOverKeptConfig(params: {
 /** The distinctive clause of the flag-had-no-effect notice. */
 const IDENTITY_NO_EFFECT_CLAUSE = "has no effect on an acceptance that keeps";
 
-/** The one no-effect notice in `warnings`, asserted to be exactly one. */
-function identityNoEffectNotice(warnings: string[]): string {
-  const notices = warnings.filter((m) => m.includes(IDENTITY_NO_EFFECT_CLAUSE));
+/**
+ * The one no-effect notice the operator was shown, asserted to be exactly one.
+ * Read off the prompt transcript, which is where the consent surface's sink puts
+ * a line on a run that stops to ask.
+ */
+function identityNoEffectNotice(promptWrites: string): string {
+  const notices = promptWrites
+    .split("\n")
+    .filter((line) => line.includes(IDENTITY_NO_EFFECT_CLAUSE));
   expect(notices).toHaveLength(1);
   return notices[0];
 }
@@ -1908,14 +1915,14 @@ test("validateAccept: offline reuse runs under the stored label, reporting the f
   // The kept file governs every exchange under the partnership, so a flag cannot
   // rename the party in passing: the acceptance proceeds under the stored label
   // and says so, naming both values and the field to edit.
-  const { ready, warnings } = await acceptOverKeptConfig({
+  const { ready, promptWrites } = await acceptOverKeptConfig({
     terms: sampleTerms("Acceptor Org"),
     identity: "Agency B",
     loggerName: "accept-kept-identity-offline",
   });
   expect(ready.reuseExistingConfig).toBe(true);
   expect(ready.dataSpec.linkageTerms.identity).toBe("Acceptor Org");
-  const notice = identityNoEffectNotice(warnings);
+  const notice = identityNoEffectNotice(promptWrites);
   expect(notice).toContain('"Agency B"');
   expect(notice).toContain('"Acceptor Org"');
   expect(notice).toContain("Edit linkage_terms.identity");
@@ -1926,7 +1933,7 @@ test("validateAccept: online reuse presents the stored label to the partner", as
   // itself, so the name the partner reads is the prepared exchange's -- and it
   // has to be the one the kept configuration goes on sending, not a label
   // supplied for this invocation alone.
-  const { ready, warnings } = await acceptOverKeptConfig({
+  const { ready, promptWrites } = await acceptOverKeptConfig({
     terms: sampleTerms("Acceptor Org"),
     identity: "Agency B",
     loggerName: "accept-kept-identity-online",
@@ -1937,7 +1944,7 @@ test("validateAccept: online reuse presents the stored label to the partner", as
   if (ready.mode !== "online") return;
   expect(ready.prepared.linkageTerms.identity).toBe("Acceptor Org");
   expect(ready.dataSpec.linkageTerms.identity).toBe("Acceptor Org");
-  expect(identityNoEffectNotice(warnings)).toContain('"Acceptor Org"');
+  expect(identityNoEffectNotice(promptWrites)).toContain('"Acceptor Org"');
 });
 
 test("validateAccept: a flag that asks for the stored label reports nothing", async () => {
@@ -1988,19 +1995,19 @@ test("validateAccept: the no-effect notice reaches the prompt whatever the log r
   }
 });
 
-test("validateAccept: on the default routing the notice is logged once, not copied", async () => {
-  // The log's own line already lands on the terminal the prompt asks on, so a
-  // second copy would print the notice twice.
+test("validateAccept: on the default routing the notice is shown once, not copied", async () => {
+  // The prompt's own line already lands on the terminal the log would have used,
+  // so a second copy would print the notice twice -- once prefixed and once not.
   const { logged, promptWrites } = await acceptOverKeptConfig({
     terms: sampleTerms("Acceptor Org"),
     identity: "Agency B",
     loggerName: "accept-kept-identity-default-routing",
     logLevel: "warn",
   });
+  expect(identityNoEffectNotice(promptWrites)).toContain('"Agency B"');
   expect(
     logged.filter((line) => line.includes(IDENTITY_NO_EFFECT_CLAUSE)),
-  ).toHaveLength(1);
-  expect(promptWrites).not.toContain(IDENTITY_NO_EFFECT_CLAUSE);
+  ).toEqual([]);
 });
 
 test("validateAccept: an unattended acceptance keeps the notice in the log alone", async () => {
@@ -2056,22 +2063,18 @@ test("validateAccept: the no-effect notice escapes both labels it reports", asyn
   // display boundary.
   const flag = `Agency B${ESC}[0m`;
   const stored = `Acceptor Org${RLO}`;
-  const { warnings, promptWrites } = await acceptOverKeptConfig({
+  const { promptWrites } = await acceptOverKeptConfig({
     terms: sampleTerms(stored),
     identity: flag,
     loggerName: "accept-kept-identity-escaping",
   });
-  const notice = identityNoEffectNotice(warnings);
+  // The prompt's own sink runs no pass of its own, so the line the question is
+  // answered against is escaped only because the notice was composed that way.
+  const notice = identityNoEffectNotice(promptWrites);
   expect(notice).toContain(sanitizeForDisplay(flag));
   expect(notice).toContain(sanitizeForDisplay(stored));
   expect(notice).not.toContain(ESC);
   expect(notice).not.toContain(RLO);
-  // The prompt's own sink runs no pass of its own, so the copy the question is
-  // answered against is escaped only because the notice was composed that way.
-  expect(promptWrites).toContain(sanitizeForDisplay(flag));
-  expect(promptWrites).toContain(sanitizeForDisplay(stored));
-  expect(promptWrites).not.toContain(ESC);
-  expect(promptWrites).not.toContain(RLO);
 });
 
 /** The default terms with their first two keys swapped: rules that no longer
@@ -5126,10 +5129,10 @@ test("handler: nothing reaches the operator between the terms and the question",
   // displayInvitation and promptConfirm would push the block off a short terminal
   // with nothing turning red -- so the property is a check rather than a comment.
   //
-  // It reads what the OPERATOR saw, not what one route emitted: the surface
-  // reaches them through the log's own sink on the default routing, and through
-  // the prompt's own stream where the log would miss it (--log-file), and both
-  // land on stderr. A check watching only the logger would pass while a direct
+  // It reads what the OPERATOR saw, not what one route emitted: on every routing
+  // that asks, the surface reaches them through the prompt's own stream on
+  // stderr, and under --log-file the log's copy lands in the file rather than
+  // beside it. A check watching only the logger would pass while a direct
   // prompt-stream write scrolled the block away. Both routings are driven here,
   // and in each the transcript is snapshotted at the instant the prompt is called.
   const fixture = offlineAcceptFixture();
@@ -5410,12 +5413,53 @@ test.each(["warn", "error", "silent"])(
   },
 );
 
+/** The line a declined confirmation leaves the operator with. */
+const DECLINE_LINE = "invitation declined; no files were written";
+
+test("handler: the terms and the decline read identically at every level", async () => {
+  // What the operator reads to answer the question cannot depend on a diagnostic
+  // setting, so the comparison is of BYTES rather than of lines with the prefix
+  // taken off: the run from the heading to the decline is one string, the same
+  // under the default level, a level that drops it from the log, and one that
+  // turns the log up -- which holds only while no copy of it carries the log's
+  // own prefix at any of them.
+  const fixture = offlineAcceptFixture();
+  promptConfirmMock.mockResolvedValue(false);
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE()));
+    const expected = await expectedConsentSurface(encoded);
+    const shown: Array<string> = [];
+    for (const flags of [
+      {},
+      { "log-level": "silent" },
+      { "log-level": "debug" },
+    ]) {
+      const { stderrWrites, stdoutWrites } =
+        await runOfflineAcceptCapturingStdio({ encoded, fixture, flags });
+      expect(promptConfirmMock).toHaveBeenCalledTimes(1);
+      promptConfirmMock.mockClear();
+      expect(stdoutWrites.join("")).toBe("");
+      const stderr = stderrWrites.join("");
+      const start = stderr.indexOf(SURFACE_HEADING);
+      expect(start).toBeGreaterThanOrEqual(0);
+      shown.push(stderr.slice(start));
+    }
+    for (const level of shown)
+      expect(level).toBe(`${expected.join("\n")}\n${DECLINE_LINE}\n`);
+    // The level that drops every log line is the one the outcome has to survive:
+    // there it is all that tells this run from an acceptance, which writes files
+    // and runs rather than saying anything here.
+    expect(shown[1]).toContain(`\n${DECLINE_LINE}\n`);
+  } finally {
+    fs.rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
 test("handler: the default prompting path prints each line of the terms exactly once", async () => {
-  // The default sink and level already put the log's own output where the prompt
-  // asks, so mirroring there unconditionally would print the whole multi-screen
-  // outline twice. Every line appears exactly as many times as the renderer
-  // emitted it -- twice for the decision facts it deliberately repeats, once for
-  // everything else.
+  // The prompt's copy and the log's own would land on the same terminal here, so
+  // writing both would print the whole multi-screen outline twice. Every line
+  // appears exactly as many times as the renderer emitted it -- twice for the
+  // decision facts it deliberately repeats, once for everything else.
   const fixture = offlineAcceptFixture();
   promptConfirmMock.mockResolvedValue(false);
   try {
@@ -5434,13 +5478,190 @@ test("handler: the default prompting path prints each line of the terms exactly 
         expected.filter((rendered) => rendered === line).length,
       );
     expect(surfaceOnStderr(stderrWrites)).toEqual(expected);
-    // The one copy is the log's: the default path's rendering is unchanged.
-    expect(stderrWrites.join("")).toContain(
-      `[INFO] [accept] ${SURFACE_HEADING}`,
-    );
+    // The one copy is the prompt's, so the surface reaches the operator plain:
+    // the prefix belongs to a diagnostic record, not to the terms a question is
+    // asked about.
+    expect(stderrWrites.join("")).not.toContain("[INFO]");
   } finally {
     fs.rmSync(fixture.dir, { recursive: true, force: true });
   }
+});
+
+// --- handler: the prompt's copy carries the redaction on its own -------------
+// Nothing between summarizeInvitation's composition and the operator's terminal
+// redacts key material on this routing: the prompt's own stream runs no pass, and
+// with no --log-file the log sink -- where core's prefixer would have been a
+// second chance -- is never called. These drive hostile terms through the whole
+// prompting path and hold the transcript to what that composition boundary owes.
+
+/**
+ * Private-key armor in the two forms the redaction rule distinguishes: a whole
+ * block, and a BEGIN marker with no END, whose fail-closed rule takes everything
+ * composed behind it. Each is one line, so either can stand as a declared name or
+ * a CSV heading.
+ */
+const ARMOR_WHOLE =
+  "-----BEGIN RSA PRIVATE KEY-----MIIEowIBAAKCAQEA-----END RSA PRIVATE KEY-----";
+const ARMOR_DANGLING =
+  "-----BEGIN OPENSSH PRIVATE KEY-----b3BlbnNzaC1rZXktdjEA";
+
+/** The key bodies themselves: the bytes a leak puts on the operator's terminal. */
+const ARMOR_BODIES = ["MIIEowIBAAKCAQEA", "b3BlbnNzaC1rZXktdjEA"];
+
+// One planting per partner-declared value the consent surface renders, each
+// carrying a distinctive prefix so the assertion that it arrived reads the value
+// rather than the label beside it.
+const ARMORED_IDENTITY = `Inviter Org ${ARMOR_WHOLE}`;
+const ARMORED_REFERENCE = `MOU-2026-0042 ${ARMOR_WHOLE}`;
+const ARMORED_PURPOSE = `Program evaluation ${ARMOR_DANGLING}`;
+const ARMORED_SEND_COLUMN = `sent_column ${ARMOR_WHOLE}`;
+const ARMORED_KEY_NAME = `SSN + LN + DOB ${ARMOR_WHOLE}`;
+const ARMORED_FIELD_NAME = `first_name ${ARMOR_DANGLING}`;
+/** The column this party's own file discloses, and the one the partner requests. */
+const ARMORED_COLUMN = `diagnosis ${ARMOR_DANGLING}`;
+
+/**
+ * The plantings the surface renders as text. Each must reach the transcript in
+ * exactly its redacted form, so the check below is reading a fixture that arrived
+ * rather than a surface that dropped it. {@link ARMORED_FIELD_NAME} is not among
+ * them: a declared linkage field is rendered by the label of its semantic type
+ * rather than by the name the partner gave it.
+ */
+const ARMORED_RENDERED = [
+  ARMORED_IDENTITY,
+  ARMORED_REFERENCE,
+  ARMORED_PURPOSE,
+  ARMORED_SEND_COLUMN,
+  ARMORED_KEY_NAME,
+  ARMORED_COLUMN,
+];
+
+/**
+ * An invitation carrying key material in the partner-declared values the
+ * consent surface renders that this fixture plants (the rule-set citation names
+ * and the transform names and parameters are left plain): the inviting party's
+ * identity, the payload names declared in each direction, a linkage key's name,
+ * a linkage field's name (with the keys citing it), and the legal agreement's
+ * reference and purpose. The declared `receive` names the column {@link
+ * armoredFixture} discloses, so the acceptance renders it in this party's own
+ * outbound set too.
+ */
+function armoredToken(): InvitationToken {
+  const base = sampleToken(FUTURE());
+  const terms = base.linkageTerms;
+  const renamed = (field: string) =>
+    field === "first_name" ? ARMORED_FIELD_NAME : field;
+  return {
+    ...base,
+    linkageTerms: {
+      ...terms,
+      identity: ARMORED_IDENTITY,
+      legalAgreement: {
+        reference: ARMORED_REFERENCE,
+        purpose: ARMORED_PURPOSE,
+        expirationDate: "2099-12-31",
+      },
+      linkageFields: terms.linkageFields.map((field) => ({
+        ...field,
+        name: renamed(field.name),
+      })),
+      linkageKeys: terms.linkageKeys.map((key, index) => ({
+        ...key,
+        ...(index === 0 ? { name: ARMORED_KEY_NAME } : {}),
+        elements: key.elements.map((element) => ({
+          ...element,
+          field: renamed(element.field),
+        })),
+        ...(key.swap !== undefined
+          ? {
+              swap: [renamed(key.swap[0]), renamed(key.swap[1])] as [
+                string,
+                string,
+              ],
+            }
+          : {}),
+      })),
+      payload: {
+        send: [{ name: ARMORED_SEND_COLUMN }],
+        receive: [{ name: ARMORED_COLUMN }],
+      },
+    },
+  };
+}
+
+/** The offline fixture whose input file discloses {@link ARMORED_COLUMN}. */
+function armoredFixture(): ReturnType<typeof offlineAcceptFixture> {
+  const fixture = offlineAcceptFixture();
+  fs.writeFileSync(
+    fixture.input,
+    `first_name,last_name,dob,ssn,${ARMORED_COLUMN}\n` +
+      "Alice,Smith,1990-01-02,123456789,A\n",
+  );
+  return fixture;
+}
+
+test("handler: hostile terms leave the sink-level pass nothing to do", async () => {
+  // The invariant the prompting path rests on: every partner-declared value
+  // is redacted where it is composed, so the pass the log sink would have applied
+  // -- core's prefixer, over the whole composed line -- changes nothing on the
+  // operator's transcript. A field composed with a plain escape instead fails
+  // here rather than putting key material on a terminal.
+  const fixture = armoredFixture();
+  promptConfirmMock.mockResolvedValue(false);
+  try {
+    const encoded = await encodeInvitation(armoredToken());
+    const { stderrWrites, stdoutWrites } = await runOfflineAcceptCapturingStdio(
+      { encoded, fixture },
+    );
+    expect(stdoutWrites.join("")).toBe("");
+    const transcript = stderrWrites.join("");
+    expect(transcript).toContain(SURFACE_HEADING);
+    // No line carries the log's prefix, so no sink-level pass ran over any of
+    // this: a routing that sent the surface through the log as well would fail
+    // here rather than leave the prefixer masking a composition site that
+    // stopped redacting.
+    expect(transcript).not.toMatch(/^\[[^\]]*\] \[[A-Z]+\] \[/m);
+    for (const line of transcript.split("\n"))
+      expect(redactPrivateKeyMaterial(line)).toBe(line);
+    for (const body of ARMOR_BODIES) expect(transcript).not.toContain(body);
+    expect(transcript).not.toContain("PRIVATE KEY");
+    for (const planted of ARMORED_RENDERED)
+      expect(transcript).toContain(redactPrivateKeyMaterial(planted));
+  } finally {
+    fs.rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: an armored allowed-character class is refused at the decode", async () => {
+  // The one rendered partner value the fixture above cannot plant: an
+  // allowed-character class is validated as a regex character class, and armor's
+  // run of dashes does not compile as one. So the surface never sees such a class
+  // -- the refusal is the check, and it too reaches the operator redacted.
+  const base = sampleToken(FUTURE());
+  const crafted = await encodeRaw({
+    ...base,
+    linkageTerms: {
+      ...base.linkageTerms,
+      linkageFields: base.linkageTerms.linkageFields.map((field) =>
+        field.type === "first_name"
+          ? {
+              ...field,
+              constraints: {
+                ...field.constraints,
+                allowedCharacters: `A-Z ${ARMOR_DANGLING}`,
+              },
+            }
+          : field,
+      ),
+    },
+  });
+  const err = await decodeAndValidateInvitation(crafted).catch(
+    (e: unknown) => e,
+  );
+  expect(err).toBeInstanceOf(UsageError);
+  const message = (err as Error).message;
+  expect(message).toContain("allowedCharacters");
+  expect(redactPrivateKeyMaterial(message)).toBe(message);
 });
 
 test("handler: --consent-to-terms leaves the terms in the --log-file, not on the terminal", async () => {

@@ -1076,14 +1076,15 @@ export async function handler(argv: Arguments): Promise<void> {
       // routed diagnostics to a --log-file or above info, so consent is never asked
       // for terms this run did not show. --consent-to-terms asks nothing, so its
       // surface stays plain diagnostic output on the routing the operator chose.
+      const consentSurface = consentSurfaceSink({
+        log,
+        logFile: options.logFile,
+        willPrompt: !consentToTerms,
+      });
       displayInvitation({
         token: ready.token,
         ownOutboundSend,
-        emit: consentSurfaceSink({
-          log,
-          logFile: options.logFile,
-          willPrompt: !consentToTerms,
-        }),
+        emit: consentSurface,
         promptFollows: !consentToTerms,
         runsExchangeThrough,
       });
@@ -1112,7 +1113,13 @@ export async function handler(argv: Arguments): Promise<void> {
         );
       }
       if (!confirmed) {
-        log.info("invitation declined; no files were written");
+        // The answer goes back through the surface's own sink rather than the
+        // logger: it is what became of the question, so it belongs on the terminal
+        // that asked whatever the operator set --log-level to. That is also what
+        // tells a decline from an acceptance at a level carrying neither's log
+        // lines -- an acceptance goes on to write files and run, a decline says
+        // this and stops, and both exit 0.
+        consentSurface("invitation declined; no files were written");
         return;
       }
 
