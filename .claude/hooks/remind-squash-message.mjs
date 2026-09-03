@@ -29,6 +29,21 @@
 // value counts what follows the colon. With no `--head`, or a value no ref
 // resolves for, the count falls back to the cwd's HEAD.
 //
+// A COMMAND CAN CHAIN SEVERAL `gh pr create` CALLS, and one reminder for the whole
+// command is then wrong at both ends: the count would come from the first `--head`
+// and the file key from the last PR URL, so a long branch's count lands in a short
+// branch's file. Past one create, the `--head` values and the PR numbers are read
+// as lists in command and output order and paired by position, one reminder per
+// pair carrying more than one commit, joined into a single message. Position is
+// the only thing that pairs them, so the pairing is trusted only when the two
+// lists are the same length: a create that failed, or output carrying part of what
+// ran, leaves lists that cannot be aligned, and the hook emits nothing rather than
+// address a message wrongly -- the session's retry of the failed create fires the
+// hook again. Within a pair, a `--head` no ref resolves for is skipped rather than
+// counted from the cwd's HEAD, which cannot be the branch of more than one pull
+// request, and a run whose main checkout root will not resolve emits nothing,
+// there being no per-PR file to name without it.
+//
 // THE PATH IS COMPUTED HERE rather than described to the session, so the
 // instruction names one absolute file instead of a convention each session
 // re-derives:
@@ -47,12 +62,17 @@
 // than an instruction to write a path that was guessed.
 //
 // STATED LIMIT. What a PostToolUse payload carries for a Bash result is the
-// harness's business and is not asserted here: the PR URL is looked for in every
-// string-valued candidate field, and a payload carrying none of them falls back to
-// the branch key rather than being wrong. `--head` is likewise read off the raw
-// command text rather than a parsed argv, so a `--head` written inside another
-// flag's quoted value is read as if it named the branch; that lands on the
-// unresolvable-ref path, which counts the cwd's HEAD.
+// harness's business and is not asserted here: PR URLs are looked for in the
+// string-valued candidate fields in turn and taken from the first one carrying
+// any -- a payload repeating one result under two field names would otherwise
+// list every URL twice and break the pairing -- and a payload carrying none falls
+// back to the branch key rather than being wrong. The command is likewise read as
+// raw text rather than a parsed argv: a `--head` written inside another flag's
+// quoted value is read as if it named the branch, which lands on the
+// unresolvable-ref path, and a literal `gh pr create` inside one (a PR body
+// quoting the command) counts as another create, routing a single create through
+// the pairing path -- where its reminder is unchanged while the lists still pair,
+// and dropped when they do not.
 //
 // PostToolUse hooks cannot block -- the command has already run -- so there is no
 // block()/exit(2) path here, only an additionalContext message or nothing. Fail
@@ -73,7 +93,9 @@ const PR_URL = /https?:\/\/[^\s"']+?\/pull\/(\d+)\b/g;
 
 // `--head <branch>` or `--head=<branch>` as `gh pr create` takes it, with the
 // value optionally quoted the way a shell command line carries it.
-const HEAD_FLAG = /--head(?:=|\s+)(?:"([^"]*)"|'([^']*)'|(\S+))/;
+const HEAD_FLAG = /--head(?:=|\s+)(?:"([^"]*)"|'([^']*)'|(\S+))/g;
+
+const GH_PR_CREATE = /gh pr create/g;
 
 function git(cwd, args) {
   return execFileSync("git", args, {
@@ -96,13 +118,12 @@ function commitCountOverBase(cwd, ref) {
   }
 }
 
-// The branch `gh pr create` was told to open the pull request for, or null when
-// the command names none. A fork-style `owner:branch` value keeps the branch.
-function headRefFromCommand(command) {
-  const match = command.match(HEAD_FLAG);
-  if (match === null) return null;
-  const value = (match[1] ?? match[2] ?? match[3]).replace(/^[^:]*:/, "");
-  return value === "" ? null : value;
+// Every branch the command tells `gh pr create` to open a pull request for, in
+// command order. A fork-style `owner:branch` value keeps the branch.
+function headRefsFromCommand(command) {
+  return [...command.matchAll(HEAD_FLAG)]
+    .map((match) => (match[1] ?? match[2] ?? match[3]).replace(/^[^:]*:/, ""))
+    .filter((value) => value !== "");
 }
 
 function candidates(toolResponse) {
@@ -113,14 +134,13 @@ function candidates(toolResponse) {
   );
 }
 
-// The last PR URL in the output wins: `gh pr create` prints its progress line
-// first and the URL of the pull request it created last.
-function prNumberKey(toolResponse) {
+// Every PR number in the first candidate field carrying one, in output order.
+function prNumbersFromResponse(toolResponse) {
   for (const candidate of candidates(toolResponse)) {
-    const matches = [...candidate.matchAll(PR_URL)];
-    if (matches.length > 0) return matches[matches.length - 1][1];
+    const numbers = [...candidate.matchAll(PR_URL)].map((match) => match[1]);
+    if (numbers.length > 0) return numbers;
   }
-  return null;
+  return [];
 }
 
 function branchKey(cwd) {
@@ -168,6 +188,43 @@ function printReminder(count) {
   );
 }
 
+// The reminder for a command carrying a single `gh pr create`, or null when the
+// branch does not carry enough commits to need a squash message.
+function singleCreateReminder(cwd, command, toolResponse) {
+  const [headRef] = headRefsFromCommand(command);
+  const count =
+    (headRef === undefined ? null : commitCountOverBase(cwd, headRef)) ??
+    commitCountOverBase(cwd, "HEAD");
+  if (count === null || count <= 1) return null;
+
+  const key = prNumbersFromResponse(toolResponse).at(-1) ?? branchKey(cwd);
+  const root = key === null ? null : mainCheckoutRoot(cwd);
+  return root === null
+    ? printReminder(count)
+    : fileReminder(count, join(root, MESSAGE_SUBDIR, `${key}.txt`));
+}
+
+// One reminder per created pull request whose branch carries more than one
+// commit, or null when nothing qualifies or the heads and the PR numbers cannot
+// be paired by position.
+function multiCreateReminder(cwd, command, toolResponse) {
+  const headRefs = headRefsFromCommand(command);
+  const prNumbers = prNumbersFromResponse(toolResponse);
+  if (headRefs.length === 0 || headRefs.length !== prNumbers.length)
+    return null;
+  const root = mainCheckoutRoot(cwd);
+  if (root === null) return null;
+
+  const reminders = headRefs
+    .map((headRef, index) => ({
+      count: commitCountOverBase(cwd, headRef),
+      path: join(root, MESSAGE_SUBDIR, `${prNumbers[index]}.txt`),
+    }))
+    .filter(({ count }) => count !== null && count > 1)
+    .map(({ count, path }) => fileReminder(count, path));
+  return reminders.length === 0 ? null : reminders.join("\n");
+}
+
 function main() {
   let event;
   try {
@@ -177,23 +234,16 @@ function main() {
   }
   if (event.tool_name !== "Bash") process.exit(0);
   const command = event?.tool_input?.command;
-  if (typeof command !== "string" || !command.includes("gh pr create")) {
-    process.exit(0);
-  }
+  if (typeof command !== "string") process.exit(0);
+  const createCount = [...command.matchAll(GH_PR_CREATE)].length;
+  if (createCount === 0) process.exit(0);
 
   const cwd = typeof event.cwd === "string" ? event.cwd : process.cwd();
-  const headRef = headRefFromCommand(command);
-  const count =
-    (headRef === null ? null : commitCountOverBase(cwd, headRef)) ??
-    commitCountOverBase(cwd, "HEAD");
-  if (count === null || count <= 1) process.exit(0);
-
-  const key = prNumberKey(event.tool_response) ?? branchKey(cwd);
-  const root = key === null ? null : mainCheckoutRoot(cwd);
   const reminder =
-    root === null
-      ? printReminder(count)
-      : fileReminder(count, join(root, MESSAGE_SUBDIR, `${key}.txt`));
+    createCount === 1
+      ? singleCreateReminder(cwd, command, event.tool_response)
+      : multiCreateReminder(cwd, command, event.tool_response);
+  if (reminder === null) process.exit(0);
 
   process.stdout.write(
     JSON.stringify({
