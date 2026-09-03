@@ -39,7 +39,11 @@ Volume=/etc/psilink-relay/certs:/etc/coturn/certs:ro
 
 Exec=-c /etc/coturn/turnserver.conf
 
-NoNewPrivileges=true
+# no-new-privileges is deliberately absent: the image's entrypoint acquires
+# cap_net_bind_service at exec, which that flag forbids -- measured on the live
+# relay 2026-09-03 (with the flag, an errno-13 bind loop on 443; without it, the
+# listener is up in seconds). DropCapability/AddCapability remains the control
+# that bounds the acquisition.
 DropCapability=ALL
 AddCapability=NET_BIND_SERVICE
 ReadOnly=true

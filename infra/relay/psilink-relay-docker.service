@@ -7,17 +7,17 @@
 # same image, the same mounts, and the same container flags; edit them together.
 # The mapping, directive to flag: ContainerName -> --name, Network=host ->
 # --network host, each Volume -> -v, ReadOnly=true -> --read-only, Tmpfs ->
-# --tmpfs, DropCapability/AddCapability -> --cap-drop/--cap-add,
-# NoNewPrivileges=true -> --security-opt no-new-privileges, LogDriver=journald ->
-# --log-driver journald, Exec -> the arguments after the image.
+# --tmpfs, DropCapability/AddCapability -> --cap-drop/--cap-add, LogDriver=journald
+# -> --log-driver journald, Exec -> the arguments after the image.
 #
 # docker run in the foreground, not -d: systemd supervises the run itself, so
 # Restart=always is what brings the relay back and `journalctl -u
 # psilink-relay.service` is where its output goes. A detached run would exit
 # immediately and leave systemd supervising nothing.
 #
-# UNTESTED LIVE: no relay has been started from this unit. Its flags were checked
-# against the docker CLI's own parser and nothing further.
+# LIVE, driven 2026-09-03 on the relay box: image build, uid probe, certificate
+# deploy, config render, and the 443 bind were all exercised from this unit's
+# docker run. The Quadlet path (psilink-relay.container) remains undriven.
 
 [Unit]
 Description=psilink WebRTC relay (coturn, TURNS on 443/tcp)
@@ -34,11 +34,15 @@ ExecStartPre=/opt/psilink-relay/render-config.sh
 # --rm removes the container when the run ends, so this clears only what an
 # ungraceful daemon exit left behind, and is not an error when there is nothing.
 ExecStartPre=-/usr/bin/docker rm -f psilink-relay
+# no-new-privileges is deliberately absent: the image's entrypoint acquires
+# cap_net_bind_service at exec, which that flag forbids -- measured on the live
+# relay 2026-09-03 (with the flag, an errno-13 bind loop on 443; without it, the
+# listener is up in seconds). --cap-drop ALL --cap-add NET_BIND_SERVICE remains
+# the control that bounds the acquisition.
 ExecStart=/usr/bin/docker run --rm --name psilink-relay \
   --network host \
   --read-only --tmpfs /var/tmp \
   --cap-drop ALL --cap-add NET_BIND_SERVICE \
-  --security-opt no-new-privileges \
   --log-driver journald \
   -v /etc/psilink-relay/turnserver.conf:/etc/coturn/turnserver.conf:ro \
   -v /etc/psilink-relay/certs:/etc/coturn/certs:ro \
