@@ -13,8 +13,10 @@ import {
   getDefaultLinkageTerms,
   getLogger,
   inferMetadata,
+  LinkageTermsUnsatisfiableError,
   MAX_NAME_LENGTH,
   OperatorConfigError,
+  sanitizeErrorForDisplay,
   StandardizationTermsError,
   UsageError,
 } from "@psilink/core";
@@ -1874,21 +1876,154 @@ test("validateInvite: a config plus an agreeing input file succeeds from the con
   }
 });
 
-test("validateInvite: a config plus a disagreeing input fails naming the unsatisfiable fields", async () => {
-  const terms = defaultTerms();
-  const { dir, configPath, keyPath } = withConfig(terms);
+// --- The mint-boundary linkage gate ------------------------------------------
+
+// Two keys over two fields, so a CSV missing one column leaves an enumeration
+// small enough to read whole (the default terms declare more keys than the cause
+// chain renders).
+function twoKeyTerms(): LinkageTerms {
+  return {
+    ...defaultTerms(),
+    linkageFields: [
+      { name: "dob", type: "date_of_birth" },
+      { name: "ssn", type: "ssn" },
+    ],
+    linkageKeys: [
+      { name: "DOB", elements: [{ field: "dob" }] },
+      { name: "SSN", elements: [{ field: "ssn" }] },
+    ],
+  };
+}
+
+// One key whose own cleaning is self-defeating: its field resolves to a present
+// column, so the field-coverage verdict passes, and the key still produces
+// nothing for any record.
+function deadKeyTerms(): LinkageTerms {
+  return {
+    ...defaultTerms(),
+    linkageFields: [{ name: "dob", type: "date_of_birth" }],
+    linkageKeys: [
+      {
+        name: "DOB",
+        elements: [
+          {
+            field: "dob",
+            transform: [
+              { function: "parse_date", params: { inputFormat: "MM/DD" } },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+}
+
+// The mint refusal rendered the way the CLI's error boundary renders it
+// (`sanitizeErrorForDisplay` in `runOrExit`): the names sit on cause links, which
+// the error's own `.message` does not carry.
+async function mintRefusal(params: {
+  terms: LinkageTerms;
+  header: string;
+}): Promise<{ rendered: string; configPath: string; dir: string }> {
+  const { dir, configPath, keyPath } = withConfig(params.terms);
+  const input = writeCsv(dir, params.header);
+  let thrown: unknown;
   try {
-    // Only a first-name column: last name, dob, and ssn cannot be produced.
-    const input = writeCsv(dir, "first_name,notes,memo,comment");
+    await validateInvite({
+      resolved: { mode: "offline", input },
+      options: testOptions({ configFile: configPath, keyFile: keyPath }),
+      acceptTimeout: 900,
+      log: silentLog,
+    });
+  } catch (err) {
+    thrown = err;
+  }
+  expect(thrown).toBeInstanceOf(LinkageTermsUnsatisfiableError);
+  // A UsageError subclass, so the CLI's error->exit boundary reports exit 64.
+  expect(thrown).toBeInstanceOf(UsageError);
+  return { rendered: sanitizeErrorForDisplay(thrown), configPath, dir };
+}
+
+test("validateInvite: a config plus a disagreeing input is refused before minting", async () => {
+  const { rendered, configPath, dir } = await mintRefusal({
+    terms: twoKeyTerms(),
+    header: "dob,notes,memo,comment",
+  });
+  try {
+    expect(rendered).toContain(
+      "this CSV cannot satisfy every linkage key the configuration declares",
+    );
+    expect(rendered).toContain(
+      "1 of the 2 agreed linkage keys cannot be produced from this input's " +
+        "columns",
+    );
+    expect(rendered).toContain("linkage key the CSV cannot produce: SSN");
+    expect(rendered).toContain("unsatisfied field: ssn (ssn)");
+    // The mint states what generating would cost and points at the operator's
+    // own authoring, naming the file the terms came from: there is no partner to
+    // renegotiate with until this invitation is sent.
+    expect(rendered).toContain(
+      "Generating an invitation would hand your partner terms that this " +
+        "configuration's own exchange refuses to run",
+    );
+    expect(rendered).toContain(
+      "Provide a CSV that covers the required field types, then generate the " +
+        `invitation again; these terms come from ${configPath}.`,
+    );
+    expect(rendered).not.toContain("ask your partner");
+    expect(rendered).not.toContain("re-establish the exchange");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("validateInvite: a config whose key cleaning drops every record is refused before minting", async () => {
+  // The column the key needs is present, so the field-coverage verdict passes;
+  // the key is still self-defeating, and an invitation carrying it would mint,
+  // reach a partner, and then be refused by this party's own `psilink exchange`.
+  const { rendered, configPath, dir } = await mintRefusal({
+    terms: deadKeyTerms(),
+    header: "first_name,last_name,dob,ssn",
+  });
+  try {
+    expect(rendered).toContain(
+      "the cleaning declared for the one agreed linkage key drops every record",
+    );
+    expect(rendered).toContain("linkage key that drops every record: DOB");
+    // The remedy is terms-side only: no column is missing, so nothing asks for a
+    // different CSV.
+    expect(rendered).toContain(
+      "Correct the cleaning steps those keys declare, then generate the " +
+        `invitation again; these terms come from ${configPath}.`,
+    );
+    expect(rendered).not.toContain("Provide a CSV");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("validateInvite: a config declaring no linkage key never reaches the mint gate", async () => {
+  // The third blocking shape the mint gate grades. A configuration cannot carry
+  // it: the terms schema floors linkageKeys at one entry, so the config parse
+  // refuses the document before the gate sees it. The gate still grades the shape
+  // (it consumes core's whole verdict), which is what keeps a terms document
+  // reaching it by some other route from minting vacuously.
+  const { dir, configPath, keyPath } = withConfig({
+    ...twoKeyTerms(),
+    linkageKeys: [],
+  });
+  try {
+    const input = writeCsv(dir, "first_name,last_name,dob,ssn");
     const promise = validateInvite({
       resolved: { mode: "offline", input },
       options: testOptions({ configFile: configPath, keyFile: keyPath }),
       acceptTimeout: 900,
       log: silentLog,
     });
-    await expect(promise).rejects.toBeInstanceOf(UsageError);
-    await expect(promise).rejects.toThrow(/last_name/);
-    await expect(promise).rejects.toThrow(/cannot satisfy/);
+    await expect(promise).rejects.toThrow(/linkage_keys/);
+    await expect(promise).rejects.not.toBeInstanceOf(
+      LinkageTermsUnsatisfiableError,
+    );
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

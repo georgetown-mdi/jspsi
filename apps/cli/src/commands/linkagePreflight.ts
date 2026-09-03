@@ -12,23 +12,40 @@ import {
 import type { LinkageTerms, Metadata, Standardization } from "@psilink/core";
 
 /**
- * Source-specific wording for {@link checkLinkageSatisfiability}. The accept and
- * exchange entry points share the refusal and the field sanitization but differ in
- * where the terms came from and how an operator settles terms their input cannot
- * satisfy.
+ * Source-specific wording for {@link checkLinkageSatisfiability}. The accept,
+ * exchange, and invite entry points share the refusal and the field sanitization
+ * but differ in where the terms came from, what proceeding would cost, and how an
+ * operator settles terms their input cannot satisfy.
  */
 export interface LinkagePreflightMessaging {
   /** Possessive noun naming the terms' origin in the messages: `"invitation"` on
    * the accept path (the partner's adopted terms), `"configuration"` on the
-   * exchange path (the committed config). */
+   * exchange and invite paths (the committed config). */
   source: string;
-  /** Clause closing the block error after the remedy lead the verdict selects
-   * ("...covers the required field types, "). Accept points at requesting a fresh
-   * invitation; exchange at re-establishing the committed exchange. Both name the
-   * out-of-band renegotiation that is the real remedy for terms this input cannot
-   * satisfy. */
+  /** Sentence closing the block error's own message, stating what proceeding
+   * past this shortfall would cost. The accept and exchange paths are about to
+   * run, so both take {@link RUN_BLOCK_CONSEQUENCE}; the invite path mints
+   * instead, where what a block prevents is disclosing an invitation rather than
+   * running a short exchange. */
+  blockConsequence: string;
+  /** Clause closing the block error's remedy link after the remedy lead the
+   * verdict selects ("...covers the required field types, "). Accept points at
+   * requesting a fresh invitation and exchange at re-establishing the committed
+   * exchange -- the out-of-band renegotiation that is the real remedy for terms
+   * an adopted set leaves this input unable to satisfy. Invite points at the
+   * operator's own authoring instead: the inviter wrote these terms, and no
+   * partner has seen them yet, so there is nothing to renegotiate. */
   blockRemedy: string;
 }
+
+/**
+ * The consequence a block states on the paths whose next step is the exchange
+ * itself. Shared rather than written out at each of them, so the accept and
+ * exchange refusals cannot drift into describing the same cost differently.
+ */
+export const RUN_BLOCK_CONSEQUENCE =
+  "Running would exchange fewer keys than the agreed terms declare, while " +
+  "the exchange record would still name every field those terms reference.";
 
 /**
  * How many cause links a block's name enumeration may occupy. The display
@@ -74,11 +91,13 @@ function fitDetailLinks(details: string[], overflowNoun: string): string[] {
  * enforces at the run boundary, so this is advance notice of a refusal that would
  * fire anyway -- earlier, before any connection or credential, and in wording that
  * names where the terms came from. The offline accept path calls no prepare at
- * all, so there this is the only place the refusal lands.
+ * all, so there this is the only place the refusal lands; the offline mint path
+ * calls none either, and there the refusal is what keeps an invitation whose own
+ * exchange is refused from reaching a partner at all.
  *
  * This wrapper owns the source-specific wording and the partner-sourced name
- * handling, kept in one copy so the accept and exchange paths cannot drift apart
- * on the escaping. The shortfall itself is phrased by core's
+ * handling, kept in one copy so the accept, exchange, and invite paths cannot
+ * drift apart on the escaping. The shortfall itself is phrased by core's
  * {@link summarizeLinkageShortfall}, the same fragment the run-boundary refusal
  * states.
  *
@@ -130,29 +149,41 @@ export function checkLinkageSatisfiability(
   // The remedy is chained ahead of the names for the reason the transport refusals
   // chain theirs first: the renderer's depth bound reaches it before any detail.
   //
-  // Ordered by how directly the operator acts on each: the unsatisfied fields name
-  // what a conforming CSV has to carry, the dead keys name what a corrected terms
-  // document has to fix, and the unsatisfiable keys report which agreed keys those
-  // field gaps cost -- a consequence of the first list rather than a separate step.
-  // With no DECLARED field unproducible -- the keys are unsatisfiable only by
-  // referencing undeclared fields -- there is no field link at all and the key
-  // links carry the whole enumeration.
-  const details = [
-    ...verdict.unsatisfiedFields.map(
-      (field) => `unsatisfied field: ${field.name} (${field.type})`,
+  // Ordered by what the verdict blocks on: the failing keys are the refusal, so
+  // they lead and survive the truncation `fitDetailLinks` applies -- a terms
+  // document declaring more entries than the renderer walks would otherwise spend
+  // the whole budget on fields and name not one of the keys they cost. The dead
+  // keys precede the unsatisfiable ones because only a corrected terms document
+  // settles them, and the fields follow as the account of WHY the unsatisfiable
+  // keys failed.
+  //
+  // Only the fields an unsatisfiable key REFERENCES are named. `unsatisfiedFields`
+  // grades every declared field, and a terms document may declare one no key
+  // draws on: that field costs no agreed key, so the run boundary does not block
+  // on it and naming it here would put a gap the operator need not close ahead of
+  // the ones they must. A dead key contributes none of these -- the dead grade is
+  // scoped to keys whose every element field resolves.
+  const blockingFieldNames = new Set(
+    verdict.unsatisfiableKeys.flatMap((key) =>
+      key.elements.map((element) => element.field),
     ),
+  );
+  const details = [
     ...verdict.deadKeys.map(
       (key) => `linkage key that drops every record: ${key.name}`,
     ),
     ...verdict.unsatisfiableKeys.map(
       (key) => `linkage key the CSV cannot produce: ${key.name}`,
     ),
+    ...verdict.unsatisfiedFields
+      .filter((field) => blockingFieldNames.has(field.name))
+      .map((field) => `unsatisfied field: ${field.name} (${field.type})`),
   ];
 
   // The remedy lead names the step each shortfall actually takes: a missing column
   // is fixed in the CSV, a dead key only in the terms, so a refusal carrying both
-  // names both. `blockRemedy` then closes with the out-of-band renegotiation that
-  // settles terms this input cannot satisfy at all.
+  // names both. `blockRemedy` then closes with what settles terms this input
+  // cannot satisfy at all, which differs by where the terms came from.
   const remedyLeads: string[] = [];
   if (verdict.unsatisfiableKeys.length > 0)
     remedyLeads.push("provide a CSV that covers the required field types");
@@ -162,9 +193,8 @@ export function checkLinkageSatisfiability(
 
   throw new LinkageTermsUnsatisfiableError(
     `this CSV cannot satisfy every linkage key the ${messaging.source} ` +
-      `declares: ${summarizeLinkageShortfall(verdict)}. Running would exchange fewer ` +
-      "keys than the agreed terms declare, while the exchange record would " +
-      "still name every field those terms reference.",
+      `declares: ${summarizeLinkageShortfall(verdict)}. ` +
+      messaging.blockConsequence,
     {
       cause: chainDetailCauses([
         `${remedy.charAt(0).toUpperCase()}${remedy.slice(1)}, ${messaging.blockRemedy}`,
