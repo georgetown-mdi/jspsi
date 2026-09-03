@@ -130,7 +130,7 @@ export const COVERED_VECTORS = [
   {
     vectors: "terms-envelope-vectors.json",
     reason:
-      "the field set, field order, and values each terms-exchange frame slot carries beside `linkageTerms` -- the record count, the effective key count, the protocol version, the save intent, the payload-intent flag, and the observed host key -- which a partner reads by name on the one round-trip every exchange performs.",
+      "the field set, field order, and values each terms-exchange frame slot carries beside `linkageTerms` -- the record count, the protocol version, the save intent, the payload-intent flag, and the observed host key -- which a partner reads by name on the one round-trip every exchange performs.",
   },
 ];
 

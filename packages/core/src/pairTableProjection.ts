@@ -35,10 +35,12 @@ export interface ResolvedRunShape {
    * fanOutFunctions.ts), so it equals {@link localRecordCount} for a party whose
    * own cleaning does not fan out.
    *
-   * It is the figure role resolution weighed and the one the partner holds for
-   * this party, which is why it is carried separately rather than in place of the
-   * raw count: the raw count is what this party's rows actually number, and what
-   * a projection over its own records multiplies.
+   * It is the figure role resolution weighed, the one the partner holds for this
+   * party, and the one {@link projectPairTable} multiplies -- both parties hold
+   * both declared counts and neither holds the other's raw one, so a projection
+   * over the declared pair is the only one the two sides agree on. The raw count
+   * is carried beside it rather than replaced by it, since it is what this
+   * party's rows actually number.
    */
   readonly localDeclaredRecordCount: number;
   /** The partner's record count as declared on the terms exchange. */
@@ -84,8 +86,13 @@ export const PAIR_TABLE_ADVISORY_MAX_PAIRS = 10_000_000;
  * whether that product is above {@link PAIR_TABLE_ADVISORY_MAX_PAIRS}.
  */
 export interface PairTableProjection {
-  /** This party's own record count, one factor of the product. */
+  /**
+   * This party's own raw dataset record count. Not a factor of the product: it
+   * is the rows the advisory names behind a declared count its cleaning fanned.
+   */
   readonly localRecordCount: number;
+  /** This party's declared record count, one factor of the product. */
+  readonly localDeclaredRecordCount: number;
   /** The partner's declared record count, the other factor. */
   readonly partnerRecordCount: number;
   /**
@@ -115,16 +122,24 @@ function isDeclarableRecordCount(count: number): boolean {
  * the cardinality puts no product on it.
  *
  * Only `many-to-many` grows quadratically: both parties keep their within-dataset
- * duplicates, so the returned-list checks bound the table at this party's own row
- * count times the partner's declared record count and no derived frame or dataset
- * bound narrows it (docs/spec/PROTOCOL.md, The both-sided expansion has no ceiling
- * of its own). Under every other cardinality at most one side keeps duplicates and
- * the table is bounded by a single record count, so there is no product to project
- * and this returns `undefined`.
+ * duplicates, so the returned-list checks bound the table at the two DECLARED
+ * record counts' product and no derived frame or dataset bound narrows it
+ * (docs/spec/PROTOCOL.md, The both-sided expansion has no ceiling of its own).
+ * Under every other cardinality at most one side keeps duplicates and the table is
+ * bounded by a single record count, so there is no product to project and this
+ * returns `undefined`.
+ *
+ * The product is DECLARED times DECLARED on both sides, so the two parties project
+ * the same figure for the same run. Each party holds its own raw row count and
+ * neither holds the other's -- only the declared counts cross the terms exchange
+ * -- so mixing a raw factor with a declared one gives the two sides different
+ * totals for one run, by the fan-out factor of whichever party's cleaning fans
+ * out.
  *
  * The projection is the honest worst case rather than a prediction: it is what the
- * pairing produces when every record on both sides shares one value. A run that
- * matches less produces less, and no run produces more.
+ * pairing produces when every record on both sides shares one value, at counts a
+ * fan-out can only overstate. A run that matches less produces less, and no run
+ * produces more.
  */
 export function projectPairTable(
   shape: ResolvedRunShape,
@@ -132,13 +147,15 @@ export function projectPairTable(
   if (shape.cardinality !== "many-to-many") return undefined;
   if (
     !isDeclarableRecordCount(shape.localRecordCount) ||
+    !isDeclarableRecordCount(shape.localDeclaredRecordCount) ||
     !isDeclarableRecordCount(shape.partnerRecordCount)
   )
     return undefined;
   const projectedPairs =
-    BigInt(shape.localRecordCount) * BigInt(shape.partnerRecordCount);
+    BigInt(shape.localDeclaredRecordCount) * BigInt(shape.partnerRecordCount);
   return {
     localRecordCount: shape.localRecordCount,
+    localDeclaredRecordCount: shape.localDeclaredRecordCount,
     partnerRecordCount: shape.partnerRecordCount,
     projectedPairs,
     exceedsAdvisoryBound:
@@ -215,12 +232,23 @@ function describeCardinality(shape: ResolvedRunShape): string | undefined {
   }
 }
 
+// Both factors are the DECLARED counts, so the sentence names the same two
+// numbers on both parties and the total it reports is the one the partner's own
+// advisory reports. Where this party's cleaning fanned its declared count past
+// its rows, a second sentence says so: the first sentence otherwise names a
+// record count the operator cannot find in its own file.
 function describePairTableProjection(projection: PairTableProjection): string {
   return (
     `This run projects up to ${formatCount(projection.projectedPairs)} matched ` +
-    `pairs: your ${formatCount(projection.localRecordCount)} records times ` +
-    `the ${formatCount(projection.partnerRecordCount)} your partner declared ` +
-    "on the terms exchange. That is above the advisory bound of " +
+    `pairs: the ${formatCount(projection.localDeclaredRecordCount)} records ` +
+    `you declared on the terms exchange times the ` +
+    `${formatCount(projection.partnerRecordCount)} your partner declared. ` +
+    (projection.localDeclaredRecordCount > projection.localRecordCount
+      ? `Your declared count stands for your ` +
+        `${formatCount(projection.localRecordCount)} records, each of which ` +
+        "your own data cleaning fans out into several candidate values. "
+      : "") +
+    "That is above the advisory bound of " +
     `${formatCount(PAIR_TABLE_ADVISORY_MAX_PAIRS)} pairs. Nothing refuses on ` +
     "the projection and the exchange continues, but the result carries one " +
     "row per pair, so expect a large result and a long run. To bring it down, " +

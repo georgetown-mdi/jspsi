@@ -1853,8 +1853,11 @@ export async function runExchange(
   // Local computation: both parties' DECLARED record counts were carried on the
   // terms exchange above (partnerRecordCount), so the role follows without a
   // further message. It is the declared count on both sides, so a party whose own
-  // cleaning fans out trends toward receiver in proportion to the work its
-  // fan-out actually costs.
+  // cleaning fans out is weighed at the larger figure and trends toward SENDER,
+  // in proportion to the work its fan-out actually costs -- away from the
+  // single-pass receiver's sole-resolver seat, which is what leaves a count no
+  // partner can check nothing to buy (docs/spec/PROTOCOL.md, Role resolution and
+  // work minimization).
   const resolvedRole = resolveRole(
     handshakeRole,
     linkageTerms.output,
