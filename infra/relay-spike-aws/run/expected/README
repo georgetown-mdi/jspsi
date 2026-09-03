@@ -1,0 +1,4 @@
+The intersection question 1 measured, from cli/input-a.csv and cli/input-b.csv
+with party A inviting and party B accepting. Both parties resolved these in
+runs/classA-1 and every later run of the local harness, so a run on AWS that
+resolves anything else has changed the measurement rather than moved it.

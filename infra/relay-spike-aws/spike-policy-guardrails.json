@@ -1,0 +1,194 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "OnlyTheFourSmallestInstanceTypes",
+      "Effect": "Deny",
+      "Action": "ec2:RunInstances",
+      "Resource": "arn:aws:ec2:*:*:instance/*",
+      "Condition": {
+        "StringNotEquals": {
+          "ec2:InstanceType": ["t4g.nano", "t4g.micro", "t3.micro", "t3a.micro"]
+        }
+      }
+    },
+    {
+      "Sid": "NoExpensiveVolumeTypes",
+      "Effect": "Deny",
+      "Action": ["ec2:RunInstances", "ec2:CreateVolume"],
+      "Resource": "arn:aws:ec2:*:*:volume/*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:VolumeType": ["io1", "io2", "st1", "sc1", "standard", "gp2"]
+        }
+      }
+    },
+    {
+      "Sid": "NoLargeVolumes",
+      "Effect": "Deny",
+      "Action": ["ec2:RunInstances", "ec2:CreateVolume"],
+      "Resource": "arn:aws:ec2:*:*:volume/*",
+      "Condition": {
+        "NumericGreaterThan": {
+          "ec2:VolumeSize": "16"
+        }
+      }
+    },
+    {
+      "Sid": "NoProvisionedIops",
+      "Effect": "Deny",
+      "Action": ["ec2:RunInstances", "ec2:CreateVolume"],
+      "Resource": "arn:aws:ec2:*:*:volume/*",
+      "Condition": {
+        "NumericGreaterThan": {
+          "ec2:VolumeIops": "3000"
+        }
+      }
+    },
+    {
+      "Sid": "NoDedicatedTenancy",
+      "Effect": "Deny",
+      "Action": ["ec2:RunInstances", "ec2:CreateVpc"],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:Tenancy": ["dedicated", "host"]
+        }
+      }
+    },
+    {
+      "Sid": "NoResizingOrRetenanting",
+      "Effect": "Deny",
+      "Action": [
+        "ec2:ModifyInstanceAttribute",
+        "ec2:ModifyInstancePlacement",
+        "ec2:ModifyVolume",
+        "ec2:ModifyInstanceCapacityReservationAttributes"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "NoCommitmentsCapacityPeeringOrExpensiveNetworking",
+      "Effect": "Deny",
+      "Action": [
+        "ec2:PurchaseReservedInstancesOffering",
+        "ec2:PurchaseHostReservation",
+        "ec2:PurchaseCapacityBlock",
+        "ec2:CreateCapacityReservation*",
+        "ec2:AllocateHosts",
+        "ec2:CreateFleet",
+        "ec2:RequestSpotFleet",
+        "ec2:RequestSpotInstances",
+        "ec2:ModifyReservedInstances",
+        "ec2:AcceptReservedInstancesExchangeQuote",
+        "ec2:CreateNatGateway",
+        "ec2:CreateVpcEndpoint*",
+        "ec2:CreateTransitGateway*",
+        "ec2:CreateVpcPeeringConnection",
+        "ec2:AcceptVpcPeeringConnection",
+        "ec2:CreateClientVpnEndpoint",
+        "ec2:CreateVpnConnection",
+        "ec2:CreateVpnGateway",
+        "ec2:CreateCustomerGateway",
+        "ec2:CreateImage",
+        "ec2:CopyImage",
+        "ec2:CreateSnapshot*",
+        "ec2:CopySnapshot",
+        "ec2:CreateStoreImageTask",
+        "ec2:BundleInstance",
+        "ec2:CreatePlacementGroup",
+        "savingsplans:*",
+        "ec2:CreateLaunchTemplate*",
+        "ec2:CreateIpam*",
+        "ec2:CreateTrafficMirror*",
+        "ec2:CreateNetworkInsights*",
+        "ec2:CreateVerifiedAccess*",
+        "ec2:CreateFlowLogs",
+        "ec2:CreateCarrierGateway",
+        "ec2:ProvisionByoipCidr"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "NoSharingImagesOrSnapshots",
+      "Effect": "Deny",
+      "Action": [
+        "ec2:ModifyImageAttribute",
+        "ec2:ModifySnapshotAttribute",
+        "ec2:DisableImageBlockPublicAccess",
+        "ec2:DisableSnapshotBlockPublicAccess",
+        "ec2:EnableImageDeprecation"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "NoEscalationNoBillingWritesNoAuditTampering",
+      "Effect": "Deny",
+      "Action": [
+        "iam:*",
+        "organizations:*",
+        "account:*",
+        "billing:*",
+        "aws-portal:*",
+        "sts:AssumeRole",
+        "sts:AssumeRoleWithWebIdentity",
+        "sts:AssumeRoleWithSAML",
+        "cloudtrail:*",
+        "config:*",
+        "guardduty:*",
+        "servicequotas:RequestServiceQuotaIncrease",
+        "budgets:Create*",
+        "budgets:Update*",
+        "budgets:Delete*",
+        "budgets:Modify*",
+        "budgets:Execute*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "NoOtherBillableServices",
+      "Effect": "Deny",
+      "Action": [
+        "rds:*",
+        "eks:*",
+        "ecs:*",
+        "elasticmapreduce:*",
+        "sagemaker:*",
+        "redshift:*",
+        "elasticache:*",
+        "lambda:*",
+        "outposts:*",
+        "batch:*",
+        "glue:*",
+        "bedrock:*",
+        "athena:*",
+        "kinesis:*",
+        "elasticloadbalancing:*",
+        "s3:*",
+        "aws-marketplace:*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "NoNonReadCallOutsideUsWest2",
+      "Effect": "Deny",
+      "NotAction": [
+        "ec2:Describe*",
+        "budgets:ViewBudget",
+        "budgets:DescribeBudget*",
+        "tag:GetResources",
+        "tag:GetTagKeys",
+        "tag:GetTagValues",
+        "cloudwatch:GetMetricStatistics",
+        "ce:GetCostAndUsage",
+        "sts:GetCallerIdentity"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringNotEquals": {
+          "aws:RequestedRegion": "us-west-2"
+        }
+      }
+    }
+  ]
+}
