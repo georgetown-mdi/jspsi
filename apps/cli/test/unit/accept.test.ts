@@ -2619,7 +2619,7 @@ test("displayInvitation: the carried disclosed subset shows names, '(none)' when
     ...base,
     disclosedPayloadColumns: ["diagnosis", "notes"],
   });
-  expect(named).toContain("columns you will receive (enforced):");
+  expect(named).toContain("columns you will receive (enforced, 2 declared):");
   expect(named).toContain("\n    - diagnosis");
   expect(named).toContain("\n    - notes");
   // The empty set is a bare "(none)", with nothing after it: the line renders only
@@ -2628,7 +2628,7 @@ test("displayInvitation: the carried disclosed subset shows names, '(none)' when
   // enforcement register is what the label's marker carries. What the declaration
   // commits its party to is stated at length in docs/CLI.md, not on the prompt.
   expect(lines({ ...base, disclosedPayloadColumns: [] }).split("\n")).toContain(
-    "  columns you will receive (enforced): (none)",
+    "  columns you will receive (enforced, 0 declared): (none)",
   );
   expect(lines({ ...base, disclosedPayloadColumns: undefined })).not.toContain(
     "columns you will receive",
@@ -2877,20 +2877,22 @@ test("displayInvitation: the received-columns marker follows what the invitation
     linkageTerms,
     disclosedPayloadColumns: ["diagnosis", "notes"],
   });
-  expect(authored).toContain("columns you will receive (your partner's word):");
+  expect(authored).toContain(
+    "columns you will receive (your partner's word, 2 declared):",
+  );
   expect(authored).toContain("\n    - diagnosis");
   expect(authored).toContain("\n    - notes");
-  expect(authored).not.toContain("columns you will receive (enforced)");
-  expect(carried).toContain("columns you will receive (enforced):");
+  expect(authored).not.toContain("columns you will receive (enforced,");
+  expect(carried).toContain("columns you will receive (enforced, 2 declared):");
   expect(carried).not.toContain(
-    "columns you will receive (your partner's word)",
+    "columns you will receive (your partner's word,",
   );
   // The marker is the whole of the difference: the same columns are listed either
   // way, so nothing else about the surface moves with the basis.
   expect(
     authored.replace(
-      "columns you will receive (your partner's word)",
-      "columns you will receive (enforced)",
+      "columns you will receive (your partner's word, 2 declared)",
+      "columns you will receive (enforced, 2 declared)",
     ),
   ).toBe(carried);
   // An authored EMPTY send is not a declaration at all -- it carries no subset and
@@ -2922,7 +2924,8 @@ test("displayInvitation: the inviter's request-from-acceptor receive shows names
   });
   const named = lines(withReceive([{ name: "dose" }, { name: "outcome" }]));
   expect(named).toContain(
-    "columns the inviting party requests from you (your partner's word):",
+    "columns the inviting party requests from you " +
+      "(your partner's word, 2 declared):",
   );
   expect(named).toContain("\n    - dose");
   expect(named).toContain("\n    - outcome");
@@ -2930,7 +2933,8 @@ test("displayInvitation: the inviter's request-from-acceptor receive shows names
   // direction prints, so "(none)" is the inviter asking for no column rather than
   // the lazy case, which prints nothing.
   expect(lines(withReceive([])).split("\n")).toContain(
-    "  columns the inviting party requests from you (your partner's word): (none)",
+    "  columns the inviting party requests from you " +
+      "(your partner's word, 0 declared): (none)",
   );
   expect(lines(withReceive(undefined))).not.toContain(
     "the inviting party requests from you",
@@ -2939,11 +2943,14 @@ test("displayInvitation: the inviter's request-from-acceptor receive shows names
 
 // The headings the two declared payload directions render under when the inviter
 // authored them, spelled out rather than derived, for the reason the labels above
-// are: a marker that silently changed vocabulary must redden the assertion.
-const DECLARED_SEND_HEADING =
-  "  columns you will receive (your partner's word):";
-const DECLARED_RECEIVE_HEADING =
-  "  columns the inviting party requests from you (your partner's word):";
+// are: a marker that silently changed vocabulary must redden the assertion. Only
+// the direction's declared total is a parameter, so looking a heading up by exact
+// text asserts the rendered total as well as the wording.
+const declaredSendHeading = (declaredTotal: number): string =>
+  `  columns you will receive (your partner's word, ${declaredTotal} declared):`;
+const declaredReceiveHeading = (declaredTotal: number): string =>
+  "  columns the inviting party requests from you " +
+  `(your partner's word, ${declaredTotal} declared):`;
 
 /**
  * A declaration at core's own ceiling, every name long enough to spend the whole
@@ -3005,7 +3012,10 @@ test("displayInvitation: bounds each declared payload list by count and states t
     MAX_PAYLOAD_ENTRIES - MAX_DECLARED_NAMES_SHOWN,
   )}`;
 
-  for (const heading of [DECLARED_SEND_HEADING, DECLARED_RECEIVE_HEADING]) {
+  for (const heading of [
+    declaredSendHeading(MAX_PAYLOAD_ENTRIES),
+    declaredReceiveHeading(MAX_PAYLOAD_ENTRIES),
+  ]) {
     // Per direction, not in total: each list carries its own cap, so one flooded
     // declaration cannot spend the other's allowance.
     const entries = entriesUnder(lines, heading);
@@ -3058,11 +3068,60 @@ test("displayInvitation: bounds each declared payload list by count and states t
         payload: { send: columns, receive: columns },
       },
     });
-    for (const heading of [DECLARED_SEND_HEADING, DECLARED_RECEIVE_HEADING])
+    for (const heading of [
+      declaredSendHeading(width),
+      declaredReceiveHeading(width),
+    ])
       expect(entriesUnder(whole.split("\n"), heading)).toEqual(
         columns.map((column) => column.name),
       );
     expect(whole).not.toContain("not shown here");
+  }
+});
+
+test("displayInvitation: each declared direction's heading states its own declared total", () => {
+  // Under the count bound the closing "and N more" line is the only magnitude a cut
+  // list carries below it, and a padded declared name reproduces that row at a
+  // matching terminal width (the stated limit on logDeclaredPayloadList). The
+  // heading states the same magnitude from above the first painted name, where no
+  // partner text precedes it, so the total is read before any of the declaration's
+  // own bytes and corroborates what the count line says.
+  const log = getLogger("accept-display-declared-total-test");
+  log.setLevel("silent");
+  // A different length per direction, both past the cap: a heading reading the
+  // painted subset, or the other direction's set, disagrees with what is declared
+  // here rather than matching by coincidence.
+  const columns = (prefix: string, count: number): Array<{ name: string }> =>
+    Array.from({ length: count }, (_, index) => ({
+      name: `${prefix}${index}`,
+    }));
+  const send = columns("send", MAX_DECLARED_NAMES_SHOWN + 3);
+  const receive = columns("receive", MAX_DECLARED_NAMES_SHOWN + 7);
+  const base = sampleToken(FUTURE());
+  const lines = renderDisplayInvitation(log, {
+    ...base,
+    linkageTerms: { ...base.linkageTerms, payload: { send, receive } },
+  }).split("\n");
+
+  for (const [heading, declared] of [
+    [declaredSendHeading(send.length), send],
+    [declaredReceiveHeading(receive.length), receive],
+  ] as const) {
+    // Found by exact text, so the rendered heading states this direction's declared
+    // length -- not the cap it painted, not the other direction's -- and carries
+    // nothing the declaration supplied: an interpolated name would fail the match.
+    const headingIndex = lines.indexOf(heading);
+    expect(headingIndex).toBeGreaterThanOrEqual(0);
+    expect(declared.length).toBeGreaterThan(MAX_DECLARED_NAMES_SHOWN);
+    expect(lines[headingIndex + 1]).toBe(`    - ${declared[0].name}`);
+    expect(entriesUnder(lines, heading)).toHaveLength(MAX_DECLARED_NAMES_SHOWN);
+    // Painted plus counted is what the heading states, so the two first-party
+    // numbers can only disagree through a real defect.
+    expect(lines[headingIndex + MAX_DECLARED_NAMES_SHOWN + 1]).toBe(
+      `    ${unshownDeclaredNamesLine(
+        declared.length - MAX_DECLARED_NAMES_SHOWN,
+      )}`,
+    );
   }
 });
 
@@ -3088,7 +3147,9 @@ test("displayInvitation: a declared name reading as the count line stays a list 
     linkageTerms: { ...base.linkageTerms, payload: { send } },
   }).split("\n");
 
-  expect(entriesUnder(lines, DECLARED_SEND_HEADING)[0]).toBe(impostor);
+  expect(entriesUnder(lines, declaredSendHeading(MAX_PAYLOAD_ENTRIES))[0]).toBe(
+    impostor,
+  );
   expect(lines.filter((line) => line === `    - ${impostor}`)).toHaveLength(1);
   expect(lines.filter((line) => line === `    ${impostor}`)).toHaveLength(1);
 });
@@ -4104,9 +4165,10 @@ test("displayInvitation: the operator's own outbound heading sits level with the
   ).split("\n");
 
   expect(lines).toContain(`  ${OUTBOUND_SEND_LABEL}:`);
-  expect(lines).toContain("  columns you will receive (enforced):");
+  expect(lines).toContain("  columns you will receive (enforced, 1 declared):");
   expect(lines).toContain(
-    "  columns the inviting party requests from you (your partner's word):",
+    "  columns the inviting party requests from you " +
+      "(your partner's word, 1 declared):",
   );
   expect(outboundSendEntries(lines)).toEqual(["diagnosis"]);
 });

@@ -109,9 +109,15 @@ export function consentSurfaceSink(params: {
  * budget for the tiering the web consent screen uses, and the marker sits on the
  * first-party LABEL rather than after the value, so no partner-controlled string
  * precedes it on the line and none can be read as carrying it.
+ *
+ * An optional note joins the marker inside the same parenthetical, for a label whose
+ * value alone leaves a magnitude unstated. It rides the label for the reason the
+ * marker does, so it must be first-party text: nothing a partner controls belongs in
+ * one.
  */
-function marked(label: string, fact: ConsentFactId): string {
-  return `${label} (${CONSENT_BASIS_MARKERS[CONSENT_FACTS[fact].basis]})`;
+function marked(label: string, fact: ConsentFactId, note?: string): string {
+  const basis = CONSENT_BASIS_MARKERS[CONSENT_FACTS[fact].basis];
+  return `${label} (${note === undefined ? basis : `${basis}, ${note}`})`;
 }
 
 /**
@@ -346,7 +352,9 @@ function logList(
  * a matching width. That residual is stated rather than closed -- any printable
  * prefix is equally fakeable, the renderer cannot know the terminal's width, and the
  * genuine line still prints exactly once per bounded direction, which is the signal
- * left to recover the true remainder from.
+ * left to recover the true remainder from. The direction's own heading states the
+ * same magnitude from above the first painted name, where no partner text precedes
+ * it at all ({@link declaredPayloadTotalNote}).
  */
 function logDeclaredPayloadList(
   emit: ConsentSurfaceSink,
@@ -357,6 +365,20 @@ function logDeclaredPayloadList(
   const unshownCount = names.length - MAX_DECLARED_NAMES_SHOWN;
   if (unshownCount > 0)
     emit(`${indent}${unshownDeclaredNamesLine(unshownCount)}`);
+}
+
+/**
+ * The magnitude note one declared payload direction's label carries: how many names
+ * that direction's declaration holds, counted over the whole declared set rather
+ * than the subset {@link logDeclaredPayloadList} paints. The web consent screen
+ * states the same magnitude beside its lists; this is the terminal's form of it.
+ *
+ * A count and a fixed word, like the closing line it corroborates: the length of a
+ * partner-controlled list carries none of that list's free text, so the label stays
+ * text the partner cannot reach.
+ */
+function declaredPayloadTotalNote(declaredCount: number): string {
+  return `${declaredCount} declared`;
 }
 
 /**
@@ -917,6 +939,7 @@ export function displayInvitation(params: {
       summary.payload.sendFromCarriedSubset
         ? "inboundPayloadColumnsCarried"
         : "inboundPayloadColumnsAuthored",
+      declaredPayloadTotalNote(summary.payload.send.length),
     );
     if (summary.payload.send.length === 0) emit(`  ${label}: (none)`);
     else {
@@ -933,6 +956,7 @@ export function displayInvitation(params: {
     const label = marked(
       "columns the inviting party requests from you",
       "requestedPayloadColumns",
+      declaredPayloadTotalNote(summary.payload.receive.length),
     );
     if (summary.payload.receive.length === 0) emit(`  ${label}: (none)`);
     else {
