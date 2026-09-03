@@ -3262,7 +3262,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
             // socket whose SFTP channel has been destroyed. Landing the fatal
             // error inside the 100 ms inter-attempt window is a race no server can
             // be held to, so that window is covered by the unit suite's hand-modelled
-            // client alone, with the standing docs/TESTING.md gives such a model.
+            // client alone, as the class docs/TESTING.md lists for such a model.
             const dead = this.deadSessionError("file rename", fromPath);
             if (dead) return Promise.reject(dead);
             // Bound each attempt's server round-trip: a withheld rename callback
