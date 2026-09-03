@@ -64,7 +64,11 @@
       "Edit(**/.env)",
       "Edit(.env.*)",
       "Edit(**/.env.*)",
-      "Edit(/etc/**)"
+      "Edit(/etc/**)",
+      "Read(.devcontainer/infra/local/**)",
+      "Read(**/.devcontainer/infra/local/**)",
+      "Edit(.devcontainer/infra/local/**)",
+      "Edit(**/.devcontainer/infra/local/**)"
     ]
   },
   "sandbox": {

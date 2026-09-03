@@ -18,6 +18,9 @@ count.txt
 __screenshots__
 *.swp
 terraform.tfvars
+# The infra dev-container profile's single-owner mount: an SSH private key
+# the owner drops in for a remote host, never repository content.
+.devcontainer/infra/local/
 scratch
 research
 *.csv

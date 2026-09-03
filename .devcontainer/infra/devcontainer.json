@@ -1,0 +1,61 @@
+{
+  "name": "${localWorkspaceFolderBasename}-infra",
+  "build": {
+    "dockerfile": "../Dockerfile",
+    "context": "..",
+    "args": {
+      "TZ": "${localEnv:TZ:America/New_York}",
+      "CLAUDE_CODE_VERSION": "latest",
+      "PSILINK_INFRA": "1"
+    }
+  },
+  "runArgs": [
+    "--cap-add=NET_ADMIN",
+    "--cap-add=NET_RAW",
+    "--env-file",
+    "${localWorkspaceFolder}/.env"
+  ],
+  "initializeCommand": "mkdir -p \"${localWorkspaceFolder}/.devcontainer/infra/local\" && { test -f \"${localWorkspaceFolder}/.env\" || touch \"${localWorkspaceFolder}/.env\"; }",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "anthropic.claude-code",
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode"
+      ],
+      "settings": {
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "editor.codeActionsOnSave": {
+          "source.fixAll.eslint": "explicit"
+        },
+        "terminal.integrated.defaultProfile.linux": "zsh",
+        "claudeCode.allowDangerouslySkipPermissions": true,
+        "claudeCode.initialPermissionMode": "bypassPermissions"
+      }
+    }
+  },
+  "remoteUser": "node",
+  "mounts": [
+    "source=psilink-claude-config-${devcontainerId},target=/home/node/.claude,type=volume",
+    "source=psilink-node-modules-${devcontainerId},target=/workspace/node_modules,type=volume",
+    "source=${localWorkspaceFolder}/.devcontainer/infra/local,target=/home/node/infra-local,type=bind,readonly"
+  ],
+  "containerEnv": {
+    "NODE_OPTIONS": "--max-old-space-size=4096",
+    "CLAUDE_CONFIG_DIR": "/home/node/.claude",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "DISABLE_AUTOUPDATER": "1",
+    "HTTP_PROXY": "http://127.0.0.1:8888",
+    "HTTPS_PROXY": "http://127.0.0.1:8888",
+    "http_proxy": "http://127.0.0.1:8888",
+    "https_proxy": "http://127.0.0.1:8888",
+    "NO_PROXY": "localhost,127.0.0.1,::1,github.com,.github.com,.githubusercontent.com,registry.npmjs.org,.registry.npmjs.org,nodejs.org,.nodejs.org,api.anthropic.com,.api.anthropic.com,claude.ai,.claude.ai,console.anthropic.com,.console.anthropic.com",
+    "no_proxy": "localhost,127.0.0.1,::1,github.com,.github.com,.githubusercontent.com,registry.npmjs.org,.registry.npmjs.org,nodejs.org,.nodejs.org,api.anthropic.com,.api.anthropic.com,claude.ai,.claude.ai,console.anthropic.com,.console.anthropic.com"
+  },
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
+  "workspaceFolder": "/workspace",
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "postStartCommand": "sudo /usr/local/bin/init-firewall.sh && sudo /usr/local/bin/init-egress-proxy.sh",
+  "waitFor": "postStartCommand"
+}
