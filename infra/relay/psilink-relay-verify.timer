@@ -1,0 +1,14 @@
+[Unit]
+Description=Verify the psilink relay daily
+
+[Timer]
+# A standing relay is idle between exchanges, so nothing else notices that it
+# stopped carrying allocations until a partner is waiting on one. The daily run
+# is what turns a silent break -- an expired certificate, a lost external
+# address, a denied-peer rule that stopped applying -- into a failed unit.
+OnCalendar=daily
+RandomizedDelaySec=30m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
