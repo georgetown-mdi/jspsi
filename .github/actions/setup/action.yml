@@ -179,7 +179,9 @@ runs:
       if: inputs.cache != 'false' && runner.os == 'Linux'
       uses: actions/cache/restore@v6
       with:
-        path: packages/core/dist
+        path: |
+          packages/core/dist
+          !packages/core/dist/tsconfig.tsbuildinfo
         key: ${{ steps.cache-keys.outputs.core }}
     - name: Build core
       if: steps.core-cache.outputs.cache-hit != 'true'
@@ -194,13 +196,30 @@ runs:
     # the guard's SOURCE_PATHS (packages/core/src and rollup.config.ts) plus the
     # tsconfig chain, binding the artifact to its inputs by content -- which is
     # what the mtime ordering stands in for and cannot itself survive an archive.
+    #
+    # packages/core/tsconfig.json sets composite: true, so a build writes
+    # dist/tsconfig.tsbuildinfo ("already emitted, skip") whose counterpart is
+    # the gitignored packages/core/.rollup.cache/, from which
+    # @rollup/plugin-typescript serves a file TypeScript skipped emitting. A
+    # restored dist carries the buildinfo without that cache, so the
+    # --configPlugin build of rollup.config.ts gets no transform and rollup
+    # fails parsing the TypeScript config (measured: RollupError,
+    # rollup.config.ts, "Expected ',', got ':'"). Removing the buildinfo makes
+    # the next build a full emit, the same work a cache-miss job already does.
+    # The path exclusion above keeps a future save from writing the buildinfo at
+    # all, but an entry already saved under its content-derived key is
+    # immutable, so this removal is needed regardless of that exclusion.
     - name: Restamp the restored core build
       if: steps.core-cache.outputs.cache-hit == 'true'
-      run: find packages/core/dist -type f -exec touch {} +
+      run: |
+        rm -f packages/core/dist/tsconfig.tsbuildinfo
+        find packages/core/dist -type f -exec touch {} +
       shell: bash
     - name: Save the @psilink/core build
       if: inputs.cache != 'false' && runner.os == 'Linux' && steps.core-cache.outputs.cache-hit != 'true'
       uses: actions/cache/save@v6
       with:
-        path: packages/core/dist
+        path: |
+          packages/core/dist
+          !packages/core/dist/tsconfig.tsbuildinfo
         key: ${{ steps.cache-keys.outputs.core }}
