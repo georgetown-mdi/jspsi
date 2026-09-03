@@ -1,42 +1,25 @@
 import { describe, expect, it } from "vitest";
 import {
+  parseFile,
   parseSource,
   readSource,
   sourceModules,
 } from "./lib/typeScriptSources.mjs";
 import {
+  CLI_FILES,
+  CLI_WEBRTC_DIR,
+  WEB_ENTRY_POINTS,
+  WEB_FILES,
   directoryDrift,
   providerOptionsReads,
+  webFilesDrift,
 } from "./check-webrtc-provider-options-unread.mjs";
-
-const CLI_WEBRTC_DIR = "apps/cli/src/connection/webrtc";
-
-const CLI_FILES = [
-  "apps/cli/src/connection/webrtc/brokerClient.ts",
-  "apps/cli/src/connection/webrtc/inboundBounds.ts",
-  "apps/cli/src/connection/webrtc/peerjsWire.ts",
-  "apps/cli/src/connection/webrtc/webrtcMessageConnection.ts",
-  "apps/cli/src/connection/webrtc/weriftPeer.ts",
-];
-
-const WEB_FILES = [
-  "apps/web/src/psi/rendezvous.ts",
-  "apps/web/src/psi/managedRendezvous.ts",
-  "apps/web/src/psi/peerMessageConnection.ts",
-  "apps/web/src/psi/waitForConnection.ts",
-  "apps/web/src/psi/peerLogging.ts",
-  "apps/web/src/psi/invitationLocation.ts",
-  "apps/web/src/psi/invitation.ts",
-  "apps/web/src/psi/managedExchangeRecord.ts",
-  "apps/web/src/psi/boundedReassembly.ts",
-  "apps/web/src/psi/waitForOpen.ts",
-  "apps/web/src/psi/waitForPeerClose.ts",
-  "apps/web/src/utils/diagnostics.ts",
-  "apps/web/src/utils/clientConfig.ts",
-];
 
 const readsIn = (source, file = "fixture.ts") =>
   providerOptionsReads(parseSource(file, source));
+
+const webEntries = () =>
+  WEB_ENTRY_POINTS.map((path) => ({ path, sourceFile: parseFile(path) }));
 
 describe("WebRTC provider_options unread check", () => {
   it("the tree as it stands passes: no scanned file reads either spelling", () => {
@@ -48,6 +31,36 @@ describe("WebRTC provider_options unread check", () => {
     expect(directoryDrift(CLI_WEBRTC_DIR, CLI_FILES)).toEqual({
       added: [],
       removed: [],
+    });
+  });
+
+  it("WEB_FILES is exactly WEB_ENTRY_POINTS's one-hop first-party imports", () => {
+    expect(webFilesDrift(webEntries(), WEB_FILES)).toEqual({
+      added: [],
+      removed: [],
+    });
+  });
+
+  it("flags a fixture entry point's import that is not in the list", () => {
+    const fixture = {
+      path: "apps/web/src/psi/fixtureEntry.ts",
+      sourceFile: parseSource(
+        "apps/web/src/psi/fixtureEntry.ts",
+        'export { isDiagnosticMode } from "@utils/diagnostics";\n',
+      ),
+    };
+    expect(webFilesDrift([fixture], [])).toEqual({
+      added: [fixture.path, "apps/web/src/utils/diagnostics.ts"],
+      removed: [],
+    });
+  });
+
+  it("flags a WEB_FILES entry no longer reachable from any entry point", () => {
+    expect(
+      webFilesDrift(webEntries(), [...WEB_FILES, "apps/web/src/psi/gone.ts"]),
+    ).toEqual({
+      added: [],
+      removed: ["apps/web/src/psi/gone.ts"],
     });
   });
 

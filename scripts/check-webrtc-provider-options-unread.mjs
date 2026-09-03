@@ -25,11 +25,21 @@
 //     check rather than silently changing what "every file" means.
 //   - WEB_FILES: the three sources the issue names (rendezvous.ts,
 //     managedRendezvous.ts, peerMessageConnection.ts) plus their first-party
-//     neighbours -- every local module (relative or `@utils/*`) any of the
-//     three imports, one hop out, value or type-only alike. That hop is read
-//     from the import statements themselves (see the file lists below), not
-//     guessed; a neighbour that itself imports further local modules is not
-//     followed a second hop.
+//     neighbours -- every local module (relative, or a tsconfig `paths` alias
+//     such as `@utils/*`) any of the three reaches via a static `import` or
+//     `export ... from` specifier, one hop out, value or type-only alike; a
+//     dynamic `import()` and a second hop are both outside the set. The hop is
+//     held to the entry points' real import statements by webFilesDrift below,
+//     which resolves each specifier with the TypeScript compiler's own
+//     resolver (`ts.resolveModuleName`, under apps/web/tsconfig.json's merged
+//     options) rather than a re-parse of the `paths` map, so an added or
+//     removed neighbour fails the check exactly as CLI_FILES's directoryDrift
+//     does. WEB_FILES stays an explicit list rather than a directory scan of
+//     apps/web/src (CLI_FILES's shape) because apps/web also hosts the
+//     console's job API, whose future SFTP-authoring code may legitimately
+//     read provider_options; a directory scan would fold that unrelated
+//     surface into this claim, so the scanned set stays the explicit list --
+//     the set IS the claim.
 //
 // WHAT A "READ" MATCHES, and what it cannot:
 //
@@ -52,20 +62,24 @@
 //     above). Neither writes the name in a shape this scan reads.
 
 import ts from "typescript";
+import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
   descendants,
+  parseFile,
   parseSource,
   readSource,
   sourceModules,
 } from "./lib/typeScriptSources.mjs";
 
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
 /** The CLI's whole WebRTC connection implementation. */
-const CLI_WEBRTC_DIR = "apps/cli/src/connection/webrtc";
+export const CLI_WEBRTC_DIR = "apps/cli/src/connection/webrtc";
 
 /** `CLI_WEBRTC_DIR`'s files, repository-relative, held to the real listing. */
-const CLI_FILES = [
+export const CLI_FILES = [
   "apps/cli/src/connection/webrtc/brokerClient.ts",
   "apps/cli/src/connection/webrtc/inboundBounds.ts",
   "apps/cli/src/connection/webrtc/peerjsWire.ts",
@@ -73,16 +87,18 @@ const CLI_FILES = [
   "apps/cli/src/connection/webrtc/weriftPeer.ts",
 ];
 
-/**
- * The three named entry points plus every first-party module they import, one
- * hop, read off their import statements: rendezvous.ts imports
- * waitForConnection.ts, peerLogging.ts, @utils/diagnostics, and
- * @utils/clientConfig; managedRendezvous.ts imports rendezvous.ts,
- * invitationLocation.ts, invitation.ts, and (type-only) managedExchangeRecord.ts;
- * peerMessageConnection.ts imports boundedReassembly.ts, peerLogging.ts,
- * waitForOpen.ts, and waitForPeerClose.ts.
- */
-const WEB_FILES = [
+/** The web app's tsconfig, whose `paths` aliases `webFilesDrift` resolves against. */
+const WEB_TSCONFIG = "apps/web/tsconfig.json";
+
+/** The three sources the issue names; `webFilesDrift` holds WEB_FILES to these plus their one-hop first-party imports. */
+export const WEB_ENTRY_POINTS = [
+  "apps/web/src/psi/rendezvous.ts",
+  "apps/web/src/psi/managedRendezvous.ts",
+  "apps/web/src/psi/peerMessageConnection.ts",
+];
+
+/** WEB_ENTRY_POINTS plus their one-hop first-party imports, held to that derivation by webFilesDrift below. */
+export const WEB_FILES = [
   "apps/web/src/psi/rendezvous.ts",
   "apps/web/src/psi/managedRendezvous.ts",
   "apps/web/src/psi/peerMessageConnection.ts",
@@ -157,6 +173,78 @@ export function directoryDrift(dir, files) {
   };
 }
 
+/**
+ * `tsconfigFile`'s resolved compiler options -- `paths`, `baseUrl`, and
+ * `extends` all merged the way `tsc` merges them -- read with the TypeScript
+ * API rather than a hand re-parse of the JSON, so a `paths` alias here is the
+ * one the compiler actually holds, not a guess at it.
+ */
+function resolvedCompilerOptions(tsconfigFile) {
+  const absolute = resolve(root, tsconfigFile);
+  const { config, error } = ts.readConfigFile(absolute, ts.sys.readFile);
+  if (error)
+    throw new Error(
+      `${tsconfigFile}: ${ts.flattenDiagnosticMessageText(error.messageText, "\n")}`,
+    );
+  return ts.parseJsonConfigFileContent(config, ts.sys, dirname(absolute))
+    .options;
+}
+
+/**
+ * `entry`'s (repository-relative `entryPath`, parsed `sourceFile`) own static
+ * `import` and `export ... from` specifiers, resolved one hop with the real
+ * TypeScript resolver (`ts.resolveModuleName`, under `options`) -- the same
+ * resolution `tsc`/the bundler would perform, not a re-implementation of the
+ * `paths` map or an extension guess. A specifier the resolver cannot place is
+ * dropped; one it places via a package resolution
+ * (`resolvedModule.isExternalLibraryImport`, e.g. `peerjs` or the workspace
+ * package `@psilink/core`) is dropped too -- neither is local to the web app's
+ * own source, whatever file the resolver happens to land the package's own
+ * types or dist output on.
+ */
+function firstPartyImports(entryPath, sourceFile, options) {
+  const containingFile = resolve(root, entryPath);
+  const resolved = new Set();
+  for (const node of descendants(sourceFile)) {
+    if (
+      !(ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) ||
+      !node.moduleSpecifier ||
+      !ts.isStringLiteralLike(node.moduleSpecifier)
+    )
+      continue;
+    const { resolvedModule } = ts.resolveModuleName(
+      node.moduleSpecifier.text,
+      containingFile,
+      options,
+      ts.sys,
+    );
+    if (!resolvedModule || resolvedModule.isExternalLibraryImport) continue;
+    resolved.add(relative(root, resolvedModule.resolvedFileName));
+  }
+  return resolved;
+}
+
+/**
+ * Where the derived web scan set -- each of `entries` (`{path, sourceFile}`)
+ * plus its one-hop first-party imports -- differs from `files`. Mirrors
+ * `directoryDrift`: both `added` and `removed` must be empty for WEB_FILES to
+ * still BE that derivation.
+ */
+export function webFilesDrift(entries, files, tsconfigFile = WEB_TSCONFIG) {
+  const options = resolvedCompilerOptions(tsconfigFile);
+  const derived = new Set();
+  for (const { path, sourceFile } of entries) {
+    derived.add(path);
+    for (const file of firstPartyImports(path, sourceFile, options))
+      derived.add(file);
+  }
+  const listed = new Set(files);
+  return {
+    added: [...derived].filter((file) => !listed.has(file)).sort(),
+    removed: [...listed].filter((file) => !derived.has(file)).sort(),
+  };
+}
+
 // CLI entry: only runs when invoked directly, so the test can import the pure
 // functions without the process.exit.
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -170,6 +258,33 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   for (const file of removed)
     failures.push(
       `${file}: listed in CLI_FILES but no longer on disk -- it moved or was renamed; update scripts/check-webrtc-provider-options-unread.mjs to follow it.`,
+    );
+
+  const webEntries = [];
+  for (const path of WEB_ENTRY_POINTS) {
+    try {
+      webEntries.push({ path, sourceFile: parseFile(path) });
+    } catch (error) {
+      if (error.code === "ENOENT") {
+        failures.push(
+          `${path}: no longer exists -- it moved or was renamed; update scripts/check-webrtc-provider-options-unread.mjs to follow it.`,
+        );
+        continue;
+      }
+      throw error;
+    }
+  }
+  const { added: webAdded, removed: webRemoved } = webFilesDrift(
+    webEntries,
+    WEB_FILES,
+  );
+  for (const file of webAdded)
+    failures.push(
+      `${file}: reachable one hop from a WEB_ENTRY_POINTS import but not in WEB_FILES -- add it to scripts/check-webrtc-provider-options-unread.mjs, or this new import is never scanned.`,
+    );
+  for (const file of webRemoved)
+    failures.push(
+      `${file}: listed in WEB_FILES but no longer reachable one hop from WEB_ENTRY_POINTS's imports -- it moved, was renamed, or the entry point stopped importing it; update scripts/check-webrtc-provider-options-unread.mjs to follow it.`,
     );
 
   const scanned = [];
