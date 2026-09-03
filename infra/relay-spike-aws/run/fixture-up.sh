@@ -38,9 +38,9 @@ LIVE="$(awsr ec2 describe-instances \
   --query 'length(Reservations[].Instances[])' --output text)"
 [ "$LIVE" -lt 2 ] || die "$LIVE instances already exist; the ceiling is two. Tear a cycle down first."
 
-# What this script launched, and what the trap below has to undo. A fixture-up
-# that dies between the launch and the last line used to leave a box billing on
-# an unattended run: nothing else in this directory tears the CLI box down.
+# What this script launched, and what the trap below has to undo: nothing else in
+# this directory tears the CLI box down, so a fixture-up that dies between the
+# launch and its last line would leave a box billing on an unattended run.
 LAUNCHED_INSTANCE=""
 fixture_emergency() {
   local rc=$? id alloc

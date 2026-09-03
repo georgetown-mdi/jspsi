@@ -7,11 +7,14 @@
 import fs from "node:fs";
 import path from "node:path";
 
+// SPIKE_NO_MUTATE sends every shell script's output to artifacts/no-mutate, so a
+// walk's rows must be read from there too or this renders the last real run.
 const ART = path.resolve(
   new URL(".", import.meta.url).pathname,
-  "../artifacts",
+  process.env.SPIKE_NO_MUTATE === "1"
+    ? "../artifacts/no-mutate"
+    : "../artifacts",
 );
-const RUN = path.resolve(new URL(".", import.meta.url).pathname);
 
 const readJsonl = (f) =>
   fs.existsSync(f)
@@ -271,15 +274,17 @@ if (fs.existsSync(costFile)) {
   try {
     const j = JSON.parse(raw);
     for (const day of j.ResultsByTime ?? []) {
+      const groups = day.Groups ?? [];
       out.push(
-        `- ${day.TimePeriod.Start}: ` +
-          (day.Groups ?? [])
-            .map(
-              (g) =>
-                `${g.Keys[0]} $${Number(g.Metrics.UnblendedCost.Amount).toFixed(4)}`,
-            )
-            .join(", ") ||
-          `- ${day.TimePeriod.Start}: no grouped cost returned`,
+        groups.length
+          ? `- ${day.TimePeriod.Start}: ` +
+              groups
+                .map(
+                  (g) =>
+                    `${g.Keys[0]} $${Number(g.Metrics.UnblendedCost.Amount).toFixed(4)}`,
+                )
+                .join(", ")
+          : `- ${day.TimePeriod.Start}: no grouped cost returned`,
       );
     }
   } catch {

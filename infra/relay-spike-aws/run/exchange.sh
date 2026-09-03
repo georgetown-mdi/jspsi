@@ -232,8 +232,19 @@ for raw in sys.stdin.buffer:
 print(f"{(end - start).total_seconds():.3f}" if start and end else "")
 ')"
 
+# coturn announces its realm at boot, with zero clients connected, so a realm in
+# the log is not evidence of anything. The per-session ALLOCATE success line
+# appears only after a credential authenticates and a relay endpoint is handed
+# out, and the session's closing peer-usage line carries the bytes that crossed
+# the relay -- the byte count the decision record cites -- so that count is
+# preferred whenever the session closed inside the captured window.
 RELAYED=unknown
-if grep -qE 'allocation|realm' "$OUT/coturn.log" 2>/dev/null; then RELAYED=yes-coturn-allocated; fi
+if grep -q 'incoming packet ALLOCATE processed, success' "$OUT/coturn.log" 2>/dev/null; then
+  RELAYED=yes-coturn-allocated
+fi
+RELAYED_BYTES="$(sed -n 's/.*peer usage:.*[[:space:]]rb=\([0-9][0-9]*\),.*[[:space:]]sb=\([0-9][0-9]*\).*/\1 \2/p' \
+  "$OUT/coturn.log" 2>/dev/null | awk '{ total += $1 + $2 } END { print total + 0 }' || true)"
+if [ "${RELAYED_BYTES:-0}" -gt 0 ]; then RELAYED="yes-coturn-relayed-${RELAYED_BYTES}b"; fi
 if [ "$CLASS" = b ] && grep -q 'client TLS established' "$OUT/proxy.log" 2>/dev/null; then
   RELAYED="$RELAYED,through-the-proxy"
 fi

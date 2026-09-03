@@ -29,10 +29,8 @@ mkdir -p "$OUT"
 chmod 700 "$STATE/cycle-$CYCLE_ID"
 
 # Every file that carries key material, found by reading it rather than by its
-# extension. Set on every run rather than once by hand: a mode set once drifts,
-# question 1 left the CA keys world-readable, and the list this replaced named
-# two .key files, so proxy-ca.pem -- the same private key, in a bundle -- stayed
-# at 644.
+# extension and set on every run rather than once by hand: a private key arrives
+# in a .pem bundle as readily as in a .key file, and a mode set by hand drifts.
 chmod_key_files() {
   local f
   for f in "$1"/*; do

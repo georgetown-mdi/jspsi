@@ -177,16 +177,20 @@ sudo docker run -d --name spike-proxy --network host --restart unless-stopped \
 # Both addresses must answer TLS before the caller calls phase 3 done: an
 # exchange started against a half-open services box measures the wrong thing.
 say "waiting for TLS on both addresses"
-for target in "$SPIKE_IP_TURN" "$SPIKE_IP_WEB"; do
+# Each address carries its own certificate, so each is probed under its own SNI
+# name: the wrong servername reaches a handshake the certificate does not cover.
+for pair in "$SPIKE_IP_TURN=$SPIKE_TURN_HOST" "$SPIKE_IP_WEB=$SPIKE_WEB_HOST"; do
+  target="${pair%%=*}"
+  servername="${pair#*=}"
   ok=false
   for _ in $(seq 1 60); do
-    if echo | openssl s_client -connect "$target:443" -servername "$SPIKE_TURN_HOST" >/dev/null 2>&1; then
+    if echo | openssl s_client -connect "$target:443" -servername "$servername" >/dev/null 2>&1; then
       ok=true; break
     fi
     sleep 2
   done
-  $ok || { echo "TLS never answered on $target:443"; sudo docker ps -a; sudo docker logs spike-turn 2>&1 | tail -30; sudo docker logs spike-front 2>&1 | tail -30; exit 1; }
-  say "TLS answering on $target:443"
+  $ok || { echo "TLS never answered on $target:443 for $servername"; sudo docker ps -a; sudo docker logs spike-turn 2>&1 | tail -30; sudo docker logs spike-front 2>&1 | tail -30; exit 1; }
+  say "TLS answering on $target:443 for $servername"
 done
 SERVICES_END=$(date -u +%s)
 echo "TIMING services-start-to-tls $((SERVICES_END - LOAD_END))"

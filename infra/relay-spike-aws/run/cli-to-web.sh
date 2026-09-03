@@ -97,7 +97,7 @@ else
   INVITATION="$(cat "$BROWSER_OUT/invitation.txt")"
 
   set +e
-  docker run --rm -v "$W/cli:/work" psi-link:spike accept \
+  docker run --rm -v "$W/cli:/work" "${SPIKE_CLI_IMAGE:-psi-link:spike-party}" accept \
     --identity "Agency A, a@agency-a.example" --consent-to-terms --log-level info \
     "$INVITATION" > "$W/cli-accept.out" 2> "$W/cli-accept.err"
   ACCEPT_CODE=$?

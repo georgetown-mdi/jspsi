@@ -140,11 +140,10 @@ _redact_literals() {
   return 0
 }
 
-# One literal, escaped for sed -E with # as the s/// delimiter. Literals are
-# escaped rather than filtered by alphabet: the filter this replaced dropped
-# every value carrying a character outside [A-Za-z0-9._-], which is every
-# standard-base64 credential -- the alphabet a self-hosted coturn credential and
-# a Cloudflare one are both minted in.
+# One literal, escaped for sed -E with # as the s/// delimiter. Every literal is
+# escaped rather than filtered by alphabet, because a self-hosted coturn
+# credential and a Cloudflare one are both standard base64, whose +, / and =
+# an [A-Za-z0-9._-] alphabet filter would drop.
 _regex_escape() {
   printf '%s' "$1" | sed -e 's/[][\\^$.*+?(){}|#]/\\&/g'
 }

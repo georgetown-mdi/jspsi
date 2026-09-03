@@ -173,10 +173,10 @@ check "create-network-acl-entry (allow tcp 443)" ec2 create-network-acl-entry --
 check "delete-network-acl-entry" ec2 delete-network-acl-entry --dry-run \
   --network-acl-id "$REAL_ACL" --rule-number 100 --egress
 check "create-route to an interface (class B)" ec2 create-route --dry-run \
-  --route-table-id "$FAKE_RT" --destination-cidr-block "$IP_TURN/32" \
+  --route-table-id "$FAKE_RT" --destination-cidr-block "$SERVICES_CIDR" \
   --network-interface-id "$FAKE_ENI"
 check "delete-route" ec2 delete-route --dry-run --route-table-id "$FAKE_RT" \
-  --destination-cidr-block "$IP_TURN/32"
+  --destination-cidr-block "$SERVICES_CIDR"
 
 echo
 echo "### services-down.sh and fixture-down.sh"
@@ -286,11 +286,10 @@ redact_case "coturn static secret" \
 
 # The two literals, read from the files the run's own writers create, at the
 # paths they create them at. Standard base64 with +, / and a trailing = is the
-# alphabet a self-hosted credential is minted in, and it is what the literal list
-# used to drop; the credential is written through party_secret_file rather than
-# spelled out here, because the defect was a glob that named a different
-# directory from the writer, and a test that spelled the path itself would have
-# passed with the glob still wrong.
+# alphabet a self-hosted credential is minted in, and the literal list has to
+# carry it. The credential is written through party_secret_file rather than
+# spelled out here so that a glob naming a different directory from the writer
+# fails this check, which a test spelling the path itself would not catch.
 SELFTEST_CYCLE="$STATE/cycle-redact-selftest"
 SELFTEST_PARTY="$SELFTEST_CYCLE/work/dry-run/a"
 trap 'rm -rf "$SELFTEST_CYCLE"' EXIT
@@ -310,17 +309,16 @@ redact_keeps "the intersection an exchange writes survives byte for byte" \
 
 echo
 echo "### every artifact under relay-spike-aws/artifacts is written by a function that redacts"
-# Five remote logs -- a.log, b.log, coturn.log, proxy.log and cli.log -- were
-# copied off their hosts into relay-spike-aws/artifacts with nothing redacting anywhere in
-# the path, which is the surface the literal list above exists to backstop. One
-# set of functions writes artifacts now, and this is what keeps it that way
-# rather than a comment claiming it. Per script: follow the assignments out from
-# ART to every variable that names a path under relay-spike-aws/artifacts, then require each
-# write aimed at one of them to name an artifact function. The write forms are
-# > >> tee cp scp mv, and python3 or node handed such a path -- an interpreter
-# writes what it is given, which is how rows.jsonl used to be written, so a read
-# goes through artifact_read to tell the two apart. mkdir and touch create no
-# content and are not counted.
+# Five remote logs -- a.log, b.log, coturn.log, proxy.log and cli.log -- are
+# copied off their hosts into relay-spike-aws/artifacts carrying the run's own secrets,
+# which is the surface the literal list above backstops. One set of functions
+# writes artifacts, and this check is what holds that rather than a comment
+# claiming it. Per script: follow the assignments out from ART to every variable
+# that names a path under relay-spike-aws/artifacts, then require each write aimed at one
+# of them to name an artifact function. The write forms are > >> tee cp scp mv,
+# and python3 or node handed such a path -- an interpreter writes whatever it is
+# given -- so a read goes through artifact_read to tell the two apart. mkdir and
+# touch create no content and are not counted.
 ARTIFACT_BAD=0
 artifact_write_check() {
   local f vars prev pat ref hits

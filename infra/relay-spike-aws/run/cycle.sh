@@ -78,14 +78,21 @@ dns_record_count() {
   load_cloudflare_env
   if [ "$CF_DNS" != true ]; then printf 'n/a (no DNS configured)'; return; fi
   if no_mutate; then printf '0 (SPIKE_NO_MUTATE: no record was created)'; return; fi
-  local zid n=0 name
+  local zid n=0 name count
   zid="$(curl -fsS -H "Authorization: Bearer $CF_DNS_API_TOKEN" \
     "https://api.cloudflare.com/client/v4/zones?name=$CF_ZONE_NAME" | jq -r '.result[0].id // empty')"
   [ -n "$zid" ] || { printf 'UNKNOWN'; return; }
   for name in "spike-turn.$CF_ZONE_NAME" "spike-web.$CF_ZONE_NAME"; do
-    n=$(( n + $(curl -fsS -H "Authorization: Bearer $CF_DNS_API_TOKEN" \
+    # The count is UNKNOWN unless every query answered with a number. An empty
+    # result substituted straight into the arithmetic would both undercount and
+    # spill the shell's own parse error into the orphan report.
+    count="$(curl -fsS -H "Authorization: Bearer $CF_DNS_API_TOKEN" \
       "https://api.cloudflare.com/client/v4/zones/$zid/dns_records?type=A&name=$name" \
-      | jq -r '.result | length') ))
+      | jq -r '.result | length' 2>/dev/null || true)"
+    case "$count" in
+      ''|*[!0-9]*) printf 'UNKNOWN'; return ;;
+    esac
+    n=$((n + count))
   done
   printf '%s' "$n"
 }

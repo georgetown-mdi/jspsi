@@ -200,7 +200,8 @@ if should_run final; then
   "$AWS_DIR/inventory.sh" 2>&1 | artifact_tee "$ART/inventory-final.txt"
   START="$(date -u +%Y-%m-%d)"
   if command -v gdate >/dev/null 2>&1; then END="$(gdate -u -d tomorrow +%Y-%m-%d)"
-  else END="$(date -u -v+1d +%Y-%m-%d)"; fi
+  elif date -u -v+1d +%Y-%m-%d >/dev/null 2>&1; then END="$(date -u -v+1d +%Y-%m-%d)"
+  else END="$(date -u -d tomorrow +%Y-%m-%d)"; fi
   aws --profile "$PROFILE" --region us-east-1 ce get-cost-and-usage \
     --time-period "Start=$START,End=$END" --granularity DAILY --metrics UnblendedCost \
     --group-by Type=DIMENSION,Key=SERVICE --output json \

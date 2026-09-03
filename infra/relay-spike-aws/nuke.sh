@@ -38,9 +38,9 @@ echo "account $ACCT confirmed, region $REGION"
 
 FAILED=0
 
-# Read-only lookup, captured in the parent shell. Calling the abort helper inside
+# Read-only lookup, captured in the parent shell: the abort helper called inside
 # a command substitution would kill only the subshell, so a throttled call would
-# read as "nothing to delete" -- a bug an earlier revision shipped.
+# read as "nothing to delete".
 look() {
   local out
   if ! out=$(aws "${A[@]}" ec2 "describe-$1" --query "$2" --output text 2>&1); then

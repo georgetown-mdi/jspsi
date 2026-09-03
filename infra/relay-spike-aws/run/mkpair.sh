@@ -24,7 +24,7 @@ set -euo pipefail
 : "${TURN_USERNAME:?}" "${TURN_CREDENTIAL:?}"
 A_ROLE="${A_ROLE:-inviter}"
 B_ROLE="${B_ROLE:-acceptor}"
-IMAGE="${SPIKE_CLI_IMAGE:-psi-link:spike}"
+IMAGE="${SPIKE_CLI_IMAGE:-psi-link:spike-party}"
 
 rm -rf "$W"; mkdir -p "$W/a" "$W/b"
 cp "$SPIKE_ROOT/cli/input-a.csv" "$W/a/input.csv"

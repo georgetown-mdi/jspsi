@@ -1,6 +1,6 @@
 {
   "BudgetName": "psilink-relay-spike",
-  "BudgetLimit": { "Amount": "20", "Unit": "USD" },
+  "BudgetLimit": { "Amount": "10", "Unit": "USD" },
   "TimeUnit": "MONTHLY",
   "BudgetType": "COST"
 }

@@ -20,13 +20,14 @@ mkdir -p "$ART/cycle-$CYCLE_ID"
 
 "$RUN_DIR/cloudflare.sh" dns-down "$CYCLE_ID" || log "DNS teardown reported a problem; see the cycle's cloudflare.log"
 
-# Class B's routes point at an interface that is about to stop existing.
+# Class B's route points at an interface that is about to stop existing. Its
+# destination is the services subnet's whole CIDR, the only shape a route more
+# specific than the VPC's local route may take, so that is what set-class.sh
+# created and what has to be deleted here.
 RT_RESTRICTED="$(state_get fixture RT_restricted || true)"
 if [ -n "$RT_RESTRICTED" ]; then
-  for cidr in "$IP_TURN/32" "$IP_WEB/32"; do
-    awsm ec2 delete-route --route-table-id "$RT_RESTRICTED" --destination-cidr-block "$cidr" \
-      >/dev/null 2>&1 || true
-  done
+  awsm ec2 delete-route --route-table-id "$RT_RESTRICTED" \
+    --destination-cidr-block "$SERVICES_CIDR" >/dev/null 2>&1 || true
 fi
 
 INSTANCE_ID="$(state_get "$SCOPE" SERVICES_INSTANCE || true)"
