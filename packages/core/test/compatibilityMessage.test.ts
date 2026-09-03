@@ -12,6 +12,7 @@ import {
   compatibilityMessage,
   quoteTermsValue,
   quoteTermsValueList,
+  ruleSetCitation,
 } from "../src/config/compatibilityMessage";
 import { validateCompatibility } from "../src/config/linkageTerms";
 import type { LinkageTerms } from "../src/config/linkageTerms";
@@ -215,6 +216,40 @@ describe("quoteTermsValueList", () => {
     expect(readMessage(quoteTermsValueList(["a", "b"])).values).toEqual([
       "a",
       "b",
+    ]);
+  });
+});
+
+describe("ruleSetCitation", () => {
+  test("renders the name delimited and a schema-shaped version bare", () => {
+    // The pair every surface showing a citation renders, pinned here so the one
+    // grammar core's mismatch diagnostic, both consent surfaces, and the CLI's
+    // drift warning share is asserted where it is written rather than only in
+    // each of their renderings.
+    expect(ruleSetCitation("hmis-keys", "1.2.0")).toBe('"hmis-keys" 1.2.0');
+  });
+
+  test("a name cannot spell the pair beside it", () => {
+    // What the delimiting is for: a name reading as a name plus a version, or
+    // carrying a delimiter of its own, stays one run rather than standing in the
+    // citation as a set at a version the invitation does not name.
+    const citation = ruleSetCitation('hmis-keys 9.9.9" over "other', "1.2.0");
+    expect(citation).toBe('"hmis-keys 9.9.9"" over ""other" 1.2.0');
+    const read = readMessage(citation);
+    expect(read.values).toEqual(['hmis-keys 9.9.9" over "other']);
+    expect(read.skeleton).toBe("<value> 1.2.0");
+  });
+
+  test("a version outside the bare shape takes the delimited run", () => {
+    // Checked on the value in hand: a citation reaches these surfaces from a
+    // partner's decoded invitation as readily as from a schema parse.
+    const version = '1.2.0" over "forged';
+    expect(ruleSetCitation("hmis-keys", version)).toBe(
+      `"hmis-keys" ${quoteTermsValue(version)}`,
+    );
+    expect(readMessage(ruleSetCitation("hmis-keys", version)).values).toEqual([
+      "hmis-keys",
+      version,
     ]);
   });
 });

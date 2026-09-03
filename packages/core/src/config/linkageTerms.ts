@@ -12,6 +12,7 @@ import {
   compatibilityMessage,
   quoteTermsValue,
   quoteTermsValueList,
+  ruleSetCitation,
 } from "./compatibilityMessage.js";
 import type { CompatibilityMessageFragment } from "./compatibilityMessage.js";
 import {
@@ -1149,20 +1150,15 @@ const LinkageRuleSetReferenceSchema: z.ZodType<LinkageRuleSetReference> =
  * specific artifact and the fields the substrate they are built from, so a
  * reader meets the narrower claim before the broader one.
  *
- * The set names are free text a partner chooses, so each is rendered as one
- * delimited run through the compatibility-message seam
- * ({@link quoteTermsValue}): a name carrying a space, the clause's own " over ",
- * or a delimiter of its own reads as content of one value rather than as
- * structure this clause asserted. The versions are schema-constrained semver, so
- * they take the seam's checked bare form ({@link bareTermsValue}) and read as
- * prose -- falling back to the delimited form for a value that does not meet the
- * shape, which is what keeps the reading of "schema-constrained" executable here
- * rather than assumed of a caller.
+ * Each half renders through {@link ruleSetCitation}, the seam's grammar for the
+ * pair, so a name carrying a space, this clause's own " over ", or a delimiter
+ * of its own reads as content of one value rather than as structure the clause
+ * asserted.
  */
 function describeRuleSet(
   reference: LinkageRuleSetReference,
 ): CompatibilityMessageFragment {
-  return compatibilityMessage`${quoteTermsValue(reference.keySet.name)} ${bareTermsValue(reference.keySet.version)} over ${quoteTermsValue(reference.fieldSet.name)} ${bareTermsValue(reference.fieldSet.version)}`;
+  return compatibilityMessage`${ruleSetCitation(reference.keySet.name, reference.keySet.version)} over ${ruleSetCitation(reference.fieldSet.name, reference.fieldSet.version)}`;
 }
 
 // --- Linkage Terms -----------------------------------------------------------
