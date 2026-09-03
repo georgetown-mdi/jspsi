@@ -239,8 +239,8 @@ by this document: the composite mirror below, and
 
 ### The composite mirror
 
-The shared CI prologue composite (`.github/actions/setup/action.yml`) pins an
-action of its own, on a path this repo does not rely on being scanned. The
+The shared CI prologue composite (`.github/actions/setup/action.yml`) pins
+actions of its own, on a path this repo does not rely on being scanned. The
 invariant that covers it is a mirror rather than a second ecosystem block:
 
 **Every action pin under `.github/actions` is identical to a pin under
