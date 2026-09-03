@@ -14,7 +14,7 @@ import { prepareForExchange, runExchange } from "../src/exchange";
 import { createMessagePipe } from "../src/connection/messageConnection";
 import {
   MAX_DROP_LINES_PER_KEY_ROUND,
-  MAX_KEY_CANDIDATES_PER_ROW,
+  FAN_OUT_CANDIDATES_PER_ELEMENT,
 } from "../src/standardization";
 import { getLogger } from "../src/utils/logger";
 
@@ -79,7 +79,7 @@ const rowCount = MAX_DROP_LINES_PER_KEY_ROUND * 3;
 const overWideRows = (party: string) =>
   Array.from({ length: rowCount }, (_unused, row) => ({
     first_name: Array.from(
-      { length: MAX_KEY_CANDIDATES_PER_ROW + 1 },
+      { length: FAN_OUT_CANDIDATES_PER_ELEMENT + 1 },
       (_u, part) => `${party}${row}part${part}`,
     ).join(" "),
   }));

@@ -17,7 +17,8 @@ import {
   assertLinkageTermsSatisfiable,
   assertStandardizationMatchesTerms,
   declaredEffectiveKeyCount,
-  MAX_KEY_CANDIDATES_PER_ROW,
+  declaredKeyWidth,
+  localFanOutFactor,
   StandardizedKeyIterable,
 } from "./standardization.js";
 import { columnValues, inferDateFormat } from "./utils/date.js";
@@ -179,22 +180,6 @@ export interface PreparedExchange {
    */
   rawRows: Array<CSVRow>;
   rowCount: number;
-  /**
-   * This party's declared effective key count -- the sum, over the agreed linkage
-   * keys, of the candidate factor its configuration declares for each (see
-   * `declaredEffectiveKeyCount`). Advertised on the terms exchange, where it
-   * becomes the authenticated input every derived single-pass bound reads.
-   *
-   * Populated by {@link prepareForExchange}, which is the only holder of BOTH
-   * authoring surfaces: a `PreparedExchange` retains the built dataset rather than
-   * the standardization spec, so one assembled without going through it leaves
-   * this undefined and {@link runExchange} advertises the floor the agreed terms
-   * alone imply. That is the same terms-half asymmetry `assertFanOutImplemented`
-   * carries at the run boundary, and it fails closed the same way: a local fan-out
-   * the advertisement does not account for is refused as the single-pass index
-   * table is built, not shipped under a bound it exceeds.
-   */
-  effectiveKeyCount?: number;
 }
 
 /**
@@ -410,24 +395,22 @@ export function matchedPairCount(associationTable: AssociationTable): number {
 }
 
 /**
- * Refuse this party's OWN fan-out advertisement on a strategy that matches a
- * single value per record, before the terms exchange carries it.
+ * Refuse agreed terms that declare a per-record candidate width on a strategy
+ * matching a single value per record, before anything goes on the wire.
  *
- * The advertised effective key count exceeding the agreed key count declares a
- * fan-out ({@link partyFansOut}), and fan-out matching runs under single-pass
- * alone (docs/spec/PROTOCOL.md, Fan-out runs under single-pass only). The partner
- * refuses such an advertisement as a protocol violation, so without this the
- * operator whose own `PreparedExchange` carried it reads the partner's message
- * for a fault of its own making -- and reads it as the partner's.
+ * The terms' effective key count exceeding their key count declares that some key
+ * may realize several candidates ({@link partyFansOut}), and fan-out matching runs
+ * under single-pass alone (docs/spec/PROTOCOL.md, Fan-out runs under single-pass
+ * only). Both parties derive the same width from the same agreed terms, so both
+ * refuse in lockstep and neither waits on a run the other has abandoned.
  *
- * Reachable only from a `PreparedExchange` assembled outside
- * {@link prepareForExchange}, which refuses the declared fan-out that would
- * produce this count. The count is this party's own either way -- derived from
- * its terms and standardization, or set by the caller -- so the message names
- * this party's configuration and stays a {@link UsageError}, like the width
- * refusals the single-pass build raises for the same class of over-declared size.
+ * `assertFanOutImplemented` covers the same ground for a declared fan-out step by
+ * name; this reaches the width a fuzzy comparison declares, which no step name
+ * shows. The width is a function of terms the accept path adopts wholesale, so the
+ * message names the terms and stays a {@link UsageError}, like the width refusals
+ * the single-pass build raises for the same class of over-declared size.
  */
-function assertFanOutAdvertisementMatchesStrategy(
+function assertDeclaredWidthMatchesStrategy(
   terms: LinkageTerms,
   effectiveKeyCount: number,
 ): void {
@@ -435,14 +418,13 @@ function assertFanOutAdvertisementMatchesStrategy(
   const keyCount = terms.linkageKeys.length;
   if (!partyFansOut(keyCount, { effectiveKeyCount })) return;
   throw new UsageError(
-    "this exchange would advertise an effective key count of " +
-      `${effectiveKeyCount} against its ${keyCount} agreed linkage key(s), ` +
-      "which declares a fan-out, while its linkage terms name a strategy that " +
-      "matches a single value per record. Fan-out matching runs under the " +
-      "single-pass linkage strategy only, so the partner refuses that " +
-      "advertisement rather than serving it. Prepare the exchange from its " +
-      "linkage terms and standardization, or agree terms whose " +
-      "linkage_strategy is single-pass.",
+    "these linkage terms declare " +
+      `${effectiveKeyCount} candidate value slot(s) per record against their ` +
+      `${keyCount} linkage key(s), so a record may realize several candidates ` +
+      "for a key, while they name a strategy that matches a single value per " +
+      "record. Matching a candidate set runs under the single-pass linkage " +
+      "strategy only. Remove the expanding step or fuzzy comparison from the " +
+      "key's elements, or agree terms whose linkage_strategy is single-pass.",
   );
 }
 
@@ -1079,16 +1061,10 @@ export function prepareForExchange(
     linkageTerms.output,
   );
 
-  // This party's declared effective key count: the sum over the agreed keys of the
-  // candidate factor its configuration declares for each, over BOTH authoring
-  // surfaces -- the terms' element transforms and this party's own standardization.
-  // The default standardization declares no fan-out, so an unauthored one yields
-  // the terms' own floor. It sizes the pre-flight gate below and, carried on the
-  // returned PreparedExchange, the bounds every single-pass frame is derived from.
-  const effectiveKeyCount = declaredEffectiveKeyCount(
-    linkageTerms,
-    exchangeDataSpec.standardization,
-  );
+  // The effective key count the agreed terms declare: the sum over their keys of
+  // the width each key's own elements declare. It reads the terms alone, so the
+  // partner derives the identical number, and it sizes the pre-flight gate below.
+  const effectiveKeyCount = declaredEffectiveKeyCount(linkageTerms);
 
   let dateInputFormat: string | undefined;
   if (exchangeDataSpec.standardization === undefined) {
@@ -1197,22 +1173,6 @@ export function prepareForExchange(
   // remedy is read through partyFansOut, the single layout discriminant, so the
   // guidance and the frame layout cannot disagree about whether this party fans
   // out.
-  if (
-    linkageTerms.linkageStrategy === "single-pass" &&
-    singlePassDatasetExceedsCap(effectiveKeyCount, rawRows.length)
-  ) {
-    throw new OperatorConfigError(
-      `single-pass linkage cannot carry this dataset: ${rawRows.length} ` +
-        `record(s) across ${linkageTerms.linkageKeys.length} linkage key(s) ` +
-        "exceed the single-pass ceiling. Reduce the number of linkage keys or " +
-        "the record count, or split the dataset into smaller batches." +
-        (partyFansOut(linkageTerms.linkageKeys.length, { effectiveKeyCount })
-          ? ` A linkage key that fans out counts as ${MAX_KEY_CANDIDATES_PER_ROW} ` +
-            "toward that ceiling, so removing a fan-out is another remedy."
-          : ""),
-    );
-  }
-
   // Sanitize the key names for display: on the accept side these come from the
   // partner's invitation (charset-unconstrained), and the operator already
   // reviewed the same escaped form when agreeing to the terms (displayInvitation).
@@ -1229,6 +1189,32 @@ export function prepareForExchange(
     metadata,
     linkageTerms,
   );
+
+  // The count this party declares, which is what the ceiling weighs and what the
+  // partner reads: its rows times the factor its own cleaning fans them out by.
+  // The dataset is what reports that factor, so a fan-out on a field no linkage
+  // key reads declares nothing.
+  const declaredRecordCount =
+    rawRows.length * localFanOutFactor(dataset.declaresFanOut);
+
+  if (
+    linkageTerms.linkageStrategy === "single-pass" &&
+    singlePassDatasetExceedsCap(effectiveKeyCount, declaredRecordCount)
+  ) {
+    throw new OperatorConfigError(
+      `single-pass linkage cannot carry this dataset: ${declaredRecordCount} ` +
+        `declared record(s) across ${linkageTerms.linkageKeys.length} linkage ` +
+        "key(s) exceed the single-pass ceiling. Reduce the number of linkage " +
+        "keys or the record count, or split the dataset into smaller batches." +
+        (partyFansOut(linkageTerms.linkageKeys.length, { effectiveKeyCount }) ||
+        dataset.declaresFanOut
+          ? " A linkage key whose elements expand counts its whole declared " +
+            "width toward that ceiling, and cleaning that fans out declares " +
+            "the records it stands for, so removing a fan-out is another " +
+            "remedy."
+          : ""),
+    );
+  }
 
   return {
     metadata,
@@ -1250,7 +1236,6 @@ export function prepareForExchange(
     dataset,
     rawRows,
     rowCount: rawRows.length,
-    effectiveKeyCount,
   };
 }
 
@@ -1728,29 +1713,29 @@ export async function runExchange(
   // and needs the explicit, authenticated signal (see the withhold gate below).
   const localDisclosesPayload = prepared.metadata.some(isDisclosedToPartner);
 
-  // This party's declared effective key count, advertised on the terms exchange as
-  // the authenticated input the single-pass bounds are derived from.
-  // prepareForExchange holds both authoring surfaces and computes it; a
-  // PreparedExchange assembled elsewhere retains no standardization spec, so it
-  // falls back to the floor the terms alone imply (see
-  // PreparedExchange.effectiveKeyCount).
-  const localEffectiveKeyCount =
-    prepared.effectiveKeyCount ?? declaredEffectiveKeyCount(linkageTerms);
-
-  // Refuse this party's own fan-out advertisement on a strategy that cannot
-  // match one, before it goes on the wire and comes back as the partner's
-  // refusal. See assertFanOutAdvertisementMatchesStrategy.
-  assertFanOutAdvertisementMatchesStrategy(
-    linkageTerms,
-    localEffectiveKeyCount,
+  // The per-key candidate widths the agreed terms declare, and their sum. Both
+  // parties derive them from terms they have both agreed, so nothing about width
+  // rides the wire and neither party reads the other's declaration.
+  const keyWidths = linkageTerms.linkageKeys.map((key, keyIndex) =>
+    declaredKeyWidth(key, keyIndex),
   );
+  const effectiveKeyCount = declaredEffectiveKeyCount(linkageTerms);
+
+  // This party's own cleaning fan-out, declared as the records it stands for
+  // rather than as width: the count that rides the envelope, resolves the role,
+  // and multiplies into every bound derived for this side.
+  const localFactor = localFanOutFactor(prepared.dataset.declaresFanOut);
+  const declaredRecordCount = rowCount * localFactor;
+
+  // Refuse a declared width on a strategy that cannot match a candidate set,
+  // before anything goes on the wire. See assertDeclaredWidthMatchesStrategy.
+  assertDeclaredWidthMatchesStrategy(linkageTerms, effectiveKeyCount);
 
   onStage(CONFIRMING_PROTOCOL_STAGE_ID);
   const {
     partnerTerms,
     warnings,
     partnerRecordCount,
-    partnerEffectiveKeyCount,
     partnerSaveIntent,
     partnerDisclosesPayload,
     partnerHostKey,
@@ -1759,11 +1744,10 @@ export async function runExchange(
     conn,
     handshakeRole,
     linkageTerms,
-    rowCount,
+    declaredRecordCount,
     options.saveIntent,
     options.observedHostKey,
     localDisclosesPayload,
-    localEffectiveKeyCount,
   );
   for (const warning of warnings) onWarning(warning);
 
@@ -1866,14 +1850,16 @@ export async function runExchange(
     bootstrap = { partnerSaveIntent, sharedSecret };
   }
 
-  // Local computation: both parties' record counts were carried on the terms
-  // exchange above (partnerRecordCount), so the role follows without a further
-  // message.
+  // Local computation: both parties' DECLARED record counts were carried on the
+  // terms exchange above (partnerRecordCount), so the role follows without a
+  // further message. It is the declared count on both sides, so a party whose own
+  // cleaning fans out trends toward receiver in proportion to the work its
+  // fan-out actually costs.
   const resolvedRole = resolveRole(
     handshakeRole,
     linkageTerms.output,
     partnerTerms.output,
-    rowCount,
+    declaredRecordCount,
     partnerRecordCount,
   );
   const isReceiver = resolvedRole === "receiver";
@@ -1911,7 +1897,7 @@ export async function runExchange(
   // cascade never reaches.
   onProtocolConfirmed(partnerTerms, resolvedRole, {
     cardinality,
-    localRecordCount: rowCount,
+    localRecordCount: declaredRecordCount,
     partnerRecordCount,
     localExpectsOutput: linkageTerms.output.expectsOutput,
     partnerAssociationTableWithheld:
@@ -1926,21 +1912,21 @@ export async function runExchange(
   );
 
   // Per-message element-count caps for the PSI decode seams, from authenticated
-  // session state only: the two exchanged record counts and the two advertised
-  // effective key counts. The receiver (joiner) is the PSI sender's counterpart, so
-  // the sender's set is the partner's when this party receives; both parties
-  // compute identical bounds.
+  // session state only: the two exchanged record counts and the effective key
+  // count both parties derive from the agreed terms. The receiver (joiner) is the
+  // PSI sender's counterpart, so the sender's set is the partner's when this party
+  // receives; both parties compute identical bounds.
   const singlePassBounds = {
     partnerRecordCount,
-    localEffectiveKeyCount,
-    partnerEffectiveKeyCount,
+    keyWidths,
+    localFanOutFactor: localFactor,
   };
   const localSize = {
-    effectiveKeyCount: localEffectiveKeyCount,
-    recordCount: rowCount,
+    effectiveKeyCount,
+    recordCount: declaredRecordCount,
   };
   const partnerSize = {
-    effectiveKeyCount: partnerEffectiveKeyCount,
+    effectiveKeyCount,
     recordCount: partnerRecordCount,
   };
   const elementBounds = psiElementBounds(

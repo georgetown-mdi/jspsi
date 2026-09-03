@@ -30,14 +30,14 @@
  * For `fuzzyComparisons`, flipping the flag is not sufficient on its own. The
  * expansion is implemented and gated on this flag in `buildKeyStrings`
  * (`standardization.ts`), which builds the role-keyed candidate set for a fuzzy
- * element, and so is the width a fuzzy key declares
- * (`declaredEffectiveKeyCount`, `fanOutFunctions.ts`), which is what a
- * multi-candidate row needs slots for under single-pass. What is still missing is
- * downstream. The one strategy that matches a candidate set is single-pass, and
- * under every other strategy a multi-candidate row is refused outright -- with
- * the flag on, a fuzzy element's declared width is an advertisement the partner
- * refuses off single-pass, which the run boundary should diagnose as the fuzzy
- * term it is rather than as a fan-out. And a record matching several partner
+ * element, and so is the width a fuzzy key declares (`declaredKeyWidth`,
+ * `fanOutFunctions.ts`), which is what a multi-candidate row needs slots for under
+ * single-pass. What is still missing is downstream. The one strategy that matches
+ * a candidate set is single-pass, and under every other strategy a multi-candidate
+ * row is refused outright -- with the flag on, a fuzzy element's declared width
+ * refuses the whole exchange off single-pass
+ * (`assertDeclaredWidthMatchesStrategy`, `exchange.ts`), which diagnoses it as a
+ * width rather than as the fuzzy term it is. And a record matching several partner
  * records through different candidates needs an attribution rule, which the
  * fan-out resolution settles for `split_on` (docs/spec/PROTOCOL.md, Record-level
  * resolution) and which fuzzy either inherits or replaces.

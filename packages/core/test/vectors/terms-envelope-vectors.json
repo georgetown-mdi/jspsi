@@ -5,7 +5,6 @@
     "message 1": [
       "linkageTerms",
       "recordCount",
-      "effectiveKeyCount",
       "protocolVersion",
       "save",
       "disclosesPayload",
@@ -16,7 +15,6 @@
       "decision",
       "abortReasons",
       "recordCount",
-      "effectiveKeyCount",
       "protocolVersion",
       "save",
       "disclosesPayload",
@@ -177,7 +175,6 @@
           "fields": [
             "linkageTerms",
             "recordCount",
-            "effectiveKeyCount",
             "protocolVersion",
             "save",
             "disclosesPayload",
@@ -185,7 +182,6 @@
           ],
           "envelope": {
             "recordCount": 100,
-            "effectiveKeyCount": 2,
             "protocolVersion": 1,
             "save": true,
             "disclosesPayload": true,
@@ -203,7 +199,6 @@
             "linkageTerms",
             "decision",
             "recordCount",
-            "effectiveKeyCount",
             "protocolVersion",
             "save",
             "disclosesPayload",
@@ -212,7 +207,6 @@
           "envelope": {
             "decision": "proceed",
             "recordCount": 250,
-            "effectiveKeyCount": 2,
             "protocolVersion": 1,
             "save": true,
             "disclosesPayload": false,
@@ -237,7 +231,6 @@
         "initiator": {
           "partnerIdentity": "Party B",
           "partnerRecordCount": 250,
-          "partnerEffectiveKeyCount": 2,
           "partnerSaveIntent": true,
           "partnerDisclosesPayload": false,
           "partnerHostKey": {
@@ -249,7 +242,6 @@
         "responder": {
           "partnerIdentity": "Party A",
           "partnerRecordCount": 100,
-          "partnerEffectiveKeyCount": 2,
           "partnerSaveIntent": true,
           "partnerDisclosesPayload": true,
           "partnerHostKey": {
@@ -275,15 +267,9 @@
         {
           "sender": "initiator",
           "slot": "message 1",
-          "fields": [
-            "linkageTerms",
-            "recordCount",
-            "effectiveKeyCount",
-            "protocolVersion"
-          ],
+          "fields": ["linkageTerms", "recordCount", "protocolVersion"],
           "envelope": {
             "recordCount": 7,
-            "effectiveKeyCount": 2,
             "protocolVersion": 1
           },
           "carriesLinkageTerms": "partyA"
@@ -295,13 +281,11 @@
             "linkageTerms",
             "decision",
             "recordCount",
-            "effectiveKeyCount",
             "protocolVersion"
           ],
           "envelope": {
             "decision": "proceed",
             "recordCount": 0,
-            "effectiveKeyCount": 2,
             "protocolVersion": 1
           },
           "carriesLinkageTerms": "partyB"
@@ -320,7 +304,6 @@
         "initiator": {
           "partnerIdentity": "Party B",
           "partnerRecordCount": 0,
-          "partnerEffectiveKeyCount": 2,
           "partnerSaveIntent": false,
           "partnerDisclosesPayload": null,
           "partnerHostKey": null,
@@ -329,7 +312,6 @@
         "responder": {
           "partnerIdentity": "Party A",
           "partnerRecordCount": 7,
-          "partnerEffectiveKeyCount": 2,
           "partnerSaveIntent": false,
           "partnerDisclosesPayload": null,
           "partnerHostKey": null,
@@ -352,15 +334,9 @@
         {
           "sender": "initiator",
           "slot": "message 1",
-          "fields": [
-            "linkageTerms",
-            "recordCount",
-            "effectiveKeyCount",
-            "protocolVersion"
-          ],
+          "fields": ["linkageTerms", "recordCount", "protocolVersion"],
           "envelope": {
             "recordCount": 12,
-            "effectiveKeyCount": 2,
             "protocolVersion": 1
           },
           "carriesLinkageTerms": "partyA"
@@ -372,13 +348,11 @@
             "linkageTerms",
             "decision",
             "recordCount",
-            "effectiveKeyCount",
             "protocolVersion"
           ],
           "envelope": {
             "decision": "proceed",
             "recordCount": 34,
-            "effectiveKeyCount": 2,
             "protocolVersion": 1
           },
           "carriesLinkageTerms": "unnamedParty"
@@ -397,7 +371,6 @@
         "initiator": {
           "partnerIdentity": null,
           "partnerRecordCount": 34,
-          "partnerEffectiveKeyCount": 2,
           "partnerSaveIntent": false,
           "partnerDisclosesPayload": null,
           "partnerHostKey": null,
@@ -406,7 +379,6 @@
         "responder": {
           "partnerIdentity": "Party A",
           "partnerRecordCount": 12,
-          "partnerEffectiveKeyCount": 2,
           "partnerSaveIntent": false,
           "partnerDisclosesPayload": null,
           "partnerHostKey": null,

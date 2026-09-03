@@ -4,21 +4,15 @@ import type { HandshakeRole, PsiRole } from "./types";
 import type { LinkageTerms, Output } from "./config/linkageTerms";
 import type { PresentedHostKey } from "./connection/fileSyncConnection";
 import {
-  MAX_LINKAGE_ENTRIES,
   parseLinkageTerms,
   validateCompatibility,
 } from "./config/linkageTerms";
 import { SHARED_SECRET_REGEX } from "./config/connection";
 import { MAX_RECORD_COUNT } from "./connection/frameSize";
-import {
-  declaredEffectiveKeyCount,
-  MAX_KEY_CANDIDATES_PER_ROW,
-} from "./fanOutFunctions";
 import { randomBytes, toBase64Url } from "./utils/crypto";
 import { describeDecodeError } from "./utils/describeDecodeError";
 import { boundedArray } from "./utils/boundedArray";
 import {
-  ConnectionError,
   receiveParsed,
   parseOrProtocolError,
   type MessageConnection,
@@ -134,49 +128,6 @@ export const recordCountField = z
   .nonnegative()
   .max(MAX_RECORD_COUNT);
 
-// The largest effective key count any conforming party can declare: every one of
-// the MAX_LINKAGE_ENTRIES keys the terms schema admits fanning out to the full
-// MAX_KEY_CANDIDATES_PER_ROW width. It is the outer safety bound alone -- what
-// keeps a pathological advertisement out of the products the derived bounds
-// multiply, exactly as MAX_RECORD_COUNT does for the record count. The checks that
-// actually bind are keyCount-relative and cannot run until the terms are agreed,
-// so the schema deliberately admits anything they will decide (0 included) and
-// assertPartnerEffectiveKeyCount refuses it with the classified protocol error
-// rather than a decode failure blaming the linkage terms.
-const MAX_EFFECTIVE_KEY_COUNT =
-  MAX_LINKAGE_ENTRIES * MAX_KEY_CANDIDATES_PER_ROW;
-
-// Each party's declared effective key count rides the terms-exchange envelope
-// beside `recordCount`: the sum, over the agreed linkage keys, of the candidate
-// factor this party declares for each -- MAX_KEY_CANDIDATES_PER_ROW for a key some
-// declared fan-out produces values for, 1 otherwise (declaredEffectiveKeyCount in
-// fanOutFunctions.ts). Multiplied by the party's record count it is that party's
-// value slot count, the authenticated upper bound on its distinct linkage-key value
-// count, and it replaces `keyCount * recordCount` in every derived single-pass
-// bound (frameSize.ts). A fan-out-free party advertises its plain key count, so
-// every fan-out-free bound is unchanged.
-//
-// It discloses a CONFIGURATION fact (this party declares a fan-out on some keys),
-// not a data fact: it is the same number whether or not any row actually splits.
-// Like `recordCount` it is per-party, per-run bounds metadata carried on the
-// envelope and never inside `linkageTerms`, so it does not enter the
-// canonical/agreed-terms hash.
-//
-// `.optional()` in the SCHEMA because message 2 doubles as the responder's abort
-// frame, which carries no role metadata at all (the same reason `recordCount` is
-// optional there). It is not optional on a frame that proceeds: the protocol-version
-// reconcile admits only a partner advertising this build's exact version, and this
-// build always declares a count beside it, so an omission there is a non-conforming
-// peer. assertPartnerEffectiveKeyCount refuses it with the classified protocol error
-// -- naming the count rather than blaming the linkage terms with a decode failure --
-// exactly as it refuses an inadmissible value.
-const effectiveKeyCountField = z
-  .number()
-  .int()
-  .nonnegative()
-  .max(MAX_EFFECTIVE_KEY_COUNT)
-  .optional();
-
 // The psilink exchange-protocol version, advertised by both parties on the terms
 // exchange and reconciled fail-closed: a partner that advertises anything other
 // than this build's exact version is on an incompatible build, so the exchange
@@ -270,7 +221,6 @@ export const PROTOCOL_VERSION_MISMATCH_MESSAGE =
 const termsMessage = z.object({
   linkageTerms: z.unknown(),
   recordCount: recordCountField,
-  effectiveKeyCount: effectiveKeyCountField,
   // Read as `unknown`, not a typed number, so a PRESENT-but-non-matching value
   // (a foreign integer, or a garbled/wrong-typed value from a non-conforming or
   // corrupted peer) reconciles to the actionable version mismatch rather than
@@ -299,7 +249,6 @@ const termsWithDecisionMessage = z.object({
   decision: z.enum(["proceed", "abort"]),
   abortReasons: abortReasonsField,
   recordCount: recordCountField.optional(),
-  effectiveKeyCount: effectiveKeyCountField,
   protocolVersion: z.unknown().optional(), // read as unknown; see termsMessage
   save: z.boolean().optional(),
   disclosesPayload: z.boolean().optional(), // per-party payload-intent; see termsMessage
@@ -346,29 +295,18 @@ export interface TermsExchangeResult {
    * puts on both stderr and the machine-readable warning event). Display text,
    * carrying no `Error` of its own: any partner-controlled fragment is escaped
    * where it is composed. Currently the terms-compatibility warnings
-   * (`validateCompatibility`) and the partner-width notice
-   * ({@link partnerWidthAboveAgreedNotice}).
+   * (`validateCompatibility`).
    */
   warnings: string[];
   /**
-   * The partner's raw dataset record count, read off the terms message envelope
-   * (beside its `linkageTerms`, not inside them). Feeds {@link resolveRole} and
-   * the single-pass PSI element bounds; because it rides the terms exchange, no
-   * separate count exchange is needed. Always present on a successful exchange (a
-   * partner that omits it fails the exchange as a non-conforming peer).
+   * The partner's declared dataset record count, read off the terms message
+   * envelope (beside its `linkageTerms`, not inside them) -- its row count times
+   * the fan-out factor its own standardization declares. Feeds {@link resolveRole}
+   * and the single-pass PSI element bounds; because it rides the terms exchange,
+   * no separate count exchange is needed. Always present on a successful exchange
+   * (a partner that omits it fails the exchange as a non-conforming peer).
    */
   partnerRecordCount: number;
-  /**
-   * The partner's declared effective key count, read off the terms message
-   * envelope beside its record count and validated against the agreed terms (see
-   * {@link assertPartnerEffectiveKeyCount}). With the partner's record count it is
-   * the partner's value slot count, the authenticated input every derived
-   * single-pass bound reads (see `psiElementBounds` and `singlePassReplyByteCap`
-   * in connection/frameSize.ts). Always the partner's own advertised value: a
-   * partner that omits it on a frame that proceeds fails the exchange as a
-   * non-conforming peer, so nothing is ever defaulted here.
-   */
-  partnerEffectiveKeyCount: number;
   /**
    * Whether the partner advertised zero-setup `--save` intent on this terms
    * exchange. `false` outside the save flow (the partner omitted the field).
@@ -410,128 +348,6 @@ export interface TermsExchangeResult {
    * logs it at a low level (the CLI logs it at debug; see apps/cli/src/protocol.ts).
    */
   partnerHostKeyMalformed: boolean;
-}
-
-/**
- * Validate the partner's advertised effective key count against the AGREED terms
- * and resolve it to the number every derived single-pass bound reads.
- *
- * Called only once the terms are agreed, which is the first point both parties'
- * linkage keys are known to be identical -- so both derive the same `keyCount` and
- * the same floor, and each holds the other to the value the other holds it to.
- * The checks (docs/spec/PROTOCOL.md, Wire-format deltas):
- *
- * - nothing above `keyCount` at all unless the agreed `linkageStrategy` is
- *   `single-pass`: an advertisement above the plain key count declares a fan-out,
- *   and fan-out matching is specified for single-pass alone
- *   (docs/spec/PROTOCOL.md, Fan-out runs under single-pass only), so this is that
- *   rule's run-boundary half -- a symmetric function of the agreed pair, which
- *   both parties refuse in lockstep. It is checked ahead of the shape checks
- *   below because on such an exchange no advertisement above the plain count is
- *   admissible whatever its shape. A count-only exchange needs no separate line:
- *   `psi-c` terms are refused off `cascade` by the terms schema itself;
- * - `keyCount <= effectiveKeyCount <= keyCount * MAX_KEY_CANDIDATES_PER_ROW`, the
- *   range a sum of per-key factors of 1 or 20 can occupy;
- * - `effectiveKeyCount - keyCount` divisible by `MAX_KEY_CANDIDATES_PER_ROW - 1`,
- *   so the implied count of fan-out keys is a whole number in `0 .. keyCount`;
- * - at least the floor the agreed terms imply -- the value derived from the
- *   partner's element transforms alone, which both parties can see. A party may
- *   advertise MORE than that floor, because its own local standardization can fan
- *   out a field the terms do not show; that width is accepted here and surfaced to
- *   the operator by {@link partnerWidthAboveAgreedNotice}.
- *
- * An advertisement failing any of them is a protocol violation, like every other
- * partner-supplied count: a `"protocol"` {@link ConnectionError}, and the caller
- * best-effort sends the partner the abort so neither side waits on a frame the
- * other will not send.
- *
- * An ABSENT advertisement draws the same refusal. Every partner reaching this
- * check advertised this build's exact protocol version (see
- * {@link reconcileProtocolVersion}), and this build always declares a count beside
- * that version, so an omission is a non-conforming peer rather than an older
- * build -- and there is no width its data can be assumed to obey.
- */
-function assertPartnerEffectiveKeyCount(
-  advertised: number | undefined,
-  agreedTerms: LinkageTerms,
-): number {
-  const keyCount = agreedTerms.linkageKeys.length;
-  if (advertised === undefined)
-    throw new ConnectionError(
-      "partner advertised no effective key count against " +
-        `${keyCount} agreed linkage key(s): a partner on this protocol version ` +
-        "always declares one",
-      "protocol",
-    );
-  const refuse = (detail: string): never => {
-    throw new ConnectionError(
-      `partner advertised an unusable effective key count (${advertised} ` +
-        `against ${keyCount} agreed linkage key(s)): ${detail}`,
-      "protocol",
-    );
-  };
-  if (advertised > keyCount && agreedTerms.linkageStrategy !== "single-pass")
-    refuse(
-      `a fan-out advertisement on a ${agreedTerms.linkageStrategy} exchange, ` +
-        "which matches one value per record",
-    );
-  if (
-    advertised < keyCount ||
-    advertised > keyCount * MAX_KEY_CANDIDATES_PER_ROW
-  )
-    refuse("outside the range a per-key candidate factor can sum to");
-  if ((advertised - keyCount) % (MAX_KEY_CANDIDATES_PER_ROW - 1) !== 0)
-    refuse("implies a fractional number of fan-out keys");
-  if (advertised < declaredEffectiveKeyCount(agreedTerms))
-    refuse("below the floor the agreed linkage keys' own transforms imply");
-  return advertised;
-}
-
-/**
- * The run-boundary notice for a partner running WIDER than the agreed terms alone
- * imply, or `undefined` for one running at exactly the width they imply.
- *
- * The agreed terms fix a floor rather than a width (see
- * {@link assertPartnerEffectiveKeyCount}): a partner's own standardization can fan
- * out a field the terms do not show, so the terms a consent surface displayed can
- * imply one width while the partner legitimately runs at up to
- * `MAX_KEY_CANDIDATES_PER_ROW` times it. Both widths are authenticated session
- * state, and every derived single-pass bound -- and this party's share of the
- * dataset ceiling -- is computed from the ADVERTISED one, so an operator who saw
- * only the terms is told when the two differ.
- *
- * Warn-don't-block: the advertisement is admissible, so this rides the terms
- * warnings the caller surfaces at the run boundary
- * ({@link TermsExchangeResult.warnings}) and never aborts. It interpolates the two
- * integers and no partner-authored text.
- *
- * `agreedTerms` is THIS party's own copy. The compatibility check has already
- * proven the two copies canonically identical -- so the floor here is the same one
- * {@link assertPartnerEffectiveKeyCount} held the advertisement to -- and reading
- * it locally keeps the number the operator is shown as the width THEIR terms
- * imply, rather than one recomputed from the frame that prompted the notice.
- *
- * Held under the per-value display cap (`DEFAULT_MAX_DISPLAY_LENGTH`, 256) at its
- * widest admissible pair of counts: 5,120 advertised against the 5,101 the agreed
- * terms imply when all but one of MAX_LINKAGE_ENTRIES keys declares a fan-out of
- * its own -- the longest rendering, since both counts reach four digits and no
- * admissible pair carries more. That keeps it one readable line rather than
- * bounding its delivery: both CLI sinks carry a terms warning at the
- * composed-warning budget (`WARNING_MESSAGE_MAX_DISPLAY_LENGTH`), which this sits
- * an order of magnitude inside.
- */
-function partnerWidthAboveAgreedNotice(
-  partnerEffectiveKeyCount: number,
-  agreedTerms: LinkageTerms,
-): string | undefined {
-  const agreedWidth = declaredEffectiveKeyCount(agreedTerms);
-  if (partnerEffectiveKeyCount <= agreedWidth) return undefined;
-  return (
-    "effective key count above the agreed terms: partner advertised " +
-    `${partnerEffectiveKeyCount} value slot(s) per record against the ` +
-    `${agreedWidth} the agreed linkage keys imply; the extra width is the ` +
-    "partner's own declaration and is not shown in the agreed terms"
-  );
 }
 
 /**
@@ -659,8 +475,8 @@ async function reconcileProtocolVersion(
  * proceed.
  *
  * The three-message protocol mirrors the sequencing of the handshake:
- *   1. Initiator  -> Responder : `{ linkageTerms, recordCount, effectiveKeyCount, protocolVersion }`
- *   2. Responder  -> Initiator : `{ linkageTerms, recordCount, effectiveKeyCount, decision, protocolVersion }`
+ *   1. Initiator  -> Responder : `{ linkageTerms, recordCount, protocolVersion }`
+ *   2. Responder  -> Initiator : `{ linkageTerms, recordCount, decision, protocolVersion }`
  *   3. Initiator  -> Responder : `{ decision }`
  *
  * If either party finds the terms incompatible, it sends `decision: "abort"`
@@ -679,21 +495,19 @@ async function reconcileProtocolVersion(
  * instead of a later cryptic frame-parse error. See
  * {@link reconcileProtocolVersion}.
  *
- * `localRecordCount` (this party's raw dataset row count) rides both terms
- * messages, and the partner's is read back as
+ * `localRecordCount` (this party's declared record count -- its row count times
+ * the fan-out factor its own standardization declares) rides both terms messages,
+ * and the partner's is read back as
  * {@link TermsExchangeResult.partnerRecordCount}. It rides the terms exchange
  * rather than a dedicated round-trip because that is the one bidirectional
  * exchange both parties always perform. It is per-party role and
  * element-bounds metadata carried on the envelope beside `linkageTerms`, never
  * inside them, so it does not enter the canonical/agreed-terms hash.
  *
- * `localEffectiveKeyCount` (this party's declared per-key candidate factors,
- * summed) rides both terms messages beside the record count and on the same terms,
- * and the partner's is read back -- after the range, divisibility, and
- * agreed-terms-floor checks of {@link assertPartnerEffectiveKeyCount} -- as
- * {@link TermsExchangeResult.partnerEffectiveKeyCount}. Omitting it advertises the
- * floor the agreed terms alone imply, which is correct for any caller holding no
- * local standardization that fans out.
+ * No width rides the envelope at all: the per-key candidate widths every derived
+ * single-pass bound reads are a function of the AGREED terms, which both parties
+ * hold once this exchange returns, so each derives the other's without a further
+ * field or round-trip (`declaredEffectiveKeyCount`, fanOutFunctions.ts).
  *
  * When `localSaveIntent` is set, this party's zero-setup `--save` intent is
  * advertised on its terms message (message 1 for the initiator, message 2 for
@@ -739,14 +553,7 @@ export async function exchangeTerms(
   localSaveIntent?: boolean,
   localHostKey?: PresentedHostKey,
   localDisclosesPayload?: boolean,
-  localEffectiveKeyCount?: number,
 ): Promise<TermsExchangeResult> {
-  // This party's declared effective key count is always advertised. A caller that
-  // holds a local standardization passes the value derived from BOTH authoring
-  // surfaces; one that does not gets the floor the terms alone imply, which is the
-  // most a party without a local fan-out could declare.
-  const effectiveKeyCount =
-    localEffectiveKeyCount ?? declaredEffectiveKeyCount(localTerms);
   // Spread into the outgoing terms frame only when this party is saving, so a
   // non-save exchange sends no `save` field at all.
   const saveField = localSaveIntent === true ? { save: true } : {};
@@ -769,7 +576,6 @@ export async function exchangeTerms(
     await conn.send({
       linkageTerms: localTerms,
       recordCount: localRecordCount,
-      effectiveKeyCount,
       protocolVersion: PROTOCOL_VERSION,
       ...saveField,
       ...disclosesPayloadField,
@@ -849,38 +655,12 @@ export async function exchangeTerms(
       throw new Error(`linkage terms are incompatible: ${errors.join("; ")}`);
     }
 
-    // Held to the AGREED terms, which the compatibility check just proved
-    // identical to ours, so both parties apply the same range, divisibility, and
-    // floor to each other's advertisement. Best-effort abort first so the
-    // responder fails with the cause rather than on its receive timeout.
-    let partnerEffectiveKeyCount: number;
-    try {
-      partnerEffectiveKeyCount = assertPartnerEffectiveKeyCount(
-        msg.effectiveKeyCount,
-        partnerTerms,
-      );
-    } catch (err) {
-      await sendAbort(conn, [
-        "partner advertised an unusable effective key count",
-      ]);
-      throw err;
-    }
-
-    // Accepted, and above the width the agreed terms alone imply: the run
-    // proceeds, and the operator hears about the gap at the run boundary.
-    const widthNotice = partnerWidthAboveAgreedNotice(
-      partnerEffectiveKeyCount,
-      localTerms,
-    );
-
     await conn.send({ decision: "proceed" });
 
     return {
       partnerTerms,
-      warnings:
-        widthNotice === undefined ? warnings : [...warnings, widthNotice],
+      warnings,
       partnerRecordCount: msg.recordCount,
-      partnerEffectiveKeyCount,
       partnerSaveIntent: msg.save === true,
       partnerDisclosesPayload: msg.disclosesPayload,
       partnerHostKey: msg.hostKey.value,
@@ -898,7 +678,6 @@ export async function exchangeTerms(
     // which requires `recordCount` (message 1's schema makes it mandatory, so a
     // missing count is caught as a parse error before this value is returned).
     let partnerRecordCount = 0;
-    let partnerAdvertisedEffectiveKeyCount: number | undefined;
     let partnerSaveIntent = false;
     let partnerDisclosesPayload: boolean | undefined;
     let partnerHostKey: PresentedHostKey | undefined;
@@ -913,7 +692,6 @@ export async function exchangeTerms(
     try {
       const parsed = termsMessage.parse(rawData);
       partnerRecordCount = parsed.recordCount;
-      partnerAdvertisedEffectiveKeyCount = parsed.effectiveKeyCount;
       partnerSaveIntent = parsed.save === true;
       partnerDisclosesPayload = parsed.disclosesPayload;
       partnerHostKey = parsed.hostKey.value;
@@ -946,34 +724,10 @@ export async function exchangeTerms(
       throw new Error(`linkage terms are incompatible: ${errors.join("; ")}`);
     }
 
-    // See the initiator branch: held to the agreed terms, aborted best-effort.
-    let partnerEffectiveKeyCount: number;
-    try {
-      partnerEffectiveKeyCount = assertPartnerEffectiveKeyCount(
-        partnerAdvertisedEffectiveKeyCount,
-        partnerTerms!,
-      );
-    } catch (err) {
-      await sendAbort(
-        conn,
-        ["partner advertised an unusable effective key count"],
-        localTerms,
-      );
-      throw err;
-    }
-
-    // See the initiator branch: an admissible width above the agreed floor is
-    // surfaced at the run boundary rather than refused.
-    const widthNotice = partnerWidthAboveAgreedNotice(
-      partnerEffectiveKeyCount,
-      localTerms,
-    );
-
     await conn.send({
       linkageTerms: localTerms,
       decision: "proceed",
       recordCount: localRecordCount,
-      effectiveKeyCount,
       protocolVersion: PROTOCOL_VERSION,
       ...saveField,
       ...disclosesPayloadField,
@@ -990,10 +744,8 @@ export async function exchangeTerms(
 
     return {
       partnerTerms: partnerTerms!,
-      warnings:
-        widthNotice === undefined ? warnings : [...warnings, widthNotice],
+      warnings,
       partnerRecordCount,
-      partnerEffectiveKeyCount,
       partnerSaveIntent,
       partnerDisclosesPayload,
       partnerHostKey,

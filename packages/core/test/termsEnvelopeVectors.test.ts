@@ -52,13 +52,11 @@ interface PartyInputs {
   saveIntent?: boolean;
   hostKey?: PresentedHostKey;
   disclosesPayload?: boolean;
-  effectiveKeyCount?: number;
 }
 
 interface ReadBack {
   partnerIdentity: string | null;
   partnerRecordCount: number;
-  partnerEffectiveKeyCount: number;
   partnerSaveIntent: boolean;
   partnerDisclosesPayload: boolean | null;
   partnerHostKey: PresentedHostKey | null;
@@ -121,7 +119,6 @@ function readBack(result: TermsExchangeResult): ReadBack {
   return {
     partnerIdentity: result.partnerTerms.identity ?? null,
     partnerRecordCount: result.partnerRecordCount,
-    partnerEffectiveKeyCount: result.partnerEffectiveKeyCount,
     partnerSaveIntent: result.partnerSaveIntent,
     partnerDisclosesPayload: result.partnerDisclosesPayload ?? null,
     partnerHostKey: result.partnerHostKey ?? null,
@@ -142,7 +139,6 @@ function drive(
     side.saveIntent,
     side.hostKey,
     side.disclosesPayload,
-    side.effectiveKeyCount,
   );
 }
 

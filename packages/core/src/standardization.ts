@@ -45,15 +45,19 @@ import {
 import { APPLIED_SETTINGS } from "./appliedSettings.js";
 import {
   declaredFanOutFunction,
+  declaredKeyWidth,
   FAN_OUT_FUNCTION_NAMES,
   isListedFanOutFunction,
-  MAX_KEY_CANDIDATES_PER_ROW,
+  localFanOutFactor,
+  MAX_KEY_CANDIDATE_WIDTH,
 } from "./fanOutFunctions.js";
 
 export {
   declaredEffectiveKeyCount,
+  declaredKeyWidth,
+  FAN_OUT_CANDIDATES_PER_ELEMENT,
   FAN_OUT_FUNCTION_NAMES,
-  MAX_KEY_CANDIDATES_PER_ROW,
+  localFanOutFactor,
 } from "./fanOutFunctions.js";
 
 const logger = getLogger("cleaning");
@@ -1608,10 +1612,25 @@ export class StandardizedField {
  * evaluated per row index and cached.
  */
 export class StandardizedDataset {
+  /**
+   * Whether any of this party's linkage fields is cleaned by a pipeline declaring
+   * a fan-out producer -- the local authoring surface the partner cannot see.
+   *
+   * Read off the fields the dataset actually holds rather than off the authored
+   * standardization, so a fan-out on a field no linkage key reads declares
+   * nothing. It is what {@link localFanOutFactor} multiplies this party's
+   * DECLARED RECORD COUNT by, and what widens the per-key bound the row builder
+   * holds a record's candidate set to.
+   */
+  readonly declaresFanOut: boolean;
+
   private readonly fieldMap: ReadonlyMap<string, StandardizedField>;
 
   constructor(fields: StandardizedField[]) {
     this.fieldMap = new Map(fields.map((f) => [f.name, f]));
+    this.declaresFanOut = fields.some(
+      (field) => field.multiplicitySources.listed,
+    );
   }
 
   /** Names of the linkage fields this dataset provides. */
@@ -2041,18 +2060,22 @@ function columnDeclaringElementIndex(
 /**
  * The hard cap on the key strings ONE row may contribute to a single key round.
  *
- * {@link MAX_KEY_CANDIDATES_PER_ROW} bounds the record's candidate set for a key,
- * dropping a record a declared fan-out widened above it and refusing one a fuzzy
- * expansion did. This cap sits well above that one and is the
- * resource bound underneath the cross-product itself: the product multiplies each
- * element's candidate count, and the decision to expand an element comes from the
+ * The key's own declared width ({@link declaredKeyWidth}) bounds the record's
+ * candidate set for that key, dropping a record a declared fan-out widened above
+ * it and refusing one a fuzzy expansion did. This cap is the resource bound
+ * underneath the cross-product itself: the product multiplies each element's
+ * candidate count, and the decision to expand an element comes from the
  * partner-authored linkage terms while the values expanded are local rows, so the
  * product is not something the local operator alone controls. A fan-out never
  * REFUSES on it -- a row whose product is too wide to assemble is dropped like
  * any other over-width row -- so the refusal binds only the other candidate
  * producer, `generateFuzzyComparisons` (docs/spec/PROTOCOL.md, The width bound).
- * Set well above any honest fuzzy key (three fuzzy elements over canonical dates
- * produce a few hundred candidates). The cap
+ *
+ * It is {@link MAX_KEY_CANDIDATE_WIDTH}, the ceiling on any one key's declared
+ * width, so the two coincide: a key the terms declare wider than a row can be
+ * assembled for is refused where the width is derived, before any row is read,
+ * and what reaches this cap is a row whose realized product outgrew a width the
+ * terms admit. It
  * bounds the COUNT of key strings, not their bytes: a fuzzy element's value is
  * bounded by MAX_FUZZY_EXPANSION_INPUT_LENGTH, but a non-fuzzy element in the
  * same key carries its full local cell, which the product replicates, so the
@@ -2061,7 +2084,7 @@ function columnDeclaringElementIndex(
  * {@link MAX_ASSEMBLED_KEY_LENGTH_PER_ROW}, measured on the same projection.
  * Both are recorded in docs/spec/CHANNEL_SECURITY.md.
  */
-const MAX_KEY_STRINGS_PER_ROW = 1024;
+const MAX_KEY_STRINGS_PER_ROW = MAX_KEY_CANDIDATE_WIDTH;
 
 /**
  * The hard cap on the total characters one row's key strings may carry for a
@@ -2113,10 +2136,10 @@ function keyStringFanOutCapRefusal(
   );
 }
 
-// The width bound's refusal for a row a fuzzy expansion widened past
-// MAX_KEY_CANDIDATES_PER_ROW. The realized count is a derived integer and the key
-// path locates the offender, so it echoes neither a local value nor the partner's
-// free text, like the two cap refusals around it.
+// The width bound's refusal for a row a fuzzy expansion widened past the width
+// the key declares. The realized count and the declared width are derived
+// integers and the key path locates the offender, so it echoes neither a local
+// value nor the partner's free text, like the two cap refusals around it.
 //
 // A declared fan-out producer takes the warned drop at this same bound instead;
 // what separates them is that the drop is the fan-out rules' own normative
@@ -2124,6 +2147,7 @@ function keyStringFanOutCapRefusal(
 // consent surface states matches independently.
 function fuzzyWidthCapRefusal(
   realized: number,
+  width: number,
   keyIndex: number | undefined,
 ): UsageError {
   const key =
@@ -2132,13 +2156,12 @@ function fuzzyWidthCapRefusal(
       : `the linkage key at linkageKeys[${keyIndex}]`;
   return new UsageError(
     `${key} expands one row into ${realized} candidate values through fuzzy ` +
-      `comparisons, above the ${MAX_KEY_CANDIDATES_PER_ROW} one record may ` +
-      "contribute to one key. That cap is the width this party advertises for " +
-      "a fuzzy key, so a wider row has no slot to occupy, and contributing " +
-      "part of the set would match on less than the terms declare. The " +
-      "exchange is refused instead. Declare fuzzy comparisons on fewer of the " +
-      "key's elements, or shorten the expanded fields with an element " +
-      "transform.",
+      `comparisons, above the ${width} one record may contribute to it. That ` +
+      "width is what the agreed terms declare for this key, so a wider row has " +
+      "no slot to occupy, and contributing part of the set would match on less " +
+      "than the terms declare. The exchange is refused instead. Declare fuzzy " +
+      "comparisons on fewer of the key's elements, or shorten the expanded " +
+      "fields with an element transform.",
   );
 }
 
@@ -2403,6 +2426,15 @@ interface KeyReadPlan {
   readonly pair: [number, number] | undefined;
   readonly fuzzyExpansions: ReadonlyArray<GenerateFuzzyComparisons | undefined>;
   readonly fate: AccumulationFate;
+  /**
+   * The candidate values one record may contribute to this key's round: the width
+   * the agreed terms declare ({@link declaredKeyWidth}) times this party's local
+   * fan-out factor, which its declared record count carries the matching multiple
+   * of. The product of the two is exactly this party's share of the key's value
+   * slots per record, so a row within this bound can never outgrow the slot bound
+   * the partner derives.
+   */
+  readonly width: number;
   readonly drops: KeyRoundDropTally;
 }
 
@@ -2429,6 +2461,7 @@ function planKeyRead(
   key: LinkageKey,
   dataset: StandardizedDataset,
   isReceiver: boolean,
+  keyIndex?: number,
 ): KeyReadPlan {
   const { elements, pair } =
     isReceiver && key.swap
@@ -2439,6 +2472,9 @@ function planKeyRead(
     pair,
     fuzzyExpansions: planFuzzyExpansions(elements, isReceiver),
     fate: keyAccumulationFate(elements, dataset),
+    width:
+      declaredKeyWidth(key, keyIndex) *
+      localFanOutFactor(dataset.declaresFanOut),
     drops: { dropped: 0, reportedIndividually: 0, summarizedThrough: 0 },
   };
 }
@@ -2449,8 +2485,8 @@ function planKeyRead(
  *
  * Returns `null` when the record contributes nothing to the round: an element's
  * field value set is empty (the `NULL`/absent realization), or a candidate set a
- * function in {@link FAN_OUT_FUNCTION_NAMES} expanded exceeds
- * {@link MAX_KEY_CANDIDATES_PER_ROW} or a magnitude bound on the key strings one
+ * function in {@link FAN_OUT_FUNCTION_NAMES} expanded exceeds the width the key
+ * declares ({@link declaredKeyWidth}) or a magnitude bound on the key strings one
  * row builds, which is dropped the same way and warned.
  * Otherwise it returns the deduplicated cross-product across the elements'
  * candidate values -- one entry per distinct combination, and a set of more than
@@ -2477,8 +2513,9 @@ function planKeyRead(
  * multiplies the row's key strings by its candidate count. The expansion runs on
  * the element's TRANSFORMED value (see the note at the expansion site), every
  * candidate flows through the same final NFC pass, and the assembled count is
- * bounded by {@link MAX_KEY_CANDIDATES_PER_ROW} -- the width a fuzzy key declares
- * -- under the {@link MAX_KEY_STRINGS_PER_ROW} assembly cap, a row above either
+ * bounded by {@link declaredKeyWidth} -- the width the agreed terms declare for
+ * the key, which compounds its elements' factors -- under the
+ * {@link MAX_KEY_STRINGS_PER_ROW} assembly cap, a row above either
  * being refused rather than narrowed. It is gated on
  * `APPLIED_SETTINGS.fuzzyComparisons`: while that is false a fuzzy element builds
  * the same single key string as an element without one.
@@ -2498,7 +2535,7 @@ export function buildKeyStrings(
 ): Set<string> | null {
   return buildKeyStringsUnderPlan(
     key,
-    planKeyRead(key, dataset, isReceiver),
+    planKeyRead(key, dataset, isReceiver, keyIndex),
     dataset,
     index,
     keyIndex,
@@ -2510,7 +2547,7 @@ export function buildKeyStrings(
 // reading a key this build classifies `refuse` as a `drop` instead.
 function buildKeyStringsUnderPlan(
   key: LinkageKey,
-  { elements, pair, fuzzyExpansions, fate, drops }: KeyReadPlan,
+  { elements, pair, fuzzyExpansions, fate, width, drops }: KeyReadPlan,
   dataset: StandardizedDataset,
   index: number,
   keyIndex: number | undefined,
@@ -2674,7 +2711,7 @@ function buildKeyStringsUnderPlan(
   // enough to exhaust memory as it is built. The count is a product of array
   // lengths, so it is known without allocating the product itself.
   //
-  // A row this wide is over MAX_KEY_CANDIDATES_PER_ROW too, once assembled, in
+  // A row this wide is over the key's declared width too, once assembled, in
   // every case but one: distinct combinations that concatenate to the same string
   // could in principle collapse a large product into a small candidate set. That
   // collapse is not measurable without the allocation this cap exists to prevent,
@@ -2746,24 +2783,24 @@ function buildKeyStringsUnderPlan(
   // through a declared producer at all takes the drop, one that also expands
   // fuzzily included: the drop is that producer's normative behavior and a row
   // must not take two fates for one crossing. A row only a fuzzy expansion widened
-  // is refused, on the same footing as the projection caps above -- the width the
-  // key advertises is the cap itself (declaredEffectiveKeyCount), so contributing
-  // part of a wider set would match on less than the terms declare while every
-  // derived bound was computed as though the whole set fit.
-  if (result.size > MAX_KEY_CANDIDATES_PER_ROW) {
+  // is refused, on the same footing as the projection caps above -- the width this
+  // key declares is the cap itself (KeyReadPlan.width), so contributing part of a
+  // wider set would match on less than the terms declare while every derived bound
+  // was computed as though the whole set fit.
+  if (result.size > width) {
     if (dropsOnExceedance)
       return dropRowFromKeyRound(
         drops,
         key,
         index,
         `realizes ${result.size} candidate values, more than the ` +
-          `${MAX_KEY_CANDIDATES_PER_ROW} one record may contribute to one key`,
+          `${width} one record may contribute to this key`,
       );
-    if (fuzzyWidened) throw fuzzyWidthCapRefusal(result.size, keyIndex);
+    if (fuzzyWidened) throw fuzzyWidthCapRefusal(result.size, width, keyIndex);
     logger.warn(
       `row ${index}, key "${redactAndSanitizeForDisplay(key.name)}": ` +
         `cross-product produced ${result.size} key strings ` +
-        `(>${MAX_KEY_CANDIDATES_PER_ROW}); a wide per-record expansion in ` +
+        `(>${width}); a wide per-record expansion in ` +
         "dual-party-output exchanges may degrade privacy guarantees",
     );
   }
@@ -2827,7 +2864,12 @@ export class StandardizedKeyIterable {
   }
 
   private valueAt(index: number): KeyCandidates {
-    this.plan ??= planKeyRead(this.key, this.dataset, this.isReceiver);
+    this.plan ??= planKeyRead(
+      this.key,
+      this.dataset,
+      this.isReceiver,
+      this.keyIndex,
+    );
     const result = buildKeyStringsUnderPlan(
       this.key,
       this.plan,

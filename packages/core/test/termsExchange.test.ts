@@ -6,13 +6,9 @@ import {
   resolveRole,
   PROTOCOL_VERSION,
   PROTOCOL_VERSION_MISMATCH_MESSAGE,
+  TERMS_ENVELOPE_FIELDS,
 } from "../src/protocolSetup";
-import {
-  MAX_LINKAGE_ENTRIES,
-  MAX_NAME_LENGTH,
-} from "../src/config/linkageTerms";
-import { MAX_KEY_CANDIDATES_PER_ROW } from "../src/fanOutFunctions";
-import { redactAndSanitizeForDisplay } from "../src/utils/sanitizeErrorForDisplay";
+import { MAX_NAME_LENGTH } from "../src/config/linkageTerms";
 import type { LinkageTerms, Output } from "../src/config/linkageTerms";
 import type { PresentedHostKey } from "../src/connection/fileSyncConnection";
 import type { PsiRole } from "../src/types";
@@ -753,438 +749,46 @@ test("record counts ride the terms messages, not a separate frame", async () => 
   }
 });
 
-// --- The declared effective key count ----------------------------------------
-// It rides the same envelope as the record count and on the same terms, and with
-// that count it is the party's value slot bound -- the authenticated input every
-// derived single-pass bound reads. A fan-out-free party advertises its plain key
-// count, so these fixtures (one key, no fan-out) advertise 1.
-//
-// An advertisement ABOVE that plain count declares a fan-out, which only a
-// single-pass exchange has a matching path for, so the shape checks below are
-// driven on single-pass terms: on the cascade the strategy refusal takes them
-// first, which is its own case further down.
+// --- No width rides the envelope ---------------------------------------------
+// The per-key candidate widths every derived single-pass bound reads are a
+// function of the AGREED terms, which both parties hold once this exchange
+// returns, so neither declares a width to the other and neither reads one.
 
-const singlePassTermsA: LinkageTerms = {
-  ...termsA,
-  linkageStrategy: "single-pass",
-};
-const singlePassTermsB: LinkageTerms = {
-  ...termsB,
-  linkageStrategy: "single-pass",
-};
-
-// The four refusals the advertised count can draw, each keyed by the fragment
-// only its own detail carries. A case asserts its fragment rather than the
-// ConnectionError class alone, so a later check cannot stand in silently for the
-// one the case exists to drive.
-const STRATEGY_REFUSAL =
-  "a fan-out advertisement on a cascade exchange, which matches one value per record";
-const RANGE_REFUSAL = "outside the range a per-key candidate factor can sum to";
-const FRACTIONAL_REFUSAL = "implies a fractional number of fan-out keys";
-const FLOOR_REFUSAL =
-  "below the floor the agreed linkage keys' own transforms imply";
-
-test("effective key counts ride the terms messages beside the record counts", async () => {
+test("neither terms message carries a width field", async () => {
   const [connA, connB] = makeConnections();
   const { conn: recordingA, sent: initiatorSent } = recordingConnection(connA);
   const { conn: recordingB, sent: responderSent } = recordingConnection(connB);
-  const [a, b] = await Promise.all([
+  await Promise.all([
     exchangeTerms(recordingA, "initiator", termsA, 100),
     exchangeTerms(recordingB, "responder", termsB, 200),
   ]);
 
-  expect(a.partnerEffectiveKeyCount).toBe(1);
-  expect(b.partnerEffectiveKeyCount).toBe(1);
-  expect(initiatorSent[0]).toMatchObject({ effectiveKeyCount: 1 });
-  expect(responderSent[0]).toMatchObject({ effectiveKeyCount: 1 });
+  for (const frame of [...initiatorSent, ...responderSent])
+    expect(frame).not.toHaveProperty("effectiveKeyCount");
+  for (const fields of Object.values(TERMS_ENVELOPE_FIELDS))
+    expect(fields).not.toContain("effectiveKeyCount");
 });
 
-test("a party may advertise more than the agreed terms' floor", async () => {
-  // A local standardization can fan out a field the terms do not show, so the
-  // agreed terms fix a FLOOR rather than the value: an advertisement above it,
-  // divisible as a whole number of fan-out keys, is accepted.
+test("a terms frame still carrying the retired width field is ignored", async () => {
+  // The envelope schemas are non-strict, so a peer that still declares a width
+  // has it stripped at the parse and the exchange proceeds on the widths both
+  // parties derive. Deliberate rather than incidental: the field carried nothing
+  // the agreed terms do not, so there is nothing for a refusal to protect.
   const [connA, connB] = makeConnections();
-  const responder = exchangeTerms(connB, "responder", singlePassTermsB, 200);
+  const responder = exchangeTerms(connB, "responder", termsB, 200);
   await connA.send({
-    linkageTerms: singlePassTermsA,
+    linkageTerms: termsA,
     recordCount: 100,
     effectiveKeyCount: 20,
     protocolVersion: PROTOCOL_VERSION,
   });
-  await connA.receive(); // msg 2
+  const msg2 = (await connA.receive()) as Record<string, unknown>;
+  expect(msg2).toMatchObject({ decision: "proceed" });
   await connA.send({ decision: "proceed" });
-  expect((await responder).partnerEffectiveKeyCount).toBe(20);
-});
 
-// --- The run-boundary notice for a width above the agreed floor --------------
-// Accepting the wider advertisement silently would leave the operator with only
-// the terms a consent surface displayed, which imply the narrower width, while
-// every derived single-pass bound -- and this party's share of the dataset
-// ceiling -- is computed from the wider one. The gap rides the terms warnings the
-// caller surfaces at the run boundary; it never blocks, because the
-// advertisement is admissible.
-
-const WIDTH_NOTICE = /effective key count above the agreed terms/;
-
-test("the responder warns when the partner's advertised width is above the agreed floor", async () => {
-  const [connA, connB] = makeConnections();
-  const responder = exchangeTerms(connB, "responder", singlePassTermsB, 200);
-  await connA.send({
-    linkageTerms: singlePassTermsA,
-    recordCount: 100,
-    effectiveKeyCount: 20,
-    protocolVersion: PROTOCOL_VERSION,
-  });
-  await connA.receive(); // msg 2
-  await connA.send({ decision: "proceed" });
-  const notice = (await responder).warnings.find((w) => WIDTH_NOTICE.test(w));
-  expect(notice).toBeDefined();
-  // Both widths are named: the advertised one the run's bounds are derived from,
-  // and the one the agreed linkage keys imply.
-  expect(notice).toContain("partner advertised 20 value slot(s) per record");
-  expect(notice).toContain("against the 1 the agreed linkage keys imply");
-  // The gap is characterized by what this party can check -- the advertisement is
-  // the partner's own, and the agreed terms do not show the width -- and not by
-  // where the extra width came from, which this party cannot verify.
-  expect(notice).toContain(
-    "the extra width is the partner's own declaration and is not shown in the agreed terms",
-  );
-});
-
-test("the initiator warns on a width above the floor advertised on message 2", async () => {
-  const [connA, connB] = makeConnections();
-  const initiator = exchangeTerms(connA, "initiator", singlePassTermsA, 100);
-  await connB.receive(); // msg 1
-  await connB.send({
-    linkageTerms: singlePassTermsB,
-    decision: "proceed",
-    recordCount: 200,
-    effectiveKeyCount: 20,
-    protocolVersion: PROTOCOL_VERSION,
-  });
-  const notice = (await initiator).warnings.find((w) => WIDTH_NOTICE.test(w));
-  expect(notice).toBeDefined();
-  expect(notice).toContain("partner advertised 20 value slot(s) per record");
-  expect(notice).toContain("against the 1 the agreed linkage keys imply");
-});
-
-test("the width notice reaches the operator whole at the widest admissible counts", async () => {
-  // The CLI escapes a terms warning at the per-value display cap on its way to
-  // stderr (apps/cli/src/protocol.ts), which truncates rather than wraps, so a
-  // notice longer than that cap reaches the operator cut short -- and the numbers
-  // it exists to name sit at its front, where a truncation would spare them but
-  // drop the explanation.
-  //
-  // The notice's length is set by the two counts it interpolates, so the widest
-  // pair is the one that renders both at their longest. The advertisement is
-  // capped at MAX_LINKAGE_ENTRIES * MAX_KEY_CANDIDATES_PER_ROW, and the agreed
-  // terms fan out on their own account too -- so the agreed width is not stuck at
-  // the plain key count but runs up to one fan-out key below the advertisement,
-  // which is where it still trips the notice. That pair (every agreed key but one
-  // declaring split_on) renders four digits against four, and no admissible pair
-  // renders more.
-  const advertised = MAX_LINKAGE_ENTRIES * MAX_KEY_CANDIDATES_PER_ROW;
-  const agreedWidth = advertised - (MAX_KEY_CANDIDATES_PER_ROW - 1);
-  const fanOutElement = {
-    field: "ssn",
-    transform: [{ function: "split_on", params: { delimiter: "/" } }],
-  };
-  const wideTerms: LinkageTerms = {
-    ...singlePassTermsA,
-    linkageKeys: Array.from({ length: MAX_LINKAGE_ENTRIES }, (_, i) => ({
-      name: `key ${i}`,
-      elements: [i === 0 ? { field: "ssn" } : fanOutElement],
-    })),
-  };
-  const [connA, connB] = makeConnections();
-  const responder = exchangeTerms(connB, "responder", wideTerms, 200);
-  await connA.send({
-    linkageTerms: wideTerms,
-    recordCount: 100,
-    effectiveKeyCount: advertised,
-    protocolVersion: PROTOCOL_VERSION,
-  });
-  await connA.receive(); // msg 2
-  await connA.send({ decision: "proceed" });
-  const notice = (await responder).warnings.find((w) => WIDTH_NOTICE.test(w));
-  expect(notice).toBeDefined();
-  // Asserted so a fixture that quietly stopped driving the widest pair -- an
-  // agreed width back at the plain key count, say -- fails here rather than
-  // passing the cap check on a shorter notice.
-  expect(notice).toContain(
-    `partner advertised ${advertised} value slot(s) per record`,
-  );
-  expect(notice).toContain(
-    `against the ${agreedWidth} the agreed linkage keys imply`,
-  );
-  expect(redactAndSanitizeForDisplay(notice!)).toBe(notice);
-});
-
-test("a fan-out-free partner at the plain key count stays quiet", async () => {
-  const [connA, connB] = makeConnections();
-  const [a, b] = await Promise.all([
-    exchangeTerms(connA, "initiator", termsA, 100),
-    exchangeTerms(connB, "responder", termsB, 200),
-  ]);
-  expect(a.warnings.filter((w) => WIDTH_NOTICE.test(w))).toEqual([]);
-  expect(b.warnings.filter((w) => WIDTH_NOTICE.test(w))).toEqual([]);
-});
-
-// The 39 case is the one the range check alone can refuse: it sits a whole
-// number of fan-out keys above the ceiling (1 + 2 * 19), so it clears the
-// divisibility check and clears the fan-out-free floor of 1 as well. The other
-// shapes fall through to a later check when the range is not enforced, which is
-// why each case names the fault it expects rather than the error class.
-test.each([
-  ["below the agreed key count", 0, RANGE_REFUSAL],
-  ["above the per-key candidate ceiling", 21, RANGE_REFUSAL],
-  ["a whole number of fan-out keys above the ceiling", 39, RANGE_REFUSAL],
-  ["implying a fractional number of fan-out keys", 5, FRACTIONAL_REFUSAL],
-])(
-  "the responder refuses an effective key count %s as a protocol violation",
-  async (_label, effectiveKeyCount, detail) => {
-    const [connA, connB] = makeConnections();
-    const responder = exchangeTerms(connB, "responder", singlePassTermsB, 200);
-    await connA.send({
-      linkageTerms: singlePassTermsA,
-      recordCount: 100,
-      effectiveKeyCount,
-      protocolVersion: PROTOCOL_VERSION,
-    });
-    const abort = await connA.receive();
-    expect(abort).toMatchObject({
-      decision: "abort",
-      abortReasons: ["partner advertised an unusable effective key count"],
-    });
-    const err = await responder.catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(ConnectionError);
-    expect((err as ConnectionError).kind).toBe("protocol");
-    expect((err as ConnectionError).message).toContain(detail);
-  },
-);
-
-test.each([
-  ["implying a fractional number of fan-out keys", 7, FRACTIONAL_REFUSAL],
-  ["a whole number of fan-out keys above the ceiling", 39, RANGE_REFUSAL],
-])(
-  "the initiator refuses an effective key count %s on message 2 too",
-  async (_label, effectiveKeyCount, detail) => {
-    const [connA, connB] = makeConnections();
-    const initiator = exchangeTerms(connA, "initiator", singlePassTermsA, 100);
-    await connB.receive(); // msg 1
-    await connB.send({
-      linkageTerms: singlePassTermsB,
-      decision: "proceed",
-      recordCount: 200,
-      effectiveKeyCount,
-      protocolVersion: PROTOCOL_VERSION,
-    });
-    const abort = await connB.receive();
-    expect(abort).toMatchObject({
-      decision: "abort",
-      abortReasons: ["partner advertised an unusable effective key count"],
-    });
-    const err = await initiator.catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(ConnectionError);
-    expect((err as ConnectionError).kind).toBe("protocol");
-    expect((err as ConnectionError).message).toContain(detail);
-  },
-);
-
-// --- The floor the agreed terms imply ----------------------------------------
-// An element transform declaring a fan-out rides the AGREED terms, so both
-// parties see it and each holds the other to at least the count it implies. A
-// party may advertise MORE than that floor -- its own standardization can fan out
-// a field the terms do not show -- but never less. Advertising the plain key
-// count under such terms is inside the range and a whole number of fan-out keys,
-// so the floor is the only check that can refuse it.
-
-const fanOutKeys: LinkageTerms["linkageKeys"] = [
-  {
-    name: "SSN",
-    elements: [
-      {
-        field: "ssn",
-        transform: [{ function: "split_on", params: { delimiter: "/" } }],
-      },
-    ],
-  },
-];
-const fanOutTermsA: LinkageTerms = {
-  ...singlePassTermsA,
-  linkageKeys: fanOutKeys,
-};
-const fanOutTermsB: LinkageTerms = {
-  ...singlePassTermsB,
-  linkageKeys: fanOutKeys,
-};
-
-test("the responder refuses an advertisement below the agreed terms' floor", async () => {
-  const [connA, connB] = makeConnections();
-  const responder = exchangeTerms(connB, "responder", fanOutTermsB, 200);
-  await connA.send({
-    linkageTerms: fanOutTermsA,
-    recordCount: 100,
-    effectiveKeyCount: fanOutKeys.length,
-    protocolVersion: PROTOCOL_VERSION,
-  });
-  const abort = await connA.receive();
-  expect(abort).toMatchObject({
-    decision: "abort",
-    abortReasons: ["partner advertised an unusable effective key count"],
-  });
-  const err = await responder.catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(ConnectionError);
-  expect((err as ConnectionError).kind).toBe("protocol");
-  expect((err as ConnectionError).message).toContain(FLOOR_REFUSAL);
-});
-
-test("a partner advertising exactly the agreed floor stays quiet", async () => {
-  // The fan-out these terms declare is one both parties can see, so a partner
-  // running at exactly the width they imply has taken no width the operator has
-  // not already agreed to: the run-boundary notice fires on the gap, and here
-  // there is none.
-  const [connA, connB] = makeConnections();
-  const responder = exchangeTerms(connB, "responder", fanOutTermsB, 200);
-  await connA.send({
-    linkageTerms: fanOutTermsA,
-    recordCount: 100,
-    effectiveKeyCount: 20,
-    protocolVersion: PROTOCOL_VERSION,
-  });
-  await connA.receive(); // msg 2
-  await connA.send({ decision: "proceed" });
   const result = await responder;
-  expect(result.partnerEffectiveKeyCount).toBe(20);
-  expect(result.warnings.filter((w) => WIDTH_NOTICE.test(w))).toEqual([]);
-});
-
-test("the initiator refuses an advertisement below the floor on message 2 too", async () => {
-  const [connA, connB] = makeConnections();
-  const initiator = exchangeTerms(connA, "initiator", fanOutTermsA, 100);
-  await connB.receive(); // msg 1
-  await connB.send({
-    linkageTerms: fanOutTermsB,
-    decision: "proceed",
-    recordCount: 200,
-    effectiveKeyCount: fanOutKeys.length,
-    protocolVersion: PROTOCOL_VERSION,
-  });
-  const abort = await connB.receive();
-  expect(abort).toMatchObject({
-    decision: "abort",
-    abortReasons: ["partner advertised an unusable effective key count"],
-  });
-  const err = await initiator.catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(ConnectionError);
-  expect((err as ConnectionError).kind).toBe("protocol");
-  expect((err as ConnectionError).message).toContain(FLOOR_REFUSAL);
-});
-
-// --- A fan-out advertisement outside single-pass -----------------------------
-// Fan-out matching is specified for the single-pass strategy alone
-// (docs/spec/PROTOCOL.md, Fan-out runs under single-pass only), and the run
-// boundary is where both parties first hold each other's declared width. The
-// agreed strategy is a mandatory-consistency term, so the refusal is a symmetric
-// function of the agreed pair and both orientations refuse in lockstep.
-//
-// Only the PARTNER's advertisement needs a check here: a local fan-out config
-// off single-pass never reaches an advertisement at all, because
-// assertFanOutImplemented refuses a declared fan-out on either authoring surface
-// at prepareForExchange, runExchange re-checks the terms half before the terms go
-// on the wire, and the advertisement itself is checked against the local strategy
-// beside it (all three pinned in prepareForExchange.test.ts). What the partner
-// refuses here is the advertisement a non-conforming peer sends anyway.
-
-test("the responder refuses a fan-out advertisement on a cascade exchange", async () => {
-  // The same value the single-pass case above accepts, so what refuses it is the
-  // agreed strategy rather than the advertisement's shape.
-  const [connA, connB] = makeConnections();
-  const responder = exchangeTerms(connB, "responder", termsB, 200);
-  await connA.send({
-    linkageTerms: termsA,
-    recordCount: 100,
-    effectiveKeyCount: 20,
-    protocolVersion: PROTOCOL_VERSION,
-  });
-  const abort = await connA.receive();
-  expect(abort).toMatchObject({
-    decision: "abort",
-    abortReasons: ["partner advertised an unusable effective key count"],
-  });
-  const err = await responder.catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(ConnectionError);
-  expect((err as ConnectionError).kind).toBe("protocol");
-  expect((err as ConnectionError).message).toContain(STRATEGY_REFUSAL);
-});
-
-test("the initiator refuses a fan-out advertisement on a cascade exchange too", async () => {
-  const [connA, connB] = makeConnections();
-  const initiator = exchangeTerms(connA, "initiator", termsA, 100);
-  await connB.receive(); // msg 1
-  await connB.send({
-    linkageTerms: termsB,
-    decision: "proceed",
-    recordCount: 200,
-    effectiveKeyCount: 20,
-    protocolVersion: PROTOCOL_VERSION,
-  });
-  const abort = await connB.receive();
-  expect(abort).toMatchObject({
-    decision: "abort",
-    abortReasons: ["partner advertised an unusable effective key count"],
-  });
-  const err = await initiator.catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(ConnectionError);
-  expect((err as ConnectionError).kind).toBe("protocol");
-  expect((err as ConnectionError).message).toContain(STRATEGY_REFUSAL);
-});
-
-const ABSENT_COUNT_REFUSAL =
-  "partner advertised no effective key count against 1 agreed linkage key(s)";
-
-test("the responder refuses a partner that omits the effective key count", async () => {
-  // The advertisement is not defaultable: the version reconcile admits only a
-  // partner advertising this build's version, and a party on that version always
-  // declares a count beside it, so an omission is a non-conforming peer and draws
-  // the classified refusal rather than resolving to the plain key count.
-  const [connA, connB] = makeConnections();
-  const responder = exchangeTerms(connB, "responder", termsB, 200);
-  await connA.send({
-    linkageTerms: termsA,
-    recordCount: 100,
-    protocolVersion: PROTOCOL_VERSION,
-  });
-  const abort = await connA.receive();
-  expect(abort).toMatchObject({
-    decision: "abort",
-    abortReasons: ["partner advertised an unusable effective key count"],
-  });
-  const err = await responder.catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(ConnectionError);
-  expect((err as ConnectionError).kind).toBe("protocol");
-  expect((err as ConnectionError).message).toContain(ABSENT_COUNT_REFUSAL);
-});
-
-test("the initiator refuses an omitted effective key count on message 2 too", async () => {
-  const [connA, connB] = makeConnections();
-  const initiator = exchangeTerms(connA, "initiator", termsA, 100);
-  await connB.receive(); // msg 1
-  await connB.send({
-    linkageTerms: termsB,
-    decision: "proceed",
-    recordCount: 200,
-    protocolVersion: PROTOCOL_VERSION,
-  });
-  const abort = await connB.receive();
-  expect(abort).toMatchObject({
-    decision: "abort",
-    abortReasons: ["partner advertised an unusable effective key count"],
-  });
-  const err = await initiator.catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(ConnectionError);
-  expect((err as ConnectionError).kind).toBe("protocol");
-  expect((err as ConnectionError).message).toContain(ABSENT_COUNT_REFUSAL);
+  expect(result.partnerRecordCount).toBe(100);
+  expect(result.warnings).toEqual([]);
 });
 
 // --- Missing record count ----------------------------------------------------
@@ -1202,7 +806,6 @@ test("initiator aborts when a proceed frame omits the record count", async () =>
   await connB.send({
     linkageTerms: termsB,
     decision: "proceed",
-    effectiveKeyCount: 1,
     protocolVersion: PROTOCOL_VERSION,
   }); // no recordCount
   // The initiator sends an abort (msg 3) and then throws; drain the abort so

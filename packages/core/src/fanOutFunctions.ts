@@ -1,22 +1,24 @@
 /**
  * The declared fan-out producers: which standardization functions expand ONE
  * value into several match candidates, the membership test the compiler captures
- * per step, the normative per-(record, key) width bound, and the effective key
+ * per step, the per-key width the agreed terms declare, and the effective key
  * count the exchange's slot arithmetic is derived from.
  *
  * Its own module because the list steers a runtime decision -- whether an
  * over-width or unassemblable row is dropped or refused -- so the membership test
  * needs a seam the unit tests can drive without the exported list itself being
- * writable (see {@link withNoListedFanOutFunctions}). It carries the width bound
- * and the effective-key-count derivation beside the list so the connection and
- * protocol layers, which bound a partner-supplied frame from them, reach them
- * without importing the whole standardization pipeline. `standardization.ts`
- * re-exports both, which is where consumers read them from.
+ * writable (see {@link withNoListedFanOutFunctions}). It carries the width
+ * derivation beside the list so the connection and protocol layers, which bound a
+ * partner-supplied frame from them, reach them without importing the whole
+ * standardization pipeline. `standardization.ts` re-exports both, which is where
+ * consumers read them from.
  */
 
 import { APPLIED_SETTINGS } from "./appliedSettings.js";
+import { MAX_LINKAGE_ENTRIES } from "./config/linkageTerms.js";
 import type { LinkageKey, LinkageTerms } from "./config/linkageTerms.js";
-import type { Standardization } from "./config/standardization.js";
+import { UsageError } from "./errors.js";
+import { fuzzyCandidateCeiling } from "./fuzzyComparisons.js";
 
 /**
  * The standardization functions that expand ONE value into several match
@@ -25,9 +27,9 @@ import type { Standardization } from "./config/standardization.js";
  * and is refused under every other rather than run with the narrower matching one
  * of those would actually deliver; see `assertFanOutImplemented`.
  *
- * It is also what {@link declaredEffectiveKeyCount} reads to decide a key's
- * candidate factor, so an entry here widens every derived single-pass bound for
- * a party whose keys the named function feeds.
+ * It is also what {@link declaredKeyWidth} reads to decide an element's candidate
+ * factor, so an entry here widens every derived single-pass bound for an exchange
+ * whose agreed key elements the named function feeds.
  *
  * Hand-listed, because whether a factory can return a multi-value `Set` is not
  * derivable from the registry. A fan-out function added to
@@ -99,36 +101,55 @@ export function withNoListedFanOutFunctions<T>(body: () => T): T {
 }
 
 /**
- * The normative per-(record, key) fan-out width bound: one record contributes at
- * most this many candidate values to one linkage key's round
- * (docs/spec/PROTOCOL.md, The width bound). Not operator-configurable -- it is
- * what a partner-supplied frame's element and byte bounds are derived from, so
- * changing it re-derives those.
+ * The candidate values ONE declared fan-out step contributes to the element it
+ * runs on: `split_on` shatters a cell into at most this many parts as far as the
+ * declared width is concerned (docs/spec/PROTOCOL.md, The width bound).
  *
- * A record realizing more candidates than this contributes NONE of them to that
- * key's round: `buildKeyStrings` drops it exactly as an absent (`NULL`)
- * realization is dropped, warns the operator, and leaves the record eligible for
- * later keys. Deliberately not a run refusal -- the transforms are
- * partner-authored while the values expanded are this party's own rows, so
- * failing the run would let a partner end an exchange by authoring a delimiter
- * that shatters one local value.
+ * Not operator-configurable -- a partner-supplied frame's element and byte bounds
+ * are derived from the widths built on it, so changing it re-derives those.
  *
- * It binds `split_on`, the fan-out producer, and it is also the count at which a
- * cross-product earns an operator advisory: a wide expansion weakens the
- * guarantee a dual-party-output exchange otherwise gives, because each candidate
- * can independently reveal co-possession. Past the bound that width is not the
- * operator's call to make per row, and the consequence of an authored fan-out
- * within the bound is surfaced where the operator consents to the terms.
+ * A record realizing more candidates for a key than that key's declared width
+ * admits contributes NONE of them to the round: `buildKeyStrings` drops it
+ * exactly as an absent (`NULL`) realization is dropped, warns the operator, and
+ * leaves the record eligible for later keys. Deliberately not a run refusal --
+ * the transforms are partner-authored while the values expanded are this party's
+ * own rows, so failing the run would let a partner end an exchange by authoring a
+ * delimiter that shatters one local value.
  *
- * It binds the other candidate producer, `generateFuzzyComparisons`, as the
- * declared width factor of any key an element of which declares one -- the same
- * number, so a fuzzy key's slots are expressible in the 1-or-20 grammar the terms
- * envelope already carries -- and as a REFUSAL rather than a drop for a row a
- * fuzzy expansion widened past it (`buildKeyStrings`): a fuzzy element declares
- * every candidate as one that matches independently, so a row contributing part
- * of its set would match on less than the terms describe.
+ * It is also the factor a party's own standardization contributes to its DECLARED
+ * RECORD COUNT ({@link localFanOutFactor}): local cleaning that fans out is the
+ * party's own business and rides no agreed term, so it is declared as the extra
+ * records it stands for rather than as extra width.
  */
-export const MAX_KEY_CANDIDATES_PER_ROW = 20;
+export const FAN_OUT_CANDIDATES_PER_ELEMENT = 20;
+
+/**
+ * The ceiling on any ONE key's declared width: the candidates a single record may
+ * contribute to a single linkage key's round.
+ *
+ * Equal by construction to the count limb of the key-string assembly cap
+ * (`MAX_KEY_STRINGS_PER_ROW`, standardization.ts), so the width a key declares and
+ * the cross-product the row builder will assemble for it are bounded by the same
+ * number: a key whose declared width would exceed what the builder can assemble is
+ * refused when the width is derived, before any row is read, rather than dropping
+ * every row at the assembly cap.
+ */
+export const MAX_KEY_CANDIDATE_WIDTH = 1024;
+
+/**
+ * The ceiling on the SUM of a party's per-key declared widths -- its effective key
+ * count, the multiplier on its record count in every derived single-pass bound
+ * (`valueSlots`, connection/frameSize.ts).
+ *
+ * Bounding the sum rather than the per-key width times the key count is what keeps
+ * the slot arithmetic's exact-integer premise literally unchanged: at
+ * {@link MAX_KEY_CANDIDATE_WIDTH} per key across the {@link MAX_LINKAGE_ENTRIES}
+ * keys the terms schema admits, `effectiveKeyCount * MAX_RECORD_COUNT` would leave
+ * the range a double represents exactly, while this bound holds that product where
+ * it has always been (docs/spec/PROTOCOL.md, The width bound).
+ */
+export const MAX_EFFECTIVE_KEY_COUNT =
+  MAX_LINKAGE_ENTRIES * FAN_OUT_CANDIDATES_PER_ELEMENT;
 
 /**
  * The name of the first declared fan-out producer among `steps`, or `undefined`
@@ -144,92 +165,118 @@ export function declaredFanOutFunction(
     ?.function;
 }
 
-// The linkage fields a party's own standardization fans out: the `output` of
-// every transformation carrying a declared fan-out step. A key referencing one of
-// those fields fans out even when its element transforms declare nothing, which
-// is why the effective key count below is per-party rather than derivable from
-// the agreed terms alone.
-function fanOutStandardizedFields(
-  standardization: Standardization | undefined,
-): ReadonlySet<string> {
-  const fields = new Set<string>();
-  for (const transformation of standardization ?? [])
-    if (declaredFanOutFunction(transformation.steps) !== undefined)
-      fields.add(transformation.output);
-  return fields;
-}
-
-function keyDeclaresFanOut(
-  key: LinkageKey,
-  fanOutFields: ReadonlySet<string>,
-): boolean {
-  // `swap` exchanges two of a key's element FIELDS while each element keeps its
-  // own transforms, so it permutes neither set this verdict reads and the sender
-  // and the receiver reach the same one.
-  return key.elements.some(
-    (element) =>
-      declaredFanOutFunction(element.transform) !== undefined ||
-      fanOutFields.has(element.field),
-  );
-}
-
-// Whether any of the key's elements declares a fuzzy expansion, read WITHOUT
-// regard to the role this party will resolve to. The advertisement rides message
-// 1 of the terms exchange, before the initiator holds the partner's record count,
-// so the role is not yet known when this number is fixed -- and an expansion some
-// role executes on one party alone is still a width that party may need. Every
-// party therefore declares the receiver-case ceiling, which is what makes the
-// floor each party derives from the agreed terms the same on both sides
-// whichever of them ends up as the receiver.
-function keyDeclaresFuzzyExpansion(key: LinkageKey): boolean {
-  return key.elements.some(
-    (element) => element.generateFuzzyComparisons !== undefined,
-  );
+// The key's position in the agreed terms, for a refusal that must locate the
+// offender without echoing the partner-authored key name.
+function keySite(keyIndex: number | undefined): string {
+  return keyIndex === undefined
+    ? "a linkage key"
+    : `the linkage key at linkageKeys[${keyIndex}]`;
 }
 
 /**
- * A party's declared **effective key count**: the sum, over the agreed linkage
- * keys, of its declared candidate factor for each -- {@link
- * MAX_KEY_CANDIDATES_PER_ROW} for a key some declared fan-out produces values
- * for, and 1 otherwise. It equals the plain key count exactly when the party
- * declares no fan-out (docs/spec/PROTOCOL.md, The width bound).
+ * The width one linkage key declares: the candidate values one record may
+ * contribute to that key's round, derived from the AGREED terms alone
+ * (docs/spec/PROTOCOL.md, The width bound).
  *
- * Multiplied by the party's record count it gives that party's **value slots**,
- * the authenticated upper bound on its distinct-value count that replaces
- * `keyCount * recordCount` in every derived single-pass bound. It is a property
- * of this party's declared configuration, not an observation of its data, so both
- * a fan-out that never splits a row and one that splits every row advertise the
- * same number.
+ * It is the PRODUCT over the key's elements of each element's own candidate
+ * factor, because `buildKeyStrings` assembles the key from the cross-product of
+ * its elements' candidate lists: an element whose `transform` declares a fan-out
+ * contributes {@link FAN_OUT_CANDIDATES_PER_ELEMENT}, one declaring a fuzzy
+ * comparison contributes that kind's {@link fuzzyCandidateCeiling}, an element
+ * declaring both contributes their product, and an element declaring neither
+ * contributes 1. Taking the larger of the two factors instead would under-declare
+ * against what the row builder actually assembles and refuse honest rows at the
+ * width seam.
  *
- * Both authoring surfaces count: an element transform in the agreed `terms`
- * (which the partner can see, and which fixes the floor the partner's advertised
- * value is held to) and a step in this party's own local `standardization`
- * (which the partner cannot see, and which is why a party may advertise more than
- * that floor). Passing no `standardization` yields exactly that floor.
+ * Read WITHOUT regard to the role this party resolves to: an expansion
+ * {@link expandsOnReceiverOnly} classifies runs on one party alone, but the width
+ * is fixed before the roles are, so both parties declare the receiver-case
+ * ceiling and derive the identical number from terms they have both agreed.
  *
- * `generateFuzzyComparisons` is the second per-record candidate producer and
- * carries the same factor, on a key any of whose elements declares one. The two
- * producers do not compound: a key both widen still declares
- * {@link MAX_KEY_CANDIDATES_PER_ROW}, which is what a record may contribute to
- * one key however many producers built the set.
+ * `swap` exchanges two of a key's element FIELDS while each element keeps its own
+ * transforms and fuzzy declaration, so it permutes no factor in the product and
+ * the sender and the receiver reach the same width.
  *
- * The fuzzy half is gated on `APPLIED_SETTINGS.fuzzyComparisons`, which is what
- * keeps the advertisement the number every party already sends while the
- * expansion builds nothing: declaring a width for candidates no row realizes
- * would spend this party's share of the single-pass ceiling on slots that stay
- * empty.
+ * The fuzzy factor is gated on `APPLIED_SETTINGS.fuzzyComparisons`: declaring
+ * width for candidates no row realizes would spend this party's share of the
+ * single-pass ceiling on slots that stay empty.
+ *
+ * Throws a {@link UsageError} for a key whose declared width exceeds
+ * {@link MAX_KEY_CANDIDATE_WIDTH} -- a width no row could assemble in full, so
+ * every row of that key would be dropped or refused at the assembly cap.
  */
-export function declaredEffectiveKeyCount(
-  terms: LinkageTerms,
-  standardization?: Standardization,
-): number {
-  const fanOutFields = fanOutStandardizedFields(standardization);
+export function declaredKeyWidth(key: LinkageKey, keyIndex?: number): number {
+  let width = 1;
+  for (const element of key.elements) {
+    if (declaredFanOutFunction(element.transform) !== undefined)
+      width *= FAN_OUT_CANDIDATES_PER_ELEMENT;
+    if (
+      APPLIED_SETTINGS.fuzzyComparisons &&
+      element.generateFuzzyComparisons !== undefined
+    )
+      width *= fuzzyCandidateCeiling(element.generateFuzzyComparisons);
+    if (width > MAX_KEY_CANDIDATE_WIDTH)
+      throw new UsageError(
+        `${keySite(keyIndex)} declares a width of more than the ` +
+          `${MAX_KEY_CANDIDATE_WIDTH} candidate values one record may ` +
+          "contribute to one key: every element's candidates multiply across " +
+          "the key, so expanding steps on several of its elements compound. " +
+          "The exchange is refused instead. Declare the expansion on fewer of " +
+          "the key's elements, or split the key into keys of fewer elements.",
+      );
+  }
+  return width;
+}
+
+/**
+ * A party's **effective key count**: the sum of {@link declaredKeyWidth} over the
+ * agreed linkage keys. It equals the plain key count exactly when no key's
+ * elements declare an expansion (docs/spec/PROTOCOL.md, The width bound).
+ *
+ * Derived from the agreed terms alone, so both parties compute it for BOTH sides
+ * with no round-trip and no advertisement: multiplied by a party's declared record
+ * count it gives that party's **value slots**, the authenticated upper bound on
+ * its distinct-value count that replaces `keyCount * recordCount` in every derived
+ * single-pass bound.
+ *
+ * A party's own local standardization is deliberately not read here. Cleaning that
+ * fans out is per-party and invisible to the partner, so it rides the party's
+ * DECLARED RECORD COUNT instead ({@link localFanOutFactor}), which keeps this
+ * number a property of terms both parties hold.
+ *
+ * Throws a {@link UsageError} when the sum exceeds {@link MAX_EFFECTIVE_KEY_COUNT}.
+ */
+export function declaredEffectiveKeyCount(terms: LinkageTerms): number {
   let effectiveKeyCount = 0;
-  for (const key of terms.linkageKeys)
-    effectiveKeyCount +=
-      keyDeclaresFanOut(key, fanOutFields) ||
-      (APPLIED_SETTINGS.fuzzyComparisons && keyDeclaresFuzzyExpansion(key))
-        ? MAX_KEY_CANDIDATES_PER_ROW
-        : 1;
+  for (const [keyIndex, key] of terms.linkageKeys.entries())
+    effectiveKeyCount += declaredKeyWidth(key, keyIndex);
+  if (effectiveKeyCount > MAX_EFFECTIVE_KEY_COUNT)
+    throw new UsageError(
+      `these linkage terms declare ${effectiveKeyCount} candidate value slots ` +
+        `per record, above the ${MAX_EFFECTIVE_KEY_COUNT} an exchange derives ` +
+        "its frame and element bounds from. The exchange is refused instead. " +
+        "Declare fewer linkage keys, or declare the expanding steps on fewer " +
+        "of their elements.",
+    );
   return effectiveKeyCount;
+}
+
+/**
+ * The factor a party's OWN standardization multiplies its declared record count
+ * by: {@link FAN_OUT_CANDIDATES_PER_ELEMENT} when any of its linkage fields is
+ * cleaned by a pipeline declaring a fan-out step, else 1.
+ *
+ * A local fan-out rides no agreed term -- the partner cannot see the
+ * standardization, and a party that pre-fanned its file outside psilink would
+ * present the same wire behavior -- so it is declared as the extra RECORDS it
+ * stands for rather than as extra width. Role resolution therefore reads the
+ * fanned count, which is the one consequence the specification states
+ * (docs/spec/PROTOCOL.md, Role resolution and work minimization).
+ *
+ * `declaresLocalFanOut` is the party's own realized reading of its cleaning
+ * pipelines (`StandardizedDataset.declaresFanOut`), not the authored
+ * standardization, so a fan-out on a field no linkage key reads changes nothing.
+ */
+export function localFanOutFactor(declaresLocalFanOut: boolean): number {
+  return declaresLocalFanOut ? FAN_OUT_CANDIDATES_PER_ELEMENT : 1;
 }

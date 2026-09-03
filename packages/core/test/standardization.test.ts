@@ -9,7 +9,7 @@ import {
   assertFanOutImplemented,
   assertStandardizationMatchesTerms,
   FAN_OUT_FUNCTION_NAMES,
-  MAX_KEY_CANDIDATES_PER_ROW,
+  FAN_OUT_CANDIDATES_PER_ELEMENT,
   describeTransformCoercions,
   dateFormatComponents,
   unsatisfiedLinkageFields,
@@ -3431,18 +3431,18 @@ describe("buildKeyStrings", () => {
 
   test("a row at the width bound keeps every candidate", () => {
     // The bound's lower side: a record realizing exactly
-    // MAX_KEY_CANDIDATES_PER_ROW candidate values contributes all of them and is
+    // FAN_OUT_CANDIDATES_PER_ELEMENT candidate values contributes all of them and is
     // not warned about.
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
     const dataset = makeDataset({
       last_name: Array.from(
-        { length: MAX_KEY_CANDIDATES_PER_ROW },
+        { length: FAN_OUT_CANDIDATES_PER_ELEMENT },
         (_unused, i) => `NAME${i}`,
       ),
       date_of_birth: "19750716",
     });
     const built = buildKeyStrings(key, dataset, 0);
-    expect(built?.size).toBe(MAX_KEY_CANDIDATES_PER_ROW);
+    expect(built?.size).toBe(FAN_OUT_CANDIDATES_PER_ELEMENT);
     expect(built?.has("NAME019750716")).toBe(true);
     expect(warn).not.toHaveBeenCalled();
   });
@@ -3456,7 +3456,7 @@ describe("buildKeyStrings", () => {
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
     const dataset = makeDataset({
       last_name: Array.from(
-        { length: MAX_KEY_CANDIDATES_PER_ROW + 1 },
+        { length: FAN_OUT_CANDIDATES_PER_ELEMENT + 1 },
         (_unused, i) => `NAME${i}`,
       ),
       date_of_birth: "19750716",
@@ -3531,14 +3531,14 @@ describe("buildKeyStrings", () => {
     const built = withUnlistedFanOutFunctions(() => {
       const dataset = makeDataset({
         last_name: Array.from(
-          { length: MAX_KEY_CANDIDATES_PER_ROW + 1 },
+          { length: FAN_OUT_CANDIDATES_PER_ELEMENT + 1 },
           (_unused, i) => `NAME${i}`,
         ),
         date_of_birth: "19750716",
       });
       return buildKeyStrings(key, dataset, 0);
     });
-    expect(built?.size).toBe(MAX_KEY_CANDIDATES_PER_ROW + 1);
+    expect(built?.size).toBe(FAN_OUT_CANDIDATES_PER_ELEMENT + 1);
     expect(built?.has("NAME2019750716")).toBe(true);
     expect(warn.mock.calls[0][0]).toMatch(
       /cross-product produced 21 key strings/,
@@ -3552,7 +3552,7 @@ describe("buildKeyStrings", () => {
     const built = withUnlistedFanOutFunctions(() => {
       const dataset = makeDataset({
         last_name: Array.from(
-          { length: MAX_KEY_CANDIDATES_PER_ROW + 1 },
+          { length: FAN_OUT_CANDIDATES_PER_ELEMENT + 1 },
           (_unused, i) => `NAME${i}`,
         ).join("-"),
         date_of_birth: "19750716",
@@ -3569,7 +3569,7 @@ describe("buildKeyStrings", () => {
       };
       return buildKeyStrings(splittingKey, dataset, 0);
     });
-    expect(built?.size).toBe(MAX_KEY_CANDIDATES_PER_ROW + 1);
+    expect(built?.size).toBe(FAN_OUT_CANDIDATES_PER_ELEMENT + 1);
     expect(warn.mock.calls[0][0]).toMatch(
       /cross-product produced 21 key strings/,
     );
