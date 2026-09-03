@@ -53,7 +53,10 @@ import {
 } from "../connectionFromUrl";
 import { withWebRTCPeerRole } from "../webrtcPeerRole";
 import { DEFAULT_WEBRTC_INACTIVITY_TIMEOUT_MS } from "../connection/webrtc/webrtcMessageConnection";
-import { DEFAULT_RENDEZVOUS_TIMEOUT_MS } from "../connection/webrtc/weriftPeer";
+import {
+  DEFAULT_CHANNEL_OPEN_TIMEOUT_MS,
+  DEFAULT_RENDEZVOUS_TIMEOUT_MS,
+} from "../connection/webrtc/weriftPeer";
 import {
   addCommonBootstrapOptions,
   connectionOverridesFrom,
@@ -1085,7 +1088,7 @@ function noteSinglePassSelection(
  * `peer_timeout_ms`, phrased for the channel that run will use.
  *
  * Each figure is read from the constant the channel's OWN transport falls back
- * to: the file-sync pair from core's file-sync budget, webrtc from the two
+ * to: the file-sync pair from core's file-sync budget, webrtc from the three
  * budgets `webRtcDialFrom` leaves unset. Those constants only coincide in value
  * (see `connection/webrtc/webrtcMessageConnection.ts`), and the rendezvous half
  * does not coincide at all, so quoting one transport's number on another's
@@ -1107,7 +1110,8 @@ function absentPeerBudgetDefaults(
       return (
         "the webrtc transport's own defaults: " +
         `${DEFAULT_RENDEZVOUS_TIMEOUT_MS / 1000}s to meet the partner at the ` +
-        `rendezvous, then ${DEFAULT_WEBRTC_INACTIVITY_TIMEOUT_MS / 1000}s of ` +
+        `rendezvous, then ${DEFAULT_CHANNEL_OPEN_TIMEOUT_MS / 1000}s for the ` +
+        `data channel to open, then ${DEFAULT_WEBRTC_INACTIVITY_TIMEOUT_MS / 1000}s of ` +
         "peer silence on the open channel"
       );
     default:

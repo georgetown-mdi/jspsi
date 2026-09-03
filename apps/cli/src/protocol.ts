@@ -334,10 +334,13 @@ export function webRtcDialFrom(
     throw new UsageError(WEBRTC_RENDEZVOUS_SECRET_REQUIRED);
   const { role } = connection;
   if (role === undefined) throw new UsageError(WEBRTC_ROLE_REQUIRED);
-  // peer_timeout_ms is documented as the total wait for the partner, which on a
-  // live channel is two waits: the rendezvous before the channel exists, and the
-  // parked receive after it. It bounds both, so setting it short fails fast on a
-  // partner that never arrives rather than only on one that arrives and stops.
+  // peer_timeout_ms is documented as the total wait for the partner, which on
+  // this transport is three waits: the rendezvous before the channel exists, the
+  // channel opening once both descriptions are exchanged, and the parked receive
+  // after. It bounds all three, so it is the operator's one reachable knob on
+  // every one of them -- short to fail fast on a partner that never arrives
+  // rather than only on one that arrives and stops, long for a negotiation that
+  // needs a relay before a candidate pair works.
   const peerTimeoutMs = connection.options?.peerTimeoutMs;
   return {
     handshakeRole: role === "acceptor" ? "initiator" : "responder",
@@ -349,6 +352,7 @@ export function webRtcDialFrom(
       ...(peerTimeoutMs !== undefined && {
         inactivityTimeoutMs: peerTimeoutMs,
         rendezvousTimeoutMs: peerTimeoutMs,
+        channelOpenTimeoutMs: peerTimeoutMs,
       }),
     },
   };

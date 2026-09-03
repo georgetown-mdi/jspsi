@@ -66,7 +66,10 @@ import {
 } from "../../src/commands/invite";
 import { loadConfigLinkageSource, saveConfig } from "../../src/config";
 import { DEFAULT_WEBRTC_INACTIVITY_TIMEOUT_MS } from "../../src/connection/webrtc/webrtcMessageConnection";
-import { DEFAULT_RENDEZVOUS_TIMEOUT_MS } from "../../src/connection/webrtc/weriftPeer";
+import {
+  DEFAULT_CHANNEL_OPEN_TIMEOUT_MS,
+  DEFAULT_RENDEZVOUS_TIMEOUT_MS,
+} from "../../src/connection/webrtc/weriftPeer";
 import { MAX_TIMEOUT_SECONDS } from "../../src/util/cli";
 import {
   connectionFromEndpoint,
@@ -855,17 +858,18 @@ test("persistedPeerBudgetNotice: names the file-sync default when no budget was 
   }
 });
 
-test("persistedPeerBudgetNotice: names the webrtc transport's own two defaults", () => {
+test("persistedPeerBudgetNotice: names the webrtc transport's own three defaults", () => {
   // The webrtc channel does not fall to the file-sync hour: an unset
-  // peer_timeout_ms leaves the transport's rendezvous and parked-receive
-  // budgets in place, and the rendezvous half is a different number. Naming the
-  // file-sync figure here would tell the operator to expect an hour at a
-  // rendezvous that gives up after ten minutes.
+  // peer_timeout_ms leaves the transport's rendezvous, channel-open, and
+  // parked-receive budgets in place, and the rendezvous figure is a different
+  // number. Naming the file-sync figure here would tell the operator to expect
+  // an hour at a rendezvous that gives up after ten minutes.
   const notice = persistedPeerBudgetNotice(undefined, 900, "webrtc");
   expect(notice).toContain("no connection.options.peer_timeout_ms");
   // Matched on a leading word boundary so the rendezvous figure cannot be read
   // out of the tail of the inactivity one (600 sits inside 3600).
   expect(notice).toMatch(secondsFigure(DEFAULT_RENDEZVOUS_TIMEOUT_MS));
+  expect(notice).toMatch(secondsFigure(DEFAULT_CHANNEL_OPEN_TIMEOUT_MS));
   expect(notice).toMatch(secondsFigure(DEFAULT_WEBRTC_INACTIVITY_TIMEOUT_MS));
   expect(notice).not.toContain("file-sync");
 });
@@ -3370,6 +3374,7 @@ test("handler: a webrtc online invite reports the webrtc peer-budget defaults, n
     const stderr = stdio.stderrWrites.join("");
     expect(exit).not.toHaveBeenCalled();
     expect(stderr).toMatch(secondsFigure(DEFAULT_RENDEZVOUS_TIMEOUT_MS));
+    expect(stderr).toMatch(secondsFigure(DEFAULT_CHANNEL_OPEN_TIMEOUT_MS));
     expect(stderr).toMatch(secondsFigure(DEFAULT_WEBRTC_INACTIVITY_TIMEOUT_MS));
     expect(stderr).not.toContain("file-sync");
   } finally {

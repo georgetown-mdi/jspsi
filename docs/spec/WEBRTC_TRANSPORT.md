@@ -351,9 +351,10 @@ condition holds.
 | Close drain | 5 min | The clean close's wait above -- the CLI's acknowledgement drain, the web's wait for the peer's close -- sized from the largest admissible frame and the measured send rate |
 | Sentinel hand-off | 2 s | Getting the close sentinel itself onto the wire |
 
-`connection.options.peer_timeout_ms`, when set, replaces both the rendezvous and
-the parked-receive budgets: on this channel the documented "total wait for the
-partner" is two waits, one before the channel exists and one after.
+`connection.options.peer_timeout_ms`, when set, replaces the rendezvous,
+channel-open, and parked-receive budgets: on this channel the documented "total
+wait for the partner" is three waits, one before the channel exists, one while
+it opens, and one after. It is the only knob an operator has on any of them.
 
 An interrupt (SIGINT or SIGTERM) does not wait any of them out. The run passes
 the transport an abort signal, and the rendezvous fails and tears down the
