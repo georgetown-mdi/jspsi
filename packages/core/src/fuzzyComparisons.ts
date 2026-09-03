@@ -35,7 +35,7 @@ function fuzzyValueTooLongRefusal(kind: GenerateFuzzyComparisons): UsageError {
     `a linkage-key element declares "${kind}" fuzzy comparisons, but a row's ` +
       "standardized value is longer than the " +
       `${MAX_FUZZY_EXPANSION_INPUT_LENGTH}-character limit the expansion ` +
-      "accepts: expanding it would allocate work that grows with the square " +
+      "accepts: expanding it would allocate work that grows with at least the square " +
       "of the value's length, and matching the row on its exact value alone " +
       "would match on less than the terms declare. The exchange is refused " +
       "instead. Shorten the field with an element transform, or remove the " +
