@@ -61,7 +61,10 @@ import {
   warnUnsupportedWebRTCServerFlags,
   type CommonBootstrapOptions,
 } from "../optionDefinitions";
-import { checkLinkageSatisfiability } from "./linkagePreflight";
+import {
+  checkLinkageSatisfiability,
+  RUN_BLOCK_CONSEQUENCE,
+} from "./linkagePreflight";
 import { warnOnValueConstraints } from "./valueConstraintWarnings";
 import {
   runProtocol,
@@ -718,6 +721,7 @@ export async function prepareDataset(
       exchangeDataSpec.linkageTerms,
       {
         source: "configuration",
+        blockConsequence: RUN_BLOCK_CONSEQUENCE,
         blockRemedy:
           "or re-establish the exchange with linkage terms the CSV satisfies.",
       },

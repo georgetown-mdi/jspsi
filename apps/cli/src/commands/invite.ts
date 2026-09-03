@@ -46,6 +46,10 @@ import {
   singleValue,
 } from "../util/cli";
 import { redactUrlCredentials } from "../util/connectionUrl";
+import {
+  checkLinkageSatisfiability,
+  type LinkagePreflightMessaging,
+} from "./linkagePreflight";
 import { assertNoProvisionConflicts, provisionConfigAndKey } from "./provision";
 import {
   inviterConnectionFromURL,
@@ -83,7 +87,6 @@ import {
   prepareForOnlineExchange,
   runOnlineBootstrap,
   singlePassDisclosureNotice,
-  unsatisfiedLinkageFields,
   type ResolvedDataSpec,
 } from "../onlineBootstrap";
 
@@ -202,6 +205,30 @@ function disclosedColumnsFor(
 ): string[] | undefined {
   if (metadata === undefined) return undefined;
   return disclosedColumnNames(metadata);
+}
+
+/**
+ * Mint-time wording for the shared linkage pre-flight
+ * ({@link checkLinkageSatisfiability}), whose grading is core's and whose copy is
+ * each caller's.
+ *
+ * Both halves differ from the run paths' because the operator's position does.
+ * Nothing runs here, so what a block prevents is disclosing an invitation, not
+ * exchanging a short set of keys; and the inviter AUTHORED these terms, so the
+ * remedy is their own configuration rather than the out-of-band renegotiation the
+ * accept and exchange paths point at -- there is no partner to renegotiate with
+ * until this invitation is sent. `configPath` names the file the terms came from,
+ * composed raw: the CLI's error boundary escapes the rendered chain once.
+ */
+function mintPreflightMessaging(configPath: string): LinkagePreflightMessaging {
+  return {
+    source: "configuration",
+    blockConsequence:
+      "Generating an invitation would hand your partner terms that this " +
+      "configuration's own exchange refuses to run, discovered only after " +
+      "they had accepted them.",
+    blockRemedy: `then generate the invitation again; these terms come from ${configPath}.`,
+  };
 }
 
 // --- Validation (the no-commit phase) ----------------------------------------
@@ -630,44 +657,35 @@ export async function validateInvite(params: {
     );
 
     if (resolved.input !== undefined) {
-      // Reconcile the input against the config: a conflict is an input whose
-      // columns cannot be transformed through the available data
-      // standardizations to produce the config's linkage fields. Fail naming the
-      // unsatisfiable fields rather than minting an invitation the input cannot
-      // honor.
       const rows = await loadInputRows(resolved.input, { allowStdin: true });
-      // Pass the config's explicit standardization AND metadata so the columns
-      // resolve to linkage fields exactly as the eventual exchange does: metadata
-      // retypes columns for the type fallback, so without it a config that types a
-      // column explicitly (or types an inferred one away) would be checked against
-      // name inference and could mint an invitation the exchange cannot satisfy.
-      const unsatisfied = unsatisfiedLinkageFields(
-        rows.columns,
-        configTerms,
-        configSource.standardization,
-        configSource.metadata,
-      );
-      if (unsatisfied.length > 0)
-        throw new UsageError(
-          "the input file cannot satisfy the configuration's linkage " +
-            `${unsatisfied.length === 1 ? "field" : "fields"}: ` +
-            unsatisfied.map((f) => `${f.name} (${f.type})`).join(", ") +
-            `. The input columns [${rows.columns.join(", ")}] cannot be ` +
-            "transformed through the available data standardizations to " +
-            "produce " +
-            `${unsatisfied.length === 1 ? "it" : "them"}; adjust the input ` +
-            "file or the configuration before generating an invitation.",
-        );
       // The input only validated compatibility; the invitation's terms come from
-      // the config, not the input. Say so up front (before the token is minted),
-      // so a user who passed an input expecting it to define the terms is not
-      // surprised to find it was merely checked.
+      // the config, not the input. Say so ahead of the check below, so a user who
+      // passed an input expecting it to define the terms reads the refusal it can
+      // raise against the right source.
       log.info(
         `a configuration file at ${options.configFile} is present; deriving ` +
           "the invitation's linkage terms from it and checking the input file " +
           "against those terms (the input does not redefine them). Pass " +
           "--config-file pointing at a new path to infer terms from the input " +
           "instead.",
+      );
+      // Reconcile the input against the config on the same verdict the run
+      // boundary enforces, rather than on column coverage alone: an invitation
+      // whose terms declare a key this input cannot produce -- or one whose own
+      // cleaning drops every record -- is refused here, before it is minted,
+      // instead of at a `psilink exchange` the partner has already accepted into.
+      //
+      // Pass the config's explicit standardization AND metadata so the columns
+      // resolve to linkage fields exactly as the eventual exchange does: metadata
+      // retypes columns for the type fallback, so without it a config that types a
+      // column explicitly (or types an inferred one away) would be checked against
+      // name inference and could mint an invitation the exchange cannot satisfy.
+      checkLinkageSatisfiability(
+        rows.columns,
+        configTerms,
+        mintPreflightMessaging(options.configFile),
+        configSource.standardization,
+        configSource.metadata,
       );
     } else {
       log.info(

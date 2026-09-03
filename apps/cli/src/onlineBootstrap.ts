@@ -569,11 +569,6 @@ export function buildDataSpec(args: {
   return { linkageTerms, metadata, standardization };
 }
 
-// Lifted into @psilink/core so the web acceptor and the CLI accept path share
-// one detector; re-exported here for invite.ts (which imports from this module)
-// and for backwards compatibility.
-export { unsatisfiedLinkageFields } from "@psilink/core";
-
 /** Build a {@link PreparedExchange} for an online run from a resolved spec. */
 export function prepareForOnlineExchange(
   dataSpec: ResolvedDataSpec,

@@ -58,6 +58,7 @@ import {
 import { resolveRecordOutput } from "../recordFile";
 import {
   checkLinkageSatisfiability,
+  RUN_BLOCK_CONSEQUENCE,
   warnColumnsTheInvitationWillNotAccept,
   type LinkagePreflightMessaging,
 } from "./linkagePreflight";
@@ -951,6 +952,7 @@ function reconcileAcceptConfig(params: {
 // exchange path, whose committed config can carry a remap or an explicit type.
 const INVITATION_PREFLIGHT_MESSAGING: LinkagePreflightMessaging = {
   source: "invitation",
+  blockConsequence: RUN_BLOCK_CONSEQUENCE,
   blockRemedy:
     "or ask your partner for an invitation with different linkage terms.",
 };

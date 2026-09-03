@@ -13,6 +13,7 @@ import type { getLogger, LinkageTerms } from "@psilink/core";
 
 import {
   checkLinkageSatisfiability,
+  RUN_BLOCK_CONSEQUENCE,
   warnColumnsTheInvitationWillNotAccept,
 } from "../../src/commands/linkagePreflight";
 
@@ -31,6 +32,7 @@ function makeLogger(): { log: ReturnType<typeof getLogger>; warns: string[] } {
 
 const messaging = {
   source: "invitation",
+  blockConsequence: RUN_BLOCK_CONSEQUENCE,
   blockRemedy: "request a fresh invitation.",
 };
 
@@ -433,7 +435,7 @@ function unsatisfiableTerms(fieldCount: number): LinkageTerms {
 // total instead of naming one more field.
 test("the refusal reports the details it could not name, with the total", () => {
   const total = 20;
-  // Each field costs one detail link and each key it collapses costs another.
+  // Each key costs one detail link and each field it needs costs another.
   const details = total * 2;
   const links = refusalLinks(["other_column"], unsatisfiableTerms(total));
 
@@ -445,21 +447,25 @@ test("the refusal reports the details it could not name, with the total", () => 
     `Provide a CSV that covers the required field types, ${messaging.blockRemedy}`,
   );
 
+  // What truncation spends the budget on is the failing keys: they are what the
+  // verdict blocks on, and a field named ahead of one would push it past the
+  // depth bound.
   const named = links.slice(2, -1);
   expect(named.length).toBeGreaterThan(0);
   named.forEach((link, index) =>
-    expect(link).toBe(`unsatisfied field: field${index} (ssn)`),
+    expect(link).toBe(`linkage key the CSV cannot produce: KEY_field${index}`),
   );
   expect(links[links.length - 1]).toBe(
     `and ${details - named.length} more details of the terms this CSV cannot ` +
       `satisfy (${details} in total)`,
   );
 
-  // The fields past the enumeration are accounted for by that count, not by a
+  // The entries past the enumeration are accounted for by that count, not by a
   // name the operator would search the output for.
   const rendered = links.join("\n");
   for (let index = named.length; index < total; index++)
-    expect(rendered).not.toContain(`field${index} (ssn)`);
+    expect(rendered).not.toContain(`KEY_field${index}`);
+  expect(rendered).not.toContain("unsatisfied field: ");
   // The composition fits the depth bound, so the renderer's generic marker --
   // which cannot report a count -- never has to stand in for it.
   expect(rendered).not.toContain(CAUSE_DEPTH_ELISION_MARKER);
@@ -468,7 +474,7 @@ test("the refusal reports the details it could not name, with the total", () => 
 test("the refusal names every detail when they all fit the link budget", () => {
   // One detail per link the renderer reaches after the summary and the remedy:
   // the widest enumeration that needs no overflow link at all. Each field costs
-  // two links (the field, then the key it collapses), so half as many fields.
+  // two links (the key it collapses, then the field), so half as many fields.
   const fields = (MAX_ERROR_CAUSE_DEPTH - 2) / 2;
   const links = refusalLinks(["other_column"], unsatisfiableTerms(fields));
 
@@ -476,14 +482,44 @@ test("the refusal names every detail when they all fit the link budget", () => {
   expect(links.slice(2)).toEqual([
     ...Array.from(
       { length: fields },
-      (_, index) => `unsatisfied field: field${index} (ssn)`,
+      (_, index) => `linkage key the CSV cannot produce: KEY_field${index}`,
     ),
     ...Array.from(
       { length: fields },
-      (_, index) => `linkage key the CSV cannot produce: KEY_field${index}`,
+      (_, index) => `unsatisfied field: field${index} (ssn)`,
     ),
   ]);
   const rendered = links.join("\n");
   expect(rendered).not.toContain("more details of the terms");
   expect(rendered).not.toContain(CAUSE_DEPTH_ELISION_MARKER);
+});
+
+test("a declared field no linkage key references is not named", () => {
+  // `unsatisfiedFields` grades every DECLARED field, so a terms document may
+  // report one no key draws on. Nothing blocks on that field -- the run boundary
+  // grades keys -- so naming it would hand the operator a gap they need not close
+  // ahead of the one they must.
+  const terms: LinkageTerms = {
+    ...dobTerms(),
+    linkageFields: [
+      { name: "ssn", type: "ssn" },
+      { name: "unreferenced", type: "email_address" },
+    ],
+    linkageKeys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
+  };
+  const links = refusalLinks(["dob"], terms);
+  expect(links).toContain("linkage key the CSV cannot produce: SSN");
+  expect(links).toContain("unsatisfied field: ssn (ssn)");
+  expect(links.join("\n")).not.toContain("unreferenced");
+});
+
+test("a dead key's refusal names the key and no field at all", () => {
+  // A dead key is shape-satisfiable, so every field it references resolves and
+  // the enumeration is the key alone: the remedy is the terms, and there is no
+  // column gap to report.
+  const links = refusalLinks(
+    ["dob"],
+    dobTerms([{ function: "parse_date", params: { inputFormat: "MM/DD" } }]),
+  );
+  expect(links.slice(2)).toEqual(["linkage key that drops every record: DOB"]);
 });

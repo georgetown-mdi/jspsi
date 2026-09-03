@@ -886,7 +886,9 @@ test("validateAccept: offline refuses when the CSV satisfies only some keys", as
   // acceptance is refused -- offline runs no prepare, so this pre-flight is the
   // only place the refusal lands, and it fires before the prompt and before any
   // configuration or key file is written. It is a usage error (exit 64) naming
-  // the unsatisfied field and the key it costs.
+  // the agreed keys it costs; the invitation declares more of them than the
+  // rendered cause chain reaches, so the keys take the whole enumeration and
+  // what stands behind them is counted rather than named.
   const options = testOptions();
   const input = writeInputCSV(["last_name", "first_name", "dob"]);
   try {
@@ -906,7 +908,10 @@ test("validateAccept: offline refuses when the CSV satisfies only some keys", as
     expect(rendered).toContain(
       "cannot satisfy every linkage key the invitation declares",
     );
-    expect(rendered).toContain("unsatisfied field: ssn (ssn)");
+    expect(rendered).toContain(
+      "linkage key the CSV cannot produce: SSN + LN + DOB",
+    );
+    expect(rendered).toContain("more details of the terms this CSV cannot");
     expect(rendered).toContain(
       "or ask your partner for an invitation with different linkage terms.",
     );
