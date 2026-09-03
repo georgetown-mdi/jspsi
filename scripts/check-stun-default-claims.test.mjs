@@ -56,9 +56,9 @@ describe("STUN default claim check", () => {
 
   it("reports the endpoint that moved, with its line", () => {
     const text = read("docs/CLI.md");
-    expect(claimMismatches(text, "stun.example.org:3478")).toEqual([
-      { line: 421, endpoint: "stun.l.google.com:19302" },
-    ]);
+    const [claim] = builtInDefaultClaims(text);
+    expect(claim).toMatchObject({ endpoint: "stun.l.google.com:19302" });
+    expect(claimMismatches(text, "stun.example.org:3478")).toEqual([claim]);
   });
 
   it("reads a claim written as a bare authority or as a stun: URI", () => {
