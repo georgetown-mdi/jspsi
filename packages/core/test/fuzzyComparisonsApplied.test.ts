@@ -21,11 +21,16 @@ import { withUnlistedFanOutFunctions } from "./utils/unlistedFanOut";
 
 describe("buildKeyStrings: fuzzy comparison expansion", () => {
   function makeDataset(fields: Record<string, string>): StandardizedDataset {
+    const keyOverEveryField = {
+      name: "every field",
+      elements: Object.keys(fields).map((field) => ({ field })),
+    };
     return new StandardizedDataset(
       Object.entries(fields).map(
         ([name, value]) =>
           new StandardizedField(name, name, [], [{ [name]: value }]),
       ),
+      [keyOverEveryField],
     );
   }
 
@@ -161,14 +166,17 @@ describe("buildKeyStrings: fuzzy comparison expansion", () => {
         { field: "date_of_birth", generateFuzzyComparisons: "adjacent_years" },
       ],
     };
-    const dataset = new StandardizedDataset([
-      new StandardizedField(
-        "date_of_birth",
-        "date_of_birth",
-        [{ function: "null_if", params: { value: "000" } }],
-        rows,
-      ),
-    ]);
+    const dataset = new StandardizedDataset(
+      [
+        new StandardizedField(
+          "date_of_birth",
+          "date_of_birth",
+          [{ function: "null_if", params: { value: "000" } }],
+          rows,
+        ),
+      ],
+      [key],
+    );
     expect(buildKeyStrings(key, dataset, 0)).toBeNull();
   });
 });
@@ -181,11 +189,16 @@ describe("buildKeyStrings: fuzzy fan-out guardrails", () => {
   });
 
   function datasetOf(fields: Record<string, string>): StandardizedDataset {
+    const keyOverEveryField = {
+      name: "every field",
+      elements: Object.keys(fields).map((field) => ({ field })),
+    };
     return new StandardizedDataset(
       Object.entries(fields).map(
         ([name, value]) =>
           new StandardizedField(name, name, [], [{ [name]: value }]),
       ),
+      [keyOverEveryField],
     );
   }
 
@@ -208,20 +221,23 @@ describe("buildKeyStrings: fuzzy fan-out guardrails", () => {
   ): StandardizedDataset {
     return withUnlistedFanOutFunctions(
       () =>
-        new StandardizedDataset([
-          new StandardizedField(
-            "a",
-            "a",
-            [{ function: "split_on", params: { delimiter: "\\|" } }],
-            [{ a: parts.join("|") }],
-          ),
-          new StandardizedField(
-            "date_of_birth",
-            "date_of_birth",
-            [],
-            [{ date_of_birth: date }],
-          ),
-        ]),
+        new StandardizedDataset(
+          [
+            new StandardizedField(
+              "a",
+              "a",
+              [{ function: "split_on", params: { delimiter: "\\|" } }],
+              [{ a: parts.join("|") }],
+            ),
+            new StandardizedField(
+              "date_of_birth",
+              "date_of_birth",
+              [],
+              [{ date_of_birth: date }],
+            ),
+          ],
+          [unlistedTimesFuzzyKey],
+        ),
     );
   }
 
@@ -366,11 +382,16 @@ describe("buildKeyStrings: fuzzy fan-out guardrails", () => {
 
 describe("buildKeyStrings: the expanding side", () => {
   function datasetOf(fields: Record<string, string>): StandardizedDataset {
+    const keyOverEveryField = {
+      name: "every field",
+      elements: Object.keys(fields).map((field) => ({ field })),
+    };
     return new StandardizedDataset(
       Object.entries(fields).map(
         ([name, value]) =>
           new StandardizedField(name, name, [], [{ [name]: value }]),
       ),
+      [keyOverEveryField],
     );
   }
 

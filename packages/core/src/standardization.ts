@@ -50,6 +50,7 @@ import {
 import {
   declaredFanOutFunction,
   declaredKeyWidth,
+  FAN_OUT_CANDIDATES_PER_ELEMENT,
   FAN_OUT_FUNCTION_NAMES,
   isListedFanOutFunction,
   localFanOutFactor,
@@ -1611,11 +1612,13 @@ export class StandardizedField {
  */
 export class StandardizedDataset {
   /**
-   * Whether any of this party's linkage fields is cleaned by a pipeline declaring
-   * a fan-out producer -- the local authoring surface the partner cannot see.
+   * Whether a linkage field one of `linkageKeys`'s elements READS is cleaned by a
+   * pipeline declaring a fan-out producer -- the local authoring surface the
+   * partner cannot see.
    *
-   * Read off the fields the dataset actually holds rather than off the authored
-   * standardization, so a fan-out on a field no linkage key reads declares
+   * Scoped to the fields those keys read because they are the only fields the
+   * exchange standardizes and matches on ({@link referencedLinkageFieldNames}),
+   * so a fan-out on any other field widens no key's candidate set and declares
    * nothing. It is what {@link localFanOutFactor} multiplies this party's
    * DECLARED RECORD COUNT by, and what widens the per-key bound the row builder
    * holds a record's candidate set to.
@@ -1624,10 +1627,22 @@ export class StandardizedDataset {
 
   private readonly fieldMap: ReadonlyMap<string, StandardizedField>;
 
-  constructor(fields: StandardizedField[]) {
+  /**
+   * @param fields - The standardized fields this dataset serves.
+   * @param linkageKeys - The linkage keys the dataset will be read for, which
+   *   scope {@link declaresFanOut}. Pass them as AUTHORED: a `swap` only permutes
+   *   `field` among a key's own elements, so the authored elements already name
+   *   every field a swapped reading could reach.
+   */
+  constructor(
+    fields: StandardizedField[],
+    linkageKeys: ReadonlyArray<LinkageKey>,
+  ) {
     this.fieldMap = new Map(fields.map((f) => [f.name, f]));
+    const keyReadFields = referencedLinkageFieldNames(linkageKeys);
     this.declaresFanOut = fields.some(
-      (field) => field.multiplicitySources.listed,
+      (field) =>
+        field.multiplicitySources.listed && keyReadFields.has(field.name),
     );
   }
 
@@ -1806,7 +1821,7 @@ export function buildStandardizedDataset(
     );
   }
 
-  return new StandardizedDataset(fields);
+  return new StandardizedDataset(fields, terms.linkageKeys);
 }
 
 // --- Key building ------------------------------------------------------------
@@ -2795,13 +2810,19 @@ function buildKeyStringsUnderPlan(
           `${width} one record may contribute to this key`,
       );
     if (fuzzyWidened) throw fuzzyWidthCapRefusal(result.size, width, keyIndex);
+  }
+
+  // The operator advisory is a gate of its own, on the fan-out cap rather than
+  // on the width the key declares: a row is called wide at the same count
+  // whatever its key's width, where reading the width would put a privacy line
+  // in front of the operator for every row two candidates wide on a width-1 key.
+  if (result.size > FAN_OUT_CANDIDATES_PER_ELEMENT)
     logger.warn(
       `row ${index}, key "${redactAndSanitizeForDisplay(key.name)}": ` +
         `cross-product produced ${result.size} key strings ` +
-        `(>${width}); a wide per-record expansion in ` +
+        `(>${FAN_OUT_CANDIDATES_PER_ELEMENT}); a wide per-record expansion in ` +
         "dual-party-output exchanges may degrade privacy guarantees",
     );
-  }
 
   return result;
 }

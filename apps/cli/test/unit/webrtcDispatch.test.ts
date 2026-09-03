@@ -186,7 +186,7 @@ function linkedConnection(role: "inviter" | "acceptor"): MessageConnection {
 const minimalPrepared = {
   metadata: [],
   linkageTerms: getDefaultLinkageTerms("Inviter"),
-  dataset: new StandardizedDataset([]),
+  dataset: new StandardizedDataset([], []),
   rawRows: [],
   rowCount: 0,
 } satisfies PreparedExchange;

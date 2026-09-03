@@ -116,9 +116,9 @@ export function withNoListedFanOutFunctions<T>(body: () => T): T {
  * not operator-configurable, because a partner-supplied frame's element and byte
  * bounds are derived from the widths built on it, so moving it re-derives those.
  *
- * The operator advisory raised for a wide per-record expansion shares the width a
- * key declares, and so shares this figure wherever one fan-out element sets that
- * width; it takes its threshold from the width rather than explaining it.
+ * The operator advisory raised for a wide per-record expansion shares this
+ * figure as its own threshold, whatever width the key it fires on declares; it
+ * shares the number rather than explaining it.
  *
  * A record realizing more candidates for a key than that key's declared width
  * admits contributes NONE of them to the round: `buildKeyStrings` drops it
@@ -294,9 +294,10 @@ export function declaredEffectiveKeyCount(terms: LinkageTerms): number {
  * fanned count, which is the one consequence the specification states
  * (docs/spec/PROTOCOL.md, Role resolution and work minimization).
  *
- * `declaresLocalFanOut` is the party's own realized reading of its cleaning
- * pipelines (`StandardizedDataset.declaresFanOut`), not the authored
- * standardization, so a fan-out on a field no linkage key reads changes nothing.
+ * `declaresLocalFanOut` is the party's own reading of the cleaning pipelines
+ * behind the fields its linkage keys READ (`StandardizedDataset.declaresFanOut`),
+ * not of the authored standardization, so a fan-out on a field no linkage key
+ * reads changes nothing.
  */
 export function localFanOutFactor(declaresLocalFanOut: boolean): number {
   return declaresLocalFanOut ? FAN_OUT_CANDIDATES_PER_ELEMENT : 1;

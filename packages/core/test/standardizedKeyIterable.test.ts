@@ -178,16 +178,19 @@ describe("StandardizedKeyIterable — a row whose value fans out", () => {
     { ssn: "559811301", last_name: "SMITH-JONES", date_of_birth: "19750716" },
     { ssn: "322842281", last_name: "IORIO", date_of_birth: "19750817" },
   ];
-  const splitDataset = new StandardizedDataset([
-    new StandardizedField("ssn", "ssn", [], splittingRows),
-    new StandardizedField(
-      "lastName",
-      "last_name",
-      [{ function: "split_on", params: { delimiter: "-" } }],
-      splittingRows,
-    ),
-    new StandardizedField("dateOfBirth", "date_of_birth", [], splittingRows),
-  ]);
+  const splitDataset = new StandardizedDataset(
+    [
+      new StandardizedField("ssn", "ssn", [], splittingRows),
+      new StandardizedField(
+        "lastName",
+        "last_name",
+        [{ function: "split_on", params: { delimiter: "-" } }],
+        splittingRows,
+      ),
+      new StandardizedField("dateOfBirth", "date_of_birth", [], splittingRows),
+    ],
+    terms.linkageKeys,
+  );
   const key = terms.linkageKeys[0];
   const iter = new StandardizedKeyIterable(
     key,
@@ -226,16 +229,19 @@ describe("StandardizedKeyIterable — a row whose value fans out", () => {
         date_of_birth: "19750716",
       },
     ];
-    const wideDataset = new StandardizedDataset([
-      new StandardizedField("ssn", "ssn", [], wideRows),
-      new StandardizedField(
-        "lastName",
-        "last_name",
-        [{ function: "split_on", params: { delimiter: "-" } }],
-        wideRows,
-      ),
-      new StandardizedField("dateOfBirth", "date_of_birth", [], wideRows),
-    ]);
+    const wideDataset = new StandardizedDataset(
+      [
+        new StandardizedField("ssn", "ssn", [], wideRows),
+        new StandardizedField(
+          "lastName",
+          "last_name",
+          [{ function: "split_on", params: { delimiter: "-" } }],
+          wideRows,
+        ),
+        new StandardizedField("dateOfBirth", "date_of_birth", [], wideRows),
+      ],
+      terms.linkageKeys,
+    );
     const wideIter = new StandardizedKeyIterable(key, wideDataset, 1);
     expect(wideIter.at(0)).toBeUndefined();
   });
@@ -255,16 +261,19 @@ describe("StandardizedKeyIterable — a row whose value fans out", () => {
           date_of_birth: "19750716",
         },
       ];
-      const wideDataset = new StandardizedDataset([
-        new StandardizedField("ssn", "ssn", [], wideRows),
-        new StandardizedField(
-          "lastName",
-          "last_name",
-          [{ function: "split_on", params: { delimiter: "-" } }],
-          wideRows,
-        ),
-        new StandardizedField("dateOfBirth", "date_of_birth", [], wideRows),
-      ]);
+      const wideDataset = new StandardizedDataset(
+        [
+          new StandardizedField("ssn", "ssn", [], wideRows),
+          new StandardizedField(
+            "lastName",
+            "last_name",
+            [{ function: "split_on", params: { delimiter: "-" } }],
+            wideRows,
+          ),
+          new StandardizedField("dateOfBirth", "date_of_birth", [], wideRows),
+        ],
+        terms.linkageKeys,
+      );
       return new StandardizedKeyIterable(key, wideDataset, 1);
     });
     const candidates = wideIter.at(0);
@@ -287,16 +296,19 @@ describe("StandardizedKeyIterable — drop reporting over a whole round", () => 
     date_of_birth: "19750716",
   }));
   const wideDataset = () =>
-    new StandardizedDataset([
-      new StandardizedField("ssn", "ssn", [], wideRows),
-      new StandardizedField(
-        "lastName",
-        "last_name",
-        [{ function: "split_on", params: { delimiter: "-" } }],
-        wideRows,
-      ),
-      new StandardizedField("dateOfBirth", "date_of_birth", [], wideRows),
-    ]);
+    new StandardizedDataset(
+      [
+        new StandardizedField("ssn", "ssn", [], wideRows),
+        new StandardizedField(
+          "lastName",
+          "last_name",
+          [{ function: "split_on", params: { delimiter: "-" } }],
+          wideRows,
+        ),
+        new StandardizedField("dateOfBirth", "date_of_birth", [], wideRows),
+      ],
+      terms.linkageKeys,
+    );
 
   afterEach(() => vi.restoreAllMocks());
 
@@ -441,10 +453,11 @@ describe("StandardizedKeyIterable — a key realizing the empty string", () => {
   // data). The distinction survives the multi-value surface: a singleton {""} is
   // the string, not `undefined`.
   const blankRows = [{ last_name: "" }];
-  const blankDataset = new StandardizedDataset([
-    new StandardizedField("lastName", "last_name", [], blankRows),
-  ]);
   const blankKey = { name: "LN", elements: [{ field: "lastName" }] };
+  const blankDataset = new StandardizedDataset(
+    [new StandardizedField("lastName", "last_name", [], blankRows)],
+    [blankKey],
+  );
   const iter = new StandardizedKeyIterable(blankKey, blankDataset, 1);
 
   test("yields the empty string rather than the excluded sentinel", () => {

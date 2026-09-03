@@ -47,6 +47,7 @@ import type {
   TransformStep,
 } from "../src/config/linkageTerms";
 import type { Metadata } from "../src/config/metadata";
+import type { Standardization } from "../src/config/standardization";
 import type { CSVRow } from "../src/file";
 import type { PsiRole } from "../src/types";
 
@@ -320,14 +321,15 @@ describe("the width an element's transforms bound its value to", () => {
       expect(bound).toBeDefined();
       for (const value of values) {
         const row = { last_name: value };
-        const dataset = new StandardizedDataset([
-          new StandardizedField("last_name", "last_name", [], [row]),
-        ]);
-        const built = buildKeyStrings(
-          { name: "LN", elements: [{ field: "last_name", transform }] },
-          dataset,
-          0,
+        const key = {
+          name: "LN",
+          elements: [{ field: "last_name", transform }],
+        };
+        const dataset = new StandardizedDataset(
+          [new StandardizedField("last_name", "last_name", [], [row])],
+          [key],
         );
+        const built = buildKeyStrings(key, dataset, 0);
         for (const candidate of built ?? [])
           expect(candidate.length).toBeLessThanOrEqual(bound!);
       }
@@ -471,10 +473,13 @@ describe("the width a key declares", () => {
       ],
     };
     const row = { last_name: "SMITH", ssn: "123456789" };
-    const dataset = new StandardizedDataset([
-      new StandardizedField("last_name", "last_name", [], [row]),
-      new StandardizedField("ssn", "ssn", [], [row]),
-    ]);
+    const dataset = new StandardizedDataset(
+      [
+        new StandardizedField("last_name", "last_name", [], [row]),
+        new StandardizedField("ssn", "ssn", [], [row]),
+      ],
+      [key],
+    );
     expect(() => buildKeyStrings(key, dataset, 0, true)).toThrow(
       /declares a width of more than the 1024/,
     );
@@ -598,13 +603,70 @@ describe("a party whose own cleaning fans out", () => {
     { last_name: "WHITE" },
   ];
 
+  // What both parties run: the same agreed terms over the same columns, with the
+  // splitting party's own rows and its partner's.
+  interface PairShape {
+    terms: LinkageTerms;
+    metadata: Metadata;
+    columns: string[];
+    localRows: Array<CSVRow>;
+    partnerRows: Array<CSVRow>;
+  }
+
+  const keyReadsTheSplitField: PairShape = {
+    terms: plainTerms,
+    metadata,
+    columns,
+    localRows: splittingRows,
+    partnerRows,
+  };
+
+  // The same cleaning over terms whose only key reads a DIFFERENT field:
+  // `last_name` is a declared linkage field the standardization splits, and no
+  // key element names it.
+  const keyReadsAnotherField: PairShape = {
+    terms: {
+      ...plainTerms,
+      linkageFields: [
+        { name: "ssn", type: "ssn" },
+        { name: "last_name", type: "last_name" },
+      ],
+      linkageKeys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
+    },
+    metadata: [
+      { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
+      ...metadata,
+    ],
+    columns: ["ssn", "last_name"],
+    localRows: [
+      { ssn: "559811301", last_name: "SMITH JONES" },
+      { ssn: "322842281", last_name: "BROWN" },
+    ],
+    partnerRows: [
+      { ssn: "559811301", last_name: "JONES" },
+      { ssn: "111223333", last_name: "GREEN" },
+      { ssn: "444556666", last_name: "WHITE" },
+    ],
+  };
+
+  const splitOn = (field: string): Standardization => [
+    {
+      output: field,
+      input: field,
+      steps: [{ function: "split_on", params: { delimiter: " " } }],
+    },
+  ];
+
   interface Confirmation {
     role: PsiRole;
     localRecordCount: number;
     localDeclaredRecordCount: number;
   }
 
-  async function runPair(splitting: boolean): Promise<Confirmation> {
+  async function runPair(
+    shape: PairShape,
+    standardization?: Standardization,
+  ): Promise<Confirmation> {
     const [connA, connB] = createMessagePipe();
     let confirmation: Confirmation | undefined;
     await Promise.all([
@@ -613,25 +675,13 @@ describe("a party whose own cleaning fans out", () => {
         "initiator",
         prepareForExchange(
           {
-            linkageTerms: { ...plainTerms, identity: "Splitting Co" },
-            metadata,
-            ...(splitting
-              ? {
-                  standardization: [
-                    {
-                      output: "last_name",
-                      input: "last_name",
-                      steps: [
-                        { function: "split_on", params: { delimiter: " " } },
-                      ],
-                    },
-                  ],
-                }
-              : {}),
+            linkageTerms: { ...shape.terms, identity: "Splitting Co" },
+            metadata: shape.metadata,
+            ...(standardization !== undefined && { standardization }),
           },
           "Splitting Co",
-          splittingRows,
-          columns,
+          shape.localRows,
+          shape.columns,
         ),
         {
           psiLibrary,
@@ -652,10 +702,13 @@ describe("a party whose own cleaning fans out", () => {
         connB,
         "responder",
         prepareForExchange(
-          { linkageTerms: { ...plainTerms, identity: "Plain Co" }, metadata },
+          {
+            linkageTerms: { ...shape.terms, identity: "Plain Co" },
+            metadata: shape.metadata,
+          },
           "Plain Co",
-          partnerRows,
-          columns,
+          shape.partnerRows,
+          shape.columns,
         ),
         { psiLibrary },
       ),
@@ -670,12 +723,12 @@ describe("a party whose own cleaning fans out", () => {
     // dataset -- the receiver -- until its own fan-out is counted, at which point
     // it is the larger and trends to sender. Nothing about the fan-out is on the
     // wire: the count is.
-    const plain = await runPair(false);
+    const plain = await runPair(keyReadsTheSplitField);
     expect(plain.localRecordCount).toBe(splittingRows.length);
     expect(plain.localDeclaredRecordCount).toBe(splittingRows.length);
     expect(plain.role).toBe("receiver" satisfies PsiRole);
 
-    const fanned = await runPair(true);
+    const fanned = await runPair(keyReadsTheSplitField, splitOn("last_name"));
     expect(fanned.localDeclaredRecordCount).toBe(
       splittingRows.length * FAN_OUT_CANDIDATES_PER_ELEMENT,
     );
@@ -683,6 +736,25 @@ describe("a party whose own cleaning fans out", () => {
     // what it declared and what resolved the role, not what its file holds.
     expect(fanned.localRecordCount).toBe(splittingRows.length);
     expect(fanned.role).toBe("sender" satisfies PsiRole);
+  });
+
+  test("cleaning a field no linkage key reads declares nothing", async () => {
+    // The same split, over terms whose only key reads another field. Nothing it
+    // realizes reaches a key's round, so it stands for no extra record: the
+    // party declares its rows and stays the smaller -- the receiver -- where
+    // counting the split would have declared 20 times its rows and flipped it.
+    const unread = await runPair(keyReadsAnotherField, splitOn("last_name"));
+    expect(unread.localDeclaredRecordCount).toBe(unread.localRecordCount);
+    expect(unread.localRecordCount).toBe(2);
+    expect(unread.role).toBe("receiver" satisfies PsiRole);
+
+    // The control on the same terms: split the field the key DOES read and the
+    // declaration returns.
+    const read = await runPair(keyReadsAnotherField, splitOn("ssn"));
+    expect(read.localDeclaredRecordCount).toBe(
+      read.localRecordCount * FAN_OUT_CANDIDATES_PER_ELEMENT,
+    );
+    expect(read.role).toBe("sender" satisfies PsiRole);
   });
 });
 

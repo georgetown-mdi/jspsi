@@ -2085,9 +2085,10 @@ test("an unknown function name is refused as a typed usage error", () => {
         name: "K",
         elements: [{ field: "f", transform: [{ function: "no" }] }],
       },
-      new StandardizedDataset([
-        new StandardizedField("f", "F", [], [{ F: "value" }]),
-      ]),
+      new StandardizedDataset(
+        [new StandardizedField("f", "F", [], [{ F: "value" }])],
+        [{ name: "K", elements: [{ field: "f" }] }],
+      ),
       0,
     ),
   ).toThrow(UnknownStandardizationFunctionError);
@@ -2192,14 +2193,17 @@ describe("NFC normalization (unconditional first pipeline step)", () => {
   test("NFC and NFD inputs yield identical key strings end-to-end", () => {
     const key = { name: "FN", elements: [{ field: "first_name" }] };
     const make = (raw: string) =>
-      new StandardizedDataset([
-        new StandardizedField(
-          "first_name",
-          "FN",
-          [{ function: "to_upper_case" }],
-          [{ FN: raw }],
-        ),
-      ]);
+      new StandardizedDataset(
+        [
+          new StandardizedField(
+            "first_name",
+            "FN",
+            [{ function: "to_upper_case" }],
+            [{ FN: raw }],
+          ),
+        ],
+        [key],
+      );
     expect(buildKeyStrings(key, make(NFD_JOSE), 0)).toEqual(
       buildKeyStrings(key, make(NFC_JOSE), 0),
     );
@@ -2442,9 +2446,10 @@ describe("buildKeyStrings: NFC normalization of the assembled key", () => {
         },
       ],
     };
-    const dataset = new StandardizedDataset([
-      new StandardizedField("first_name", "FN", [], [{ FN: "anything" }]),
-    ]);
+    const dataset = new StandardizedDataset(
+      [new StandardizedField("first_name", "FN", [], [{ FN: "anything" }])],
+      [key],
+    );
     expect(buildKeyStrings(key, dataset, 0)).toEqual(new Set([NFC_JOSE]));
   });
 
@@ -2454,10 +2459,13 @@ describe("buildKeyStrings: NFC normalization of the assembled key", () => {
     // final NFC pass recomposes it to the precomposed U+00E9.
     const key = { name: "AB", elements: [{ field: "a" }, { field: "b" }] };
     const rows = [{ a: "e", b: "\u0301" }];
-    const dataset = new StandardizedDataset([
-      new StandardizedField("a", "a", [], rows),
-      new StandardizedField("b", "b", [], rows),
-    ]);
+    const dataset = new StandardizedDataset(
+      [
+        new StandardizedField("a", "a", [], rows),
+        new StandardizedField("b", "b", [], rows),
+      ],
+      [key],
+    );
     expect(buildKeyStrings(key, dataset, 0)).toEqual(new Set(["\u00e9"]));
   });
 });
@@ -2488,9 +2496,10 @@ describe("buildKeyStrings: element-transform compilation reused across rows", ()
       ],
     };
     const rows = [{ SSN: "111223333" }, { SSN: "444556666" }, { SSN: "abc" }];
-    const dataset = new StandardizedDataset([
-      new StandardizedField("ssn", "SSN", [], rows),
-    ]);
+    const dataset = new StandardizedDataset(
+      [new StandardizedField("ssn", "SSN", [], rows)],
+      [key],
+    );
     expect(buildKeyStrings(key, dataset, 0)).toEqual(new Set(["3333"]));
     expect(buildKeyStrings(key, dataset, 1)).toEqual(new Set(["6666"]));
     // No 4-digit tail -> the element produces no value -> the key collapses.
@@ -2529,9 +2538,10 @@ describe("buildKeyStrings: element-transform compilation reused across rows", ()
     const rows = Array.from({ length: rowCount }, (_, i) => ({
       SSN: `${100000000 + i}`,
     }));
-    const dataset = new StandardizedDataset([
-      new StandardizedField("ssn", "SSN", [], rows),
-    ]);
+    const dataset = new StandardizedDataset(
+      [new StandardizedField("ssn", "SSN", [], rows)],
+      [key],
+    );
 
     const spy = vi.spyOn(linearRegex, "compileLinearRegex");
     for (let i = 0; i < rowCount; i++) buildKeyStrings(key, dataset, i);
@@ -2557,9 +2567,10 @@ describe("buildKeyStrings: element-transform compilation reused across rows", ()
     const rows = Array.from({ length: rowCount }, (_, i) => ({
       DOB: `01/${String((i % 28) + 1).padStart(2, "0")}/2020`,
     }));
-    const dataset = new StandardizedDataset([
-      new StandardizedField("dob", "DOB", [], rows),
-    ]);
+    const dataset = new StandardizedDataset(
+      [new StandardizedField("dob", "DOB", [], rows)],
+      [key],
+    );
 
     const spy = vi.spyOn(linearRegex, "compileLinearRegex");
     for (let i = 0; i < rowCount; i++) buildKeyStrings(key, dataset, i);
@@ -2598,10 +2609,13 @@ describe("buildKeyStrings: element-transform compilation reused across rows", ()
       FIRST: `${1000 + i}`,
       SECOND: `${2000 + i}`,
     }));
-    const dataset = new StandardizedDataset([
-      new StandardizedField("first", "FIRST", [], rows),
-      new StandardizedField("second", "SECOND", [], rows),
-    ]);
+    const dataset = new StandardizedDataset(
+      [
+        new StandardizedField("first", "FIRST", [], rows),
+        new StandardizedField("second", "SECOND", [], rows),
+      ],
+      [key],
+    );
 
     const spy = vi.spyOn(linearRegex, "compileLinearRegex");
     for (let i = 0; i < rowCount; i++) buildKeyStrings(key, dataset, i, true);
@@ -2653,12 +2667,15 @@ describe("buildKeyStrings: element-transform compilation reused across rows", ()
       F3: `${3000 + i}`,
       F4: `01/${String((i % 28) + 1).padStart(2, "0")}/2020`,
     }));
-    const dataset = new StandardizedDataset([
-      new StandardizedField("f1", "F1", [], rows),
-      new StandardizedField("f2", "F2", [], rows),
-      new StandardizedField("f3", "F3", [], rows),
-      new StandardizedField("f4", "F4", [], rows),
-    ]);
+    const dataset = new StandardizedDataset(
+      [
+        new StandardizedField("f1", "F1", [], rows),
+        new StandardizedField("f2", "F2", [], rows),
+        new StandardizedField("f3", "F3", [], rows),
+        new StandardizedField("f4", "F4", [], rows),
+      ],
+      [key],
+    );
 
     const spy = vi.spyOn(linearRegex, "compileLinearRegex");
     for (let i = 0; i < rowCount; i++) buildKeyStrings(key, dataset, i);
@@ -2691,9 +2708,10 @@ describe("buildKeyStrings: element-transform compilation reused across rows", ()
     const rows = Array.from({ length: rowCount }, (_, i) => ({
       SSN: `${100000000 + i}`,
     }));
-    const dataset = new StandardizedDataset([
-      new StandardizedField("ssn", "SSN", [], rows),
-    ]);
+    const dataset = new StandardizedDataset(
+      [new StandardizedField("ssn", "SSN", [], rows)],
+      [key],
+    );
 
     const spy = vi.spyOn(linearRegex, "compileLinearRegex");
     for (let i = 0; i < rowCount; i++) buildKeyStrings(key, dataset, i);
@@ -2887,6 +2905,66 @@ describe("buildStandardizedDataset", () => {
     expect(dataset.getField("date_of_birth")?.get(0)).toEqual(["19900115"]);
   });
 
+  // The fan-out declaration is scoped to the fields a linkage key READS: cleaning
+  // that fans out a field no key reads widens no candidate set, so it declares
+  // neither extra records (localFanOutFactor) nor extra width.
+  describe("declaresFanOut", () => {
+    const fanningRows = [{ LAST_NAME: "smith jones", DOB: "19900115" }];
+    const metadata: ColumnMetadata[] = [
+      {
+        name: "LAST_NAME",
+        type: "last_name",
+        role: "linkage",
+        isPayload: false,
+      },
+      { name: "DOB", type: "date_of_birth", role: "linkage", isPayload: false },
+    ];
+    const splitLastName = [
+      {
+        output: "last_name",
+        input: "LAST_NAME",
+        steps: [{ function: "split_on", params: { delimiter: " " } }],
+      },
+    ];
+
+    test("a fan-out on a field a linkage key reads declares", () => {
+      const dataset = buildStandardizedDataset(
+        splitLastName,
+        fanningRows,
+        metadata,
+        minimalTerms,
+      );
+      expect(dataset.declaresFanOut).toBe(true);
+    });
+
+    test("a fan-out on a field no linkage key reads declares nothing", () => {
+      const dobKeyOnly: LinkageTerms = {
+        ...minimalTerms,
+        linkageKeys: [{ name: "DOB", elements: [{ field: "date_of_birth" }] }],
+      };
+      const dataset = buildStandardizedDataset(
+        splitLastName,
+        fanningRows,
+        metadata,
+        dobKeyOnly,
+      );
+      // Not vacuous: the field is in the dataset and its row really does realize
+      // two values. No key reads it, so nothing it realizes reaches a round.
+      expect(dataset.getField("last_name")?.get(0)).toEqual(["smith", "jones"]);
+      expect(dataset.declaresFanOut).toBe(false);
+    });
+
+    test("terms whose keys read nothing declare nothing", () => {
+      const dataset = buildStandardizedDataset(
+        splitLastName,
+        fanningRows,
+        metadata,
+        { ...minimalTerms, linkageKeys: [] },
+      );
+      expect(dataset.declaresFanOut).toBe(false);
+    });
+  });
+
   test("field absent from both standardization and metadata is not in dataset", () => {
     const dataset = buildStandardizedDataset(undefined, rows, [], minimalTerms);
     expect(dataset.getField("last_name")).toBeUndefined();
@@ -2933,15 +3011,18 @@ describe("buildStandardizedDataset", () => {
 describe("StandardizedDataset", () => {
   test("fieldNames reflects all fields passed to constructor", () => {
     const rows = [{ A: "x", B: "y" }];
-    const dataset = new StandardizedDataset([
-      new StandardizedField("alpha", "A", [], rows),
-      new StandardizedField("beta", "B", [], rows),
-    ]);
+    const dataset = new StandardizedDataset(
+      [
+        new StandardizedField("alpha", "A", [], rows),
+        new StandardizedField("beta", "B", [], rows),
+      ],
+      [{ name: "A+B", elements: [{ field: "alpha" }, { field: "beta" }] }],
+    );
     expect(dataset.fieldNames).toEqual(new Set(["alpha", "beta"]));
   });
 
   test("getField returns undefined for unknown field", () => {
-    const dataset = new StandardizedDataset([]);
+    const dataset = new StandardizedDataset([], []);
     expect(dataset.getField("nonexistent")).toBeUndefined();
   });
 });
@@ -2966,7 +3047,11 @@ describe("buildKeyStrings", () => {
       }
       return new StandardizedField(name, name, [], [{ [name]: value }]);
     });
-    return new StandardizedDataset(standardizedFields);
+    const keyOverEveryField = {
+      name: "every field",
+      elements: Object.keys(fields).map((field) => ({ field })),
+    };
+    return new StandardizedDataset(standardizedFields, [keyOverEveryField]);
   }
 
   const key = {
@@ -2980,15 +3065,18 @@ describe("buildKeyStrings", () => {
 
   test("empty field value set (null) returns null", () => {
     const rows = [{ last_name: "SMITH", date_of_birth: "000" }];
-    const dataset = new StandardizedDataset([
-      new StandardizedField("last_name", "last_name", [], rows),
-      new StandardizedField(
-        "date_of_birth",
-        "date_of_birth",
-        [{ function: "null_if", params: { value: "000" } }],
-        rows,
-      ),
-    ]);
+    const dataset = new StandardizedDataset(
+      [
+        new StandardizedField("last_name", "last_name", [], rows),
+        new StandardizedField(
+          "date_of_birth",
+          "date_of_birth",
+          [{ function: "null_if", params: { value: "000" } }],
+          rows,
+        ),
+      ],
+      [key],
+    );
     expect(buildKeyStrings(key, dataset, 0)).toBeNull();
   });
 
@@ -3417,10 +3505,13 @@ describe("buildKeyStrings", () => {
       { last_name: "SMITH", date_of_birth: "19900115" },
       { last_name: "JONES", date_of_birth: "19850701" },
     ];
-    const dataset = new StandardizedDataset([
-      new StandardizedField("last_name", "last_name", [], rows),
-      new StandardizedField("date_of_birth", "date_of_birth", [], rows),
-    ]);
+    const dataset = new StandardizedDataset(
+      [
+        new StandardizedField("last_name", "last_name", [], rows),
+        new StandardizedField("date_of_birth", "date_of_birth", [], rows),
+      ],
+      [key],
+    );
     expect(buildKeyStrings(key, dataset, 0)).toEqual(
       new Set(["SMITH19900115"]),
     );
@@ -3543,6 +3634,25 @@ describe("buildKeyStrings", () => {
     expect(warn.mock.calls[0][0]).toMatch(
       /cross-product produced 21 key strings/,
     );
+  });
+
+  test("two candidates on a width-1 key raise no advisory", () => {
+    // The advisory's threshold is the fan-out cap, not the key's declared width.
+    // A row a producer outside the listed set widened to two candidates is over
+    // the width this key declares, so it is carried to the strategy that refuses
+    // it -- but two candidates is not the wide expansion the advisory speaks
+    // about, and warning per row here would put one privacy line in front of the
+    // operator for every row of the file.
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const built = withUnlistedFanOutFunctions(() => {
+      const dataset = makeDataset({
+        last_name: ["SMITH", "JONES"],
+        date_of_birth: "19750716",
+      });
+      return buildKeyStrings(key, dataset, 0);
+    });
+    expect(built?.size).toBe(2);
+    expect(warn).not.toHaveBeenCalled();
   });
 
   test("an unlisted producer in an element transform is carried too", () => {
@@ -4548,13 +4658,16 @@ describe("buildKeyStrings", () => {
     // 1025 ceiling-sized candidates cross the cap; 513 of them do not, so a key
     // holding them in one element crosses while that element is still building
     // and a key splitting them across two crosses at the second.
-    const dataset = new StandardizedDataset([
-      splitField("whole", ceilingCandidates(1025)),
-      splitField("half_one", ceilingCandidates(513)),
-      splitField("half_two", ceilingCandidates(513)),
-      plainField("short_one", "19750716"),
-      plainField("short_two", "19750717"),
-    ]);
+    const dataset = new StandardizedDataset(
+      [
+        splitField("whole", ceilingCandidates(1025)),
+        splitField("half_one", ceilingCandidates(513)),
+        splitField("half_two", ceilingCandidates(513)),
+        plainField("short_one", "19750716"),
+        plainField("short_two", "19750717"),
+      ],
+      [orderedKey("whole", "half_one", "half_two", "short_one", "short_two")],
+    );
     for (const fields of [
       ["whole", "short_one"],
       ["short_one", "whole"],
@@ -4580,11 +4693,14 @@ describe("buildKeyStrings", () => {
     // crossing is made of: it is the key DECLARING it that fixes the fate, so
     // the element it sits in -- including one the crossing never reaches --
     // makes no difference.
-    const dataset = new StandardizedDataset([
-      splitField("half_one", ceilingCandidates(513)),
-      splitField("half_two", ceilingCandidates(513)),
-      withUnlistedFanOutFunctions(() => splitField("unlisted", ["Y", "Z"])),
-    ]);
+    const dataset = new StandardizedDataset(
+      [
+        splitField("half_one", ceilingCandidates(513)),
+        splitField("half_two", ceilingCandidates(513)),
+        withUnlistedFanOutFunctions(() => splitField("unlisted", ["Y", "Z"])),
+      ],
+      [orderedKey("half_one", "half_two", "unlisted")],
+    );
     for (const fields of [
       ["half_one", "half_two", "unlisted"],
       ["unlisted", "half_one", "half_two"],
@@ -4623,11 +4739,14 @@ describe("buildKeyStrings", () => {
     ].map((elements) => ({ name: "ordered", elements }));
 
   const inStepDataset = () =>
-    new StandardizedDataset([
-      plainField("tokens", tokenCell(1443)),
-      plainField("short_one", "19750716"),
-      plainField("short_two", "19750717"),
-    ]);
+    new StandardizedDataset(
+      [
+        plainField("tokens", tokenCell(1443)),
+        plainField("short_one", "19750716"),
+        plainField("short_two", "19750717"),
+      ],
+      permutedKeys(),
+    );
 
   test("a declared fan-out row drops wherever the expanding element sits", () => {
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
@@ -4693,15 +4812,18 @@ describe("buildKeyStrings", () => {
       ],
     };
     const rows = [{ last_name: "000", date_of_birth: "19750716" }];
-    const firstElementRealizesNothing = new StandardizedDataset([
-      new StandardizedField(
-        "last_name",
-        "last_name",
-        [{ function: "null_if", params: { value: "000" } }],
-        rows,
-      ),
-      new StandardizedField("date_of_birth", "date_of_birth", [], rows),
-    ]);
+    const firstElementRealizesNothing = new StandardizedDataset(
+      [
+        new StandardizedField(
+          "last_name",
+          "last_name",
+          [{ function: "null_if", params: { value: "000" } }],
+          rows,
+        ),
+        new StandardizedField("date_of_birth", "date_of_birth", [], rows),
+      ],
+      [key],
+    );
     // The premise: this row is excluded at the first element, so the second
     // element's transform is one no row runs.
     expect(
@@ -6260,9 +6382,10 @@ describe("assessLinkageSatisfiability dead keys", () => {
           },
         ],
       };
-      const dataset = new StandardizedDataset([
-        new StandardizedField("dob", "dob", [], rows),
-      ]);
+      const dataset = new StandardizedDataset(
+        [new StandardizedField("dob", "dob", [], rows)],
+        [key],
+      );
       for (let index = 0; index < rows.length; index++)
         expect([label, index, buildKeyStrings(key, dataset, index)]).toEqual([
           label,
@@ -6294,9 +6417,10 @@ describe("assessLinkageSatisfiability dead keys", () => {
       const { deadKeys } = assessLinkageSatisfiability(columns, terms);
       expect([params, deadKeys]).toEqual([params, []]);
       // Not vacuous: some value length really does key under these bounds.
-      const dataset = new StandardizedDataset([
-        new StandardizedField("dob", "dob", [], rows),
-      ]);
+      const dataset = new StandardizedDataset(
+        [new StandardizedField("dob", "dob", [], rows)],
+        terms.linkageKeys,
+      );
       const keyed = rows.some(
         (_row, index) =>
           buildKeyStrings(terms.linkageKeys[0], dataset, index) !== null,
@@ -6329,9 +6453,10 @@ describe("assessLinkageSatisfiability dead keys", () => {
     const rows = Array.from({ length: 97 }, (_, length) => ({
       dob: "9".repeat(length),
     }));
-    const dataset = new StandardizedDataset([
-      new StandardizedField("dob", "dob", [], rows),
-    ]);
+    const dataset = new StandardizedDataset(
+      [new StandardizedField("dob", "dob", [], rows)],
+      [{ name: "DOB", elements: [{ field: "dob" }] }],
+    );
     const divergent: string[] = [];
     let claimedDead = 0;
     let pairs = 0;

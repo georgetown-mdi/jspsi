@@ -224,11 +224,16 @@ describe("the declared width of a fuzzy key", () => {
 
 describe("buildKeyStrings while fuzzy expansion is not applied", () => {
   function makeDataset(fields: Record<string, string>): StandardizedDataset {
+    const keyOverEveryField = {
+      name: "every field",
+      elements: Object.keys(fields).map((field) => ({ field })),
+    };
     return new StandardizedDataset(
       Object.entries(fields).map(
         ([name, value]) =>
           new StandardizedField(name, name, [], [{ [name]: value }]),
       ),
+      [keyOverEveryField],
     );
   }
 

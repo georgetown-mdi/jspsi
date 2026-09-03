@@ -105,7 +105,7 @@ const STUB_LINKAGE_TERMS = getDefaultLinkageTerms("Stand-in Party");
 const STUB_PREPARED = {
   metadata: [],
   linkageTerms: STUB_LINKAGE_TERMS,
-  dataset: new StandardizedDataset([]),
+  dataset: new StandardizedDataset([], []),
   rawRows: [],
   rowCount: 0,
 } satisfies PreparedExchange;
