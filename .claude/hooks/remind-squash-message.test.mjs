@@ -258,6 +258,63 @@ describe("remind-squash-message hook", () => {
     expect(context(prCreateEvent(dir, ghOutput(46)))).toBeNull();
   });
 
+  // Two `gh pr create` calls chained into one Bash command -- the shape whose
+  // count and file key come from different creates unless the two are paired.
+  const twoCreates = (firstBranch, secondBranch) =>
+    `gh pr create --base staging --head ${firstBranch} --title x && ` +
+    `gh pr create --base staging --head ${secondBranch} --title y`;
+
+  it("reminds only for the created PR whose branch qualifies", () => {
+    const dir = track(makeRepo(0, "staging"));
+    const many = addBranch(dir, "three-commit-branch", 3);
+    const one = addBranch(dir, "single-commit-branch", 1);
+    const additionalContext = context(
+      prCreateEvent(
+        dir,
+        ghOutput(1265) + ghOutput(1266),
+        twoCreates(many, one),
+      ),
+    );
+    expect(additionalContext.split("\n")).toHaveLength(1);
+    expect(additionalContext).toContain("3 commits");
+    expect(additionalContext).toContain(
+      join(dir, "scratch", "squash-messages", "1265.txt"),
+    );
+    expect(additionalContext).not.toContain("1266.txt");
+  });
+
+  it("pairs each created PR with its own --head branch's count", () => {
+    const dir = track(makeRepo(0, "staging"));
+    const first = addBranch(dir, "first-branch", 2);
+    const second = addBranch(dir, "second-branch", 3);
+    const lines = context(
+      prCreateEvent(
+        dir,
+        ghOutput(1265) + ghOutput(1266),
+        twoCreates(first, second),
+      ),
+    ).split("\n");
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain("2 commits");
+    expect(lines[0]).toContain(
+      join(dir, "scratch", "squash-messages", "1265.txt"),
+    );
+    expect(lines[1]).toContain("3 commits");
+    expect(lines[1]).toContain(
+      join(dir, "scratch", "squash-messages", "1266.txt"),
+    );
+  });
+
+  it("emits nothing when two creates leave one PR URL", () => {
+    const dir = track(makeRepo(0, "staging"));
+    const first = addBranch(dir, "first-branch", 2);
+    const second = addBranch(dir, "second-branch", 3);
+    const additionalContext = context(
+      prCreateEvent(dir, ghOutput(1266), twoCreates(first, second)),
+    );
+    expect(additionalContext).toBeNull();
+  });
+
   it("falls back to printing when no key can be determined", () => {
     const dir = track(makeRepo(2));
     execFileSync("git", ["-C", dir, "checkout", "-q", "--detach"]);
