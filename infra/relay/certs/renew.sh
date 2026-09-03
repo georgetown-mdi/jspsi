@@ -28,8 +28,13 @@ log() { printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*" >&2; }
 # shellcheck disable=SC1090
 . "$ENV_FILE"
 [ -f "$ACME_ENV" ] || die "no $ACME_ENV; copy certs/env.example there, chmod 600, and fill in the provider credential"
+# The provider credential must reach the ACME client's process environment:
+# a plain `.` sets shell variables the client never sees, so export-all
+# around the sourcing. Measured live 2026-09-03 (lego saw no token).
+set -a
 # shellcheck disable=SC1090
 . "$ACME_ENV"
+set +a
 
 REALM="${PSILINK_RELAY_REALM:-}"
 [ -n "$REALM" ] || die "PSILINK_RELAY_REALM is unset in $ENV_FILE"
