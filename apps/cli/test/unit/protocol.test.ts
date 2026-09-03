@@ -813,6 +813,7 @@ test("names a deduplicating cardinality and warns on an over-bound projection", 
   const runShape: ResolvedRunShape = {
     cardinality: "many-to-many",
     localRecordCount: 3163,
+    localDeclaredRecordCount: 3163,
     partnerRecordCount: 3163,
     localExpectsOutput: true,
     partnerAssociationTableWithheld: false,
@@ -877,6 +878,7 @@ test("leaves the pre-round seam silent on a one-to-one run", async () => {
     runExchangeConfirming({
       cardinality: "one-to-one",
       localRecordCount: 3163,
+      localDeclaredRecordCount: 3163,
       partnerRecordCount: 3163,
       localExpectsOutput: true,
       partnerAssociationTableWithheld: false,
@@ -915,6 +917,7 @@ test("tells a non-receiving party what the run's completion tells it too", async
       {
         cardinality: "one-to-many",
         localRecordCount: 4,
+        localDeclaredRecordCount: 4,
         partnerRecordCount: 6,
         localExpectsOutput: false,
         partnerAssociationTableWithheld: false,

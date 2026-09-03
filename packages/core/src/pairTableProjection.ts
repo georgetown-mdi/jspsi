@@ -10,8 +10,9 @@ import type { LinkageCardinality } from "./link.js";
  *
  * Every field is settled before the first PSI round and comes from authenticated
  * session state: the cardinality from {@link resolveLinkageCardinality} over both
- * parties' agreed terms, this party's own row count from its loaded dataset, the
- * partner's from the terms-exchange envelope, whose schema (`recordCountField`,
+ * parties' agreed terms, this party's own row count from its loaded dataset and
+ * the count it declared from that count and its own cleaning, the partner's from
+ * the terms-exchange envelope, whose schema (`recordCountField`,
  * protocolSetup.ts) bounds it to a nonnegative integer no larger than
  * {@link MAX_RECORD_COUNT}, and both entitlements from the two agreed terms
  * documents plus the resolved role. {@link runExchange} hands the whole shape to
@@ -28,6 +29,18 @@ export interface ResolvedRunShape {
   readonly cardinality: LinkageCardinality;
   /** This party's own raw dataset record count. */
   readonly localRecordCount: number;
+  /**
+   * This party's record count as DECLARED on the terms exchange: its raw count
+   * times the fan-out factor its own standardization declares (`localFanOutFactor`,
+   * fanOutFunctions.ts), so it equals {@link localRecordCount} for a party whose
+   * own cleaning does not fan out.
+   *
+   * It is the figure role resolution weighed and the one the partner holds for
+   * this party, which is why it is carried separately rather than in place of the
+   * raw count: the raw count is what this party's rows actually number, and what
+   * a projection over its own records multiplies.
+   */
+  readonly localDeclaredRecordCount: number;
   /** The partner's record count as declared on the terms exchange. */
   readonly partnerRecordCount: number;
   /**

@@ -191,6 +191,7 @@ describe("the notices an unattended run can raise", () => {
     const { cardinalityNotice, pairTableAdvisory } = describeResolvedRunShape({
       cardinality: "many-to-many",
       localRecordCount: 3163,
+      localDeclaredRecordCount: 3163,
       partnerRecordCount: 3164,
       localExpectsOutput: true,
       partnerAssociationTableWithheld: false,

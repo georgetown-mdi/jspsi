@@ -916,7 +916,10 @@ export async function linkViaCountOnlyPSI(
 // stays symmetric while neither operator is sent to a configuration that cannot
 // move it. Reducing either factor, or splitting the dataset, is the actionable
 // remedy on a breaching side, and removing a fan-out is another when that side
-// declares one.
+// declares one. This party's own declaration covers both places one can be
+// authored -- the agreed width, and the local cleaning that rides its record
+// count instead -- while the partner's cleaning is invisible here, so the
+// partner's hint rests on the agreed width alone.
 //
 // Every remedy it names is a configuration one of the two operators can change, so
 // its raise site is a UsageError (CLI exit 64) rather than a transport or internal
@@ -929,15 +932,20 @@ function singlePassOverCapMessage(
   numLinkageKeys: number,
   breach: SinglePassCeilingBreach,
   local: SinglePassPartySize,
+  localFansOut: boolean,
   partner: SinglePassPartySize,
 ): string {
   const declared = (who: string, party: SinglePassPartySize): string =>
     `${who} declared ${party.effectiveKeyCount} effective linkage key(s) ` +
     `across ${party.recordCount} record(s), which is ${valueSlots(party)} ` +
     "value slot(s)";
-  const fanOutRemedy = (whose: string): string =>
+  const fanOutRemedy = (whose: string, cleaningToo: boolean): string =>
     " A linkage key whose elements expand counts its whole declared width " +
-    `toward that ceiling, so removing ${whose} fan-out is another remedy.`;
+    "toward that ceiling" +
+    (cleaningToo
+      ? ", and cleaning that fans out declares the records it stands for,"
+      : ",") +
+    ` so removing ${whose} fan-out is another remedy.`;
 
   const cause =
     breach === "local"
@@ -951,7 +959,7 @@ function singlePassOverCapMessage(
     remedies.push(
       "Reduce the number of linkage keys or the record count, or split the " +
         "dataset into smaller batches." +
-        (partyFansOut(numLinkageKeys, local) ? fanOutRemedy("a") : ""),
+        (localFansOut ? fanOutRemedy("a", true) : ""),
     );
   if (breach !== "local")
     remedies.push(
@@ -963,7 +971,7 @@ function singlePassOverCapMessage(
           "its record count can lift this: the partner reduces its record " +
           "count or splits its dataset.") +
         (partyFansOut(numLinkageKeys, partner)
-          ? fanOutRemedy("the partner's")
+          ? fanOutRemedy("the partner's", false)
           : ""),
     );
 
@@ -1281,6 +1289,7 @@ export async function linkViaSinglePassPSI(
         numLinkageKeys,
         ceilingBreach,
         localSize,
+        localFansOut,
         partnerSize,
       ),
     );
@@ -1453,16 +1462,20 @@ export async function linkViaSinglePassPSI(
   }
   // The sender's own fan-out factor, recovered from the two counts rather than
   // advertised: its declared record count is its row count times the factor, so
-  // the quotient is that factor exactly. A frame whose row count does not divide
-  // the declared count, or that implies a factor above what one declared fan-out
-  // step can produce, is refused -- no honest sender emits either, and the sender's
-  // slot bound below stays derived from authenticated state whatever the frame
-  // says.
+  // the quotient is that factor exactly. A local fan-out declares either no
+  // factor at all or one whole declared step's (localFanOutFactor,
+  // fanOutFunctions.ts), so those two quotients are the only ones an honest
+  // sender can produce and every other is refused -- a non-integer, a factor
+  // between them, one above the declared step's, and a frame declaring no rows
+  // against a positive exchanged count, which no factor multiplies up to. A
+  // sender holding no rows at all exchanged no records either, and that one
+  // legitimate zero case takes the unfanned factor. The sender's slot bound
+  // below stays derived from authenticated state whatever the frame says.
   const senderFanOutFactor =
-    numSenderRecords === 0 ? 1 : partnerRecordCount / numSenderRecords;
+    partnerRecordCount === 0 ? 1 : partnerRecordCount / numSenderRecords;
   if (
-    !Number.isInteger(senderFanOutFactor) ||
-    senderFanOutFactor > FAN_OUT_CANDIDATES_PER_ELEMENT
+    senderFanOutFactor !== 1 &&
+    senderFanOutFactor !== FAN_OUT_CANDIDATES_PER_ELEMENT
   ) {
     throw partnerProtocolError(
       participant.id,

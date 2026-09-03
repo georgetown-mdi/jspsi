@@ -921,6 +921,9 @@ test("singlePassReplyByteCap stays below both transport envelopes at its maximum
   // sender is the NARROWEST admissible one: its slots are spread over the most
   // records.
   expect(partyFansOut(worst.keyCount, worst.sender)).toBe(false);
+  // The whole-MiB figure frameSize.ts's own docstring states for the slot
+  // ceiling, derived from the searched maximum rather than restated there.
+  expect(Math.floor(worst.bytes / 1024 / 1024)).toBe(251);
   // The file-sync backstop, a core constant.
   expect(worst.bytes).toBeLessThan(MAX_FRAME_SIZE_BYTES);
   // The nearer constraint: the WebRTC data channel's fixed browser-tab envelope.
@@ -1273,8 +1276,9 @@ test("a run whose own declared size is over the ceiling keeps the local diagnosi
   );
   await expect(run).rejects.toThrow(
     new RegExp(
-      "counts its whole declared width toward that ceiling, " +
-        "so removing a fan-out is another remedy",
+      "counts its whole declared width toward that ceiling, and cleaning " +
+        "that fans out declares the records it stands for, so removing a " +
+        "fan-out is another remedy",
     ),
   );
   await expect(run).rejects.not.toThrow(/the partner declared/);

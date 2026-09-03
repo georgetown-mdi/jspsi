@@ -39,6 +39,7 @@ const shape = (
 ): ResolvedRunShape => ({
   cardinality,
   localRecordCount,
+  localDeclaredRecordCount: localRecordCount,
   partnerRecordCount,
   localExpectsOutput: true,
   partnerAssociationTableWithheld: false,
@@ -355,11 +356,13 @@ test("hands the resolved shape to the front end before the first round", async (
   );
 
   // Both counts, read from this party's own side: the cardinality is the mirror
-  // label each party resolves, the local count is its own, and the partner's is
-  // the one that rode the terms exchange.
+  // label each party resolves, the local count is its own rows, and the
+  // partner's is the one that rode the terms exchange. Neither party's cleaning
+  // fans out here, so what each declared is what it holds.
   expect(captureA.runShape).toStrictEqual({
     cardinality: "many-to-many",
     localRecordCount: 4,
+    localDeclaredRecordCount: 4,
     partnerRecordCount: 6,
     localExpectsOutput: true,
     partnerAssociationTableWithheld: false,
@@ -367,6 +370,7 @@ test("hands the resolved shape to the front end before the first round", async (
   expect(captureB.runShape).toStrictEqual({
     cardinality: "many-to-many",
     localRecordCount: 6,
+    localDeclaredRecordCount: 6,
     partnerRecordCount: 4,
     localExpectsOutput: true,
     partnerAssociationTableWithheld: false,
@@ -423,6 +427,7 @@ test("a non-receiving party's own seam says so, on the cascade", async () => {
   expect(captureA.runShape).toStrictEqual({
     cardinality: "many-to-one",
     localRecordCount: 4,
+    localDeclaredRecordCount: 4,
     partnerRecordCount: 6,
     localExpectsOutput: true,
     partnerAssociationTableWithheld: false,
@@ -430,6 +435,7 @@ test("a non-receiving party's own seam says so, on the cascade", async () => {
   expect(captureB.runShape).toStrictEqual({
     cardinality: "one-to-many",
     localRecordCount: 6,
+    localDeclaredRecordCount: 6,
     partnerRecordCount: 4,
     localExpectsOutput: false,
     partnerAssociationTableWithheld: false,
@@ -468,6 +474,7 @@ test("a single-pass blind helper is named as reading nothing back", async () => 
   expect(captureA.runShape).toStrictEqual({
     cardinality: "many-to-one",
     localRecordCount: 4,
+    localDeclaredRecordCount: 4,
     partnerRecordCount: 6,
     localExpectsOutput: true,
     partnerAssociationTableWithheld: true,
@@ -494,6 +501,7 @@ test("an over-bound projection warns and the run completes", async () => {
   expect(captureA.runShape).toStrictEqual({
     cardinality: "many-to-many",
     localRecordCount: rows,
+    localDeclaredRecordCount: rows,
     partnerRecordCount: rows,
     localExpectsOutput: true,
     partnerAssociationTableWithheld: false,

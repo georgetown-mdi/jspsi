@@ -929,6 +929,7 @@ describe("runExchangeLifecycle", () => {
   const OVER_BOUND_SHAPE: ResolvedRunShape = {
     cardinality: "many-to-many",
     localRecordCount: 3163,
+    localDeclaredRecordCount: 3163,
     partnerRecordCount: 3163,
     localExpectsOutput: true,
     partnerAssociationTableWithheld: false,
@@ -1002,6 +1003,7 @@ describe("runExchangeLifecycle", () => {
       runExchangeConfirming({
         cardinality: "one-to-one",
         localRecordCount: 3163,
+        localDeclaredRecordCount: 3163,
         partnerRecordCount: 3163,
         localExpectsOutput: true,
         partnerAssociationTableWithheld: false,
@@ -1028,6 +1030,7 @@ describe("runExchangeLifecycle", () => {
     const shape: ResolvedRunShape = {
       cardinality: "one-to-many",
       localRecordCount: 3163,
+      localDeclaredRecordCount: 3163,
       partnerRecordCount: 3163,
       localExpectsOutput: true,
       partnerAssociationTableWithheld: false,

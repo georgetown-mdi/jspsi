@@ -22,6 +22,7 @@ import {
   MAX_SINGLE_PASS_CELLS,
   singlePassReplyByteCap,
 } from "../src/connection/frameSize";
+import { MAX_LINKAGE_ENTRIES } from "../src/config/linkageTerms";
 import {
   createMessagePipe,
   ConnectionError,
@@ -212,13 +213,207 @@ test("the ragged table is refused for carrying more candidates than the declared
   );
 });
 
+// --- the sender's own fan-out factor, recovered from the two counts ----------
+// A sender whose OWN cleaning fans out declares the records that cleaning stands
+// for while its table still carries the rows it holds, so the receiver recovers
+// the factor as the quotient of the count the sender exchanged and the count its
+// frame declares. Nothing about the fan-out is on the wire, so the quotient is
+// the whole of what the receiver has: it is held to the two an honest local
+// fan-out can produce, and every other reading is a protocol refusal.
+
+// The sender and receiver of one recovery fixture, run to settlement. The sender
+// fans out nowhere and ships the rows it holds, so what the recovery reads is
+// the count the receiver was handed for it. The sender's table is WITHHELD so it
+// returns the moment its reply is sent: a receiver that refuses the reply sends
+// no message 3, and an in-memory pipe carries no inactivity deadline for the
+// sender to give up on.
+function factorRecoveryPair(
+  senderData: Array<Column>,
+  receiverData: Array<Column>,
+  senderRecordCountTheReceiverHolds: number,
+): Promise<Array<PromiseSettledResult<AssociationTable>>> {
+  const [senderConn, receiverConn] = createMessagePipe();
+  return Promise.allSettled([
+    linkViaSinglePassPSI(
+      { cardinality: "one-to-one" },
+      new PSIParticipant(
+        "server",
+        psiLibrary,
+        { role: "starter", verbose: -1 },
+        UNBOUNDED_PSI_ELEMENTS,
+      ),
+      senderConn,
+      senderData,
+      boundsFor(receiverData[0].length, [1]),
+      true,
+      -1,
+    ),
+    linkViaSinglePassPSI(
+      { cardinality: "one-to-one" },
+      new PSIParticipant(
+        "client",
+        psiLibrary,
+        { role: "joiner", verbose: -1 },
+        UNBOUNDED_PSI_ELEMENTS,
+      ),
+      receiverConn,
+      receiverData,
+      boundsFor(senderRecordCountTheReceiverHolds, [1]),
+      true,
+      -1,
+    ),
+  ]);
+}
+
+function expectRecoveryRefusal(
+  settled: Array<PromiseSettledResult<AssociationTable>>,
+  message: RegExp,
+): void {
+  const [sender, receiver] = settled;
+  // The sender is honest: it built and sent its reply, and only the receiver's
+  // reading of the two counts refuses.
+  expect(sender.status).toBe("fulfilled");
+  expect(receiver.status).toBe("rejected");
+  const err = (receiver as PromiseRejectedResult).reason as unknown;
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+  expect((err as ConnectionError).message).toMatch(message);
+}
+
+test("an honest fanning sender's ragged table decodes to the pairs its rows hold", async () => {
+  // The sender's cleaning splits one of its two rows, so it declares 40 records
+  // for the 2 it ships and its cells carry up to a whole declared step's
+  // candidates. The receiver recovers the factor from those two counts alone and
+  // reads the ragged table at the widths the agreed terms declare times it.
+  const [senderConn, receiverConn] = createMessagePipe();
+  const [senderTable, receiverTable] = await Promise.all([
+    linkViaSinglePassPSI(
+      { cardinality: "one-to-one" },
+      new PSIParticipant(
+        "server",
+        psiLibrary,
+        { role: "starter", verbose: -1 },
+        UNBOUNDED_PSI_ELEMENTS,
+      ),
+      senderConn,
+      [[new Set(["SMITH", "JONES"]), "BROWN"]],
+      boundsFor(2, [1], FAN_OUT_CANDIDATES_PER_ELEMENT),
+      false,
+      -1,
+    ),
+    linkViaSinglePassPSI(
+      { cardinality: "one-to-one" },
+      new PSIParticipant(
+        "client",
+        psiLibrary,
+        { role: "joiner", verbose: -1 },
+        UNBOUNDED_PSI_ELEMENTS,
+      ),
+      receiverConn,
+      [["JONES", "BROWN"]],
+      boundsFor(2 * FAN_OUT_CANDIDATES_PER_ELEMENT, [1]),
+      false,
+      -1,
+    ),
+  ]);
+  // The sender's row 0 matches through the candidate its cleaning split off, and
+  // its row 1 on its single value.
+  expect(receiverTable).toStrictEqual([
+    [0, 1],
+    [0, 1],
+  ]);
+  expect(senderTable).toStrictEqual([
+    [0, 1],
+    [0, 1],
+  ]);
+});
+
+test("a reply whose rows do not divide the exchanged count is refused", async () => {
+  const settled = await factorRecoveryPair([["A", "B", "C"]], [["A", "B"]], 7);
+  expectRecoveryRefusal(
+    settled,
+    /declares 3 sender record\(s\) against the 7 the sender exchanged/,
+  );
+});
+
+test("a reply implying a factor above one declared step's is refused", async () => {
+  const settled = await factorRecoveryPair(
+    [["A"]],
+    [["A", "B"]],
+    FAN_OUT_CANDIDATES_PER_ELEMENT + 1,
+  );
+  expectRecoveryRefusal(
+    settled,
+    /not a fan-out factor a declared step can produce/,
+  );
+});
+
+test("a reply implying a factor between the two an honest sender produces is refused", async () => {
+  // A local fan-out declares one whole step's factor or none at all, so a
+  // quotient inside that range is a shape no honest sender emits.
+  const settled = await factorRecoveryPair([["A"]], [["A", "B"]], 2);
+  expectRecoveryRefusal(
+    settled,
+    /declares 1 sender record\(s\) against the 2 the sender exchanged/,
+  );
+});
+
+test("a reply declaring no rows against a positive exchanged count is refused", async () => {
+  // No factor multiplies zero rows into records, so the pair is a partner fault
+  // rather than a sender that legitimately holds nothing.
+  const settled = await factorRecoveryPair([[]], [["A", "B"]], 5);
+  expectRecoveryRefusal(
+    settled,
+    /declares 0 sender record\(s\) against the 5 the sender exchanged/,
+  );
+});
+
+test("a sender that holds no rows at all is the one legitimate zero", async () => {
+  // Zero rows against zero exchanged records is what an empty dataset declares,
+  // and it takes the unfanned factor rather than the refusal above.
+  const [senderConn, receiverConn] = createMessagePipe();
+  const [senderTable, receiverTable] = await Promise.all([
+    linkViaSinglePassPSI(
+      { cardinality: "one-to-one" },
+      new PSIParticipant(
+        "server",
+        psiLibrary,
+        { role: "starter", verbose: -1 },
+        UNBOUNDED_PSI_ELEMENTS,
+      ),
+      senderConn,
+      [[]],
+      boundsFor(2, [1]),
+      false,
+      -1,
+    ),
+    linkViaSinglePassPSI(
+      { cardinality: "one-to-one" },
+      new PSIParticipant(
+        "client",
+        psiLibrary,
+        { role: "joiner", verbose: -1 },
+        UNBOUNDED_PSI_ELEMENTS,
+      ),
+      receiverConn,
+      [["A", "B"]],
+      boundsFor(0, [1]),
+      false,
+      -1,
+    ),
+  ]);
+  expect(receiverTable).toStrictEqual([[], []]);
+  expect(senderTable).toStrictEqual([[], []]);
+});
+
 // --- the record-level resolution, over a real two-party exchange -------------
 
 function boundsFor(
   partnerRecordCount: number,
   keyWidths: Array<number>,
+  localFanOutFactor = 1,
 ): SinglePassSessionBounds {
-  return { partnerRecordCount, keyWidths, localFanOutFactor: 1 };
+  return { partnerRecordCount, keyWidths, localFanOutFactor };
 }
 
 type Column = Array<string | Set<string> | undefined>;
@@ -620,6 +815,47 @@ test("an over-ceiling fan-out exchange aborts on both sides before any frame mov
       new Promise((resolve) => setTimeout(() => resolve(nothingDelivered), 0)),
     ]),
   ).resolves.toBe(nothingDelivered);
+});
+
+test("a party over the ceiling on its own cleaning alone is offered the fan-out remedy", async () => {
+  // The agreed terms declare no width at all, so the layout discriminant every
+  // other guidance decision reads sees no fan-out here: what put this party over
+  // the budget is the factor its OWN cleaning multiplies its record count by,
+  // which the partner cannot see and the agreed width cannot show.
+  const keyCount = MAX_LINKAGE_ENTRIES;
+  const rows =
+    Math.floor(
+      MAX_SINGLE_PASS_CELLS / (keyCount * FAN_OUT_CANDIDATES_PER_ELEMENT),
+    ) + 1;
+  // The same rows without the cleaning fan-out are comfortably inside the
+  // budget, so the fan-out is the whole reason this breaches.
+  expect(keyCount * rows).toBeLessThan(MAX_SINGLE_PASS_CELLS);
+  const column: Column = Array.from({ length: rows }, (_u, i) => `V${i}`);
+  const [conn] = createMessagePipe();
+  const run = linkViaSinglePassPSI(
+    { cardinality: "one-to-one" },
+    new PSIParticipant(
+      "server",
+      psiLibrary,
+      { role: "starter", verbose: -1 },
+      UNBOUNDED_PSI_ELEMENTS,
+    ),
+    conn,
+    new Array<Column>(keyCount).fill(column),
+    boundsFor(
+      2,
+      new Array<number>(keyCount).fill(1),
+      FAN_OUT_CANDIDATES_PER_ELEMENT,
+    ),
+    false,
+    -1,
+  );
+  await expect(run).rejects.toThrow(UsageError);
+  await expect(run).rejects.toThrow(
+    /cleaning that fans out declares the records it stands for, so removing a fan-out/,
+  );
+  // The breach is this party's alone, so the partner is offered nothing.
+  await expect(run).rejects.not.toThrow(/the partner's fan-out/);
 });
 
 test("a row realizing more candidates than the party declared is refused, not shipped", async () => {

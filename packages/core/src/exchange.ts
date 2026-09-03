@@ -1897,7 +1897,8 @@ export async function runExchange(
   // cascade never reaches.
   onProtocolConfirmed(partnerTerms, resolvedRole, {
     cardinality,
-    localRecordCount: declaredRecordCount,
+    localRecordCount: rowCount,
+    localDeclaredRecordCount: declaredRecordCount,
     partnerRecordCount,
     localExpectsOutput: linkageTerms.output.expectsOutput,
     partnerAssociationTableWithheld:

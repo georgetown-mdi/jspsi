@@ -359,8 +359,7 @@ export function singlePassExchangeExceedsCap(
  *
  * Call only for an in-cap exchange (guard with {@link singlePassCeilingBreach}
  * first, or its boolean convenience {@link singlePassExchangeExceedsCap}): at the
- * slot ceiling the cap is about 240 MiB fan-out-free and about 251
- * MiB with the ragged table's count prefixes, below both transports' fixed
+ * slot ceiling the cap is about 251 MiB, below both transports' fixed
  * envelopes (the 256 MiB WebRTC envelope is the nearer one), so the per-transport
  * clamp -- min with {@link MAX_FRAME_SIZE_BYTES} for file-sync, with
  * `MAX_WEBRTC_FRAME_BYTES` (connection/binaryPackBounds.ts) for WebRTC -- is

@@ -551,11 +551,15 @@ describe("a party whose own cleaning fans out", () => {
     { last_name: "WHITE" },
   ];
 
-  async function runPair(
-    splitting: boolean,
-  ): Promise<{ role: PsiRole; localRecordCount: number }> {
+  interface Confirmation {
+    role: PsiRole;
+    localRecordCount: number;
+    localDeclaredRecordCount: number;
+  }
+
+  async function runPair(splitting: boolean): Promise<Confirmation> {
     const [connA, connB] = createMessagePipe();
-    let confirmation: { role: PsiRole; localRecordCount: number } | undefined;
+    let confirmation: Confirmation | undefined;
     await Promise.all([
       runExchange(
         connA,
@@ -589,7 +593,11 @@ describe("a party whose own cleaning fans out", () => {
             role: PsiRole,
             shape: ResolvedRunShape,
           ) => {
-            confirmation = { role, localRecordCount: shape.localRecordCount };
+            confirmation = {
+              role,
+              localRecordCount: shape.localRecordCount,
+              localDeclaredRecordCount: shape.localDeclaredRecordCount,
+            };
           },
         },
       ),
@@ -617,12 +625,16 @@ describe("a party whose own cleaning fans out", () => {
     // wire: the count is.
     const plain = await runPair(false);
     expect(plain.localRecordCount).toBe(splittingRows.length);
+    expect(plain.localDeclaredRecordCount).toBe(splittingRows.length);
     expect(plain.role).toBe("receiver" satisfies PsiRole);
 
     const fanned = await runPair(true);
-    expect(fanned.localRecordCount).toBe(
+    expect(fanned.localDeclaredRecordCount).toBe(
       splittingRows.length * FAN_OUT_CANDIDATES_PER_ELEMENT,
     );
+    // The shape's raw count stays this party's own rows: the fanned figure is
+    // what it declared and what resolved the role, not what its file holds.
+    expect(fanned.localRecordCount).toBe(splittingRows.length);
     expect(fanned.role).toBe("sender" satisfies PsiRole);
   });
 });
