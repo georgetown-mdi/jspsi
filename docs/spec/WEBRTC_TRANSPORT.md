@@ -362,6 +362,21 @@ broker socket and the peer connection on it, so a party that interrupts while
 waiting for its partner exits at once rather than at the end of the rendezvous
 budget.
 
+A configured relay adds one wait that is not a ceiling and does not end early.
+werift keeps a TURN allocation alive by re-sending REFRESH on a timer armed from
+the lifetime the relay granted, and tearing the peer connection down leaves a
+timer that is already waiting armed; a waiting timer holds the process. So a run
+that allocated against a relay returns five sixths of the granted lifetime after
+its work is done -- about 500 s where a relay grants the usual 600 s. Everything
+the exchange owes is finished before that wait begins: the result, the exchange
+record and the receipt are written, the channel and the broker socket are
+closed, and nothing crosses the wire during it. What it costs is the process,
+and in a container the container, which is what a scheduled recurring run has to
+allow for. Nothing werift exposes releases the timer, so the wait is a stated
+limit rather than a budget this transport sets; the measurement, and the release
+paths that were driven against it, are in
+[DEPENDENCY_PINS.md](DEPENDENCY_PINS.md#the-behavioural-premises).
+
 Two bounds are memory rather than time, both on inbound signaling: a signaling
 frame is refused above 256 KiB before it is parsed, and at most 128 remote
 candidates are held while this side's description is not yet applied.
