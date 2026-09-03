@@ -234,3 +234,37 @@ export function compatibilityMessage(
     composed += values[index] + fixedSpans[index + 1];
   return composed as CompatibilityMessageFragment;
 }
+
+/**
+ * Render one half of a rule-set citation -- a set's name beside that half's
+ * content version -- as the pair every surface that shows a citation renders.
+ *
+ * The grammar, stated here rather than at each of them. The name is one
+ * delimited run ({@link quoteTermsValue}): it is free text admitting a space
+ * and a delimiter of its own, so an undelimited name reading `hmis-keys 9.9.9`
+ * would be indistinguishable from a name plus the version beside it, and a name
+ * carrying a delimiter would close a run early and spell a citation of its own.
+ * The version takes the checked bare form ({@link bareTermsValue}) and reads as
+ * prose, falling back to the delimited run for a value outside that shape or
+ * past its length bound -- checked on the value in hand, since a citation
+ * reaches these surfaces from a partner's decoded invitation as readily as from
+ * a schema parse.
+ *
+ * Shared rather than composed per surface because the pair is a grammar the
+ * sites showing a citation have to agree on: core's rule-set mismatch
+ * diagnostic, the CLI acceptance consent surface, the CLI citation-drift
+ * warning, and the browser consent screen all render the same partner-chosen
+ * values, and the two consent surfaces are read by an operator deciding whether
+ * the citation on screen is the one they take it for. Composed independently,
+ * one of them can bare a name or drop a delimiter without any other changing.
+ *
+ * It takes the two values rather than a citation object so a caller that has to
+ * treat them first -- escaped for a `log.warn` sink, redacted -- hands over what
+ * it treated, leaving this the last pass over what is rendered.
+ */
+export function ruleSetCitation(
+  name: string,
+  version: string,
+): CompatibilityMessageFragment {
+  return compatibilityMessage`${quoteTermsValue(name)} ${bareTermsValue(version)}`;
+}

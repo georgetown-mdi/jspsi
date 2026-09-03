@@ -1,7 +1,6 @@
 import logLibrary from "loglevel";
 
 import {
-  bareTermsValue,
   CONSENT_BASIS_MARKERS,
   CONSENT_FACTS,
   COUNT_ONLY_DISCLOSURE_STATEMENT,
@@ -13,8 +12,8 @@ import {
   LINKAGE_RULE_SET_VERDICT_COPY,
   MAX_DECLARED_NAMES_SHOWN,
   PROPOSED_NOT_APPLIED_NOTES,
-  quoteTermsValue,
   redactAndSanitizeForDisplay,
+  ruleSetCitation,
   summarizeInvitation,
   UNRECOGNIZED_TRANSFORM_NOTE,
   unshownDeclaredNamesLine,
@@ -151,17 +150,11 @@ function verdictMarked(
  * set the substrate it is built from. Both names and both versions are
  * partner-controlled, sanitized by the summary, and each follows a fixed
  * first-party label on its own line so none can begin a line or be read as
- * carrying the marker before it. Both halves render through core's terms-value
- * seam, the same grammar core's own rule-set mismatch message renders this pair
- * with. A name is free text that may carry a space, so an undelimited one reading
- * "hmis-keys 9.9.9" would be indistinguishable from the name plus the version
- * beside it; it therefore takes the delimited form, whose doubling of a delimiter
- * inside a run leaves a name unable to terminate its own, so whatever it spells
- * reads as content of one value rather than as structure this line asserted. A
- * version is semver the terms schema constrains to a shape no line structure is
- * made of, so it takes the seam's checked bare form and reads as prose -- checked
- * on the value in hand, falling back to the delimited form for one that does not
- * meet the shape, rather than trusting the decode that usually produced it.
+ * carrying the marker before it. Each half renders through core's terms-value
+ * seam ({@link ruleSetCitation}), the same grammar core's own rule-set mismatch
+ * message and the browser consent screen render this pair with, so whatever a
+ * name spells reads as content of one value rather than as structure this line
+ * asserted.
  *
  * The seam runs after the summary's escape, not before: the escape truncates and
  * redacts, and either applied to an already-delimited run could take the closing
@@ -176,13 +169,11 @@ function displayRuleSetCitation(
   emit(`  ${marked("linkage rule set", "linkageRuleSet")}:`);
   emit(
     `    ${verdictMarked("keys", ruleSet.keySet.verdict)}: ` +
-      `${quoteTermsValue(ruleSet.keySet.name)} ` +
-      `${bareTermsValue(ruleSet.keySet.version)}`,
+      ruleSetCitation(ruleSet.keySet.name, ruleSet.keySet.version),
   );
   emit(
     `    ${verdictMarked("fields", ruleSet.fieldSet.verdict)}: ` +
-      `${quoteTermsValue(ruleSet.fieldSet.name)} ` +
-      `${bareTermsValue(ruleSet.fieldSet.version)}`,
+      ruleSetCitation(ruleSet.fieldSet.name, ruleSet.fieldSet.version),
   );
   for (const verdict of notes)
     emit(`    ${LINKAGE_RULE_SET_VERDICT_COPY[verdict].note}`);

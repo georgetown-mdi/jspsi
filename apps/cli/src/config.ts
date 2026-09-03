@@ -30,6 +30,7 @@ import {
   redactPrivateKeyMaterial,
   renderedDisplayCost,
   replaceControlCharactersForDisplay,
+  ruleSetCitation,
   safeParseConnectionConfig,
   safeParseFileSyncOptions,
   safeParseLinkageTerms,
@@ -2232,21 +2233,21 @@ export function loadConfigLinkageSource(
  *
  * The names are free text whoever authored the config chose, and a `log.warn` is
  * their sink (a value that never becomes an `Error` is escaped at the call site
- * that shows it), so each is escaped here. Delimiting then runs over the escaped
- * form through core's terms-value seam -- the same grammar core's own rule-set
- * mismatch message uses -- which is what makes the name's boundaries readable: a
- * name may carry a space, so an undelimited one reading `hmis-keys 9.9.9` would
- * be indistinguishable from the name plus the version beside it, and the escape
- * preserves printable ASCII, so a name carrying a delimiter of its own would
- * close a plain quote early and forge the clause's structure. The seam doubles
- * an embedded delimiter instead, so no name can terminate its own run.
+ * that shows it), so each is escaped here. The pair then renders through core's
+ * terms-value seam ({@link ruleSetCitation}) -- the same grammar core's own
+ * rule-set mismatch message and both consent surfaces use -- which is what makes
+ * the name's boundaries readable, the escape having preserved every printable
+ * ASCII character a name could forge the clause's structure with.
  *
  * Escaping BEFORE delimiting, not after: the escape truncates its output, and a
  * truncation applied to an already-delimited run could take the closing
  * delimiter off it.
  */
 function describeRuleSetHalf(identity: LinkageSetIdentity): string {
-  return compatibilityMessage`${quoteTermsValue(redactAndSanitizeForDisplay(identity.name))} ${bareTermsValue(redactAndSanitizeForDisplay(identity.version))}`;
+  return ruleSetCitation(
+    redactAndSanitizeForDisplay(identity.name),
+    redactAndSanitizeForDisplay(identity.version),
+  );
 }
 
 /**

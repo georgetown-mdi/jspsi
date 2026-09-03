@@ -417,6 +417,77 @@ describe("InvitationTerms: per-key matching disclosures", () => {
     expect(app.container.textContent).toContain('"hmis-keys 9.9.9" 2.3.0');
   });
 
+  test("a cited set name cannot render another citation's value", async () => {
+    // The name is delimited through core's terms-value seam, which doubles a
+    // delimiter inside a run, so a name carrying one cannot end its own value:
+    // what an acceptor reads is the whole name, never the value a citation of a
+    // shorter name at another version renders. Asserted on each half's own
+    // element rather than on the screen's concatenated text, so what is measured
+    // is the run the name occupies, not a substring of the page.
+    //
+    // Neither citation below names a set this build ships -- the first pair by
+    // version, the second by name -- so all four halves render under one marker
+    // and the two renderings differ in nothing but how the name is rendered.
+    const imitated = {
+      keys: '"hmis-keys" 9.9.9',
+      fields: '"baseline-pii" 9.9.9',
+    };
+    renderTerms(
+      {
+        ...citingTerms,
+        linkageRuleSet: {
+          fieldSet: { name: "baseline-pii", version: "9.9.9" },
+          keySet: { name: "hmis-keys", version: "9.9.9" },
+        },
+      },
+      { perspective: "review" },
+    );
+    for (const value of [imitated.keys, imitated.fields])
+      await expect
+        .element(page.getByText(value, { exact: true }))
+        .toBeInTheDocument();
+
+    renderTerms(
+      {
+        ...citingTerms,
+        linkageRuleSet: {
+          fieldSet: { name: 'baseline-pii" 9.9.9', version: "1.0.0" },
+          keySet: { name: 'hmis-keys" 9.9.9', version: "1.0.0" },
+        },
+      },
+      { perspective: "review" },
+    );
+    for (const value of [
+      '"hmis-keys"" 9.9.9" 1.0.0',
+      '"baseline-pii"" 9.9.9" 1.0.0',
+    ])
+      await expect
+        .element(page.getByText(value, { exact: true }))
+        .toBeInTheDocument();
+    expect(app.container.textContent).not.toContain(imitated.keys);
+    expect(app.container.textContent).not.toContain(imitated.fields);
+  });
+
+  test("a version outside the bare shape reads as a delimited run, not as prose", async () => {
+    // The version renders undelimited on the strength of the shape the terms
+    // schema holds it to, and the seam re-checks that shape on the value in hand:
+    // one outside it takes the delimited run rather than standing in the citation
+    // unattributed.
+    renderTerms(
+      {
+        ...citingTerms,
+        linkageRuleSet: {
+          fieldSet: { name: "baseline-pii", version: "1.0.0" },
+          keySet: { name: "hmis-keys", version: '1.0.0" 9.9.9' },
+        },
+      },
+      { perspective: "review" },
+    );
+    await expect
+      .element(page.getByText('"hmis-keys" "1.0.0"" 9.9.9"', { exact: true }))
+      .toBeInTheDocument();
+  });
+
   test("the viewer's own proposing preview cites the set without attributing it to a partner, and states a disproved half as theirs to correct", async () => {
     // Under "proposing" the terms are the viewer's own -- the console's direct
     // exchange states outright that there is no invitation for a partner to

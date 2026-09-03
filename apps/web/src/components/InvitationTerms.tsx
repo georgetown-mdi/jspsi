@@ -27,6 +27,7 @@ import {
   UNRECOGNIZED_TRANSFORM_NOTE,
   distinctLinkageRuleSetVerdicts,
   linkageRuleSetVerdictNote,
+  ruleSetCitation,
   sanitizeForDisplay,
   summarizeInvitation,
   unshownDeclaredNamesLine,
@@ -1363,13 +1364,19 @@ export function InvitationTerms({
             bound in their own Text between fixed chrome -- never joined into
             the label -- for the reason the allowed-character class below is:
             a crafted value must not be able to read as system chrome. Within
-            the box, the name is quoted as core's rule-set mismatch message
-            quotes it: a name may carry a space, so an unquoted
-            "hmis-keys 9.9.9" would be indistinguishable from the name plus
-            the schema-constrained semver version beside it. The quoting
-            shares that message's stated limit -- a name may itself carry a double
-            quote -- though each half renders in its own bordered box, which
-            confines the misreading.
+            the box, each half renders through core's terms-value seam
+            (`ruleSetCitation`), the grammar the CLI accept prompt and core's own
+            mismatch message render this pair with, which is what keeps the name
+            from reading as a citation of some other set at some other version.
+            The seam rather than the box, because the box separates a half from
+            the chrome around it and not the name from the version, and because
+            that separation is styling a reader's stylesheet or a copied-out line
+            does not carry, while a run's boundaries are in the text itself. It
+            runs after summarizeInvitation's escape, not before: that escape
+            truncates and redacts, and either applied to an already-delimited run
+            could take the closing delimiter off it, while the two compose in this
+            order -- the seam emits only printable ASCII, which the escape leaves
+            alone.
 
             Each half's label carries this build's own verdict on it, from the
             same shared table the caveats come from, so a name psilink resolved
@@ -1407,8 +1414,10 @@ export function InvitationTerms({
                   ):
                 </Text>
                 <Text size="sm" ff="monospace" style={ruleSetValueStyle}>
-                  &quot;{summary.linkageRuleSet.keySet.name}&quot;{" "}
-                  {summary.linkageRuleSet.keySet.version}
+                  {ruleSetCitation(
+                    summary.linkageRuleSet.keySet.name,
+                    summary.linkageRuleSet.keySet.version,
+                  )}
                 </Text>
                 <Text size="sm">
                   Fields (
@@ -1420,8 +1429,10 @@ export function InvitationTerms({
                   ):
                 </Text>
                 <Text size="sm" ff="monospace" style={ruleSetValueStyle}>
-                  &quot;{summary.linkageRuleSet.fieldSet.name}&quot;{" "}
-                  {summary.linkageRuleSet.fieldSet.version}
+                  {ruleSetCitation(
+                    summary.linkageRuleSet.fieldSet.name,
+                    summary.linkageRuleSet.fieldSet.version,
+                  )}
                 </Text>
               </Stack>
               {distinctLinkageRuleSetVerdicts(
