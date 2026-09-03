@@ -27,6 +27,7 @@ import {
   MAX_RAW_INVITATION_LENGTH,
   parseExchangeSpec,
   reconcileReceivedPayload,
+  redactPrivateKeyMaterial,
   sanitizeErrorForDisplay,
   sanitizeForDisplay,
   setDiagnosticSink,
@@ -5422,6 +5423,181 @@ test("handler: the default prompting path prints each line of the terms exactly 
   } finally {
     fs.rmSync(fixture.dir, { recursive: true, force: true });
   }
+});
+
+// --- handler: the prompt's copy carries the redaction on its own -------------
+// Nothing between summarizeInvitation's composition and the operator's terminal
+// redacts key material on this routing: the prompt's own stream runs no pass, and
+// with no --log-file the log sink -- where core's prefixer would have been a
+// second chance -- is never called. These drive hostile terms through the whole
+// prompting path and hold the transcript to what that composition boundary owes.
+
+/**
+ * Private-key armor in the two forms the redaction rule distinguishes: a whole
+ * block, and a BEGIN marker with no END, whose fail-closed rule takes everything
+ * composed behind it. Each is one line, so either can stand as a declared name or
+ * a CSV heading.
+ */
+const ARMOR_WHOLE =
+  "-----BEGIN RSA PRIVATE KEY-----MIIEowIBAAKCAQEA-----END RSA PRIVATE KEY-----";
+const ARMOR_DANGLING =
+  "-----BEGIN OPENSSH PRIVATE KEY-----b3BlbnNzaC1rZXktdjEA";
+
+/** The key bodies themselves: the bytes a leak puts on the operator's terminal. */
+const ARMOR_BODIES = ["MIIEowIBAAKCAQEA", "b3BlbnNzaC1rZXktdjEA"];
+
+// One planting per partner-declared value the consent surface renders, each
+// carrying a distinctive prefix so the assertion that it arrived reads the value
+// rather than the label beside it.
+const ARMORED_IDENTITY = `Inviter Org ${ARMOR_WHOLE}`;
+const ARMORED_REFERENCE = `MOU-2026-0042 ${ARMOR_WHOLE}`;
+const ARMORED_PURPOSE = `Program evaluation ${ARMOR_DANGLING}`;
+const ARMORED_SEND_COLUMN = `sent_column ${ARMOR_WHOLE}`;
+const ARMORED_KEY_NAME = `SSN + LN + DOB ${ARMOR_WHOLE}`;
+const ARMORED_FIELD_NAME = `first_name ${ARMOR_DANGLING}`;
+/** The column this party's own file discloses, and the one the partner requests. */
+const ARMORED_COLUMN = `diagnosis ${ARMOR_DANGLING}`;
+
+/**
+ * The plantings the surface renders as text. Each must reach the transcript in
+ * exactly its redacted form, so the check below is reading a fixture that arrived
+ * rather than a surface that dropped it. {@link ARMORED_FIELD_NAME} is not among
+ * them: a declared linkage field is rendered by the label of its semantic type
+ * rather than by the name the partner gave it.
+ */
+const ARMORED_RENDERED = [
+  ARMORED_IDENTITY,
+  ARMORED_REFERENCE,
+  ARMORED_PURPOSE,
+  ARMORED_SEND_COLUMN,
+  ARMORED_KEY_NAME,
+  ARMORED_COLUMN,
+];
+
+/**
+ * An invitation carrying key material in every partner-declared value the consent
+ * surface renders: the inviting party's identity, the payload names declared in
+ * each direction, a linkage key's name, a linkage field's name (with the keys
+ * citing it), and the legal agreement's reference and purpose. The declared
+ * `receive` names the column {@link armoredFixture} discloses, so the acceptance
+ * renders it in this party's own outbound set too.
+ */
+function armoredToken(): InvitationToken {
+  const base = sampleToken(FUTURE());
+  const terms = base.linkageTerms;
+  const renamed = (field: string) =>
+    field === "first_name" ? ARMORED_FIELD_NAME : field;
+  return {
+    ...base,
+    linkageTerms: {
+      ...terms,
+      identity: ARMORED_IDENTITY,
+      legalAgreement: {
+        reference: ARMORED_REFERENCE,
+        purpose: ARMORED_PURPOSE,
+        expirationDate: "2099-12-31",
+      },
+      linkageFields: terms.linkageFields.map((field) => ({
+        ...field,
+        name: renamed(field.name),
+      })),
+      linkageKeys: terms.linkageKeys.map((key, index) => ({
+        ...key,
+        ...(index === 0 ? { name: ARMORED_KEY_NAME } : {}),
+        elements: key.elements.map((element) => ({
+          ...element,
+          field: renamed(element.field),
+        })),
+        ...(key.swap !== undefined
+          ? {
+              swap: [renamed(key.swap[0]), renamed(key.swap[1])] as [
+                string,
+                string,
+              ],
+            }
+          : {}),
+      })),
+      payload: {
+        send: [{ name: ARMORED_SEND_COLUMN }],
+        receive: [{ name: ARMORED_COLUMN }],
+      },
+    },
+  };
+}
+
+/** The offline fixture whose input file discloses {@link ARMORED_COLUMN}. */
+function armoredFixture(): ReturnType<typeof offlineAcceptFixture> {
+  const fixture = offlineAcceptFixture();
+  fs.writeFileSync(
+    fixture.input,
+    `first_name,last_name,dob,ssn,${ARMORED_COLUMN}\n` +
+      "Alice,Smith,1990-01-02,123456789,A\n",
+  );
+  return fixture;
+}
+
+test("handler: hostile terms leave the sink-level pass nothing to do", async () => {
+  // The invariant the prompting path rests on: every partner-declared value
+  // is redacted where it is composed, so the pass the log sink would have applied
+  // -- core's prefixer, over the whole composed line -- changes nothing on the
+  // operator's transcript. A field composed with a plain escape instead fails
+  // here rather than putting key material on a terminal.
+  const fixture = armoredFixture();
+  promptConfirmMock.mockResolvedValue(false);
+  try {
+    const encoded = await encodeInvitation(armoredToken());
+    const { stderrWrites, stdoutWrites } = await runOfflineAcceptCapturingStdio(
+      { encoded, fixture },
+    );
+    expect(stdoutWrites.join("")).toBe("");
+    const transcript = stderrWrites.join("");
+    expect(transcript).toContain(SURFACE_HEADING);
+    // No line carries the log's prefix, so no sink-level pass ran over any of
+    // this: a routing that sent the surface through the log as well would fail
+    // here rather than leave the prefixer masking a composition site that
+    // stopped redacting.
+    expect(transcript).not.toMatch(/^\[[^\]]*\] \[[A-Z]+\] \[/m);
+    for (const line of transcript.split("\n"))
+      expect(redactPrivateKeyMaterial(line)).toBe(line);
+    for (const body of ARMOR_BODIES) expect(transcript).not.toContain(body);
+    expect(transcript).not.toContain("PRIVATE KEY");
+    for (const planted of ARMORED_RENDERED)
+      expect(transcript).toContain(redactPrivateKeyMaterial(planted));
+  } finally {
+    fs.rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: an armored allowed-character class is refused at the decode", async () => {
+  // The one rendered partner value the fixture above cannot plant: an
+  // allowed-character class is validated as a regex character class, and armor's
+  // run of dashes does not compile as one. So the surface never sees such a class
+  // -- the refusal is the check, and it too reaches the operator redacted.
+  const base = sampleToken(FUTURE());
+  const crafted = await encodeRaw({
+    ...base,
+    linkageTerms: {
+      ...base.linkageTerms,
+      linkageFields: base.linkageTerms.linkageFields.map((field) =>
+        field.type === "first_name"
+          ? {
+              ...field,
+              constraints: {
+                ...field.constraints,
+                allowedCharacters: `A-Z ${ARMOR_DANGLING}`,
+              },
+            }
+          : field,
+      ),
+    },
+  });
+  const err = await decodeAndValidateInvitation(crafted).catch(
+    (e: unknown) => e,
+  );
+  expect(err).toBeInstanceOf(UsageError);
+  const message = (err as Error).message;
+  expect(message).toContain("allowedCharacters");
+  expect(redactPrivateKeyMaterial(message)).toBe(message);
 });
 
 test("handler: --consent-to-terms leaves the terms in the --log-file, not on the terminal", async () => {
