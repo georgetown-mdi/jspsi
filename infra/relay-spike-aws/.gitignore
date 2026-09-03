@@ -1,0 +1,15 @@
+# Everything a spike run reads or writes that identifies an account, carries a
+# secret, or is a measurement rather than tooling. The scripts refuse to run
+# without ACCOUNT_ID rather than defaulting to one; the rest is optional and
+# each caller branches on its presence.
+ACCOUNT_ID
+cloudflare/env
+certs/
+cli/
+artifacts/
+run/state/
+
+# The intersection an exchange must resolve to, compared byte for byte by
+# exchange.sh. The repository ignores *.csv everywhere, and these two are
+# fixtures rather than data.
+!run/expected/*.csv

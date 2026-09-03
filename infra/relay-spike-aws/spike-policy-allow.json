@@ -1,0 +1,32 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "EverythingEc2InOneRegion",
+      "Effect": "Allow",
+      "Action": "ec2:*",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "us-west-2"
+        }
+      }
+    },
+    {
+      "Sid": "ReadOnlyCostAndIdentity",
+      "Effect": "Allow",
+      "Action": [
+        "budgets:DescribeBudget*",
+        "budgets:ViewBudget",
+        "ce:GetCostAndUsage",
+        "cloudwatch:GetMetricStatistics",
+        "ec2:Describe*",
+        "sts:GetCallerIdentity",
+        "tag:GetResources",
+        "tag:GetTagKeys",
+        "tag:GetTagValues"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
