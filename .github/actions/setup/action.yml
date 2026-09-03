@@ -179,28 +179,39 @@ runs:
       if: inputs.cache != 'false' && runner.os == 'Linux'
       uses: actions/cache/restore@v6
       with:
-        path: packages/core/dist
+        # Kept identical to the save step's list below: actions/cache derives
+        # the cache version from the path list, so a restore list that
+        # diverged from save's would never see what save wrote under this key.
+        path: |
+          packages/core/dist
+          !packages/core/dist/tsconfig.tsbuildinfo
         key: ${{ steps.cache-keys.outputs.core }}
     - name: Build core
       if: steps.core-cache.outputs.cache-hit != 'true'
       run: npm run build -w packages/core
       shell: bash
-    # The apps register scripts/lib/coreDistFreshness.mjs as a vitest
-    # globalSetup, which refuses a run whose core sources are newer than the dist
-    # the suites import. A restore writes the archived mtimes while
-    # actions/checkout stamps the sources with the current time, so every hit
-    # would read as stale. Restamping is that guard's premise restored rather
-    # than a bypass of it: the key this dist was restored under hashes both of
-    # the guard's SOURCE_PATHS (packages/core/src and rollup.config.ts) plus the
-    # tsconfig chain, binding the artifact to its inputs by content -- which is
-    # what the mtime ordering stands in for and cannot itself survive an archive.
+    # A restored dist keeps the build-time mtimes the apps' freshness guard
+    # reads as stale, so every file is re-stamped; the composite build's
+    # tsconfig.tsbuildinfo is removed because its counterpart, the gitignored
+    # packages/core/.rollup.cache/, never rides the cache, and a buildinfo
+    # without it makes the next --configPlugin build serve no transform for
+    # rollup.config.ts. See docs/notes/core-dist-cache-buildinfo.md.
     - name: Restamp the restored core build
       if: steps.core-cache.outputs.cache-hit == 'true'
-      run: find packages/core/dist -type f -exec touch {} +
+      run: |
+        rm -f packages/core/dist/tsconfig.tsbuildinfo
+        find packages/core/dist -type f -exec touch {} +
       shell: bash
     - name: Save the @psilink/core build
       if: inputs.cache != 'false' && runner.os == 'Linux' && steps.core-cache.outputs.cache-hit != 'true'
       uses: actions/cache/save@v6
       with:
-        path: packages/core/dist
+        # Kept identical to the restore step's list above, for the same
+        # cache-version reason. The exclusion here is live -- it keeps future
+        # saves from writing the buildinfo -- while the restamp step's rm -f
+        # handles an entry already saved with it, whose content-derived key is
+        # immutable.
+        path: |
+          packages/core/dist
+          !packages/core/dist/tsconfig.tsbuildinfo
         key: ${{ steps.cache-keys.outputs.core }}
