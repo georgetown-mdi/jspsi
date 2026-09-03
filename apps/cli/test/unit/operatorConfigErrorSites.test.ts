@@ -3,7 +3,7 @@ import { dirname, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import ts from "typescript";
-import { expect, test } from "vitest";
+import { describe, expect, test } from "vitest";
 
 // The `config` event category is keyed on the `OperatorConfigError` TYPE alone
 // (classifyTerminalError in src/eventStream.ts), and the category's definition
@@ -21,22 +21,31 @@ import { expect, test } from "vitest";
 // What the scan reaches, which is the whole of what it claims:
 //
 // - The three product source trees below, parsed as this checkout ships them.
-//   Nothing resolves an import, a type or a symbol; every decision is syntactic
-//   and single-file.
-// - A member class is `OperatorConfigError` or any class in those trees written
-//   as `class X extends <member>`, to a fixed point. A member introduced some
-//   other way -- assigned, mixed in, declared outside these trees -- is not seen.
-// - A construction site is a `new <Identifier>(...)` whose identifier names a
-//   member as spelled. One written through an alias, a variable, or a factory is
-//   not seen.
+//   No type checker runs; every decision is syntactic.
+// - A class is identified by its DECLARATION -- file plus name, never the name
+//   alone -- and a name written in an `extends` clause or a `new` is resolved
+//   against what its file can see: that file's own declarations first, then its
+//   imports, following a relative specifier, `@psilink/core`, or the web app's
+//   `@*` path mapping to the imported file and on through its `export *` and
+//   `export { ... } from` re-exports. A name that lands on more than one
+//   declaration fails the scan naming both rather than picking one.
+// - A member class is the `OperatorConfigError` declaration below or any class
+//   in those trees written as `class X extends <member>`, to a fixed point. A
+//   member introduced some other way -- assigned, mixed in, declared outside
+//   these trees -- is not seen.
+// - A construction site is a `new <Identifier>(...)` whose identifier resolves
+//   to a member declaration. One written through an alias, a variable, or a
+//   factory is not seen.
 // - An interpolation is any expression contributing text to the first argument
 //   that is not fixed literal text. String concatenation, template spans,
 //   parentheses and the two branches of a conditional are followed; a
 //   conditional's CONDITION is not, contributing no text of its own. An
-//   identifier bound to a module-level constant in the same file is resolved
-//   into that constant, exactly, since a constant has one value. A CALL is
-//   recorded as written and NOT followed: its text depends on its arguments, so
-//   the verdict below covers what the callee composes.
+//   identifier bound to a module-level constant in the same file resolves into
+//   that constant, exactly, since a constant has one value -- unless a scope
+//   between the use site and the module binds the name itself, which makes the
+//   value opaque again and so a recorded interpolation. A CALL is recorded as
+//   written and NOT followed: its text depends on its arguments, so the verdict
+//   below covers what the callee composes.
 //
 // Where the reach errs it errs toward reporting: an expression it cannot reduce
 // to fixed text is recorded rather than ignored, so answering a spurious entry
@@ -56,11 +65,30 @@ const ROOT = resolve(
 // keeps the fence with the TYPE rather than with one consumer of it.
 const SOURCE_TREES = ["packages/core/src", "apps/cli/src", "apps/web/src"];
 
-const ROOT_MEMBER = "OperatorConfigError";
+/** A class declaration, the unit of class identity across the scanned trees. */
+interface DeclarationRef {
+  readonly file: string;
+  readonly name: string;
+}
+
+const refKey = (ref: DeclarationRef): string => `${ref.file} :: ${ref.name}`;
+
+const ROOT_MEMBER: DeclarationRef = {
+  file: "packages/core/src/errors.ts",
+  name: "OperatorConfigError",
+};
+
+// The core package entry: package.json's `exports` "." is the bundle rollup
+// builds from this module, so an `@psilink/core` import reads its re-exports.
+const CORE_ENTRY = "packages/core/src/main.ts";
+
+const WEB_TREE = "apps/web/src";
 
 /**
  * A construction site, keyed by file and by the enclosing function rather than
- * by line, so ordinary edits above it do not churn the ledger.
+ * by line, so ordinary edits above it do not churn the ledger. Two constructions
+ * under one anchor are two entries here, in source order; the ledger key numbers
+ * them within the anchor.
  */
 interface ConfigErrorSite {
   readonly file: string;
@@ -201,14 +229,14 @@ function sourceModules(dir: string): string[] {
 }
 
 /**
- * Parse a repository-relative source as this checkout ships it. The script kind
- * follows the extension: a .tsx parsed as plain TypeScript loses its JSX, so a
- * construction written inside an element would not be in the tree to find.
+ * Parse a source under its repository-relative name. The script kind follows the
+ * extension: a .tsx parsed as plain TypeScript loses its JSX, so a construction
+ * written inside an element would not be in the tree to find.
  */
-function parseFile(file: string): ts.SourceFile {
+function parseSource(file: string, text: string): ts.SourceFile {
   return ts.createSourceFile(
     file,
-    readFileSync(resolve(ROOT, file), "utf8"),
+    text,
     ts.ScriptTarget.Latest,
     true,
     file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
@@ -226,35 +254,305 @@ function descendants(node: ts.Node): ts.Node[] {
   return found;
 }
 
-const SOURCES = new Map(
-  SOURCE_TREES.flatMap(sourceModules).map((file) => [file, parseFile(file)]),
-);
+/** A class declaration together with the names its `extends` clause spells. */
+interface ClassDeclaration extends DeclarationRef {
+  readonly baseNames: readonly string[];
+}
 
-/** Every class in the scanned trees that extends `OperatorConfigError`, transitively. */
-function memberClasses(): Set<string> {
-  const extendsByClass = new Map<string, string[]>();
-  for (const source of SOURCES.values()) {
-    for (const node of descendants(source)) {
-      if (!ts.isClassDeclaration(node) || node.name === undefined) continue;
-      const bases = (node.heritageClauses ?? [])
-        .filter((clause) => clause.token === ts.SyntaxKind.ExtendsKeyword)
-        .flatMap((clause) => clause.types)
-        .filter((type) => ts.isIdentifier(type.expression))
-        .map((type) => (type.expression as ts.Identifier).text);
-      extendsByClass.set(node.name.text, bases);
+/** The module and exported name an `import` binds a local name to. */
+interface ImportBinding {
+  readonly specifier: string;
+  readonly exported: string;
+}
+
+/** An `export * from` (no `names`) or an `export { a as b } from`. */
+interface ReExport {
+  readonly specifier: string;
+  /** Exported name to the name the target module exports it under. */
+  readonly names?: ReadonlyMap<string, string>;
+}
+
+interface FileIndex {
+  readonly declared: readonly ClassDeclaration[];
+  /** By the name the file resolves, which includes `default` for a default export. */
+  readonly classes: ReadonlyMap<string, ClassDeclaration>;
+  readonly imports: ReadonlyMap<string, ImportBinding>;
+  readonly reExports: readonly ReExport[];
+}
+
+/** A name whose use site left the resolver with more than one candidate. */
+interface AmbiguousName {
+  readonly file: string;
+  readonly name: string;
+  readonly candidates: readonly ClassDeclaration[];
+}
+
+interface Scan {
+  readonly sources: ReadonlyMap<string, ts.SourceFile>;
+  readonly files: ReadonlyMap<string, FileIndex>;
+  readonly declarations: readonly ClassDeclaration[];
+  readonly byName: ReadonlyMap<string, ClassDeclaration[]>;
+  /** Filled as the resolver runs, keyed by use site so one name reports once. */
+  readonly ambiguities: Map<string, AmbiguousName>;
+}
+
+/** Every identifier a binding name introduces, destructuring included. */
+function bindingNames(name: ts.BindingName): string[] {
+  if (ts.isIdentifier(name)) return [name.text];
+  return name.elements.flatMap((element) =>
+    ts.isBindingElement(element) ? bindingNames(element.name) : [],
+  );
+}
+
+function indexFile(file: string, source: ts.SourceFile): FileIndex {
+  const declared: ClassDeclaration[] = [];
+  const classes = new Map<string, ClassDeclaration>();
+  const imports = new Map<string, ImportBinding>();
+  const reExports: ReExport[] = [];
+
+  for (const node of descendants(source)) {
+    if (!ts.isClassDeclaration(node) || node.name === undefined) continue;
+    const baseNames = (node.heritageClauses ?? [])
+      .filter((clause) => clause.token === ts.SyntaxKind.ExtendsKeyword)
+      .flatMap((clause) => clause.types)
+      .filter((type) => ts.isIdentifier(type.expression))
+      .map((type) => (type.expression as ts.Identifier).text);
+    const declaration: ClassDeclaration = {
+      file,
+      name: node.name.text,
+      baseNames,
+    };
+    declared.push(declaration);
+    classes.set(declaration.name, declaration);
+    if (
+      node.modifiers?.some(
+        (modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword,
+      )
+    )
+      classes.set("default", declaration);
+  }
+
+  for (const statement of source.statements) {
+    if (
+      ts.isImportDeclaration(statement) &&
+      ts.isStringLiteral(statement.moduleSpecifier)
+    ) {
+      const specifier = statement.moduleSpecifier.text;
+      const clause = statement.importClause;
+      if (clause?.name !== undefined)
+        imports.set(clause.name.text, { specifier, exported: "default" });
+      const bindings = clause?.namedBindings;
+      if (bindings !== undefined && ts.isNamedImports(bindings))
+        for (const element of bindings.elements)
+          imports.set(element.name.text, {
+            specifier,
+            exported: (element.propertyName ?? element.name).text,
+          });
+      continue;
+    }
+    if (
+      !ts.isExportDeclaration(statement) ||
+      statement.moduleSpecifier === undefined ||
+      !ts.isStringLiteral(statement.moduleSpecifier)
+    )
+      continue;
+    const specifier = statement.moduleSpecifier.text;
+    const clause = statement.exportClause;
+    if (clause === undefined) {
+      reExports.push({ specifier });
+      continue;
+    }
+    if (!ts.isNamedExports(clause)) continue;
+    reExports.push({
+      specifier,
+      names: new Map(
+        clause.elements.map((element) => [
+          element.name.text,
+          (element.propertyName ?? element.name).text,
+        ]),
+      ),
+    });
+  }
+
+  return { declared, classes, imports, reExports };
+}
+
+function scanSources(sources: ReadonlyMap<string, ts.SourceFile>): Scan {
+  const files = new Map<string, FileIndex>();
+  const declarations: ClassDeclaration[] = [];
+  const byName = new Map<string, ClassDeclaration[]>();
+  for (const [file, source] of sources) {
+    const index = indexFile(file, source);
+    files.set(file, index);
+    for (const declaration of index.declared) {
+      declarations.push(declaration);
+      const sameName = byName.get(declaration.name) ?? [];
+      sameName.push(declaration);
+      byName.set(declaration.name, sameName);
     }
   }
-  const members = new Set([ROOT_MEMBER]);
+  return { sources, files, declarations, byName, ambiguities: new Map() };
+}
+
+/** The scanned module a path resolves to, over the extensions the trees write. */
+function sourceAt(
+  base: string,
+  sources: ReadonlyMap<string, ts.SourceFile>,
+): string | undefined {
+  const stems = /\.jsx?$/u.test(base)
+    ? [base.replace(/\.jsx?$/u, ""), base]
+    : [base];
+  for (const stem of stems)
+    for (const candidate of [
+      `${stem}.ts`,
+      `${stem}.tsx`,
+      stem,
+      posix.join(stem, "index.ts"),
+      posix.join(stem, "index.tsx"),
+    ])
+      if (sources.has(candidate)) return candidate;
+  return undefined;
+}
+
+/** The scanned module `specifier` names from `fromFile`, if it names one at all. */
+function resolveSpecifier(
+  fromFile: string,
+  specifier: string,
+  sources: ReadonlyMap<string, ts.SourceFile>,
+): string | undefined {
+  if (specifier === "@psilink/core")
+    return sources.has(CORE_ENTRY) ? CORE_ENTRY : undefined;
+  if (specifier.startsWith("."))
+    return sourceAt(posix.join(posix.dirname(fromFile), specifier), sources);
+  // The web app's tsconfig maps `@*` onto `./src/*` and falls through to
+  // node_modules when nothing is there, which is what an unfound path is here.
+  if (specifier.startsWith("@") && fromFile.startsWith(`${WEB_TREE}/`))
+    return sourceAt(posix.join(WEB_TREE, specifier.slice(1)), sources);
+  return undefined;
+}
+
+function distinct(declarations: ClassDeclaration[]): ClassDeclaration[] {
+  return [
+    ...new Map(
+      declarations.map((declaration) => [refKey(declaration), declaration]),
+    ).values(),
+  ];
+}
+
+/** The declarations `file` exports as `name`, through its re-exports. */
+function exportedDeclarations(
+  file: string,
+  name: string,
+  scan: Scan,
+  seen: Set<string>,
+): ClassDeclaration[] {
+  const visit = `${file} :: ${name}`;
+  if (seen.has(visit)) return [];
+  seen.add(visit);
+  const index = scan.files.get(file);
+  if (index === undefined) return [];
+  const own = index.classes.get(name);
+  if (own !== undefined) return [own];
+  const imported = index.imports.get(name);
+  if (imported !== undefined) {
+    const target = resolveSpecifier(file, imported.specifier, scan.sources);
+    return target === undefined
+      ? []
+      : exportedDeclarations(target, imported.exported, scan, seen);
+  }
+  const found: ClassDeclaration[] = [];
+  for (const reExport of index.reExports) {
+    const original =
+      reExport.names === undefined ? name : reExport.names.get(name);
+    if (original === undefined) continue;
+    const target = resolveSpecifier(file, reExport.specifier, scan.sources);
+    if (target !== undefined)
+      found.push(...exportedDeclarations(target, original, scan, seen));
+  }
+  return distinct(found);
+}
+
+type Resolution =
+  | { readonly kind: "declaration"; readonly declaration: ClassDeclaration }
+  | { readonly kind: "ambiguous" }
+  | { readonly kind: "unresolved" };
+
+/** The declarations an import in `file` binds `name` to, or undefined if none does. */
+function importedCandidates(
+  file: string,
+  name: string,
+  scan: Scan,
+): ClassDeclaration[] | undefined {
+  const imported = scan.files.get(file)?.imports.get(name);
+  if (imported === undefined) return undefined;
+  const target = resolveSpecifier(file, imported.specifier, scan.sources);
+  return target === undefined
+    ? []
+    : exportedDeclarations(target, imported.exported, scan, new Set());
+}
+
+/**
+ * The declaration `name` denotes where `file` writes it. A name the file neither
+ * declares nor imports falls back to the scanned declarations carrying it, which
+ * is where two trees can offer the same name: the resolver records the collision
+ * and resolves nothing rather than picking a side.
+ */
+function resolveClassName(file: string, name: string, scan: Scan): Resolution {
+  const own = scan.files.get(file)?.classes.get(name);
+  if (own !== undefined) return { kind: "declaration", declaration: own };
+  const candidates =
+    importedCandidates(file, name, scan) ?? scan.byName.get(name) ?? [];
+  if (candidates.length === 0) return { kind: "unresolved" };
+  if (candidates.length === 1)
+    return { kind: "declaration", declaration: candidates[0] };
+  scan.ambiguities.set(`${file} :: ${name}`, { file, name, candidates });
+  return { kind: "ambiguous" };
+}
+
+/**
+ * Every class declaration that is the root member or extends one, transitively,
+ * as a set of declaration keys.
+ */
+function memberDeclarations(scan: Scan, root: DeclarationRef): Set<string> {
+  const rootDeclaration = scan.files.get(root.file)?.classes.get(root.name);
+  if (rootDeclaration === undefined)
+    throw new Error(
+      `${refKey(root)} is not declared in the scanned trees, so the category has no root to close over. Point ROOT_MEMBER at the declaration it moved to.`,
+    );
+  const members = new Set([refKey(rootDeclaration)]);
   for (let grew = true; grew;) {
     grew = false;
-    for (const [name, bases] of extendsByClass) {
-      if (members.has(name) || !bases.some((base) => members.has(base)))
-        continue;
-      members.add(name);
+    for (const declaration of scan.declarations) {
+      if (members.has(refKey(declaration))) continue;
+      const extendsMember = declaration.baseNames.some((base) => {
+        const resolution = resolveClassName(declaration.file, base, scan);
+        return (
+          resolution.kind === "declaration" &&
+          members.has(refKey(resolution.declaration))
+        );
+      });
+      if (!extendsMember) continue;
+      members.add(refKey(declaration));
       grew = true;
     }
   }
   return members;
+}
+
+/**
+ * The collisions that can move the fence: one whose candidates are all
+ * non-members leaves both the member set and the site list as they are.
+ */
+function materialAmbiguities(scan: Scan, members: Set<string>): string[] {
+  return [...scan.ambiguities.values()]
+    .filter((ambiguity) =>
+      ambiguity.candidates.some((candidate) => members.has(refKey(candidate))),
+    )
+    .map(
+      (ambiguity) =>
+        `${ambiguity.file}: \`${ambiguity.name}\` resolves to ${ambiguity.candidates.map(refKey).join(" and ")}`,
+    )
+    .sort();
 }
 
 /** The initializer of a module-level `const NAME = ...` in `source`, if there is one. */
@@ -273,6 +571,51 @@ function moduleConstInitializer(
         return declaration.initializer;
   }
   return undefined;
+}
+
+/** Whether `scope` binds `name` itself: a parameter, a local, or a catch variable. */
+function bindsName(scope: ts.Node, name: string): boolean {
+  if (ts.isFunctionLike(scope))
+    return scope.parameters.some((parameter) =>
+      bindingNames(parameter.name).includes(name),
+    );
+  if (ts.isCatchClause(scope))
+    return (
+      scope.variableDeclaration !== undefined &&
+      bindingNames(scope.variableDeclaration.name).includes(name)
+    );
+  const declarations: ts.VariableDeclaration[] = [];
+  if (
+    ts.isBlock(scope) ||
+    ts.isModuleBlock(scope) ||
+    ts.isCaseClause(scope) ||
+    ts.isDefaultClause(scope)
+  )
+    for (const statement of scope.statements)
+      if (ts.isVariableStatement(statement))
+        declarations.push(...statement.declarationList.declarations);
+  if (
+    (ts.isForStatement(scope) ||
+      ts.isForOfStatement(scope) ||
+      ts.isForInStatement(scope)) &&
+    scope.initializer !== undefined &&
+    ts.isVariableDeclarationList(scope.initializer)
+  )
+    declarations.push(...scope.initializer.declarations);
+  return declarations.some((declaration) =>
+    bindingNames(declaration.name).includes(name),
+  );
+}
+
+/** Whether a scope between `node` and its module binds `name`, hiding the module's. */
+function isShadowed(node: ts.Node, name: string): boolean {
+  for (
+    let scope: ts.Node | undefined = node.parent;
+    scope !== undefined && !ts.isSourceFile(scope);
+    scope = scope.parent
+  )
+    if (bindsName(scope, name)) return true;
+  return false;
 }
 
 /** Every non-literal expression `expr` contributes to the message text. */
@@ -306,7 +649,11 @@ function collectInterpolations(
     collectInterpolations(expr.whenFalse, source, resolved, found);
     return;
   }
-  if (ts.isIdentifier(expr) && !resolved.has(expr.text)) {
+  if (
+    ts.isIdentifier(expr) &&
+    !resolved.has(expr.text) &&
+    !isShadowed(expr, expr.text)
+  ) {
     const initializer = moduleConstInitializer(source, expr.text);
     if (initializer !== undefined) {
       resolved.add(expr.text);
@@ -337,16 +684,22 @@ function enclosingAnchor(node: ts.Node): string {
   return "(module scope)";
 }
 
-/** Every construction of a member class in the scanned trees. */
+/** Every construction of a member class in the scanned trees, in source order. */
 function foundSites(
+  scan: Scan,
   members: Set<string>,
 ): Omit<ConfigErrorSite, "provenance">[] {
   const sites: Omit<ConfigErrorSite, "provenance">[] = [];
-  for (const [file, source] of SOURCES) {
+  for (const [file, source] of scan.sources) {
     for (const node of descendants(source)) {
       if (!ts.isNewExpression(node)) continue;
       if (!ts.isIdentifier(node.expression)) continue;
-      if (!members.has(node.expression.text)) continue;
+      const resolution = resolveClassName(file, node.expression.text, scan);
+      if (
+        resolution.kind !== "declaration" ||
+        !members.has(refKey(resolution.declaration))
+      )
+        continue;
       const message = node.arguments?.[0];
       const interpolates = new Set<string>();
       if (message !== undefined)
@@ -362,8 +715,32 @@ function foundSites(
   return sites;
 }
 
-const key = (site: { file: string; anchor: string }): string =>
-  `${site.file} :: ${site.anchor}`;
+/**
+ * Each site with its ledger key: file, anchor, and the site's ordinal within
+ * that anchor, so two constructions under one anchor stay two rows.
+ */
+function keyed<T extends { file: string; anchor: string }>(
+  sites: readonly T[],
+): [string, T][] {
+  const seen = new Map<string, number>();
+  return sites.map((site) => {
+    const anchor = `${site.file} :: ${site.anchor}`;
+    const ordinal = (seen.get(anchor) ?? 0) + 1;
+    seen.set(anchor, ordinal);
+    return [`${anchor} #${ordinal}`, site];
+  });
+}
+
+const SOURCES = new Map(
+  SOURCE_TREES.flatMap(sourceModules).map((file) => [
+    file,
+    parseSource(file, readFileSync(resolve(ROOT, file), "utf8")),
+  ]),
+);
+
+const SCAN = scanSources(SOURCES);
+const MEMBERS = memberDeclarations(SCAN, ROOT_MEMBER);
+const FOUND_SITES = foundSites(SCAN, MEMBERS);
 
 // What a member's message may carry, quoted into both failures below so the
 // verdict is stated where it has to be reached rather than only in the ledger.
@@ -385,38 +762,164 @@ const INTERPOLATION_GUIDANCE =
   `account for, so the recorded verdict was not reached over it. ${CONTENT_RULE} ` +
   "Then update the entry's `interpolates` and `provenance` together.";
 
+const AMBIGUITY_GUIDANCE =
+  "A class name written in an `extends` clause or a `new` matches more than " +
+  "one declaration in the scanned trees, and the scan will not pick one, so " +
+  "the member set below cannot be trusted. Import the class the site means, or " +
+  "rename one of the two declarations.";
+
+test("every class name the scan resolves lands on one declaration", () => {
+  expect(materialAmbiguities(SCAN, MEMBERS), AMBIGUITY_GUIDANCE).toStrictEqual(
+    [],
+  );
+});
+
 test("the config event category's members are the recorded ones", () => {
   // A new subclass is a second way the site list can grow: it inherits the
   // category through the instanceof check without naming the base type anywhere.
-  expect([...memberClasses()].sort()).toStrictEqual([
-    "OperatorConfigError",
-    "StandardizationTermsError",
+  expect([...MEMBERS].sort()).toStrictEqual([
+    "packages/core/src/errors.ts :: OperatorConfigError",
+    "packages/core/src/errors.ts :: StandardizationTermsError",
   ]);
 });
 
 test("every OperatorConfigError construction site is accounted for", () => {
-  const found = foundSites(memberClasses()).map(key).sort();
-  const recorded = RECORDED_SITES.map(key).sort();
+  const found = keyed(FOUND_SITES)
+    .map(([siteKey]) => siteKey)
+    .sort();
+  const recorded = keyed(RECORDED_SITES)
+    .map(([siteKey]) => siteKey)
+    .sort();
   expect(found, SITE_SET_GUIDANCE).toStrictEqual(recorded);
 });
 
 test("no recorded site interpolates a partner-sourced value into its message", () => {
-  const found = new Map(
-    foundSites(memberClasses()).map((site) => [key(site), site]),
-  );
-  for (const recorded of RECORDED_SITES) {
-    const site = found.get(key(recorded));
-    expect(
-      site,
-      `${key(recorded)} is recorded but was not found`,
-    ).toBeDefined();
-    expect(site?.raises).toBe(recorded.raises);
+  const recorded = new Map(keyed(RECORDED_SITES));
+  for (const [siteKey, site] of keyed(FOUND_SITES)) {
+    const entry = recorded.get(siteKey);
+    expect(entry, `${siteKey} was found but is not recorded`).toBeDefined();
+    if (entry === undefined) continue;
+    expect(site.raises).toBe(entry.raises);
     // Equality, not containment: an interpolation added to a site already in the
     // ledger would otherwise inherit a verdict taken for the values beside it.
     expect(
-      site?.interpolates,
-      `${key(recorded)}: ${INTERPOLATION_GUIDANCE} Recorded verdict: ${recorded.provenance}`,
-    ).toStrictEqual([...recorded.interpolates]);
-    expect(recorded.provenance.length).toBeGreaterThan(0);
+      site.interpolates,
+      `${siteKey}: ${INTERPOLATION_GUIDANCE} Recorded verdict: ${entry.provenance}`,
+    ).toStrictEqual([...entry.interpolates]);
+    expect(entry.provenance.length).toBeGreaterThan(0);
   }
+});
+
+const FIXTURE_ROOT: DeclarationRef = {
+  file: "fixture/errors.ts",
+  name: "OperatorConfigError",
+};
+
+const FIXTURE_ERRORS = "export class OperatorConfigError extends Error {}\n";
+
+function fixtureScan(files: Record<string, string>): Scan {
+  return scanSources(
+    new Map(
+      Object.entries(files).map(([file, text]) => [
+        file,
+        parseSource(file, text),
+      ]),
+    ),
+  );
+}
+
+// The reach cases the shipped trees do not exercise, held over synthetic sources
+// so they stay pinned whatever the product code happens to declare today.
+describe("the scan's reach", () => {
+  test("a same-named class elsewhere does not drop a member", () => {
+    const scan = fixtureScan({
+      "fixture/errors.ts": FIXTURE_ERRORS,
+      "fixture/member.ts": `
+import { OperatorConfigError } from "./errors.js";
+export class Refusal extends OperatorConfigError {
+  static raise(): never {
+    throw new Refusal("refused");
+  }
+}
+`,
+      "fixture/unrelated.ts": "export class Refusal {}\n",
+    });
+    const members = memberDeclarations(scan, FIXTURE_ROOT);
+    expect([...members].sort()).toStrictEqual([
+      "fixture/errors.ts :: OperatorConfigError",
+      "fixture/member.ts :: Refusal",
+    ]);
+    expect(
+      keyed(foundSites(scan, members)).map(([siteKey]) => siteKey),
+    ).toStrictEqual(["fixture/member.ts :: raise #1"]);
+  });
+
+  test("a name matching two declarations fails rather than picking one", () => {
+    const scan = fixtureScan({
+      "fixture/errors.ts": FIXTURE_ERRORS,
+      "fixture/member.ts": `
+import { OperatorConfigError } from "./errors.js";
+export class Refusal extends OperatorConfigError {}
+`,
+      "fixture/unrelated.ts": "export class Refusal {}\n",
+      "fixture/derived.ts": "export class Narrower extends Refusal {}\n",
+    });
+    const members = memberDeclarations(scan, FIXTURE_ROOT);
+    expect(materialAmbiguities(scan, members)).toStrictEqual([
+      "fixture/derived.ts: `Refusal` resolves to fixture/member.ts :: Refusal and fixture/unrelated.ts :: Refusal",
+    ]);
+    expect(members.has("fixture/derived.ts :: Narrower")).toBe(false);
+  });
+
+  test("two constructions under one anchor are two ledger rows", () => {
+    const scan = fixtureScan({
+      "fixture/errors.ts": FIXTURE_ERRORS,
+      "fixture/sites.ts": `
+import { OperatorConfigError } from "./errors.js";
+export function guard(count: number): void {
+  if (count === 0) throw new OperatorConfigError("no rows are configured");
+  throw new OperatorConfigError(\`too many rows: \${count}\`);
+}
+`,
+    });
+    const sites = keyed(
+      foundSites(scan, memberDeclarations(scan, FIXTURE_ROOT)),
+    );
+    expect(
+      sites.map(([siteKey, site]) => [siteKey, site.interpolates]),
+    ).toStrictEqual([
+      ["fixture/sites.ts :: guard #1", []],
+      ["fixture/sites.ts :: guard #2", ["count"]],
+    ]);
+  });
+
+  test("a shadowed constant is recorded as an opaque interpolation", () => {
+    const scan = fixtureScan({
+      "fixture/errors.ts": FIXTURE_ERRORS,
+      "fixture/shadowing.ts": `
+import { OperatorConfigError } from "./errors.js";
+const detail = "the configured signing mode";
+export function fixedDetail(): never {
+  throw new OperatorConfigError(\`unsupported: \${detail}\`);
+}
+export function parameterShadows(detail: string): never {
+  throw new OperatorConfigError(\`unsupported: \${detail}\`);
+}
+export function localShadows(input: string): never {
+  const detail = input.trim();
+  throw new OperatorConfigError(\`unsupported: \${detail}\`);
+}
+`,
+    });
+    const sites = keyed(
+      foundSites(scan, memberDeclarations(scan, FIXTURE_ROOT)),
+    );
+    expect(
+      sites.map(([siteKey, site]) => [siteKey, site.interpolates]),
+    ).toStrictEqual([
+      ["fixture/shadowing.ts :: fixedDetail #1", []],
+      ["fixture/shadowing.ts :: parameterShadows #1", ["detail"]],
+      ["fixture/shadowing.ts :: localShadows #1", ["detail"]],
+    ]);
+  });
 });

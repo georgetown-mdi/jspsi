@@ -143,7 +143,11 @@ function refusalCauseChain(
  * `apps/cli/test/unit/operatorConfigErrorSites.test.ts` enumerates every
  * construction site of this type and its subclasses, records what each message
  * interpolates and why that value is local, and fails on a site or an
- * interpolation it does not account for.
+ * interpolation it does not account for. Its reach is syntactic and bounded to
+ * what it scans: `packages/core/src`, `apps/cli/src`, and `apps/web/src`, for
+ * classes written as `class X extends <member>` and constructions written as
+ * `new <Identifier>(...)`, so a member or a construction reached through a
+ * factory, an alias, or a variable is outside it.
  *
  * Extend it from -- or raise it directly in -- any check that fails closed on
  * the operator's OWN configuration and whose message names only local content.
