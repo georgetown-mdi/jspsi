@@ -292,9 +292,11 @@ refills as fast as it drains, because nothing in it can be finished.
 Ratified by the owner:
 
 - **CI and test coverage** (board 10) -- Done is: no prose runtime claim
-  survives in shipped source and no test is held green by a retry or a skip --
-  each claim is a check that fails on the claimed-impossible state, each timing
-  test carries a measured margin.
+  survives in shipped source, no test is held green by a retry or a skip, and
+  the merge gate's critical path is measured and carries no serial work that
+  could run beside it -- each claim is a check that fails on the claimed-
+  impossible state, each timing test carries a measured margin, and setup is
+  paid once per pull request rather than once per job.
 - **Issue Orchestration** (board 10) -- Done is: every rule the issue-to-PR flow
   depends on is enforced by a hook or a check rather than by prose alone, and
   each `.claude/scripts/` tool the flow invokes either runs in-container or
