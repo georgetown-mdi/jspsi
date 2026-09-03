@@ -124,6 +124,14 @@ function parseDateWidthBound(
  * which is the bound that held before any of this was read -- while deriving one
  * too small would refuse an honest row at the width seam, which is why the
  * default is to clear.
+ *
+ * A width this DERIVES is never below 1. Params that would settle 0 -- a
+ * `parse_date` whose output layout is empty -- are floored here rather than
+ * passed on: a zero declares a key narrower than the single candidate the row
+ * builder emits for it, which refuses an honest row at the width seam and drives
+ * the effective key count below the plain key count. The terms schema refuses
+ * that shape where a document is read (`linkageTerms.ts`), so this floor is what
+ * holds for a chain reaching the derivation another way.
  */
 export function elementValueWidthBound(
   steps: readonly TransformStep[] | undefined,
@@ -152,5 +160,5 @@ export function elementValueWidthBound(
         break;
     }
   }
-  return bound;
+  return bound === undefined ? undefined : Math.max(1, bound);
 }

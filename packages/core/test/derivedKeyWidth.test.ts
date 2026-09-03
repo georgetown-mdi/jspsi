@@ -220,6 +220,50 @@ describe("the width an element's transforms bound its value to", () => {
     ).toBe(10);
   });
 
+  test("a width that settles at zero is floored at one", () => {
+    // A value always yields at least itself, so the narrowest honest bound is one
+    // character. `parse_date` with an empty output layout is the one shape whose
+    // params settle zero -- the rendered date is as wide as the format -- and a
+    // zero would declare a key narrower than the single candidate the row builder
+    // emits for it. The terms schema refuses the shape (linkageTerms.test.ts), so
+    // this floor is what holds for a chain reaching the derivation another way.
+    expect(
+      elementValueWidthBound([
+        { function: "parse_date", params: { outputFormat: "" } },
+      ]),
+    ).toBe(1);
+    // And through a chain that carries it: a pad reads the floored width, not a
+    // zero.
+    expect(
+      elementValueWidthBound([
+        { function: "parse_date", params: { outputFormat: "" } },
+        { function: "null_if", params: { values: ["UNKNOWN"] } },
+      ]),
+    ).toBe(1);
+  });
+
+  test("a floored width keeps the effective key count at or above the key count", () => {
+    // The consequence the floor exists for: a key's declared width is the product
+    // of its elements' factors, so a zero factor would drive the sum below the
+    // plain key count -- understating the sender's own slot bound and refusing its
+    // honest rows.
+    const key: LinkageKey = {
+      name: "DOB",
+      elements: [
+        {
+          field: "last_name",
+          generateFuzzyComparisons: "transpositions",
+          transform: [{ function: "parse_date", params: { outputFormat: "" } }],
+        },
+      ],
+    };
+    expect(fuzzyCandidateCeiling("transpositions", 1)).toBe(1);
+    expect(declaredKeyWidth(key)).toBe(1);
+    const terms = termsWithFuzzyKey("transpositions");
+    terms.linkageKeys[0] = key;
+    expect(declaredEffectiveKeyCount(terms)).toBe(terms.linkageKeys.length);
+  });
+
   test("a substring whose bounds do not settle a width derives none", () => {
     // A negative length measures its end from the end of the VALUE, so the
     // window it opens grows with the value; a degenerate bound reads nothing at
@@ -254,6 +298,9 @@ describe("the width an element's transforms bound its value to", () => {
       [{ function: "phonetic" }],
       [{ function: "parse_date" }],
       [{ function: "parse_date", params: { outputFormat: "YYYY-MM-DD" } }],
+      // The floored chain: the builder emits one empty candidate for it, which
+      // the floor of 1 covers where a derived 0 would not.
+      [{ function: "parse_date", params: { outputFormat: "" } }],
       [
         { function: "substring", params: { start: 1, length: 10 } },
         { function: "null_if", params: { values: ["UNKNOWN"] } },

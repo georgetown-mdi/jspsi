@@ -810,6 +810,32 @@ const TransformStepSchema: z.ZodType<TransformStep> = TransformStepBaseSchema
       path: ["params"],
     },
   )
+  // An EMPTY `outputFormat` renders every date to the empty string, and it is the
+  // one width-shaping param that can settle a derived width of ZERO: a
+  // `parse_date` element's width is the rendered layout's own length, where
+  // `substring` and `pad_left` derive theirs from a POSITIVE integer length alone
+  // and `phonetic` from a fixed code length (elementValueWidthBound,
+  // keyElementWidth.ts). A zero declares a key narrower than the single candidate
+  // the row builder emits for it, so an honest row would be refused at the width
+  // seam -- over a step the PARTNER authored. The derivation floors at 1 so no
+  // consumer can read a zero; this refuses the shape where the document is read,
+  // on every parse path a partner's terms travel, because no honest template
+  // declares a date that renders to nothing. A non-string outputFormat is a
+  // different shape: the factory falls back to the default layout, which the
+  // derivation reads too.
+  .refine(
+    (step) => {
+      if (step.function !== "parse_date") return true;
+      const { outputFormat } = step.params ?? {};
+      return typeof outputFormat !== "string" || outputFormat.length > 0;
+    },
+    {
+      message:
+        "parse_date outputFormat must not be empty: it would render every " +
+        "date to the empty string",
+      path: ["params", "outputFormat"],
+    },
+  )
   // The four `tier: "regex"` functions compile their raw `pattern` / `delimiter`
   // under the linear-time engine. applyElementTransform compiles each step once per
   // distinct transform array (memoized), so this caps that one-time compile and
