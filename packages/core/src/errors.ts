@@ -138,8 +138,12 @@ function refusalCauseChain(
  * rather than echoed into the operator's own UI. Keying the surfacing on this type
  * makes MEMBERSHIP a structural property (a check either is or is not a member)
  * rather than a reachability argument about which check happened to fire; each
- * member is in turn responsible for carrying only local content in its message
- * (see {@link StandardizationTermsError} for the basis of its guarantee).
+ * member is in turn responsible for carrying only local content in its message.
+ * That per-member responsibility is a ledger rather than a promise made here:
+ * `apps/cli/test/unit/operatorConfigErrorSites.test.ts` enumerates every
+ * construction site of this type and its subclasses, records what each message
+ * interpolates and why that value is local, and fails on a site or an
+ * interpolation it does not account for.
  *
  * Extend it from -- or raise it directly in -- any check that fails closed on
  * the operator's OWN configuration and whose message names only local content.
@@ -147,15 +151,12 @@ function refusalCauseChain(
  * built from fixed prose over counts alone has nothing to exclude, whichever
  * document the counts were read off. {@link StandardizationTermsError} is a
  * member by subclass; a check whose refusal meets the contract without needing a
- * narrower type raises the base class directly -- the standardization arm of
- * `assertFanOutImplemented`, and `prepareForExchange`'s single-pass ceiling
- * pre-flight, which fires on this party's own record count and names no field,
- * key, or column at all. The two send-side disclosure refusals
- * ({@link OutboundDisclosureRefusalError}) are candidates on the same reasoning --
- * each compares this party's own current metadata against its own recorded set, so
- * every name in their messages is local -- but joining is a per-check surfacing
- * decision, not a consequence of refusing before anything is sent, so they sit
- * outside until one is taken. The payload-SEND disclosure check
+ * narrower type raises the base class directly. The two send-side disclosure
+ * refusals ({@link OutboundDisclosureRefusalError}) are candidates on the same
+ * reasoning -- each compares this party's own current metadata against its own
+ * recorded set, so every name in their messages is local -- but joining is a
+ * per-check surfacing decision, not a consequence of refusing before anything is
+ * sent, so they sit outside until one is taken. The payload-SEND disclosure check
  * (`assertPayloadSendDisclosed`) is deliberately NOT a member -- on the accept side
  * its `payload.send` names are adopted from the partner's invitation, and the check
  * cannot tell its role at the throw site, so it stays conservatively out and its
