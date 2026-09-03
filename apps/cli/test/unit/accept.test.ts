@@ -1897,9 +1897,15 @@ async function acceptOverKeptConfig(params: {
 /** The distinctive clause of the flag-had-no-effect notice. */
 const IDENTITY_NO_EFFECT_CLAUSE = "has no effect on an acceptance that keeps";
 
-/** The one no-effect notice in `warnings`, asserted to be exactly one. */
-function identityNoEffectNotice(warnings: string[]): string {
-  const notices = warnings.filter((m) => m.includes(IDENTITY_NO_EFFECT_CLAUSE));
+/**
+ * The one no-effect notice the operator was shown, asserted to be exactly one.
+ * Read off the prompt transcript, which is where the consent surface's sink puts
+ * a line on a run that stops to ask.
+ */
+function identityNoEffectNotice(promptWrites: string): string {
+  const notices = promptWrites
+    .split("\n")
+    .filter((line) => line.includes(IDENTITY_NO_EFFECT_CLAUSE));
   expect(notices).toHaveLength(1);
   return notices[0];
 }
@@ -1908,14 +1914,14 @@ test("validateAccept: offline reuse runs under the stored label, reporting the f
   // The kept file governs every exchange under the partnership, so a flag cannot
   // rename the party in passing: the acceptance proceeds under the stored label
   // and says so, naming both values and the field to edit.
-  const { ready, warnings } = await acceptOverKeptConfig({
+  const { ready, promptWrites } = await acceptOverKeptConfig({
     terms: sampleTerms("Acceptor Org"),
     identity: "Agency B",
     loggerName: "accept-kept-identity-offline",
   });
   expect(ready.reuseExistingConfig).toBe(true);
   expect(ready.dataSpec.linkageTerms.identity).toBe("Acceptor Org");
-  const notice = identityNoEffectNotice(warnings);
+  const notice = identityNoEffectNotice(promptWrites);
   expect(notice).toContain('"Agency B"');
   expect(notice).toContain('"Acceptor Org"');
   expect(notice).toContain("Edit linkage_terms.identity");
@@ -1926,7 +1932,7 @@ test("validateAccept: online reuse presents the stored label to the partner", as
   // itself, so the name the partner reads is the prepared exchange's -- and it
   // has to be the one the kept configuration goes on sending, not a label
   // supplied for this invocation alone.
-  const { ready, warnings } = await acceptOverKeptConfig({
+  const { ready, promptWrites } = await acceptOverKeptConfig({
     terms: sampleTerms("Acceptor Org"),
     identity: "Agency B",
     loggerName: "accept-kept-identity-online",
@@ -1937,7 +1943,7 @@ test("validateAccept: online reuse presents the stored label to the partner", as
   if (ready.mode !== "online") return;
   expect(ready.prepared.linkageTerms.identity).toBe("Acceptor Org");
   expect(ready.dataSpec.linkageTerms.identity).toBe("Acceptor Org");
-  expect(identityNoEffectNotice(warnings)).toContain('"Acceptor Org"');
+  expect(identityNoEffectNotice(promptWrites)).toContain('"Acceptor Org"');
 });
 
 test("validateAccept: a flag that asks for the stored label reports nothing", async () => {
@@ -1988,19 +1994,19 @@ test("validateAccept: the no-effect notice reaches the prompt whatever the log r
   }
 });
 
-test("validateAccept: on the default routing the notice is logged once, not copied", async () => {
-  // The log's own line already lands on the terminal the prompt asks on, so a
-  // second copy would print the notice twice.
+test("validateAccept: on the default routing the notice is shown once, not copied", async () => {
+  // The prompt's own line already lands on the terminal the log would have used,
+  // so a second copy would print the notice twice -- once prefixed and once not.
   const { logged, promptWrites } = await acceptOverKeptConfig({
     terms: sampleTerms("Acceptor Org"),
     identity: "Agency B",
     loggerName: "accept-kept-identity-default-routing",
     logLevel: "warn",
   });
+  expect(identityNoEffectNotice(promptWrites)).toContain('"Agency B"');
   expect(
     logged.filter((line) => line.includes(IDENTITY_NO_EFFECT_CLAUSE)),
-  ).toHaveLength(1);
-  expect(promptWrites).not.toContain(IDENTITY_NO_EFFECT_CLAUSE);
+  ).toEqual([]);
 });
 
 test("validateAccept: an unattended acceptance keeps the notice in the log alone", async () => {
@@ -2056,22 +2062,18 @@ test("validateAccept: the no-effect notice escapes both labels it reports", asyn
   // display boundary.
   const flag = `Agency B${ESC}[0m`;
   const stored = `Acceptor Org${RLO}`;
-  const { warnings, promptWrites } = await acceptOverKeptConfig({
+  const { promptWrites } = await acceptOverKeptConfig({
     terms: sampleTerms(stored),
     identity: flag,
     loggerName: "accept-kept-identity-escaping",
   });
-  const notice = identityNoEffectNotice(warnings);
+  // The prompt's own sink runs no pass of its own, so the line the question is
+  // answered against is escaped only because the notice was composed that way.
+  const notice = identityNoEffectNotice(promptWrites);
   expect(notice).toContain(sanitizeForDisplay(flag));
   expect(notice).toContain(sanitizeForDisplay(stored));
   expect(notice).not.toContain(ESC);
   expect(notice).not.toContain(RLO);
-  // The prompt's own sink runs no pass of its own, so the copy the question is
-  // answered against is escaped only because the notice was composed that way.
-  expect(promptWrites).toContain(sanitizeForDisplay(flag));
-  expect(promptWrites).toContain(sanitizeForDisplay(stored));
-  expect(promptWrites).not.toContain(ESC);
-  expect(promptWrites).not.toContain(RLO);
 });
 
 /** The default terms with their first two keys swapped: rules that no longer
@@ -5348,12 +5350,53 @@ test.each(["warn", "error", "silent"])(
   },
 );
 
+/** The line a declined confirmation leaves the operator with. */
+const DECLINE_LINE = "invitation declined; no files were written";
+
+test("handler: the terms and the decline read identically at every level", async () => {
+  // What the operator reads to answer the question cannot depend on a diagnostic
+  // setting, so the comparison is of BYTES rather than of lines with the prefix
+  // taken off: the run from the heading to the decline is one string, the same
+  // under the default level, a level that drops it from the log, and one that
+  // turns the log up -- which holds only while no copy of it carries the log's
+  // own prefix at any of them.
+  const fixture = offlineAcceptFixture();
+  promptConfirmMock.mockResolvedValue(false);
+  try {
+    const encoded = await encodeInvitation(sampleToken(FUTURE()));
+    const expected = await expectedConsentSurface(encoded);
+    const shown: Array<string> = [];
+    for (const flags of [
+      {},
+      { "log-level": "silent" },
+      { "log-level": "debug" },
+    ]) {
+      const { stderrWrites, stdoutWrites } =
+        await runOfflineAcceptCapturingStdio({ encoded, fixture, flags });
+      expect(promptConfirmMock).toHaveBeenCalledTimes(1);
+      promptConfirmMock.mockClear();
+      expect(stdoutWrites.join("")).toBe("");
+      const stderr = stderrWrites.join("");
+      const start = stderr.indexOf(SURFACE_HEADING);
+      expect(start).toBeGreaterThanOrEqual(0);
+      shown.push(stderr.slice(start));
+    }
+    for (const level of shown)
+      expect(level).toBe(`${expected.join("\n")}\n${DECLINE_LINE}\n`);
+    // The level that drops every log line is the one the outcome has to survive:
+    // there it is all that tells this run from an acceptance, which writes files
+    // and runs rather than saying anything here.
+    expect(shown[1]).toContain(`\n${DECLINE_LINE}\n`);
+  } finally {
+    fs.rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
 test("handler: the default prompting path prints each line of the terms exactly once", async () => {
-  // The default sink and level already put the log's own output where the prompt
-  // asks, so mirroring there unconditionally would print the whole multi-screen
-  // outline twice. Every line appears exactly as many times as the renderer
-  // emitted it -- twice for the decision facts it deliberately repeats, once for
-  // everything else.
+  // The prompt's copy and the log's own would land on the same terminal here, so
+  // writing both would print the whole multi-screen outline twice. Every line
+  // appears exactly as many times as the renderer emitted it -- twice for the
+  // decision facts it deliberately repeats, once for everything else.
   const fixture = offlineAcceptFixture();
   promptConfirmMock.mockResolvedValue(false);
   try {
@@ -5372,10 +5415,10 @@ test("handler: the default prompting path prints each line of the terms exactly 
         expected.filter((rendered) => rendered === line).length,
       );
     expect(surfaceOnStderr(stderrWrites)).toEqual(expected);
-    // The one copy is the log's: the default path's rendering is unchanged.
-    expect(stderrWrites.join("")).toContain(
-      `[INFO] [accept] ${SURFACE_HEADING}`,
-    );
+    // The one copy is the prompt's, so the surface reaches the operator plain:
+    // the prefix belongs to a diagnostic record, not to the terms a question is
+    // asked about.
+    expect(stderrWrites.join("")).not.toContain("[INFO]");
   } finally {
     fs.rmSync(fixture.dir, { recursive: true, force: true });
   }
