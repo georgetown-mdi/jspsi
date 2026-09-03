@@ -185,6 +185,19 @@ runs:
       if: steps.core-cache.outputs.cache-hit != 'true'
       run: npm run build -w packages/core
       shell: bash
+    # The apps register scripts/lib/coreDistFreshness.mjs as a vitest
+    # globalSetup, which refuses a run whose core sources are newer than the dist
+    # the suites import. A restore writes the archived mtimes while
+    # actions/checkout stamps the sources with the current time, so every hit
+    # would read as stale. Restamping is that guard's premise restored rather
+    # than a bypass of it: the key this dist was restored under hashes both of
+    # the guard's SOURCE_PATHS (packages/core/src and rollup.config.ts) plus the
+    # tsconfig chain, binding the artifact to its inputs by content -- which is
+    # what the mtime ordering stands in for and cannot itself survive an archive.
+    - name: Restamp the restored core build
+      if: steps.core-cache.outputs.cache-hit == 'true'
+      run: find packages/core/dist -type f -exec touch {} +
+      shell: bash
     - name: Save the @psilink/core build
       if: inputs.cache != 'false' && runner.os == 'Linux' && steps.core-cache.outputs.cache-hit != 'true'
       uses: actions/cache/save@v6
