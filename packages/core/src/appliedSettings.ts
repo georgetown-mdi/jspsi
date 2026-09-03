@@ -51,6 +51,16 @@
  * order alone, which is what the operator-facing "matched in either order" copy
  * on the acceptance surfaces overstates until the flip.
  *
+ * Plain `swap` becomes single-pass-only at the flip: declaredKeyWidth's factor of
+ * 2 makes effectiveKeyCount exceed keyCount, so assertDeclaredWidthMatchesStrategy
+ * refuses `swap` terms under any other strategy. Decide at flip time whether that
+ * consequence stands or the factor gates differently; docs/EXCHANGE_REFERENCE.md's
+ * single-pass requirement line now records it.
+ *
+ * The width-strategy refusal message tells the operator to remove an expanding
+ * step or fuzzy comparison, which a key declaring only `swap` does not have;
+ * reword the message when the consequence above is settled.
+ *
  * The count-only algorithm (`psi-c`) is NOT gated here: the exchange runs it
  * (`linkViaCountOnlyPSI`, `link.ts`), `assertAlgorithmImplemented` (`exchange.ts`)
  * admits it, and it is selectable on the authoring and acceptance surfaces. What
