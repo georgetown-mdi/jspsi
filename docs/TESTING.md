@@ -123,7 +123,7 @@ stale silently at the next pinned bump of either package.
 
 #### What the real-server legs cannot reach
 
-The controls above take the SFTP adapter a long way, but not everywhere. Three
+The controls above take the SFTP adapter a long way, but not everywhere. Four
 classes of its behaviour are held by the unit suite's hand-modelled
 `ssh2-sftp-client` alone, and stay there. Each is a limit of what a server can be
 made to do, not a gap waiting for a case, so a plan that decomposes the adapter
@@ -152,6 +152,14 @@ has to keep the model for them rather than promise to retire it:
   site in this app hands one: every `FileSyncConnection` put passes a `Buffer` or
   a chunk list. A real-server case would have to call the adapter directly with a
   string or a stream to reach them, which is what the unit suite already does.
+- **The inter-attempt dead-session window.** `renameOnce`'s guarded outcome is
+  driven at method entry against a real server socket whose SFTP channel has
+  been destroyed (`sftpConnection.test.ts`'s "a fatal 'error' on the raw SFTP
+  wrapper does not crash and fails terminally"). A fatal session error landing
+  in the short window between two attempts of a retried operation is a race no
+  server here can be held to, so that window stays the model's ground alone --
+  `ssh2SftpAdapter.test.ts`'s "stops retrying when a fatal session error lands
+  between attempts".
 
 The CLI's WebRTC transport is a project of its own, `webrtc`, holding the files
 under `apps/cli/test/integration/webrtc/`:
