@@ -4,8 +4,12 @@ The relay runs on a dedicated instance of its own, provisioned from the referenc
 in [the parent directory](../README.md) rather than configured by hand. This
 file is the AWS half: what to launch, what to open, and what the owner does once.
 
-Nothing here has been run. No instance has been launched from this document, and
-no step below has been driven against an account.
+One instance has been launched from this document, on the stock Amazon Linux 2023
+arm64 AMI, and it got as far as the package step. Two things it found are fixed
+in what is below: the clone took the repository's default branch, which predates
+`infra/relay` and so had nothing to install, and the install asked for a podman
+package AL2023 does not publish. Nothing past that step has been driven -- no
+image built, no certificate issued, no allocation carried.
 
 ## The instance
 
@@ -20,6 +24,12 @@ turns on (see [the deployment record](../../../docs/notes/webrtc-relay-deploymen
 Nothing about the reference is AL2023-specific except `dnf` in `install.sh`. The
 AMI is stock: no image is baked, and the instance is reproduced by relaunching it
 against the same user-data.
+
+**On this AMI the relay runs under docker.** AL2023 publishes no `podman` package
+and carries no EPEL, so `install.sh` installs Docker Engine from `dnf` and
+supervises the container with `psilink-relay-docker.service` rather than the
+Quadlet unit. Nothing else about the install changes; see
+[Supervision and the container runtime](../README.md#supervision-and-the-container-runtime).
 
 **An elastic address, held.** The relay's name has to keep resolving between
 exchanges, and a partner has no channel to be handed a new address out of band.
@@ -56,8 +66,14 @@ installing.
 ```sh
 #!/bin/bash
 set -euo pipefail
+# The ref to install from, named rather than defaulted. The repository's default
+# branch trails staging by hundreds of commits and predates infra/relay, so a
+# clone of it has nothing here to install. This becomes main once the pending
+# staging release lands.
+PSILINK_RELAY_SRC_REF=staging
 dnf -y install git
-git clone --depth 1 https://github.com/georgetown-mdi/jspsi /opt/psilink-src
+git clone --depth 1 --branch "$PSILINK_RELAY_SRC_REF" \
+  https://github.com/georgetown-mdi/jspsi /opt/psilink-src
 install -d -m 700 /etc/psilink-relay
 install -m 600 /opt/psilink-src/infra/relay/relay.env.example /etc/psilink-relay/relay.env
 sed -i 's/^PSILINK_RELAY_REALM=.*/PSILINK_RELAY_REALM=relay.example.org/' /etc/psilink-relay/relay.env
@@ -72,6 +88,14 @@ CLOUDFLARE_DNS_API_TOKEN=REPLACE_WITH_YOUR_DNS_TOKEN
 ACME
 /opt/psilink-src/infra/relay/install.sh
 ```
+
+**`PSILINK_RELAY_SRC_REF` is not optional.** A clone with no `--branch` takes the
+repository's default branch, which trails `staging` by hundreds of commits and
+does not carry `infra/relay` at all -- the install fails at the
+`relay.env.example` copy two lines later, before anything has been installed, and
+that is the failure this variable exists to prevent. Name the ref that carries
+the reference being installed: `staging` today, `main` once the pending release
+lands.
 
 **The metadata hop limit stays at 1 and IMDSv2 stays required.** `external-ip.sh`
 reads IMDSv2 and needs no more than one hop. A relay is the box where an

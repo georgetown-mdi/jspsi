@@ -57,6 +57,11 @@ ratified by the owner.
   README documents the equivalent `docker run` line as a first-class alternative
   rather than a footnote: a host that already runs docker needs no different
   configuration.
+  _Addendum, 2026-09-03: the first install attempt measured the AL2023 AMI this
+  reference prescribes carrying no podman package and no EPEL, and docker from
+  `dnf`. `install.sh` detects the runtime and keeps this unit where podman
+  exists; the docker half is a tracked unit paired with it,
+  `infra/relay/psilink-relay-docker.service`, rather than the README line._
 - **Host networking**, which is a requirement of the protocol rather than a
   preference: TURN hands out a relayed transport address that bridge networking
   or published ports would rewrite.

@@ -33,12 +33,14 @@ managed option.
 ## Provenance
 
 Agent-authored, and a proposal rather than ratified infrastructure: read every
-claim here as something to check. **Nothing here has been run against a relay.**
-No instance has been launched, no image built, no certificate issued, and no
-allocation driven. `verify.sh` is the script that turns this from a proposal into
-a working relay, and it has itself never been run -- its probes key on coturn's
-documented exit statuses and message strings rather than measured ones. Fix what
-the first real run gets wrong rather than loosening a probe until it passes.
+claim here as something to check. **No relay has been stood up from it.** One
+instance has been launched and the install attempted on it, which is where the
+runtime section's AL2023 package facts come from; it got no further than the
+package step. No image has been built, no certificate issued, and no allocation
+driven. `verify.sh` is the script that turns this from a proposal into a working
+relay, and it has itself never been run -- its probes key on coturn's documented
+exit statuses and message strings rather than measured ones. Fix what the first
+real run gets wrong rather than loosening a probe until it passes.
 
 Three pieces were driven locally against a fixture, and only those three:
 `render-config.sh` renders the template, writes at mode 600, and refuses a
@@ -71,10 +73,10 @@ a pull request.
    refuses to run without it; nothing defaults to a hostname.
 3. Put `/etc/psilink-relay/acme.env` from [`certs/env.example`](certs/env.example)
    at mode 600, with the DNS provider's credential.
-4. Run `install.sh` as root. It installs podman, mints the static authentication
-   secret if the host has none, builds the image, obtains a certificate, renders
-   the configuration, installs the unit and the two timers, starts the relay, and
-   runs `verify.sh`.
+4. Run `install.sh` as root. It installs a container runtime, mints the static
+   authentication secret if the host has none, builds the image, obtains a
+   certificate, renders the configuration, installs the unit and the two timers,
+   starts the relay, and runs `verify.sh`.
 5. Read `verify.sh`'s output. A relay that starts and cannot allocate looks
    identical from the console.
 6. Per exchange: `mint-credential.sh [name] [ttl]` prints a credential and the
@@ -92,7 +94,8 @@ or the Dockerfile and it converges.
 | `Dockerfile` | The base image pin, and nothing else. One line of instruction: `coturn/coturn` at a tag and its multi-arch index digest. The single home of that digest -- every other file names the locally built `localhost/psilink-relay:installed` tag, so a base move is exactly one edit. Its comment carries the fallback if the community image stops publishing |
 | `turnserver.conf.tmpl` | The hardened coturn configuration, with `__PLACEHOLDER__` values. Tracked; the rendered file is not |
 | `render-config.sh` | Substitutes the template at mode 600. Run at install and again on every start, because a stopped and started instance comes back on a different address and a stale `external-ip` advertises a candidate nobody can reach. The cloud seam is one variable: an executable printing `<public>/<private>` |
-| `psilink-relay.container` | The Quadlet unit, installed at `/etc/containers/systemd/`. systemd is the only supervisor; there is no container daemon under it |
+| `psilink-relay.container` | The Quadlet unit for a podman host, installed at `/etc/containers/systemd/`. systemd is the only supervisor; there is no container daemon under it |
+| `psilink-relay-docker.service` | The same container on a docker host: a plain systemd unit running `docker run` in the foreground, installed as `/etc/systemd/system/psilink-relay.service`. Same image, mounts, and flags as the Quadlet unit -- the two are edited together |
 | `psilink-relay-verify.service`, `.timer` | The daily verification. A standing relay is idle between exchanges, so nothing else notices it stopped carrying allocations until a partner is waiting on one |
 | `install.sh` | The whole install, idempotent |
 | `verify.sh` | Drives a real TURNS handshake, a real allocation, and a probe that an allocation toward an internal address is refused. Passes only on an observed refusal: a question that could not be asked reports UNCLEAR and fails |
@@ -101,27 +104,30 @@ or the Dockerfile and it converges.
 | `certs/` | ACME DNS-01 renewal: the timer and its unit, the client-neutral `renew.sh`, the deploy hook, and the provider credential's example |
 | `aws/` | The AWS-specific half: instance provisioning, the IMDSv2 external-address helper, and the demo box's stop/start scripts |
 
-## Supervision, and the `docker run` equivalent
+## Supervision and the container runtime
 
-The unit is podman + Quadlet: daemonless, with systemd as the only supervisor.
-A host that runs docker instead needs no different flags, because the flags are
-the same ones:
+One service name, `psilink-relay.service`, whichever runtime the host carries:
+the certificate deploy hook restarts it by that name and the verification timer
+requires it. Which file defines it is what `install.sh` decides, and it decides
+once per host -- the runtime is recorded in `relay.env` and read back on every
+later run, so a converge does not move a running relay from one supervisor to the
+other.
 
-```sh
-docker run -d --name psilink-relay \
-  --network host \
-  --restart unless-stopped \
-  --read-only --tmpfs /var/tmp \
-  --cap-drop ALL --cap-add NET_BIND_SERVICE \
-  --security-opt no-new-privileges \
-  -v /etc/psilink-relay/turnserver.conf:/etc/coturn/turnserver.conf:ro \
-  -v /etc/psilink-relay/certs:/etc/coturn/certs:ro \
-  localhost/psilink-relay:installed -c /etc/coturn/turnserver.conf
-```
+| The host has | The unit | The supervisor |
+| --- | --- | --- |
+| podman | `psilink-relay.container`, at `/etc/containers/systemd/` | podman's systemd generator: daemonless, and systemd is the only supervisor |
+| docker | `psilink-relay-docker.service`, installed as `/etc/systemd/system/psilink-relay.service` | systemd, over a foreground `docker run`; the unit `Requires=docker.service` |
 
-What the unit adds and this line does not is the `ExecStartPre` that re-renders
-the configuration: run `render-config.sh` before each `docker run`, or the relay
-advertises whatever address it was installed against.
+**Amazon Linux 2023 is a docker host.** It publishes no `podman` package and
+carries no EPEL, so `dnf install podman` fails there with no match, while `dnf
+install docker` installs Docker Engine. That is measured on the arm64 AMI
+[`aws/provision.md`](aws/provision.md) prescribes, and it is why the docker path
+is a tracked unit rather than a documented equivalence. `install.sh` still
+prefers podman wherever the distribution carries it.
+
+The two unit files carry the same image, the same read-only mounts, and the same
+container flags. `psilink-relay-docker.service`'s header holds the
+directive-to-flag mapping between them, and an edit to one is an edit to both.
 
 Host networking is a requirement of the protocol rather than a convenience. TURN
 hands out a relayed transport address, and bridge networking or published ports
@@ -167,9 +173,11 @@ provider, or on-prem changes two things and nothing else:
   `printf`.
 - **The DNS-01 provider.** Two variables in `acme.env`.
 
-The image, the configuration, the unit, the credential model, and the
-verification are the same everywhere. Neither `install.sh`'s `dnf` line nor the
-`aws/` directory is reached by anything else here.
+The image, the configuration, the units, the credential model, and the
+verification are the same everywhere. Neither `install.sh`'s `dnf` lines nor the
+`aws/` directory is reached by anything else here; on a distribution without
+`dnf`, install podman or docker with that distribution's own package manager and
+`install.sh` uses what it finds.
 
 ## What is not tracked
 

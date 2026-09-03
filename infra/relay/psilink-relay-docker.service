@@ -1,0 +1,52 @@
+# The relay's unit on a host that runs docker rather than podman. install.sh
+# puts this at /etc/systemd/system/psilink-relay.service -- the service name is
+# the same on both runtimes, because certs/deploy-hook.sh restarts
+# psilink-relay.service by name and psilink-relay-verify.service requires it.
+#
+# PAIRED WITH psilink-relay.container, the podman Quadlet unit. The two carry the
+# same image, the same mounts, and the same container flags; edit them together.
+# The mapping, directive to flag: ContainerName -> --name, Network=host ->
+# --network host, each Volume -> -v, ReadOnly=true -> --read-only, Tmpfs ->
+# --tmpfs, DropCapability/AddCapability -> --cap-drop/--cap-add,
+# NoNewPrivileges=true -> --security-opt no-new-privileges, LogDriver=journald ->
+# --log-driver journald, Exec -> the arguments after the image.
+#
+# docker run in the foreground, not -d: systemd supervises the run itself, so
+# Restart=always is what brings the relay back and `journalctl -u
+# psilink-relay.service` is where its output goes. A detached run would exit
+# immediately and leave systemd supervising nothing.
+#
+# UNTESTED LIVE: no relay has been started from this unit. Its flags were checked
+# against the docker CLI's own parser and nothing further.
+
+[Unit]
+Description=psilink WebRTC relay (coturn, TURNS on 443/tcp)
+Documentation=https://github.com/georgetown-mdi/jspsi/blob/main/infra/relay/README.md
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+# Rendered on every start, not only at install: the instance's public address is
+# not a property of the installation, and a stale external-ip advertises a
+# relayed candidate nobody can reach.
+ExecStartPre=/opt/psilink-relay/render-config.sh
+# --rm removes the container when the run ends, so this clears only what an
+# ungraceful daemon exit left behind, and is not an error when there is nothing.
+ExecStartPre=-/usr/bin/docker rm -f psilink-relay
+ExecStart=/usr/bin/docker run --rm --name psilink-relay \
+  --network host \
+  --read-only --tmpfs /var/tmp \
+  --cap-drop ALL --cap-add NET_BIND_SERVICE \
+  --security-opt no-new-privileges \
+  --log-driver journald \
+  -v /etc/psilink-relay/turnserver.conf:/etc/coturn/turnserver.conf:ro \
+  -v /etc/psilink-relay/certs:/etc/coturn/certs:ro \
+  localhost/psilink-relay:installed \
+  -c /etc/coturn/turnserver.conf
+ExecStop=-/usr/bin/docker stop psilink-relay
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

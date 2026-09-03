@@ -1,12 +1,15 @@
-# Quadlet unit for the psilink standing relay. install.sh puts this at
-# /etc/containers/systemd/psilink-relay.container, where podman's systemd
-# generator turns it into psilink-relay.service at daemon-reload.
+# Quadlet unit for the psilink standing relay, used where the host has podman.
+# install.sh puts this at /etc/containers/systemd/psilink-relay.container, where
+# podman's systemd generator turns it into psilink-relay.service at
+# daemon-reload.
 #
 # systemd is the only supervisor: there is no container daemon under this, and
 # nothing restarts the relay except the unit below.
 #
-# The equivalent `docker run` line, for a host that runs docker instead, is in
-# README.md. The flags are the same ones; only the supervisor differs.
+# PAIRED WITH psilink-relay-docker.service, which install.sh uses instead on a
+# host that has docker and no podman -- Amazon Linux 2023 among them. The two
+# carry the same image, the same mounts, and the same container flags; edit them
+# together. That file's header carries the directive-to-flag mapping.
 
 [Unit]
 Description=psilink WebRTC relay (coturn, TURNS on 443/tcp)

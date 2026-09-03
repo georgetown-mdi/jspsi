@@ -42,6 +42,22 @@ die() { printf 'ABORTING: %s\n' "$*" >&2; exit 1; }
 REALM="${PSILINK_RELAY_REALM:-}"
 [ -n "$REALM" ] || die "PSILINK_RELAY_REALM is unset in $ENV_FILE"
 
+# The runtime install.sh chose and recorded. A host installed by hand may carry
+# no record of it, so fall back to whichever is on PATH rather than assuming one:
+# the probes below run the relay's own image, and the wrong binary is a run that
+# never happens rather than a question answered.
+RUNTIME="${PSILINK_RELAY_RUNTIME:-}"
+if [ -z "$RUNTIME" ]; then
+  for candidate in podman docker; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      RUNTIME="$candidate"
+      break
+    fi
+  done
+fi
+[ -n "$RUNTIME" ] || die "no container runtime on this host and PSILINK_RELAY_RUNTIME is unset in $ENV_FILE; the allocation probes run the relay's image"
+command -v "$RUNTIME" >/dev/null 2>&1 || die "PSILINK_RELAY_RUNTIME names $RUNTIME, which is not on PATH"
+
 PASS=0; FAIL=0; UNCLEAR=0
 report() {
   case "$1" in
@@ -110,10 +126,12 @@ else
 fi
 
 # One TURNS client run through the image, which is where turnutils_uclient lives.
-# Host networking so it reaches the relay the way a party does.
+# Host networking so it reaches the relay the way a party does. podman and docker
+# take these flags the same way; only install.sh's build line differs between
+# them.
 uclient() {
   local peer="$1"
-  timeout 60 podman run --rm --network host --entrypoint turnutils_uclient "$IMAGE" \
+  timeout 60 "$RUNTIME" run --rm --network host --entrypoint turnutils_uclient "$IMAGE" \
     -t -S -p 443 -u "$TURN_USER" -w "$TURN_CRED" -e "$peer" -n 2 -c -v "$REALM" 2>&1
 }
 
