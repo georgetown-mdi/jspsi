@@ -148,7 +148,11 @@ const RECORDED_SITES: readonly ConfigErrorSite[] = [
     file: "packages/core/src/exchange.ts",
     anchor: "prepareForExchange",
     raises: "OperatorConfigError",
-    interpolates: ["declaredRecordCount", "linkageTerms.linkageKeys.length"],
+    interpolates: [
+      "SINGLE_PASS_LOCAL_REMEDY",
+      "declaredRecordCount",
+      "linkageTerms.linkageKeys.length",
+    ],
     provenance:
       "no partner-AUTHORED text: `declaredRecordCount` is this party's own " +
       "record count times a build constant, and " +
@@ -157,7 +161,10 @@ const RECORDED_SITES: readonly ConfigErrorSite[] = [
       "verdict's whole basis -- what the content rule excludes is text another " +
       "party wrote, and a cardinality carries none of it, whichever document it " +
       "was read off. Interpolating a NAME from those same terms here would not " +
-      "inherit this reasoning.",
+      "inherit this reasoning. `SINGLE_PASS_LOCAL_REMEDY` " +
+      "(connection/frameSize.ts) is a module constant of fixed prose, shared " +
+      "with the two-party gate's message so the two state one remedy; it quotes " +
+      "no value at all.",
   },
   {
     file: "packages/core/src/standardization.ts",

@@ -9,7 +9,12 @@ import {
   redactAndSanitizeForDisplay,
   summarizeLinkageShortfall,
 } from "@psilink/core";
-import type { LinkageTerms, Metadata, Standardization } from "@psilink/core";
+import type {
+  LinkageTerms,
+  LinkageTermsStanding,
+  Metadata,
+  Standardization,
+} from "@psilink/core";
 
 /**
  * Source-specific wording for {@link checkLinkageSatisfiability}. The accept,
@@ -36,6 +41,12 @@ export interface LinkagePreflightMessaging {
    * operator's own authoring instead: the inviter wrote these terms, and no
    * partner has seen them yet, so there is nothing to renegotiate. */
   blockRemedy: string;
+  /** Where these terms stand between the two parties, which selects the standing
+   * core's shortfall fragment states and whether the keyless refusal's remedy
+   * reads as an agreement or as this operator's own declaration. Accept and
+   * exchange hold terms a partner is held to as well; the mint holds none until
+   * the invitation it is about to generate is sent. */
+  termsStanding: LinkageTermsStanding;
 }
 
 /**
@@ -99,7 +110,7 @@ function fitDetailLinks(details: string[], overflowNoun: string): string[] {
  * handling, kept in one copy so the accept, exchange, and invite paths cannot
  * drift apart on the escaping. The shortfall itself is phrased by core's
  * {@link summarizeLinkageShortfall}, the same fragment the run-boundary refusal
- * states.
+ * states, at the standing this seat's terms hold.
  *
  * @param standardization The committed config's explicit standardization, when
  *   any: an explicit column remap satisfies a field whose semantic type is
@@ -134,7 +145,11 @@ export function checkLinkageSatisfiability(
         "indistinguishable from a legitimately empty intersection.",
       {
         cause: chainDetailCauses([
-          "Agree linkage terms declaring at least one linkage key, " +
+          // Declaring a key is an agreement on the seats a partner is already
+          // held to, and this operator's own edit on the seat that has none.
+          (messaging.termsStanding === "agreed"
+            ? "Agree linkage terms declaring at least one linkage key, "
+            : "Declare at least one linkage key in these terms, ") +
             messaging.blockRemedy,
         ]),
       },
@@ -193,7 +208,7 @@ export function checkLinkageSatisfiability(
 
   throw new LinkageTermsUnsatisfiableError(
     `this CSV cannot satisfy every linkage key the ${messaging.source} ` +
-      `declares: ${summarizeLinkageShortfall(verdict)}. ` +
+      `declares: ${summarizeLinkageShortfall(verdict, messaging.termsStanding)}. ` +
       messaging.blockConsequence,
     {
       cause: chainDetailCauses([

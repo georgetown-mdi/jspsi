@@ -769,8 +769,11 @@ describe("validateAdvancedInvite", () => {
     };
     const result = validateAdvancedInvite(deadDraft, seed, NOW);
     expect(result.canGenerate).toBe(false);
+    // The editor's terms are the inviter's own draft, so the shared fragment
+    // counts the keys without calling them agreed: nobody has agreed to anything
+    // until Generate hands them out.
     expect(result.errors.keys).toContain(
-      "the cleaning declared for the one agreed linkage key drops every record",
+      "the cleaning declared for the one linkage key drops every record",
     );
     expect(result.errors.keys).toContain(
       'Review the cleaning on the keys badged "won\'t match"',

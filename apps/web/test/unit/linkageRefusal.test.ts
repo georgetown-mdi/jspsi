@@ -104,14 +104,16 @@ describe("unlinkableFileAlert", () => {
     const alert = unlinkableFileAlert({ kind: "shortfall", verdict });
     expect(alert.title).toBe("This file cannot satisfy the linkage terms");
     expect(alert.message).toContain(
-      "the one agreed linkage key cannot be produced from this input's columns",
+      "the one linkage key cannot be produced from this input's columns",
     );
     expect(alert.message).toContain(
       "set terms that declare only the keys the files on both sides can supply",
     );
     // The quick mint renders this alert before any invitation exists, so the
-    // first-party copy may not address a partner the operator has not got yet.
+    // first-party copy may not address a partner the operator has not got yet --
+    // nor may the shared fragment inside it call the keys agreed.
     expect(alert.message).not.toContain("your partner");
+    expect(alert.message).not.toContain("agreed linkage key");
     expect(alert.message).not.toContain("partner-key-name");
     // The unsatisfied FIELDS are named, as the missing-types guidance every seat
     // gives -- escaped at this sink, since they are terms content on an accept.
@@ -140,7 +142,7 @@ describe("unlinkableFileAlert", () => {
     expect(verdict.deadKeys).toHaveLength(1);
     const alert = unlinkableFileAlert({ kind: "shortfall", verdict });
     expect(alert.message).toContain(
-      "the cleaning declared for the one agreed linkage key drops every record",
+      "the cleaning declared for the one linkage key drops every record",
     );
   });
 });

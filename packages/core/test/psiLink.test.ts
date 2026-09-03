@@ -24,6 +24,7 @@ import {
   MAX_FRAME_SIZE_BYTES,
   MAX_SINGLE_PASS_CELLS,
   partyFansOut,
+  SINGLE_PASS_LOCAL_REMEDY,
   singlePassDatasetExceedsCap,
   singlePassExchangeExceedsCap,
   singlePassReplyByteCap,
@@ -1062,7 +1063,7 @@ test("the single-pass sender refuses a built reply above the derived cap", async
   );
   // The over-ceiling diagnosis and its dataset remedies stay out: neither operator
   // can move this by shrinking a dataset.
-  expect(message).not.toMatch(/Reduce the number of linkage keys/);
+  expect(message).not.toMatch(/Reduce the record count/);
   expect(message).not.toMatch(/single-pass ceiling of/);
 });
 
@@ -1187,7 +1188,7 @@ test("single-pass aborts symmetrically when the exchange exceeds the ceiling", a
   await expect(run).rejects.toThrow(
     /This party's own 2 value slot\(s\) are within the ceiling, so within the agreed terms neither its linkage keys nor its record count can lift this: the partner reduces its record count or splits its dataset\./,
   );
-  await expect(run).rejects.not.toThrow(/Reduce the number of linkage keys/);
+  await expect(run).rejects.not.toThrow(/Reduce the record count/);
   await expect(run).rejects.not.toThrow(/cascade/);
   // The abort happened before any frame was exchanged: the peer saw nothing.
   void peer;
@@ -1226,7 +1227,7 @@ test("single-pass aborts symmetrically from the starter side too", async () => {
         `${MAX_SINGLE_PASS_CELLS + 1} record\\(s\\)`,
     ),
   );
-  await expect(run).rejects.not.toThrow(/Reduce the number of linkage keys/);
+  await expect(run).rejects.not.toThrow(/Reduce the record count/);
   await expect(run).rejects.not.toThrow(/cascade/);
   // The starter aborted before receiving the request: the peer saw nothing.
   void peer;
@@ -1271,9 +1272,10 @@ test("a run whose own declared size is over the ceiling keeps the local diagnosi
         `${FAN_OUT_CANDIDATES_PER_ELEMENT * localRecords} value slot\\(s\\)`,
     ),
   );
-  await expect(run).rejects.toThrow(
-    /Reduce the number of linkage keys or the record count, or split the dataset into smaller batches\./,
-  );
+  await expect(run).rejects.toThrow(SINGLE_PASS_LOCAL_REMEDY);
+  // The keys are an agreed term, so the remedy states narrowing them as a
+  // renegotiation rather than as an edit this operator could make alone.
+  await expect(run).rejects.not.toThrow(/Reduce the number of linkage keys/);
   await expect(run).rejects.toThrow(
     new RegExp(
       "counts its whole declared width toward that ceiling, and cleaning " +
@@ -1326,9 +1328,8 @@ test("an exchange over the ceiling on both sides names both declarations", async
         `${MAX_SINGLE_PASS_CELLS * localRecords} value slot\\(s\\)`,
     ),
   );
-  await expect(run).rejects.toThrow(
-    /Reduce the number of linkage keys or the record count, or split the dataset into smaller batches\./,
-  );
+  await expect(run).rejects.toThrow(SINGLE_PASS_LOCAL_REMEDY);
+  await expect(run).rejects.not.toThrow(/Reduce the number of linkage keys/);
   await expect(run).rejects.toThrow(
     /The partner reduces its record count or splits its dataset on its side too\./,
   );

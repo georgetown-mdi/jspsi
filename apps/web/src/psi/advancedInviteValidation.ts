@@ -459,9 +459,11 @@ export function validateAdvancedInvite(
     if (!verdict.fullySatisfied) {
       // The shortfall fragment is core's, the one the run-boundary refusal states,
       // so the editor cannot describe the fault in words of its own. It carries
-      // counts only; the key names stay off this message.
+      // counts only; the key names stay off this message. Taken on the draft
+      // standing: these terms are the inviter's own, and Generate is the step that
+      // would first put them in front of a partner.
       errors.keys =
-        `These terms cannot be run against your file: ${summarizeLinkageShortfall(verdict)}. ` +
+        `These terms cannot be run against your file: ${summarizeLinkageShortfall(verdict, "draft")}. ` +
         shortfallRemedy(verdict);
     }
   }

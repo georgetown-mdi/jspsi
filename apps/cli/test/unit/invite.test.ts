@@ -1954,9 +1954,11 @@ test("validateInvite: a config plus a disagreeing input is refused before mintin
       "this CSV cannot satisfy every linkage key the configuration declares",
     );
     expect(rendered).toContain(
-      "1 of the 2 agreed linkage keys cannot be produced from this input's " +
-        "columns",
+      "1 of the 2 linkage keys cannot be produced from this input's columns",
     );
+    // The mint holds nobody to these terms yet, so the shared fragment counts the
+    // keys without calling them agreed.
+    expect(rendered).not.toContain("agreed linkage key");
     expect(rendered).toContain("linkage key the CSV cannot produce: SSN");
     expect(rendered).toContain("unsatisfied field: ssn (ssn)");
     // The mint states what generating would cost and points at the operator's
@@ -1987,7 +1989,7 @@ test("validateInvite: a config whose key cleaning drops every record is refused 
   });
   try {
     expect(rendered).toContain(
-      "the cleaning declared for the one agreed linkage key drops every record",
+      "the cleaning declared for the one linkage key drops every record",
     );
     expect(rendered).toContain("linkage key that drops every record: DOB");
     // The remedy is terms-side only: no column is missing, so nothing asks for a

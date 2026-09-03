@@ -8,6 +8,7 @@ import {
 import {
   MAX_SINGLE_PASS_CELLS,
   partyFansOut,
+  SINGLE_PASS_LOCAL_REMEDY,
   singlePassCeilingBreach,
   singlePassReplyByteCap,
   valueSlots,
@@ -916,14 +917,16 @@ export async function linkViaCountOnlyPSI(
 // the budget, and offers each side's remedies to the side that can apply them --
 // the two parties reach mirrored verdicts (singlePassCeilingBreach), so the abort
 // stays symmetric while neither operator is sent to a configuration that cannot
-// move it. Reducing either factor, or splitting the dataset, is the actionable
+// move it. Reducing the record count, or splitting the dataset, is the actionable
 // remedy on a breaching side, and removing a fan-out is another when that side
-// declares one. This party's own declaration covers both places one can be
-// authored -- the agreed width, and the local cleaning that rides its record
-// count instead -- while the partner's cleaning is invisible here, so the
-// partner's hint rests on the agreed width alone.
+// declares one. The key count is neither: it is an agreed term, so it is offered
+// as a renegotiation rather than as an edit a side that did not choose it could
+// make alone (SINGLE_PASS_LOCAL_REMEDY). This party's own declaration covers both
+// places a fan-out can be authored -- the agreed width, and the local cleaning
+// that rides its record count instead -- while the partner's cleaning is
+// invisible here, so the partner's hint rests on the agreed width alone.
 //
-// Every remedy it names is a configuration one of the two operators can change, so
+// Every remedy it names is a change one of the two operators can carry through, so
 // its raise site is a UsageError (CLI exit 64) rather than a transport or internal
 // fault -- the same class as the width refusals below. It interpolates the two
 // parties' declared effective key counts, their record counts, and the value slot
@@ -959,9 +962,7 @@ function singlePassOverCapMessage(
   const remedies: string[] = [];
   if (breach !== "partner")
     remedies.push(
-      "Reduce the number of linkage keys or the record count, or split the " +
-        "dataset into smaller batches." +
-        (localFansOut ? fanOutRemedy("a", true) : ""),
+      SINGLE_PASS_LOCAL_REMEDY + (localFansOut ? fanOutRemedy("a", true) : ""),
     );
   if (breach !== "local")
     remedies.push(

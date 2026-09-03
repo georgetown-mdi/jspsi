@@ -273,6 +273,24 @@ export function singlePassDatasetExceedsCap(
 }
 
 /**
+ * What a party whose own declared size reached the ceiling can do about it, as
+ * both over-ceiling refusals state it -- the coarse prepare-time pre-flight and
+ * the authoritative two-party gate -- so the advance notice and the refusal that
+ * follows it cannot offer different remedies.
+ *
+ * The record count and the batching are that party's own to change. The linkage
+ * keys are not: they are an agreed term, held identically by both sides, so an
+ * acceptor cannot narrow a set its invitation carried and an inviter's own
+ * narrowing is terms the partner has to run under. Naming that as a
+ * renegotiation rather than as an edit is what keeps the remedy true on the seat
+ * that did not choose the keys.
+ */
+export const SINGLE_PASS_LOCAL_REMEDY =
+  "Reduce the record count or split the dataset into smaller batches; the " +
+  "linkage keys are an agreed term, so declaring fewer of them takes new " +
+  "terms agreed with the partner.";
+
+/**
  * Which side of an exchange breached the single-pass ceiling, named from the point
  * of view of the party asking. See {@link singlePassCeilingBreach}.
  */
