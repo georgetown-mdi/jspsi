@@ -129,11 +129,14 @@ run's commit. Then, from a branch in this repository:
    ```
 
    A cold cache fails loudly instead -- `npm error code EINTEGRITY`, naming the
-   wanted and got sha512 -- but that is the cold-cache case only. CI's
-   `setup-node` keys its npm cache on `package-lock.json`, and a skipped edit
-   leaves that key unchanged, so the restored cache hits and the old bytes
-   install with no error at all. The `diff -r` above is the confirmation that
-   does not depend on cache state.
+   wanted and got sha512 -- but that is the cold-cache case only, and the cache
+   this install reads is your own machine's, warm with the bytes being replaced:
+   a skipped edit leaves the lockfile's key unchanged, so the old bytes install
+   with no error at all. The `diff -r` above is the confirmation that does not
+   depend on cache state. CI does not stand in for it: the setup action's
+   dependency cache is keyed on the vendored tarball's bytes, so a re-vendor
+   misses that cache and installs, but what it installs is what the lockfile
+   names.
 
 6. **Run the checks locally.**
 

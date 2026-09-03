@@ -3,7 +3,7 @@
 //
 // The `github-actions` Dependabot block in .github/dependabot.yml is configured
 // against .github/workflows. The shared CI prologue composite
-// (.github/actions/setup/action.yml) pins an action of its own, on a path this
+// (.github/actions/setup/action.yml) pins actions of its own, on a path this
 // repo does not rely on being scanned. Coverage reaches it transitively instead:
 // every pin a composite carries is identical to a pin a workflow carries, so a
 // release or advisory surfacing on the workflow occurrence covers the composite

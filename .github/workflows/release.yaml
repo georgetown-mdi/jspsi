@@ -14,7 +14,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       # Pins Node, installs from the lockfile, and builds @psilink/core.
+      # Uncached: this job is the gate the publish job below depends on, so what
+      # it tests is an install of the lockfile rather than a cache entry any run
+      # in the repository could have written.
       - uses: ./.github/actions/setup
+        with:
+          cache: "false"
       - name: Build CLI
         run: npm run build -w apps/cli
       - name: Unit tests (core)

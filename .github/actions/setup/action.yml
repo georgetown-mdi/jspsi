@@ -10,26 +10,52 @@
 # Core is built here because the apps consume @psilink/core from its built dist/
 # (the same way they do locally), so typecheck/build/test in every workflow needs
 # it present first.
+#
+# Most jobs restore the installed tree and that build from actions/cache instead
+# of producing them, under the conditions the cache steps below state. A miss --
+# and a job that opts out -- runs exactly what a cacheless job would: npm ci,
+# then the core build, in that order, with the same failure surface. Neither
+# restore carries restore-keys, so a key matches in full or restores nothing; no
+# prefix-matched or partial entry can stand in for either artifact.
+#
+# Each artifact is restored and saved by a step of its own rather than by the
+# combined actions/cache, so its save sits in this action's step order after the
+# step that produces it instead of in a post-job step: a composite runs its steps
+# in order and a failed step ends the action, so an install or a build that
+# failed never reaches its save.
 name: "Setup"
 description: "Set up Node, install dependencies, and build @psilink/core"
+
+inputs:
+  cache:
+    description: >-
+      Whether to restore node_modules and packages/core/dist from actions/cache.
+      Pass "false" for a clean install and build against the lockfile alone.
+    default: "true"
+    required: false
 
 runs:
   using: "composite"
   steps:
     - name: Setup Node
+      # No `cache: "npm"`. It caches npm's download directory, which pays only on
+      # the install the cache steps below usually skip, and it is the same order
+      # of magnitude as the installed tree itself (490 MB against 543 MB in this
+      # repository's dev container) -- storing both on the same cadence would
+      # compete for the repository's shared cache budget and evict the entries
+      # this action exists to hit. A miss installs against the registry.
       uses: actions/setup-node@v7
       with:
         node-version: "26"
-        cache: "npm"
     - name: Verify vendored native tarball integrity
       # @openmined/psi.js is a file: dependency carrying prebuilt native .node
       # binaries. The lockfile's sha512 integrity covers what npm installs from
       # its cache; this covers the bytes in the tree, catching a swapped or
       # corrupted vendored artifact before install. See lib/*.tgz.sha256. Offline
       # and dependency-free, which is why it stays ahead of the provenance check
-      # below and of npm ci. Stock macOS runners ship shasum, not sha256sum, so
-      # this falls back to `shasum -a 256` there; both read the same sidecar
-      # format under -c.
+      # below, of any cache restore, and of npm ci. Stock macOS runners ship
+      # shasum, not sha256sum, so this falls back to `shasum -a 256` there; both
+      # read the same sidecar format under -c.
       run: |
         if command -v sha256sum >/dev/null 2>&1; then
           sha256sum -c lib/openmined-psi.js-*.tgz.sha256
@@ -43,16 +69,138 @@ runs:
       # This reads the GitHub artifact attestation stored against the PRODUCING
       # repository instead. It is armed per artifact by the marker committed
       # beside the tarball: armed, a non-zero verifier exit fails the job;
-      # disarmed, it warns and the sidecar baseline stands. Runs before npm ci:
-      # the script has no dependencies, only Node above it.
+      # disarmed, it warns and the sidecar baseline stands. Runs before any cache
+      # restore and before npm ci: the script has no dependencies, only Node
+      # above it.
       run: npm run check:prebuild-provenance
       shell: bash
       env:
         # gh attestation verify queries api.github.com at verification time.
         GH_TOKEN: ${{ github.token }}
+    # The cache steps share one condition. Linux, because the saving this
+    # cache exists for is the pull-request merge gate, which runs on ubuntu: the
+    # two other runner families reach this action only through nightly_platform,
+    # where restoring an archived node_modules would put its workspace symlinks
+    # through an archive round trip these measurements have not covered, and
+    # where every extra (os, arch) variant stored competes for the repository's
+    # shared cache budget against the Linux entries. And the `cache` input, for a
+    # caller that needs the install and the build themselves.
+    - name: Derive the cache keys
+      id: cache-keys
+      if: inputs.cache != 'false' && runner.os == 'Linux'
+      # Both keys are derived here so the build key can be the install key plus
+      # the core sources, rather than two lists that could drift apart.
+      #
+      # The install key names everything npm ci reads to decide what lands in
+      # node_modules, plus the interpreter it lands for:
+      #   - runner.os and runner.arch, because the tree carries native binaries;
+      #   - the running Node version, read from the interpreter rather than
+      #     restated from the pin above, so the two cannot disagree;
+      #   - package-lock.json and every workspace package.json, because npm ci
+      #     refuses to install when the two disagree and a restore would skip
+      #     that refusal;
+      #   - lib/*.tgz, the vendored native tarball. The lockfile does NOT bind
+      #     those bytes on its own: driven against npm 11.19.0, swapping a file:
+      #     tarball for different bytes under the same name and version leaves
+      #     package-lock.json untouched, and `npm ci` against a warm npm cache
+      #     then reinstalls the OLD bytes and exits 0 (only a cold cache reaches
+      #     the tarball and fails EINTEGRITY). Hashing the tarball is what makes
+      #     a re-vendor a new key.
+      #
+      # The core build key adds what rollup reads to produce dist/: the sources,
+      # its config, and the tsconfig chain. packages/core/package.json is already
+      # in the install key, and the toolchain is the installed tree that key
+      # covers. packages/core/test is deliberately absent -- a type error there
+      # is a warning the build exits 0 on (driven against this rollup config), so
+      # it changes neither dist/ nor the build's failure surface, and `npm run
+      # typecheck` is what holds it.
+      env:
+        RUNNER_OS: ${{ runner.os }}
+        RUNNER_ARCH: ${{ runner.arch }}
+        INSTALL_HASH: ${{ hashFiles('package-lock.json', 'package.json', 'apps/*/package.json', 'packages/*/package.json', 'lib/*.tgz') }}
+        CORE_HASH: ${{ hashFiles('packages/core/src/**', 'packages/core/rollup.config.ts', 'packages/core/tsconfig.json', 'tsconfig.base.json') }}
+      # hashFiles yields an empty string when a pattern set matches nothing, which
+      # would silently drop the term it stands for out of the key, so fail here
+      # instead of caching under a key that binds less than it reads.
+      run: |
+        test -n "$INSTALL_HASH"
+        test -n "$CORE_HASH"
+        install="npm-install-$RUNNER_OS-$RUNNER_ARCH-node$(node -p 'process.versions.node')-$INSTALL_HASH"
+        echo "install=$install" >> "$GITHUB_OUTPUT"
+        echo "core=$install-core-$CORE_HASH" >> "$GITHUB_OUTPUT"
+      shell: bash
+    - name: Restore the installed dependency tree
+      id: install-cache
+      if: inputs.cache != 'false' && runner.os == 'Linux'
+      uses: actions/cache/restore@v6
+      with:
+        path: |
+          node_modules
+          apps/*/node_modules
+          packages/*/node_modules
+        key: ${{ steps.cache-keys.outputs.install }}
+    # A skipped restore reports no cache-hit, so both conditions below fall
+    # through to the full install and build whenever the cache is off. Each save
+    # repeats its restore's whole condition rather than only the miss, because
+    # that same fall-through would otherwise have it archiving the tree a job
+    # that opted out built for itself.
     - name: Install dependencies
+      if: steps.install-cache.outputs.cache-hit != 'true'
       run: npm ci
       shell: bash
+    # The second safeguard beside the key, for what a key cannot decide: whether
+    # the entry it named holds the tree the lockfile describes. A restore that
+    # came up short, and an entry written under this key by any other run in the
+    # repository, both match the key exactly as a good one does. npm decides --
+    # the script drives `npm install --dry-run --offline`, needing no registry
+    # and no warm npm download cache, and it compares the installed integrity of
+    # the file: tarball separately, which a version-keyed diff cannot see.
+    - name: Verify the restored dependency tree against the lockfile
+      if: steps.install-cache.outputs.cache-hit == 'true'
+      run: node .claude/scripts/check-node-modules-drift.mjs
+      shell: bash
+    # An entry under an exact key is immutable, so a tree archived from a partial
+    # install would be restored by every later run carrying that key, which would
+    # then skip the install and fail the drift check with no route back short of
+    # a lockfile edit or a manual eviction. Saving here rather than after the job
+    # is what keeps such a tree out of the cache at all: an npm ci that failed
+    # ends the action above this step.
+    - name: Save the installed dependency tree
+      if: inputs.cache != 'false' && runner.os == 'Linux' && steps.install-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: |
+          node_modules
+          apps/*/node_modules
+          packages/*/node_modules
+        key: ${{ steps.cache-keys.outputs.install }}
+    - name: Restore the @psilink/core build
+      id: core-cache
+      if: inputs.cache != 'false' && runner.os == 'Linux'
+      uses: actions/cache/restore@v6
+      with:
+        path: packages/core/dist
+        key: ${{ steps.cache-keys.outputs.core }}
     - name: Build core
+      if: steps.core-cache.outputs.cache-hit != 'true'
       run: npm run build -w packages/core
       shell: bash
+    # The apps register scripts/lib/coreDistFreshness.mjs as a vitest
+    # globalSetup, which refuses a run whose core sources are newer than the dist
+    # the suites import. A restore writes the archived mtimes while
+    # actions/checkout stamps the sources with the current time, so every hit
+    # would read as stale. Restamping is that guard's premise restored rather
+    # than a bypass of it: the key this dist was restored under hashes both of
+    # the guard's SOURCE_PATHS (packages/core/src and rollup.config.ts) plus the
+    # tsconfig chain, binding the artifact to its inputs by content -- which is
+    # what the mtime ordering stands in for and cannot itself survive an archive.
+    - name: Restamp the restored core build
+      if: steps.core-cache.outputs.cache-hit == 'true'
+      run: find packages/core/dist -type f -exec touch {} +
+      shell: bash
+    - name: Save the @psilink/core build
+      if: inputs.cache != 'false' && runner.os == 'Linux' && steps.core-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: packages/core/dist
+        key: ${{ steps.cache-keys.outputs.core }}

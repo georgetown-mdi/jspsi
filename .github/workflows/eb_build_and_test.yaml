@@ -165,10 +165,14 @@ jobs:
       # --with-deps installs are not in this cache and are installed on every run
       # regardless. No restore-keys: a build saved under another playwright version
       # is not the one this version drives, and restoring it would only carry it
-      # into the next save.
-      - name: Cache the Playwright browser build
+      # into the next save. Restoring and saving are separate steps so the save
+      # sits after the install below rather than in a post-job step: a browser
+      # directory left partial by a provisioning run that failed every attempt is
+      # then never archived under this key, whose entry no later run of the same
+      # playwright version could replace.
+      - name: Restore the Playwright browser build
         id: browser-cache
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{runner.os}}-${{runner.arch}}-${{steps.playwright.outputs.version}}
@@ -219,6 +223,12 @@ jobs:
           done
           echo "::error::Playwright provisioning failed on all $attempts attempts; the last one $outcome"
           exit "$status"
+      - name: Save the Playwright browser build
+        if: steps.browser-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{runner.os}}-${{runner.arch}}-${{steps.playwright.outputs.version}}
       # Integration and browser tests both stand up the web dev server through a
       # shared, self-managing vitest globalSetup (it spawns the server, waits for
       # readiness, reuses a running one, and tears it down -- no manual step and no
