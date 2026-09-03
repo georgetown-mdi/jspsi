@@ -25,8 +25,10 @@ import {
   OUTBOUND_SEND_NO_PAYLOAD_SENTENCE,
   PROPOSED_NOT_APPLIED_NOTES,
   UNRECOGNIZED_TRANSFORM_NOTE,
+  bareTermsValue,
   distinctLinkageRuleSetVerdicts,
   linkageRuleSetVerdictNote,
+  quoteTermsValue,
   sanitizeForDisplay,
   summarizeInvitation,
   unshownDeclaredNamesLine,
@@ -39,6 +41,7 @@ import type { ReactNode, Ref } from "react";
 import type {
   ConnectionEndpoint,
   InvitationKeySummary,
+  InvitationRuleSetIdentitySummary,
   LinkageTerms,
 } from "@psilink/core";
 
@@ -74,6 +77,37 @@ const ruleSetValueStyle = {
   padding: "2px 6px",
   wordBreak: "break-all",
 } as const;
+
+/**
+ * One half of the rule-set citation -- a partner-chosen set name beside that
+ * half's content version -- rendered through core's terms-value seam, the same
+ * grammar core's own rule-set mismatch message and the CLI accept prompt render
+ * this pair with.
+ *
+ * The name is free text that may carry a space, so an undelimited one reading
+ * `hmis-keys 9.9.9` would be indistinguishable from the name plus the version
+ * beside it; it takes the delimited form, whose doubling of a delimiter inside a
+ * run leaves a name unable to terminate its own, so whatever it spells reads as
+ * content of one value rather than as a citation this block asserted. The version
+ * is semver the terms schema holds to a shape no citation structure is made of,
+ * so it takes the checked bare form -- checked on the value in hand, falling back
+ * to the delimited run for one outside that shape, rather than trusting the
+ * decode that usually produced it.
+ *
+ * The pair composes here rather than in the JSX so both halves render through one
+ * grammar, and so the delimiting does not rest on the box each half renders in:
+ * that separation is styling, which a reader's stylesheet or a copied-out line
+ * does not carry, while a run's boundaries are in the text itself.
+ *
+ * The seam runs after `summarizeInvitation`'s escape, not before: that escape
+ * truncates and redacts, and either applied to an already-delimited run could
+ * take the closing delimiter off it. The two passes compose -- the seam emits
+ * only printable ASCII, which the escape leaves alone -- so neither doubles the
+ * other's work.
+ */
+function ruleSetCitation(half: InvitationRuleSetIdentitySummary): string {
+  return `${quoteTermsValue(half.name)} ${bareTermsValue(half.version)}`;
+}
 
 /** A labelled block: a bold caption above its value(s). When `captionId` is set it
  * is put on the caption, so a child that is itself a labelled region (a
@@ -1363,13 +1397,9 @@ export function InvitationTerms({
             bound in their own Text between fixed chrome -- never joined into
             the label -- for the reason the allowed-character class below is:
             a crafted value must not be able to read as system chrome. Within
-            the box, the name is quoted as core's rule-set mismatch message
-            quotes it: a name may carry a space, so an unquoted
-            "hmis-keys 9.9.9" would be indistinguishable from the name plus
-            the schema-constrained semver version beside it. The quoting
-            shares that message's stated limit -- a name may itself carry a double
-            quote -- though each half renders in its own bordered box, which
-            confines the misreading.
+            the box, the pair renders through core's terms-value seam
+            (`ruleSetCitation`), which is what keeps the name from reading as a
+            citation of some other set at some other version.
 
             Each half's label carries this build's own verdict on it, from the
             same shared table the caveats come from, so a name psilink resolved
@@ -1407,8 +1437,7 @@ export function InvitationTerms({
                   ):
                 </Text>
                 <Text size="sm" ff="monospace" style={ruleSetValueStyle}>
-                  &quot;{summary.linkageRuleSet.keySet.name}&quot;{" "}
-                  {summary.linkageRuleSet.keySet.version}
+                  {ruleSetCitation(summary.linkageRuleSet.keySet)}
                 </Text>
                 <Text size="sm">
                   Fields (
@@ -1420,8 +1449,7 @@ export function InvitationTerms({
                   ):
                 </Text>
                 <Text size="sm" ff="monospace" style={ruleSetValueStyle}>
-                  &quot;{summary.linkageRuleSet.fieldSet.name}&quot;{" "}
-                  {summary.linkageRuleSet.fieldSet.version}
+                  {ruleSetCitation(summary.linkageRuleSet.fieldSet)}
                 </Text>
               </Stack>
               {distinctLinkageRuleSetVerdicts(
