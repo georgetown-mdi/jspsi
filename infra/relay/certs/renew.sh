@@ -43,18 +43,18 @@ install -d -m 700 "$ACME_HOME"
 case "$CLIENT" in
   lego)
     command -v lego >/dev/null 2>&1 || die "lego is not installed; see Certificates in infra/relay/README.md"
-    # `lego renew` is a no-op outside the renewal window, so one call covers both
-    # the first issuance and every later one -- the timer needs no branch and no
-    # state of its own.
+    # lego v5's `run` covers both the first issuance and every later renewal:
+    # it reads the stored certificate and renews only when due (--renew-days),
+    # so the timer needs no branch and no state of its own. Measured against
+    # lego v5.4.1: the v4 top-level flags moved under `run`, and the v4
+    # `renew` command is gone.
     if [ -f "$ACME_HOME/certificates/$REALM.crt" ]; then
       log "renewing the certificate for $REALM through $PROVIDER (no-op outside the window)"
-      lego --accept-tos --email "$EMAIL" --dns "$PROVIDER" --domains "$REALM" \
-        --path "$ACME_HOME" renew --days 30
     else
       log "issuing a first certificate for $REALM through $PROVIDER"
-      lego --accept-tos --email "$EMAIL" --dns "$PROVIDER" --domains "$REALM" \
-        --path "$ACME_HOME" run
     fi
+    lego run --accept-tos --email "$EMAIL" --dns "$PROVIDER" --domains "$REALM" \
+      --path "$ACME_HOME" --renew-days 30
     SRC_CRT="$ACME_HOME/certificates/$REALM.crt"
     SRC_KEY="$ACME_HOME/certificates/$REALM.key"
     ;;

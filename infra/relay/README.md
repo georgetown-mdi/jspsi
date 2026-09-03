@@ -136,10 +136,11 @@ enough that publishing it is not a port list.
 
 ## Certificates
 
-Let's Encrypt over DNS-01, on a systemd timer, driven through `lego` (default) or
-`acme.sh`. DNS-01 rather than HTTP-01 because the relay already terminates TLS on
-443 for TURNS -- an HTTP-01 challenge would need a second service on 80 whose
-only job is to answer it.
+Let's Encrypt over DNS-01, on a systemd timer, driven through `lego` (default,
+v5 or later -- `renew.sh` drives the v5 `run` flag shape, which a v4 binary
+rejects) or `acme.sh`. DNS-01 rather than HTTP-01 because the relay already
+terminates TLS on 443 for TURNS -- an HTTP-01 challenge would need a second
+service on 80 whose only job is to answer it.
 
 The provider is a variable, and the credential lives in `/etc/psilink-relay/acme.env`
 at mode 600. `certs/env.example` carries the Cloudflare shape (a token scoped to
