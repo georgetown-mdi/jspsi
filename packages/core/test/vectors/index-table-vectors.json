@@ -26,7 +26,7 @@
     {
       "name": "ragged-widths-zero-one-and-many",
       "layout": "ragged",
-      "description": "A sender declaring a fan-out, over two keys and three records, with cells of width 0, 1, 2, and 3. Two cells list their candidates in an order that is NOT ascending in build order, so the strict ascent the receiver validates has to come from the re-sort applied after the remap rather than from the order the sender built them in.",
+      "description": "A sender declaring a fan-out, over two keys and three records, with cells of width 0, 1, 2, and 3. Two cells list their candidates in an order that is NOT ascending in build order, so the strict ascent the receiver validates has to come from the re-sort applied after the remap rather than from the order the sender built them in. The declared widths DIFFER between the two keys -- the shape agreed terms take as soon as one key declares a fan-out and another a narrower expansion -- and key 1's widest cell sits exactly at its own width, so a receiver holding every cell to one key's width reads this table wrong in one direction or the other.",
       "keyCount": 2,
       "recordCount": 3,
       "distinctValueCount": 4,
@@ -35,8 +35,8 @@
         [[1, 0], [], [3]],
         [[2], [0, 2, 3], [1]]
       ],
-      "keyWidths": [20, 20],
-      "slotBound": 120,
+      "keyWidths": [20, 3],
+      "slotBound": 69,
       "words": [2, 1, 2, 0, 1, 0, 1, 3, 3, 0, 2, 3, 1, 1],
       "wordsHex": "0200000001000000020000000000000001000000000000000100000003000000030000000000000002000000030000000100000001000000",
       "cells": [

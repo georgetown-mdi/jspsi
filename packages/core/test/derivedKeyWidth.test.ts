@@ -21,6 +21,7 @@ import {
   declaredKeyWidth,
   FAN_OUT_CANDIDATES_PER_ELEMENT,
   MAX_KEY_CANDIDATE_WIDTH,
+  SWAP_VARIANT_WIDTH_FACTOR,
 } from "../src/fanOutFunctions";
 import {
   expandFuzzyComparisons,
@@ -63,6 +64,26 @@ const BOTH_OUTPUT: Output = { expectsOutput: true, shareWithPartner: true };
 
 const fanOutStep = { function: "split_on", params: { delimiter: "/" } };
 
+// A `transpositions` element declares one candidate per PAIR of its value's
+// positions, so an element whose transforms bound no width declares more than
+// MAX_KEY_CANDIDATE_WIDTH and is refused where the width is derived. Every
+// fixture below that must be admissible bounds that value the way
+// EXCHANGE_REFERENCE.md tells an author to, and reads its ceiling at the bound.
+const TRANSPOSITION_VALUE_BOUND = 10;
+
+const boundToTranspositionWidth: TransformStep[] = [
+  {
+    function: "substring",
+    params: { start: 1, length: TRANSPOSITION_VALUE_BOUND },
+  },
+];
+
+function declaredCeiling(kind: GenerateFuzzyComparisons): number {
+  return kind === "transpositions"
+    ? fuzzyCandidateCeiling(kind, TRANSPOSITION_VALUE_BOUND)
+    : fuzzyCandidateCeiling(kind);
+}
+
 // Two keys: the first declares the expansion under test, the second declares
 // nothing, so a factor that landed on the wrong key is visible in the sum.
 function termsWithFuzzyKey(kind: GenerateFuzzyComparisons): LinkageTerms {
@@ -81,7 +102,15 @@ function termsWithFuzzyKey(kind: GenerateFuzzyComparisons): LinkageTerms {
     linkageKeys: [
       {
         name: "LN",
-        elements: [{ field: "last_name", generateFuzzyComparisons: kind }],
+        elements: [
+          {
+            field: "last_name",
+            generateFuzzyComparisons: kind,
+            ...(kind === "transpositions"
+              ? { transform: boundToTranspositionWidth }
+              : {}),
+          },
+        ],
       },
       { name: "SSN", elements: [{ field: "ssn" }] },
     ],
@@ -89,14 +118,15 @@ function termsWithFuzzyKey(kind: GenerateFuzzyComparisons): LinkageTerms {
 }
 
 // The longest value each kind accepts, which is where its ceiling is set. A
-// repeating value would collapse candidates into each other, so each character
-// differs from its neighbours; the date is the one canonical shape
-// `adjacent_years` reads, whose expansion does not grow with length.
+// repeated character would collapse candidates into each other -- a transposition
+// of two equal characters emits none at all -- so every character is distinct;
+// the date is the one canonical shape `adjacent_years` reads, whose expansion
+// does not grow with length.
 function longestExpandableValue(kind: GenerateFuzzyComparisons): string {
   if (kind === "adjacent_years") return "19900115";
   return Array.from(
     { length: MAX_FUZZY_EXPANSION_INPUT_LENGTH },
-    (_unused, i) => String.fromCodePoint(0x41 + (i % 26)),
+    (_unused, i) => String.fromCodePoint(0x41 + i),
   ).join("");
 }
 
@@ -340,13 +370,86 @@ describe("the width an element's transforms bound its value to", () => {
 describe("the width a key declares", () => {
   test.each(FUZZY_KINDS)("%s raises only its own key's width", (kind) => {
     const terms = termsWithFuzzyKey(kind);
-    expect(declaredKeyWidth(terms.linkageKeys[0])).toBe(
-      fuzzyCandidateCeiling(kind),
-    );
+    expect(declaredKeyWidth(terms.linkageKeys[0])).toBe(declaredCeiling(kind));
     expect(declaredKeyWidth(terms.linkageKeys[1])).toBe(1);
-    expect(declaredEffectiveKeyCount(terms)).toBe(
-      fuzzyCandidateCeiling(kind) + 1,
+    expect(declaredEffectiveKeyCount(terms)).toBe(declaredCeiling(kind) + 1);
+  });
+
+  test("a key declaring swap doubles the product of its elements' factors", () => {
+    // The receiver assembles the key in both orders, so a record contributes
+    // twice what its elements' factors alone would carry, and the sender declares
+    // the same number for the role it may not hold.
+    const key: LinkageKey = {
+      name: "FN+LN",
+      elements: [{ field: "last_name" }, { field: "ssn" }],
+    };
+    expect(declaredKeyWidth(key)).toBe(1);
+    expect(declaredKeyWidth({ ...key, swap: ["last_name", "ssn"] })).toBe(
+      SWAP_VARIANT_WIDTH_FACTOR,
     );
+    const fuzzy: LinkageKey = {
+      name: "FN+LN",
+      elements: key.elements.map((element) => ({
+        ...element,
+        generateFuzzyComparisons: "adjacent_years" as const,
+      })),
+      swap: ["last_name", "ssn"],
+    };
+    expect(declaredKeyWidth(fuzzy)).toBe(
+      SWAP_VARIANT_WIDTH_FACTOR * fuzzyCandidateCeiling("adjacent_years") ** 2,
+    );
+  });
+
+  test("an unbounded transpositions element declares more than one key may carry", () => {
+    // The stated limit of the all-pairs enumeration: the pair count of the
+    // 128-character expansion limit is far above MAX_KEY_CANDIDATE_WIDTH, so an
+    // element whose transforms bound no width is refused where the width is
+    // derived rather than at a row. Bounding the value to 45 characters is the
+    // widest an author can declare.
+    const unbounded: LinkageKey = {
+      name: "LN",
+      elements: [
+        { field: "last_name", generateFuzzyComparisons: "transpositions" },
+      ],
+    };
+    expect(
+      fuzzyCandidateCeiling("transpositions", MAX_FUZZY_EXPANSION_INPUT_LENGTH),
+    ).toBeGreaterThan(MAX_KEY_CANDIDATE_WIDTH);
+    expect(() => declaredKeyWidth(unbounded)).toThrow(UsageError);
+    expect(() => declaredKeyWidth(unbounded, 0)).toThrow(
+      /linkageKeys\[0\] declares a width of more than the 1024/,
+    );
+    expect(fuzzyCandidateCeiling("transpositions", 45)).toBeLessThanOrEqual(
+      MAX_KEY_CANDIDATE_WIDTH,
+    );
+    expect(fuzzyCandidateCeiling("transpositions", 46)).toBeGreaterThan(
+      MAX_KEY_CANDIDATE_WIDTH,
+    );
+  });
+
+  test("two all-pairs elements in one key compound past the ceiling at nine characters each", () => {
+    // The stacked case the reference states: each element alone is admissible at
+    // a nine-character bound, and the two together are not. It is settled from
+    // the terms, so no row is read and no machinery beyond the width derivation
+    // is involved.
+    const boundTo = (length: number): TransformStep[] => [
+      { function: "substring", params: { start: 1, length } },
+    ];
+    const stacked = (length: number): LinkageKey => ({
+      name: "LN+SSN",
+      elements: ["last_name", "ssn"].map((field) => ({
+        field,
+        transform: boundTo(length),
+        generateFuzzyComparisons: "transpositions" as const,
+      })),
+    });
+    expect(declaredKeyWidth(stacked(8))).toBe(
+      fuzzyCandidateCeiling("transpositions", 8) ** 2,
+    );
+    expect(fuzzyCandidateCeiling("transpositions", 9) ** 2).toBeGreaterThan(
+      MAX_KEY_CANDIDATE_WIDTH,
+    );
+    expect(() => declaredKeyWidth(stacked(9))).toThrow(UsageError);
   });
 
   test("a key both producers widen declares their product", () => {
@@ -373,12 +476,12 @@ describe("the width a key declares", () => {
       expandFuzzyComparisons("ABCDEFGHIJ", "edit_distances").length,
     ).toBeLessThanOrEqual(11);
 
-    const swapped = termsWithFuzzyKey("transpositions");
-    swapped.linkageKeys[0].elements[0].transform = bounded;
-    expect(declaredKeyWidth(swapped.linkageKeys[0])).toBe(10);
+    const transposed = termsWithFuzzyKey("transpositions");
+    transposed.linkageKeys[0].elements[0].transform = bounded;
+    expect(declaredKeyWidth(transposed.linkageKeys[0])).toBe(46);
     expect(
       expandFuzzyComparisons("ABCDEFGHIJ", "transpositions").length,
-    ).toBeLessThanOrEqual(10);
+    ).toBeLessThanOrEqual(46);
 
     // The date expansion emits the year either side whatever the value's width,
     // so a bound moves nothing for it.
@@ -428,7 +531,7 @@ describe("the width a key declares", () => {
   test("a bound above the expansion's own limit is clamped to it", () => {
     // A value wider than the limit is refused rather than expanded, so no
     // element declares more candidates than the limit's own ceiling.
-    const terms = termsWithFuzzyKey("transpositions");
+    const terms = termsWithFuzzyKey("edit_distances");
     terms.linkageKeys[0].elements[0].transform = [
       {
         function: "substring",
@@ -436,7 +539,7 @@ describe("the width a key declares", () => {
       },
     ];
     expect(declaredKeyWidth(terms.linkageKeys[0])).toBe(
-      MAX_FUZZY_EXPANSION_INPUT_LENGTH,
+      MAX_FUZZY_EXPANSION_INPUT_LENGTH + 1,
     );
   });
 
@@ -511,7 +614,7 @@ describe("both parties derive the same width with no round-trip", () => {
 
     // Each party derives the partner's width from the terms it was handed, and
     // the two derivations agree with each party's reading of its own.
-    const expected = fuzzyCandidateCeiling("transpositions") + 1;
+    const expected = declaredCeiling("transpositions") + 1;
     expect(declaredEffectiveKeyCount(a.partnerTerms)).toBe(expected);
     expect(declaredEffectiveKeyCount(b.partnerTerms)).toBe(expected);
     expect(declaredEffectiveKeyCount(FUZZY_TERMS)).toBe(expected);
@@ -546,7 +649,7 @@ describe("both parties derive the same width with no round-trip", () => {
           responderRecords,
         ),
       ]);
-      const expected = fuzzyCandidateCeiling("transpositions") + 1;
+      const expected = declaredCeiling("transpositions") + 1;
       expect(declaredEffectiveKeyCount(a.partnerTerms)).toBe(expected);
       expect(declaredEffectiveKeyCount(b.partnerTerms)).toBe(expected);
     },
@@ -567,7 +670,7 @@ describe("both parties derive the same width with no round-trip", () => {
     expect(result.partnerRecordCount).toBe(100);
     // The stripped field decides nothing: the width is still the terms'.
     expect(declaredEffectiveKeyCount(result.partnerTerms)).toBe(
-      fuzzyCandidateCeiling("transpositions") + 1,
+      declaredCeiling("transpositions") + 1,
     );
   });
 });

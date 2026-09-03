@@ -85,7 +85,11 @@ const tables = [
       "of width 0, 1, 2, and 3. Two cells list their candidates in an order that " +
       "is NOT ascending in build order, so the strict ascent the receiver " +
       "validates has to come from the re-sort applied after the remap rather " +
-      "than from the order the sender built them in.",
+      "than from the order the sender built them in. The declared widths DIFFER " +
+      "between the two keys -- the shape agreed terms take as soon as one key " +
+      "declares a fan-out and another a narrower expansion -- and key 1's widest " +
+      "cell sits exactly at its own width, so a receiver holding every cell to " +
+      "one key's width reads this table wrong in one direction or the other.",
     // Per key, per record, the build-order value ids that record contributes.
     columns: [
       [[1, 0], [], [3]],
@@ -95,8 +99,9 @@ const tables = [
     // The width the agreed terms declare for each key, which is the per-cell
     // bound the receiver applies and, summed and multiplied by the record count,
     // the slot bound beside it. Both are derived from the terms and never from
-    // the frame.
-    keyWidths: [FAN_OUT_CANDIDATES_PER_ELEMENT, FAN_OUT_CANDIDATES_PER_ELEMENT],
+    // the frame. Key 1 declares the fuzzy ceiling of `adjacent_years` beside key
+    // 0's fan-out width, so the vector is not uniform.
+    keyWidths: [FAN_OUT_CANDIDATES_PER_ELEMENT, 3],
   },
 ];
 

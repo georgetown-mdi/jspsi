@@ -145,6 +145,26 @@ describe("single-pass index-table layout vectors", () => {
     );
   });
 
+  test("the ragged vector's declared widths differ between keys", () => {
+    // A uniform vector cannot separate the per-cell bound from the first key's
+    // width: every cell reads correctly either way. The pinned table declares a
+    // different width per key and fills the NARROWER key's exactly, so a receiver
+    // holding every cell to one key's width misreads it.
+    const ragged = vectors.tables.filter(
+      (table): table is RaggedTable => table.layout === "ragged",
+    );
+    expect(ragged.length).toBeGreaterThan(0);
+    for (const table of ragged) {
+      expect(new Set(table.keyWidths).size).toBeGreaterThan(1);
+      const narrowest = Math.min(...table.keyWidths);
+      const key = table.keyWidths.indexOf(narrowest);
+      const widestCell = Math.max(
+        ...table.cells[key].map((cell) => cell.length),
+      );
+      expect(widestCell).toBe(narrowest);
+    }
+  });
+
   test("both layouts are pinned, as a table and inside a whole reply frame", () => {
     // A layout that fell out of the file would be one nothing here holds, which
     // is the hole these vectors close.

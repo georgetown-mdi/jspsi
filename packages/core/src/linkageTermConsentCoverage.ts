@@ -624,8 +624,9 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
   "linkageKeys[].swap": {
     classification: "consent-relevant",
     reason:
-      "Matches two elements in either order on the receiving side, so records " +
-      "whose values are transposed between two fields match.",
+      "Builds this key with the two named elements' values exchanged on the " +
+      "receiving side, so records whose values are transposed between two " +
+      "fields match.",
     vary: (terms) =>
       edited(terms, (draft) => {
         delete draft.linkageKeys[0].swap;

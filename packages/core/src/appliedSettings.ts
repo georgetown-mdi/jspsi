@@ -42,6 +42,15 @@
  * fan-out resolution settles for `split_on` (docs/spec/PROTOCOL.md, Record-level
  * resolution) and which fuzzy either inherits or replaces.
  *
+ * This flag also gates a term that is not `generateFuzzyComparisons`: a key's
+ * `swap`, whose full variant has the receiver build the key in BOTH orders so it
+ * matches its two elements in either arrangement
+ * (docs/notes/one-sided-fuzzy-expansion.md). It rides this flag because a second
+ * key string per row is a candidate set, which is the same thing every strategy
+ * but single-pass refuses. With the flag false the receiver builds the exchanged
+ * order alone, which is what the operator-facing "matched in either order" copy
+ * on the acceptance surfaces overstates until the flip.
+ *
  * The count-only algorithm (`psi-c`) is NOT gated here: the exchange runs it
  * (`linkViaCountOnlyPSI`, `link.ts`), `assertAlgorithmImplemented` (`exchange.ts`)
  * admits it, and it is selectable on the authoring and acceptance surfaces. What
