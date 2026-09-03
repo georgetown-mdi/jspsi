@@ -19,6 +19,7 @@ import { MAX_LINKAGE_ENTRIES } from "./config/linkageTerms.js";
 import type { LinkageKey, LinkageTerms } from "./config/linkageTerms.js";
 import { UsageError } from "./errors.js";
 import { fuzzyCandidateCeiling } from "./fuzzyComparisons.js";
+import { elementValueWidthBound } from "./keyElementWidth.js";
 
 /**
  * The standardization functions that expand ONE value into several match
@@ -105,8 +106,19 @@ export function withNoListedFanOutFunctions<T>(body: () => T): T {
  * runs on: `split_on` shatters a cell into at most this many parts as far as the
  * declared width is concerned (docs/spec/PROTOCOL.md, The width bound).
  *
- * Not operator-configurable -- a partner-supplied frame's element and byte bounds
- * are derived from the widths built on it, so changing it re-derives those.
+ * The value is an arbitrary working figure with no privacy, protocol, or
+ * disclosure meaning: it is set where it covers the honest shapes seen so far
+ * with margin -- a hyphenated name plus a compound field is sixteen candidates at
+ * four parts each -- and nothing else picks it. Raise it whenever a use case
+ * needs more; the only constraint is the arithmetic, since it multiplies into the
+ * template-wide width total ({@link MAX_EFFECTIVE_KEY_COUNT}) that keeps the slot
+ * product exact in a double (connection/frameSize.ts), which the tests pin. It is
+ * not operator-configurable, because a partner-supplied frame's element and byte
+ * bounds are derived from the widths built on it, so moving it re-derives those.
+ *
+ * The operator advisory raised for a wide per-record expansion shares the width a
+ * key declares, and so shares this figure wherever one fan-out element sets that
+ * width; it takes its threshold from the width rather than explaining it.
  *
  * A record realizing more candidates for a key than that key's declared width
  * admits contributes NONE of them to the round: `buildKeyStrings` drops it
@@ -188,6 +200,12 @@ function keySite(keyIndex: number | undefined): string {
  * against what the row builder actually assembles and refuse honest rows at the
  * width seam.
  *
+ * A fuzzy element's factor is taken at the width its own transforms bound its
+ * value to ({@link elementValueWidthBound}), since every kind's candidate count
+ * grows with that width; an element whose transforms bound no width takes the
+ * global expansion limit. The bound is a function of the agreed terms, so both
+ * parties derive the same factor.
+ *
  * Read WITHOUT regard to the role this party resolves to: an expansion
  * {@link expandsOnReceiverOnly} classifies runs on one party alone, but the width
  * is fixed before the roles are, so both parties declare the receiver-case
@@ -214,7 +232,10 @@ export function declaredKeyWidth(key: LinkageKey, keyIndex?: number): number {
       APPLIED_SETTINGS.fuzzyComparisons &&
       element.generateFuzzyComparisons !== undefined
     )
-      width *= fuzzyCandidateCeiling(element.generateFuzzyComparisons);
+      width *= fuzzyCandidateCeiling(
+        element.generateFuzzyComparisons,
+        elementValueWidthBound(element.transform),
+      );
     if (width > MAX_KEY_CANDIDATE_WIDTH)
       throw new UsageError(
         `${keySite(keyIndex)} declares a width of more than the ` +

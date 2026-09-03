@@ -27,8 +27,10 @@ import {
   fuzzyCandidateCeiling,
   MAX_FUZZY_EXPANSION_INPUT_LENGTH,
 } from "../src/fuzzyComparisons";
+import { elementValueWidthBound } from "../src/keyElementWidth";
 import {
   buildKeyStrings,
+  STANDARDIZATION_FUNCTION_NAMES,
   StandardizedDataset,
   StandardizedField,
 } from "../src/standardization";
@@ -42,6 +44,7 @@ import type {
   LinkageKey,
   LinkageTerms,
   Output,
+  TransformStep,
 } from "../src/config/linkageTerms";
 import type { Metadata } from "../src/config/metadata";
 import type { CSVRow } from "../src/file";
@@ -125,6 +128,166 @@ describe("the ceiling each fuzzy kind declares", () => {
   });
 });
 
+// The one-step chains whose declared params settle an output width, with the
+// width each settles. Every other function core knows derives none, which the
+// enumeration below holds to the registry rather than to this list.
+const WIDTH_SHAPING_STEPS: ReadonlyArray<[string, TransformStep, number]> = [
+  [
+    "substring",
+    { function: "substring", params: { start: 1, length: 10 } },
+    10,
+  ],
+  ["phonetic", { function: "phonetic" }, 4],
+  ["parse_date", { function: "parse_date" }, 8],
+  [
+    "parse_date with its own output layout",
+    { function: "parse_date", params: { outputFormat: "YYYY-MM-DD" } },
+    10,
+  ],
+];
+
+describe("the width an element's transforms bound its value to", () => {
+  test.each(WIDTH_SHAPING_STEPS)(
+    "%s settles a width",
+    (_label, step, width) => {
+      expect(elementValueWidthBound([step])).toBe(width);
+    },
+  );
+
+  test("every other function core knows settles none", () => {
+    // Held to the registry rather than to a list beside it, so a function added
+    // to core falls back to the global cap until it is classified here -- the
+    // safe direction, since a width derived too small refuses an honest row.
+    const settling = new Set(
+      WIDTH_SHAPING_STEPS.map(([, step]) => step.function),
+    );
+    for (const name of STANDARDIZATION_FUNCTION_NAMES) {
+      if (settling.has(name)) continue;
+      expect(elementValueWidthBound([{ function: name }])).toBeUndefined();
+    }
+  });
+
+  test("a pad fills up to its length and settles no width on its own", () => {
+    expect(
+      elementValueWidthBound([{ function: "pad_left", params: { length: 9 } }]),
+    ).toBeUndefined();
+    // It raises one the chain already carries, since a value shorter than the
+    // pad leaves it at the pad's own length.
+    expect(
+      elementValueWidthBound([
+        { function: "substring", params: { start: 1, length: 4 } },
+        { function: "pad_left", params: { length: 9 } },
+      ]),
+    ).toBe(9);
+    // A pad below the width carried into it moves nothing.
+    expect(
+      elementValueWidthBound([
+        { function: "substring", params: { start: 1, length: 9 } },
+        { function: "pad_left", params: { length: 4 } },
+      ]),
+    ).toBe(9);
+  });
+
+  test("the last step to settle a width governs", () => {
+    expect(
+      elementValueWidthBound([
+        { function: "pad_left", params: { length: 40 } },
+        { function: "substring", params: { start: 1, length: 10 } },
+      ]),
+    ).toBe(10);
+    expect(
+      elementValueWidthBound([
+        { function: "substring", params: { start: 1, length: 10 } },
+        { function: "phonetic" },
+      ]),
+    ).toBe(4);
+    // A step whose output width its params do not settle clears the width: an
+    // upper-casing can emit more characters than it was handed.
+    expect(
+      elementValueWidthBound([
+        { function: "substring", params: { start: 1, length: 10 } },
+        { function: "to_upper_case" },
+      ]),
+    ).toBeUndefined();
+    // A step that returns the value it was handed, or drops it, carries the
+    // width through.
+    expect(
+      elementValueWidthBound([
+        { function: "substring", params: { start: 1, length: 10 } },
+        { function: "null_if", params: { values: ["UNKNOWN"] } },
+        { function: "filter_regex", params: { pattern: "[A-Z]" } },
+      ]),
+    ).toBe(10);
+  });
+
+  test("a substring whose bounds do not settle a width derives none", () => {
+    // A negative length measures its end from the end of the VALUE, so the
+    // window it opens grows with the value; a degenerate bound reads nothing at
+    // all, which the row build drops.
+    expect(
+      elementValueWidthBound([
+        { function: "substring", params: { start: 1, length: -2 } },
+      ]),
+    ).toBeUndefined();
+    expect(
+      elementValueWidthBound([
+        { function: "substring", params: { start: 0, length: 5 } },
+      ]),
+    ).toBeUndefined();
+  });
+
+  test("the real row build never produces a value wider than the derived bound", () => {
+    // The bound decides how many candidates a fuzzy element may declare, so a
+    // reading above what the pipeline emits is what would refuse an honest row.
+    // Driven through the shipped key builder rather than restated.
+    const chains: TransformStep[][] = [
+      [{ function: "substring", params: { start: 1, length: 10 } }],
+      [{ function: "substring", params: { start: -5, length: 5 } }],
+      [
+        { function: "substring", params: { start: 1, length: 4 } },
+        { function: "pad_left", params: { length: 9 } },
+      ],
+      [
+        { function: "pad_left", params: { length: 40 } },
+        { function: "substring", params: { start: 1, length: 10 } },
+      ],
+      [{ function: "phonetic" }],
+      [{ function: "parse_date" }],
+      [{ function: "parse_date", params: { outputFormat: "YYYY-MM-DD" } }],
+      [
+        { function: "substring", params: { start: 1, length: 10 } },
+        { function: "null_if", params: { values: ["UNKNOWN"] } },
+      ],
+    ];
+    const values = [
+      "SMITH",
+      "01/02/1990",
+      "A".repeat(300),
+      // A combining sequence whose composed form is WIDER than the sequence
+      // itself, which is what a width read off the input alone would miss.
+      "\u0344".repeat(40),
+      "Ki\u0301ng-Ferna\u0301ndez y Guitie\u0301rrez",
+    ];
+    for (const transform of chains) {
+      const bound = elementValueWidthBound(transform);
+      expect(bound).toBeDefined();
+      for (const value of values) {
+        const row = { last_name: value };
+        const dataset = new StandardizedDataset([
+          new StandardizedField("last_name", "last_name", [], [row]),
+        ]);
+        const built = buildKeyStrings(
+          { name: "LN", elements: [{ field: "last_name", transform }] },
+          dataset,
+          0,
+        );
+        for (const candidate of built ?? [])
+          expect(candidate.length).toBeLessThanOrEqual(bound!);
+      }
+    }
+  });
+});
+
 describe("the width a key declares", () => {
   test.each(FUZZY_KINDS)("%s raises only its own key's width", (kind) => {
     const terms = termsWithFuzzyKey(kind);
@@ -145,6 +308,86 @@ describe("the width a key declares", () => {
     terms.linkageKeys[0].elements[0].transform = [fanOutStep];
     expect(declaredKeyWidth(terms.linkageKeys[0])).toBe(
       FAN_OUT_CANDIDATES_PER_ELEMENT * fuzzyCandidateCeiling("adjacent_years"),
+    );
+  });
+
+  test("an element whose transforms bound its value declares that width's ceiling", () => {
+    // The ceiling is the count the expansion can realize from a value of the
+    // bounded width, measured against the real expansion rather than restated.
+    const bounded: TransformStep[] = [
+      { function: "substring", params: { start: 1, length: 10 } },
+    ];
+    const terms = termsWithFuzzyKey("edit_distances");
+    terms.linkageKeys[0].elements[0].transform = bounded;
+    expect(declaredKeyWidth(terms.linkageKeys[0])).toBe(11);
+    expect(
+      expandFuzzyComparisons("ABCDEFGHIJ", "edit_distances").length,
+    ).toBeLessThanOrEqual(11);
+
+    const swapped = termsWithFuzzyKey("transpositions");
+    swapped.linkageKeys[0].elements[0].transform = bounded;
+    expect(declaredKeyWidth(swapped.linkageKeys[0])).toBe(10);
+    expect(
+      expandFuzzyComparisons("ABCDEFGHIJ", "transpositions").length,
+    ).toBeLessThanOrEqual(10);
+
+    // The date expansion emits the year either side whatever the value's width,
+    // so a bound moves nothing for it.
+    const dated = termsWithFuzzyKey("adjacent_years");
+    dated.linkageKeys[0].elements[0].transform = [{ function: "parse_date" }];
+    expect(declaredKeyWidth(dated.linkageKeys[0])).toBe(3);
+  });
+
+  test("two bounded elements compound to a width the ceiling admits", () => {
+    // The same pair of elements unbounded declares 129 * 129, which the per-key
+    // ceiling refuses; bounding each element's value is what admits the key.
+    const key: LinkageKey = {
+      name: "LN2",
+      elements: [
+        {
+          field: "last_name",
+          generateFuzzyComparisons: "edit_distances",
+          transform: [
+            { function: "substring", params: { start: 1, length: 10 } },
+          ],
+        },
+        {
+          field: "ssn",
+          generateFuzzyComparisons: "edit_distances",
+          transform: [
+            { function: "substring", params: { start: 1, length: 10 } },
+          ],
+        },
+      ],
+    };
+    expect(declaredKeyWidth(key)).toBe(121);
+    expect(121).toBeLessThanOrEqual(MAX_KEY_CANDIDATE_WIDTH);
+  });
+
+  test("an element only a pad shapes takes the global cap", () => {
+    // A pad settles no maximum on its own, so the element declares what a value
+    // of any admissible width can realize.
+    const terms = termsWithFuzzyKey("edit_distances");
+    terms.linkageKeys[0].elements[0].transform = [
+      { function: "pad_left", params: { length: 9 } },
+    ];
+    expect(declaredKeyWidth(terms.linkageKeys[0])).toBe(
+      MAX_FUZZY_EXPANSION_INPUT_LENGTH + 1,
+    );
+  });
+
+  test("a bound above the expansion's own limit is clamped to it", () => {
+    // A value wider than the limit is refused rather than expanded, so no
+    // element declares more candidates than the limit's own ceiling.
+    const terms = termsWithFuzzyKey("transpositions");
+    terms.linkageKeys[0].elements[0].transform = [
+      {
+        function: "substring",
+        params: { start: 1, length: MAX_FUZZY_EXPANSION_INPUT_LENGTH * 3 },
+      },
+    ];
+    expect(declaredKeyWidth(terms.linkageKeys[0])).toBe(
+      MAX_FUZZY_EXPANSION_INPUT_LENGTH,
     );
   });
 

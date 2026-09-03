@@ -44,6 +44,10 @@ import {
 } from "./fuzzyComparisons.js";
 import { APPLIED_SETTINGS } from "./appliedSettings.js";
 import {
+  DEFAULT_DATE_OUTPUT_FORMAT,
+  SOUNDEX_CODE_LENGTH,
+} from "./keyElementWidth.js";
+import {
   declaredFanOutFunction,
   declaredKeyWidth,
   FAN_OUT_FUNCTION_NAMES,
@@ -59,6 +63,7 @@ export {
   FAN_OUT_FUNCTION_NAMES,
   localFanOutFactor,
 } from "./fanOutFunctions.js";
+export { DEFAULT_DATE_OUTPUT_FORMAT } from "./keyElementWidth.js";
 
 const logger = getLogger("cleaning");
 
@@ -396,17 +401,6 @@ export function dateFormatComponents(
   return components;
 }
 
-/**
- * The output layout a `parse_date` step emits when it declares no usable
- * `outputFormat`. It carries every date component, so the default drops nothing.
- *
- * Exported so a terms-level reading of a step -- the breadth markers here, and
- * the consent header's `parse_date` copy in `invitationSummary.ts` -- resolves an
- * absent or non-string `outputFormat` to what the runtime actually emits rather
- * than to a restated literal.
- */
-export const DEFAULT_DATE_OUTPUT_FORMAT = "YYYYMMDD";
-
 // The characters a `parse_date` step emits for one date: the output format with
 // EVERY occurrence of each substituted token replaced by its (padded) component
 // value, in the fixed order all YYYY, then all MM, then all DD
@@ -532,14 +526,18 @@ function soundex(s: string): string {
   const first = upper[0];
   let result = first;
   let prev = SOUNDEX[first] ?? "0";
-  for (let idx = 1; idx < upper.length && result.length < 4; idx++) {
+  for (
+    let idx = 1;
+    idx < upper.length && result.length < SOUNDEX_CODE_LENGTH;
+    idx++
+  ) {
     const c = upper[idx];
     if (c === "H" || c === "W") continue;
     const code = SOUNDEX[c] ?? "0";
     if (code !== "0" && code !== prev) result += code;
     prev = code;
   }
-  return result.padEnd(4, "0");
+  return result.padEnd(SOUNDEX_CODE_LENGTH, "0");
 }
 
 function phoneticFactory(params: Params): StandardizingFn {
