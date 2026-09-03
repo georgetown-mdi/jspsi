@@ -41,7 +41,7 @@
 // synthetic bytes exercise exactly.
 
 import {
-  MAX_KEY_CANDIDATES_PER_ROW,
+  FAN_OUT_CANDIDATES_PER_ELEMENT,
   decodeFixedWidthIndexTable,
   decodeInt32LE,
   decodeRaggedIndexTable,
@@ -92,11 +92,11 @@ const tables = [
       [[2], [0, 2, 3], [1]],
     ],
     permutation: [3, 1, 0, 2],
-    // The sender's value slot count: its declared effective key count (one
-    // fan-out key at the normative per-record width, one plain key) times its
-    // record count. Every ragged bound the receiver applies is derived from this
-    // and never from the frame.
-    declaredEffectiveKeyCount: MAX_KEY_CANDIDATES_PER_ROW + 1,
+    // The width the agreed terms declare for each key, which is the per-cell
+    // bound the receiver applies and, summed and multiplied by the record count,
+    // the slot bound beside it. Both are derived from the terms and never from
+    // the frame.
+    keyWidths: [FAN_OUT_CANDIDATES_PER_ELEMENT, FAN_OUT_CANDIDATES_PER_ELEMENT],
   },
 ];
 
@@ -169,7 +169,7 @@ function buildTable(table) {
   const decoded = decodeInt32LE(wordBytes);
   const slotBound =
     table.layout === "ragged"
-      ? table.declaredEffectiveKeyCount * recordCount
+      ? table.keyWidths.reduce((sum, width) => sum + width, 0) * recordCount
       : undefined;
   const cells =
     table.layout === "fixed-width"
@@ -177,7 +177,7 @@ function buildTable(table) {
       : decodeRaggedIndexTable(
           "generator",
           decoded,
-          keyCount,
+          table.keyWidths,
           recordCount,
           slotBound,
         );
@@ -193,10 +193,7 @@ function buildTable(table) {
     columns: table.columns,
     ...(slotBound === undefined
       ? {}
-      : {
-          declaredEffectiveKeyCount: table.declaredEffectiveKeyCount,
-          slotBound,
-        }),
+      : { keyWidths: table.keyWidths, slotBound }),
     words,
     wordsHex: hex(wordBytes),
     cells: readCells(cells, recordCount),
@@ -281,7 +278,7 @@ const vectors = {
     "record count | the index table as the remaining bytes. The two " +
     "length-prefixed parts carry explicit lengths; the table's length is implied " +
     "by the frame size.",
-  maxKeyCandidatesPerRow: MAX_KEY_CANDIDATES_PER_ROW,
+  fanOutCandidatesPerElement: FAN_OUT_CANDIDATES_PER_ELEMENT,
   tables: builtTables,
   replyFrames: replyFrames.map(buildReplyFrame),
 };

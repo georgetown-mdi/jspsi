@@ -641,6 +641,7 @@ describe("naming what the agreed terms resolved to", () => {
   const OVER_BOUND_SHAPE: ResolvedRunShape = {
     cardinality: "many-to-many",
     localRecordCount: 3163,
+    localDeclaredRecordCount: 3163,
     partnerRecordCount: 3164,
     localExpectsOutput: true,
     partnerAssociationTableWithheld: false,
@@ -678,6 +679,7 @@ describe("naming what the agreed terms resolved to", () => {
     exchangeConfirming({
       cardinality: "one-to-one",
       localRecordCount: 3163,
+      localDeclaredRecordCount: 3163,
       partnerRecordCount: 3164,
       localExpectsOutput: true,
       partnerAssociationTableWithheld: false,

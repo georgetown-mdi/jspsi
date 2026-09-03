@@ -15,7 +15,10 @@ import {
   type LinkageCardinality,
 } from "../src/link";
 import { MAX_WEBRTC_FRAME_BYTES } from "../src/connection/binaryPackBounds";
-import { MAX_KEY_CANDIDATES_PER_ROW } from "../src/fanOutFunctions";
+import {
+  FAN_OUT_CANDIDATES_PER_ELEMENT,
+  MAX_KEY_CANDIDATE_WIDTH,
+} from "../src/fanOutFunctions";
 import { MAX_LINKAGE_ENTRIES } from "../src/config/linkageTerms";
 import {
   MAX_FRAME_SIZE_BYTES,
@@ -790,7 +793,7 @@ test("singlePassDatasetExceedsCap fires exactly at slots = the budget", () => {
   const perKey = Math.floor(MAX_SINGLE_PASS_CELLS / 4);
   expect(singlePassDatasetExceedsCap(4, perKey)).toBe(false);
   expect(singlePassDatasetExceedsCap(4, perKey + 1)).toBe(true);
-  // A key that fans out counts MAX_KEY_CANDIDATES_PER_ROW toward the same
+  // A key that fans out counts its whole declared width toward the same
   // unchanged budget, so it buys its width with rows: four keys of which one fans
   // out is an effective key count of 23.
   const perSlot = Math.floor(MAX_SINGLE_PASS_CELLS / 23);
@@ -828,7 +831,7 @@ test("singlePassReplyByteCap weights the sender heavier and charges the ragged t
     recordCount,
   });
   expect(singlePassReplyByteCap(2, size(10, 2), size(5, 2))).toBe(
-    (40 + 4) * (2 * 10) + 40 * (2 * 5) + 256,
+    (40 + 4) * (2 * 10) + 40 * (2 * 5) + 4 * (2 * 10) + 256,
   );
   // The two arguments are NOT interchangeable: the sender carries the index table
   // (+4/slot), so swapping the sender and receiver sizes changes the value. This
@@ -839,18 +842,22 @@ test("singlePassReplyByteCap weights the sender heavier and charges the ragged t
   expect(singlePassReplyByteCap(3, size(100, 3), size(200, 3))).not.toBe(
     singlePassReplyByteCap(3, size(200, 3), size(100, 3)),
   );
-  // A sender that fans out ships the ragged table, whose per-cell count prefix is
-  // the only added term; the receiver's fan-out adds nothing beyond its own slots,
-  // since it ships no index table.
+  // The ragged table's per-cell count prefix is charged on every exchange, on the
+  // sender's cells alone: a party whose own standardization fans out ships that
+  // layout while the agreed terms show no width at all, so no function of those
+  // terms can tell in advance which layout a legitimate sender will ship. The
+  // receiver's own width adds nothing beyond its slots, since it ships no index
+  // table.
   expect(singlePassReplyByteCap(1, size(10, 20), size(5, 1))).toBe(
     (40 + 4) * (20 * 10) + 40 * (1 * 5) + 4 * (1 * 10) + 256,
   );
   expect(singlePassReplyByteCap(1, size(10, 1), size(5, 20))).toBe(
-    (40 + 4) * (1 * 10) + 40 * (20 * 5) + 256,
+    (40 + 4) * (1 * 10) + 40 * (20 * 5) + 4 * (1 * 10) + 256,
   );
-  // At the same slot budget, a fanning-out sender's cap exceeds a fan-out-free
-  // one's: the ragged table's per-cell count prefixes are the added term, which is
-  // why the envelope invariant below is maximized over a fanning-out sender.
+  // At the same slot budget, a wider sender's cap exceeds a narrow one's: its
+  // slots are spread over fewer records, so its cells cost the same while its
+  // count prefixes cost less -- which is why the envelope invariant below is
+  // maximized over the narrow sender rather than assumed.
   const atCeiling = singlePassReplyByteCap(
     1,
     { effectiveKeyCount: 1, recordCount: MAX_SINGLE_PASS_CELLS },
@@ -859,12 +866,12 @@ test("singlePassReplyByteCap weights the sender heavier and charges the ragged t
   const atFanOutCeiling = singlePassReplyByteCap(
     1,
     {
-      effectiveKeyCount: MAX_KEY_CANDIDATES_PER_ROW,
-      recordCount: MAX_SINGLE_PASS_CELLS / MAX_KEY_CANDIDATES_PER_ROW,
+      effectiveKeyCount: FAN_OUT_CANDIDATES_PER_ELEMENT,
+      recordCount: MAX_SINGLE_PASS_CELLS / FAN_OUT_CANDIDATES_PER_ELEMENT,
     },
     { effectiveKeyCount: 1, recordCount: MAX_SINGLE_PASS_CELLS },
   );
-  expect(atFanOutCeiling).toBeGreaterThan(atCeiling);
+  expect(atFanOutCeiling).toBeLessThan(atCeiling);
 });
 
 test("singlePassReplyByteCap stays below both transport envelopes at its maximum over the admissible space", () => {
@@ -876,21 +883,25 @@ test("singlePassReplyByteCap stays below both transport envelopes at its maximum
   //
   // The maximum is SEARCHED rather than hand-picked, so a change to any of those
   // bounds re-maximizes here instead of leaving the invariant evaluated at an
-  // interior point that still passes. The space searched is the one the wire admits
-  // (assertPartnerEffectiveKeyCount, protocolSetup.ts): up to MAX_LINKAGE_ENTRIES
-  // agreed keys, an effective key count of keyCount + fanOutKeys *
-  // (MAX_KEY_CANDIDATES_PER_ROW - 1) for a whole number of fanning-out keys, and --
-  // since the cap rises with rows -- the largest record count the slot budget
-  // leaves that width.
+  // interior point that still passes. The space searched is the one the terms
+  // admit (declaredKeyWidth, fanOutFunctions.ts): up to MAX_LINKAGE_ENTRIES agreed
+  // keys, an effective key count of keyCount + fanOutKeys * (width - 1) for a
+  // whole number of keys at each declarable per-key width, and -- since the cap
+  // rises with rows -- the largest record count the slot budget leaves that width.
+  const declarableWidths = [
+    FAN_OUT_CANDIDATES_PER_ELEMENT,
+    MAX_KEY_CANDIDATE_WIDTH,
+  ];
   const partiesAt = (keyCount: number) =>
-    Array.from({ length: keyCount + 1 }, (_unused, fanOutKeys) => {
-      const effectiveKeyCount =
-        keyCount + fanOutKeys * (MAX_KEY_CANDIDATES_PER_ROW - 1);
-      return {
-        effectiveKeyCount,
-        recordCount: Math.floor(MAX_SINGLE_PASS_CELLS / effectiveKeyCount),
-      };
-    });
+    declarableWidths.flatMap((width) =>
+      Array.from({ length: keyCount + 1 }, (_unused, fanOutKeys) => {
+        const effectiveKeyCount = keyCount + fanOutKeys * (width - 1);
+        return {
+          effectiveKeyCount,
+          recordCount: Math.floor(MAX_SINGLE_PASS_CELLS / effectiveKeyCount),
+        };
+      }),
+    );
   const empty = { effectiveKeyCount: 0, recordCount: 0 };
   let worst = { bytes: 0, keyCount: 0, sender: empty, receiver: empty };
   for (let keyCount = 1; keyCount <= MAX_LINKAGE_ENTRIES; keyCount++) {
@@ -906,8 +917,13 @@ test("singlePassReplyByteCap stays below both transport envelopes at its maximum
   expect(singlePassExchangeExceedsCap(worst.sender, worst.receiver)).toBe(
     false,
   );
-  // It fans out, which is what makes the ragged count-prefix term the binding one.
-  expect(partyFansOut(worst.keyCount, worst.sender)).toBe(true);
+  // The count-prefix term is charged per (key, sender record), so the maximizing
+  // sender is the NARROWEST admissible one: its slots are spread over the most
+  // records.
+  expect(partyFansOut(worst.keyCount, worst.sender)).toBe(false);
+  // The whole-MiB figure frameSize.ts's own docstring states for the slot
+  // ceiling, derived from the searched maximum rather than restated there.
+  expect(Math.floor(worst.bytes / 1024 / 1024)).toBe(251);
   // The file-sync backstop, a core constant.
   expect(worst.bytes).toBeLessThan(MAX_FRAME_SIZE_BYTES);
   // The nearer constraint: the WebRTC data channel's fixed browser-tab envelope.
@@ -1223,7 +1239,7 @@ test("a run whose own declared size is over the ceiling keeps the local diagnosi
   // it declared -- with no attribution to the partner, so an operator whose own
   // dataset stops the run is sent to the configuration that can lift it.
   const localRecords =
-    Math.floor(MAX_SINGLE_PASS_CELLS / MAX_KEY_CANDIDATES_PER_ROW) + 1;
+    Math.floor(MAX_SINGLE_PASS_CELLS / FAN_OUT_CANDIDATES_PER_ELEMENT) + 1;
   const [conn, peer] = createMessagePipe();
   const receiver = new PSIParticipant(
     "client",
@@ -1240,8 +1256,8 @@ test("a run whose own declared size is over the ceiling keeps the local diagnosi
       partnerRecordCount: 1,
       // One key fanning out over this party's own standardization: the width its
       // advertisement claims, and what multiplies its rows into the budget.
-      localEffectiveKeyCount: MAX_KEY_CANDIDATES_PER_ROW,
-      partnerEffectiveKeyCount: 1,
+      keyWidths: [FAN_OUT_CANDIDATES_PER_ELEMENT],
+      localFanOutFactor: 1,
     },
     false,
     -1,
@@ -1250,9 +1266,9 @@ test("a run whose own declared size is over the ceiling keeps the local diagnosi
   await expect(run).rejects.toThrow(/single-pass cannot carry this dataset/);
   await expect(run).rejects.toThrow(
     new RegExp(
-      `this party declared ${MAX_KEY_CANDIDATES_PER_ROW} effective linkage ` +
+      `this party declared ${FAN_OUT_CANDIDATES_PER_ELEMENT} effective linkage ` +
         `key\\(s\\) across ${localRecords} record\\(s\\), which is ` +
-        `${MAX_KEY_CANDIDATES_PER_ROW * localRecords} value slot\\(s\\)`,
+        `${FAN_OUT_CANDIDATES_PER_ELEMENT * localRecords} value slot\\(s\\)`,
     ),
   );
   await expect(run).rejects.toThrow(
@@ -1260,8 +1276,9 @@ test("a run whose own declared size is over the ceiling keeps the local diagnosi
   );
   await expect(run).rejects.toThrow(
     new RegExp(
-      `fans out counts as ${MAX_KEY_CANDIDATES_PER_ROW} toward that ceiling, ` +
-        "so removing a fan-out is another remedy",
+      "counts its whole declared width toward that ceiling, and cleaning " +
+        "that fans out declares the records it stands for, so removing a " +
+        "fan-out is another remedy",
     ),
   );
   await expect(run).rejects.not.toThrow(/the partner declared/);
@@ -1291,8 +1308,8 @@ test("an exchange over the ceiling on both sides names both declarations", async
     [["a", "b"]],
     {
       partnerRecordCount: localRecords,
-      localEffectiveKeyCount: MAX_SINGLE_PASS_CELLS,
-      partnerEffectiveKeyCount: 1,
+      keyWidths: [MAX_SINGLE_PASS_CELLS],
+      localFanOutFactor: 1,
     },
     false,
     -1,
@@ -1304,8 +1321,9 @@ test("an exchange over the ceiling on both sides names both declarations", async
       `this party declared ${MAX_SINGLE_PASS_CELLS} effective linkage ` +
         `key\\(s\\) across 2 record\\(s\\), which is ` +
         `${MAX_SINGLE_PASS_CELLS * 2} value slot\\(s\\), and the partner ` +
-        `declared 1 effective linkage key\\(s\\) across ${localRecords} ` +
-        `record\\(s\\), which is ${localRecords} value slot\\(s\\)`,
+        `declared ${MAX_SINGLE_PASS_CELLS} effective linkage key\\(s\\) ` +
+        `across ${localRecords} record\\(s\\), which is ` +
+        `${MAX_SINGLE_PASS_CELLS * localRecords} value slot\\(s\\)`,
     ),
   );
   await expect(run).rejects.toThrow(

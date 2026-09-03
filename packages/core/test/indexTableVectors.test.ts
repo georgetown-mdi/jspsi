@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, test } from "vitest";
 
-import { MAX_KEY_CANDIDATES_PER_ROW } from "../src/fanOutFunctions";
+import { FAN_OUT_CANDIDATES_PER_ELEMENT } from "../src/fanOutFunctions";
 import {
   decodeFixedWidthIndexTable,
   decodeInt32LE,
@@ -58,7 +58,7 @@ interface RaggedTable {
   permutation: Array<number>;
   /** Per key, per record, the build-order value ids that record contributes. */
   columns: Cells;
-  declaredEffectiveKeyCount: number;
+  keyWidths: Array<number>;
   slotBound: number;
   words: Array<number>;
   wordsHex: string;
@@ -68,7 +68,7 @@ interface RaggedTable {
 type Table = FixedWidthTable | RaggedTable;
 
 interface IndexTableVectors {
-  maxKeyCandidatesPerRow: number;
+  fanOutCandidatesPerElement: number;
   tables: Array<Table>;
   replyFrames: Array<{
     name: string;
@@ -127,7 +127,7 @@ function decodeTable(table: Table, words: Int32Array): Array<KeyCells> {
     : decodeRaggedIndexTable(
         "partner",
         words,
-        table.keyCount,
+        table.keyWidths,
         table.recordCount,
         table.slotBound,
       );
@@ -136,11 +136,13 @@ function decodeTable(table: Table, words: Int32Array): Array<KeyCells> {
 const named = (table: Table): [string, Table] => [table.name, table];
 
 describe("single-pass index-table layout vectors", () => {
-  test("the file pins this build's per-record candidate width", () => {
-    // The ragged layout's cell widths and the slot bounds derived beside them are
-    // all relative to this constant, so a file pinned to another value pins a
-    // table the receiver's own bounds would not admit.
-    expect(vectors.maxKeyCandidatesPerRow).toBe(MAX_KEY_CANDIDATES_PER_ROW);
+  test("the file pins this build's per-element candidate factor", () => {
+    // The ragged layout's declared key widths and the slot bounds derived beside
+    // them are all relative to this constant, so a file pinned to another value
+    // pins a table the receiver's own bounds would not admit.
+    expect(vectors.fanOutCandidatesPerElement).toBe(
+      FAN_OUT_CANDIDATES_PER_ELEMENT,
+    );
   });
 
   test("both layouts are pinned, as a table and inside a whole reply frame", () => {

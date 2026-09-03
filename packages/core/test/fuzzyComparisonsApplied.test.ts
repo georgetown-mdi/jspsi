@@ -13,18 +13,24 @@ import {
   StandardizedDataset,
   StandardizedField,
 } from "../src/standardization";
-import { MAX_KEY_CANDIDATES_PER_ROW } from "../src/fanOutFunctions";
+import { FAN_OUT_CANDIDATES_PER_ELEMENT } from "../src/fanOutFunctions";
 import { UsageError } from "../src/errors";
 import { getLogger } from "../src/utils/logger";
 import type { LinkageKey, TransformStep } from "../src/config/linkageTerms";
+import { withUnlistedFanOutFunctions } from "./utils/unlistedFanOut";
 
 describe("buildKeyStrings: fuzzy comparison expansion", () => {
   function makeDataset(fields: Record<string, string>): StandardizedDataset {
+    const keyOverEveryField = {
+      name: "every field",
+      elements: Object.keys(fields).map((field) => ({ field })),
+    };
     return new StandardizedDataset(
       Object.entries(fields).map(
         ([name, value]) =>
           new StandardizedField(name, name, [], [{ [name]: value }]),
       ),
+      [keyOverEveryField],
     );
   }
 
@@ -160,14 +166,17 @@ describe("buildKeyStrings: fuzzy comparison expansion", () => {
         { field: "date_of_birth", generateFuzzyComparisons: "adjacent_years" },
       ],
     };
-    const dataset = new StandardizedDataset([
-      new StandardizedField(
-        "date_of_birth",
-        "date_of_birth",
-        [{ function: "null_if", params: { value: "000" } }],
-        rows,
-      ),
-    ]);
+    const dataset = new StandardizedDataset(
+      [
+        new StandardizedField(
+          "date_of_birth",
+          "date_of_birth",
+          [{ function: "null_if", params: { value: "000" } }],
+          rows,
+        ),
+      ],
+      [key],
+    );
     expect(buildKeyStrings(key, dataset, 0)).toBeNull();
   });
 });
@@ -180,45 +189,88 @@ describe("buildKeyStrings: fuzzy fan-out guardrails", () => {
   });
 
   function datasetOf(fields: Record<string, string>): StandardizedDataset {
+    const keyOverEveryField = {
+      name: "every field",
+      elements: Object.keys(fields).map((field) => ({ field })),
+    };
     return new StandardizedDataset(
       Object.entries(fields).map(
         ([name, value]) =>
           new StandardizedField(name, name, [], [{ [name]: value }]),
       ),
+      [keyOverEveryField],
+    );
+  }
+
+  // The key both width tests below read: a plain element over a field an UNLISTED
+  // producer expands, crossed with one fuzzy element. The declared width counts
+  // the fuzzy factor alone -- an unlisted producer declares nothing -- so the row
+  // can realize more than the width buys it, which is the only way a fuzzy row
+  // outgrows a width derived from the ceilings its own expansion obeys.
+  const unlistedTimesFuzzyKey: LinkageKey = {
+    name: "A+DOB",
+    elements: [
+      { field: "a" },
+      { field: "date_of_birth", generateFuzzyComparisons: "adjacent_years" },
+    ],
+  };
+
+  function unlistedSplitDataset(
+    parts: string[],
+    date: string,
+  ): StandardizedDataset {
+    return withUnlistedFanOutFunctions(
+      () =>
+        new StandardizedDataset(
+          [
+            new StandardizedField(
+              "a",
+              "a",
+              [{ function: "split_on", params: { delimiter: "\\|" } }],
+              [{ a: parts.join("|") }],
+            ),
+            new StandardizedField(
+              "date_of_birth",
+              "date_of_birth",
+              [],
+              [{ date_of_birth: date }],
+            ),
+          ],
+          [unlistedTimesFuzzyKey],
+        ),
     );
   }
 
   test("the width bound refuses a row the expansion widened past it", () => {
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
-    const key: LinkageKey = {
-      name: "A+B",
-      elements: [
-        { field: "a", generateFuzzyComparisons: "edit_distances" },
-        { field: "b", generateFuzzyComparisons: "edit_distances" },
-      ],
-    };
-    // Each 8-character value expands to itself plus 8 deletions: 9 x 9 = 81, over
-    // the 20 the key's declared width buys it. The row is refused rather than
-    // narrowed to a slice of the candidate set the terms declare, and rather than
-    // warned and shipped -- 61 of its candidates would have no slot to occupy.
-    const dataset = datasetOf({ a: "ABCDEFGH", b: "JKLMNOPQ" });
-    expect(() => buildKeyStrings(key, dataset, 0)).toThrow(UsageError);
-    expect(() => buildKeyStrings(key, dataset, 0)).toThrow(
-      /expands one row into 81 candidate values through fuzzy comparisons, above the 20/,
+    // Five unlisted candidates crossed with the three an adjacent-years
+    // expansion realizes: 15, over the 3 the key's declared width buys it. The
+    // row is refused rather than narrowed to a slice of the candidate set the
+    // terms declare, and rather than warned and shipped -- 12 of its candidates
+    // would have no slot to occupy.
+    const dataset = unlistedSplitDataset(
+      ["V0", "V1", "V2", "V3", "V4"],
+      "19900115",
+    );
+    expect(() =>
+      buildKeyStrings(unlistedTimesFuzzyKey, dataset, 0, true),
+    ).toThrow(UsageError);
+    expect(() =>
+      buildKeyStrings(unlistedTimesFuzzyKey, dataset, 0, true),
+    ).toThrow(
+      /expands one row into 15 candidate values through fuzzy comparisons, above the 3/,
     );
     expect(warn).not.toHaveBeenCalled();
   });
 
   test("the width refusal names no local value", () => {
-    const key: LinkageKey = {
-      name: "A+B",
-      elements: [
-        { field: "a", generateFuzzyComparisons: "edit_distances" },
-        { field: "b", generateFuzzyComparisons: "edit_distances" },
-      ],
-    };
-    const dataset = datasetOf({ a: "SECRETAB", b: "SECRETCD" });
-    expect(() => buildKeyStrings(key, dataset, 0)).toThrow(/^(?!.*SECRET).*$/s);
+    const dataset = unlistedSplitDataset(
+      ["SECRETA", "SECRETB", "SECRETC", "SECRETD", "SECRETE"],
+      "19900115",
+    );
+    expect(() =>
+      buildKeyStrings(unlistedTimesFuzzyKey, dataset, 0, true),
+    ).toThrow(/^(?!.*SECRET).*$/s);
   });
 
   test("a declared fan-out keeps the warned drop at the same bound", () => {
@@ -236,7 +288,7 @@ describe("buildKeyStrings: fuzzy fan-out guardrails", () => {
       ],
     };
     const parts = Array.from(
-      { length: MAX_KEY_CANDIDATES_PER_ROW + 1 },
+      { length: FAN_OUT_CANDIDATES_PER_ELEMENT + 1 },
       (_unused, i) => `V${i}`,
     ).join("/");
     expect(buildKeyStrings(key, datasetOf({ a: parts }), 0)).toBeNull();
@@ -256,30 +308,11 @@ describe("buildKeyStrings: fuzzy fan-out guardrails", () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
-  test("a row fanning out past the hard cap is refused, not built", () => {
-    const key: LinkageKey = {
-      name: "wide",
-      elements: ["a", "b", "c", "d"].map((field) => ({
-        field,
-        generateFuzzyComparisons: "edit_distances" as const,
-      })),
-    };
-    // Six-character values expand to 7 candidates each: 7^4 = 2401 > 1024.
-    const dataset = datasetOf({
-      a: "ABCDEF",
-      b: "GHIJKL",
-      c: "MNOPQR",
-      d: "STUVWX",
-    });
-    expect(() => buildKeyStrings(key, dataset, 0)).toThrow(UsageError);
-    expect(() => buildKeyStrings(key, dataset, 0)).toThrow(/2401 key strings/);
-    // The cap has two openings and the count tells them apart for nobody, so the
-    // message names both. This row's is fuzzy expansion; the other opening, an
-    // unlisted producer, is pinned in standardization.test.ts.
-    expect(() => buildKeyStrings(key, dataset, 0)).toThrow(/fuzzy comparisons/);
-  });
-
-  test("the cap refusal names no local value", () => {
+  test("a key whose declared width exceeds the ceiling is refused", () => {
+    // Every element's candidates multiply across the key, so four elements each
+    // declaring the edit-distance ceiling declare a width no row could be
+    // assembled for. The refusal is settled from the TERMS, before any row is
+    // read, rather than dropping or refusing every row at the assembly cap.
     const key: LinkageKey = {
       name: "wide",
       elements: ["a", "b", "c", "d"].map((field) => ({
@@ -293,6 +326,12 @@ describe("buildKeyStrings: fuzzy fan-out guardrails", () => {
       c: "SECRETC",
       d: "SECRETD",
     });
+    expect(() => buildKeyStrings(key, dataset, 0)).toThrow(UsageError);
+    expect(() => buildKeyStrings(key, dataset, 0)).toThrow(
+      /declares a width of more than the 1024 candidate values/,
+    );
+    // The refusal reads the terms alone, so it echoes neither this row's values
+    // nor the partner's free text.
     expect(() => buildKeyStrings(key, dataset, 0)).toThrow(/^(?!.*SECRET).*$/s);
   });
 
@@ -302,20 +341,21 @@ describe("buildKeyStrings: fuzzy fan-out guardrails", () => {
     // which every candidate of the product carries a copy of. The key's byte
     // limb is what bounds those replicated bytes: this row's candidate COUNT is
     // inside the assembly cap, and its byte total is not.
+    const plainFields = ["p0", "p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8"];
     const key: LinkageKey = {
       name: "wide",
       elements: [
-        { field: "a" },
-        { field: "b", generateFuzzyComparisons: "edit_distances" },
-        { field: "c", generateFuzzyComparisons: "edit_distances" },
+        ...plainFields.map((field) => ({ field })),
+        { field: "b", generateFuzzyComparisons: "edit_distances" as const },
       ],
     };
     const dataset = datasetOf({
-      a: "A".repeat(4096),
-      b: Array.from({ length: 100 }, (_unused, i) =>
+      ...Object.fromEntries(
+        plainFields.map((field) => [field, "A".repeat(4096)]),
+      ),
+      b: Array.from({ length: 128 }, (_unused, i) =>
         String.fromCharCode(65 + (i % 26)),
       ).join(""),
-      c: "ABCDEFGHI",
     });
     expect(() => buildKeyStrings(key, dataset, 0)).toThrow(UsageError);
     expect(() => buildKeyStrings(key, dataset, 0)).toThrow(
@@ -342,15 +382,24 @@ describe("buildKeyStrings: fuzzy fan-out guardrails", () => {
 
 describe("buildKeyStrings: the expanding side", () => {
   function datasetOf(fields: Record<string, string>): StandardizedDataset {
+    const keyOverEveryField = {
+      name: "every field",
+      elements: Object.keys(fields).map((field) => ({ field })),
+    };
     return new StandardizedDataset(
       Object.entries(fields).map(
         ([name, value]) =>
           new StandardizedField(name, name, [], [{ [name]: value }]),
       ),
+      [keyOverEveryField],
     );
   }
 
-  const RECEIVER_ONLY_KIND = "transpositions";
+  // The receiver-only kind these mixed keys read is `adjacent_years` rather than
+  // `transpositions`: the two are classified alike, and its ceiling of three is
+  // what leaves room for a both-sided element beside it under the key's declared
+  // width ceiling.
+  const RECEIVER_ONLY_KIND = "adjacent_years";
   const BOTH_SIDED_KIND = "edit_distances";
 
   test.each([
@@ -396,17 +445,24 @@ describe("buildKeyStrings: the expanding side", () => {
 
   test("the sender of a mixed key still expands the both-sided element", () => {
     const key: LinkageKey = {
-      name: "LN+FN",
+      name: "DOB+FN",
       elements: [
-        { field: "last_name", generateFuzzyComparisons: RECEIVER_ONLY_KIND },
+        {
+          field: "date_of_birth",
+          generateFuzzyComparisons: RECEIVER_ONLY_KIND,
+        },
         { field: "first_name", generateFuzzyComparisons: BOTH_SIDED_KIND },
       ],
     };
-    const dataset = datasetOf({ last_name: "AB", first_name: "CD" });
-    // Receiver: {AB, BA} x {CD, D, C}. Sender: {AB} x {CD, D, C}.
-    expect(buildKeyStrings(key, dataset, 0, true)?.size).toBe(6);
+    const dataset = datasetOf({
+      date_of_birth: "19900115",
+      first_name: "CD",
+    });
+    // Receiver: {19900115, 19890115, 19910115} x {CD, D, C}.
+    // Sender:   {19900115}                     x {CD, D, C}.
+    expect(buildKeyStrings(key, dataset, 0, true)?.size).toBe(9);
     expect(buildKeyStrings(key, dataset, 0, false)).toEqual(
-      new Set(["ABCD", "ABD", "ABC"]),
+      new Set(["19900115CD", "19900115D", "19900115C"]),
     );
   });
 
@@ -423,10 +479,15 @@ describe("buildKeyStrings: the expanding side", () => {
       ],
       swap: ["a", "b"],
     };
-    const dataset = datasetOf({ a: "AB", b: "CD" });
+    const dataset = datasetOf({ a: "19900115", b: "20000229" });
+    // Swapped, the receiver reads b then a, expanding each: 2000-02-29 has no
+    // counterpart in either adjacent (non-leap) year, so it contributes itself
+    // alone, while 1990-01-15 contributes both neighbours.
     expect(buildKeyStrings(key, dataset, 0, true)).toEqual(
-      new Set(["CDAB", "DCAB", "CDBA", "DCBA"]),
+      new Set(["2000022919900115", "2000022919890115", "2000022919910115"]),
     );
-    expect(buildKeyStrings(key, dataset, 0, false)).toEqual(new Set(["ABCD"]));
+    expect(buildKeyStrings(key, dataset, 0, false)).toEqual(
+      new Set(["1990011520000229"]),
+    );
   });
 });

@@ -7,7 +7,10 @@ import {
   psiElementBounds,
 } from "../src/connection/frameSize";
 import { MAX_LINKAGE_ENTRIES } from "../src/config/linkageTerms";
-import { MAX_KEY_CANDIDATES_PER_ROW } from "../src/fanOutFunctions";
+import {
+  MAX_EFFECTIVE_KEY_COUNT,
+  MAX_KEY_CANDIDATE_WIDTH,
+} from "../src/fanOutFunctions";
 import { recordCountField } from "../src/protocolSetup";
 
 // --- MAX_RECORD_COUNT: the slot-count gate's exact-product dependency, as a check -
@@ -15,18 +18,26 @@ import { recordCountField } from "../src/protocolSetup";
 // recordCount > MAX_SINGLE_PASS_CELLS, and its precision argument holds only while
 // that product is exact -- below 2^53. That once rested implicitly on the
 // recordCount schema's `.int()` safe-integer ceiling; MAX_RECORD_COUNT makes it an
-// explicit bound. Fan-out multiplies the left factor by up to
-// MAX_KEY_CANDIDATES_PER_ROW, cutting the headroom from about 35x to about 1.8x, so
-// the check is against the EFFECTIVE key count: a future raise of
-// MAX_LINKAGE_ENTRIES, MAX_KEY_CANDIDATES_PER_ROW, or MAX_RECORD_COUNT that would
-// let the product lose precision fails here rather than silently corrupting the
-// gate.
+// explicit bound. A declared width multiplies the left factor, so the check is
+// against the EFFECTIVE key count: a future raise of MAX_EFFECTIVE_KEY_COUNT or
+// MAX_RECORD_COUNT that would let the product lose precision fails here rather
+// than silently corrupting the gate.
 
 test("effectiveKeyCount * recordCount stays an exact integer at the schema maxima", () => {
-  const maxEffectiveKeyCount = MAX_LINKAGE_ENTRIES * MAX_KEY_CANDIDATES_PER_ROW;
-  const productAtMaxima = maxEffectiveKeyCount * MAX_RECORD_COUNT;
+  const productAtMaxima = MAX_EFFECTIVE_KEY_COUNT * MAX_RECORD_COUNT;
   expect(productAtMaxima).toBeLessThanOrEqual(Number.MAX_SAFE_INTEGER);
   expect(Number.isSafeInteger(productAtMaxima)).toBe(true);
+});
+
+// The load-bearing half of the same premise: what keeps the product exact is that
+// the ceiling binds the SUM of the per-key widths. Bounding each key at
+// MAX_KEY_CANDIDATE_WIDTH and letting MAX_LINKAGE_ENTRIES of them stand would put
+// the product past 2^53, so a change that re-keyed the ceiling onto the per-key
+// width fails here rather than corrupting the gate silently.
+test("bounding the per-key width alone would lose the exact product", () => {
+  const perKeyCeilingSum = MAX_LINKAGE_ENTRIES * MAX_KEY_CANDIDATE_WIDTH;
+  expect(perKeyCeilingSum).toBeGreaterThan(MAX_EFFECTIVE_KEY_COUNT);
+  expect(Number.isSafeInteger(perKeyCeilingSum * MAX_RECORD_COUNT)).toBe(false);
 });
 
 test("recordCountField rejects a record count above the explicit bound at decode", () => {

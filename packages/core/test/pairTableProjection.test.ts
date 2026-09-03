@@ -39,6 +39,7 @@ const shape = (
 ): ResolvedRunShape => ({
   cardinality,
   localRecordCount,
+  localDeclaredRecordCount: localRecordCount,
   partnerRecordCount,
   localExpectsOutput: true,
   partnerAssociationTableWithheld: false,
@@ -83,6 +84,54 @@ test("keeps the product exact past the safe-integer range the counts admit", () 
   );
 });
 
+// A party whose own cleaning fans out declares its rows times the factor, and
+// that declared figure is the only one its partner ever holds -- the raw count
+// crosses no wire. Constructed shapes rather than a driven exchange because the
+// combination is unreachable through prepareForExchange today: a fan-out runs
+// under single-pass alone, which refuses the both-sided cardinality this
+// projection is the only consumer of. The public shape admits it, so the
+// projection is pinned over it here.
+const fanned = (
+  rows: number,
+  factor: number,
+  partnerRecordCount: number,
+): ResolvedRunShape => ({
+  ...shape("many-to-many", rows, partnerRecordCount),
+  localDeclaredRecordCount: rows * factor,
+});
+
+test("both parties project one total when either side's cleaning fans out", () => {
+  // 100 rows fanned by 20 declare 2,000; the partner holds 500 rows and declares
+  // them. Each party multiplies the two DECLARED counts, so both project
+  // 1,000,000 -- where multiplying a raw local count by a declared partner one
+  // gives 50,000 on one side and 1,000,000 on the other for the same run, which
+  // is a bound one of them would cross and the other would not.
+  const fanningSide = projectPairTable(fanned(100, 20, 500));
+  const plainSide = projectPairTable(shape("many-to-many", 500, 2000));
+  expect(fanningSide?.projectedPairs).toBe(1_000_000n);
+  expect(plainSide?.projectedPairs).toBe(fanningSide?.projectedPairs);
+
+  // The same figure whichever seat fans out, including with both of them at it.
+  const bothA = projectPairTable(fanned(100, 20, 10_000));
+  const bothB = projectPairTable(fanned(500, 20, 2000));
+  expect(bothA?.projectedPairs).toBe(20_000_000n);
+  expect(bothB?.projectedPairs).toBe(bothA?.projectedPairs);
+});
+
+test("the advisory names the fanning party's own rows beside its declared count", () => {
+  // The declared figure is the one both parties multiply, so it is what the
+  // sentence leads with -- and on the fanning side it is a record count the
+  // operator cannot find in its own file, so the rows behind it are named too.
+  const advisory = describeResolvedRunShape(
+    fanned(1000, 20, 1000),
+  ).pairTableAdvisory!;
+  expect(advisory).toContain("20,000,000");
+  expect(advisory).toContain("the 20,000 records you declared");
+  expect(advisory).toContain("the 1,000 your partner declared");
+  expect(advisory).toContain("stands for your 1,000 records");
+  expect(advisory).toMatch(/^[\x20-\x7e]+$/);
+});
+
 test("projects nothing for a count the terms exchange would not have admitted", () => {
   // The bounds are the terms-exchange schema's, which refuses a count outside
   // them as a protocol decode failure. Failing soft here: no projection, while
@@ -99,6 +148,8 @@ test("projects nothing for a count the terms exchange would not have admitted", 
     );
   }
   expect(projectPairTable(shape("many-to-many", -1, 10))).toBeUndefined();
+  // The declared count is a factor now, so it is held to the same bounds.
+  expect(projectPairTable(fanned(MAX_RECORD_COUNT, 2, 10))).toBeUndefined();
 });
 
 // --- What a front end renders ------------------------------------------------
@@ -223,8 +274,10 @@ test("raises no advisory under the bound and names both contributions above it",
   // which side drives it: the product, this party's own count, and the count the
   // partner declared.
   expect(over.pairTableAdvisory).toContain("10,007,732");
-  expect(over.pairTableAdvisory).toContain("your 3,163 records");
+  expect(over.pairTableAdvisory).toContain("the 3,163 records you declared");
   expect(over.pairTableAdvisory).toContain("the 3,164 your partner declared");
+  // Nothing about a fan-out for a party whose declared count is its rows.
+  expect(over.pairTableAdvisory).not.toContain("stands for your");
   expect(over.pairTableAdvisory).toContain("10,000,000");
 });
 
@@ -355,11 +408,13 @@ test("hands the resolved shape to the front end before the first round", async (
   );
 
   // Both counts, read from this party's own side: the cardinality is the mirror
-  // label each party resolves, the local count is its own, and the partner's is
-  // the one that rode the terms exchange.
+  // label each party resolves, the local count is its own rows, and the
+  // partner's is the one that rode the terms exchange. Neither party's cleaning
+  // fans out here, so what each declared is what it holds.
   expect(captureA.runShape).toStrictEqual({
     cardinality: "many-to-many",
     localRecordCount: 4,
+    localDeclaredRecordCount: 4,
     partnerRecordCount: 6,
     localExpectsOutput: true,
     partnerAssociationTableWithheld: false,
@@ -367,6 +422,7 @@ test("hands the resolved shape to the front end before the first round", async (
   expect(captureB.runShape).toStrictEqual({
     cardinality: "many-to-many",
     localRecordCount: 6,
+    localDeclaredRecordCount: 6,
     partnerRecordCount: 4,
     localExpectsOutput: true,
     partnerAssociationTableWithheld: false,
@@ -423,6 +479,7 @@ test("a non-receiving party's own seam says so, on the cascade", async () => {
   expect(captureA.runShape).toStrictEqual({
     cardinality: "many-to-one",
     localRecordCount: 4,
+    localDeclaredRecordCount: 4,
     partnerRecordCount: 6,
     localExpectsOutput: true,
     partnerAssociationTableWithheld: false,
@@ -430,6 +487,7 @@ test("a non-receiving party's own seam says so, on the cascade", async () => {
   expect(captureB.runShape).toStrictEqual({
     cardinality: "one-to-many",
     localRecordCount: 6,
+    localDeclaredRecordCount: 6,
     partnerRecordCount: 4,
     localExpectsOutput: false,
     partnerAssociationTableWithheld: false,
@@ -468,6 +526,7 @@ test("a single-pass blind helper is named as reading nothing back", async () => 
   expect(captureA.runShape).toStrictEqual({
     cardinality: "many-to-one",
     localRecordCount: 4,
+    localDeclaredRecordCount: 4,
     partnerRecordCount: 6,
     localExpectsOutput: true,
     partnerAssociationTableWithheld: true,
@@ -494,6 +553,7 @@ test("an over-bound projection warns and the run completes", async () => {
   expect(captureA.runShape).toStrictEqual({
     cardinality: "many-to-many",
     localRecordCount: rows,
+    localDeclaredRecordCount: rows,
     partnerRecordCount: rows,
     localExpectsOutput: true,
     partnerAssociationTableWithheld: false,
@@ -502,7 +562,7 @@ test("an over-bound projection warns and the run completes", async () => {
     captureA.runShape!,
   ).pairTableAdvisory;
   expect(advisory).toContain("10,004,569");
-  expect(advisory).toContain("your 3,163 records");
+  expect(advisory).toContain("the 3,163 records you declared");
   expect(advisory).toContain("the 3,163 your partner declared");
 
   // Warned, and completing: both parties hold the one table the round produced.

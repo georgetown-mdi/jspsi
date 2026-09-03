@@ -105,7 +105,7 @@ const STUB_LINKAGE_TERMS = getDefaultLinkageTerms("Stand-in Party");
 const STUB_PREPARED = {
   metadata: [],
   linkageTerms: STUB_LINKAGE_TERMS,
-  dataset: new StandardizedDataset([]),
+  dataset: new StandardizedDataset([], []),
   rawRows: [],
   rowCount: 0,
 } satisfies PreparedExchange;
@@ -929,6 +929,7 @@ describe("runExchangeLifecycle", () => {
   const OVER_BOUND_SHAPE: ResolvedRunShape = {
     cardinality: "many-to-many",
     localRecordCount: 3163,
+    localDeclaredRecordCount: 3163,
     partnerRecordCount: 3163,
     localExpectsOutput: true,
     partnerAssociationTableWithheld: false,
@@ -1002,6 +1003,7 @@ describe("runExchangeLifecycle", () => {
       runExchangeConfirming({
         cardinality: "one-to-one",
         localRecordCount: 3163,
+        localDeclaredRecordCount: 3163,
         partnerRecordCount: 3163,
         localExpectsOutput: true,
         partnerAssociationTableWithheld: false,
@@ -1028,6 +1030,7 @@ describe("runExchangeLifecycle", () => {
     const shape: ResolvedRunShape = {
       cardinality: "one-to-many",
       localRecordCount: 3163,
+      localDeclaredRecordCount: 3163,
       partnerRecordCount: 3163,
       localExpectsOutput: true,
       partnerAssociationTableWithheld: false,

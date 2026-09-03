@@ -86,7 +86,7 @@ vi.mock("@psilink/core", async (importActual) => {
             linkageFields: [],
             linkageKeys: [],
           },
-          dataset: new actual.StandardizedDataset([]),
+          dataset: new actual.StandardizedDataset([], []),
           rawRows: [],
           rowCount: 0,
         }) satisfies PreparedExchange,

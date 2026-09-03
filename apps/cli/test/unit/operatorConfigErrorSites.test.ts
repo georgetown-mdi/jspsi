@@ -148,14 +148,10 @@ const RECORDED_SITES: readonly ConfigErrorSite[] = [
     file: "packages/core/src/exchange.ts",
     anchor: "prepareForExchange",
     raises: "OperatorConfigError",
-    interpolates: [
-      "MAX_KEY_CANDIDATES_PER_ROW",
-      "linkageTerms.linkageKeys.length",
-      "rawRows.length",
-    ],
+    interpolates: ["declaredRecordCount", "linkageTerms.linkageKeys.length"],
     provenance:
-      "no partner-AUTHORED text: `rawRows.length` is this party's own record " +
-      "count, `MAX_KEY_CANDIDATES_PER_ROW` a build constant, and " +
+      "no partner-AUTHORED text: `declaredRecordCount` is this party's own " +
+      "record count times a build constant, and " +
       "`linkageTerms.linkageKeys.length` a COUNT off the agreed terms, which " +
       "the accept path does adopt from the invitation. The count is the " +
       "verdict's whole basis -- what the content rule excludes is text another " +

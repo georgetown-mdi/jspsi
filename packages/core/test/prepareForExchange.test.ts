@@ -27,7 +27,7 @@ import {
 } from "../src/connection/frameSize";
 import {
   declaredEffectiveKeyCount,
-  MAX_KEY_CANDIDATES_PER_ROW,
+  FAN_OUT_CANDIDATES_PER_ELEMENT,
 } from "../src/fanOutFunctions";
 import {
   DEDUPLICATE_IMPLEMENTED_BY_STRATEGY,
@@ -484,31 +484,6 @@ describe("prepareForExchange: a fan-out transform is refused off single-pass", (
     });
     await expect(run).rejects.toThrow(/the connection was used/);
   });
-
-  test("runExchange refuses this party's own fan-out advertisement off single-pass", async () => {
-    // The advertisement is the same declaration read at the run boundary: a
-    // count above the agreed key count says this party fans out, which the
-    // partner refuses as a protocol violation. Refused locally first, so the
-    // operator reads its own configuration named rather than a message about the
-    // partner. Only a PreparedExchange assembled outside prepareForExchange
-    // reaches it, which is what setting the field by hand stands in for.
-    const prepared = prepareForExchange(
-      { linkageTerms: terms, metadata },
-      "Tester",
-      rawRows,
-      columns,
-    );
-    prepared.effectiveKeyCount = MAX_KEY_CANDIDATES_PER_ROW;
-
-    const run = runExchange(unusableConnection(), "initiator", prepared, {
-      psiLibrary: unusablePsiLibrary,
-    });
-    await expect(run).rejects.toThrow(UsageError);
-    await expect(run).rejects.toThrow(/effective key count/);
-    // Its own fault, named as its own: nothing in the message attributes the
-    // advertisement to the partner.
-    await expect(run).rejects.not.toThrow(/partner advertised/);
-  });
 });
 
 // --- The same two surfaces run under single-pass ------------------------------
@@ -546,7 +521,7 @@ describe("prepareForExchange: a fan-out transform runs under single-pass", () =>
     ],
   };
 
-  test("a standardization declaring split_on prepares, and advertises the fan-out width", () => {
+  test("a standardization declaring split_on prepares, declaring no width", () => {
     const prepared = prepareForExchange(
       {
         linkageTerms: singlePassTerms,
@@ -557,9 +532,12 @@ describe("prepareForExchange: a fan-out transform runs under single-pass", () =>
       rawRows,
       columns,
     );
-    // The width the partner's element bounds and read gate are derived from: the
-    // one key this party fans out counts as MAX_KEY_CANDIDATES_PER_ROW, not 1.
-    expect(prepared.effectiveKeyCount).toBe(MAX_KEY_CANDIDATES_PER_ROW);
+    // A local fan-out rides no agreed term, so the terms' width is unchanged and
+    // the dataset carries the fan-out the record count is multiplied by.
+    expect(declaredEffectiveKeyCount(singlePassTerms)).toBe(
+      singlePassTerms.linkageKeys.length,
+    );
+    expect(prepared.dataset.declaresFanOut).toBe(true);
   });
 
   test("a linkage-key element transform declaring split_on prepares", () => {
@@ -569,9 +547,12 @@ describe("prepareForExchange: a fan-out transform runs under single-pass", () =>
       rawRows,
       columns,
     );
-    expect(prepared.effectiveKeyCount).toBe(
-      declaredEffectiveKeyCount(splittingElementTerms),
+    // The width rides the agreed terms here, so the party's own cleaning declares
+    // nothing.
+    expect(declaredEffectiveKeyCount(splittingElementTerms)).toBe(
+      FAN_OUT_CANDIDATES_PER_ELEMENT,
     );
+    expect(prepared.dataset.declaresFanOut).toBe(false);
   });
 
   test("runExchange carries fan-out terms to the terms exchange", async () => {
@@ -625,7 +606,7 @@ describe("prepareForExchange: the single-pass ceiling pre-flight", () => {
     ],
   };
   // Just past the ceiling at a given declared width. The budget is on value slots,
-  // so a fanning-out config crosses it at MAX_KEY_CANDIDATES_PER_ROW times fewer
+  // so a fanning-out config crosses it at its whole declared width times fewer
   // rows. One row object shared across the array: both refusals here fire on the
   // counts, before anything reads a row.
   const rowsOverCeiling = (effectiveKeyCount: number): Array<CSVRow> =>
@@ -650,13 +631,13 @@ describe("prepareForExchange: the single-pass ceiling pre-flight", () => {
   });
 
   test("an over-ceiling fan-out config is offered the fan-out remedy the ceiling has for it", () => {
-    // A fan-out key costs MAX_KEY_CANDIDATES_PER_ROW value slots per record, so a
+    // A fan-out key costs its whole declared width in value slots per record, so a
     // fanning config crosses the ceiling at that many times fewer rows -- and
     // dropping the fan-out is a remedy that really does bring it back under. The
     // remedy is offered on the same discriminant the frame layout reads
     // (partyFansOut), so the guidance cannot disagree with the wire about whether
     // this party fans out.
-    const overCeilingRows = rowsOverCeiling(MAX_KEY_CANDIDATES_PER_ROW);
+    const overCeilingRows = rowsOverCeiling(FAN_OUT_CANDIDATES_PER_ELEMENT);
     // The dataset really is over the ceiling at the width this config declares,
     // rather than at its plain key count: the fan-out is what puts it over.
     expect(
@@ -693,9 +674,10 @@ describe("prepareForExchange: the single-pass ceiling pre-flight", () => {
       rawRows,
       columns,
     );
-    expect(prepared.effectiveKeyCount).toBe(
-      declaredEffectiveKeyCount(fanOutTerms),
+    expect(declaredEffectiveKeyCount(fanOutTerms)).toBe(
+      FAN_OUT_CANDIDATES_PER_ELEMENT,
     );
+    expect(prepared.rowCount).toBe(rawRows.length);
   });
 
   test("a standardization contradicting its terms is refused ahead of the ceiling", () => {
@@ -709,10 +691,7 @@ describe("prepareForExchange: the single-pass ceiling pre-flight", () => {
     const inconsistentStandardization: Standardization = [
       { output: "not_a_field", input: "first_name" },
     ];
-    const effectiveKeyCount = declaredEffectiveKeyCount(
-      singlePassTerms,
-      inconsistentStandardization,
-    );
+    const effectiveKeyCount = declaredEffectiveKeyCount(singlePassTerms);
     const overCeilingRows = rowsOverCeiling(effectiveKeyCount);
     // The dataset really is over the ceiling at the width this config declares, so
     // what arrives below is the ordering's doing rather than a fixture that never

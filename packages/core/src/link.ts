@@ -15,7 +15,7 @@ import {
   type SinglePassPartySize,
 } from "./connection/frameSize";
 import { assertBlockDiagonalClosure } from "./entityClosure";
-import { MAX_KEY_CANDIDATES_PER_ROW } from "./fanOutFunctions";
+import { FAN_OUT_CANDIDATES_PER_ELEMENT } from "./fanOutFunctions";
 import {
   fanOutReachedMatchingRefusal,
   type KeyCandidates,
@@ -444,10 +444,12 @@ export function attributableRoundMatches(
  *   yielding a candidate SET is refused rather than matched on one of them:
  *   fan-out matching runs under single-pass only (docs/spec/PROTOCOL.md, Fan-out
  *   matching).
- * @param partnerRecordCount - The partner's raw row count, exchanged over the
- *   encrypted channel during role resolution. It is the authenticated bound the
- *   partner-returned row indices are checked against before they reach the
- *   returned table (see utils/partnerIndices.ts).
+ * @param partnerRecordCount - The partner's declared record count -- its rows
+ *   times its own local fan-out factor (docs/spec/PROTOCOL.md, Role resolution
+ *   and work minimization) -- exchanged over the encrypted channel during role
+ *   resolution. It is the authenticated bound the partner-returned row indices
+ *   are checked against before they reach the returned table (see
+ *   utils/partnerIndices.ts).
  * @param verbosity - Log verbosity level (default 0).
  * @param setStage - Optional callback invoked with a progress label at each
  *   key round.
@@ -916,7 +918,10 @@ export async function linkViaCountOnlyPSI(
 // stays symmetric while neither operator is sent to a configuration that cannot
 // move it. Reducing either factor, or splitting the dataset, is the actionable
 // remedy on a breaching side, and removing a fan-out is another when that side
-// declares one.
+// declares one. This party's own declaration covers both places one can be
+// authored -- the agreed width, and the local cleaning that rides its record
+// count instead -- while the partner's cleaning is invisible here, so the
+// partner's hint rests on the agreed width alone.
 //
 // Every remedy it names is a configuration one of the two operators can change, so
 // its raise site is a UsageError (CLI exit 64) rather than a transport or internal
@@ -929,15 +934,20 @@ function singlePassOverCapMessage(
   numLinkageKeys: number,
   breach: SinglePassCeilingBreach,
   local: SinglePassPartySize,
+  localFansOut: boolean,
   partner: SinglePassPartySize,
 ): string {
   const declared = (who: string, party: SinglePassPartySize): string =>
     `${who} declared ${party.effectiveKeyCount} effective linkage key(s) ` +
     `across ${party.recordCount} record(s), which is ${valueSlots(party)} ` +
     "value slot(s)";
-  const fanOutRemedy = (whose: string): string =>
-    ` A linkage key that fans out counts as ${MAX_KEY_CANDIDATES_PER_ROW} ` +
-    `toward that ceiling, so removing ${whose} fan-out is another remedy.`;
+  const fanOutRemedy = (whose: string, cleaningToo: boolean): string =>
+    " A linkage key whose elements expand counts its whole declared width " +
+    "toward that ceiling" +
+    (cleaningToo
+      ? ", and cleaning that fans out declares the records it stands for,"
+      : ",") +
+    ` so removing ${whose} fan-out is another remedy.`;
 
   const cause =
     breach === "local"
@@ -951,7 +961,7 @@ function singlePassOverCapMessage(
     remedies.push(
       "Reduce the number of linkage keys or the record count, or split the " +
         "dataset into smaller batches." +
-        (partyFansOut(numLinkageKeys, local) ? fanOutRemedy("a") : ""),
+        (localFansOut ? fanOutRemedy("a", true) : ""),
     );
   if (breach !== "local")
     remedies.push(
@@ -963,7 +973,7 @@ function singlePassOverCapMessage(
           "its record count can lift this: the partner reduces its record " +
           "count or splits its dataset.") +
         (partyFansOut(numLinkageKeys, partner)
-          ? fanOutRemedy("the partner's")
+          ? fanOutRemedy("the partner's", false)
           : ""),
     );
 
@@ -1063,22 +1073,38 @@ export function withholdsSenderAssociationTable(
 }
 
 /**
- * The authenticated session state {@link linkViaSinglePassPSI} derives every one
- * of its bounds from: the partner's raw row count and both parties' declared
- * effective key counts, all three carried on the terms exchange. Nothing here is
- * read from an inbound linkage frame, so both parties compute the same numbers and
- * reach the same verdicts.
+ * The session state {@link linkViaSinglePassPSI} derives every one of its bounds
+ * from: the per-key widths the AGREED terms declare, which both parties derive
+ * identically with no advertisement, and the two parties' declared record counts,
+ * exchanged over the encrypted channel. Nothing here is read from an inbound
+ * linkage frame, so both parties compute the same numbers and reach the same
+ * verdicts.
  */
 export interface SinglePassSessionBounds {
   /**
-   * The partner's raw row count, exchanged over the encrypted channel during role
-   * resolution.
+   * The partner's declared record count, exchanged over the encrypted channel
+   * during role resolution. It is the partner's row count times its own local
+   * fan-out factor, which is why the reply's own record count is held to it as an
+   * upper bound rather than an equality.
    */
   readonly partnerRecordCount: number;
-  /** This party's own declared effective key count, as it advertised it. */
-  readonly localEffectiveKeyCount: number;
-  /** The partner's declared effective key count, as it advertised it. */
-  readonly partnerEffectiveKeyCount: number;
+  /**
+   * The candidate values one record may contribute to each agreed linkage key,
+   * positionally aligned with `data` and derived from the agreed terms alone
+   * ({@link declaredKeyWidth}), so both parties hold the identical vector.
+   */
+  readonly keyWidths: ReadonlyArray<number>;
+  /**
+   * The factor this party's own standardization multiplies its record count by
+   * (`localFanOutFactor`, fanOutFunctions.ts). This party's DECLARED record count
+   * -- what it carried on the terms exchange, and what the partner holds it to --
+   * is its row count times this factor, so the two are derived here from the data
+   * rather than passed in and left to diverge from it. It widens the per-cell
+   * bound this party's own table build is held to by exactly the multiple that
+   * declared count carries, and it is what makes this party ship the ragged layout
+   * when its local cleaning fans out but the agreed terms declare no width.
+   */
+  readonly localFanOutFactor: number;
 }
 
 /**
@@ -1174,65 +1200,76 @@ export async function linkViaSinglePassPSI(
       `single-pass PSI`,
   );
 
-  const {
-    partnerRecordCount,
-    localEffectiveKeyCount,
-    partnerEffectiveKeyCount,
-  } = bounds;
+  const { partnerRecordCount, keyWidths, localFanOutFactor } = bounds;
 
-  // The layout this party's own index table takes: ragged when its declared
-  // effective key count exceeds the agreed key count, fixed-width otherwise. The
-  // discriminant is the declared value rather than the data, so the build refuses
-  // a cell wider than what was declared instead of silently outgrowing the slot
+  if (keyWidths.length !== numLinkageKeys)
+    throw new Error(
+      `${participant.id}: single-pass was given ${keyWidths.length} declared ` +
+        `key width(s) for ${numLinkageKeys} linkage key(s)`,
+    );
+
+  // The effective key count both parties derive from the agreed terms: the sum of
+  // the per-key widths, with no advertisement to reconcile, so one value serves
+  // both sides of every derived bound.
+  const effectiveKeyCount = keyWidths.reduce((sum, width) => sum + width, 0);
+
+  // The per-cell bound this party's own table build is held to. The local factor
+  // rides this party's DECLARED RECORD COUNT rather than the agreed width, so the
+  // two multiply back to exactly the slot bound the partner derives.
+  const localCellWidths = keyWidths.map((width) => width * localFanOutFactor);
+
+  // The layout this party's own index table takes: ragged when a record may hold
+  // several candidates for a key -- because the agreed terms declare width, or
+  // because this party's own cleaning fans out -- fixed-width otherwise. The
+  // discriminant is the declaration rather than the data, so the build refuses a
+  // cell wider than what was declared instead of silently outgrowing the slot
   // bound derived from it.
-  const localFansOut = partyFansOut(numLinkageKeys, {
-    effectiveKeyCount: localEffectiveKeyCount,
-  });
+  const localFansOut =
+    partyFansOut(numLinkageKeys, { effectiveKeyCount }) ||
+    localFanOutFactor > 1;
 
   const { distinctValues, columns, numRecords, slotCount } =
-    getDistinctValuesAndIndices(data, localFansOut);
+    getDistinctValuesAndIndices(data, localFansOut, localCellWidths);
 
   // Map (own count, partner count, role) -> (sender size, receiver size). Both
   // parties derive the SAME pair: the starter is the PSI sender, the joiner the
-  // receiver. This is the authenticated session state the frame cap, the
-  // over-ceiling gate, and the index-table layout read -- never the inbound frame.
+  // receiver. This is the authenticated session state the frame cap and the
+  // over-ceiling gate read -- never the inbound frame.
   const isSender = participant.config.role === "starter";
+  // What this party declared on the terms exchange: its rows times its own
+  // fan-out factor, the same product the partner was handed.
+  const localRecordCount = numRecords * localFanOutFactor;
   const localSize: SinglePassPartySize = {
-    effectiveKeyCount: localEffectiveKeyCount,
-    recordCount: numRecords,
+    effectiveKeyCount,
+    recordCount: localRecordCount,
   };
   const partnerSize: SinglePassPartySize = {
-    effectiveKeyCount: partnerEffectiveKeyCount,
+    effectiveKeyCount,
     recordCount: partnerRecordCount,
   };
   const senderSize = isSender ? localSize : partnerSize;
   const receiverSize = isSender ? partnerSize : localSize;
-  // The sender's advertised width decides message 2's layout on BOTH sides, so a
-  // sender that declares no fan-out ships the frame it always shipped even when
-  // its partner fans out.
-  const senderFansOut = partyFansOut(numLinkageKeys, senderSize);
 
   // The value slots this party's own data actually occupies must fit the bound its
-  // advertisement claims: the partner's decode, its element bounds, and its read
+  // declaration claims: the partner's decode, its element bounds, and its read
   // gate are all derived from that claim, so exceeding it would have the partner
   // reject a frame this party built. A candidate producer whose width the declared
   // factors do not account for lands here rather than on the wire: a row within the
   // per-record bound still overruns the slots when the key it widens is one the
   // declared factors count as single-valued, which is what a producer outside
-  // FAN_OUT_FUNCTION_NAMES realizes -- `declaredEffectiveKeyCount`
-  // (fanOutFunctions.ts) declares a factor for each producer it knows. That
-  // producer is a configuration its operator can change, so the refusal is
-  // usage-typed rather than internal.
-  const localSlotBound = localEffectiveKeyCount * numRecords;
+  // FAN_OUT_FUNCTION_NAMES realizes -- `declaredKeyWidth` (fanOutFunctions.ts)
+  // declares a factor for each producer it knows. That producer is a configuration
+  // its operator can change, so the refusal is usage-typed rather than internal.
+  const localSlotBound = effectiveKeyCount * localRecordCount;
   if (slotCount > localSlotBound) {
     throw new UsageError(
       `${participant.id}: single-pass built ${slotCount} candidate value slot(s) ` +
         `across ${numLinkageKeys} linkage key(s) and ${numRecords} record(s), ` +
-        `more than the ${localSlotBound} this party's declared linkage terms and ` +
-        "standardization account for. Drop the step that expands a record's " +
-        "value for a key the declared factors count as single-valued -- a " +
-        "transform that expands one value without being a declared fan-out " +
-        "function -- so this party's rows fit the width it advertised.",
+        `more than the ${localSlotBound} this party's agreed linkage terms and ` +
+        "declared record count account for. Drop the step that expands a " +
+        "record's value for a key the declared factors count as single-valued " +
+        "-- a transform that expands one value without being a declared fan-out " +
+        "function -- so this party's rows fit the width its terms declare.",
     );
   }
 
@@ -1254,6 +1291,7 @@ export async function linkViaSinglePassPSI(
         numLinkageKeys,
         ceilingBreach,
         localSize,
+        localFansOut,
         partnerSize,
       ),
     );
@@ -1406,36 +1444,70 @@ export async function linkViaSinglePassPSI(
   } = decodeSinglePassReply(replyFrame);
 
   // Validate every count the reply declares against authenticated state, before
-  // it drives any allocation. The sender packs its own record count into the
-  // reply (part (c) of the wire format); it must equal the count the sender
-  // exchanged over the encrypted channel during role resolution
-  // (partnerRecordCount), which the over-ceiling gate above already bounded. This
-  // ties the decoded count to authenticated state rather than trusting the frame,
-  // and the index-table check then confirms the frame's own shape against the
-  // agreed key count, that record count, and the sender's declared slot bound --
-  // all before the allocations below, preserving the pre-allocation ordering.
-  if (numSenderRecords !== partnerRecordCount) {
+  // it drives any allocation. The sender packs the number of rows its table
+  // carries into the reply (part (c) of the wire format); it may declare no MORE
+  // than the record count the sender exchanged over the encrypted channel during
+  // role resolution (partnerRecordCount), which the over-ceiling gate above
+  // already bounded. The two are equal for a sender whose own cleaning does not
+  // fan out, and a fanning sender declares the multiple of its rows its factor
+  // stands for, so the tie is an upper bound rather than an equality. This ties
+  // the decoded count to authenticated state rather than trusting the frame, and
+  // the index-table check then confirms the frame's own shape against the agreed
+  // key count, that record count, and the sender's slot bound -- all before the
+  // allocations below, preserving the pre-allocation ordering.
+  if (numSenderRecords > partnerRecordCount) {
     throw partnerProtocolError(
       participant.id,
       `the single-pass reply declares ${numSenderRecords} sender record(s), ` +
-        `but the sender exchanged ${partnerRecordCount}`,
+        `more than the ${partnerRecordCount} the sender exchanged`,
     );
   }
-  const senderSlotBound = senderSize.effectiveKeyCount * numSenderRecords;
-  const senderCells = senderFansOut
-    ? decodeRaggedIndexTable(
-        participant.id,
-        stackedDistinctValueIndices,
-        numLinkageKeys,
-        numSenderRecords,
-        senderSlotBound,
-      )
-    : decodeFixedWidthIndexTable(
-        participant.id,
-        stackedDistinctValueIndices,
-        numLinkageKeys,
-        numSenderRecords,
-      );
+  // The sender's own fan-out factor, recovered from the two counts rather than
+  // advertised: its declared record count is its row count times the factor, so
+  // the quotient is that factor exactly. A local fan-out declares either no
+  // factor at all or one whole declared step's (localFanOutFactor,
+  // fanOutFunctions.ts), so those two quotients are the only ones an honest
+  // sender can produce and every other is refused -- a non-integer, a factor
+  // between them, one above the declared step's, and a frame declaring no rows
+  // against a positive exchanged count, which no factor multiplies up to. A
+  // sender holding no rows at all exchanged no records either, and that one
+  // legitimate zero case takes the unfanned factor. The sender's slot bound
+  // below stays derived from authenticated state whatever the frame says.
+  const senderFanOutFactor =
+    partnerRecordCount === 0 ? 1 : partnerRecordCount / numSenderRecords;
+  if (
+    senderFanOutFactor !== 1 &&
+    senderFanOutFactor !== FAN_OUT_CANDIDATES_PER_ELEMENT
+  ) {
+    throw partnerProtocolError(
+      participant.id,
+      `the single-pass reply declares ${numSenderRecords} sender record(s) ` +
+        `against the ${partnerRecordCount} the sender exchanged, which is not ` +
+        "a fan-out factor a declared step can produce",
+    );
+  }
+  // Bounded by the authenticated pair alone: the sender's row count times the
+  // factor is exactly its declared record count, so this is the same product the
+  // element bounds and the read gate were derived from.
+  const senderSlotBound = senderSize.effectiveKeyCount * partnerRecordCount;
+  // The sender ships the ragged layout for the same two reasons this party would:
+  // the agreed terms declare width, or the sender's own cleaning fans out -- which
+  // is what the recovered factor names.
+  const senderCells =
+    partyFansOut(numLinkageKeys, senderSize) || senderFanOutFactor > 1
+      ? decodeRaggedIndexTable(
+          participant.id,
+          stackedDistinctValueIndices,
+          keyWidths.map((width) => width * senderFanOutFactor),
+          numSenderRecords,
+          senderSlotBound,
+        )
+      : decodeFixedWidthIndexTable(
+          participant.id,
+          stackedDistinctValueIndices,
+          numLinkageKeys,
+          numSenderRecords,
+        );
 
   // Collect the request-masking transients before the match masking.
   relieveTransientMemory();
@@ -1580,15 +1652,17 @@ function localKeyCells(column: LocalKeyColumn): KeyCells {
 // the values themselves. "" is a real value with its own index, distinct from the
 // fixed-width layout's -1 absent marker (docs/spec/PROTOCOL.md, Key input data).
 //
-// `fansOut` is the party's DECLARED width, not an observation of its data: a
-// record's candidate set is refused here when it is wider than the declaration
-// admits, so the slot bound derived from that declaration -- which the partner's
-// element bounds, read gate, and decode all rest on -- cannot be outgrown by the
-// data. Values stay pooled across keys with no per-key tag, exactly as they are
-// without fan-out, and the replay compares them only within one key's round.
+// `fansOut` and `cellWidths` are the party's DECLARATION, not an observation of
+// its data: a record's candidate set is refused here when it is wider than the
+// per-key width declared for it, so the slot bound derived from that declaration
+// -- which the partner's element bounds, read gate, and decode all rest on --
+// cannot be outgrown by the data. Values stay pooled across keys with no per-key
+// tag, exactly as they are without fan-out, and the replay compares them only
+// within one key's round.
 function getDistinctValuesAndIndices(
   data: Array<IndexableIterable<KeyCandidates>>,
   fansOut: boolean,
+  cellWidths: ReadonlyArray<number>,
 ): {
   distinctValues: Array<string>;
   columns: Array<LocalKeyColumn>;
@@ -1653,14 +1727,15 @@ function getDistinctValuesAndIndices(
       // does not bind -- a fuzzy comparison, or an expansion from a function
       // outside FAN_OUT_FUNCTION_NAMES -- and each is a configuration its operator
       // can change.
-      if (width > MAX_KEY_CANDIDATES_PER_ROW)
+      if (width > cellWidths[j])
         throw new UsageError(
           `single-pass: record ${i} contributes ${width} candidate value(s) to ` +
-            `linkage key ${j}, more than the ${MAX_KEY_CANDIDATES_PER_ROW} one ` +
-            "record may contribute to one key. Drop the step that expands this " +
-            "record's value for that key -- a fuzzy comparison, or a transform " +
-            "that expands one value without being a declared fan-out function -- " +
-            "so no record realizes more candidates than the bound admits.",
+            `linkage key ${j}, more than the ${cellWidths[j]} this party's ` +
+            "agreed terms and standardization declare for it. Drop the step " +
+            "that expands this record's value for that key -- a fuzzy " +
+            "comparison, or a transform that expands one value without being a " +
+            "declared fan-out function -- so no record realizes more candidates " +
+            "than the declared width admits.",
         );
       starts[i + 1] = values.length;
     }
@@ -1750,23 +1825,25 @@ export function decodeFixedWidthIndexTable(
  * (key, record) cell is a count word `c` followed by `c` value-index words; there
  * is no absent marker, a record with no value for the key being `c = 0`.
  *
- * Every bound comes from state the partner cannot choose: the agreed key count,
- * the record count the sender carried on the terms exchange, the normative width
- * bound, and `slotBound` -- the sender's declared effective key count times that
- * record count, which is also what bounds the setup frame's element count, so an
- * index at or above it can address no value the sender could legitimately have
- * sent. The checks, in the order the fixed-width layout's own length check ran:
- * exactly `keyCount * numRecords` cells, each count in `0 .. 20`, the counts
- * totalling no more than the slot bound, each cell's indices strictly ascending
- * (which is also what rejects a repeat) and inside the value bound, and the words
- * ending exactly at the last index word.
+ * Every bound comes from state the partner cannot choose: `keyWidths`, the
+ * per-key widths the AGREED terms declare (scaled by the fan-out factor the two
+ * exchanged record counts fix), whose length is the agreed key count; the number
+ * of rows the reply declares, itself held to the sender's exchanged record count;
+ * and `slotBound` -- the sender's effective key count times that exchanged record
+ * count, which is also what bounds the setup frame's element count, so an index at
+ * or above it can address no value the sender could legitimately have sent. The
+ * checks, in the order the fixed-width layout's own length check ran: exactly
+ * `keyWidths.length * numRecords` cells, each count within that key's declared
+ * width, the counts totalling no more than the slot bound, each cell's indices
+ * strictly ascending (which is also what rejects a repeat) and inside the value
+ * bound, and the words ending exactly at the last index word.
  *
  * @internal exported for the malformed-frame wire-message tests.
  */
 export function decodeRaggedIndexTable(
   participantId: string,
   words: Int32Array,
-  keyCount: number,
+  keyWidths: ReadonlyArray<number>,
   numRecords: number,
   slotBound: number,
 ): Array<KeyCells> {
@@ -1776,6 +1853,7 @@ export function decodeRaggedIndexTable(
       `the single-pass distinct-value index table ${detail}`,
     );
   };
+  const keyCount = keyWidths.length;
   const cellCount = keyCount * numRecords;
   if (words.length < cellCount)
     refuse("declares fewer cells than the agreed key and record counts");
@@ -1795,8 +1873,8 @@ export function decodeRaggedIndexTable(
     keyStarts[0] = written;
     for (let row = 0; row < numRecords; ++row) {
       const width = words[read++];
-      if (width < 0 || width > MAX_KEY_CANDIDATES_PER_ROW)
-        refuse("declares a cell wider than one record may contribute to a key");
+      if (width < 0 || width > keyWidths[j])
+        refuse("declares a cell wider than the agreed terms declare for a key");
       if (read + width > words.length)
         refuse("is truncated inside a cell it declared");
       let previous = -1;
@@ -2066,9 +2144,9 @@ export function replaySinglePassCascade(
       }
       if (receiverCandidates.length === 0) continue;
       // Ascending here plus the ascending sender-row loop is exactly the normative
-      // lexicographic order. Each of the sender row's at most
-      // MAX_KEY_CANDIDATES_PER_ROW values contributes one receiver row, or the
-      // group behind it where the receiver deduplicates.
+      // lexicographic order. Each of the sender row's values, at most the width
+      // its key declares, contributes one receiver row, or the group behind it
+      // where the receiver deduplicates.
       receiverCandidates.sort((a, b) => a - b);
       touchedSenderRows.push(senderRow);
       let previous = -1;

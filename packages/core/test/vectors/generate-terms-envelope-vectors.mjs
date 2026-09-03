@@ -217,7 +217,6 @@ function readBack(result) {
     // is optional, and "the partner named itself none" is what this pins.
     partnerIdentity: result.partnerTerms.identity ?? null,
     partnerRecordCount: result.partnerRecordCount,
-    partnerEffectiveKeyCount: result.partnerEffectiveKeyCount,
     partnerSaveIntent: result.partnerSaveIntent,
     partnerDisclosesPayload: result.partnerDisclosesPayload ?? null,
     partnerHostKey: result.partnerHostKey ?? null,
@@ -244,7 +243,6 @@ async function runScenario(scenario) {
       side.saveIntent,
       side.hostKey,
       side.disclosesPayload,
-      side.effectiveKeyCount,
     );
 
   const [initiatorResult, responderResult] = await Promise.all([

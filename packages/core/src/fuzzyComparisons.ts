@@ -158,6 +158,51 @@ export function expandsOnReceiverOnly(kind: GenerateFuzzyComparisons): boolean {
 }
 
 /**
+ * The most candidate values `kind` can realize from one standardized value,
+ * counting the value itself.
+ *
+ * This is the factor a fuzzy element contributes to its key's declared width
+ * (`declaredKeyWidth`, fanOutFunctions.ts), so it must upper-bound
+ * {@link expandFuzzyComparisons}'s result for every value the expansion accepts:
+ * a ceiling below what the expansion realizes refuses an honest row at the width
+ * bound, and one above it spends value slots that stay empty.
+ *
+ * Each kind's count grows with the WIDTH of the value it is handed:
+ * `adjacent_years` emits the year either side of a canonical date, so three with
+ * the value, whatever the value's width; `edit_distances` emits one deletion per
+ * code point, so the width plus the value; `transpositions` emits one swap per
+ * adjacent pair, one fewer than the width, so the width with the value.
+ *
+ * `valueWidthBound` is the width the element's own transforms bound its value to
+ * (`elementValueWidthBound`, keyElementWidth.ts), which both parties derive from
+ * the agreed terms. An element whose transforms bound nothing passes `undefined`
+ * and takes {@link MAX_FUZZY_EXPANSION_INPUT_LENGTH}, the longest value the
+ * expansion accepts at all; a bound above that limit is clamped to it, since a
+ * wider value is refused rather than expanded.
+ *
+ * Total over the kind and pure, like {@link expandsOnReceiverOnly} beside it, so
+ * both parties derive the identical factor from the agreed terms and a member
+ * added to {@link GenerateFuzzyComparisons} without an arm here fails to compile.
+ */
+export function fuzzyCandidateCeiling(
+  kind: GenerateFuzzyComparisons,
+  valueWidthBound?: number,
+): number {
+  const width = Math.min(
+    valueWidthBound ?? MAX_FUZZY_EXPANSION_INPUT_LENGTH,
+    MAX_FUZZY_EXPANSION_INPUT_LENGTH,
+  );
+  switch (kind) {
+    case "adjacent_years":
+      return 3;
+    case "edit_distances":
+      return width + 1;
+    case "transpositions":
+      return width;
+  }
+}
+
+/**
  * Expand one standardized value into the match candidates a
  * `generateFuzzyComparisons` rule declares.
  *

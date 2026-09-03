@@ -77,10 +77,10 @@ export const MAX_PSI_DECODE_ELEMENTS = Math.floor(
  * Terminology: a "cell" is one (key, record) pair, and a "value slot" is one
  * candidate value one record contributes to one key's round. Without fan-out a
  * cell holds at most one slot and the two counts coincide; with fan-out a cell
- * holds up to {@link MAX_KEY_CANDIDATES_PER_ROW} of them, which is why the budget
- * is expressed in slots and the party's declared `effectiveKeyCount` -- the sum of
- * its per-key candidate factors, carried on the terms exchange -- replaces the raw
- * key count here (docs/spec/PROTOCOL.md, The width bound). A party's slot count is
+ * holds up to the width its key declares, which is why the budget is expressed in
+ * slots and the `effectiveKeyCount` -- the sum of the per-key widths the agreed
+ * terms declare -- replaces the raw key count here (docs/spec/PROTOCOL.md, The
+ * width bound). A party's slot count is
  * the worst-case UPPER BOUND on its count of distinct (deduplicated) linkage-key
  * values `D`, reached only when every slot holds a value that occurs nowhere else;
  * for sparse or repeating keys `D` is lower. This budget is on slots, not on `D`:
@@ -157,12 +157,11 @@ export const MAX_SINGLE_PASS_CELLS = 3_000_000;
  * requirement a value the gate no longer depends on silently.
  *
  * Value: 1,000,000,000,000 (10^12). The effective key count is bounded at
- * MAX_LINKAGE_ENTRIES * MAX_KEY_CANDIDATES_PER_ROW (256 keys each fanning out to
- * 20 candidates = 5,120), so `effectiveKeyCount * recordCount` at this ceiling is
- * 5.12 x 10^15, about 1.8x below 2^53 -- still exact, with materially less headroom
- * than the fan-out-free 2.56 x 10^14, which is why the `frameSize.test.ts`
- * invariant pins it against the EFFECTIVE key count and raising either the
- * candidate cap or MAX_LINKAGE_ENTRIES re-derives it. It is also astronomically
+ * MAX_EFFECTIVE_KEY_COUNT (5,120), so `effectiveKeyCount * recordCount` at this
+ * ceiling is 5.12 x 10^15, about 1.8x below 2^53 -- still exact, with materially
+ * less headroom than the fan-out-free 2.56 x 10^14, which is why the
+ * `frameSize.test.ts` invariant pins it against the EFFECTIVE key count and
+ * raising that ceiling re-derives it. It is also astronomically
  * above any legitimate dataset (the static frame cap admits ~15M curve points; the
  * single-pass slot cap is 3M), so it never rejects a real record count.
  * Defense-in-depth: the same bound keeps the {@link psiElementBounds} products
@@ -197,10 +196,11 @@ const SINGLE_PASS_REPLY_OVERHEAD_BYTES = 256;
 
 /**
  * One party's authenticated single-pass size, as the two quantities every derived
- * bound below is a function of: the party's declared `effectiveKeyCount` (the sum
- * of its per-key candidate factors, carried on the terms exchange) and its raw
- * record count (carried there too). Their product is the party's **value slot**
- * count -- the worst-case upper bound on its distinct linkage-key value count.
+ * bound below is a function of: the `effectiveKeyCount` both parties derive from
+ * the agreed terms (the sum of the per-key declared widths) and the party's
+ * declared record count, carried on the terms exchange. Their product is the
+ * party's **value slot** count -- the worst-case upper bound on its distinct
+ * linkage-key value count.
  *
  * Named rather than positional because both parties compute every bound below from
  * the SAME pair in the SAME roles, and a swapped sender/receiver pair silently
@@ -208,9 +208,15 @@ const SINGLE_PASS_REPLY_OVERHEAD_BYTES = 256;
  * two are not interchangeable).
  */
 export interface SinglePassPartySize {
-  /** The party's declared effective key count (`declaredEffectiveKeyCount`). */
+  /**
+   * The effective key count the agreed terms declare (`declaredEffectiveKeyCount`),
+   * the same number on both parties.
+   */
   readonly effectiveKeyCount: number;
-  /** The party's raw row count, as carried on the terms exchange. */
+  /**
+   * The party's declared record count -- its row count times its own local
+   * fan-out factor -- as carried on the terms exchange.
+   */
   readonly recordCount: number;
 }
 
@@ -334,21 +340,26 @@ export function singlePassExchangeExceedsCap(
  * slot counts and `sCells = keyCount * sender.recordCount`, the cap is
  *   (SINGLE_PASS_BYTES_PER_MASKED_VALUE + SINGLE_PASS_BYTES_PER_INDEX_WORD) * sSlots
  *   + SINGLE_PASS_BYTES_PER_MASKED_VALUE * rSlots
- *   + SINGLE_PASS_BYTES_PER_INDEX_WORD * sCells   [only when the sender fans out]
+ *   + SINGLE_PASS_BYTES_PER_INDEX_WORD * sCells
  *   + SINGLE_PASS_REPLY_OVERHEAD_BYTES
  * in exact integer arithmetic (all inputs are non-negative integers well below
  * 2^53, so no rounding occurs). The sender contributes a masked value plus an index
  * word per value slot; the receiver contributes a masked value per value slot; and
- * a sender that fans out ships the ragged index table, whose per-cell
- * candidate-count prefix is the last term. The discriminant is {@link
- * partyFansOut} on the sender, which both parties evaluate from the same
- * authenticated advertisement, so a fan-out-free exchange derives exactly the cap
- * it derived before fan-out existed.
+ * a sender shipping the ragged index table contributes its per-cell
+ * candidate-count prefix, the last term.
+ *
+ * That last term is unconditional, unlike the derived bounds beside it: a party
+ * whose OWN standardization fans out ships the ragged layout while the agreed
+ * terms show no width at all, so no function of the agreed terms can tell in
+ * advance which layout a legitimate sender will ship. Charging the prefix on every
+ * exchange keeps the cap an upper bound on both layouts, which is what a read gate
+ * must be -- undershooting rejects a legitimate frame, while overshooting only
+ * loosens defense-in-depth. It leaves the cap about a tenth above the frame a
+ * fan-out-free sender actually builds.
  *
  * Call only for an in-cap exchange (guard with {@link singlePassCeilingBreach}
  * first, or its boolean convenience {@link singlePassExchangeExceedsCap}): at the
- * slot ceiling the cap is about 240 MiB fan-out-free and about 251
- * MiB with the ragged table's count prefixes, below both transports' fixed
+ * slot ceiling the cap is about 251 MiB, below both transports' fixed
  * envelopes (the 256 MiB WebRTC envelope is the nearer one), so the per-transport
  * clamp -- min with {@link MAX_FRAME_SIZE_BYTES} for file-sync, with
  * `MAX_WEBRTC_FRAME_BYTES` (connection/binaryPackBounds.ts) for WebRTC -- is
@@ -362,14 +373,11 @@ export function singlePassReplyByteCap(
   sender: SinglePassPartySize,
   receiver: SinglePassPartySize,
 ): number {
-  const senderCountPrefixBytes = partyFansOut(keyCount, sender)
-    ? SINGLE_PASS_BYTES_PER_INDEX_WORD * keyCount * sender.recordCount
-    : 0;
   return (
     (SINGLE_PASS_BYTES_PER_MASKED_VALUE + SINGLE_PASS_BYTES_PER_INDEX_WORD) *
       valueSlots(sender) +
     SINGLE_PASS_BYTES_PER_MASKED_VALUE * valueSlots(receiver) +
-    senderCountPrefixBytes +
+    SINGLE_PASS_BYTES_PER_INDEX_WORD * keyCount * sender.recordCount +
     SINGLE_PASS_REPLY_OVERHEAD_BYTES
   );
 }
@@ -412,8 +420,8 @@ export interface PsiElementBounds {
  * The setup carries the SENDER's masked set; the request carries the RECEIVER's
  * masked set; the response re-encrypts that request, so it carries the receiver's
  * count too. Inputs are non-negative integers well below 2^53 (record counts are
- * bounded by {@link MAX_RECORD_COUNT}, effective key counts by MAX_LINKAGE_ENTRIES
- * times MAX_KEY_CANDIDATES_PER_ROW), so the products are exact.
+ * bounded by {@link MAX_RECORD_COUNT}, effective key counts by
+ * MAX_EFFECTIVE_KEY_COUNT), so the products are exact.
  */
 export function psiElementBounds(
   sender: SinglePassPartySize,

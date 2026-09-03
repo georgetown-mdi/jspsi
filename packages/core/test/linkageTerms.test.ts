@@ -974,6 +974,32 @@ test("common parse_date formats validate", () => {
   }
 });
 
+test("an empty parse_date outputFormat is rejected", () => {
+  // The one width-shaping param a partner can declare that settles a width of
+  // ZERO: the derived width of a parse_date element is the rendered layout's own
+  // length (elementValueWidthBound, keyElementWidth.ts), and a zero declares a key
+  // narrower than the one candidate the row builder emits for it -- refusing an
+  // honest row over a step the partner authored. No honest template declares a
+  // date that renders to nothing, so the shape is refused where the document is
+  // read. The message names the parameter and echoes no partner value.
+  const result = safeParseLinkageTerms(parseDateTerms({ output_format: "" }));
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(result.error.issues[0].path).toContain("outputFormat");
+  expect(result.error.issues[0].message).toMatch(
+    /parse_date outputFormat must not be empty/,
+  );
+  // One character is the narrowest layout that renders anything, and it parses.
+  expect(
+    safeParseLinkageTerms(parseDateTerms({ output_format: "Y" })).success,
+  ).toBe(true);
+  // An empty INPUT format is a different question -- it drops every value rather
+  // than rendering a zero-width one -- and is left to the dead-pipeline grading.
+  expect(
+    safeParseLinkageTerms(parseDateTerms({ input_format: "" })).success,
+  ).toBe(true);
+});
+
 test("a non-string parse_date format still validates, so the runtime factory handles it", () => {
   // Only a string format drives the regex build / output allocation; the factory
   // treats a non-string as an empty/absent format, so the length cap does not

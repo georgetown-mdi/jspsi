@@ -503,21 +503,19 @@ test("exitCodeForError: an unrecognized standardization function is EX_USAGE", (
   // an unattended supervisor to retry, and every retry conducts another whole
   // exchange ending at the same refusal.
   const rows = [{ SURNAME: "SMITH" }];
-  const dataset = new StandardizedDataset([
-    new StandardizedField("surname", "SURNAME", [], rows),
-  ]);
+  const key = {
+    name: "SURNAME",
+    elements: [
+      { field: "surname", transform: [{ function: "transliterate_han" }] },
+    ],
+  };
+  const dataset = new StandardizedDataset(
+    [new StandardizedField("surname", "SURNAME", [], rows)],
+    [key],
+  );
   let refusal: unknown;
   try {
-    buildKeyStrings(
-      {
-        name: "SURNAME",
-        elements: [
-          { field: "surname", transform: [{ function: "transliterate_han" }] },
-        ],
-      },
-      dataset,
-      0,
-    );
+    buildKeyStrings(key, dataset, 0);
   } catch (err: unknown) {
     refusal = err;
   }
