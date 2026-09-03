@@ -1,0 +1,14 @@
+# Everything an operator fills in or a host renders: a secret, a credential, cert
+# material, or a rendered configuration. The tracked half is the template and the
+# example beside it, and every script refuses to run rather than defaulting to a
+# value it was not given.
+aws/env
+certs/env
+relay.env
+acme.env
+acme/
+turnserver.conf
+static-auth-secret
+*.pem
+*.key
+*.crt

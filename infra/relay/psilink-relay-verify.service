@@ -1,0 +1,9 @@
+[Unit]
+Description=Verify the psilink relay carries a TURNS allocation
+Documentation=https://github.com/georgetown-mdi/jspsi/blob/main/infra/relay/README.md
+After=psilink-relay.service
+Requires=psilink-relay.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/psilink-relay/verify.sh

@@ -1,0 +1,9 @@
+[Unit]
+Description=Renew the psilink relay's TLS certificate by ACME DNS-01
+Documentation=https://github.com/georgetown-mdi/jspsi/blob/main/infra/relay/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/psilink-relay/certs/renew.sh

@@ -118,6 +118,24 @@ updates:
       # is the one shape that cannot leave that case uncovered.
       - dependency-name: "amazonlinux"
 
+  # The relay reference's base image. infra/relay/Dockerfile is a single pinned
+  # FROM and nothing else -- the digest's only home, since every other file there
+  # names the locally built tag -- so a bump here is the one-line digest edit
+  # this ecosystem exists for. It ships no code and runs in no workflow, but a
+  # coturn advisory reaches a deployment that was stood up from it, and a pull
+  # request is what surfaces one.
+  - package-ecosystem: docker
+    directory: "/infra/relay"
+    target-branch: "staging"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    cooldown:
+      # Only default-days is valid for the docker and github-actions
+      # ecosystems; the semver-*-days keys are supported for npm only.
+      default-days: 7
+
   # GitHub Actions used by the workflows in .github/workflows. Every action is
   # tag-pinned (e.g. actions/checkout@v7), and this block is configured against
   # that path.

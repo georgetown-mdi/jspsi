@@ -1,0 +1,81 @@
+# coturn configuration for the psilink standing relay.
+#
+# render-config.sh substitutes every __PLACEHOLDER__ below and writes the result
+# at mode 600, because the rendered file carries the static authentication
+# secret. This template is tracked; the rendered file is not.
+#
+# Placeholders: __LISTENING_IP__ __EXTERNAL_IP__ __REALM__ __MIN_PORT__
+# __MAX_PORT__ __USER_QUOTA__ __TOTAL_QUOTA__ __MAX_BPS__ __STATIC_AUTH_SECRET__
+
+# TURNS on 443/tcp is the whole client-facing surface. A restrictive network
+# leaves 443/tcp open and nothing else, which is the case this relay exists for,
+# and every other listener would be reachable without carrying anyone.
+tls-listening-port=443
+no-udp
+no-tcp
+no-dtls
+no-tlsv1
+no-tlsv1_1
+
+listening-ip=__LISTENING_IP__
+relay-ip=__LISTENING_IP__
+
+# public/private. The instance sees only its private address, so the relayed
+# candidate coturn advertises would be unroutable without this mapping.
+external-ip=__EXTERNAL_IP__
+
+# The UDP relay range. A peer's traffic leaves here whatever transport the client
+# reached the relay over, so this range is open inbound and outbound even though
+# no client listener is.
+min-port=__MIN_PORT__
+max-port=__MAX_PORT__
+
+fingerprint
+
+# The credential model: username is <unix-expiry>:<name>, password is the base64
+# HMAC-SHA1 of that username under the secret below. mint-credential.sh is the
+# only supported minting path, and realm must match what it signs against.
+use-auth-secret
+static-auth-secret=__STATIC_AUTH_SECRET__
+realm=__REALM__
+
+cert=/etc/coturn/certs/fullchain.pem
+pkey=/etc/coturn/certs/privkey.pem
+
+# Peer denial. A TURN allocation forwards to any address the client names, so
+# without these the relay is a proxy into whatever the instance can reach: its
+# own loopback services, the VPC, and the cloud metadata endpoint on
+# 169.254.169.254 -- which on a misconfigured instance hands out role
+# credentials. Loopback is denied explicitly rather than left to coturn's
+# default, so the posture is readable here and cannot change under us.
+denied-peer-ip=0.0.0.0-0.255.255.255
+denied-peer-ip=10.0.0.0-10.255.255.255
+denied-peer-ip=127.0.0.0-127.255.255.255
+denied-peer-ip=169.254.0.0-169.254.255.255
+denied-peer-ip=172.16.0.0-172.31.255.255
+denied-peer-ip=192.168.0.0-192.168.255.255
+denied-peer-ip=224.0.0.0-255.255.255.255
+denied-peer-ip=::1
+denied-peer-ip=fc00::-fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+denied-peer-ip=fe80::-febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+denied-peer-ip=ff00::-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+no-multicast-peers
+
+# What a leaked credential is worth. The credential expires in an hour, so these
+# bound the damage inside that hour: concurrent allocations per user and in
+# total, and the per-session rate. A psilink exchange is tens of kilobytes over
+# seconds, so these sit far above one exchange and far below a useful open relay.
+user-quota=__USER_QUOTA__
+total-quota=__TOTAL_QUOTA__
+max-bps=__MAX_BPS__
+
+# coturn's telnet CLI listens on the host with a default password. The web admin
+# interface is off unless it is asked for, and nothing here asks for it.
+no-cli
+
+log-file=stdout
+simple-log
+
+# The container's root filesystem is read-only, so the one path coturn writes is
+# named here and backed by the unit's tmpfs.
+pidfile=/var/tmp/turnserver.pid

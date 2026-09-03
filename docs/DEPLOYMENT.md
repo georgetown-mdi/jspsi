@@ -8,7 +8,11 @@ This document covers the deployment and operation of the supporting services req
 
 ## STUN/TURN
 
-PSI-Link does not bundle a STUN or TURN server, and no reference configuration is provided in this release. Deployments needing NAT traversal for WebRTC typically either point at a commercial ICE-credential service (Twilio Network Traversal Service and equivalents return time-limited credentials on demand; see [COMMUNICATION.md#stunturn](COMMUNICATION.md#stunturn)) or operate a self-hosted coturn instance using its upstream documentation. Reference configurations for both are targeted for the 1.1 release; see [ROADMAP.md](ROADMAP.md).
+PSI-Link does not bundle a STUN or TURN server. A deployment needing NAT traversal for WebRTC either points at a commercial ICE-credential service (Twilio Network Traversal Service and equivalents return time-limited credentials on demand; see [COMMUNICATION.md#stunturn](COMMUNICATION.md#stunturn)) or operates a relay of its own.
+
+For the self-hosted case, [`infra/relay/`](../infra/relay/README.md) is a reference deployment of coturn on a dedicated instance: a digest-pinned image, a hardened configuration, the unit that supervises it, ACME certificate renewal, a per-exchange credential helper, and a verification script. Its README is the operational document -- what to launch, what to open, and the order of operations. It is a proposal that nothing has yet been run from, so treat it as a starting point to verify in your environment rather than a validated configuration.
+
+A relay forwards the encrypted WebRTC channel without terminating it, so it sees addresses, timing, and volume and no exchange data. That holds whether the relay is yours or a vendor's, which is why a commercial service is an acceptable option; see [SECURITY_DESIGN.md](SECURITY_DESIGN.md#channel-security).
 
 ## WebSocket-to-TCP proxy
 

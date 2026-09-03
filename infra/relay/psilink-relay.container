@@ -1,0 +1,55 @@
+# Quadlet unit for the psilink standing relay. install.sh puts this at
+# /etc/containers/systemd/psilink-relay.container, where podman's systemd
+# generator turns it into psilink-relay.service at daemon-reload.
+#
+# systemd is the only supervisor: there is no container daemon under this, and
+# nothing restarts the relay except the unit below.
+#
+# The equivalent `docker run` line, for a host that runs docker instead, is in
+# README.md. The flags are the same ones; only the supervisor differs.
+
+[Unit]
+Description=psilink WebRTC relay (coturn, TURNS on 443/tcp)
+Documentation=https://github.com/georgetown-mdi/jspsi/blob/main/infra/relay/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+ContainerName=psilink-relay
+
+# The tag install.sh builds from this directory's Dockerfile, which is where the
+# base digest is pinned. Nothing here names a registry image or a floating tag.
+Image=localhost/psilink-relay:installed
+
+# TURN's relay port range and its NAT behaviour do not survive bridge networking
+# or published ports: coturn hands out a relayed transport address that the
+# translation would rewrite, and the range is wide enough that publishing it is
+# not a port list. Host networking is a requirement of the protocol here, not a
+# convenience.
+Network=host
+
+# The rendered configuration carries the static authentication secret and is
+# mounted read-only. The certificate directory is what the ACME deploy hook
+# writes and what coturn re-reads on restart.
+Volume=/etc/psilink-relay/turnserver.conf:/etc/coturn/turnserver.conf:ro
+Volume=/etc/psilink-relay/certs:/etc/coturn/certs:ro
+
+Exec=-c /etc/coturn/turnserver.conf
+
+NoNewPrivileges=true
+DropCapability=ALL
+AddCapability=NET_BIND_SERVICE
+ReadOnly=true
+Tmpfs=/var/tmp
+LogDriver=journald
+
+[Service]
+# Rendered on every start, not only at install: the instance's public address is
+# not a property of the installation, and a stale external-ip advertises a
+# relayed candidate nobody can reach.
+ExecStartPre=/opt/psilink-relay/render-config.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
