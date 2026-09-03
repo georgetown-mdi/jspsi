@@ -667,9 +667,12 @@ test("an injected path fails the run before anything is dialed", async () => {
   expect(mockState.dials).toHaveLength(0);
 });
 
-test("peer_timeout_ms bounds the rendezvous as well as the parked receive", () => {
-  // Its documented meaning is the total wait for the partner, which on a live
-  // channel is two waits: before the channel exists, and after.
+test("peer_timeout_ms bounds each of the transport's three waits", () => {
+  // Its documented meaning is the total wait for the partner, which on this
+  // transport is three waits: the rendezvous before the channel exists, the
+  // channel opening once both descriptions are exchanged, and the parked
+  // receive after. The reference doc's peer_timeout_ms row states that a set
+  // value replaces all three, and this is what holds it to that.
   const { options } = webRtcDialFrom(
     {
       channel: "webrtc",
@@ -681,9 +684,10 @@ test("peer_timeout_ms bounds the rendezvous as well as the parked receive", () =
   );
   expect(options.inactivityTimeoutMs).toBe(90_000);
   expect(options.rendezvousTimeoutMs).toBe(90_000);
+  expect(options.channelOpenTimeoutMs).toBe(90_000);
 });
 
-test("an unset peer_timeout_ms leaves both transport defaults in place", () => {
+test("an unset peer_timeout_ms leaves all three transport defaults in place", () => {
   const { options } = webRtcDialFrom(
     {
       channel: "webrtc",
@@ -694,4 +698,5 @@ test("an unset peer_timeout_ms leaves both transport defaults in place", () => {
   );
   expect(options.inactivityTimeoutMs).toBeUndefined();
   expect(options.rendezvousTimeoutMs).toBeUndefined();
+  expect(options.channelOpenTimeoutMs).toBeUndefined();
 });
