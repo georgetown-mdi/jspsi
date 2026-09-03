@@ -394,9 +394,9 @@ describe("the check's registration", () => {
     );
   });
 
-  it("runs as a step of the static-checks gate", () => {
+  it("runs as a step of the Static Checks gate", () => {
     const workflow = parse(readRoot(".github/workflows/static_checks.yaml"));
-    const steps = workflow.jobs["static-checks"].steps;
+    const steps = Object.values(workflow.jobs).flatMap((job) => job.steps);
     expect(
       steps.some((step) =>
         (step.run ?? "").includes("npm run check:built-in-set-versions"),
