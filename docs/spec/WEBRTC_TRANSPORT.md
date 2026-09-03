@@ -323,9 +323,11 @@ side reads it, so no key in it reaches the PeerJS client, the peer connection,
 or the ICE configuration above, and the only honored form of the map is the SFTP
 channel's, filtered through a default-deny allowlist
 ([EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md#connectionprovider_options)).
-That allowlist rather than a verbatim passthrough is what a consumer here would
-be held to, since an opaque map reaching the broker or peer options could
-otherwise move where this side connects.
+`npm run check:webrtc-provider-options-unread` holds that claim: it scans the
+CLI's and web app's WebRTC sources for a read of the option and fails the moment
+one appears. That allowlist rather than a verbatim passthrough is what a
+consumer here would be held to, since an opaque map reaching the broker or peer
+options could otherwise move where this side connects.
 
 ## Application-layer encryption
 

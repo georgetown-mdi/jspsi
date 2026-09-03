@@ -289,6 +289,16 @@ jobs:
       # quietly false.
       - name: Built-in STUN default claims
         run: npm run check:stun-default-claims
+      # docs/spec/WEBRTC_TRANSPORT.md and docs/EXCHANGE_REFERENCE.md state that
+      # connection.provider_options is inert on the webrtc channel: no transport
+      # on either side reads it, which is what lets the SFTP-only default-deny
+      # allowlist on that option stop there rather than needing a WebRTC
+      # counterpart. This scans the CLI's whole WebRTC connection directory and
+      # the web app's WebRTC entry points plus their first-party neighbours for
+      # a read of the option under either spelling, failing the moment one
+      # appears rather than leaving the claim to prose.
+      - name: WebRTC provider_options unread
+        run: npm run check:webrtc-provider-options-unread
       # A zero-setup exchange authors no linkage terms: each party derives them
       # from its own file, and the built-in keys work with no authoring only
       # because every one of them is built from the guaranteed-minimum PII both

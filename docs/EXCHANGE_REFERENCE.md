@@ -898,7 +898,7 @@ The receiver only reads files whose on-disk size matches the declared byte count
 
 *Type:* object  
 *Required:* no  
-*Applies to:* `sftp` (accepted on `webrtc` but inert: no WebRTC transport reads it; see [WEBRTC_TRANSPORT.md](spec/WEBRTC_TRANSPORT.md#ice))
+*Applies to:* `sftp` (accepted on `webrtc` but inert: no WebRTC transport reads it, held by `npm run check:webrtc-provider-options-unread`; see [WEBRTC_TRANSPORT.md](spec/WEBRTC_TRANSPORT.md#ice))
 
 An opaque key-value map of additional, non-security transport-tuning options for the underlying transport library. Keys and values are defined by the package providing the connection implementation. `@`-file pathing is supported here as well.
 
