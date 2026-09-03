@@ -5067,10 +5067,10 @@ test("handler: nothing reaches the operator between the terms and the question",
   // displayInvitation and promptConfirm would push the block off a short terminal
   // with nothing turning red -- so the property is a check rather than a comment.
   //
-  // It reads what the OPERATOR saw, not what one route emitted: the surface
-  // reaches them through the log's own sink on the default routing, and through
-  // the prompt's own stream where the log would miss it (--log-file), and both
-  // land on stderr. A check watching only the logger would pass while a direct
+  // It reads what the OPERATOR saw, not what one route emitted: on every routing
+  // that asks, the surface reaches them through the prompt's own stream on
+  // stderr, and under --log-file the log's copy lands in the file rather than
+  // beside it. A check watching only the logger would pass while a direct
   // prompt-stream write scrolled the block away. Both routings are driven here,
   // and in each the transcript is snapshotted at the instant the prompt is called.
   const fixture = offlineAcceptFixture();
@@ -5475,12 +5475,14 @@ const ARMORED_RENDERED = [
 ];
 
 /**
- * An invitation carrying key material in every partner-declared value the consent
- * surface renders: the inviting party's identity, the payload names declared in
- * each direction, a linkage key's name, a linkage field's name (with the keys
- * citing it), and the legal agreement's reference and purpose. The declared
- * `receive` names the column {@link armoredFixture} discloses, so the acceptance
- * renders it in this party's own outbound set too.
+ * An invitation carrying key material in the partner-declared values the
+ * consent surface renders that this fixture plants (the rule-set citation names
+ * and the transform names and parameters are left plain): the inviting party's
+ * identity, the payload names declared in each direction, a linkage key's name,
+ * a linkage field's name (with the keys citing it), and the legal agreement's
+ * reference and purpose. The declared `receive` names the column {@link
+ * armoredFixture} discloses, so the acceptance renders it in this party's own
+ * outbound set too.
  */
 function armoredToken(): InvitationToken {
   const base = sampleToken(FUTURE());
