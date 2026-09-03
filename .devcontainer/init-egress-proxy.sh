@@ -12,7 +12,8 @@ IFS=$'\n\t'        # vars, and pipeline failures; stricter word splitting.
 # default-deny, admitting a destination by HOSTNAME from
 # /usr/local/share/psilink-egress-allowlist plus PSILINK_EGRESS_EXTRA_HOSTS,
 # and an iptables OUTPUT rule that lets the tinyproxy uid -- and nothing else in
-# the container -- reach an address outside the IP allowlist.
+# the container -- reach ports 443 and 22 on an address outside the IP
+# allowlist.
 #
 # Everything init-firewall.sh admitted stays admitted, directly: the infra
 # profile's NO_PROXY names those hosts, so the workflow that runs in the default
@@ -33,8 +34,16 @@ LOG_FILE=/var/log/psilink-egress-proxy.log
 PID_FILE=/run/psilink-egress-proxy.pid
 ALLOWLIST_FILE=/usr/local/share/psilink-egress-allowlist
 
-# Undo everything this script added. Called by the trap and before a fresh
-# start, so re-running the script is idempotent rather than cumulative.
+# The one firewall rule this script adds, written once so the insert, the
+# existence check, and the delete cannot drift from each other. The port bound
+# is what limits the lane's width: tinyproxy's ConnectPort governs CONNECT
+# tunnels only, while the same proxy also serves absolute-URI HTTP requests,
+# which would otherwise reach any port on an admitted host.
+UID_RULE=(-p tcp -m multiport --dports 22,443 -m owner --uid-owner "$PROXY_USER" -j ACCEPT)
+
+# Undo everything this script added. Called by fail() and before a fresh start,
+# so re-running the script is idempotent rather than cumulative, and so calling
+# it twice on one failure is harmless.
 teardown() {
   if [ -f "$PID_FILE" ]; then
     kill "$(cat "$PID_FILE")" 2>/dev/null || true
@@ -49,16 +58,30 @@ teardown() {
   done
   rm -f "$PID_FILE"
   # Delete every copy of the uid rule, however many earlier runs left.
-  while iptables -C OUTPUT -p tcp -m owner --uid-owner "$PROXY_USER" -j ACCEPT 2>/dev/null; do
-    iptables -D OUTPUT -p tcp -m owner --uid-owner "$PROXY_USER" -j ACCEPT
+  while iptables -C OUTPUT "${UID_RULE[@]}" 2>/dev/null; do
+    iptables -D OUTPUT "${UID_RULE[@]}"
   done
 }
 
-trap 'rc=$?; echo "init-egress-proxy: error (rc=$rc) -- removing the proxy and its firewall rule; egress stays exactly what init-firewall.sh left"; teardown; exit $rc' ERR
+# The single failure exit. bash runs no ERR trap for a bare `exit` inside an
+# `if` or a loop, so a script that exited on its own after a state change would
+# leave the proxy running and the widened firewall rule in place while reporting
+# failure. Every failure after the first mutating command below goes through
+# here instead, which tears both back out.
+fail() {
+  trap - ERR
+  echo "ERROR: $*" >&2
+  teardown
+  exit 1
+}
+
+trap 'fail "init-egress-proxy failed (rc=$?) -- removing the proxy and its firewall rule; egress stays exactly what init-firewall.sh left"' ERR
 
 # The proxy widens nothing on its own: it is only reachable because of the uid
 # rule below, which is only safe on top of a built firewall. Refuse to run
 # against an unconfigured one rather than adding a rule to a permissive chain.
+# This is the last check before the first mutating command, so it is also the
+# last one that can exit without tearing anything down.
 if [ "$(iptables -S OUTPUT | head -n1)" != "-P OUTPUT DROP" ]; then
   echo "ERROR: OUTPUT policy is not DROP -- run init-firewall.sh first"
   exit 1
@@ -87,8 +110,7 @@ valid_pattern() {
 }
 
 if [ ! -r "$ALLOWLIST_FILE" ]; then
-  echo "ERROR: $ALLOWLIST_FILE is missing or unreadable"
-  exit 1
+  fail "$ALLOWLIST_FILE is missing or unreadable"
 fi
 
 # Strip comments and surrounding whitespace, drop blank lines. The extra hosts
@@ -101,8 +123,7 @@ patterns=$(
   } | sed -e 's/#.*$//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e '/^$/d' | sort -u
 )
 if [ -z "$patterns" ]; then
-  echo "ERROR: assembled allowlist is empty"
-  exit 1
+  fail "assembled allowlist is empty"
 fi
 
 invalid=0
@@ -113,8 +134,7 @@ while read -r pattern; do
   fi
 done <<<"$patterns"
 if [ "$invalid" -ne 0 ]; then
-  echo "ERROR: $invalid invalid pattern(s); refusing to start the proxy"
-  exit 1
+  fail "$invalid invalid pattern(s); refusing to start the proxy"
 fi
 
 mkdir -p "$CONF_DIR"
@@ -131,9 +151,10 @@ install -o "$PROXY_USER" -g "$PROXY_USER" -m 0644 /dev/null "$LOG_FILE"
 # expression, which is what keeps `example.com` from admitting
 # `notexample.com`. Filtering is on the host (FilterURLs is left at its default
 # of No), because every destination here arrives as CONNECT, where the proxy
-# sees the host and nothing else. ConnectPort is the only tunnel width offered:
-# 443 for HTTPS and 22 for SSH, so a tunnel to an arbitrary service port on an
-# admitted host is refused.
+# sees the host and nothing else. ConnectPort keeps CONNECT tunnels to 443 for
+# HTTPS and 22 for SSH; it does not reach the absolute-URI HTTP requests
+# tinyproxy also serves, so it is a second layer over the port bound carried by
+# UID_RULE rather than the width control itself.
 cat >"$CONF_FILE" <<EOF
 User $PROXY_USER
 Group $PROXY_USER
@@ -159,27 +180,40 @@ echo "init-egress-proxy: starting tinyproxy on $PROXY_URL with $(printf '%s\n' "
 tinyproxy -c "$CONF_FILE"
 
 # tinyproxy daemonizes, so the port is not necessarily bound when it returns.
-# A bare TCP connect is the whole question here, and unlike an HTTP request to
-# the proxy's own address it does not make tinyproxy log an error about a
-# transparent-proxy request it was never configured for.
-listening=0
+# Whether the port answers is the wrong question: a foreign process that bound
+# 8888 first answers a bare TCP connect just as well, and tinyproxy -- which
+# cannot then bind -- is not running at all. What the rule below widens egress
+# for is the proxy's uid, so what has to be true is that THIS run's tinyproxy is
+# alive under it. The pid file is the trustworthy channel for that: it lives in
+# root-only /run, teardown above deleted any earlier one, and tinyproxy writes
+# it only after it has the socket and has dropped to $PROXY_USER. The port probe
+# is the other half: together they answer "this run's proxy is up AND 8888 is
+# open", which is the pair the rule below is safe under.
+proxy_uid=$(id -u "$PROXY_USER")
+proxy_pid=
 for _ in $(seq 1 50); do
-  if nc -z -w 2 127.0.0.1 "$PROXY_PORT" 2>/dev/null; then
-    listening=1
-    break
+  if [ -s "$PID_FILE" ]; then
+    candidate=$(cat "$PID_FILE" 2>/dev/null || true)
+    if [ -n "$candidate" ] &&
+      [ "$(cat "/proc/$candidate/comm" 2>/dev/null || true)" = tinyproxy ] &&
+      [ "$(awk '$1 == "Uid:" { print $2 }' "/proc/$candidate/status" 2>/dev/null || true)" = "$proxy_uid" ] &&
+      [ "$(awk '$1 == "State:" { print $2 }' "/proc/$candidate/status" 2>/dev/null || true)" != Z ] &&
+      nc -z -w 2 127.0.0.1 "$PROXY_PORT" 2>/dev/null; then
+      proxy_pid=$candidate
+      break
+    fi
   fi
   sleep 0.2
 done
-if [ "$listening" -ne 1 ]; then
-  echo "ERROR: tinyproxy did not begin listening on $PROXY_URL"
-  exit 1
+if [ -z "$proxy_pid" ]; then
+  fail "no live tinyproxy of this run's own (uid $proxy_uid, pid file $PID_FILE) is listening on $PROXY_URL"
 fi
 
-# The one rule that widens egress, and it widens it for one uid. Inserted at the
-# head of OUTPUT so it precedes both the ipset match and the catch-all REJECT;
-# every other rule init-firewall.sh installed is untouched, so a process that is
-# not the proxy still reaches only the IP allowlist.
-iptables -I OUTPUT 1 -p tcp -m owner --uid-owner "$PROXY_USER" -j ACCEPT
+# The one rule that widens egress, and it widens it for one uid on two ports.
+# Inserted at the head of OUTPUT so it precedes both the ipset match and the
+# catch-all REJECT; every other rule init-firewall.sh installed is untouched, so
+# a process that is not the proxy still reaches only the IP allowlist.
+iptables -I OUTPUT 1 "${UID_RULE[@]}"
 
 # --- Verification -----------------------------------------------------------
 #
@@ -229,8 +263,7 @@ expect() { # $1 = label, $2 = observed, $3 = required prefix
   if [[ "$2" == "$3"* ]]; then
     echo "Proxy verification passed - $1: $2"
   else
-    echo "ERROR: Proxy verification failed - $1: expected '$3...', got '$2'"
-    return 1
+    fail "Proxy verification failed - $1: expected '$3...', got '$2'"
   fi
 }
 
@@ -255,12 +288,16 @@ if [ -n "${PSILINK_EGRESS_EXTRA_HOSTS:-}" ]; then
     [[ "$extra" != *'*'* ]] || continue
     result=$(via_proxy "https://$extra/")
     if [ "$result" = filtered ]; then
-      echo "ERROR: Proxy verification failed - PSILINK_EGRESS_EXTRA_HOSTS host $extra is filtered"
-      exit 1
+      fail "Proxy verification failed - PSILINK_EGRESS_EXTRA_HOSTS host $extra is filtered"
     fi
     echo "Proxy verification passed - added host $extra is admitted by the filter: $result"
   done < <(printf '%s\n' "${PSILINK_EGRESS_EXTRA_HOSTS}" | tr ',' '\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
 fi
+
+# Reading the chain needs root, which the node user has for these two scripts
+# and nothing else, so the script that holds it prints the result.
+echo "init-egress-proxy: OUTPUT chain now in force (the uid rule is this script's only addition):"
+iptables -S OUTPUT | sed 's/^/  /'
 
 trap - ERR
 echo "init-egress-proxy: complete -- hostname-gated egress on $PROXY_URL, refusals logged to $LOG_FILE"

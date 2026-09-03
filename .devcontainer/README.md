@@ -215,7 +215,8 @@ one, and it adds:
 - **The Docker CLIENT only** (`docker-ce-cli`, from Docker's signed apt
   repository), for `docker -H ssh://user@host` against a remote daemon.
 - **A second egress lane**: a `tinyproxy` HTTP CONNECT proxy on
-  `127.0.0.1:8888`, default-deny, admitting a destination by HOSTNAME.
+  `127.0.0.1:8888`, default-deny, admitting a destination by HOSTNAME and
+  reaching it only on port 443 or 22.
 
 ### Choosing it
 
@@ -240,10 +241,11 @@ can: `ec2.us-west-2.amazonaws.com` is one name, and
 `ec2-1-2-3-4.us-west-2.compute.amazonaws.com` is a different one.
 
 So the firewall is left exactly as the default profile has it, and the proxy is
-added beside it. One `iptables` rule connects the two: TCP egress is accepted
-for packets owned by the `tinyproxy` uid, ahead of the IP-allowlist match and
-the catch-all REJECT. Nothing else in the container gains an inch -- a process
-that is not the proxy still reaches only the IP allowlist.
+added beside it. One `iptables` rule connects the two: TCP egress to port 443 or
+22 is accepted for packets owned by the `tinyproxy` uid, ahead of the
+IP-allowlist match and the catch-all REJECT. Nothing else in the container gains
+an inch -- a process that is not the proxy still reaches only the IP allowlist,
+and the proxy itself reaches no other port.
 
 ### The two lanes, and which one a request takes
 
@@ -263,9 +265,10 @@ find a closed port.
 
 SSH is the exception that has to be stated: `/etc/ssh/ssh_config.d/` routes
 EVERY SSH destination through the proxy (`ProxyCommand nc -X connect`), because
-`ssh` opens a socket the firewall would otherwise reject. `localhost` is exempt,
-so the native `sshd` SFTP test backend is untouched. `github.com` is on the
-proxy allowlist for this reason as well as being on the IP one.
+`ssh` opens a socket the firewall would otherwise reject. `localhost` is exempt
+because an interactive `ssh` to a loopback `sshd` needs no proxy in its path at
+all. `github.com` is on the proxy allowlist for this reason as well as being on
+the IP one.
 
 ### The allowlist
 
@@ -328,8 +331,11 @@ On top of the residuals listed for both profiles above:
 - **A CONNECT tunnel carries anything.** The proxy sees the hostname and the
   port, then joins two sockets. It does not inspect what flows through, so an
   admitted host on 443 is a channel for whatever an agent wants to send it. The
-  allowlist decides who can be talked to, never what is said. `ConnectPort`
-  limits tunnels to 443 and 22, which is the whole of the width control.
+  allowlist decides who can be talked to, never what is said. The width control
+  is the firewall rule, which accepts the proxy uid's packets on ports 443 and
+  22 and no others; `ConnectPort` is a second, weaker layer, since it governs
+  CONNECT tunnels alone and the same proxy also forwards ordinary absolute-URI
+  HTTP requests.
 - **Two admitted namespaces are other people's.**
   `*.s3.us-west-2.amazonaws.com` is any account's bucket and
   `*.execute-api.us-west-2.amazonaws.com` is any account's API Gateway stage.
@@ -337,7 +343,9 @@ On top of the residuals listed for both profiles above:
   addresses a bucket -- and are a channel to storage and to an HTTP endpoint an
   adversary controls. `*.compute.amazonaws.com`, the same shape for EC2
   instances, is NOT admitted, and admitting it would give away the reason this
-  profile exists.
+  profile exists. `fnmatch`'s `*` spans dots, so those two patterns also admit
+  deeper labels within their own suffix (`a.b.c.s3.us-west-2.amazonaws.com`),
+  which is the same shared namespace rather than a wider one.
 - **DNS is still open**, exactly as in the default profile, and now resolves for
   the proxy as well.
 - **`PSILINK_EGRESS_EXTRA_HOSTS` is an environment variable**, so it is
@@ -354,12 +362,12 @@ On top of the residuals listed for both profiles above:
 Inside the container, after start:
 
 ```sh
-sudo iptables -S OUTPUT | head -3       # the uid rule sits ahead of everything
 cat /etc/psilink-egress-proxy/filter    # the assembled allowlist
 curl -x http://127.0.0.1:8888 -sS -o /dev/null -w '%{http_code}\n' \
   https://sts.us-west-2.amazonaws.com/                     # an HTTP status: reached
 curl -x http://127.0.0.1:8888 https://example.com/         # 403 from the proxy
 curl --noproxy '*' https://sts.us-west-2.amazonaws.com/    # refused by the firewall
+curl -x http://127.0.0.1:8888 http://checkip.amazonaws.com/  # 500: port 80 is outside the lane
 curl -x http://127.0.0.1:8888 \
   https://ec2-1-2-3-4.us-west-2.compute.amazonaws.com/     # 403: instances stay out
 aws sts get-caller-identity                                # an answer from AWS
@@ -368,8 +376,13 @@ docker --version && test ! -e /var/run/docker.sock         # client, no socket
 tail /var/log/psilink-egress-proxy.log                     # what was refused
 ```
 
-Re-running `sudo /usr/local/bin/init-egress-proxy.sh` is safe: it tears down the
-previous proxy and rule first, and if anything fails -- an unparseable pattern,
-a proxy that will not start, a probe that does not answer as expected -- it
-removes both again and exits non-zero, leaving egress exactly what
-`init-firewall.sh` left it.
+The chain itself is not on that list: reading it needs root, and the `node`
+account's sudo grant covers the two init scripts and nothing else. So
+`init-egress-proxy.sh` prints the resulting OUTPUT chain at the end of a
+successful start -- in the container-creation log, and again on demand from
+`sudo /usr/local/bin/init-egress-proxy.sh`.
+
+Re-running that script is safe: it tears down the previous proxy and rule first,
+and if anything fails -- an unparseable pattern, a proxy that will not start, a
+probe that does not answer as expected -- it removes both again and exits
+non-zero, leaving egress exactly what `init-firewall.sh` left it.

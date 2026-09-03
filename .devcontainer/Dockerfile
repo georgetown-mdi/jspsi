@@ -183,9 +183,9 @@ RUN set -eu; \
   echo '# Infra dev-container profile: every SSH destination is reached through the'; \
   echo '# loopback CONNECT proxy, so an SSH host is admitted by the same hostname'; \
   echo '# allowlist an HTTPS host is. Without this ssh opens a socket directly and'; \
-  echo '# the egress firewall rejects it. First match wins in ssh_config, so the'; \
-  echo '# loopback exemption -- the local sshd the SFTP test backend spawns -- has'; \
-  echo '# to precede the catch-all.'; \
+  echo '# the egress firewall rejects it. An interactive ssh to a loopback sshd'; \
+  echo '# needs no proxy in its path, and first match wins in ssh_config, so that'; \
+  echo '# exemption has to precede the catch-all.'; \
   echo 'Host localhost 127.0.0.1 ::1'; \
   echo '  ProxyCommand none'; \
   echo ''; \
