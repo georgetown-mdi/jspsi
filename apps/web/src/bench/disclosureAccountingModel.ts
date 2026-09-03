@@ -27,6 +27,7 @@ import {
   RECORDED_LINKAGE_RULE_SET_CAVEAT,
   displayPartyIdentity,
   displayText,
+  ruleSetCitation,
   sanitizeForDisplay,
 } from "@psilink/core";
 
@@ -193,17 +194,57 @@ function categoryLabel(column: {
 }
 
 /**
+ * One cited half of a rule set -- the set name beside that half's content
+ * version -- as one display value, composed through core's terms-value seam
+ * ({@link ruleSetCitation}) over the two values this sink has escaped.
+ *
+ * The seam's brand claims delimiting and control-character treatment, not
+ * escaping, so its result is not a {@link Displayable} on its own and the
+ * assertion below is what carries it into a fact. What makes the assertion true
+ * is that this function escapes both values itself and takes the raw pair to do
+ * it: every byte of the result is either a byte of a {@link sanitizeForDisplay}
+ * output or one of the printable-ASCII delimiters and the single space the seam
+ * composes with, so no value reaches a fact unescaped and no second pass is owed
+ * -- which is also why the escape cannot be lifted to the caller, where a value
+ * could arrive already branded and skip it. It is total, so there is no entry
+ * point through which an unescaped value could reach the assertion; the unit
+ * suite drives a crafted name and an out-of-shape version through it.
+ */
+function citedSetIdentity(setIdentity: {
+  name: string;
+  version: string;
+}): Displayable {
+  return ruleSetCitation(
+    sanitizeForDisplay(setIdentity.name),
+    sanitizeForDisplay(setIdentity.version),
+  ) as string as Displayable;
+}
+
+/**
  * The rule-set citation as its two cited halves, keys before fields -- the
  * specific artifact before the substrate it is built from, the order core's own
  * rule-set mismatch message and the acceptance surfaces both present them in.
  *
- * Each name is quoted because it is free text of the authoring party's choosing
- * that may carry a space, which would otherwise blur into the version beside it
- * ("hmis-keys 9.9.9" reading as either). The quoting reaches that far and no
- * further: a name carrying a double quote of its own can still close the quotes
- * early and fake the structure for a skimming reader, the same residual core
- * states for the clause it renders. The half's name leads the line as this app's
- * own chrome, outside the quotes, so a crafted value cannot occupy it.
+ * Each half renders through core's terms-value seam ({@link ruleSetCitation}),
+ * the grammar the two consent surfaces and core's own mismatch message render
+ * this pair with: the set name as one delimited run whose delimiter is doubled
+ * inside it, the content version through the checked bare form with that run as
+ * its fallback. A name is free text of the authoring party's choosing, so it may
+ * carry a space that would otherwise blur into the version beside it, or a
+ * delimiter and a version-shaped token that would spell a citation of some other
+ * set at some other version; inside a run, what it spells is content of one
+ * value rather than structure this line asserted. The half's name leads the line
+ * as this app's own chrome, outside the run, so a crafted value cannot occupy
+ * it.
+ *
+ * The record stores both values raw -- byte-exact is what its cross-party
+ * validation needs -- so unlike the consent surfaces, whose values arrive
+ * escaped from `summarizeInvitation`, this sink is where they cross the display
+ * boundary. The escape runs per value, ahead of the delimiters, for the reason
+ * the consent screen gives: it bounds and rewrites each value on its own, so its
+ * truncation cannot take the closing delimiter off a composed run. The two
+ * compose in that order -- the seam emits only printable ASCII, which the escape
+ * leaves alone -- so neither doubles the other's work.
  *
  * The caveat beneath them is core's ({@link RECORDED_LINKAGE_RULE_SET_CAVEAT}),
  * beside the per-verdict copy the consent surfaces render, so what the accounting
@@ -220,8 +261,8 @@ function ruleSetFact(
   return {
     label: RULE_SET_LABEL,
     values: [
-      displayText`Keys: "${sanitizeForDisplay(ruleSet.keySet.name)}" ${sanitizeForDisplay(ruleSet.keySet.version)}`,
-      displayText`Fields: "${sanitizeForDisplay(ruleSet.fieldSet.name)}" ${sanitizeForDisplay(ruleSet.fieldSet.version)}`,
+      displayText`Keys: ${citedSetIdentity(ruleSet.keySet)}`,
+      displayText`Fields: ${citedSetIdentity(ruleSet.fieldSet)}`,
     ],
     muted: RULE_SET_ABSENT,
     note: RECORDED_LINKAGE_RULE_SET_CAVEAT,
