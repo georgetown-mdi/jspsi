@@ -28,6 +28,7 @@ from a direction still open to a decision taken and built.
 | [linkage-rule-grounding.md](linkage-rule-grounding.md) | Proposal, pending adoption -- nothing here is adopted or shipped. |
 | [lockless-rendezvous-barrier.md](lockless-rendezvous-barrier.md) | Weighed and set aside; the shipped symmetric barrier stands. |
 | [one-sided-disclosure.md](one-sided-disclosure.md) | Resolved - shipped as the opt-in `single-pass` linkage strategy (the cascade stays the default). |
+| [one-sided-fuzzy-expansion.md](one-sided-fuzzy-expansion.md) | Decided and built, behind the flag the fuzzy expansion itself sits behind. |
 | [operator-message-control-characters.md](operator-message-control-characters.md) | Decided and built. |
 | [prebuild-provenance.md](prebuild-provenance.md) | Decided, built, and armed against a fork that attests. |
 | [psi-c-count-only.md](psi-c-count-only.md) | Decided and built. |

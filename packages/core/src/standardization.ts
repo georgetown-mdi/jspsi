@@ -32,6 +32,8 @@ import {
   MAX_DATE_FORMAT_LENGTH,
   MAX_TRANSFORM_PATTERN_LENGTH,
   referencedLinkageFieldNames,
+  swapPairFuzzyComparisonsDiffer,
+  swapPairTransformsDiffer,
 } from "./config/linkageTerms.js";
 import { inferMetadata } from "./config/metadata.js";
 import type { ColumnMetadata } from "./config/metadata.js";
@@ -2042,6 +2044,12 @@ function applyElementTransform(
 // for the round to compare like with like whichever party role resolution makes
 // receiver; the terms schema binds them (config/linkageTerms.ts), which is what
 // lets the transform stay with the position here.
+//
+// This list is the SWAPPED order alone. The receiver assembles the authored
+// order beside it -- the swap's full variant, one-sided like the receiver-only
+// fuzzy kinds ({@link expandsOnReceiverOnly}) and gated with them -- by
+// exchanging the two positions' assembled candidate lists rather than reading
+// the key a second time (see the assembly in buildKeyStringsUnderPlan).
 function swapElements(
   elements: LinkageKeyElement[],
   [nameA, nameB]: [string, string],
@@ -2438,6 +2446,17 @@ interface KeyReadPlan {
   readonly elements: LinkageKeyElement[];
   readonly pair: [number, number] | undefined;
   readonly fuzzyExpansions: ReadonlyArray<GenerateFuzzyComparisons | undefined>;
+  /**
+   * Whether this party also assembles the key in the order the terms AUTHOR it,
+   * beside the swapped order {@link KeyReadPlan.elements} carries -- the swap's
+   * full variant, which is what makes a swapped key match the two elements in
+   * EITHER order rather than in the exchanged one alone. True on the receiver of
+   * a key whose `swap` resolves, and only while
+   * `APPLIED_SETTINGS.fuzzyComparisons` is on: a second key string per row is a
+   * candidate set, which the cascade and the count-only round refuse, so it
+   * lands with the round that consumes one exactly as the fuzzy expansion does.
+   */
+  readonly assemblesSwapVariant: boolean;
   readonly fate: AccumulationFate;
   /**
    * The candidate values one record may contribute to this key's round: the width
@@ -2470,6 +2489,35 @@ function planFuzzyExpansions(
   });
 }
 
+// The receiver assembles the authored order by exchanging the swap pair's two
+// assembled candidate lists, which is the authored order exactly when the pair's
+// two positions declare the same transform and the same expansion -- the shape
+// the terms schema requires (config/linkageTerms.ts). Reading it off the terms
+// again here rather than trusting that rule keeps the premise a check: a key
+// assembled outside the schema is refused instead of matching on a set neither
+// order realizes. The key path locates the offender, as the width refusals do,
+// so the message echoes none of the partner's free text.
+function assertSwapPairPositionsAgree(
+  key: LinkageKey,
+  keyIndex: number | undefined,
+): void {
+  if (!swapPairTransformsDiffer(key) && !swapPairFuzzyComparisonsDiffer(key))
+    return;
+  const site =
+    keyIndex === undefined
+      ? "a linkage key"
+      : `the linkage key at linkageKeys[${keyIndex}]`;
+  throw new UsageError(
+    `${site} declares a swap whose two elements do not declare the same ` +
+      "transform and generate_fuzzy_comparisons. A swap moves the field " +
+      "references and leaves each element's own transform and expansion in " +
+      "place, so a mismatched pair would build one order from a column the " +
+      "other order never reads. The exchange is refused instead. Give the " +
+      "swapped pair one transform and one expansion in the agreed linkage " +
+      "terms.",
+  );
+}
+
 function planKeyRead(
   key: LinkageKey,
   dataset: StandardizedDataset,
@@ -2480,10 +2528,14 @@ function planKeyRead(
     isReceiver && key.swap
       ? swapElements(key.elements, key.swap)
       : { elements: key.elements, pair: undefined };
+  const assemblesSwapVariant =
+    pair !== undefined && APPLIED_SETTINGS.fuzzyComparisons;
+  if (assemblesSwapVariant) assertSwapPairPositionsAgree(key, keyIndex);
   return {
     elements,
     pair,
     fuzzyExpansions: planFuzzyExpansions(elements, isReceiver),
+    assemblesSwapVariant,
     fate: keyAccumulationFate(elements, dataset),
     width:
       declaredKeyWidth(key, keyIndex) *
@@ -2513,7 +2565,13 @@ function planKeyRead(
  * fuzzy expansions run. The receiver builds keys with the named elements swapped
  * and applies every declared expansion; the sender does neither the swap nor an
  * expansion {@link expandsOnReceiverOnly} classifies (see
- * {@link planFuzzyExpansions}).
+ * {@link planFuzzyExpansions}). Under
+ * `APPLIED_SETTINGS.fuzzyComparisons` the receiver assembles the key in BOTH
+ * orders rather than the swapped one alone, which is what makes a swapped key
+ * match the two elements in either order; one party assembling both is what the
+ * whole set of one-transposition variants is for, and the second party
+ * assembling them too would only double the work
+ * (docs/notes/one-sided-fuzzy-expansion.md).
  *
  * `keyIndex` is this key's position in the agreed terms' `linkageKeys`, carried
  * only so a magnitude refusal ({@link MAX_TRANSFORMED_VALUE_LENGTH},
@@ -2560,7 +2618,15 @@ export function buildKeyStrings(
 // reading a key this build classifies `refuse` as a `drop` instead.
 function buildKeyStringsUnderPlan(
   key: LinkageKey,
-  { elements, pair, fuzzyExpansions, fate, width, drops }: KeyReadPlan,
+  {
+    elements,
+    pair,
+    fuzzyExpansions,
+    assemblesSwapVariant,
+    fate,
+    width,
+    drops,
+  }: KeyReadPlan,
   dataset: StandardizedDataset,
   index: number,
   keyIndex: number | undefined,
@@ -2733,10 +2799,16 @@ function buildKeyStringsUnderPlan(
   // deliberately does not take (docs/spec/PROTOCOL.md, The width bound). Fuzzy
   // expansion keeps the refusal, the fate it takes at the width bound below too,
   // as does multiplicity from a function outside FAN_OUT_FUNCTION_NAMES.
-  const projectedKeyStrings = elementValues.reduce(
-    (count, values) => count * values.length,
-    1,
-  );
+  // The swap's full variant assembles the key twice -- the swapped order and the
+  // authored one -- from the same candidate lists, so both projections below take
+  // the product times the number of orders assembled. The two orders can only
+  // collide, never diverge in size, so the doubled projection bounds the union
+  // exactly as the single one bounds the product.
+  const ordersAssembled = assemblesSwapVariant ? 2 : 1;
+
+  const projectedKeyStrings =
+    ordersAssembled *
+    elementValues.reduce((count, values) => count * values.length, 1);
   if (projectedKeyStrings > MAX_KEY_STRINGS_PER_ROW) {
     if (!dropsOnExceedance)
       throw keyStringFanOutCapRefusal(projectedKeyStrings, keyIndex);
@@ -2789,6 +2861,23 @@ function buildKeyStringsUnderPlan(
       parts.join("").normalize("NFC"),
     ),
   );
+
+  // The swap's other order, from the lists already built: exchanging the pair's
+  // two candidate lists is the authored order because the pair's two positions
+  // declare one transform and one expansion, which planKeyRead checked before
+  // this row was read. A row whose two swapped values are equal realizes one
+  // order, not two, so the widening is measured on what the union RETAINED --
+  // the same footing the fuzzy expansion's own widening is measured on.
+  if (assemblesSwapVariant && pair !== undefined) {
+    const [idA, idB] = pair;
+    const authoredOrder = [...elementValues];
+    authoredOrder[idA] = elementValues[idB];
+    authoredOrder[idB] = elementValues[idA];
+    const swappedOrderOnly = result.size;
+    for (const parts of cartesianProduct(authoredOrder))
+      result.add(parts.join("").normalize("NFC"));
+    if (result.size > swappedOrderOnly) fuzzyWidened = true;
+  }
 
   // The width bound is measured on the assembled, DEDUPLICATED candidate set,
   // which is what a record contributes to the round, and it binds both candidate

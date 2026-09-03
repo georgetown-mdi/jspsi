@@ -164,6 +164,18 @@ export const MAX_EFFECTIVE_KEY_COUNT =
   MAX_LINKAGE_ENTRIES * FAN_OUT_CANDIDATES_PER_ELEMENT;
 
 /**
+ * The factor a key declaring `swap` multiplies into its declared width: the
+ * receiver assembles the key in the authored order and in the swapped one, so a
+ * record contributes at most twice the product of its elements' factors.
+ *
+ * Two rather than the element count, because the swap names exactly two
+ * positions and exchanging them is an involution -- the two orders are the whole
+ * of what either party assembles, and a record whose two swapped values are
+ * equal realizes one of them (docs/spec/PROTOCOL.md, The width bound).
+ */
+export const SWAP_VARIANT_WIDTH_FACTOR = 2;
+
+/**
  * The name of the first declared fan-out producer among `steps`, or `undefined`
  * when none of them declares one. Reads the frozen
  * {@link FAN_OUT_FUNCTION_NAMES} list rather than the compile-time membership
@@ -212,19 +224,29 @@ function keySite(keyIndex: number | undefined): string {
  * ceiling and derive the identical number from terms they have both agreed.
  *
  * `swap` exchanges two of a key's element FIELDS while each element keeps its own
- * transforms and fuzzy declaration, so it permutes no factor in the product and
- * the sender and the receiver reach the same width.
+ * transforms and fuzzy declaration, so it permutes no factor in the product. It
+ * contributes a factor of its own instead: the receiver assembles the key in the
+ * authored order as well as the swapped one, which is what makes a swapped key
+ * match its two elements in either order
+ * (docs/notes/one-sided-fuzzy-expansion.md), so a swapped key declares
+ * {@link SWAP_VARIANT_WIDTH_FACTOR} times the product of its elements' factors.
+ * The sender assembles the authored order alone and declares the same number,
+ * for the same reason it declares the receiver-only fuzzy ceilings.
  *
- * The fuzzy factor is gated on `APPLIED_SETTINGS.fuzzyComparisons`: declaring
- * width for candidates no row realizes would spend this party's share of the
- * single-pass ceiling on slots that stay empty.
+ * Both the fuzzy factor and the swap factor are gated on
+ * `APPLIED_SETTINGS.fuzzyComparisons`, the flag their expansions are gated on:
+ * declaring width for candidates no row realizes would spend this party's share
+ * of the single-pass ceiling on slots that stay empty.
  *
  * Throws a {@link UsageError} for a key whose declared width exceeds
  * {@link MAX_KEY_CANDIDATE_WIDTH} -- a width no row could assemble in full, so
  * every row of that key would be dropped or refused at the assembly cap.
  */
 export function declaredKeyWidth(key: LinkageKey, keyIndex?: number): number {
-  let width = 1;
+  let width =
+    APPLIED_SETTINGS.fuzzyComparisons && key.swap !== undefined
+      ? SWAP_VARIANT_WIDTH_FACTOR
+      : 1;
   for (const element of key.elements) {
     if (declaredFanOutFunction(element.transform) !== undefined)
       width *= FAN_OUT_CANDIDATES_PER_ELEMENT;

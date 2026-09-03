@@ -47,15 +47,54 @@ function fuzzyTerms(kind: GenerateFuzzyComparisons): LinkageTerms {
 // expansion the flag turns on.
 
 describe("transpositionCandidates", () => {
-  test("emits every adjacent swap and never the original", () => {
-    expect(transpositionCandidates("1234")).toEqual(["2134", "1324", "1243"]);
+  test("emits every two-position swap, not the adjacent ones alone", () => {
+    // All six pairs of a four-character value, in position order: the three
+    // non-adjacent ones ("3214", "4231", "1432") are what an adjacent-only
+    // enumeration misses, and what a value transposed across a separator needs.
+    expect(transpositionCandidates("1234")).toEqual([
+      "2134",
+      "3214",
+      "4231",
+      "1324",
+      "1432",
+      "1243",
+    ]);
   });
 
-  test("a repeated adjacent pair transposes to the original, so emits nothing", () => {
-    // "AAB": swapping positions 0/1 reproduces "AAB", so only the A/B swap is a
-    // real candidate.
-    expect(transpositionCandidates("AAB")).toEqual(["ABA"]);
+  test("the emitted set is the whole one-transposition neighbourhood", () => {
+    // The full-variant property one-sided expansion rests on: every value one
+    // transposition from "1234" is here, so a partner holding any of them meets
+    // this value without expanding its own (docs/notes/one-sided-fuzzy-expansion.md).
+    const points = Array.from("1234");
+    const neighbourhood = new Set<string>();
+    for (let i = 0; i < points.length; i++)
+      for (let j = 0; j < points.length; j++) {
+        if (i === j) continue;
+        const swapped = [...points];
+        swapped[i] = points[j];
+        swapped[j] = points[i];
+        const candidate = swapped.join("");
+        if (candidate !== "1234") neighbourhood.add(candidate);
+      }
+    expect(new Set(transpositionCandidates("1234"))).toEqual(neighbourhood);
+  });
+
+  test("a pair of identical characters transposes to the original, so emits nothing", () => {
+    // "AAB": swapping positions 0/1 reproduces "AAB", so only the two A/B swaps
+    // are real candidates.
+    expect(transpositionCandidates("AAB")).toEqual(["BAA", "ABA"]);
     expect(transpositionCandidates("AAAA")).toEqual([]);
+  });
+
+  test("no two pairs emit the same candidate", () => {
+    // A swap of differing characters changes the value at exactly its own two
+    // positions, so the pairs cannot collide -- which is what lets the ceiling be
+    // the pair count rather than an over-declaration above it.
+    for (const value of ["ABABAB", "AABBCC", "ABCABC", "AAB"]) {
+      const candidates = transpositionCandidates(value);
+      expect(new Set(candidates).size).toBe(candidates.length);
+      expect(candidates).not.toContain(value);
+    }
   });
 
   test("values too short to transpose emit nothing", () => {
@@ -213,6 +252,66 @@ describe("expandsOnReceiverOnly", () => {
   });
 });
 
+describe("what each side's expansion buys, as an intersection", () => {
+  // The two strategies, driven as the round drives them: one party's candidate
+  // set against the other's, meeting when they share a value. `expanded` is what
+  // a party that runs the expansion contributes and `[value]` what one that does
+  // not, so each case below is a whole round in miniature.
+  function meet(mine: string[], theirs: string[]): boolean {
+    const set = new Set(mine);
+    return theirs.some((value) => set.has(value));
+  }
+  const exact = (value: string): string[] => [value];
+  const expanded = (value: string, kind: GenerateFuzzyComparisons): string[] =>
+    expandFuzzyComparisons(value, kind);
+
+  test("edit_distances needs BOTH sides to expand", () => {
+    // A substitution: neither party's value is a deletion of the other's, so a
+    // deletion neighbourhood on one side alone reaches nothing. The two meet at
+    // "SMTH", which is a deletion of each.
+    const mine = "SMITH";
+    const theirs = "SMYTH";
+    expect(meet(expanded(mine, "edit_distances"), exact(theirs))).toBe(false);
+    expect(meet(exact(mine), expanded(theirs, "edit_distances"))).toBe(false);
+    expect(
+      meet(
+        expanded(mine, "edit_distances"),
+        expanded(theirs, "edit_distances"),
+      ),
+    ).toBe(true);
+  });
+
+  test.each([
+    { kind: "transpositions" as const, mine: "123456789", theirs: "923456781" },
+    { kind: "adjacent_years" as const, mine: "19900115", theirs: "19910115" },
+  ])(
+    "$kind meets on ONE side's expansion, whichever side that is",
+    ({ kind, mine, theirs }) => {
+      expect(meet(expanded(mine, kind), exact(theirs))).toBe(true);
+      expect(meet(exact(mine), expanded(theirs, kind))).toBe(true);
+    },
+  );
+
+  test.each([
+    { kind: "transpositions" as const, mine: "123456789", theirs: "923456781" },
+    { kind: "adjacent_years" as const, mine: "19900115", theirs: "19910115" },
+  ])(
+    "$kind on both sides adds candidates and no match the one side missed",
+    ({ kind, mine, theirs }) => {
+      // The cost of the symmetric reading: the pair already meets one-sided, so
+      // the second party's candidates buy nothing but their own count -- work,
+      // wire slots, and values that can collide with a THIRD record.
+      const oneSided = expanded(mine, kind).length + exact(theirs).length;
+      const symmetric =
+        expanded(mine, kind).length + expanded(theirs, kind).length;
+      expect(symmetric).toBeGreaterThan(oneSided);
+      expect(meet(expanded(mine, kind), expanded(theirs, kind))).toBe(
+        meet(expanded(mine, kind), exact(theirs)),
+      );
+    },
+  );
+});
+
 describe("the declared width of a fuzzy key", () => {
   // Read under the shipped flag (false) here; the widths the flag buys are pinned
   // in fuzzyExpansionWidth.test.ts, which mocks it on.
@@ -304,6 +403,27 @@ describe("buildKeyStrings while fuzzy expansion is not applied", () => {
         new Set(["SMITH"]),
       );
     }
+  });
+
+  test("a swapped key builds the exchanged order alone, not both orders", () => {
+    // The swap's full variant is gated with the expansion beside it: a second key
+    // string per row is a candidate set, which the cascade and the count-only
+    // round refuse, so it lands with the round that consumes one.
+    const dataset = makeDataset({ first_name: "JOHN", last_name: "SMITH" });
+    const key: LinkageKey = {
+      name: "FN+LN",
+      elements: [{ field: "first_name" }, { field: "last_name" }],
+      swap: ["first_name", "last_name"],
+    };
+    expect(buildKeyStrings(key, dataset, 0, true)).toEqual(
+      new Set(["SMITHJOHN"]),
+    );
+    expect(buildKeyStrings(key, dataset, 0, false)).toEqual(
+      new Set(["JOHNSMITH"]),
+    );
+    expect(
+      declaredEffectiveKeyCount({ linkageKeys: [key] } as LinkageTerms),
+    ).toBe(1);
   });
 
   test("a row the expansion would widen past the width bound still builds one key", () => {

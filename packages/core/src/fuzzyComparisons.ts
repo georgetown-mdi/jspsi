@@ -5,14 +5,15 @@ import type { GenerateFuzzyComparisons } from "./config/linkageTerms.js";
 /**
  * The longest standardized value the fuzzy expansion will widen.
  *
- * Every expansion kind emits O(length) candidates of O(length) characters each,
- * so the work and allocation for one element grow with the SQUARE of the value
- * it is handed. The value is local row data, whose length nothing upstream
- * bounds, while the decision to expand it comes from the partner-authored
- * linkage terms -- so without this cap a partner could declare a fuzzy element
- * over a field the local file happens to fill with very long cells and drive
- * unbounded per-row allocation. Names and canonical dates sit far below the cap,
- * so it never binds on real linkage data.
+ * Every expansion kind emits candidates of O(length) characters each: O(length)
+ * of them for the deletion kind, whose allocation therefore grows with the
+ * SQUARE of the value it is handed, and O(length^2) for the all-pairs
+ * transposition kind, whose allocation grows with its CUBE. The value is local
+ * row data, whose length nothing upstream bounds, while the decision to expand
+ * it comes from the partner-authored linkage terms -- so without this cap a
+ * partner could declare a fuzzy element over a field the local file happens to
+ * fill with very long cells and drive unbounded per-row allocation. Names and
+ * canonical dates sit far below the cap, so it never binds on real linkage data.
  *
  * A value above the cap is refused rather than passed through unexpanded:
  * passing it through would match that row on the single exact value while the
@@ -34,7 +35,7 @@ function fuzzyValueTooLongRefusal(kind: GenerateFuzzyComparisons): UsageError {
     `a linkage-key element declares "${kind}" fuzzy comparisons, but a row's ` +
       "standardized value is longer than the " +
       `${MAX_FUZZY_EXPANSION_INPUT_LENGTH}-character limit the expansion ` +
-      "accepts: expanding it would allocate work that grows with the square " +
+      "accepts: expanding it would allocate work that grows with at least the square " +
       "of the value's length, and matching the row on its exact value alone " +
       "would match on less than the terms declare. The exchange is refused " +
       "instead. Shorten the field with an element transform, or remove the " +
@@ -55,7 +56,15 @@ function nonCanonicalDateRefusal(): UsageError {
 }
 
 /**
- * Every adjacent-character transposition of `value`, excluding `value` itself.
+ * Every two-position transposition of `value` -- all pairs of positions, not
+ * adjacent ones alone -- excluding `value` itself.
+ *
+ * This is a FULL-VARIANT enumeration: the whole set of values one transposition
+ * away from `value`, which is why one party enumerating it suffices for two
+ * records a single transposition apart to meet (docs/notes/one-sided-fuzzy-expansion.md).
+ * Adjacent pairs alone would miss the transposition an operator most often makes
+ * across a separator, and would need both parties to expand to cover even the
+ * pairs it does reach.
  *
  * Iterates code points rather than UTF-16 units so a swap never splits a
  * surrogate pair into two lone surrogates -- a candidate no partner's
@@ -63,18 +72,20 @@ function nonCanonicalDateRefusal(): UsageError {
  * builder's final NFC pass unchanged.
  *
  * A pair of identical characters transposes to the original string, so it emits
- * no candidate.
+ * no candidate. Every other pair emits a candidate differing from `value` at
+ * exactly that pair's two positions, so no two pairs collide.
  */
 export function transpositionCandidates(value: string): string[] {
   const points = Array.from(value);
   const candidates: string[] = [];
-  for (let i = 0; i + 1 < points.length; i++) {
-    if (points[i] === points[i + 1]) continue;
-    const swapped = [...points];
-    swapped[i] = points[i + 1];
-    swapped[i + 1] = points[i];
-    candidates.push(swapped.join(""));
-  }
+  for (let i = 0; i < points.length; i++)
+    for (let j = i + 1; j < points.length; j++) {
+      if (points[i] === points[j]) continue;
+      const swapped = [...points];
+      swapped[i] = points[j];
+      swapped[j] = points[i];
+      candidates.push(swapped.join(""));
+    }
   return candidates;
 }
 
@@ -83,9 +94,11 @@ export function transpositionCandidates(value: string): string[] {
  * than `value`, so `value` itself is never among them.
  *
  * These are the values within one edit distance of `value` that are SHORTER
- * than it; the partner's own value is expanded by its own party, so a deletion
- * on each side covers a single substitution or insertion between them without
- * either side enumerating the alphabet.
+ * than it -- a deletion NEIGHBOURHOOD rather than a full variant enumeration,
+ * and the reason this kind is the one both parties expand: the partner's own
+ * value is expanded by its own party, so a deletion on each side covers a single
+ * substitution or insertion between them without either side enumerating the
+ * alphabet (docs/notes/one-sided-fuzzy-expansion.md).
  *
  * Deleting either character of a repeated pair yields the same string, so the
  * result is deduplicated.
@@ -137,11 +150,17 @@ export function adjacentYearCandidates(value: string): string[] {
  * moves no term, no terms hash, and no wire byte, extending the receiver-only
  * `swap` directive's precedent.
  *
- * `transpositions` and `adjacent_years` are role-keyed: their candidates are
- * built on the resolved receiver alone. `edit_distances` is built by BOTH
- * parties: each side's own deletions are what let a substitution or insertion
- * between the two values meet in the middle (see {@link deletionCandidates}),
- * so expanding one side alone would match on less than the terms declare.
+ * What separates the two is the shape of the expansion, not the field it reads.
+ * `transpositions` and `adjacent_years` are FULL-VARIANT enumerations -- the
+ * whole set of values one transposition, or one year, away from the value -- so
+ * one party enumerating suffices for two records that far apart to meet, and a
+ * second party enumerating would only double the work and widen what matches.
+ * `edit_distances` is a deletion NEIGHBOURHOOD: each side's own deletions are
+ * what let a substitution or insertion between the two values meet in the middle
+ * (see {@link deletionCandidates}), so expanding one side alone would match on
+ * less than the terms declare. The argument in full, including why the
+ * intersection does not depend on which party role resolution designates:
+ * docs/notes/one-sided-fuzzy-expansion.md.
  *
  * Total over the kind and pure -- it reads no term, no role, and no row -- so
  * both parties classify a kind identically, and a member added to
@@ -171,7 +190,10 @@ export function expandsOnReceiverOnly(kind: GenerateFuzzyComparisons): boolean {
  * `adjacent_years` emits the year either side of a canonical date, so three with
  * the value, whatever the value's width; `edit_distances` emits one deletion per
  * code point, so the width plus the value; `transpositions` emits one swap per
- * adjacent pair, one fewer than the width, so the width with the value.
+ * PAIR of positions, so the pair count with the value -- quadratic in the width,
+ * which is what makes a width-bounding transform the practical requirement for
+ * declaring it (the per-key ceiling refuses an element whose value is bounded to
+ * more than 45 characters).
  *
  * `valueWidthBound` is the width the element's own transforms bound its value to
  * (`elementValueWidthBound`, keyElementWidth.ts), which both parties derive from
@@ -198,7 +220,7 @@ export function fuzzyCandidateCeiling(
     case "edit_distances":
       return width + 1;
     case "transpositions":
-      return width;
+      return (width * (width - 1)) / 2 + 1;
   }
 }
 

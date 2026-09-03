@@ -193,6 +193,48 @@ test.each([
   expectProtocolRefusal(() => decodeRagged(words), message);
 });
 
+// The same guards under a width vector whose keys DIFFER. Every fixture above is
+// uniform, so a decode reading the first key's width for every cell reads them
+// all correctly; agreed terms produce a mixed vector as soon as one key declares
+// a fan-out and another a narrower expansion, and it is the mixed case that
+// separates `keyWidths[j]` from `keyWidths[0]`.
+const MIXED_KEY_WIDTHS = [FAN_OUT_CANDIDATES_PER_ELEMENT, 3];
+const MIXED_SLOT_BOUND =
+  MIXED_KEY_WIDTHS.reduce((sum, width) => sum + width, 0) * RAGGED_ROWS;
+
+function decodeMixed(words: Array<number>) {
+  return decodeRaggedIndexTable(
+    "client",
+    Int32Array.from(words),
+    MIXED_KEY_WIDTHS,
+    RAGGED_ROWS,
+    MIXED_SLOT_BOUND,
+  );
+}
+
+test("a mixed-width table decodes each key's cells at that key's own width", () => {
+  // Key 0 carries a cell of 4, above the 3 key 1 declares; key 1 carries one of
+  // exactly its own 3. A decode holding every cell to the narrower width refuses
+  // this honest table, and one holding them all to the wider passes the refusal
+  // below.
+  const cells = decodeMixed([4, 0, 1, 2, 3, 0, 3, 0, 1, 2, 1, 5]);
+  expect(cells).toHaveLength(MIXED_KEY_WIDTHS.length);
+  expect(cells[0].count(0)).toBe(4);
+  expect(cells[0].count(1)).toBe(0);
+  expect(cells[1].count(0)).toBe(3);
+  expect(cells[1].count(1)).toBe(1);
+  expect(cells[1].valueAt(1, 0)).toBe(5);
+});
+
+test("a mixed-width table is refused for a cell inside the FIRST key's width and outside its own", () => {
+  // The width the refusal reads is key 1's, not the table's widest: this cell of
+  // 4 would be conforming under key 0 and is not under key 1.
+  expectProtocolRefusal(
+    () => decodeMixed([4, 0, 1, 2, 3, 0, 4, 0, 1, 2, 3, 0]),
+    /wider than the agreed terms declare for a key/,
+  );
+});
+
 test("the ragged table is refused for carrying more candidates than the declared width admits", () => {
   // The running total is bounded by the sender's OWN advertised slot count, so a
   // frame within the width bound cell by cell is still refused when its cells sum
@@ -430,6 +472,7 @@ async function runFanOutExchange(
   receiverData: Array<Column>,
   withhold = false,
   senderCardinality: LinkageCardinality = "one-to-one",
+  declaredKeyWidths?: Array<number>,
 ): Promise<{ senderTable: AssociationTable; receiverTable: AssociationTable }> {
   const receiverCardinality: LinkageCardinality =
     senderCardinality === "many-to-one"
@@ -444,9 +487,11 @@ async function runFanOutExchange(
   const anyFanOut = [...senderData, ...receiverData].some((column) =>
     column.some((cell) => cell instanceof Set),
   );
-  const keyWidths = new Array<number>(keyCount).fill(
-    anyFanOut ? FAN_OUT_CANDIDATES_PER_ELEMENT : 1,
-  );
+  const keyWidths =
+    declaredKeyWidths ??
+    new Array<number>(keyCount).fill(
+      anyFanOut ? FAN_OUT_CANDIDATES_PER_ELEMENT : 1,
+    );
   const [senderConn, receiverConn] = createMessagePipe();
   const [senderTable, receiverTable] = await Promise.all([
     linkViaSinglePassPSI(
@@ -916,6 +961,26 @@ test("a cell wider than the normative width bound is refused as the table is bui
     /contributes 21 candidate value\(s\) to linkage key 0/,
   );
   await expect(run).rejects.toThrow(UsageError);
+});
+
+test("a cell the key beside it would refuse is admitted at its own key's width", async () => {
+  // The mirror of the refusal below, and the direction a uniform vector cannot
+  // show: the NARROW key is the first one, so a build reading `cellWidths[0]` for
+  // every cell would refuse this honest row rather than let it match. Key 0
+  // carries one value per record and matches nothing; the pair meets on key 1,
+  // whose own width admits the wide cell.
+  const wide = new Set(
+    Array.from({ length: FAN_OUT_CANDIDATES_PER_ELEMENT }, (_u, i) => `V${i}`),
+  );
+  const { senderTable, receiverTable } = await runFanOutExchange(
+    [["A"], [wide]],
+    [["B"], ["V7"]],
+    false,
+    "one-to-one",
+    [1, FAN_OUT_CANDIDATES_PER_ELEMENT],
+  );
+  expect(receiverTable).toStrictEqual([[0], [0]]);
+  expect(senderTable).toStrictEqual([[0], [0]]);
 });
 
 test("a row over the width its own key declares is refused, not the key beside it", async () => {

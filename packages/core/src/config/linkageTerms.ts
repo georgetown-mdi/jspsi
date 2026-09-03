@@ -940,6 +940,9 @@ const LinkageKeyElementSchema: z.ZodType<LinkageKeyElement> = z.object({
  * When `swap` is present it names two elements (by element `name` or `field`
  * name) that the receiver swaps when building this key; the sender uses the
  * un-swapped order. This catches data entry errors where names are reversed.
+ * Under `APPLIED_SETTINGS.fuzzyComparisons` the receiver builds BOTH orders, so
+ * the key matches its two elements in either arrangement while the sender still
+ * builds one (docs/notes/one-sided-fuzzy-expansion.md).
  */
 export interface LinkageKey {
   name: string;
@@ -989,10 +992,11 @@ const LinkageKeySchema: z.ZodType<LinkageKey> = z.object({
  * default and advanced-invite paths (which derive one side without this function),
  * rather than silently moving the hash.
  *
- * `swap` does not widen the result: it only permutes `field` among a key's existing
- * elements at receive time, so the union over the authored (un-swapped) elements
- * already names every field any swapped order could reference. Callers pass keys as
- * authored, without resolving swap.
+ * `swap` does not widen this FIELD set: it only permutes `field` among a key's
+ * existing elements at receive time, so the union over the authored (un-swapped)
+ * elements already names every field any swapped order could reference. Callers pass
+ * keys as authored, without resolving swap. (It does widen the CANDIDATE set a
+ * record contributes, which is the declared width's concern rather than this one.)
  *
  * This is the UNION, distinct from the per-key satisfiability predicate
  * (`key.elements.every(...)`) the satisfiability checker and {@link LinkageTermsSchema}'s
@@ -1776,6 +1780,33 @@ export function swapPairTransformsDiffer(key: LinkageKey): boolean {
   );
 }
 
+/**
+ * Whether the two elements this key's `swap` names declare DIFFERENT
+ * `generateFuzzyComparisons`, the sibling shape {@link LinkageTermsSchema}
+ * refuses beside {@link swapPairTransformsDiffer}.
+ *
+ * A swap moves only the field references and leaves each position's own
+ * expansion where it is, so a mismatched pair would expand a column one way on
+ * the party that swaps and another on the party that does not -- two readings of
+ * one agreed document, neither party able to see the divergence from its own
+ * copy.
+ *
+ * False for a key declaring no swap, and for one whose swap target resolves to no
+ * element -- the dangling case the schema answers by its own rule.
+ *
+ * Exported for the key-read layer, which reads the pair's two positions as
+ * interchangeable when it assembles the swapped order (`planKeyRead`,
+ * standardization.ts) and refuses rather than resting that on a rule enforced
+ * only where the terms are decoded.
+ */
+export function swapPairFuzzyComparisonsDiffer(key: LinkageKey): boolean {
+  const paired = swapPairedElements(key);
+  return (
+    paired !== undefined &&
+    paired[0].generateFuzzyComparisons !== paired[1].generateFuzzyComparisons
+  );
+}
+
 export const LinkageTermsSchema: z.ZodType<LinkageTerms> =
   LinkageTermsBaseSchema.refine(
     (a) => !a.deduplicate || a.output.expectsOutput,
@@ -1885,25 +1916,14 @@ export const LinkageTermsSchema: z.ZodType<LinkageTerms> =
     // (`planFuzzyExpansions`, standardization.ts). A pair whose targets do not
     // resolve is left to the referential-integrity refine above, which owns that
     // fault. As above, the message echoes no partner-controlled value.
-    .refine(
-      (a) =>
-        a.linkageKeys.every((key) => {
-          const paired = swapPairedElements(key);
-          return (
-            paired === undefined ||
-            paired[0].generateFuzzyComparisons ===
-              paired[1].generateFuzzyComparisons
-          );
-        }),
-      {
-        message:
-          "the two elements a linkage key swap names must declare the same " +
-          "generate_fuzzy_comparisons: a swap moves the field references and " +
-          "leaves each element's own expansion in place, so a mismatched pair " +
-          "would expand a column differently on the two parties",
-        path: ["linkageKeys"],
-      },
-    )
+    .refine((a) => !a.linkageKeys.some(swapPairFuzzyComparisonsDiffer), {
+      message:
+        "the two elements a linkage key swap names must declare the same " +
+        "generate_fuzzy_comparisons: a swap moves the field references and " +
+        "leaves each element's own expansion in place, so a mismatched pair " +
+        "would expand a column differently on the two parties",
+      path: ["linkageKeys"],
+    })
     // The sibling rule to the expansion refine above, on the swap pair's other
     // position-bound attribute; the rationale lives on swapPairTransformsDiffer.
     // As above, the message echoes no partner-controlled value.
