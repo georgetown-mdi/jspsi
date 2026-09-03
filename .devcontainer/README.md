@@ -6,6 +6,12 @@ both SFTP integration backends -- with no Docker inside it. It runs as the
 non-root `node` user behind an egress firewall, so Claude can run prompt-free
 with its writes confined to the container.
 
+There are two configurations. This document describes the default one
+throughout; the [infrastructure profile](#infrastructure-profile) at the end is
+the same container plus the tooling and the second egress lane that AWS,
+Cloudflare, Let's Encrypt, and remote-host work need. Everything below applies
+to both unless it says otherwise.
+
 ## What is inside
 
 - **Node 26** (`node:26-bookworm`), matching the shipped runtime and CI.
@@ -110,8 +116,13 @@ the host filesystem, not an airtight seal:
   read-write, so a planted `.git/hooks/*` or edited file persists on the host and
   can run there later. Treat what runs inside as you would any code in the repo.
 
-Closing the first three would need a name-aware egress proxy, which is out of
-scope here.
+Closing the first three would need a name-aware egress proxy. The
+[infrastructure profile](#infrastructure-profile) below runs one, but only over
+the destinations it adds: those are admitted by hostname, so a host sharing a
+CDN edge with an admitted name is not reachable there by sending a different
+SNI. It narrows none of the bullets above -- the IP allowlist is unchanged, and
+every host it admits is still reached directly and by address -- and it carries
+residuals of its own, listed with it.
 
 ## Prerequisites
 
@@ -183,3 +194,182 @@ With a `GH_TOKEN` set in `.env` (see Prerequisites) a session can push feature
 branches and open PRs from inside; pushes to `staging`/`main` are refused by the
 push hook and by GitHub branch protection. With no token, push/PR are
 unauthenticated and fail.
+
+## Infrastructure profile
+
+A second configuration, `.devcontainer/infra/devcontainer.json`, for the work
+the default profile cannot do at all: AWS, Cloudflare, Let's Encrypt, a remote
+Docker daemon over SSH, and the standards and literature sites. Today that work
+is handed to the host, where there is no container wall at all -- this profile
+is the alternative to that.
+
+It is the same image and the same egress firewall, with the same mounts plus
+one, and it adds:
+
+- **The AWS CLI v2**, at a pinned version, from the official installer archive.
+  The two architecture digests in the Dockerfile were taken from archives whose
+  detached signatures verified against the AWS CLI Team key
+  `FB5D B77F D5C1 18B8 0511  ADA8 A631 0ACC 4672 475C`; the build re-checks the
+  digest. AWS publishes no checksum file, so re-verify a version bump the same
+  way rather than pasting a digest from the download.
+- **The Docker CLIENT only** (`docker-ce-cli`, from Docker's signed apt
+  repository), for `docker -H ssh://user@host` against a remote daemon.
+- **A second egress lane**: a `tinyproxy` HTTP CONNECT proxy on
+  `127.0.0.1:8888`, default-deny, admitting a destination by HOSTNAME.
+
+### Choosing it
+
+The Dev Containers specification reads any `.devcontainer/<name>/devcontainer.json`
+as a configuration of its own, so VS Code's "Reopen in Container" offers a
+picker once there is more than one: choose `<folder>-infra`. With the bare
+`devcontainer` CLI, name it:
+
+```sh
+devcontainer up --workspace-folder . --config .devcontainer/infra/devcontainer.json
+```
+
+Nothing about the default profile changes by adding it; a session that never
+picks it sees the container it saw before.
+
+### Why a second lane rather than a wider allowlist
+
+`init-firewall.sh` matches destination IPs, and an IP allowlist cannot express
+AWS: EC2 in us-west-2 alone publishes 169 prefixes, all shared-tenant, so
+admitting them admits every other AWS customer's instance. A hostname allowlist
+can: `ec2.us-west-2.amazonaws.com` is one name, and
+`ec2-1-2-3-4.us-west-2.compute.amazonaws.com` is a different one.
+
+So the firewall is left exactly as the default profile has it, and the proxy is
+added beside it. One `iptables` rule connects the two: TCP egress is accepted
+for packets owned by the `tinyproxy` uid, ahead of the IP-allowlist match and
+the catch-all REJECT. Nothing else in the container gains an inch -- a process
+that is not the proxy still reaches only the IP allowlist.
+
+### The two lanes, and which one a request takes
+
+`NO_PROXY` names loopback and the hosts the IP allowlist already admits
+(`github.com` and its subdomains, `*.githubusercontent.com`,
+`registry.npmjs.org`, `nodejs.org`, `api.anthropic.com`, `claude.ai`,
+`console.anthropic.com`). Those go direct, byte-identically to the default
+profile; only a NEW destination takes the proxy. Each host is listed in both the
+bare (`github.com`) and the dotted (`.github.com`) form, because the clients in
+the image resolve `NO_PROXY` in three separate implementations -- libcurl (curl,
+and git over HTTPS), Go (gh), and Python (the aws CLI) -- and carrying both
+forms means none of them depends on a spelling it may not honor.
+
+`post-create.sh` clears the proxy variables for its own run: creation happens
+before either lane exists, so an install that went looking for the proxy would
+find a closed port.
+
+SSH is the exception that has to be stated: `/etc/ssh/ssh_config.d/` routes
+EVERY SSH destination through the proxy (`ProxyCommand nc -X connect`), because
+`ssh` opens a socket the firewall would otherwise reject. `localhost` is exempt,
+so the native `sshd` SFTP test backend is untouched. `github.com` is on the
+proxy allowlist for this reason as well as being on the IP one.
+
+### The allowlist
+
+`.devcontainer/infra/egress-allowlist`, one pattern per line with the reason for
+each group. It is baked into the image at build time, the way `init-firewall.sh`
+is, rather than read from the bind-mounted workspace -- so adding a host to it
+is a repository change and a rebuild, not an edit a running session can make.
+
+Matching is `fnmatch`, so a pattern without `*` matches that host and nothing
+else (`example.com` does not admit `notexample.com`). A `*` is accepted only
+inside a pattern's first label; `*`, `*.com`, and anything carrying a character
+a hostname cannot hold are rejected, and a rejected pattern refuses the whole
+start rather than being skipped.
+
+For a host that should not be a repository change -- a zone name, a particular
+instance address -- set `PSILINK_EGRESS_EXTRA_HOSTS` in `.env` to a
+comma-separated list. Every entry in it is probed at start and the start fails
+if the filter does not actually admit it, so a typo is loud rather than silent.
+
+### Credentials
+
+Put AWS credentials in the repository-root `.env`, the same gitignored file and
+`--env-file` path as `GH_TOKEN`, under the same **literal** rules -- unquoted, no
+`export`, no inline `# comment`:
+
+```
+AWS_ACCESS_KEY_ID=<access key id>
+AWS_SECRET_ACCESS_KEY=<secret access key>
+AWS_DEFAULT_REGION=us-west-2
+```
+
+Two things follow from that, both the same posture as `GH_TOKEN` and
+`CLAUDE_CODE_OAUTH_TOKEN`. The credentials are readable by anything running in
+the container, so use a dedicated IAM principal scoped to what the work needs
+and rotate it if it may be exposed. And the host's own `~/.aws` is deliberately
+NOT mounted: an environment credential is the one the container was given, while
+a mounted profile directory is whatever the owner's default profile happens to
+be, which is usually far more than the task.
+
+An SSH private key for a remote host goes in `.devcontainer/infra/local/`, bind
+mounted read-only at `/home/node/infra-local`. The directory is gitignored, and
+`.claude/settings.json` denies Claude's Read and Edit tools on it -- a floor
+against the common path, not a wall, exactly as the `.env` deny rules are: an
+arbitrary shell command still reads it.
+
+### Deliberately absent
+
+**The host's Docker socket.** Mounting it is the usual way to give a container
+Docker, and it would delete the container boundary that is layer 1 of the
+security model above: the socket is root on the host, so anything that can write
+it can start a privileged container and read or write the whole host filesystem.
+The client is installed without a daemon instead, for `docker -H
+ssh://user@host` against a remote one. `/var/run/docker.sock` does not exist in
+the image and nothing here creates it.
+
+### What the second lane does not protect against
+
+On top of the residuals listed for both profiles above:
+
+- **A CONNECT tunnel carries anything.** The proxy sees the hostname and the
+  port, then joins two sockets. It does not inspect what flows through, so an
+  admitted host on 443 is a channel for whatever an agent wants to send it. The
+  allowlist decides who can be talked to, never what is said. `ConnectPort`
+  limits tunnels to 443 and 22, which is the whole of the width control.
+- **Two admitted namespaces are other people's.**
+  `*.s3.us-west-2.amazonaws.com` is any account's bucket and
+  `*.execute-api.us-west-2.amazonaws.com` is any account's API Gateway stage.
+  They are admitted deliberately -- virtual-hosted-style S3 is how the aws CLI
+  addresses a bucket -- and are a channel to storage and to an HTTP endpoint an
+  adversary controls. `*.compute.amazonaws.com`, the same shape for EC2
+  instances, is NOT admitted, and admitting it would give away the reason this
+  profile exists.
+- **DNS is still open**, exactly as in the default profile, and now resolves for
+  the proxy as well.
+- **`PSILINK_EGRESS_EXTRA_HOSTS` is an environment variable**, so it is
+  operator convenience rather than a boundary: anything running as `node` can
+  re-run the proxy script with a widened list. The container boundary is what
+  confines a session; this lane, like the firewall, is a guardrail.
+- **The proxy logs refusals, not traffic.** `/var/log/psilink-egress-proxy.log`
+  is world-readable and records each filtered host at `Notice` level; a
+  successful tunnel is not logged, so the file answers "what was refused", not
+  "where did this container go".
+
+### Verify it yourself
+
+Inside the container, after start:
+
+```sh
+sudo iptables -S OUTPUT | head -3       # the uid rule sits ahead of everything
+cat /etc/psilink-egress-proxy/filter    # the assembled allowlist
+curl -x http://127.0.0.1:8888 -sS -o /dev/null -w '%{http_code}\n' \
+  https://sts.us-west-2.amazonaws.com/                     # an HTTP status: reached
+curl -x http://127.0.0.1:8888 https://example.com/         # 403 from the proxy
+curl --noproxy '*' https://sts.us-west-2.amazonaws.com/    # refused by the firewall
+curl -x http://127.0.0.1:8888 \
+  https://ec2-1-2-3-4.us-west-2.compute.amazonaws.com/     # 403: instances stay out
+aws sts get-caller-identity                                # an answer from AWS
+ssh -T git@github.com                                      # through the tunnel
+docker --version && test ! -e /var/run/docker.sock         # client, no socket
+tail /var/log/psilink-egress-proxy.log                     # what was refused
+```
+
+Re-running `sudo /usr/local/bin/init-egress-proxy.sh` is safe: it tears down the
+previous proxy and rule first, and if anything fails -- an unparseable pattern,
+a proxy that will not start, a probe that does not answer as expected -- it
+removes both again and exits non-zero, leaving egress exactly what
+`init-firewall.sh` left it.

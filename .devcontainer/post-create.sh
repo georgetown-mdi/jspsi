@@ -4,6 +4,14 @@ set -euo pipefail
 # Runs once on container creation, before the egress firewall is applied (the
 # firewall is a postStartCommand), so this install reaches the full network.
 
+# The infra profile puts HTTP(S)_PROXY in containerEnv, but the proxy it names
+# is started by a postStartCommand, so nothing is listening on that port while
+# this script runs and every fetch below would fail against a closed loopback
+# port. Creation is the one moment with no egress lane and no need of one, so
+# clear the variables for this script alone. Unset in the default profile, where
+# this is a no-op.
+unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy
+
 # Install workspace dependencies into the node_modules volume (isolated from the
 # bind-mounted host tree by devcontainer.json), building any native pieces for
 # this Linux container rather than reusing the host's macOS build. `npm ci` is the

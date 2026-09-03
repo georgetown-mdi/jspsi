@@ -1,0 +1,120 @@
+# Hostname egress allowlist for the infra dev-container profile.
+#
+# One pattern per line; `#` starts a comment. A pattern is a hostname, or a
+# hostname whose FIRST label carries `*` wildcards (`*.githubusercontent.com`,
+# `productionresultssa*.blob.core.windows.net`). init-egress-proxy.sh rejects
+# any other shape -- a wildcard in a later label, a bare `*`, a pattern with no
+# dot, or a wildcard label sitting directly on a TLD -- and refuses to start the
+# proxy rather than assembling a list that admits more than it reads as.
+#
+# Matching is tinyproxy's `FilterType fnmatch` against the CONNECT host, so a
+# pattern with no `*` matches that host and nothing else: `example.com` does not
+# admit `notexample.com`, the way an unanchored regular expression would.
+# fnmatch is case-sensitive, so every pattern here is lowercase and a client
+# that spells a host in uppercase is denied -- the safe direction.
+#
+# The proxy is the SECOND egress lane. The first is init-firewall.sh's IP
+# allowlist, which the infra profile leaves exactly as the default profile has
+# it; the hosts it already admits are repeated at the bottom of this file so
+# that this file is a complete statement of the profile's reach, and so that
+# SSH (which is routed through the proxy for every destination) can reach
+# github.com.
+#
+# PSILINK_EGRESS_EXTRA_HOSTS in the repository-root .env adds a comma-separated
+# list of further patterns at container start, for a zone name or an instance
+# address that should not be a repository change.
+
+# --- AWS, by service endpoint ----------------------------------------------
+#
+# Deliberately NOT `*.amazonaws.com`. That wildcard would admit
+# `*.compute.amazonaws.com` -- the public DNS name of every AWS customer's EC2
+# instance -- and so re-open by name exactly the shared-tenant channel the IP
+# allowlist cannot close. Each service endpoint is named instead. The region is
+# us-west-2, matching infra/aws_eb and apps/web/deploy/aws_eb.
+#
+# Every hostname down to route53 below is what `aws <service> <op> --region
+# us-west-2 --debug` resolved, not what the service is called: the CLI puts
+# cost explorer on `ce.us-east-1`, service quotas on `servicequotas` with no
+# hyphen, CloudWatch on `monitoring`, and the marketplace catalog on
+# `catalog.marketplace.<region>` rather than any of the obvious spellings.
+sts.us-west-2.amazonaws.com
+ec2.us-west-2.amazonaws.com
+iam.amazonaws.com
+budgets.amazonaws.com
+ce.us-east-1.amazonaws.com
+servicequotas.us-west-2.amazonaws.com
+apigateway.us-west-2.amazonaws.com
+lambda.us-west-2.amazonaws.com
+dynamodb.us-west-2.amazonaws.com
+logs.us-west-2.amazonaws.com
+monitoring.us-west-2.amazonaws.com
+cloudformation.us-west-2.amazonaws.com
+catalog.marketplace.us-west-2.amazonaws.com
+elasticbeanstalk.us-west-2.amazonaws.com
+ssm.us-west-2.amazonaws.com
+route53.amazonaws.com
+
+# The legacy global STS endpoint, and the two Session Manager data-plane hosts
+# the SSM agent and the session-manager-plugin open rather than the CLI. No
+# `aws` invocation resolves any of these, so unlike the block above they are
+# taken from their service's documented `<service>.<region>.amazonaws.com`
+# shape; each is an AWS-operated name, none is a customer namespace.
+sts.amazonaws.com
+ssmmessages.us-west-2.amazonaws.com
+ec2messages.us-west-2.amazonaws.com
+
+# Plain HTTPS hosts rather than API endpoints.
+ip-ranges.amazonaws.com
+checkip.amazonaws.com
+docs.aws.amazon.com
+
+# Stated residual: the two entries below are themselves CUSTOMER namespaces, not
+# AWS-operated hostnames. Any account's bucket answers on
+# `<bucket>.s3.us-west-2.amazonaws.com`, and any account's API Gateway stage
+# answers on `<api-id>.execute-api.us-west-2.amazonaws.com`, so admitting the
+# wildcards admits a channel to storage and to an HTTP endpoint an adversary
+# controls. They are admitted deliberately -- virtual-hosted-style S3 is how the
+# aws CLI addresses a bucket, and the deployed web app's API is reached this way
+# -- and accepted as a residual rather than closed. `*.compute.amazonaws.com` is
+# the same shape and is NOT admitted, because nothing here needs it.
+s3.us-west-2.amazonaws.com
+*.s3.us-west-2.amazonaws.com
+*.execute-api.us-west-2.amazonaws.com
+
+# --- Cloudflare -------------------------------------------------------------
+api.cloudflare.com
+turn.cloudflare.com
+
+# --- Let's Encrypt (ACME) ---------------------------------------------------
+acme-v02.api.letsencrypt.org
+acme-staging-v02.api.letsencrypt.org
+
+# --- Docker Hub (manifest inspection, e.g. `docker buildx imagetools inspect`)
+registry-1.docker.io
+auth.docker.io
+index.docker.io
+hub.docker.com
+production.cloudflare.docker.com
+
+# --- Standards and literature ----------------------------------------------
+csrc.nist.gov
+nvlpubs.nist.gov
+www.ncbi.nlm.nih.gov
+pmc.ncbi.nlm.nih.gov
+web.archive.org
+
+# --- Already admitted by the IP allowlist (init-firewall.sh) ----------------
+#
+# Repeated here so this file states the profile's whole reach, and because SSH
+# is routed through the proxy for every destination: `git@github.com` would
+# otherwise be unreachable even though the firewall admits its address.
+github.com
+api.github.com
+codeload.github.com
+*.githubusercontent.com
+registry.npmjs.org
+nodejs.org
+api.anthropic.com
+claude.ai
+console.anthropic.com
+productionresultssa*.blob.core.windows.net
