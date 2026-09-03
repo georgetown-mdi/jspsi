@@ -4,6 +4,7 @@ import {
   LINKAGE_RULE_SET_VERDICT_COPY,
   RECORDED_LINKAGE_RULE_SET_CAVEAT,
   UNNAMED_PARTY_LABEL,
+  sanitizeForDisplay,
 } from "@psilink/core";
 
 import {
@@ -198,7 +199,9 @@ describe("a disclosure's facts", () => {
   test("escape a cited set's name and version, which the authoring party chose", async () => {
     // The citation is carried through unvetted, so its names and versions are free
     // text of somebody's choosing exactly as the partner identity is; this module
-    // is their display sink too.
+    // is their display sink too. A version renders undelimited on the strength of
+    // a shape the seam re-checks on the value in hand, so the escaped one below
+    // takes the delimited run rather than standing in the line unattributed.
     const record = await disclosureRecord({
       linkageRuleSet: {
         fieldSet: { name: "baseline‮pii", version: "1.0.0" },
@@ -210,9 +213,72 @@ describe("a disclosure's facts", () => {
     );
 
     expect(factValues(disclosureFacts(record), "Rule set cited")).toEqual([
-      'Keys: "hmis-keys" 2.1.0\\x1b[31m',
+      'Keys: "hmis-keys" "2.1.0\\x1b[31m"',
       'Fields: "baseline\\u202epii" 1.0.0',
     ]);
+  });
+
+  test("a crafted set name cannot read as a shorter name at another version", async () => {
+    // A set name is free text the authoring party chose, so one carrying the
+    // delimiter and a version-shaped token beside it can spell the citation of
+    // another set at another version, on the row a compliance reader consults.
+    // The seam's run is what answers that: the delimiter is doubled inside the
+    // name, so what the name spells stays content of one value rather than
+    // structure this line asserted.
+    //
+    // The imitated pair is what a reader would take the crafted names for -- the
+    // two set names the standing fixture cites, at a version neither half is
+    // recorded at -- so absence of both is what the assertion measures.
+    const imitated = {
+      keys: 'Keys: "hmis-keys" 9.9.9',
+      fields: 'Fields: "baseline-pii" 9.9.9',
+    };
+    const record = await disclosureRecord({
+      linkageRuleSet: {
+        fieldSet: { name: 'baseline-pii" 9.9.9', version: "1.0.0" },
+        keySet: { name: 'hmis-keys" 9.9.9', version: "1.0.0" },
+      },
+    });
+
+    const values = factValues(disclosureFacts(record), "Rule set cited");
+
+    expect(values).toEqual([
+      'Keys: "hmis-keys"" 9.9.9" 1.0.0',
+      'Fields: "baseline-pii"" 9.9.9" 1.0.0',
+    ]);
+    for (const citation of [imitated.keys, imitated.fields])
+      expect(values.join("\n")).not.toContain(citation);
+  });
+
+  test("a cited half crosses the display boundary once, delimiters and all", async () => {
+    // The seam states delimiting, not escaping, so its result reaches a fact by
+    // an assertion rather than by the escape's own return type, and what that
+    // assertion claims is measured here: over names and versions built from the
+    // classes the escape exists to remove, every byte of the rendered line is
+    // printable ASCII, so nothing the escape rewrites survives into a run.
+    //
+    // The escape's own mark is what says it ran at all: each of these values
+    // escapes to a form carrying a backslash, so re-escaping the line changes
+    // it. That much is a floor, not a count -- a twice-escaped line would read
+    // the same way here -- and the exact forms below are what pin the count,
+    // since a second pass would double every backslash in them.
+    const record = await disclosureRecord({
+      linkageRuleSet: {
+        fieldSet: { name: "base‮line\u{1f600}", version: "1.0.0" },
+        keySet: { name: 'hmis\u0000"keys', version: "2.1\u001b.0" },
+      },
+    });
+
+    const values = factValues(disclosureFacts(record), "Rule set cited");
+
+    expect(values).toEqual([
+      'Keys: "hmis\\x00""keys" "2.1\\x1b.0"',
+      'Fields: "base\\u202eline\\u{1f600}" 1.0.0',
+    ]);
+    for (const value of values) {
+      expect(value).toMatch(/^[\x20-\x7e]+$/);
+      expect(sanitizeForDisplay(value)).not.toBe(value);
+    }
   });
 
   test("read a count-only run as the count-only disclosure it was", async () => {

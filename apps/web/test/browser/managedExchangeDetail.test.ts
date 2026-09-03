@@ -1170,6 +1170,61 @@ describe("managed exchange detail accounting of disclosures", () => {
       .toBeVisible();
   });
 
+  test("a crafted set name reads as one run in the opened disclosure, not as a citation of another set", async () => {
+    // The names are the authoring party's free text, and this row is the one a
+    // HIPAA or FERPA reader consults, so a name carrying the delimiter and a
+    // version-shaped token must not be able to stand in the rendered line as a
+    // shorter name at a version the record does not carry. Driven through the
+    // real view rather than the model alone: what a reader is held to is the
+    // text the detail renders.
+    //
+    // The imitated pair names the two sets the standing fixture cites, at a
+    // version neither half is recorded at, so neither string can reach the
+    // screen from anywhere but a run the crafted name broke out of.
+    const imitated = {
+      keys: 'Keys: "hmis-keys" 9.9.9',
+      fields: 'Fields: "baseline-pii" 9.9.9',
+    };
+    const accounting = appendDisclosureRecord(
+      undefined,
+      await disclosureRecord({
+        linkageRuleSet: {
+          fieldSet: { name: 'baseline-pii" 9.9.9', version: "1.0.0" },
+          keySet: { name: 'hmis-keys" 9.9.9', version: "1.0.0" },
+        },
+      }),
+    );
+    const [entry] = disclosureEntries(accounting);
+    app.render(
+      createElement(ManagedExchangeDetail, {
+        record: record("inviter"),
+        accountingRead: { kind: "accounting", accounting },
+        onResetAccounting: () => Promise.resolve(),
+        onRetryAccountingRead: () => undefined,
+        onSaveLocalFields: () => Promise.resolve(),
+        onReinviteToChangeTerms: () => undefined,
+        canReinvite: true,
+        reinviting: false,
+        reinviteFailed: false,
+      }),
+    );
+
+    await page.getByRole("button", { name: entry.when, exact: false }).click();
+
+    await expect
+      .element(
+        page.getByText('Keys: "hmis-keys"" 9.9.9" 1.0.0', { exact: true }),
+      )
+      .toBeVisible();
+    await expect
+      .element(
+        page.getByText('Fields: "baseline-pii"" 9.9.9" 1.0.0', { exact: true }),
+      )
+      .toBeVisible();
+    expect(app.container.textContent).not.toContain(imitated.keys);
+    expect(app.container.textContent).not.toContain(imitated.fields);
+  });
+
   test("a disclosure whose terms cited no rule set says so, with no caveat to qualify", async () => {
     const accounting = appendDisclosureRecord(
       undefined,
