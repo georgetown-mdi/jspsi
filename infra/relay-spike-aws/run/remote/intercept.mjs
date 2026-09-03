@@ -19,10 +19,14 @@ import { PassThrough } from "node:stream";
 
 const D = process.env.SPIKE_DIR ?? "/opt/spike";
 const caFile = `${D}/certs/ca.crt`;
-const ca =
-  fs.existsSync(caFile) && fs.statSync(caFile).size > 0
-    ? fs.readFileSync(caFile)
-    : undefined;
+let ca;
+try {
+  const caBuf = fs.readFileSync(caFile);
+  ca = caBuf.length > 0 ? caBuf : undefined;
+} catch (err) {
+  if (err.code !== "ENOENT") throw err;
+  ca = undefined;
+}
 
 const targets = [
   {
@@ -92,7 +96,7 @@ for (const t of targets) {
       client.on("close", done("client"));
       upstream.on("close", done("upstream"));
       client.on("error", (e) =>
-        console.log(`[${t.label}] client error: ${e.message}`),
+        console.log(`[${t.label}] client error: ${JSON.stringify(e.message)}`),
       );
       upstream.on("error", (e) =>
         console.log(`[${t.label}] upstream error: ${e.message}`),
