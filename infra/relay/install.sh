@@ -18,9 +18,12 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-ETC="${PSILINK_RELAY_ETC:-/etc/psilink-relay}"
+# Both paths are literals here and in the unit files, which cannot read a
+# variable this script was given: a configurable root would move the scripts and
+# leave the units pointing at the old one, splitting the install in half.
+ETC=/etc/psilink-relay
+LIBEXEC=/opt/psilink-relay
 ENV_FILE="${PSILINK_RELAY_ENV_FILE:-$ETC/relay.env}"
-LIBEXEC="${PSILINK_RELAY_LIBEXEC:-/opt/psilink-relay}"
 IMAGE="${PSILINK_RELAY_IMAGE:-localhost/psilink-relay:installed}"
 QUADLET_DIR=/etc/containers/systemd
 UNIT_DIR=/etc/systemd/system
@@ -85,6 +88,11 @@ case "$IMAGE_UID" in
 esac
 log "the image runs as uid $IMAGE_UID"
 if ! grep -q '^PSILINK_RELAY_IMAGE_UID=' "$ENV_FILE"; then
+  # A hand-edited file need not end in a newline, and an append onto one would
+  # land on the end of whatever the operator typed last.
+  if [ -s "$ENV_FILE" ] && [ -n "$(tail -c 1 "$ENV_FILE")" ]; then
+    printf '\n' >> "$ENV_FILE"
+  fi
   printf 'PSILINK_RELAY_IMAGE_UID=%s\n' "$IMAGE_UID" >> "$ENV_FILE"
 else
   sed -i "s/^PSILINK_RELAY_IMAGE_UID=.*/PSILINK_RELAY_IMAGE_UID=$IMAGE_UID/" "$ENV_FILE"
@@ -101,6 +109,16 @@ install -m 755 "$HERE/certs/renew.sh" "$HERE/certs/deploy-hook.sh" "$LIBEXEC/cer
 if [ ! -s "$ETC/certs/fullchain.pem" ] || [ ! -s "$ETC/certs/privkey.pem" ]; then
   log "no certificate yet; obtaining one by DNS-01"
   "$LIBEXEC/certs/renew.sh" || die "certificate issuance failed; see Certificates in infra/relay/README.md"
+else
+  # A re-run with a certificate already here skips renew.sh, and the deploy hook
+  # with it, so nothing else re-owns the key to the uid probed above. A rebuilt
+  # image that moved that uid would hand coturn a key it cannot read, which it
+  # answers by falling back to its defaults rather than failing
+  # (docs/notes/webrtc-relay-deployment.md): the relay starts, and the first
+  # symptom is a party that cannot gather a relay candidate.
+  log "certificate already present; re-owning it to uid $IMAGE_UID"
+  chown "$IMAGE_UID" "$ETC/certs" "$ETC/certs/fullchain.pem" "$ETC/certs/privkey.pem" \
+    || die "could not give uid $IMAGE_UID the certificate in $ETC/certs; coturn would start on defaults rather than fail"
 fi
 
 # --- the configuration ------------------------------------------------------
@@ -112,13 +130,16 @@ install -m 644 "$HERE/psilink-relay.container" "$QUADLET_DIR/"
 install -m 644 "$HERE/certs/psilink-relay-cert.service" "$HERE/certs/psilink-relay-cert.timer" "$UNIT_DIR/"
 install -m 644 "$HERE/psilink-relay-verify.service" "$HERE/psilink-relay-verify.timer" "$UNIT_DIR/"
 
-systemctl daemon-reload
-systemctl enable --now psilink-relay-cert.timer
-systemctl enable --now psilink-relay-verify.timer
+systemctl daemon-reload || die "systemctl daemon-reload failed, so the Quadlet generator has not read $QUADLET_DIR/psilink-relay.container; check systemd-analyze verify and run again"
+systemctl enable --now psilink-relay-cert.timer \
+  || die "psilink-relay-cert.timer did not start; the certificate would expire unrenewed. journalctl -u psilink-relay-cert.timer"
+systemctl enable --now psilink-relay-verify.timer \
+  || die "psilink-relay-verify.timer did not start; nothing would notice a relay that stopped allocating. journalctl -u psilink-relay-verify.timer"
 
 # A Quadlet-generated service is enabled by the unit's own [Install] section at
 # generation time, so it is started rather than enabled here.
-systemctl restart psilink-relay.service
+systemctl restart psilink-relay.service \
+  || die "psilink-relay.service did not start; journalctl -u psilink-relay.service carries coturn's own output"
 log "psilink-relay.service started"
 
 if [ "$SKIP_VERIFY" = 1 ]; then

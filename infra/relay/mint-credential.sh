@@ -17,7 +17,7 @@
 # the credential and the URL, which are what a partner needs and which expire.
 set -euo pipefail
 
-ETC="${PSILINK_RELAY_ETC:-/etc/psilink-relay}"
+ETC=/etc/psilink-relay
 ENV_FILE="${PSILINK_RELAY_ENV_FILE:-$ETC/relay.env}"
 
 die() { printf 'ABORTING: %s\n' "$*" >&2; exit 1; }

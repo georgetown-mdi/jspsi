@@ -15,7 +15,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-ETC="${PSILINK_RELAY_ETC:-/etc/psilink-relay}"
+ETC=/etc/psilink-relay
 ENV_FILE="${PSILINK_RELAY_ENV_FILE:-$ETC/relay.env}"
 TMPL="${PSILINK_RELAY_TEMPLATE:-$HERE/turnserver.conf.tmpl}"
 
@@ -34,7 +34,7 @@ SECRET_FILE="${PSILINK_RELAY_SECRET_FILE:-$ETC/static-auth-secret}"
 MIN_PORT="${PSILINK_RELAY_MIN_PORT:-49152}"
 MAX_PORT="${PSILINK_RELAY_MAX_PORT:-49200}"
 USER_QUOTA="${PSILINK_RELAY_USER_QUOTA:-6}"
-TOTAL_QUOTA="${PSILINK_RELAY_TOTAL_QUOTA:-60}"
+TOTAL_QUOTA="${PSILINK_RELAY_TOTAL_QUOTA:-40}"
 MAX_BPS="${PSILINK_RELAY_MAX_BPS:-2000000}"
 HELPER="${PSILINK_RELAY_EXTERNAL_IP_HELPER:-$HERE/aws/external-ip.sh}"
 OUT="${PSILINK_RELAY_CONF:-$ETC/turnserver.conf}"
@@ -62,6 +62,15 @@ case "$SECRET" in
   *[!A-Za-z0-9_-]*) die "$SECRET_FILE holds characters outside [A-Za-z0-9_-]; regenerate it with: openssl rand -hex 32" ;;
 esac
 
+# The substitution below is textual and does not know a comment from a setting,
+# so a comment naming a placeholder is rewritten in place -- and a comment naming
+# the secret's placeholder puts the secret in a comment of the rendered file.
+COMMENTED="$(grep '^[[:space:]]*#' "$TMPL" | grep -o '__[A-Z_]*__' | sort -u || true)"
+if [ -n "$COMMENTED" ]; then
+  printf '%s\n' "$COMMENTED" >&2
+  die "$TMPL names a placeholder in a comment; name each one where it is used instead"
+fi
+
 TMP="$(mktemp "$OUT.XXXXXX")"
 chmod 600 "$TMP"
 trap 'rm -f "$TMP"' EXIT
@@ -79,8 +88,8 @@ sed -e "s#__LISTENING_IP__#$PRIVATE_IP#g" \
 
 # A placeholder left in a setting is one this script has not been taught about,
 # and coturn would read the literal token as the value. Comment lines are exempt
-# because the template names its own placeholders in its header, and a comment is
-# not a setting.
+# because a comment is not a setting; the check above is what keeps one from
+# carrying a placeholder in the first place.
 LEFTOVER="$(grep -v '^[[:space:]]*#' "$TMP" | grep -o '__[A-Z_]*__' | sort -u || true)"
 if [ -n "$LEFTOVER" ]; then
   printf '%s\n' "$LEFTOVER" >&2

@@ -27,9 +27,11 @@
 # Meant to run at install and on psilink-relay-verify.timer.
 set -uo pipefail
 
-ETC="${PSILINK_RELAY_ETC:-/etc/psilink-relay}"
+ETC=/etc/psilink-relay
 ENV_FILE="${PSILINK_RELAY_ENV_FILE:-$ETC/relay.env}"
-LIBEXEC="${PSILINK_RELAY_LIBEXEC:-$(cd "$(dirname "$0")" && pwd)}"
+# mint-credential.sh is a sibling of this script wherever it sits, which is what
+# install.sh and the unit files both mean by /opt/psilink-relay.
+HERE="$(cd "$(dirname "$0")" && pwd)"
 IMAGE="${PSILINK_RELAY_IMAGE:-localhost/psilink-relay:installed}"
 
 die() { printf 'ABORTING: %s\n' "$*" >&2; exit 1; }
@@ -54,32 +56,52 @@ report() {
 printf 'psilink relay verification: %s\n\n' "$REALM"
 
 # --- handshake ---------------------------------------------------------------
-if ! HS="$(echo | timeout 20 openssl s_client -connect "$REALM:443" -servername "$REALM" \
-  -verify_return_error 2>&1)"; then
-  report fail "TLS handshake on $REALM:443" "$(printf '%s' "$HS" | tr '\n' ' ' | cut -c1-160)"
-else
-  report pass "TLS handshake on $REALM:443"
-  SUBJECT="$(printf '%s' "$HS" | sed -n 's/^subject=//p' | head -1)"
-  ISSUER="$(printf '%s' "$HS" | sed -n 's/^issuer=//p' | head -1)"
+# Which certificate the relay serves, read out of an s_client transcript that
+# carries it.
+certificate_report() {
+  local transcript="$1"
+  local subject issuer
+  subject="$(printf '%s' "$transcript" | sed -n 's/^subject=//p' | head -1)"
+  issuer="$(printf '%s' "$transcript" | sed -n 's/^issuer=//p' | head -1)"
+  if [ -z "$subject" ] || [ -z "$issuer" ]; then
+    report unclear "could not read the certificate $REALM:443 serves" \
+      "$(printf '%s' "$transcript" | tr '\n' ' ' | cut -c1-160)"
+    return 0
+  fi
   # A self-signed certificate is what the demo box carried, and werift refuses to
   # gather a relay candidate against a chain it cannot verify
   # (docs/notes/webrtc-relay-deployment.md): every party would silently fail to
   # relay rather than report a certificate problem.
-  if [ -n "$SUBJECT" ] && [ "$SUBJECT" = "$ISSUER" ]; then
-    report fail "the certificate is self-signed" "subject and issuer are both $SUBJECT"
+  if [ "$subject" = "$issuer" ]; then
+    report fail "the certificate is self-signed" "subject and issuer are both $subject"
   else
-    report pass "the certificate is issued by $ISSUER"
+    report pass "the certificate is issued by $issuer"
   fi
-  if printf '%s' "$HS" | openssl x509 -noout -checkend 604800 >/dev/null 2>&1; then
+  if printf '%s' "$transcript" | openssl x509 -noout -checkend 604800 >/dev/null 2>&1; then
     report pass "the certificate is valid for at least another 7 days"
   else
     report fail "the certificate expires within 7 days" "psilink-relay-cert.timer should have renewed it"
   fi
+}
+
+if ! HS="$(echo | timeout 20 openssl s_client -connect "$REALM:443" -servername "$REALM" \
+  -verify_return_error 2>&1)"; then
+  # -verify_return_error ends the handshake on an unverifiable chain before
+  # s_client prints the certificate, so an untrusted or self-signed one -- the
+  # case the diagnostics below exist for -- is exactly the case they would have
+  # nothing to read. Ask a second time without it, for the diagnosis only: the
+  # handshake that decides this probe is the verifying one above.
+  UNVERIFIED="$(echo | timeout 20 openssl s_client -connect "$REALM:443" -servername "$REALM" 2>&1)" || true
+  certificate_report "$UNVERIFIED"
+  report fail "TLS handshake on $REALM:443" "$(printf '%s' "$HS" | tr '\n' ' ' | cut -c1-160)"
+else
+  report pass "TLS handshake on $REALM:443"
+  certificate_report "$HS"
 fi
 
 # --- a credential for this run ----------------------------------------------
 TURN_USER=""; TURN_CRED=""
-if CRED_OUT="$("$LIBEXEC/mint-credential.sh" verify 600 2>&1)"; then
+if CRED_OUT="$("$HERE/mint-credential.sh" verify 600 2>&1)"; then
   TURN_USER="$(printf '%s' "$CRED_OUT" | sed -n 's/^username:  *//p' | head -1)"
   TURN_CRED="$(printf '%s' "$CRED_OUT" | sed -n 's/^credential:  *//p' | head -1)"
 else

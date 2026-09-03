@@ -40,12 +40,16 @@ a working relay, and it has itself never been run -- its probes key on coturn's
 documented exit statuses and message strings rather than measured ones. Fix what
 the first real run gets wrong rather than loosening a probe until it passes.
 
-Two pieces were driven locally against a fixture, and only those two:
-`render-config.sh` renders the template, writes at mode 600, and refuses both a
-leftover placeholder and a secret whose alphabet its substitution would not
-survive; `mint-credential.sh` produces a credential that matches an independent
-HMAC-SHA1 computation of the same username. Whether coturn accepts that
-credential, and every other claim in this directory, is unverified.
+Three pieces were driven locally against a fixture, and only those three:
+`render-config.sh` renders the template, writes at mode 600, and refuses a
+leftover placeholder, a placeholder named in a comment, and a secret whose
+alphabet its substitution would not survive; `mint-credential.sh` produces a
+credential that matches an independent HMAC-SHA1 computation of the same
+username; `verify.sh`'s handshake probe was run against a local `openssl
+s_server` holding first a self-signed certificate and then a leaf under a locally
+trusted CA, which is a TLS endpoint and not a relay -- the allocation and refusal
+probes have still been asked of nothing. Whether coturn accepts that credential,
+and every other claim in this directory, is unverified.
 
 The measurement this reference implements, and the shapes it rules out, are in
 [`docs/notes/webrtc-relay-deployment.md`](../../docs/notes/webrtc-relay-deployment.md);
@@ -142,7 +146,9 @@ image rather than assuming. The relay measurement recorded coturn silently
 falling back to its defaults on a key it could not read: no error where the
 failure is, and the first symptom is a party that cannot gather a relay
 candidate. A renewal that landed a root-owned key would take the relay out that
-way, at renewal time, with nothing in the journal naming the cause.
+way, at renewal time, with nothing in the journal naming the cause. `install.sh`
+converges the same ownership on every run, certificate already present or not,
+because a rebuilt image is where that uid moves.
 
 The hook **restarts** rather than reloads. Whether a signal makes coturn re-read
 its certificate is a question nobody has driven against the real server, so the

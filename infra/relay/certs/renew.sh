@@ -16,7 +16,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-ETC="${PSILINK_RELAY_ETC:-/etc/psilink-relay}"
+ETC=/etc/psilink-relay
 ENV_FILE="${PSILINK_RELAY_ENV_FILE:-$ETC/relay.env}"
 ACME_ENV="${PSILINK_RELAY_ACME_ENV:-$ETC/acme.env}"
 ACME_HOME="${PSILINK_RELAY_ACME_HOME:-$ETC/acme}"

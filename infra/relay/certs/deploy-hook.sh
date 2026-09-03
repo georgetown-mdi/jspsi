@@ -18,7 +18,7 @@
 # UNTESTED LIVE: no certificate has been deployed through this script.
 set -euo pipefail
 
-ETC="${PSILINK_RELAY_ETC:-/etc/psilink-relay}"
+ETC=/etc/psilink-relay
 ENV_FILE="${PSILINK_RELAY_ENV_FILE:-$ETC/relay.env}"
 DEST="${PSILINK_RELAY_CERT_DIR:-$ETC/certs}"
 

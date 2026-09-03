@@ -1,11 +1,15 @@
 # coturn configuration for the psilink standing relay.
 #
-# render-config.sh substitutes every __PLACEHOLDER__ below and writes the result
-# at mode 600, because the rendered file carries the static authentication
-# secret. This template is tracked; the rendered file is not.
+# render-config.sh substitutes every value written between double underscores
+# below and writes the result at mode 600, because the rendered file carries the
+# static authentication secret. This template is tracked; the rendered file is
+# not.
 #
-# Placeholders: __LISTENING_IP__ __EXTERNAL_IP__ __REALM__ __MIN_PORT__
-# __MAX_PORT__ __USER_QUOTA__ __TOTAL_QUOTA__ __MAX_BPS__ __STATIC_AUTH_SECRET__
+# The substitution is textual and does not know a comment from a setting, so a
+# comment naming a placeholder is rewritten with the rest -- a comment naming the
+# secret's placeholder would put the secret in a comment. Each placeholder is
+# named where it is used and nowhere else, and render-config.sh refuses a
+# template that names one in a comment.
 
 # TURNS on 443/tcp is the whole client-facing surface. A restrictive network
 # leaves 443/tcp open and nothing else, which is the case this relay exists for,
