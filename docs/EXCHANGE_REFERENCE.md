@@ -1238,7 +1238,7 @@ Parameter names below are written in snake_case in YAML (e.g. `input_format`, `i
 | `remove_accents` | Remove accents and other diacritics, ASCII-ifying the text; re-normalizes to NFC after the diacritic strip | - |
 | `remove_affixes` | Remove name titles (Mr., Dr., ...) (and suffixes (Jr., III, ...) | - |
 | `substring` | Extract a substring | `start` (integer, 1-indexed, required; negative counts from end), `length` (positive integer, required) |
-| `parse_date` | Reformat a date string | `input_format` (default `MM/DD/YYYY`), `output_format` (default `YYYYMMDD`), each at most 256 characters; tokens: `YYYY`, `YY`, `MM`, `DD` |
+| `parse_date` | Reformat a date string | `input_format` (default `MM/DD/YYYY`), `output_format` (default `YYYYMMDD`), each at most 256 characters; an empty `output_format` is refused, since it would render every date to the empty string; tokens: `YYYY`, `YY`, `MM`, `DD` |
 | `pad_left` | Left-pad the value with a fill character up to a target length; pass-through if already at or above the length | `length` (positive integer, required; capped at 256 in a linkage key element's `transform`, uncapped in a `standardization` step), `char` (single character, default `"0"`) |
 | `phonetic` | Apply a phonetic encoding | `algorithm`: `soundex` (default); result is a 4-character string, or `null` for a value carrying no letters |
 | `replace_regex` | Replace all regex matches | `pattern` (required), `replacement` (default `""`) |

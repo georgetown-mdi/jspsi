@@ -444,10 +444,12 @@ export function attributableRoundMatches(
  *   yielding a candidate SET is refused rather than matched on one of them:
  *   fan-out matching runs under single-pass only (docs/spec/PROTOCOL.md, Fan-out
  *   matching).
- * @param partnerRecordCount - The partner's raw row count, exchanged over the
- *   encrypted channel during role resolution. It is the authenticated bound the
- *   partner-returned row indices are checked against before they reach the
- *   returned table (see utils/partnerIndices.ts).
+ * @param partnerRecordCount - The partner's declared record count -- its rows
+ *   times its own local fan-out factor (docs/spec/PROTOCOL.md, Role resolution
+ *   and work minimization) -- exchanged over the encrypted channel during role
+ *   resolution. It is the authenticated bound the partner-returned row indices
+ *   are checked against before they reach the returned table (see
+ *   utils/partnerIndices.ts).
  * @param verbosity - Log verbosity level (default 0).
  * @param setStage - Optional callback invoked with a progress label at each
  *   key round.

@@ -105,12 +105,14 @@ const hostKeyField = z
       : { value: undefined, malformed: true };
   });
 
-// Each party's raw dataset record count rides the terms-exchange envelope, beside
-// `linkageTerms` (like `save` and `hostKey`), so both parties learn each other's
-// count on the one bidirectional round-trip they always perform -- there is no
-// separate count exchange. It is per-party, per-run role/bounds metadata, NOT a
-// linkage term: it stays out of the canonicalized terms and the agreed-terms hash
-// (which are built from `linkageTerms` alone). Both counts are consumed by two
+// Each party's DECLARED record count -- its rows times the fan-out factor its
+// own standardization declares (docs/spec/PROTOCOL.md, Role resolution and work
+// minimization) -- rides the terms-exchange envelope, beside `linkageTerms`
+// (like `save` and `hostKey`), so both parties learn each other's count on the
+// one bidirectional round-trip they always perform -- there is no separate count
+// exchange. It is per-party, per-run role/bounds metadata, NOT a linkage term:
+// it stays out of the canonicalized terms and the agreed-terms hash (which are
+// built from `linkageTerms` alone). Both counts are consumed by two
 // things on every exchange: the both-output role decision (see resolveRole /
 // pickRole) and the single-pass frame cap and PSI element bounds (frameSize.ts,
 // psiElementBounds), which derive from both counts regardless of output split.
@@ -860,9 +862,11 @@ export async function receiveCountReport(
 // --- Role resolution ---------------------------------------------------------
 
 // The work-minimizing PSI role assignment for two both-output parties, from
-// their exchanged row counts: the smaller-row party becomes the receiver. The
-// receiver's distinct-value set crosses the wire twice (its request, then that
-// request re-encrypted in the reply) and it bears the larger share of the curve
+// their exchanged declared counts: the party with the smaller declared count
+// becomes the receiver, so a party whose own cleaning fans out is weighed at the
+// records it declares rather than the rows it holds. The receiver's
+// distinct-value set crosses the wire twice (its request, then that request
+// re-encrypted in the reply) and it bears the larger share of the curve
 // operations, so it is the heavier side; placing the smaller dataset there
 // minimizes total work (communication + compute) across both linkage strategies
 // for the near-unique keys linkage requires. The full derivation -- including
@@ -880,9 +884,10 @@ function pickRole(
 }
 
 /**
- * Determine this party's PSI role from the record counts already exchanged.
+ * Determine this party's PSI role from the declared record counts already
+ * exchanged.
  *
- * This is a pure local computation with no connection I/O: both parties' record
+ * This is a pure local computation with no connection I/O: both parties' declared
  * counts ride the terms exchange (see {@link exchangeTerms}), so by the time the
  * terms are agreed each party holds its own count and the partner's, and the role
  * follows without a further message. Both output cases resolve locally.
@@ -890,11 +895,12 @@ function pickRole(
  * When exactly one party has `expectsOutput: true`, that party is the receiver
  * regardless of the counts -- it is the only party that learns the result. When
  * both parties expect output the assignment is free, so it minimizes total work:
- * the smaller-row party becomes the receiver, a tie broken in favour of the
- * initiator (see {@link pickRole} and docs/spec/PROTOCOL.md, Role resolution and
- * work minimization). The counts are still carried on the terms exchange in the
- * one-sided case too -- the role does not consume them there, but the single-pass
- * element bounds do (see exchange.ts, psiElementBounds).
+ * the party with the smaller declared count becomes the receiver, a tie broken
+ * in favour of the initiator (see {@link pickRole} and docs/spec/PROTOCOL.md,
+ * Role resolution and work minimization). The counts are still carried on the
+ * terms exchange in the one-sided case too -- the role does not consume them
+ * there, but the single-pass element bounds do (see exchange.ts,
+ * psiElementBounds).
  *
  * Call this after a successful {@link exchangeTerms}, whose
  * {@link TermsExchangeResult.partnerRecordCount} supplies `partnerRecordCount`.
