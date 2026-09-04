@@ -900,6 +900,42 @@ export async function decodeInvitation(
 }
 
 /**
+ * The verdict {@link hasExpiryInstantPassed} returns for an `expires` it cannot
+ * parse: `"fail-closed"` treats the value as already passed, `"fail-open"` as
+ * not passed. The safe direction belongs to what the bound governs, not to the
+ * comparison, so a caller states one explicitly.
+ */
+export type UnparseableExpiryVerdict = "fail-closed" | "fail-open";
+
+/**
+ * Whether the ISO 8601 instant `expires` has passed as of `now`: `true` when
+ * `expires` is present and at or before `now`; `false` when it is absent (no
+ * bound in force) or is a valid instant still in the future. The comparison is
+ * at-or-before, so a bound equal to `now` has already passed -- it is never
+ * valid for one last instant.
+ *
+ * The shared comparison behind the invitation acceptors and the web app's
+ * managed-exchange surfaces: a caller decides whether an `expires` bound has run
+ * out through this rather than parsing the instant itself, so two surfaces
+ * cannot drift apart on the boundary or on a malformed value.
+ *
+ * `onUnparseable` has no default. `new Date(...)` yields `NaN` for a value it
+ * cannot parse and a bare `<=` against `NaN` is `false`, so an unparseable bound
+ * reads as not-passed unless a caller decides otherwise; requiring the verdict
+ * puts that decision at the call site, where what the bound governs is visible.
+ */
+export function hasExpiryInstantPassed(
+  expires: string | undefined,
+  now: Date,
+  { onUnparseable }: { onUnparseable: UnparseableExpiryVerdict },
+): boolean {
+  if (expires === undefined) return false;
+  const expiresMs = new Date(expires).getTime();
+  if (Number.isNaN(expiresMs)) return onUnparseable === "fail-closed";
+  return expiresMs <= now.getTime();
+}
+
+/**
  * Whether an invitation must be rejected on expiry grounds at `now`:
  * `true` when `expires` is present and at or before `now`, OR present but
  * unparseable; `false` when `expires` is absent (an unbounded token) or is a
@@ -907,19 +943,15 @@ export async function decodeInvitation(
  *
  * Fails closed on the boundary and on a malformed value: an `expires` equal to
  * `now` is already expired (never valid for one last instant), and an
- * unparseable `expires` (a `Date` of `NaN`, which `<=` would otherwise treat as
- * not-expired) is rejected rather than honored. The malformed case is defense in
- * depth: {@link decodeInvitation}'s schema already rejects a non-ISO `expires`,
- * so a token reaching here through decode never carries one -- but every acceptor
- * fails closed on its own, not only by relying on that upstream gate. Shared by
- * the CLI and web acceptors so both enforce identical semantics.
+ * unparseable `expires` is rejected rather than honored. The malformed case is
+ * defense in depth: {@link decodeInvitation}'s schema already rejects a non-ISO
+ * `expires`, so a token reaching here through decode never carries one -- but
+ * every acceptor fails closed on its own, not only by relying on that upstream
+ * gate. Shared by the CLI and web acceptors so both enforce identical semantics.
  */
 export function isInvitationExpired(
   expires: string | undefined,
   now: Date = new Date(),
 ): boolean {
-  if (expires === undefined) return false;
-  const expiresMs = new Date(expires).getTime();
-  if (Number.isNaN(expiresMs)) return true;
-  return expiresMs <= now.getTime();
+  return hasExpiryInstantPassed(expires, now, { onUnparseable: "fail-closed" });
 }

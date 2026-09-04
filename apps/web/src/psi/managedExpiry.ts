@@ -9,12 +9,12 @@
  * discipline.
  *
  * The age bound is optional and off by default (an absent `expires` is no bound
- * in force); a record with no bound never lapses. A malformed `expires` reaching
- * here is impossible for a stored record (the schema validates it as an ISO
- * datetime on every read), but an unparseable value is treated as not lapsed
- * rather than silently blocking, so the check can only refuse a genuinely-past
- * bound.
+ * in force); a record with no bound never lapses. The instant comparison itself
+ * is core's, shared with the invitation acceptors so a bound cannot mean one
+ * thing on one surface and another elsewhere.
  */
+
+import { hasExpiryInstantPassed } from "@psilink/core";
 
 import type { ManagedExchangeRecord } from "./managedExchangeRecord";
 
@@ -24,15 +24,21 @@ import type { ManagedExchangeRecord } from "./managedExchangeRecord";
  * record with no bound (`expires` absent) never lapses. The comparison is
  * at-or-before, matching the spec's "the instant after which `sharedSecret` must
  * not be used" -- the boundary instant itself is already lapsed.
+ *
+ * Fails closed on a value the comparison cannot parse: the bound governs a
+ * stored secret's usable lifetime, so an `expires` whose instant is unreadable
+ * stops the secret being used rather than letting it run unbounded. A stored
+ * record cannot carry one -- the schema validates `expires` as an ISO datetime
+ * on every read -- so the direction only decides what an unreachable value
+ * would do.
  */
 export function managedExchangeLapsed(
   record: Pick<ManagedExchangeRecord, "expires">,
   now: number,
 ): boolean {
-  if (record.expires === undefined) return false;
-  const expiresAt = Date.parse(record.expires);
-  if (Number.isNaN(expiresAt)) return false;
-  return expiresAt <= now;
+  return hasExpiryInstantPassed(record.expires, new Date(now), {
+    onUnparseable: "fail-closed",
+  });
 }
 
 /**

@@ -34,8 +34,8 @@ describe("managedExchangeLapsed", () => {
     ).toBe(true);
   });
 
-  test("an unparseable bound is treated as not lapsed (never wrongly blocks)", () => {
-    expect(managedExchangeLapsed({ expires: "not-a-date" }, NOW)).toBe(false);
+  test("an unparseable bound fails closed (lapsed)", () => {
+    expect(managedExchangeLapsed({ expires: "not-a-date" }, NOW)).toBe(true);
   });
 });
 

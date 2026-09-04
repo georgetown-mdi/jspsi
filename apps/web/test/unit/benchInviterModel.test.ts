@@ -289,6 +289,12 @@ describe("display helpers", () => {
     const now = new Date("2026-07-08T19:00:00.000Z");
     expect(invitationUsable("2026-07-08T19:32:00.000Z", now)).toBe(true);
     expect(invitationUsable("2026-07-08T18:32:00.000Z", now)).toBe(false);
+    expect(invitationUsable(now.toISOString(), now)).toBe(false);
+  });
+
+  test("invitationUsable fails closed on an unreadable expiry moment", () => {
+    const now = new Date("2026-07-08T19:00:00.000Z");
+    expect(invitationUsable("not-a-date", now)).toBe(false);
   });
 });
 
