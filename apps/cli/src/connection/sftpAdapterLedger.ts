@@ -2,25 +2,18 @@
  * The operator-facing accounting one SFTP adapter keeps over a run: the sessions
  * it established and lost, the counters its end-of-run summary reports, the
  * outstanding-operation gauge its idle boundary is held on, and the cadence its
- * repeating warnings share.
- *
- * It is deliberately transport-blind -- no ssh2 or ssh2-sftp-client type reaches
- * it, and it holds no session, socket or client state. What it records is the
- * adapter's own integers, never a partner-controlled value, so the whole of it
- * can be read back by the summary and the machine metrics event without a
- * disclosure question. See {@link ./ssh2SftpAdapter} for the events that drive
- * it, and docs/notes/sftp-adapter-state-machine.md for the model they belong to.
+ * repeating warnings share. Transport-blind: no ssh2 or ssh2-sftp-client type
+ * reaches it, and it holds no session, socket or client state. See
+ * {@link ./ssh2SftpAdapter} for the events that drive it, and
+ * docs/notes/sftp-adapter-state-machine.md, "The ledger", for the model and the
+ * rationale behind it.
  */
 
 /**
  * Warn cadence for the adapter's repeating operator conditions: the first
- * occurrence draws a line, then every `SFTP_REDIAL_WARN_INTERVAL`-th. Every such
- * condition here recurs once per poll cycle for as long as it lasts -- a partner
- * whose server caps session lifetime, one that never closes a released
- * connection, a transition stuck long enough to decline the cycle's dial -- so
- * an unpaced line would fill an hours-long exchange's log while silence would
- * hide the condition altogether. An observability cadence only, independent of
- * every bound the adapter enforces.
+ * occurrence draws a line, then every `SFTP_REDIAL_WARN_INTERVAL`-th. An
+ * observability cadence only, independent of every bound the adapter enforces.
+ * Rationale: docs/spec/CHANNEL_SECURITY.md, "What each bound protects".
  */
 export const SFTP_REDIAL_WARN_INTERVAL = 10;
 
@@ -39,32 +32,11 @@ const LOSS_CAUSES = ["partner", "deliberate", "teardown", "fatal"] as const;
 
 /**
  * What one invocation of the connection-per-poll idle release did, drawn from a
- * total and mutually exclusive partition. It is the recorded value: the session
- * reading the release leaves behind and the counter it moves are both
- * projections of it (see {@link ./ssh2SftpAdapter}), so a future outcome has to
- * state both answers or it does not compile.
- *
- * The first four close nothing and so end no generation: `skipped` reached the
- * front of the transition queue with teardown already latched, `held` found an
- * operation this side had issued still unsettled, `declined` gave up its bounded
- * wait for the transition ahead of it, and `alreadyEnded` found the session gone
- * with its loss already accounted for by whatever took it.
- *
- * `noSession` is that same absent session with the generation still live: a
- * partner-side drop cleared it inside this cycle with nothing on the wire to
- * observe it, so this boundary is the first thing that does. `closedByPeer`,
- * `releasedOverEndedTransport` and `released` are the
- * three ways a session that WAS there ends, told apart by which side ended the
- * transport beneath it -- the peer's FIN already consumed, the peer's disconnect
- * already answered by ssh2 ending its own half, or neither, which is the
- * ordinary release. `forced` is any of those three whose close the partner
- * withheld past the release's bound, so this side destroyed the transport; which
- * side ended it is the reading the entry classification already recorded, and
- * the forcing does not change that answer.
- *
- * `didNotClose` and `destroyDidNotClear` are the two degraded tails, both
- * leaving the session live: the release's own `end()` did not end the transport,
- * and the forced destroy did not clear the session.
+ * total and mutually exclusive partition: the session reading the release
+ * leaves behind and the counter it moves are both projections of it (see
+ * {@link ./ssh2SftpAdapter}). What each outcome means and what state it leaves
+ * the session in: docs/spec/FILE_SYNC.md, "Session lifetime across an idle
+ * boundary".
  */
 export type IdleBoundaryOutcome = (typeof IDLE_BOUNDARY_OUTCOMES)[number];
 
@@ -87,12 +59,9 @@ const IDLE_BOUNDARY_OUTCOMES = [
 /**
  * The whole of one adapter's session accounting. The invariant -- no
  * generation leaves the live state without exactly one recorded loss cause --
- * is held structurally rather than asserted: every dial charges any
- * still-pending end before advancing, and {@link SftpAdapterLedger.dialSucceeded}
- * raises on one that slipped through. The sum identity this implies
- * (`generationsEnded` equals the sum of {@link losses}) is an identity of the
- * ledger itself, so no test asserts it; tests pin WHICH cause each driven end
- * charged.
+ * is held structurally: {@link SftpAdapterLedger.dialSucceeded} raises rather
+ * than silently replacing a generation still live. Model and rationale:
+ * docs/notes/sftp-adapter-state-machine.md, "Transitions, and the invariant".
  *
  * @internal
  */
@@ -151,14 +120,10 @@ export class SftpAdapterLedger {
   /**
    * Warn about the `count`-th occurrence of a repeating condition, on the
    * cadence they all share: the first, then every
-   * {@link SFTP_REDIAL_WARN_INTERVAL}-th. `alsoDue` adds an occurrence off that
-   * cadence the operator is owed anyway -- the last re-dial a budget permits,
-   * which a budget shorter than the interval never reaches. `build` runs only
-   * when the line is due, so a suppressed one costs nothing to compose.
-   *
-   * `count` is the caller's own running total for that condition rather than a
-   * tally kept here, so every stream is paced on exactly the number its message
-   * quotes and the two cannot drift apart.
+   * {@link SFTP_REDIAL_WARN_INTERVAL}-th; `alsoDue` adds the last re-dial a
+   * budget permits. `count` is the caller's own running total, not a tally kept
+   * here -- see docs/notes/sftp-adapter-state-machine.md, "The ledger". `build`
+   * runs only when the line is due.
    */
   pacedWarn(count: number, build: () => string, alsoDue = false): void {
     if (!alsoDue && count !== 1 && count % SFTP_REDIAL_WARN_INTERVAL !== 0)
