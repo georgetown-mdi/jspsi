@@ -4,6 +4,6 @@
     { "path": "packages/core" },
     { "path": "packages/peerjs-broker" },
     { "path": "apps/web" },
-    { "path": "apps/cli/tsconfig.test.json" }
+    { "path": "apps/cli" }
   ]
 }
