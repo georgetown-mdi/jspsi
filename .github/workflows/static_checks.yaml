@@ -174,7 +174,10 @@ jobs:
       # than skimmed as one of a batch. This reads the packages those checklists
       # name and fails on any the npm Dependabot groups would swallow into a
       # batched pull request without excluding -- the drift where a checklist is
-      # written and the config never hears about it.
+      # written and the config never hears about it. It also holds every package
+      # a reviewed group names outright in its own patterns out of every other
+      # group's exclude-patterns, so adding a package to a group like
+      # cryptographic without excluding it elsewhere fails the same way.
       - name: Dependabot pin coverage
         run: npm run check:dependabot-pin-coverage
       # The root brace-expansion override answers an advisory no bump on the

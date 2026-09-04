@@ -26,7 +26,9 @@
 //      docs/spec/DEPENDENCY_PINS.md must be covered by the `exclude-patterns`
 //      of every npm group in .github/dependabot.yml that would otherwise
 //      swallow it -- a group whose `patterns` match the package without naming
-//      it.
+//      it. Every group in the file, in whichever npm update block: the pins
+//      document is repository-wide, so a batch raised by any block is one the
+//      checklist is not read against.
 //
 //   2. That package must be declared by at least one manifest in this
 //      workspace, and every manifest declaring it must declare an exact
@@ -34,10 +36,22 @@
 //
 //   3. Those declarations must all name the same version.
 //
+//   4. A package literally named in one npm group's `patterns` must be
+//      covered by the `exclude-patterns` of every other npm group in the same
+//      update block that would otherwise swallow it -- the same "swallow"
+//      reading as the first rule, applied between two groups instead of
+//      between a checklist and a group. Adding a package to a reviewed
+//      group's `patterns` and forgetting its exclusion elsewhere returns it to
+//      whichever other group's batch would otherwise match it, silently. The
+//      block bounds it because groups only compete for a bump inside the block
+//      that raises the pull request; a group in another block takes nothing
+//      away from this one's reviewed treatment.
+//
 // A group that names the package outright in its `patterns` is its deliberate
 // reviewed treatment (`cryptographic`, `webrtc-stack`), not a batch it fell
-// into, so it asks for no exclude entry. A group declaring no `patterns` at all
-// matches every package (`non-critical`), so it always does.
+// into, so it asks for no exclude entry there -- from either the first rule or
+// the fourth. A group declaring no `patterns` at all matches every package
+// (`non-critical`), so it always needs one.
 //
 // The heading convention this reads: an "Upgrading ..." heading ends in a
 // parenthesised list of the npm packages the section covers, separated by " / "
@@ -93,6 +107,17 @@
 //   - Whether a package that ought to carry an upgrade checklist has one. The
 //     read runs from the document out to the config and the manifests, and
 //     never back.
+//   - A group `patterns` entry that carries a `*` inside an otherwise literal
+//     name -- e.g. a scoped org wildcard. The fourth rule reads a `patterns`
+//     entry as either a literal package name or the bare `*` npmGroups()
+//     already normalizes an absent `patterns` key to; a glob of any other
+//     shape is a package list this does not resolve to names, and the
+//     package name it "otherwise swallows" would depend on the resolution,
+//     so it throws rather than guessing.
+//   - Which of two groups a package should be reviewed under, when its name
+//     appears in more than one group's `patterns`. The fourth rule only
+//     checks that a group whose own `patterns` do not name the package
+//     excludes it if some other group's do.
 
 import { globSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -176,9 +201,12 @@ export function headingViolations(sections) {
 
 /**
  * The dependency groups the npm update blocks declare, as
- * `{name, patterns, excludePatterns}` in config order, or null when the source
- * carries no npm block at all. A group declaring no `patterns` is read as
- * matching everything, which is Dependabot's documented default.
+ * `{block, name, patterns, excludePatterns}` in config order, or null when the
+ * source carries no npm block at all. `block` is the position of the update
+ * block the group was declared in among the npm blocks, so a rule reading this
+ * flattened list can still tell two blocks' groups apart. A group declaring no
+ * `patterns` is read as matching everything, which is Dependabot's documented
+ * default.
  */
 export function npmGroups(source) {
   const updates = parse(source)?.updates;
@@ -186,10 +214,11 @@ export function npmGroups(source) {
     (candidate) => candidate?.["package-ecosystem"] === ECOSYSTEM,
   );
   if (blocks.length === 0) return null;
-  return blocks.flatMap((block) => {
+  return blocks.flatMap((block, position) => {
     const groups = block.groups;
     if (!groups || typeof groups !== "object") return [];
     return Object.entries(groups).map(([name, group]) => ({
+      block: position,
       name,
       patterns: Array.isArray(group?.patterns) ? group.patterns : ["*"],
       excludePatterns: Array.isArray(group?.["exclude-patterns"])
@@ -200,12 +229,17 @@ export function npmGroups(source) {
 }
 
 /**
- * Every checklist-carrying package a group would swallow without excluding, as
- * message strings. Empty means no batched pull request can carry a bump whose
- * upgrade checklist is recorded in the pins document.
+ * Every way one of `candidates` would be swallowed without being excluded, as
+ * the message `describe` renders for it. A candidate is
+ * `{name, groups, ...context}`: the package name, the groups that must hold it
+ * out, and whatever else its message needs; a group swallows the name when its
+ * `patterns` match without naming it and no `exclude-patterns` entry covers
+ * it. `describe` receives `{name, group, swallowing, ...context}`. Repeated
+ * messages collapse, so the shared swallow reading behind the first and fourth
+ * rules is written once.
  */
-export function coverageViolations(packages, groups) {
-  const messages = packages.flatMap((name) =>
+function swallowViolations(candidates, describe) {
+  const messages = candidates.flatMap(({ name, groups, ...context }) =>
     groups.flatMap((group) => {
       if (group.patterns.includes(name)) return [];
       const swallowing = group.patterns.find((pattern) =>
@@ -215,12 +249,60 @@ export function coverageViolations(packages, groups) {
       if (group.excludePatterns.some((pattern) => coversName(pattern, name))) {
         return [];
       }
-      return [
-        `${PINS_DOC} carries an "Upgrading ..." checklist for ${name}, but the npm group "${group.name}" in ${CONFIG_FILE} matches it through pattern "${swallowing}" without naming it, and no exclude-patterns entry covers it -- a ${name} bump would arrive inside that group's batched pull request, where the checklist is not what gets read. Add "${name}" to that group's exclude-patterns, or name it in the group's patterns if that group is the reviewed treatment for it.`,
-      ];
+      return [describe({ name, group, swallowing, ...context })];
     }),
   );
   return [...new Set(messages)];
+}
+
+/**
+ * Every checklist-carrying package a group would swallow without excluding, as
+ * message strings. Empty means no batched pull request can carry a bump whose
+ * upgrade checklist is recorded in the pins document.
+ */
+export function coverageViolations(packages, groups) {
+  return swallowViolations(
+    packages.map((name) => ({ name, groups })),
+    ({ name, group, swallowing }) =>
+      `${PINS_DOC} carries an "Upgrading ..." checklist for ${name}, but the npm group "${group.name}" in ${CONFIG_FILE} matches it through pattern "${swallowing}" without naming it, and no exclude-patterns entry covers it -- a ${name} bump would arrive inside that group's batched pull request, where the checklist is not what gets read. Add "${name}" to that group's exclude-patterns, or name it in the group's patterns if that group is the reviewed treatment for it.`,
+  );
+}
+
+/**
+ * Every package literally named in one npm group's `patterns` that another
+ * group in the same update block would swallow into its own batch without
+ * excluding, as message strings naming the package, the group that names it,
+ * and the group whose exclusion is missing. Two groups share an update block
+ * when they carry the same `block` from npmGroups(); a group in another block
+ * is never compared, competing for no pull request with this one. Empty means
+ * every package a group names outright is held out of every other group in its
+ * block that would otherwise match it. Throws when a `patterns` entry carries
+ * a `*` inside an otherwise literal name -- npmGroups() already normalizes an
+ * absent `patterns` key to the bare `*` this treats as "names no package"; a
+ * glob of any other shape is a package list this does not resolve to names, so
+ * it fails rather than silently passing the entry over.
+ */
+export function groupExclusionViolations(groups) {
+  const named = groups.flatMap((namingGroup) =>
+    namingGroup.patterns
+      .filter((pattern) => pattern !== "*")
+      .map((name) => ({ name, namingGroup })),
+  );
+  const wildcard = named.find(({ name }) => name.includes("*"));
+  if (wildcard !== undefined) {
+    throw new Error(
+      `${CONFIG_FILE}: npm group "${wildcard.namingGroup.name}" names "${wildcard.name}" in its patterns, a glob shape groupExclusionViolations in scripts/check-dependabot-pin-coverage.mjs does not read as a package name. It reads a literal package name or the bare "*" match-everything default and refuses to guess at the rest. Teach groupExclusionViolations the shape, or name the package literally.`,
+    );
+  }
+  return swallowViolations(
+    named.map(({ name, namingGroup }) => ({
+      name,
+      namingGroup,
+      groups: groups.filter((group) => group.block === namingGroup.block),
+    })),
+    ({ name, group, swallowing, namingGroup }) =>
+      `${CONFIG_FILE}: npm group "${namingGroup.name}" names "${name}" in its patterns, but npm group "${group.name}" matches it through pattern "${swallowing}" with no exclude-patterns entry covering it -- a ${name} bump would arrive inside "${group.name}"'s batched pull request instead of "${namingGroup.name}"'s reviewed one. Add "${name}" to "${group.name}"'s exclude-patterns.`,
+  );
 }
 
 /**
@@ -330,6 +412,17 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     );
     process.exit(1);
   }
+  let groupExclusions;
+  try {
+    groupExclusions = groupExclusionViolations(groups);
+  } catch (error) {
+    console.error(error.message);
+    process.exit(1);
+  }
+  if (groupExclusions.length > 0) {
+    for (const violation of groupExclusions) console.error(violation);
+    process.exit(1);
+  }
   const packages = [...new Set(sections.flatMap(({ packages }) => packages))];
   const violations = coverageViolations(packages, groups);
   if (violations.length > 0) {
@@ -362,7 +455,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.exit(1);
   }
   const count = (n, noun) => `${n} ${noun}${n === 1 ? "" : "s"}`;
+  const groupNamed = new Set(
+    groups.flatMap((group) =>
+      group.patterns.filter((pattern) => pattern !== "*"),
+    ),
+  );
   console.log(
-    `Dependabot checklist-pin coverage check passed: ${count(packages.length, "package")} named by ${count(sections.length, "upgrade checklist")} in ${PINS_DOC}, checked against ${count(groups.length, "npm group")} in ${CONFIG_FILE} and each pinned to one version by ${count(declarations.length, "declaration")} across ${count(paths.length, "manifest")}.`,
+    `Dependabot checklist-pin coverage check passed: ${count(packages.length, "package")} named by ${count(sections.length, "upgrade checklist")} in ${PINS_DOC}, checked against ${count(groups.length, "npm group")} in ${CONFIG_FILE} and each pinned to one version by ${count(declarations.length, "declaration")} across ${count(paths.length, "manifest")}. ${count(groupNamed.size, "package")} named outright in a group's patterns ${groupNamed.size === 1 ? "is" : "are"} held out of every other group in its update block that would otherwise batch it.`,
   );
 }

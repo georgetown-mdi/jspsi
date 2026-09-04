@@ -8,6 +8,7 @@ import { coversAction as coversName } from "./check-dependabot-ignore-shape.mjs"
 import {
   coverageViolations,
   exactnessViolations,
+  groupExclusionViolations,
   headingViolations,
   manifestPaths,
   npmGroups,
@@ -35,7 +36,20 @@ ${groups}
           - "*"
 `;
 
-const group = (name, patterns, excludePatterns = []) => ({
+const twoNpmBlocks = (first, second) => `version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    groups:
+${first}
+  - package-ecosystem: npm
+    directory: "/apps/web"
+    groups:
+${second}
+`;
+
+const group = (name, patterns, excludePatterns = [], block = 0) => ({
+  block,
   name,
   patterns,
   excludePatterns,
@@ -189,6 +203,24 @@ updates:
 `),
     ).toEqual([]);
   });
+
+  it("numbers the block each group came from, so a rule can scope to one", () => {
+    expect(
+      npmGroups(
+        twoNpmBlocks(
+          `      cryptographic:
+        patterns:
+          - "ssh2"`,
+          `      web-non-critical:
+        patterns:
+          - "*"`,
+        ),
+      ),
+    ).toEqual([
+      group("cryptographic", ["ssh2"], [], 0),
+      group("web-non-critical", ["*"], [], 1),
+    ]);
+  });
 });
 
 describe("a checklist package a group would swallow", () => {
@@ -262,6 +294,117 @@ describe("a checklist package a group would swallow", () => {
         ],
       ),
     ).toHaveLength(4);
+  });
+});
+
+describe("a group-named package another group would swallow", () => {
+  it("passes when every group-named package is excluded from the catch-all", () => {
+    expect(
+      groupExclusionViolations([
+        group("cryptographic", ["ssh2", "node-forge"]),
+        group("non-critical", ["*"], ["ssh2", "node-forge"]),
+      ]),
+    ).toEqual([]);
+  });
+
+  it("fails naming the package, the naming group, and the group missing the exclusion", () => {
+    const violations = groupExclusionViolations([
+      group("cryptographic", ["ssh2", "node-forge"]),
+      group("non-critical", ["*"], ["ssh2"]),
+    ]);
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toContain("node-forge");
+    expect(violations[0]).toContain('npm group "cryptographic"');
+    expect(violations[0]).toContain('npm group "non-critical"');
+    expect(violations[0]).toContain('through pattern "*"');
+  });
+
+  it("passes when the swallowing group names the package in its own patterns too", () => {
+    expect(
+      groupExclusionViolations([
+        group("cryptographic", ["ssh2"]),
+        group("also-crypto", ["ssh2"]),
+      ]),
+    ).toEqual([]);
+  });
+
+  it("passes when no other group's patterns can reach the package", () => {
+    expect(
+      groupExclusionViolations([
+        group("cryptographic", ["ssh2"]),
+        group("webrtc-stack", ["peerjs", "werift"]),
+      ]),
+    ).toEqual([]);
+  });
+
+  it("passes when a wildcard exclude-patterns entry covers it", () => {
+    expect(
+      groupExclusionViolations([
+        group("cryptographic", ["ssh2"]),
+        group("non-critical", ["*"], ["ss*"]),
+      ]),
+    ).toEqual([]);
+  });
+
+  it("reports one violation per swallowing group when several would batch it", () => {
+    const violations = groupExclusionViolations([
+      group("cryptographic", ["ssh2"]),
+      group("non-critical", ["*"]),
+      group("also-everything", ["*"]),
+    ]);
+    expect(violations).toHaveLength(2);
+  });
+
+  it("treats a bare * patterns entry as naming no package", () => {
+    expect(
+      groupExclusionViolations([
+        group("non-critical", ["*"]),
+        group("also-everything", ["*"]),
+      ]),
+    ).toEqual([]);
+  });
+
+  it("leaves a catch-all in another update block alone, batching separately", () => {
+    expect(
+      groupExclusionViolations(
+        npmGroups(
+          twoNpmBlocks(
+            `      cryptographic:
+        patterns:
+          - "ssh2"`,
+            `      web-non-critical:
+        patterns:
+          - "*"`,
+          ),
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  it("fails that same pair of groups when one update block declares both", () => {
+    const violations = groupExclusionViolations(
+      npmGroups(
+        config(`      cryptographic:
+        patterns:
+          - "ssh2"
+      web-non-critical:
+        patterns:
+          - "*"`),
+      ),
+    );
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toContain("ssh2");
+    expect(violations[0]).toContain('npm group "cryptographic"');
+    expect(violations[0]).toContain('npm group "web-non-critical"');
+  });
+
+  it("throws on a group pattern carrying a glob beyond the bare * default", () => {
+    expect(() =>
+      groupExclusionViolations([
+        group("scoped", ["@openmined/*"]),
+        group("non-critical", ["*"]),
+      ]),
+    ).toThrow(/glob shape/);
   });
 });
 
@@ -543,6 +686,50 @@ describe("the real repository configuration", () => {
   it("holds every checklist package out of the groups that would batch it", () => {
     expect(groups()).not.toBeNull();
     expect(coverageViolations(packages(), groups())).toEqual([]);
+  });
+
+  it("holds every group-named package out of every other group's batch", () => {
+    expect(groupExclusionViolations(groups())).toEqual([]);
+  });
+
+  it.each(["@noble/curves", "@openmined/psi.js", "node-forge"])(
+    "fails when %s is dropped from non-critical's exclude-patterns, and passes restored",
+    (name) => {
+      const withoutExclusion = groups().map((candidate) =>
+        candidate.name === "non-critical"
+          ? {
+              ...candidate,
+              excludePatterns: candidate.excludePatterns.filter(
+                (pattern) => pattern !== name,
+              ),
+            }
+          : candidate,
+      );
+      const violations = groupExclusionViolations(withoutExclusion);
+      expect(violations.length).toBeGreaterThan(0);
+      expect(violations.some((violation) => violation.includes(name))).toBe(
+        true,
+      );
+      expect(
+        violations.some((violation) => violation.includes('"non-critical"')),
+      ).toBe(true);
+      // Restoring the untouched real config -- groups() re-reads the file, so
+      // withoutExclusion above never mutated it -- passes again.
+      expect(groupExclusionViolations(groups())).toEqual([]);
+    },
+  );
+
+  it("fails when a new name joins cryptographic's patterns with no matching exclusion", () => {
+    const withNewPattern = groups().map((candidate) =>
+      candidate.name === "cryptographic"
+        ? { ...candidate, patterns: [...candidate.patterns, "left-pad"] }
+        : candidate,
+    );
+    const violations = groupExclusionViolations(withNewPattern);
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toContain("left-pad");
+    expect(violations[0]).toContain('npm group "cryptographic"');
+    expect(violations[0]).toContain('npm group "non-critical"');
   });
 
   it("has a group that would swallow a checklist package, so the green above is not vacuous", () => {
