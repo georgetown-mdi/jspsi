@@ -9,11 +9,12 @@ state that lets a two-party PPRL exchange run again on an agreed schedule from
 the web application -- unattended where the platform allows -- without
 re-authoring the exchange or re-establishing a shared secret. It covers the
 record's field-by-field shape -- what persists across runs versus what is
-supplied at each run -- the field types, the key-derivation implications of the
-persisted secret, the schedule and run bookkeeping the unattended path relies
-on, the local sibling stores beside the record (the backup, spent, and import
-markers, and the accounting of disclosures each run files its record into), and
-the export artifact's custody model and rollback caveats. It is the
+supplied at each run -- the field types, and the key-derivation implications of
+the persisted secret. It also covers the schedule and run bookkeeping the
+unattended path relies on, the local sibling stores beside the record (the
+backup, spent, and import markers, and the accounting of disclosures each run
+files its record into), and the export artifact's custody model and rollback
+caveats. It is the
 implementation-level complement to the **Managed exchange lifecycle** overview in
 [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md), which says what the feature is for,
 its automation goal and platform envelope, its durability and single-owner
@@ -105,11 +106,11 @@ are the standing definition of the managed exchange.
 | `lastRun` | object or absent | Run bookkeeping the backup state and the tiered desync UX read (see [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md)): `at` (ISO 8601 UTC), `outcome` (`"succeeded"` \| `"failed"` \| `"desynced"` \| `"missed"`), and, for a non-succeeded outcome, an optional `failureKind` (`"auth"` \| `"transport"` \| `"storage"` \| `"custody-unreadable"` \| `"input"` \| `"terms-shortfall"` \| `"consent"` \| `"handed-off"` \| `"cancelled"`). A `"missed"` outcome records a no-show: the wait for the other party's runner spent its whole budget with nobody arriving, so no handshake ran. A scheduled run reaches it when an agreed window passes without a completed handshake; an attended run reaches it when its own wait for the partner expires. It has no `failureKind` -- the outcome is the whole account, and it is held apart from `"transport"` (a connection that was made and broke, whose remedy is retrying the connection) and from `"cancelled"` (the operator stopped the run). It is benign, retried at the next window or whenever the operator runs the exchange again, and never routed through the desync/attack framing (see [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#a-missed-window-is-neither-desync-nor-attack)). An `"input"` failure records a benign pre-run acquisition problem -- the handle's file missing, moved, or unreadable at run start -- detected before any connection, likewise never routed through that framing; putting the file back clears it, so its surface offers the run again. A `"terms-shortfall"` failure records the other benign pre-run input state, held apart from it because its remedy is not another attempt: the file was read and cannot satisfy every linkage key the standing terms declare, so the run is refused before connecting (by the run-start input guard, or by the run boundary's own `assertLinkageTermsSatisfiable` inside the pre-connection prepare), and the same file refuses identically at the next window. Its remedy is a file covering every agreed key, or terms re-agreed with the partner out of band -- never a retry or a bare re-pick. A `"consent"` failure records the third pre-connection refusal: a send-side disclosure gate refused because the set this run would send is not the one the exchange recorded agreeing to send (see [What the setup consent covers across runs](../MANAGED_EXCHANGE.md#what-the-setup-consent-covers-across-runs)). It is likewise benign and outside that framing. A `"handed-off"` failure records the fourth: the run found this device's copy [spent](#the-backup-marker-the-spent-state-and-the-import-marker-local-siblings-never-in-the-artifact) by an export and refused inside the run+rotate lock, before reading the input file and before connecting, rather than rotating a secret whose owner is now elsewhere. It is the single-owner invariant holding rather than a fault, so it too stays outside the desync/attack framing, and it is the record's own account of a run -- attended or scheduled -- that met a hand-off nobody was present to answer for. A `"custody-unreadable"` failure records the fifth, and it is that same refusal failing to read the entry it decides on: the sibling entry did not validate, or its store did not answer, so the run stopped in the same place rather than rotating on custody it could not establish. It is held apart from `"storage"` because the two leave different states behind -- a `"storage"` failure rotated a secret it could not save, which can leave the two parties holding different ones and is recovered by re-inviting, while this refusal precedes the handshake and rotates nothing, so nothing here is a desync and a fresh secret would replace one nothing moved. `"consent"`, `"terms-shortfall"`, `"handed-off"`, and `"custody-unreadable"` are the failure kinds a surface must **not** present as retryable: the same input determines the same disclosure and falls the same way short of the same keys, a handed-off copy refuses identically at every later run, and a run reads the same unreadable entry every time, so the remedy is the operator's, not another attempt's. A record written before a kind was added to the enum still reads -- an entry with `"input"` for a shortfall loads and tiers as the generic input state; the converse is the reader-rejects-unknown rule's consequence, an artifact with a kind this reader does not know being refused whole rather than read with the kind dropped. A **re-invite clears `lastRun`** in the same rotation transaction that advances the fresh secret: the re-invite is the recovery for the failure the entry recorded, so leaving it would re-derive a consumed tier at the next visit -- and once the import marker is cleared alongside, a stale `"auth"` failure would re-derive as the attack tier rather than the benign import one. A successful run instead advances `lastRun` to `"succeeded"`; only the re-invite recovery drops it. |
 
 Everything in this table except `sharedSecret` is non-secret but not
-non-sensitive: together the persisted fields disclose the partnership's
-existence and shape -- who links with whom, over which field categories, on
-what agreed schedule, whatever the document's operator-authored free-text
-fields hold (see the `exchangeFile` row), and, when a handle is persisted,
-from which named input file -- to any reader of the store. That
+non-sensitive. Together the persisted fields disclose the partnership's
+existence and shape to any reader of the store: who links with whom, over which
+field categories, on what agreed schedule, whatever the document's
+operator-authored free-text fields hold (see the `exchangeFile` row), and, when
+a handle is persisted, from which named input file. That
 presence-and-shape disclosure, and why none of the secret-centric controls
 reduce it, is analyzed in [Metadata at
 rest](../SECURITY_DESIGN.md#metadata-at-rest-presence-and-shape).
@@ -128,8 +129,8 @@ in the mint layer: the record composer assembles the connection from a
 credential-free locator input and persists the schema's parse result. The
 downloadable-file mint path's credential-free input union covers only the
 file-sync channels (a webrtc exchange is coordinated live, not from a
-downloadable file), so core holds the composer's webrtc arm as three
-distinct pieces: a credential-free `WebRTCExchangeLocator` type
+downloadable file), so core holds the composer's webrtc arm as three distinct
+pieces. They are a credential-free `WebRTCExchangeLocator` type
 (`host`/`port`/`path` only); a `webrtc` arm in `connectionFromLocator`, the
 locator-to-connection expansion in `packages/core/src/config/exchangeFile.ts`;
 and the composition guarantee extending to the nested `server` object's two
@@ -308,7 +309,7 @@ hours -- plus three rules that are entry's alone:
   turning the wall-clock cadence into the stored UTC `anchor` (see the `anchor`
   row). Re-opening the form reads the anchor back on the operator's own clock,
   and a save that left every cadence field as it was **writes no schedule at
-  all** rather than resolving again: a wall clock a zone skips or repeats does
+  all** rather than resolving again. A wall clock a zone skips or repeats does
   not round-trip, so re-resolving on an unrelated save (a label edit, a max-age
   change) could walk the agreed instant away from the partner's. Omitting the
   field, rather than writing back the object the form opened on, is what keeps
@@ -336,11 +337,12 @@ Entry also enforces the field bounds in the table above as its own validation, s
 an out-of-range value is refused at the field rather than at the store write, and
 the width floor of one hour that the schema's structural floor does not state.
 Those bounds hold what the operator **enters**. A width the record already
-states -- one merely finer than the field's unit, 5400 seconds for an hour and a
-half, or one below the floor from an import or a hand-edited record -- is shown
-back as the exact value it is rather than rounded, and stands: the save holds
-its seconds through untouched, and neither the unit nor the floor is applied to
-it. Rewriting it would change what the partnership agreed without saying so, and
+states is shown back as the exact value it is rather than rounded, and stands.
+Such a width is one merely finer than the field's unit, 5400 seconds for an hour
+and a half, or one below the floor from an import or a hand-edited record. The
+save holds its seconds through untouched, and neither the unit nor the floor is
+applied to it. Rewriting it would change what the partnership agreed without
+saying so, and
 refusing it would block the form's other edits -- a label, a max-age policy -- on
 a value the operator never typed. Only a width the operator changes takes entry's
 bounds and the whole-hour rule the field asks for.
@@ -362,19 +364,20 @@ on `intervalDays` and `windowSeconds`: the window containing an instant, and the
 first window after it, both then land within one period plus one width of that
 instant, which is inside the representable range for any clock reading a machine
 can hold. A period or width past the ceilings is refused by the schema, so it
-never reaches a surface as a record at all: the attended list read parses
+never reaches a surface as a record at all. The attended list read parses
 strictly and rejects wholesale on it, so the whole read fails and the
-saved-exchanges list routes to its read-failed recovery surface, whose separate
-per-entry diagnostic read is where the offending record is identified and
-discarded. The display derivation also refuses a reading instant within one
+saved-exchanges list routes to its read-failed recovery surface. That surface's
+separate per-entry diagnostic read is where the offending record is identified
+and discarded. The display derivation also refuses a reading instant within one
 period plus one width of the end of the representable range, which is the other
 half of the pair.
 
 **The unattended read is per-entry, not strict.** A wake reads the store one
-entry at a time: an entry this build cannot parse -- an out-of-bounds period or
-width from an artifact imported or hand-edited before these ceilings existed, or
-any other record an app upgrade invalidated -- is **skipped**, reported as its own
-skip in the wake's diagnostic line, and every other due record still runs. Such an
+entry at a time. An entry this build cannot parse is **skipped**, reported as
+its own skip in the wake's diagnostic line, and every other due record still
+runs. Such an entry holds an out-of-bounds period or width from an artifact
+imported or hand-edited before these ceilings existed, or is any other record an
+app upgrade invalidated. Such an
 entry stays unparseable until an operator discards it, so a wholesale rejection
 here would be standing rather than transient: no exchange in the store would run
 unattended for as long as the entry sat there, with nobody present to meet the
@@ -466,12 +469,12 @@ registration surviving that long; the pacing and the cap are what keep an attemp
 that fails immediately from spending the window in a loop. The pacing interval is
 itself bounded by the close, which ends the occupancy in any case.
 
-**A limit of the occupancy.** The lock is held per attempt, not per window: an
-attempt that spends its full peer wait outlasts the pacing interval, so the
-next attempt takes the [single-writer lock](#the-secret-is-a-linear-resource)
-back at once, but an attempt that fails fast leaves the lock free for the rest
-of its pacing gap, and a window whose attempt cap runs out before the close
-leaves it free for the tail (see
+**A limit of the occupancy.** The lock is held per attempt, not per window. An
+attempt that spends its full peer wait outlasts the pacing interval, so the next
+attempt takes the [single-writer lock](#the-secret-is-a-linear-resource) back at
+once. But an attempt that fails fast leaves the lock free for the rest of its
+pacing gap, and a window whose attempt cap runs out before the close leaves it
+free for the tail (see
 [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#cross-tab-single-writer-locking-web-locks)).
 An operator's own Run can take the lock in any such free interval and rotate
 the shared secret, and the occupancy's later attempts then run against a
@@ -533,7 +536,7 @@ therefore let one trailing transient failure record a window of no-show waits as
 `"failed"`, which leaves the count untouched and loses the miss entirely.
 
 A failure that **proves the partner was met** decides the same question the
-other way, and outranks any absence the window found earlier: a handshake that
+other way, and outranks any absence the window found earlier. A handshake that
 failed closed ran against a partner on the far end of an open channel, a
 rotation persist fails only after that handshake yielded the rotated secret, and
 any failure past the data-exchange boundary postdates both. Per the
@@ -684,12 +687,12 @@ backbone](../MANAGED_EXCHANGE.md#the-durability-backbone-exportimport)).
 The artifact's shape and custody model:
 
 - **Contents.** The persisted record fields above -- the exchange-file document
-  plus `sharedSecret`, `expires`, the schedule, and the local bookkeeping: the
-  browser analog of handing over `psilink.yaml` and `.psilink.key` together --
-  **minus the input-file handle**: a `FileSystemFileHandle` is a device- and
-  profile-local platform object with no file serialization, so the export omits
-  it and the first run after an import re-acquires one (a one-time selection).
-  The record's `id` is likewise not included: it is a device-local record
+plus `sharedSecret`, `expires`, the schedule, and the local bookkeeping, the
+browser analog of handing over `psilink.yaml` and `.psilink.key` together --
+**minus the input-file handle**. A `FileSystemFileHandle` is a device- and
+profile-local platform object with no file serialization, so the export omits it
+and the first run after an import re-acquires one (a one-time selection). The
+record's `id` is likewise not included: it is a device-local record
   identifier, not partnership data, and an import is a **take-over that mints a
   fresh local record**, not a copy of the source's identity. The artifact does
   not rotate -- it snapshots the secret current at export -- so a stale artifact
@@ -697,15 +700,15 @@ The artifact's shape and custody model:
   (stamped when a max-age policy is set) lapses; the backup state prompts
   re-export after each rotation.
 - **Top-level shape.** The artifact is a JSON document with an `artifactVersion`
-  tag (its own reader-rejects-unknown literal, distinct from the record's
-  `schemaVersion` -- the on-disk artifact format versions independently of the
-  stored record) and three parts that keep the two CLI halves separable from the
-  browser-only fields: `exchangeDocument` embeds the exchange-file document as a
-  valid `psilink.yaml` (the snake_case YAML the CLI loads, serialized through the
-  same discipline the mint layer applies to a validated spec); `key` is the
-  `.psilink.key` pair (`sharedSecret` and, when a bound is in force, `expires`);
-  and `local` holds the browser-only fields the two CLI artifacts do not
-  (`label`, `side`, `schedule`, `lastRun`, `tokenMaxAgeDays`). The artifact's own
+tag and three parts that keep the two CLI halves separable from the browser-only
+fields. The tag is its own reader-rejects-unknown literal, distinct from the
+record's `schemaVersion`: the on-disk artifact format versions independently of
+the stored record. `exchangeDocument` embeds the exchange-file document as a
+valid `psilink.yaml` (the snake_case YAML the CLI loads, serialized through the
+same discipline the mint layer applies to a validated spec). `key` is the
+`.psilink.key` pair (`sharedSecret` and, when a bound is in force, `expires`).
+And `local` holds the browser-only fields the two CLI artifacts do not (`label`,
+`side`, `schedule`, `lastRun`, `tokenMaxAgeDays`). The artifact's own
   JSON keys are `camelCase`, by design: the `.psilink.key` file the CLI reads is
   itself `camelCase` JSON (`sharedSecret`, `expires`), parsed without a
   `snake_case` conversion, so a `camelCase` `key` block is what maps onto a valid
@@ -723,13 +726,13 @@ The artifact's shape and custody model:
   shown for a record that is in the operator's own custody. It cannot make a
   record run that would otherwise refuse, and it cannot stop a refusal the spent
   entry earns.
-- **CLI-separable format.** The record is the CLI's config-plus-key pair kept
-  as one browser object, and its export stays consumable by the CLI toolchain
-  rather than becoming a third format: the embedded `exchangeDocument` is a
-  valid `psilink.yaml`; the `key` block's `sharedSecret` and `expires` pair maps
-  onto a valid `.psilink.key` (the block can be lifted out verbatim -- the field
-  names already match the key file's); and the `local` block's fields are cleanly
-  separable and ignorable. This is a format-compatibility commitment, not a
+- **CLI-separable format.** The record is the CLI's config-plus-key pair kept as
+one browser object, and its export stays consumable by the CLI toolchain rather
+than becoming a third format. The embedded `exchangeDocument` is a valid
+`psilink.yaml`. The `key` block's `sharedSecret` and `expires` pair maps onto a
+valid `.psilink.key`, and can be lifted out verbatim, since the field names
+already match the key file's. The `local` block's fields are cleanly separable
+and ignorable. This is a format-compatibility commitment, not a
   claim the embedded exchange runs there: the composed webrtc connection holds
   no `role`, the field the CLI derives its rendezvous peer id from and refuses a
   webrtc run without (see [Role: a local `side` field](#role-a-local-side-field-not-the-document)).
@@ -738,11 +741,11 @@ The artifact's shape and custody model:
   record must be usable with nobody present to supply a passphrase, and the
   artifact adopts the CLI key file's trust model instead. `.psilink.key` is a
   plaintext credential protected by custody and storage permissions, not by a
-  passphrase, and the export asks for the same handling -- owner-only storage,
-  never an unencrypted transmission channel, the backup guidance in [Key file
-  security](../SECURITY_DESIGN.md#key-file-security) (an operator who wants
+  passphrase, and the export asks for the same handling: owner-only storage,
+  never an unencrypted transmission channel, and the backup guidance in [Key
+  file security](../SECURITY_DESIGN.md#key-file-security). An operator who wants
   encryption at rest stores the file in an encrypted location or secrets
-  manager, exactly as the CLI's backup guidance says).
+  manager, exactly as the CLI's backup guidance says.
 - **A captured export is a captured credential.** It stays usable until the
   partnership rotates past it -- which a dormant partnership may not do for
   months -- so the response to a lost or copied artifact is the [compromise
@@ -836,19 +839,19 @@ record, in a separate origin-local store keyed by the record `id`, and are
   export marks nothing, so a copy spent that way holds whatever backup state it
   already had. The attestation is checked rather than taken on its word, and the
   check and the write are **one atomic store step** (a cross-store
-  check-and-spend), as the backup marker's are: inside a single
-  transaction spanning the record and sibling stores, the confirmation reads the
-  record by `id`, compares the `sharedSecret` the files it downloaded hold, and
-  writes the spent state only while the two match. A rotation -- whose own write
+  check-and-spend), as the backup marker's are. Inside a single transaction
+  spanning the record and sibling stores, the confirmation reads the record by
+  `id`, compares the `sharedSecret` the files it downloaded hold, and writes the
+  spent state only while the two match. A rotation -- whose own write
   spans the same two stores -- therefore lands either before that step, which then
   reads the rotated secret and refuses, or after a spend that was decided against
-  the secret those files hold; it cannot land between the check and the write. So a
-  rotation that persisted between the download and the attestation -- a run in any
-  context, or a re-invite -- refuses the spend instead of recording one, since what
-  would be handed over is a copy the partnership has already moved past, and a record
-  gone from the store refuses on its own terms: there is no live copy left to spend,
-  and none to download again either, so those refusals are reported apart and say
-  different things.
+  the secret those files hold; it cannot land between the check and the write.
+  So a rotation that persisted between the download and the attestation -- a run
+  in any context, or a re-invite -- refuses the spend instead of recording one,
+  since what would be handed over is a copy the partnership has already moved
+  past. A record gone from the store refuses on its own terms: there is no live
+  copy left to spend, and none to download again either. Those two refusals are
+  reported apart and say different things.
 
   **A run in flight is excluded rather than checked.** That transaction decides a
   rotation that has already landed; a run still in flight has landed nothing for it
@@ -886,23 +889,24 @@ record, in a separate origin-local store keyed by the record `id`, and are
 
   **The match is `spent` plus a secret match plus an absent `handoff`.** Revive keys
   on the absence rather than on an inequality against a known route, so a hand-off
-  added later is gated by default instead of inheriting the migration's recovery. An
-  artifact the operator exported from this browser before a command-line hand-off
-  still has the secret that record was spent holding, and the import **refuses
-  it**: it neither revives the spent record -- that would run a copy the hand-off gave
-  away -- nor installs a fresh one, which would split one secret across a spent husk
-  here and a live row beside it. Nothing is written. A handed-off match determines the
+  added later is gated by default instead of inheriting the migration's
+  recovery. An artifact the operator exported from this browser before a
+  command-line hand-off still has the secret that record was spent holding, and
+  the import **refuses it**. It neither revives the spent record -- that would
+  run a copy the hand-off gave away -- nor installs a fresh one, which would
+  split one secret across a spent husk here and a live row beside it. Nothing is
+  written. A handed-off match determines the
   import by itself: an artifact whose secret matches a handed-off record is refused
   even when a migration-spent record holds that secret too, and the refusal names the
   handed-off record. Where it fires, the refusal names the stored record and the
   recovery that record actually has -- the exchange runs from the files the
   hand-off saved, and bringing it back to this browser is a re-invite. A stated
-  limit bounds the surface: the import affordance renders only beside an empty or
-  unreadable listing, a handed-off record keeps the listing non-empty, and an
+  limit bounds the surface. The import affordance renders only beside an empty
+  or unreadable listing, a handed-off record keeps the listing non-empty, and an
   unreadable store fails the revive's own parse before the refusal can be
-  reported -- so the guard binds at the store's import path, and a fully supported
-  surface for meeting it (an explicit re-take on the spent record) remains future
-  work.
+  reported. So the guard binds at the store's import path, and a fully supported
+  surface for meeting it (an explicit re-take on the spent record) remains
+  future work.
 
   **The refusal is scoped to this store's state at import**, and both of its
   conditions are the operator's to remove: the handed-off record must still be in
@@ -923,12 +927,13 @@ record, in a separate origin-local store keyed by the record `id`, and are
   response (see
   [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#rollback-at-rest-copies-can-silently-resurrect)).
 - **The import marker** (`importedAt`, an ISO 8601 UTC instant) records that this
-  device installed or revived the record from a backup artifact. It is the evidence
-  the desync tiering reads to tell an **import/restore since the last successful run**
-  apart from an unexplained handshake failure (Tier 1 versus Tier 2; see
-  [Telling a desync from an attack](../MANAGED_EXCHANGE.md#telling-a-desync-from-an-attack)):
-  a restored copy can hold a secret the partnership has rotated past, so a
-  handshake failure while this marker stands is the benign import tier (recovery:
+  device installed or revived the record from a backup artifact. It is the
+  evidence the desync tiering reads to tell an **import/restore since the last
+  successful run** apart from an unexplained handshake failure (Tier 1 versus
+  Tier 2; see [Telling a desync from an
+  attack](../MANAGED_EXCHANGE.md#telling-a-desync-from-an-attack)). A restored
+  copy can hold a secret the partnership has rotated past, so a handshake
+  failure while this marker stands is the benign import tier (recovery:
   re-invite), not the attack path. "Since the last successful run" is enforced
   **structurally**, not by comparing timestamps, by two write-side rules that mirror
   the backup marker's:
@@ -946,13 +951,14 @@ record, in a separate origin-local store keyed by the record `id`, and are
 
   It too is a **plain timestamp**, no secret material and no rotation epoch.
 
-All three are **local siblings by design**: the marker's currency input, this
+All three are **local siblings by design**. The marker's currency input, this
 device's spent status, and this device's restore history must not travel in the
-export artifact -- an imported copy is a fresh live owner, for which "the source
-last backed up on X", "the source was spent", or "the source was imported on X" is
-meaningless -- and the record schema is reader-rejects-unknown, so holding any of
-them on the record would force a new `schemaVersion` or leak into the artifact.
-Keeping them siblings makes their non-inclusion **structural**: the exporter reads
+export artifact: an imported copy is a fresh live owner, for which "the source
+last backed up on X", "the source was spent", or "the source was imported on X"
+is meaningless. And the record schema is reader-rejects-unknown, so holding any
+of them on the record would force a new `schemaVersion` or leak into the
+artifact. Keeping them siblings makes their non-inclusion **structural**: the
+exporter reads
 only the record. Deleting a managed exchange removes the record and its sibling
 state together (see [Deleting a managed
 exchange](../MANAGED_EXCHANGE.md#deleting-a-managed-exchange)).
@@ -967,11 +973,11 @@ accounting of disclosures or a FERPA disclosure record from (see
 [COMPLIANCE.md](../COMPLIANCE.md#hipaa-considerations)).
 
 **An entry is a run's exchange record, verbatim.** Not a summary of one, and not
-a second format beside it: every fact the accounting states -- the partner, the
-governing agreement and the purpose of the disclosure under it, the categories
-disclosed each way, the records this party exposed, the result size where the
-record format's entitlement gate recorded one, and the instant -- is a field of
-that record. What a surface renders is therefore a reading of the artifact, and a
+a second format beside it. Every fact the accounting states is a field of that
+record: the partner, the governing agreement and the purpose of the disclosure
+under it, the categories disclosed each way, the records this party exposed, the
+result size where the record format's entitlement gate recorded one, and the
+instant. What a surface renders is therefore a reading of the artifact, and a
 fact the record does not hold is reported as not recorded rather than inferred
 from elsewhere.
 
@@ -1046,18 +1052,19 @@ rests on, and it is pinned by a test driving both parses against a moved version
 rather than asserted here.
 
 **The unreadable state is a value in hand, not a failure to read.** One read
-obtains the stored value in a single round trip and classifies it: a store that
-does not open -- private mode with storage blocked, an engine without IndexedDB,
-or a version-change open transiently held off by another tab's older connection
--- and a read transaction that does not complete are both *store-unavailable*,
-which offers neither arm below. Only a value that was obtained and then refused by
-the parses is *unreadable*. The split is the one the saved-exchanges list already
-makes between a failed open and a failed read after one, and it is critical
-twice over: the blocked-open condition is transient and self-healing, so routing
-it to the reset would offer to destroy records over a condition that clears when
-the other tab yields; and reading once means the validating parse and the
-envelope-only parse see the same bytes, so the two readings of an accounting
-cannot disagree.
+obtains the stored value in a single round trip and classifies it. A store that
+does not open and a read transaction that does not complete are both
+*store-unavailable*, which offers neither arm below. A store fails to open under
+private mode with storage blocked, on an engine without IndexedDB, or where a
+version-change open is transiently held off by another tab's older connection.
+Only a value that was obtained and then refused by
+the parses is *unreadable*. The split is the one the saved-exchanges list
+already makes between a failed open and a failed read after one, and it is
+critical twice over. The blocked-open condition is transient and self-healing,
+so routing it to the reset would offer to destroy records over a condition that
+clears when the other tab yields. And reading once means the validating parse
+and the envelope-only parse see the same bytes, so the two readings of an
+accounting cannot disagree.
 
 **A refused value is then split by which side is behind.** A bump strands entries
 only in one direction, and the refused entries' own `version` literals -- held
