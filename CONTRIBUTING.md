@@ -108,14 +108,14 @@ warm-server inner loop, and the browser-suite plumbing are in
 ### Coverage
 
 Coverage is an informational report (`npm run coverage`), not part of `npm test`
-and not a CI gate. There is deliberately no global percentage threshold -- do
+and not a CI gate. There is no global percentage threshold by design -- do
 not add one. Rationale and what the report covers: [docs/TESTING.md](docs/TESTING.md#coverage).
 
 ## Code Conventions
 
 - **TypeScript** with strict mode throughout. Avoid `any`; if you must use it, add a comment explaining why.
 - **Naming**: `camelCase` in TypeScript; `snake_case` in user-facing JSON and YAML files. Semicolons required. Prefer a long, explicit, self-documenting name over a short one plus a clarifying comment.
-- **Comments**: write one only when the _why_ is non-obvious - a hidden constraint, subtle invariant, or known limitation. Do not restate what the code does. Multi-line `//` blocks are permitted for genuinely complex runtime constraints that cannot fit on one line.
+- **Comments**: write one only when the _why_ is non-obvious - a hidden constraint, subtle invariant, or known limitation. Do not restate what the code does. Multi-line `//` blocks are permitted for complex runtime constraints that cannot fit on one line.
 - **Encode runtime invariants as checks, not prose**: a claim that something does not happen at runtime -- a line that never fires, an unreachable branch, a callback that never runs -- belongs in an executable check that fails when the claim breaks, not a comment or doc note that cannot, and a best-effort check says so, because a backstop is not a guarantee. The worked case, its premise and its enforcing check -- a prose note there went stale while the check did not, the point of the rule: [docs/spec/DEPENDENCY_PINS.md](docs/spec/DEPENDENCY_PINS.md#upgrading-the-sftp-stack-ssh2--ssh2-sftp-client) and the CLI integration console sentinel (`apps/cli/test/consoleSentinel.ts`).
 - **JSDoc**: `/** */` on all exports; `/** @internal */` (with no description) for test-only exports.
 - **Validation**: define the TypeScript interface first, then derive the Zod schema with `z.ZodType<Interface>`. Apply `camelizeKeys` before Zod parsing so user-facing YAML/JSON remains `snake_case` while TypeScript sees `camelCase`.
@@ -128,6 +128,33 @@ not add one. Rationale and what the report covers: [docs/TESTING.md](docs/TESTIN
 - **CLI durations**: a duration-valued CLI flag parses its value through the shared `parseDuration` / human-readable `<int><unit>` format (`apps/cli/src/util/duration.ts`), read from args via `durationFlagSeconds` (`apps/cli/src/util/cli.ts`), never a bare integer of seconds, so the accepted value syntax stays consistent across flags.
 - **CLI flag naming**: a flag names the object of the action rather than the mechanism, stays self-scoping (a generic `--yes` overclaims), does not stutter with its subcommand, and a weighty or irreversible action gets no terse short form.
 - **Windows paths**: support wherever a user can supply a local path. Normalize backslashes on ingestion; use `fileURLToPath` for `file://` URLs.
+- **Plain language**: use the plainest accurate word. Do not coin a metaphor where a domain word exists, and do not promote an internal name into text a user reads. A user-visible string states what happened and what to do, and nothing else -- no justification of the design, no reassurance the reader cannot act on, no refutation of an objection they did not raise. A comment states a constraint, not an argument, and stays under roughly six lines; when the reasoning is longer than that, it is a design record and belongs in `docs/notes/`. This applies to hook and script headers as much as to source comments. The negative wordlist below is the list to check a rewrite against; it is a prompt to reread a sentence, not a substitution table, and no CI check enforces it -- a word-list check would fire on `mintExchangeFile` and `honest-but-curious` and teach contributors to route around it.
+
+  Prefer the right-hand word. Judge each in context; none is a safe blind substitution.
+
+      carries | carry | carried      -> has / holds / includes / states / sends
+      honest | honestly              -> accurate / correct / does not overstate
+      load-bearing                   -> critical / required / name the consequence
+      seam | seams                   -> boundary / call site / name the function
+      surface | surfaces | surfaced  -> shows / reports / exposes  (VERB only)
+      backstop                       -> fallback / safety check / name the mechanism
+      premise | premises             -> assumption
+      footgun | foot-gun             -> hazard / mistake / name the failure
+      blast radius                   -> scope of impact / what it touches
+      escape hatch                   -> override / opt-out / documented exception
+      reads as                       -> is treated as / displays as
+      settles                        -> determines / fixes  (value sense only)
+      deliberately                   -> delete, or "by design"
+      worth naming/stating/carrying  -> delete the signpost
+      true up | trued | true the     -> correct / fix
+      first-class                    -> fully supported / primary
+      genuinely | materially | crucially | notably -> delete
+      bubble up | paper over | knob | legible -> raise / hide / setting / clear
+      appliance | bench              -> console
+      battery | lock-in | warn-not-enforce -> name the thing plainly
+
+  These words are grounded in this repository and are NOT on the list: gate, mint, fan-out, round, ledger, canonical, attest, invariant, in flight, pin, drift, reconcile, sweep, harden, posture, hygiene, and the noun surface (attack surface, consent surface, `ConsentSurfaceName`). Neither are the terms of art -- honest-but-curious, semi-honest, honest party, the PSI round and round-trip, Promise settlement -- nor any identifier, filename, type name, fixture, or schema key.
+
 - **Markdown**: soft line wrapping, single space after periods, ASCII punctuation (`-` not em-dash, `->` not arrow character).
 
 Linting and formatting are enforced by CI. Run locally before pushing:
@@ -144,7 +171,7 @@ psilink documentation is three-tier:
 
 - `docs/` (overview) - conceptual and operational documents for program officers, security reviewers, compliance officers, IT staff, and contributors.
 - `docs/spec/` - the technical specification tier: wire formats, byte encodings, normative constant values, protocol internals, and implementation-level design, for implementors and auditors. See [`docs/spec/README.md`](docs/spec/README.md) for the index and routing guide.
-- `docs/notes/` - tracked, citeable design records and explorations: the model behind a mechanism, the options weighed, and the decisions taken. Non-normative - nothing here binds an implementation, and a note points at the spec for the normative rows rather than restating them. Indexed by [`docs/notes/README.md`](docs/notes/README.md), which carries the maturity ladder from `scratch/` up to the formal tiers.
+- `docs/notes/` - tracked, citeable design records and explorations: the model behind a mechanism, the options weighed, and the decisions taken. Non-normative - nothing here binds an implementation, and a note points at the spec for the normative rows rather than restating them. Indexed by [`docs/notes/README.md`](docs/notes/README.md), which holds the maturity ladder from `scratch/` up to the formal tiers.
 
 When behavior changes, update the matching tier:
 
@@ -154,13 +181,13 @@ When behavior changes, update the matching tier:
 
 If you are writing a constant value, a byte/wire layout, an HKDF info string or other algorithm step, or the "would only need revisiting if..." rationale behind one of those, it belongs in `docs/spec/` - regardless of which doc you currently have open. Overview docs (`docs/`) stay conceptual and operational, including operational rationale such as the coverage-gate decision.
 
-Overview docs must stay scannable: no multi-hundred-word paragraphs -- use subheadings and lists. When an edit lands in a section that is already a wall of text, restructure the section rather than growing a sentence in place.
+All three documentation tiers (`docs/`, `docs/spec/`, `docs/notes/`) must stay scannable: no multi-hundred-word paragraphs -- use subheadings and lists. When an edit lands in a section that is already a wall of text, restructure the section rather than growing a sentence in place.
 
-Write documentation as the target state, not a narration of what changed -- no "now", "previously", or "no longer"; the reader cannot see the diff, and change history belongs in the commit message.
+Write documentation as the target state, not a narration of what changed -- no "now", "previously", or "no longer"; the reader cannot see the diff, and change history belongs in the commit message. This holds in all three tiers and in source comments.
 
 Use an obviously fake placeholder for any credential-shaped value in an example config or sample document -- GitHub push protection rejects a push whose commits add a real-looking secret anywhere, docs and example YAML included, and recovering means amending the offending commit rather than adding a follow-up on top of it.
 
-The governance documents -- [SECURITY.md](SECURITY.md), [PRIVACY.md](PRIVACY.md), [docs/INCIDENT_RESPONSE.md](docs/INCIDENT_RESPONSE.md), [docs/SECURITY_DESIGN.md](docs/SECURITY_DESIGN.md), [docs/COMPLIANCE.md](docs/COMPLIANCE.md), and [docs/SHARED_RESPONSIBILITY.md](docs/SHARED_RESPONSIBILITY.md) -- carry `review_owner` and `last_reviewed` in their YAML front matter, so an agency reviewer can see who owns each one and when it was last confirmed correct without reading the git history. The owner is a role rather than a person, so it survives a change of maintainer. A substantive change to one of these -- anything that alters what the document asserts, as opposed to a typo, link, or formatting fix -- sets its `last_reviewed` to the date the change lands. The date means someone read the document and found it still correct, so leave it where it is for an edit that was not that.
+The governance documents -- [SECURITY.md](SECURITY.md), [PRIVACY.md](PRIVACY.md), [docs/INCIDENT_RESPONSE.md](docs/INCIDENT_RESPONSE.md), [docs/SECURITY_DESIGN.md](docs/SECURITY_DESIGN.md), [docs/COMPLIANCE.md](docs/COMPLIANCE.md), and [docs/SHARED_RESPONSIBILITY.md](docs/SHARED_RESPONSIBILITY.md) -- have `review_owner` and `last_reviewed` in their YAML front matter, so an agency reviewer can see who owns each one and when it was last confirmed correct without reading the git history. The owner is a role rather than a person, so it survives a change of maintainer. A substantive change to one of these -- anything that alters what the document asserts, as opposed to a typo, link, or formatting fix -- sets its `last_reviewed` to the date the change lands. The date means someone read the document and found it still correct, so leave it where it is for an edit that was not that.
 
 Documentation-tier placement is in scope for code review: a reviewer flags spec-level detail written into a `docs/` overview doc.
 
@@ -168,7 +195,7 @@ Documentation-tier placement is in scope for code review: a reviewer flags spec-
 
 `CHANGELOG.md` is reader-facing release notes for whoever runs or vets psilink from outside this repo, browsing to learn what it does and whether it is worth adopting -- not a second copy of the git history. It is a short list of the product's headline capabilities, not a record of the work done.
 
-- Pre-release, the default answer to "does this PR need a changelog entry?" is no. Add one only for a genuinely major feature -- a new capability a reader browsing the repo needs to know exists -- or a breaking change to something already listed. Everything else is skipped: individual flags and config fields, UI polish, operational and error-handling refinements, bug fixes, changed defaults, exit-code and format tweaks, internal refactors, test/CI/tooling changes, `@psilink/core` API reshapes, and doc-only edits. When in doubt, leave it out; a reviewer adds an entry back far more cheaply than the log recovers from bloat.
+- Pre-release, the default answer to "does this PR need a changelog entry?" is no. Add one only for a major feature -- a new capability a reader browsing the repo needs to know exists -- or a breaking change to something already listed. Everything else is skipped: individual flags and config fields, UI polish, operational and error-handling refinements, bug fixes, changed defaults, exit-code and format tweaks, internal refactors, test/CI/tooling changes, `@psilink/core` API reshapes, and doc-only edits. When in doubt, leave it out; a reviewer adds an entry back far more cheaply than the log recovers from bloat.
 - One or two lines per entry, stating the capability; push rationale and wire detail to `docs/`, `docs/spec/`, or the PR and link it with a trailing `See docs/...`.
 - Group under Added / Changed / Deprecated / Removed / Fixed / Security; prefix a breaking change `BREAKING:`. Keep the Security section to the headline security posture, not each hardening change.
 - Once there are releases operators upgrade between, the bar drops to any change a reader acts on when deciding whether to upgrade -- a changed default, behavior, exit code, wire/on-disk format, or security fix -- and security entries are recorded exhaustively per release. Until then, hold the higher bar.
@@ -184,7 +211,7 @@ Documentation-tier placement is in scope for code review: a reviewer flags spec-
   subject, while a single-commit PR's landing subject is its commit's own
   message, already governed by this same rule.
 - Include a body for non-trivial commits explaining motivation and context, not just what changed. Hard-wrap body lines at roughly 70 characters.
-- A pull request is squash-merged, so its squash message is the commit that lands. `node .claude/scripts/squash-message.mjs <pr-number>` drafts one from the branch's commits, the PR body, and this document, and prints it for the maintainer to review before pasting; it merges nothing. A pull request carrying a single commit needs no hand-written squash message -- GitHub takes that commit's own message -- so the script refuses one and the work goes into the commit itself.
+- A pull request is squash-merged, so its squash message is the commit that lands. `node .claude/scripts/squash-message.mjs <pr-number>` drafts one from the branch's commits, the PR body, and this document, and prints it for the maintainer to review before pasting; it merges nothing. A pull request with a single commit needs no hand-written squash message -- GitHub takes that commit's own message -- so the script refuses one and the work goes into the commit itself.
 
 ## Pull Request Process
 
