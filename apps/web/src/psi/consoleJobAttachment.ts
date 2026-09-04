@@ -6,15 +6,14 @@ import type { JobApiClient } from "@psi/serverJobExchangeDriver";
 
 /**
  * The console's strand-recovery persistence: a single localStorage record naming
- * the last exchange this browser started on the appliance, plus the discard
+ * the last exchange this browser started on the console, plus the discard
  * sequence every deliberate-abandonment path runs.
  *
  * The record survives a hard tab close (localStorage, not sessionStorage -- the
  * strand case this exists for is exactly a close that sessionStorage would not
  * survive) and holds no secret: a v4 UUID plus two enum labels. Access to the job
- * rides the operator-local origin the console appliance serves, never knowledge of
- * the id, so persisting the id discloses nothing an attacker could not already
- * reach.
+ * rides the operator-local origin the console serves, never knowledge of the id,
+ * so persisting the id discloses nothing an attacker could not already reach.
  */
 
 const log = getLogger("consoleJobAttachment");
@@ -22,8 +21,8 @@ const log = getLogger("consoleJobAttachment");
 /** The localStorage key the console's last-created job id is written under. */
 const STORAGE_KEY = "psilink-console-last-job";
 
-/** The stored record's schema version; a value under any other version reads as
- * absent (a forward/backward-incompatible record is discarded, not migrated). */
+/** The stored record's schema version; a value under any other version is treated
+ * as absent (a forward/backward-incompatible record is discarded, not migrated). */
 const ATTACHMENT_VERSION = 1;
 
 /** How long a discard waits for a graceful cancel to run to completion before
@@ -35,13 +34,13 @@ const DISCARD_POLL_BUDGET_MS = 15_000;
 /** The gap between discard status polls. */
 const DISCARD_POLL_INTERVAL_MS = 500;
 
-/** Which bench seat started the exchange -- carried for the recovery surface's
+/** Which console seat started the exchange -- kept for the recovery surface's
  * initial run-state fold; the recovery re-attaches through the same per-id routes
  * regardless. */
 export type ConsoleJobSeat = "inviter" | "acceptor";
 
 /** The persisted strand-recovery record: the last job this browser created on the
- * appliance, its seat, and the transport it rode. */
+ * console, its seat, and the transport it rode. */
 export interface ConsoleJobAttachment {
   jobId: string;
   seat: ConsoleJobSeat;
@@ -66,7 +65,7 @@ function attachmentOf(value: unknown): ConsoleJobAttachment | null {
  * is malformed. A malformed value (a hand-edited record, or one from an
  * incompatible version) is cleared as it is read, so a bad record cannot linger
  * and re-fail the probe on every mount. Storage being unavailable (SSR, blocked
- * quota) reads as absent.
+ * quota) is treated as absent.
  */
 export function readAttachment(): ConsoleJobAttachment | null {
   let raw: string | null;
@@ -131,18 +130,16 @@ function realDelay(ms: number): Promise<void> {
 /**
  * Cancel-if-running, then delete, then clear: the deliberate-discard sequence
  * every abandonment path runs (try again, start over, run another, the recovery
- * panel's Discard). If the job is still running it is cancelled and polled to
- * terminal within a bounded budget -- so the CLI's graceful escalation finishes
- * and cleans its rendezvous before the DELETE's SIGKILL -- and only then deleted.
- * The explicit DELETE is the one disk-remover; clearing the attachment last means
- * a completed discard always leaves no dangling recovery record.
+ * panel's Discard). A running job is cancelled and polled to terminal within a
+ * bounded budget before the DELETE, so the CLI's graceful escalation finishes and
+ * cleans its rendezvous before DELETE's own SIGKILL. The explicit DELETE is the
+ * one disk-remover; clearing the attachment last means a completed discard leaves
+ * no dangling recovery record.
  *
  * Best-effort throughout: a failed status/cancel/delete is dev-logged and the
- * sequence proceeds, and the attachment is cleared even if a step failed. A
- * dangling record that can no longer reach its job is worse than a workdir left
- * on disk: nothing reclaims a workdir automatically -- the explicit DELETE is its
- * only remover -- so the record is dropped rather than left re-failing recovery
- * on every mount.
+ * sequence proceeds, and the attachment is cleared even if a step failed -- a
+ * dangling record that can no longer reach its job is worse than an orphaned
+ * workdir, which nothing but the explicit DELETE reclaims.
  */
 export async function discardServerJob(
   client: JobApiClient,

@@ -1,12 +1,12 @@
 /**
  * The pure model behind the saved-exchanges affordance: turning a stored managed
- * record and its local sibling state into the small, honest summary the lobby's run
+ * record and its local sibling state into the small, accurate summary the lobby's run
  * list shows -- the label, this party's side, a one-line last-run status, the
  * schedule's due-ness where one is agreed, the derived backup state, and the spent
  * (handed-off) state. No React, no IndexedDB: the store reads and the actions live
  * in the components, so the display derivation is unit-testable in Node.
  *
- * This is deliberately NOT the management list: it lists stored records with a run
+ * This is NOT the management list: it lists stored records with a run
  * action, the backup state, and (for a spent record) no run action. Add/remove and
  * per-exchange detail are separate items. The last-run status here is a plain
  * summary, so the operator can recognize a partnership and launch a re-run.
@@ -42,13 +42,13 @@ export const SIDE_LABEL: Record<ManagedExchangeSide, string> = {
   acceptor: "You accept",
 };
 
-/** The derived backup state a row surfaces, phrased for the list. `"backed-up"`
- * carries the date phrase for the quiet green line; `"backup-needed"` is the one
+/** The derived backup state a row shows, phrased for the list. `"backed-up"`
+ * holds the date phrase for the quiet green line; `"backup-needed"` is the one
  * actionable state. */
 export type SavedExchangeBackup =
   { kind: "backed-up"; asOf: string } | { kind: "backup-needed" };
 
-/** The schedule lines a row carries for a record with an agreed schedule: where
+/** The schedule lines a row holds for a record with an agreed schedule: where
  * the recurrence stands at the row's `now`, and the coordination line a run of
  * missed windows earns (see {@link ./scheduleSurfacingModel.ts}). */
 export interface SavedExchangeScheduleLines {
@@ -71,8 +71,8 @@ export interface SavedExchangeRow {
   /** A one-line status summary of the last run and the expiry state. */
   status: string;
   /** Whether the stored secret has lapsed as of the row's `now`: the run action
-   * is still offered (the launch surfaces the benign expiry state and points at
-   * re-invite), but the list names the lapse so it is not a surprise. */
+   * is still offered (the launch shows the benign expiry state and points at
+   * re-invite), but the list names the lapse regardless. */
   expired: boolean;
   /** The derived backup state for the row (see {@link SavedExchangeBackup}). */
   backup: SavedExchangeBackup;
@@ -85,18 +85,18 @@ export interface SavedExchangeRow {
    * command-line files do not), so the row names the one that applies. Absent on a
    * row that is not spent, and on a migration spend. */
   spentHandoff?: ManagedSpentHandoff;
-  /** The schedule lines, for a record that carries an agreed schedule and is not
+  /** The schedule lines, for a record that holds an agreed schedule and is not
    * spent (see {@link scheduleLines}). Absent otherwise, so a row for an exchange
    * nobody scheduled says nothing about scheduling. */
   schedule?: SavedExchangeScheduleLines;
 }
 
-/** The one-line status a failure tier reads as in the list -- a specific but quiet
+/** The one-line status a failure tier displays as in the list -- a specific but quiet
  * line naming the state and its recovery gist, deferring the full copy (and, for the
  * unexplained tier, the attack framing and the out-of-band confirmation) to the
- * per-exchange surface the row opens. A benign tier never reads as attack framing here;
- * the unexplained tier reads as "needs you to check with your partner", the honest
- * lead without the checklist. `at` is the last run's phrased instant. */
+ * per-exchange surface the row opens. A benign tier is never treated as attack framing
+ * here; the unexplained tier displays as "needs you to check with your partner", the
+ * plain lead without the checklist. `at` is the last run's phrased instant. */
 function tierStatus(tier: ManagedFailureTier, at: string): string {
   switch (tier) {
     case "expired":
@@ -134,7 +134,7 @@ function tierStatus(tier: ManagedFailureTier, at: string): string {
   }
 }
 
-/** The last-run status line for a record. A record that has never run reads as
+/** The last-run status line for a record. A record that has never run is treated as
  * never-run; a succeeded run names its date; a non-succeeded outcome is tiered from the
  * record's own bookkeeping ({@link deriveManagedFailureTier}) into its specific,
  * non-alarming state -- the list's quiet form of the tiers the run surface expands. */
@@ -157,7 +157,7 @@ function lastRunStatus(
 }
 
 /** The backup state phrased for a row, from the record's local backup marker. A
- * `"backed-up"` state carries the marker's date; a `"backup-needed"` state is the
+ * `"backed-up"` state holds the marker's date; a `"backup-needed"` state is the
  * one actionable prompt. */
 function backupFor(local: ManagedLocalState | undefined): SavedExchangeBackup {
   const state = deriveManagedBackupState(local?.backup);
@@ -182,15 +182,14 @@ function scheduleLines(
 
 /**
  * Derive the display row for a stored record as of `now`, given its local sibling
- * state (the backup marker and any spent state). The last-run status carries a
+ * state (the backup marker and any spent state). The last-run status holds a
  * lapsed-`expires` note when the secret has lapsed; the backup state is derived from
  * the marker's presence; a spent record names its handoff date and which hand-off it
  * was, and the list suppresses its run action. `now` is injected so the expiry note
  * is pure and testable.
  *
- * A record carrying an agreed schedule also carries its schedule lines -- unless it
- * is spent, whose copy this browser no longer runs: naming a next window on a row
- * with no run action would read as a run this browser is going to make.
+ * A record with an agreed schedule also has its schedule lines, unless it is spent
+ * -- a spent row shows no run action.
  */
 export function savedExchangeRow(
   record: ManagedExchangeRecord,

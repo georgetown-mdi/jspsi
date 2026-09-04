@@ -14,8 +14,8 @@ import type { ReactNode } from "react";
 /** The narrow share bar's rows in ledger order: the headline disclosure facts
  * each row producer marked `shareBar` -- the producer declares its own
  * condensed subset, so a relabel cannot silently drop a row from the trust
- * surface. The leading-rows fallback is a best-effort backstop only, keeping
- * the bar non-empty should a producer mark nothing; the unit suite pins each
+ * surface. The leading-rows fallback is best-effort only, keeping the bar
+ * non-empty should a producer mark nothing; the unit suite pins each
  * producer's marked subset, so it is not a guarantee anything relies on. */
 function shareBarRows(
   rows: ReadonlyArray<LedgerRow>,
@@ -26,10 +26,10 @@ function shareBarRows(
 
 /**
  * One row of the disclosure ledger: an uppercase label, the value in the
- * bench's monospace data voice, and an optional reference to the spine step
+ * console's monospace data voice, and an optional reference to the spine step
  * that owns the value ("Step 2"). `muted` is the named empty state ("None",
  * "Nothing - matching only"), rendered in the placeholder voice; with neither
- * the row shows the em-dash "not decided yet" mark. `shareBar` carries the
+ * the row shows the em-dash "not decided yet" mark. `shareBar` holds the
  * producer's marker for the narrow condensed bar (see {@link shareBarRows}).
  */
 export interface LedgerRow {
@@ -40,9 +40,9 @@ export interface LedgerRow {
   shareBar?: boolean;
 }
 
-/** Plain-language explanations for the ledger's row headings, surfaced by the
+/** Plain-language explanations for the ledger's row headings, shown by the
  * info icon beside each heading (hover, focus, or tap). Keyed by row label so
- * every producer -- the inviter's, the acceptor's, and their settled past-tense
+ * every producer -- the inviter's, the acceptor's, and their final past-tense
  * variants -- gets one shared explanation; a label with no entry renders
  * without an icon. Perspective-neutral wording, since the same label can face
  * either party. */
@@ -125,7 +125,7 @@ function CustomizeFactValue({ entry }: { entry: RailFact }) {
 /**
  * The ledger's Customize group, shown only while the terms are editable: one
  * plain button per optional surface (normal tab order, no menu semantics),
- * pairing the surface's label with its quiet fact. The open tab's row carries
+ * pairing the surface's label with its quiet fact. The open tab's row has
  * `aria-current="true"` and the accent style; a surface not yet reachable
  * (no file read) renders its row disabled. `groupNote` is the line above the
  * rows -- the "Customize" heading on the wide ledger, the "Filled in from your
@@ -139,7 +139,7 @@ function LedgerCustomize({
   facts: ReadonlyArray<RailFact>;
   /** The line above the rows. Absent on the wide ledger (the uppercase
    * "Customize" heading); the narrow disclosure passes the softer "Filled in
-   * from your file." note, its toggle already carrying the "Customize" name. */
+   * from your file." note, its toggle already labeled "Customize". */
   groupNote?: string;
 }) {
   return (
@@ -242,11 +242,11 @@ function LedgerRows({ rows }: { rows: ReadonlyArray<LedgerRow> }) {
 }
 
 /**
- * The standing disclosure ledger on the bench's right: always visible,
+ * The standing disclosure ledger on the console's right: always visible,
  * filling in as the exchange takes shape -- the running answer to "what leaves
  * this machine". Rendered as an `<aside>` landmark named by its title. While
  * the terms are editable it also hosts the Customize group's surface rows
- * ({@link LedgerCustomize}); the hosting bench withholds `customize` once the
+ * ({@link LedgerCustomize}); the hosting console withholds `customize` once the
  * terms seal or the run launches.
  *
  * At or below the narrow cut-over the aside folds to a collapsible "What you
@@ -270,7 +270,7 @@ export function Ledger({
   tag?: string;
   /** A quiet standing notice shown while the loaded file is the synthetic
    * sample (pristine or edited). `onClear` renders its Clear action; the
-   * hosting bench withholds it once the terms seal (an invitation minted or an
+   * hosting console withholds it once the terms seal (an invitation minted or an
    * exchange file saved), where a one-click teardown would be destructive. */
   demoNotice?: { label: string; onClear?: () => void };
   rows: ReadonlyArray<LedgerRow>;
@@ -307,11 +307,10 @@ export function Ledger({
  * The ledger at a narrow viewport: a collapsible "What you will share" bar
  * over the condensed top rows plus the trust footer, and -- while the terms
  * are editable -- a separate Customize disclosure holding the same surface
- * rows. Both default collapsed but present, one tap from their contents.
- * Still an `<aside>` named by the ledger title, so the trust landmark survives
- * the fold. The share bar comes first so it is the page's first interactive
- * element ahead of the sample notice's Clear action; the standing tag and
- * sample notice follow it, always visible.
+ * rows. Both default collapsed. Still an `<aside>` named by the ledger title.
+ * The share bar comes first so it is the page's first interactive element,
+ * ahead of the sample notice's Clear action; the standing tag and sample
+ * notice follow it, always visible.
  */
 function NarrowLedger({
   title,

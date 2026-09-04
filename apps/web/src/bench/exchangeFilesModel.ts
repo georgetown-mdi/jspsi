@@ -10,7 +10,7 @@ import type { JobExchangeOptions } from "@jobs/intent";
 /**
  * The pure model behind the console's "Exchange files" authoring card: how the
  * operator's retain-mode and file-sync choices become the tuning `options` a
- * server job carries, and what the card refuses before the run starts.
+ * server job takes, and what the card refuses before the run starts.
  *
  * No React and no I/O, so the implication chain, the schema-rejection path, and
  * the emitted option block are the tested boundary. Every rule about the values
@@ -28,7 +28,7 @@ import type { JobExchangeOptions } from "@jobs/intent";
  * The three states are not decoration: stating `on` is how an operator gets a
  * `peer_id` without retain mode (core requires `timestamp_in_filename` for one),
  * and stating `off` is how they can author a combination core refuses -- which
- * the card surfaces as a form problem rather than a failed run.
+ * the card shows as a form problem rather than a failed run.
  */
 export type FileSyncToggle = "auto" | "on" | "off";
 
@@ -74,7 +74,7 @@ export const RETAIN_MODE_BILATERAL_NOTICE =
   "directory. A mismatch is only discovered when the two sides meet, and the " +
   "exchange then stops with an error.";
 
-/** Resolve a {@link FileSyncToggle} to the boolean the option block carries, or
+/** Resolve a {@link FileSyncToggle} to the boolean the option block holds, or
  * undefined for `auto` (the field is left off entirely). */
 function toggleValue(toggle: FileSyncToggle): boolean | undefined {
   if (toggle === "on") return true;
@@ -85,7 +85,7 @@ function toggleValue(toggle: FileSyncToggle): boolean | undefined {
 /**
  * The tuning `options` block a draft contributes to a job intent, or undefined
  * when the operator changed nothing (so the intent omits the block and the
- * composed config carries no `options` at all).
+ * composed config holds no `options` at all).
  *
  * Retain mode's implications are resolved through core's
  * {@link withRetainModeImplications}: turning retain on and leaving the other two
@@ -94,7 +94,7 @@ function toggleValue(toggle: FileSyncToggle): boolean | undefined {
  * the contradiction reaches {@link exchangeFilesProblems} rather than being
  * silently corrected.
  *
- * `unexpectedFiles` is included only when the caller's flow can carry it (see
+ * `unexpectedFiles` is included only when the caller's flow can hold it (see
  * {@link ExchangeFilesCapabilities}); a flow that cannot must not put a value on
  * the intent that would be dropped downstream.
  */
@@ -118,7 +118,7 @@ export function exchangeFilesOptions(
   return Object.keys(resolved).length === 0 ? undefined : resolved;
 }
 
-/** Which of the card's controls the calling flow can actually carry. A zero-setup
+/** Which of the card's controls the calling flow can actually hold. A zero-setup
  * (Direct) run composes no configuration document, and `unexpected_files` has no
  * CLI flag, so that one control is offered only where a config document is
  * composed. */
@@ -137,7 +137,7 @@ export const CONFIG_EXCHANGE_FILES: ExchangeFilesCapabilities = {
  * Direct, zero-setup flow). `unexpected_files` is a configuration-only key with no
  * CLI flag, so it cannot ride a zero-setup command and the card withholds it here
  * rather than accepting a value the run would drop. Retain mode's trio and the
- * party name all have flags, so those are carried in full.
+ * party name all have flags, so those are included in full.
  */
 export const ZERO_SETUP_EXCHANGE_FILES: ExchangeFilesCapabilities = {
   unexpectedFiles: false,

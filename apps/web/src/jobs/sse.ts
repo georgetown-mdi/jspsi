@@ -1,21 +1,15 @@
 import type { BufferedEvent, JobRecord } from "./jobManager";
 
 /**
- * Render one server-sent-events frame: an `id:` line carrying the monotonic
- * event id (so a browser's EventSource echoes it as `Last-Event-ID` on
- * reconnect) and a `data:` line carrying the JSON event, terminated by the blank
- * line that ends a frame.
- *
- * A CLI-relayed event arrives with every string field already escaped at the
- * trust boundary, so it carries no raw control byte to begin with. A
- * manager-composed event does not: the rendezvous preflight names partner-chosen
- * directory entries and composes them RAW so the console seat stays the one
- * altitude that escapes them, and a filename is free to carry a newline, a
- * carriage return, and a whole forged `data:` line. What keeps that inside one
- * frame is `JSON.stringify` escaping every newline class within the serialized
- * string, leaving the `\n` here as the writer's own terminator. Pinned end to
- * end -- from a name on a real mount to what a seat renders -- rather than
- * claimed, by `apps/web/test/unit/jobWarningFraming.unit.test.ts`.
+ * Render one server-sent-events frame: an `id:` line holding the monotonic
+ * event id (echoed by a browser's EventSource as `Last-Event-ID` on
+ * reconnect) and a `data:` line containing the JSON event, closed by the
+ * blank line that ends a frame. A manager-composed event can embed raw
+ * partner-chosen bytes -- a newline, a carriage return, a forged `data:`
+ * line -- but `JSON.stringify` escapes every newline class in the
+ * serialized string, so the frame boundary here stays this function's own
+ * `\n`. Pinned end to end by
+ * `apps/web/test/unit/jobWarningFraming.unit.test.ts`.
  */
 export function renderSseFrame(id: number, event: unknown): string {
   return `id: ${id}\ndata: ${JSON.stringify(event)}\n\n`;
@@ -47,22 +41,19 @@ function parseOffset(value: string | null): number | null {
 }
 
 /**
- * The keepalive frame: an SSE comment, which carries no `data:` line and so is
+ * The keepalive frame: an SSE comment, which contains no `data:` line and so is
  * no event at all -- an EventSource ignores it and the console's own client
  * parser drops it. Its only job is to put bytes on the wire.
  */
 export const SSE_KEEPALIVE_FRAME = ": keepalive\n\n";
 
 /**
- * The fixed cadence at which an event stream writes a keepalive frame,
- * indifferent to real traffic (a redundant comment frame beside real events is
- * free, and a fixed timer needs no reset bookkeeping). An exchange is
- * legitimately quiet for minutes at a time -- a party waiting on its partner
- * emits nothing -- while a reverse proxy or load balancer in front of the
- * console cuts an idle response far sooner (60 seconds is a common default, and
- * a hardened one is shorter). Sized well under that floor so the operator's view
- * of a waiting run survives, rather than raising an idle window the deployment
- * owns and psilink does not.
+ * The cadence at which an event stream writes a keepalive frame. A reverse
+ * proxy or load balancer in front of the console can cut an idle response as
+ * soon as 60 seconds (a common default, sooner on a hardened one), and an
+ * exchange can sit quiet for minutes while a party waits on its partner -- so
+ * this stays well under that floor rather than raising a timeout the
+ * deployment owns and psilink does not.
  */
 export const SSE_KEEPALIVE_INTERVAL_MS = 15000;
 

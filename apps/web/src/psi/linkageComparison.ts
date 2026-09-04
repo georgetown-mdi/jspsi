@@ -22,40 +22,32 @@ import type {
  * signed document format depends on and which rejects an explicit `undefined`
  * where it accepts an absent property. The values these compares take are
  * DRAFT-side: live JavaScript objects the editor holds and rebuilds, not the
- * parsed documents the predicates are otherwise handed, so nothing holds them to
- * a document's shape and both spellings of "not set" are representable. A key
- * spelling it the second way states what the offer states and reads the same on
- * every surface that displays it, so a compare answering `false` for it would drop
- * the key's opt-in badge on the bench and the built terms' rule-set citation -- a
- * partner-visible provenance claim lost over a property that says nothing.
+ * parsed documents the predicates are otherwise handed, so both spellings of "not
+ * set" are representable. A key spelling it the second way states what the offer
+ * states, so an unpruned compare would answer `false` for it and drop the key's
+ * opt-in badge on the console and the built terms' rule-set citation.
  *
- * The prune closes that by making the difference unrepresentable at the compare,
- * rather than by an enumeration of which edit paths can produce the shape -- so an
- * editor callback that starts producing one costs nothing here. The adjacent half
- * is the one measured: no draft-editing helper and no import BUILDS terms
- * carrying an explicit `undefined` (`advancedInviteTerms.test.ts`), which is what
- * keeps the Generate gate's canonical-encode dry run clear. That sweep does not
- * reach the expert editor's own key, alias, transform, and fuzzy callbacks, which
- * the encode gate covers instead.
+ * The prune closes that by making the difference unrepresentable at the compare.
+ * No draft-editing helper and no import builds terms carrying an explicit
+ * `undefined` (`advancedInviteTerms.test.ts`), which keeps the Generate gate's
+ * canonical-encode dry run clear; that sweep does not reach the expert editor's
+ * own key, alias, transform, and fuzzy callbacks, which the encode gate covers
+ * instead.
  *
- * The prune therefore lives on this side of the boundary, where the values are
- * drafts rather than documents: the editor's membership compares route through here
- * rather than reaching for core's strict predicate directly, so the prune is
- * applied uniformly across the class. A `no-restricted-imports` ban in
- * `apps/web/eslint.config.js` holds them here, refusing an import of
- * `encodeForComparison`, `isOptInLinkageKey`, `isDrawnFromLinkageRuleSet`, or
- * `linkageRuleSetReferenceFor` from `@psilink/core` anywhere under
- * `apps/web/src` but this module, where a direct import would silently skip the
- * prune. It reads static import and re-export specifiers -- a named import, a
- * rename, a namespace binding and a blanket re-export alike -- so a predicate
- * reached through a runtime `import()` is past it;
+ * A `no-restricted-imports` ban in `apps/web/eslint.config.js` routes the
+ * editor's membership compares through this module rather than core's predicate
+ * directly, refusing an import of `encodeForComparison`, `isOptInLinkageKey`,
+ * `isDrawnFromLinkageRuleSet`, or `linkageRuleSetReferenceFor` from
+ * `@psilink/core` anywhere under `apps/web/src` but this module. It reads static
+ * import and re-export specifiers -- a named import, a rename, a namespace
+ * binding and a blanket re-export alike -- so a predicate reached through a
+ * runtime `import()` is past it;
  * `scripts/eslint-linkage-comparison-ban.test.mjs` pins the shapes it refuses.
  *
- * The ban carves out no exception beyond this module because it needs none: the
- * prune returns a value it drops nothing from by reference, so a parsed document
- * asked through these wrappers is the same value core would have been handed
- * directly. They are the whole import surface the ban leaves, and the
- * `advancedInvite` barrel the bench imports re-exports all four.
+ * The prune returns a value it drops nothing from by reference, so a parsed
+ * document asked through these wrappers is the same value core would have been
+ * handed directly: they are the whole import surface the ban leaves, and the
+ * `advancedInvite` barrel the console imports re-exports all four.
  */
 
 /**
@@ -113,13 +105,10 @@ function comparableForm<TValue>(value: TValue): TValue {
  * {@link comparableForm} prune applied per declared field and per key, over the
  * two rule arrays core compares and nothing else.
  *
- * Per entry rather than over the whole structure, because the callers hand these
- * compares an entire terms document: pruned in one call, a single value the prune
- * cannot read -- in a key, in a field, or anywhere else in the document -- costs
- * every clean rule beside it its prune, and so costs a document departing from the
- * built-in set in nothing but the spread its citation. Per entry, an unreadable
- * rule is the only one compared unpruned, which core answers as it answers any
- * value it cannot encode. */
+ * The prune runs per entry rather than over the whole structure: an unreadable
+ * value in one rule does not cost the prune on the rules beside it. An unreadable
+ * rule alone is compared unpruned, which core answers as it answers any value it
+ * cannot encode. */
 function comparableRules(
   rules: Pick<LinkageTerms, "linkageFields" | "linkageKeys">,
 ): Pick<LinkageTerms, "linkageFields" | "linkageKeys"> {
@@ -144,7 +133,7 @@ export function isOptInDraftKey(key: LinkageKey): boolean {
 }
 
 /** Whether the draft-built `rules` were drawn from `ruleSet`, the predicate that
- * keeps a citation honest over rules the editor let an operator edit. */
+ * keeps a citation accurate over rules the editor let an operator edit. */
 export function isDraftDrawnFromLinkageRuleSet(
   ruleSet: BuiltInLinkageRuleSet,
   rules: Pick<LinkageTerms, "linkageFields" | "linkageKeys">,

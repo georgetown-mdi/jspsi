@@ -46,7 +46,7 @@ declare global {
  * and refuses startup.
  *
  * The rendezvous mounts it excludes come from the memoized provisioning, the same
- * value the boot warning and the manager read, so a split appliance resolves each
+ * value the boot warning and the manager read, so a split console resolves each
  * leg's real path once per process rather than once per consumer.
  */
 export function bootSftpCredentialScratchDir(
@@ -65,15 +65,15 @@ export function bootSftpCredentialScratchDir(
 }
 
 /**
- * Log the startup diagnostics for this appliance's rendezvous mounts (see
+ * Log the startup diagnostics for this console's rendezvous mounts (see
  * `rendezvousSplitFaults`): the reason a filedrop exchange cannot run as
  * provisioned -- an incoherent split rendezvous pair -- and the warning that a leg's
  * real path could not be read, so the pair's containment refusal was decided on the
  * configured paths alone.
  *
- * Non-fatal, and deliberately not a refused boot: the fault stops only the filedrop
+ * Non-fatal, and not a refused boot: the fault stops only the filedrop
  * transport, which the console disables with the same sentence, while an SFTP
- * exchange on the same appliance is unaffected. Logged all the same, because an
+ * exchange on the same console is unaffected. Logged all the same, because an
  * operator who provisioned a second mount and never opened the invite chooser would
  * otherwise learn of it only from a create that refuses. The warning is logged here
  * and nowhere else: it qualifies a boot-time comparison rather than describing the
@@ -115,7 +115,7 @@ export function warnJobApiProfileMismatch(
  * Return the shared {@link JobManager}, or null when the job API is disabled (no
  * data root configured). Constructs the manager lazily on first use with a data
  * root read from the environment, so a disabled deployment builds nothing and
- * spawns nothing. The manager carries the resolved work-input directory when
+ * spawns nothing. The manager holds the resolved work-input directory when
  * configured; it does not vary per request.
  */
 export function useJobManager(

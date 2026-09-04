@@ -52,7 +52,7 @@ import type { ProfiledJobInput } from "@psi/workInputClient";
  *
  * The strategy is authored here rather than on the server step because it is a
  * term rather than a connection setting: it reshapes the very terms previewed
- * below it, and selecting single-pass carries the disclosure note the invitation
+ * below it, and selecting single-pass includes the disclosure note the invitation
  * flow's own authoring control presents.
  *
  * The terms preview is read-only. It is computed from the file's columns exactly as
@@ -114,8 +114,8 @@ export function DirectConfirmSection({
   );
 
   // A direct run is a live two-party session against the agreed server, dialled
-  // by the appliance sharing this machine, so a device reporting no network
-  // cannot carry it. Naming that here beats pressing Run into an opaque
+  // by the console sharing this machine, so a device reporting no network
+  // cannot conduct it. Naming that here beats pressing Run into an opaque
   // connection failure. Only the offline direction is gated -- being online is no
   // promise the partner is there (see @utils/networkStatus).
   const online = useOnlineStatus();
@@ -125,7 +125,7 @@ export function DirectConfirmSection({
       ? undefined
       : unlinkableFileAlert(preview.refusal);
 
-  // A column this file sends whose name is too long to carry. The appliance would
+  // A column this file sends whose name is too long to transmit. The console would
   // refuse the run at data preparation, so it is refused here where the operator can
   // still act on it, in the same words the invitation seats use. This spine has no
   // disclosure control -- every non-linkage column is sent -- so the remedy it
@@ -136,14 +136,13 @@ export function DirectConfirmSection({
       ? overlongColumnsAlert(preview.overlongDisclosedColumns)
       : undefined;
 
-  // Client-side guard mirroring the intent schema's identity contract, validated on
-  // the value the run actually sends (the trimmed label; a blank field omits identity
-  // altogether and the run names no party, so it is not an error). Naming the fault
+  // Client-side guard mirroring the intent schema's identity contract, validated
+  // on the value the run actually sends (the trimmed label; a blank field omits
+  // identity and the run names no party, so it is not an error). Naming the fault
   // at the field keeps a label the schema refuses -- a leading dash, an over-long
-  // value, or a control character -- from reaching the server as an opaque 400 that
-  // failureFor would misattribute to the file or SFTP destination. The rules are
-  // the shared contract's, so this guard cannot come to admit what the schema
-  // refuses.
+  // value, or a control character -- from reaching the server as an opaque 400
+  // that failureFor would misattribute to the file or SFTP destination -- the
+  // shared contract's own rules, which this guard cannot loosen.
   const trimmedIdentity = identity.trim();
   const identityError =
     trimmedIdentity.length === 0

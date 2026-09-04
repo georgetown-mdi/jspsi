@@ -12,21 +12,19 @@
  * There are two ways to be on the wrong side of that rotation, and they call for
  * different remedies -- wait, or download again -- so they say different things.
  *
- * What happened is stated in the same words at both hand-offs -- as the surfaces
- * that start an exchange share one offline reason (`offlineExchangeGate.ts`) -- so
- * an operator held back at either one meets one explanation rather than a sentence
- * per screen. Neither names a file, since the migration downloads one and the
- * command-line export two, and what goes out of date is the copy whichever shape it
- * took.
+ * What happened is stated in the same words at both hand-offs, as the surfaces
+ * that start an exchange share one offline reason (`offlineExchangeGate.ts`).
+ * Neither names a file, since the migration downloads one and the command-line
+ * export two, and what goes out of date is the copy whichever shape it took.
  *
- * What to DO about it is the one thing that cannot be shared, because a refusal is
- * only useful where the operator is standing: the command-line panel's own download
- * button sits beside its confirmation, while the migration's confirmation is a whole
- * screen that replaces the one carrying "Move to another device". So the remedy is
- * per hand-off ({@link supersededHandoffReason}), and it names a control on the
- * screen showing it. A record that is gone from this browser has no remedy of that
- * shape at either hand-off -- there is nothing left here to download -- so that
- * refusal says so instead of sending the operator after a copy nothing can produce.
+ * What to DO about it differs per hand-off, since a refusal is only useful where
+ * the operator is standing: the command-line panel's own download button sits
+ * beside its confirmation, while the migration's confirmation is a whole screen
+ * that replaces the one carrying "Move to another device". The remedy is per
+ * hand-off ({@link supersededHandoffReason}), naming a control on the screen
+ * showing it. A record that is gone from this browser has no remedy of that shape
+ * at either hand-off -- there is nothing left here to download -- so that refusal
+ * says so instead.
  */
 
 import type { ManagedSpentHandoff } from "@psi/managedLocalState";
@@ -95,7 +93,7 @@ export const RECORD_GONE_HANDOFF_TITLE = "This exchange is no longer here";
  * at all -- deleted, or cleared with the browser's storage -- while the downloaded
  * files sat waiting for the attestation. Shared by both hand-offs, because neither
  * has a download to offer for a record that is not there: the superseded refusal's
- * "download it again" is exactly the sentence this case must not carry.
+ * "download it again" is exactly the sentence this case must not state.
  */
 export const RECORD_GONE_HANDOFF_REASON =
   "This exchange is no longer in this browser -- it was deleted, or cleared " +

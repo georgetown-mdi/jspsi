@@ -78,18 +78,9 @@ export function assertManagedRerunDispatchable(
 }
 
 /**
- * Acquire the rendezvous for a re-run, dispatched on the record's local `side`:
- * the inviter listens on its derived id ({@link listenAsInviter}); the acceptor
- * dials the inviter's derived id ({@link dialAsAcceptor}) at this app's own
- * signaling location. The current `sharedSecret` is passed to whichever flow
- * runs, so its peer id derives fresh from that secret under the side's label
- * -- no derived value is read from storage.
- *
- * The inviter returns its registered peer with no channel yet (the caller then
- * awaits the acceptor's inbound connection); the acceptor returns both the peer
- * and the opened channel. So both cases resolve to `{ peer, conn }` only after
- * the caller has the inbound side, this returns the peer for the inviter and the
- * pair for the acceptor through the discriminated result below.
+ * Acquired rendezvous, discriminated by side: the inviter returns its registered
+ * peer with no channel yet (the caller awaits the acceptor's inbound connection);
+ * the acceptor returns both the peer and the opened channel.
  */
 export type ManagedRendezvousAcquisition =
   | { side: "inviter"; peer: Peer }

@@ -38,7 +38,7 @@ export interface ManagedSpentState {
 }
 
 /** How a checked spend ended. `"spent"` is the one outcome that writes: no run was
- * in flight, and the stored record still carried the secret the hand-off downloaded.
+ * in flight, and the stored record still held the secret the hand-off downloaded.
  * The three refusals are held apart because the operator's way out of them differs
  * -- waiting out a run, downloading the exchange again, and neither -- and a caller
  * that folded them would send an operator after a copy nothing can produce:

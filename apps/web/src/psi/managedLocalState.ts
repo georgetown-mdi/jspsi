@@ -1,10 +1,10 @@
 /**
- * The local sibling state a managed exchange carries beside its record: the backup
+ * The local sibling state a managed exchange holds beside its record: the backup
  * marker (when a backup was last taken) and the spent state (an export handed this
- * device's copy off, and which one did). Both are deliberately NOT record fields
- * and NOT in the export artifact:
+ * device's copy off, and which one did). Both are NOT record fields and NOT in
+ * the export artifact:
  *
- * - The backup marker is derived-currency input the record must not carry -- a
+ * - The backup marker is derived-currency input the record must not hold -- a
  *   secret-derived or record-embedded "when I last backed up" would either force a
  *   new record `schemaVersion` (reader-rejects-unknown) or leak into the artifact;
  *   keeping it a sibling makes its non-inclusion structural (see
@@ -212,7 +212,7 @@ export async function markManagedExchangeBackedUp(
  * Mark a record imported and backed-up as of the import instant -- a fresh install
  * from a backup artifact, which is itself a current backup of the installed secret.
  * Both markers are stamped in one read-modify-write, so the record reads green and
- * carries its restore evidence together. The import marker is what the desync tiering
+ * holds its restore evidence together. The import marker is what the desync tiering
  * reads to tell an import-since-last-success apart from an unexplained handshake
  * failure (see {@link ./managedFailureTiers.ts}); the backup marker keeps the freshly
  * installed record from immediately prompting a re-export. A revive-in-place instead

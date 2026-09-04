@@ -11,7 +11,7 @@
  * identifier, so the default terms infer every column and several default keys
  * fire with zero customization.
  *
- * The records are structurally synthetic, not annotated: every SSN carries
+ * The records are structurally synthetic, not annotated: every SSN has
  * area 900, which the SSA has never issued and which core's
  * `isStructurallyValidSsn` treats as structurally INVALID (`area < 900`). That
  * check runs only under the `validOnly` constraint, which the default SSN
@@ -49,7 +49,7 @@ export const SAMPLE_INVITER_CSV = [
   "James,Whitfield,11/23/1975,900-52-8830,10023,INV-1002",
   // 3. Accented letters resolve to their ASCII forms.
   "Renee,Etienne,07/14/1992,900-19-4471,94110,INV-1003",
-  // 4. The partner row carries a Jr. affix the default cleaning strips.
+  // 4. The partner row has a Jr. affix the default cleaning strips.
   "Harold,Brooks,02/09/1969,900-63-7712,30303,INV-1004",
   // 5. SSN punctuation differs from the partner's unpunctuated value.
   "Priya,Natarajan,05/30/1983,900-45-6789,02139,INV-1005",
@@ -72,7 +72,7 @@ export const SAMPLE_INVITER_CSV = [
 
 /**
  * The partner-side sample. Rows 1-7 are the counterparts of the inviter's
- * matching rows (with the deliberate near-miss variations); rows 8-9 are the
+ * matching rows (with the near-miss variations); rows 8-9 are the
  * look-close non-matches; rows 10-12 are unique to this side.
  */
 export const SAMPLE_PARTNER_CSV = [
@@ -83,7 +83,7 @@ export const SAMPLE_PARTNER_CSV = [
   " james , whitfield ,11/23/1975,900-52-8830,10023,PTR-2002",
   // 3. Accented spelling of the inviter's ASCII names.
   "Renée,Étienne,07/14/1992,900-19-4471,94110,PTR-2003",
-  // 4. Carries the Jr. affix the default cleaning strips.
+  // 4. Has the Jr. affix the default cleaning strips.
   "Harold,Brooks Jr.,02/09/1969,900-63-7712,30303,PTR-2004",
   // 5. Same SSN without punctuation.
   "Priya,Natarajan,05/30/1983,900456789,02139,PTR-2005",
