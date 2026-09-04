@@ -39,9 +39,9 @@ from a direction still open to a decision taken and built.
 | [sftp-adapter-state-machine.md](sftp-adapter-state-machine.md) | Shipped. |
 | [shared-consent-summary.md](shared-consent-summary.md) | Shipped. |
 | [signing-identity-custody.md](signing-identity-custody.md) | Decided and built, by a 3-panelist design panel converging 3-0. |
-| [standing-relay-delivery.md](standing-relay-delivery.md) | Decided, and the reference is written; nothing has been run from it. |
+| [standing-relay-delivery.md](standing-relay-delivery.md) | Decided, the reference is written, and the first deployment has driven a relayed exchange through it. |
 | [web-server-runtime-role.md](web-server-runtime-role.md) | Direction recorded; no removal scheduled. |
-| [webrtc-relay-deployment.md](webrtc-relay-deployment.md) | Measured, with a recommendation and a proposed epic; nothing here is ratified, scheduled, or built. |
+| [webrtc-relay-deployment.md](webrtc-relay-deployment.md) | Measured, with a recommendation and a proposed epic; the recommendation is now deployed and verified against the standing relay. |
 
 Each note carries the full status statement at its own top; this table is a pointer, not a restatement.
 

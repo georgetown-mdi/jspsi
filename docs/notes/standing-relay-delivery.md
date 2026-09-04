@@ -4,11 +4,12 @@ title: "Standing Relay Delivery Shape"
 
 # How the standing relay is delivered
 
-_Status: decided, and the reference is written; nothing has been run from it. The
-relay measurement recommended a shared, long-lived relay with per-exchange
-credentials, and this note records the decisions that turn that recommendation
-into repository artifacts -- where the relay runs, how it is supervised, and what
-is tracked. The measurement itself is in
+_Status: decided, the reference is written, and the first deployment has driven a
+relayed exchange through it. The relay measurement recommended a shared,
+long-lived relay with per-exchange credentials, and this note records the
+decisions that turn that recommendation into repository artifacts -- where the
+relay runs, how it is supervised, and what is tracked. The measurement itself is
+in
 [webrtc-relay-deployment.md](webrtc-relay-deployment.md) and is not restated
 here. The artifacts are [`infra/relay/`](../../infra/relay/README.md). See
 [docs/notes/README.md](README.md)._
@@ -103,14 +104,22 @@ ratified by the owner.
 - **Nothing about the browser's ICE list.** Giving the web client a TURN entry is
   a disclosure decision the measurement raises and this note does not touch.
 
-## The open edge
+## The edge, now closed
 
-Nothing in the reference has been run against a relay: no instance launched, no
-image built, no certificate issued, no allocation driven. Its verification script
-is itself unrun, and its probes key on coturn's documented exit statuses rather
-than measured ones. The two pieces that could be driven locally were -- the
-configuration render and the credential arithmetic, the latter against an
-independent computation of the same HMAC -- and the README says which. The first
-real deployment is what settles the rest, and the direction of the fix is to
-correct a probe that reads the wrong thing rather than to loosen one until it
-passes.
+The first real deployment ran the reference end to end and settled what only a
+deployment could. A dedicated instance was launched from the reference, a real
+public-authority certificate was issued to it, and `verify.sh` passed against the
+running relay -- a real handshake, a real allocation, and an observed refusal of
+an allocation toward an internal address, so its probes now key on measured
+behaviour rather than documented exit statuses. Then a relayed exchange was
+driven through it: a CLI party with UDP blocked outright completed a
+mutually-authenticated exchange whose entire data-channel traffic the relay carried, with the
+credential minted per exchange by `mint-credential.sh`. The byte evidence and the
+two operational findings the bring-up surfaced are in
+[webrtc-relay-deployment.md](webrtc-relay-deployment.md), not restated here.
+
+What the deployment does not yet cover is the field: the driven exchange ran
+between two parties on the relay host rather than across two separate networks
+behind real NAT, and no browser party has been exercised against the standing
+instance. A relayed exchange is verified against the standing relay; the
+real-NAT and browser scenarios remain to be driven.

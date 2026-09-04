@@ -447,7 +447,7 @@ connection:
       credential: "@/run/secrets/turn"
 ```
 
-**This path is configured but unproven: no exchange has been driven through a real relay.** Do not build a deployment that depends on relayed connectivity until it has been verified in your environment. `ice_provision` (an ICE-credential API) is not supported by the CLI and is refused rather than ignored, so a connection that configures it does not silently fall back to the default.
+**A relayed exchange has been verified against the project's standing relay:** a CLI party with UDP blocked outright completed an authenticated exchange whose data-channel traffic the relay carried, over TURN-over-TLS on 443. werift verifies the TURN server's certificate, so a relay presenting a certificate the CLI host does not trust yields no relay candidate and no relayed path. Verify relayed connectivity in your own environment before depending on it. `ice_provision` (an ICE-credential API) is not supported by the CLI and is refused rather than ignored, so a connection that configures it does not silently fall back to the default.
 
 **A run that allocates against a relay does not return when its work is done.** The allocation a relay hands out is held open by a refresh timer the exchange's teardown cannot cancel, so the command lingers for five sixths of the lifetime the relay granted -- roughly eight minutes where a relay grants the usual ten. The result file, the exchange record and the receipt are all written before the wait, and nothing is transferred during it; what it holds is the process, and in a container the container, which is what a scheduled recurring exchange has to allow for. The mechanism and its measurement are in [WEBRTC_TRANSPORT.md](spec/WEBRTC_TRANSPORT.md#budgets).
 

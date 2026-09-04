@@ -4,8 +4,10 @@ title: "WebRTC Relay and Deployment Shape"
 
 # The WebRTC relay, and the shape that deploys it
 
-_Status: measured, with a recommendation and a proposed epic; nothing here is
-ratified, scheduled, or built. This note records what TURN over TLS on 443
+_Status: measured, with a recommendation and a proposed epic, and the
+recommendation is now deployed and verified -- a relayed exchange has been driven
+against the standing relay it recommended (see the bring-up addendum below). This
+note stays the measurement record. It records what TURN over TLS on 443
 carried on two restrictive network classes, what a per-exchange provisioned
 deployment costs and leaves behind, how a self-hosted relay compares with a
 managed one, and which shape the evidence favours. Nothing here is normative:
@@ -16,6 +18,26 @@ argument in
 and the posture in
 [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#channel-security). See
 [docs/notes/README.md](README.md)._
+
+_Bring-up addendum, 2026-09-04: the recommendation below is now built. The
+standing relay described in
+[standing-relay-delivery.md](standing-relay-delivery.md) has been deployed and
+verified to carry a relayed exchange. A CLI party with all outbound and inbound
+UDP dropped (only loopback allowed), whose only possible transport is
+TURN-over-TLS on 443, completed a mutually-authenticated PSI exchange over ten
+matched records; host conntrack witnessed its entire data-channel traffic crossing the relay
+(about 29 KB up, 36 KB down to the relay on 443), with a per-exchange
+HMAC-SHA1 credential on a one-hour expiry. Two operational findings from the
+bring-up. First, this coturn build logs no per-session relayed-byte summary to
+its container logs -- only a connection reset on teardown -- so the byte witness
+came from host conntrack accounting rather than the relay's own log. Second,
+coturn's per-username allocation quota interacts with the roughly eight-minute
+allocation linger a relayed run leaves behind: reusing one credential username
+across rapid back-to-back exchanges exhausts the quota and gets new allocations
+rejected mid-stream, which minting a fresh per-exchange credential name (as the
+tool already does) avoids. The exchange ran between two parties on the relay
+host, not across two separate networks behind real NAT, and exercised no browser
+party against the instance; those remain unmeasured._
 
 ## What was measured, and on what
 
@@ -339,10 +361,13 @@ Candidate members, by title:
 - **Provision an ephemeral peer-coordination server per exchange.** Measured
   here rather than resolved on paper. The evidence recommends against it as the
   default and records the three findings any later attempt has to design around.
-- **Drive a real TURN relay through the CLI WebRTC transport.** Largely
-  discharged by the relayed-candidate evidence above; what remains is the
-  CLI-side residue, above all truing the "configured but unproven" limit where
-  it ships in [CLI.md](../CLI.md#webrtc-exchanges), which this record falsifies.
+- **Drive a real TURN relay through the CLI WebRTC transport.** Discharged: the
+  standing relay now carries a byte-witnessed relayed exchange for a UDP-blocked
+  CLI party (bring-up addendum above), and the "configured but unproven" limit
+  that shipped in [CLI.md](../CLI.md#webrtc-exchanges) and
+  [EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md#connectionturn) is trued to
+  match. What remains is the field: a real-NAT path and a browser party against
+  the standing instance.
 - **New, and the one this record most motivates: give the web client a TURN
   entry.** Until the browser can offer a relay candidate of its own, no
   restrictive-network claim about a CLI-to-web exchange is complete, and the
