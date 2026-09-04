@@ -44,26 +44,16 @@ interface IndexIterationPair {
   iteration: number;
 }
 
-// Parsed as the whole received message (the root array). With no enclosing
-// array/record/tuple frame above the root, a pathological count cannot drive the
-// ~130k STACK overflow the nested collections face (see participant.ts
-// associationTableMessage and config/linkageTerms.ts) -- but a far larger count
-// (~millions of invalid elements, within the frame cap) makes Zod throw a
-// DIFFERENT RangeError ("Invalid string length", ~3.5M on Zod 4.4.3) building its
-// error string from one issue per element. The single-issue validator caps issue
-// accumulation at one regardless of count (utils/singleIssueArray.ts), so a
-// pathological frame fails as a clean bounded rejection; a count `.max()` is not
-// an option because the legitimate count -- the matched intersection -- is in the
-// millions, bounded only by MAX_FRAME_SIZE_BYTES. The predicate mirrors
-// `z.object({ theirIndex: z.number(), iteration: z.number() })` for acceptance:
-// a non-null, non-array object (z.object rejects an array outright, even one
-// carrying theirIndex/iteration own-properties) with a finite value at each field
-// (Number.isFinite, like z.number()). Unlike that object schema it does not strip
-// unknown keys, which is immaterial -- a legitimate partner sends exactly these
-// two keys, and only theirIndex/iteration are ever read. This array is read both
-// via receiveParsed (sendFirst, below) and via a direct `.parse()` (the
-// !sendFirst send-before-parse path, wrapped in parseOrProtocolError) so either
-// way a malformed frame surfaces a clean ConnectionError("protocol").
+// Parsed as the whole received message (the root array). The single-issue
+// validator caps issue accumulation at one regardless of element count
+// (utils/singleIssueArray.ts), so a pathological frame fails as a clean
+// bounded rejection rather than a stack overflow or an oversized Zod error
+// string; a count `.max()` is not an option since the legitimate count -- the
+// matched intersection -- is in the millions, bounded only by
+// MAX_FRAME_SIZE_BYTES. The predicate accepts a non-null, non-array object
+// with a finite theirIndex and iteration, read via receiveParsed or a direct
+// `.parse()`; either way a malformed frame produces a clean
+// ConnectionError("protocol").
 /** @internal exported for the pathological-count wire-message test. */
 export const associationAndIterationArray =
   singleIssueArray<IndexIterationPair>(
@@ -84,13 +74,12 @@ interface IndexableIterable<T> extends Iterable<T> {
 }
 
 // The cascade and the count-only round run one value per record, so a record
-// carrying several candidates has no round to enter: it is refused where it would
-// be consumed rather than narrowed to one candidate or dropped from the round,
-// either of which matches on less than the terms declare. Key realization carries
-// the whole candidate set (buildKeyStrings), so this is the single point those two
-// strategies read a record's value through. Single-pass, the one strategy fan-out
-// matching is specified for, consumes the set instead (docs/spec/PROTOCOL.md,
-// Fan-out matching).
+// with several candidates is refused rather than narrowed to one candidate or
+// dropped -- either would match on less than the terms declare. Key
+// realization holds the whole candidate set (buildKeyStrings), so this is the
+// one point those two strategies read a record's value through; single-pass,
+// the one strategy fan-out matching is specified for, consumes the set
+// instead (docs/spec/PROTOCOL.md, Fan-out matching).
 function requireSingleCandidate(value: KeyCandidates): string | undefined {
   if (value === undefined || typeof value === "string") return value;
   throw fanOutReachedMatchingRefusal();
@@ -105,20 +94,12 @@ function getUnidentifiedIndices(
   }, [] as Array<number>);
 }
 
-// Maps each value occurring exactly once in valueAt(0..count-1) to its index.
-// The result's insertion order follows the order values appear in valueAt --
-// callers rely on this to build identical outputs. Undefined values are ignored.
-//
-// Keeps one map of first-seen indices plus a set of the values that recur, rather
-// than three maps: in the near-unique case no value recurs, so the set stays empty
-// and the first-index map IS the answer, returned without a copy. When some values
-// recur, the recurring ones are deleted from the map; Map iteration is insertion
-// order and delete preserves the order of the survivors, so the first-appearance
-// order callers depend on is unchanged. This trims psilink's own per-key
-// reconstruction churn; it is a minor slice of the
-// single-pass receiver's transient peak, which is dominated by the per-element
-// JS<->native boundary marshalling that the GC relief in linkViaSinglePassPSI
-// collects.
+// Maps each value occurring exactly once in valueAt(0..count-1) to its index,
+// in first-appearance order -- callers rely on this order to build identical
+// outputs. Undefined values are ignored. Keeps one first-seen-index map plus
+// a set of the recurring values rather than three maps: deleting a recurring
+// value from the map preserves the survivors' insertion order, so the
+// first-appearance order holds without a separate pass.
 function reduceToSingletons<T>(
   count: number,
   valueAt: (index: number) => T | undefined,
@@ -158,17 +139,15 @@ export function removeDuplicatesAndUndefineds(
 }
 
 /**
- * One round's `(record, value)` incidence for this party, as the round's PSI set
- * addresses it: position `k` of the set stands for the local rows listed at
+ * One round's `(record, value)` incidence for this party: position `k` of the
+ * round's PSI set stands for the local rows at
  * `rows[groupStarts[k] .. groupStarts[k + 1])`, ascending.
  *
- * `groupStarts` is absent where every position stands for exactly one row -- the
- * within-round uniqueness rule a non-deduplicating party applies, which drops a
- * value two or more of its rows hold -- so that party keeps the flat
- * row-per-position array and allocates nothing extra. A deduplicating ("many")
- * party keeps such a value, contributing it once and standing it for the group of
- * rows holding it (docs/spec/PROTOCOL.md, Matching multiplicity: the (record,
- * value) incidence).
+ * `groupStarts` is absent where every position stands for exactly one row (a
+ * non-deduplicating party, which drops a value two or more of its rows
+ * hold). A deduplicating ("many") party keeps such a value once, standing it
+ * for the group of rows holding it (docs/spec/PROTOCOL.md, Matching
+ * multiplicity: the (record, value) incidence).
  *
  * @internal exported for the round-construction tests.
  */
@@ -177,7 +156,7 @@ interface RoundCandidates {
   readonly groupStarts?: Array<number>;
 }
 
-/** @internal how many positions this round's PSI set carries. */
+/** @internal how many positions this round's PSI set holds. */
 export function candidatePositionCount(candidates: RoundCandidates): number {
   return candidates.groupStarts
     ? candidates.groupStarts.length - 1
@@ -197,16 +176,16 @@ function positionRowRange(
 }
 
 /**
- * The deduplicating counterpart of {@link removeDuplicatesAndUndefineds}: a value
- * several of this party's records hold stays in the round and stands for the GROUP
- * of those records, rather than being dropped as ambiguous.
+ * The deduplicating counterpart of {@link removeDuplicatesAndUndefineds}: a
+ * value several of this party's records hold stays in the round, standing
+ * for the GROUP of those records rather than being dropped as ambiguous.
  *
- * The set carries each DISTINCT value once, so it is bounded by this party's row
- * count exactly as a non-deduplicating party's is and no derived frame or dataset
- * bound moves; the multiplicity is re-expanded locally when a match comes back
- * (docs/spec/PROTOCOL.md, The per-side rules). Values appear in first-occurrence
- * order and each group's rows ascend, which is what makes the expansion ordering
- * both parties reconstruct from reproducible.
+ * The set holds each DISTINCT value once, so it stays bounded by this
+ * party's row count and no derived frame or dataset bound moves; the
+ * multiplicity is re-expanded locally when a match comes back
+ * (docs/spec/PROTOCOL.md, The per-side rules). Values appear in
+ * first-occurrence order and each group's rows ascend, which is what makes
+ * the expansion ordering reproducible on both parties.
  *
  * @internal exported for the round-construction tests.
  */
@@ -252,15 +231,14 @@ function sentGrouping(sent: IterationMap): PartnerIndexGrouping {
   };
 }
 
-// One label per matched record of this party, equal exactly for the records that
-// named one (round, position) -- the block of a single matched value. Read off the
-// grouping copied out before the send rather than off the list itself, so the
-// derivation rests on this party's own record of what it sent rather than on
-// objects a transport may hand both sides by reference. That is hygiene keeping the
-// derivation self-contained rather than a defence this path needs: the in-place
-// translation that overwrites a received list (`e.theirIndex = i`, below) is the
-// branch a side keeping no duplicates takes, and a label is derived only where both
-// sides keep theirs.
+// One label per matched record of this party, equal exactly for the records
+// that named one (round, position) -- the block of a single matched value.
+// Read off the grouping copied out before the send, not off the list itself,
+// so the derivation rests on this party's own record of what it sent rather
+// than on objects a transport may hand both sides by reference. The in-place
+// translation that overwrites a received list (`e.theirIndex = i`, below) is
+// the branch a side keeping no duplicates takes; a label is derived only
+// where both sides keep theirs.
 function blockLabels(groups: PartnerIndexGrouping): Int32Array {
   const labels = new Int32Array(groups.rounds.length);
   const positionsByRound = new Map<number, Map<number, number>>();
@@ -323,7 +301,7 @@ export type LinkageCardinality =
 // Which side of a round's (record, value) incidence keeps its within-dataset
 // duplicate values, read off this party's own resolved label. Both sides' rules
 // are derived from that one label, so each party knows what its partner's frames
-// carry without a second exchanged term and the lockstep rounds cannot diverge.
+// hold without a second exchanged term and the lockstep rounds cannot diverge.
 interface MultiplicitySides {
   readonly localKeepsDuplicates: boolean;
   readonly partnerKeepsDuplicates: boolean;
@@ -344,17 +322,17 @@ function multiplicitySides(cardinality: LinkageCardinality): MultiplicitySides {
   }
 }
 
-// Which cardinalities the single-pass strategy resolves. Its seam hands the whole
-// resolved table to the sender, and the sender holds it to a length taken from the
-// half that keeps its distinctness (assertPartnerIndexTable, utils/partnerIndices.ts);
-// under a both-sided multiplicity neither half keeps it and the sender holds no
-// local bound on the table's size, so the pair is refused rather than paired.
-// Exhaustive for the same reason as above.
+// Which cardinalities the single-pass strategy resolves. This strategy hands
+// the whole resolved table to the sender, held to a length taken from the
+// half that keeps its distinctness (assertPartnerIndexTable,
+// utils/partnerIndices.ts); a both-sided multiplicity leaves neither half
+// distinct, so the pair is refused rather than paired. Exhaustive for the
+// same reason as above.
 //
-// The both-sided verdict is READ from the strategy table the agreed-terms refusal
-// reads (config/linkageTerms.ts) rather than restated here, so this fail-closed
-// half and that boundary cannot drift apart: a strategy entry that starts saying
-// it pairs the cardinality stops being refused at both points at once.
+// The both-sided verdict is read from the strategy table the agreed-terms
+// refusal reads (config/linkageTerms.ts) rather than restated here, so a
+// strategy entry that starts pairing the cardinality stops being refused at
+// both points at once.
 function singlePassResolves(cardinality: LinkageCardinality): boolean {
   switch (cardinality) {
     case "one-to-one":
@@ -370,24 +348,20 @@ function singlePassResolves(cardinality: LinkageCardinality): boolean {
  * The round matches a "many" party attributes to its rows: its own matched
  * position mapped to the partner position it paired with.
  *
- * A position the intersection names MORE THAN ONCE is a value two or more of the
- * PARTNER's records hold. The "one" side's own within-round uniqueness rule would
- * have dropped that value before the round; where the "one" side does not apply it
- * -- the variant in which one party contributes its whole dataset each round and
- * the other resolves -- the "many" party applies it on the partner's behalf and
- * drops the value from the round, so the exchange cannot silently deliver the
- * `many-to-many` multiplicity neither party's terms declared (docs/spec/PROTOCOL.md,
- * Deriving one table from the exchanged association maps). The dropped group's rows
- * are attributed nothing and stay eligible for later keys, exactly as a value this
- * party dropped itself: this drop is the one carve-out from the rule that a record
- * appearing in a round's candidate pairs leaves candidacy after it
+ * A position the intersection names MORE THAN ONCE is a value two or more of
+ * the PARTNER's records hold. Where the "one" side's own within-round
+ * uniqueness rule did not already drop that value, the "many" party applies
+ * it on the partner's behalf and drops the value from the round, so the
+ * exchange cannot silently deliver `many-to-many` multiplicity neither
+ * party's terms declared (docs/spec/PROTOCOL.md, Deriving one table from the
+ * exchanged association maps). The dropped group's rows stay eligible for
+ * later keys, exactly as a value this party dropped itself
  * (docs/spec/PROTOCOL.md, Multiplicity is within-round).
  *
- * This party's own set carries each value once, so a repeat can only come from the
- * partner's. On the starter role the round's own association-table check refuses
- * such a table upstream (a repeated index in either half, `identifyIntersection`);
- * on the joiner role the local half is this party's own computation and reaches
- * here instead, which is the path a partner that does not deduplicate takes.
+ * This party's own set holds each value once, so a repeat can only come from
+ * the partner's: refused upstream on the starter role
+ * (`identifyIntersection`), reached here on the joiner role where the local
+ * half is this party's own computation.
  *
  * @internal exported for the single-resolver-obligation test.
  */
@@ -410,58 +384,50 @@ export function attributableRoundMatches(
  * Runs the PSI linkage protocol over one or more linkage keys and returns the
  * matched row indices.
  *
- * Keys are tried in order. Records matched on key `j` are excluded from all
- * subsequent key rounds, so each record appears in the result at most once.
- * Within a given key round, records whose key value is duplicated across the
- * local dataset are excluded from that round entirely (ambiguous matches cannot
- * be attributed to a single record). They may still match on a later key.
+ * Keys are tried in order; a record matched on key `j` is excluded from all
+ * later rounds, so each record appears in the result at most once. Within a
+ * round, a record whose key value is duplicated in the local dataset is
+ * excluded from that round (an ambiguous match cannot be attributed to one
+ * record), though it may still match a later key.
  *
- * Under `"one-to-one"` both parties' locally-duplicated key values are excluded
- * from each round, so no record matches more than one of the partner's. Under a
- * deduplicating cardinality the "many" side instead KEEPS such a value,
- * contributing it once and attributing a match on it to every one of its records
- * holding it, while the "one" side's rule is unchanged; the label is this party's
- * own, so a `"many-to-one"` party's partner runs `"one-to-many"` and the two
- * mirror one procedure (docs/spec/PROTOCOL.md, Deduplicating cardinalities). Under
- * `"many-to-many"` both parties apply the "many" rule, so a matched value stands
- * for a group on each side and the pair set it contributes is the two groups'
- * product. The entity closure that resolves such a table is a local step over the
- * returned table rather than part of the pairing
- * ({@link ./entityClosure.entityClusters}), and the table this returns is held to
- * the block shape that closure rests on before it leaves here
- * ({@link ./entityClosure.assertBlockDiagonalClosure}). exchange.ts resolves the
- * cardinality from the two agreed `deduplicate` settings, so an exchange whose
- * parties both declare it reaches this strategy with that label.
+ * Under `"one-to-one"` both parties exclude their own duplicated values from
+ * every round. Under a deduplicating cardinality the "many" side instead
+ * KEEPS such a value, contributing it once and attributing a match to every
+ * record holding it, while the "one" side is unchanged; the label is this
+ * party's own, so a `"many-to-one"` party's partner runs `"one-to-many"` and
+ * the two mirror one procedure (docs/spec/PROTOCOL.md, Deduplicating
+ * cardinalities). Under `"many-to-many"` both sides apply the "many" rule,
+ * so a matched value stands for a group on each side and the pair set is the
+ * two groups' product; the returned table is held to the block shape the
+ * entity closure step rests on ({@link ./entityClosure.entityClusters},
+ * {@link ./entityClosure.assertBlockDiagonalClosure}). exchange.ts resolves
+ * the cardinality from the two agreed `deduplicate` settings.
  *
- * @param protocol - Exchange protocol settings; only `cardinality` is used
- *   here, and it is this party's own resolved label (see
- *   {@link LinkageCardinality}).
- * @param participant - Must have a resolved role (`"starter"` or `"joiner"`);
- *   throws if `role` is still `"either"`.
+ * @param protocol - Only `cardinality` is used, this party's own resolved
+ *   label (see {@link LinkageCardinality}).
+ * @param participant - Must have a resolved role (`"starter"` or
+ *   `"joiner"`); throws if `role` is still `"either"`.
  * @param conn - Open connection to the exchange partner.
- * @param data - One entry per linkage key. Each entry is an iterable over all
- *   local records (indexed by row position) yielding the record's value for
- *   that key, or `undefined` if the record has no value for it. A record
- *   yielding a candidate SET is refused rather than matched on one of them:
- *   fan-out matching runs under single-pass only (docs/spec/PROTOCOL.md, Fan-out
+ * @param data - One entry per linkage key: an iterable over all local
+ *   records yielding each record's value for that key, or `undefined` if it
+ *   has none. A record yielding a candidate SET is refused -- fan-out
+ *   matching runs under single-pass only (docs/spec/PROTOCOL.md, Fan-out
  *   matching).
- * @param partnerRecordCount - The partner's declared record count -- its rows
- *   times its own local fan-out factor (docs/spec/PROTOCOL.md, Role resolution
- *   and work minimization) -- exchanged over the encrypted channel during role
- *   resolution. It is the authenticated bound the partner-returned row indices
- *   are checked against before they reach the returned table (see
- *   utils/partnerIndices.ts).
+ * @param partnerRecordCount - The partner's declared record count (its rows
+ *   times its own fan-out factor), exchanged during role resolution. Bounds
+ *   the partner-returned row indices before they reach the returned table
+ *   (utils/partnerIndices.ts).
  * @param verbosity - Log verbosity level (default 0).
  * @param setStage - Optional callback invoked with a progress label at each
  *   key round.
- * @returns An {@link AssociationTable} whose first element (`[0]`) contains
- *   the local matched row indices in ascending order, and whose second element
- *   (`[1]`) contains the corresponding partner row indices in the same pairing
- *   order. The local half is STRICTLY ascending except where the PARTNER keeps its
- *   within-dataset duplicates -- `"one-to-many"` and `"many-to-many"` -- several
- *   of its rows then linking to one of this party's, which makes the half
- *   non-decreasing instead (docs/spec/PROTOCOL.md, Deriving one table from the
- *   exchanged association maps).
+ * @returns An {@link AssociationTable}: `[0]` holds the local matched row
+ *   indices ascending, `[1]` the corresponding partner row indices in the
+ *   same pairing order. The local half is STRICTLY ascending except where
+ *   the PARTNER keeps its within-dataset duplicates (`"one-to-many"` and
+ *   `"many-to-many"`), several of its rows then linking to one of this
+ *   party's, which makes the half non-decreasing instead
+ *   (docs/spec/PROTOCOL.md, Deriving one table from the exchanged
+ *   association maps).
  */
 export async function linkViaPSI(
   protocol: {
@@ -606,7 +572,7 @@ export async function linkViaPSI(
 
   // Held for the returned list's check below, where this party is the "many"
   // side: the pairing its own list named is what that list has to come back
-  // carrying, entry for entry or run for run as the partner's own side rules.
+  // holding, entry for entry or run for run as the partner's own side rules.
   const sentGroups = sides.localKeepsDuplicates
     ? sentGrouping(identifiedIndexIterationMap)
     : undefined;
@@ -623,17 +589,16 @@ export async function linkViaPSI(
     identifiedIndexIterationMap,
   );
 
-  // Translate the partner's list of our records through the per-round candidate
-  // sets, checking each entry against what THIS side matched before it reads a
-  // candidate set. A round pairs the same VALUES on both parties, and it pairs
-  // our position p only if the partner's corresponding record names p in that
-  // same round, which is what makes every entry checkable against local state
-  // rather than merely bounded. What the pairing is NOT, once a side
-  // deduplicates, is one entry per record on both sides: a list from the "many"
-  // side names each of our matched positions once per record in the group behind
-  // it, so the count equality is replaced by a coverage rule and a bound taken
-  // from the partner's authenticated row count (docs/spec/PROTOCOL.md, Deriving
-  // one table from the exchanged association maps).
+  // Translate the partner's list of our records through the per-round
+  // candidate sets, checking each entry against what THIS side matched
+  // before it reads a candidate set: a round pairs our position p only if
+  // the partner's corresponding record also names p in that round, so every
+  // entry is checkable against local state. Once a side deduplicates, the
+  // pairing is no longer one entry per record on both sides -- a "many"
+  // side's list names each of our matched positions once per record in its
+  // group -- so a coverage rule and a bound on the partner's authenticated
+  // row count replace count equality (docs/spec/PROTOCOL.md, Deriving one
+  // table from the exchanged association maps).
   if (sides.partnerKeepsDuplicates) {
     if (theirIdentifiedIndexIterationMap.length > partnerRecordCount)
       throw partnerProtocolError(
@@ -753,31 +718,29 @@ export async function linkViaPSI(
   );
 
   // Our own list, come back with each entry's index translated into the
-  // partner's row space. Its length is ours to know -- one entry per record we
-  // matched, or, where the partner expanded it, the tally we accumulated over its
-  // own list above -- and every row index it carries lands in the returned table
-  // (the partner half of the result, the payload alignment, and the attested
-  // record), so it is bounded by the row count the partner carried on the terms
-  // exchange. A repeated row is admitted only where THIS party is the "many"
-  // side, several of its records legitimately naming one partner row; the count
-  // check above it is then what caps the list's length, which distinctness
-  // otherwise does.
+  // partner's row space. Its length is ours to know -- one entry per record
+  // we matched, or, where the partner expanded it, the tally we accumulated
+  // over its own list above -- and every row index it holds lands in the
+  // returned table, so it is bounded by the row count the partner declared
+  // on the terms exchange. A repeated row is admitted only where THIS party
+  // is the "many" side; the count check above then caps the list's length,
+  // which distinctness otherwise does.
   //
-  // What survives the relaxation is injectivity MODULO the grouping this party
-  // sent, and both halves of it are checkable here: two of our entries that named
-  // the same (round, position) must come back carrying the same partner row, and
-  // two that named different positions must come back carrying different rows --
-  // distinct positions in a round are distinct partner values held by distinct
-  // partner rows, and a partner row matched in round j has left candidacy for
-  // every later round. Without it the "one" partner, not this party's own data,
-  // would decide which of our records group together (docs/spec/PROTOCOL.md,
-  // Deriving one table from the exchanged association maps).
+  // What survives the relaxation is injectivity MODULO the grouping this
+  // party sent: two entries naming the same (round, position) must come back
+  // holding the same partner row, and two naming different positions must
+  // come back holding different rows -- distinct positions in a round are
+  // distinct partner values held by distinct partner rows, and a partner row
+  // matched in round j has left candidacy for every later round. Without it
+  // the "one" partner, not this party's own data, would decide which of our
+  // records group together (docs/spec/PROTOCOL.md, Deriving one table from
+  // the exchanged association maps).
   //
-  // Where the partner keeps its duplicates too, each of our entries comes back as
-  // the whole partner GROUP behind the position it named rather than as one row,
-  // so the same rule reads over runs: our grouped entries must come back with
-  // identical runs and our differently grouped ones with disjoint runs. The run
-  // lengths are the per-record tally, so the grouping stays a quantity we hold.
+  // Where the partner keeps its duplicates too, each of our entries comes
+  // back as the whole partner GROUP behind the position it named rather than
+  // one row, so the same rule reads over runs: grouped entries must come
+  // back with identical runs, differently grouped ones with disjoint runs.
+  // The run lengths are the per-record tally we already hold.
   assertPartnerIndexCount(
     participant.id,
     "the returned mapped-element list",
@@ -802,16 +765,16 @@ export async function linkViaPSI(
       [[], []] as [Array<number>, Array<number>],
     );
 
-  // Our own list came back EXPANDED: our matched records in the order we sent
-  // them, each followed by the partner rows of the group it matched. Walking our
-  // records in that same order with the per-record tally is what reconstructs the
-  // pairing, and it is why the expansion order is normative.
+  // Our own list came back EXPANDED: our matched records in the order we
+  // sent them, each followed by the partner rows of the group it matched.
+  // Walking our records in that order with the per-record tally reconstructs
+  // the pairing, which is why the expansion order is normative.
   //
-  // Under a BOTH-sided multiplicity the pairs are labelled with the block each one
-  // belongs to as they are built, so the entity closure the table resolves into can
-  // be held to those blocks below. Only that cardinality carries the labels: where
-  // one side keeps its distinctness a cluster is one record of that side with the
-  // group facing it, which the table's own shape already gives.
+  // Under a BOTH-sided multiplicity the pairs are labelled with the block
+  // each belongs to as they are built, so the entity closure step can hold
+  // the table to those blocks below. Only that cardinality has labels: where
+  // one side keeps its distinctness a cluster is one record of that side
+  // with the group facing it, which the table's own shape already gives.
   const labels = sentGroups && blockLabels(sentGroups);
   const blockOfPair: Array<number> | undefined = labels && [];
   const table: [Array<number>, Array<number>] = [[], []];
@@ -834,31 +797,34 @@ export async function linkViaPSI(
  * linkage key, resolving to the size of the intersection and to nothing that names a
  * match (docs/spec/PROTOCOL.md, PSI-C).
  *
- * Returns the count this party holds at the end of the round, or `undefined` when it
- * holds none -- the sender of a run whose agreed terms entitle only the receiver.
- * The receiver computes the count locally from the setup and the response; the
- * sender computes nothing and learns nothing about it from the round itself, so the
- * only route to the sender is the count-report frame this function runs when
- * `reportCountToSender` is set. Both parties derive that flag from the same agreed
- * terms ({@link ./protocolSetup.reportsCountToSender}), so the frame is sent
+ * Returns the count this party holds at the end of the round, or
+ * `undefined` when it holds none -- the sender of a run whose agreed terms
+ * entitle only the receiver. The receiver computes the count locally from
+ * the setup and the response; the sender learns nothing from the round
+ * itself, so its only route to the count is the count-report frame this
+ * function sends when `reportCountToSender` is set. Both parties derive
+ * that flag from the same agreed terms
+ * ({@link ./protocolSetup.reportsCountToSender}), so the frame is sent
  * exactly when it is awaited.
  *
- * The within-dataset filter is the cascade's own: a record with no value for the key
- * sits the round out, and a value duplicated within this party's dataset is dropped
- * entirely, so each party contributes exactly the values it holds once. That is what
- * makes the count equal the size of the table a single-key `psi` run over the same
- * data would produce -- the library's cardinality operation reports the MULTISET
- * intersection and would otherwise over-count a repeated value.
+ * The within-dataset filter is the cascade's own: a record with no value
+ * for the key sits the round out, and a value duplicated within this
+ * party's dataset is dropped entirely, so each party contributes exactly
+ * the values it holds once. This makes the count equal the size of the
+ * table a single-key `psi` run over the same data would produce, since the
+ * library's cardinality operation reports the MULTISET intersection and
+ * would otherwise over-count a repeated value.
  *
- * @param participant - Must have a resolved role and a count-only engine; the
- *   identifier-revealing engine refuses the cardinality operation rather than
- *   returning one.
- * @param data - The agreed linkage keys' local values, which for a count-only run is
- *   exactly one entry. A longer list is refused rather than narrowed to its first
- *   key: a narrowed run would deliver a count the operator did not agree to.
- * @param reportCountToSender - Whether this round's count-report frame is exchanged
- *   (see {@link ./protocolSetup.reportsCountToSender}); both parties pass the same
- *   value.
+ * @param participant - Must have a resolved role and a count-only engine;
+ *   the identifier-revealing engine refuses the cardinality operation
+ *   rather than returning one.
+ * @param data - The agreed linkage keys' local values, exactly one entry
+ *   for a count-only run. A longer list is refused rather than narrowed to
+ *   its first key, which would deliver a count the operator did not agree
+ *   to.
+ * @param reportCountToSender - Whether this round's count-report frame is
+ *   exchanged (see {@link ./protocolSetup.reportsCountToSender}); both
+ *   parties pass the same value.
  * @param maxCount - The largest legitimate count, for bounding the reported figure
  *   on the sender: the smaller of the two exchanged record counts.
  */
@@ -906,32 +872,28 @@ export async function linkViaCountOnlyPSI(
 }
 
 // Actionable guidance for an exchange that exceeds the single-pass ceiling.
-// Deliberately does NOT recommend cascade: linkage_strategy is a
-// mandatory-consistency agreed term that cannot change unilaterally mid-exchange
-// (re-agreeing on cascade is an out-of-band step), so pointing at it here would be
-// misleading. See docs/spec/PROTOCOL.md (the single-pass dataset ceiling).
+// By design this does not recommend cascade: linkage_strategy is a
+// mandatory-consistency agreed term that cannot change unilaterally
+// mid-exchange, so pointing at it here would mislead (docs/spec/PROTOCOL.md,
+// the single-pass dataset ceiling).
 //
-// The ceiling is a PER-PARTY budget on the value slot count effectiveKeyCount *
-// recordCount, so the guidance is oriented to the party it is shown to: it states
-// the products the gate actually weighed, names which side's declared size reached
-// the budget, and offers each side's remedies to the side that can apply them --
-// the two parties reach mirrored verdicts (singlePassCeilingBreach), so the abort
-// stays symmetric while neither operator is sent to a configuration that cannot
-// move it. Reducing the record count, or splitting the dataset, is the actionable
-// remedy on a breaching side, and removing a fan-out is another when that side
-// declares one. The key count is neither: it is an agreed term, so it is offered
-// as a renegotiation rather than as an edit a side that did not choose it could
-// make alone (SINGLE_PASS_LOCAL_REMEDY). This party's own declaration covers both
-// places a fan-out can be authored -- the agreed width, and the local cleaning
-// that rides its record count instead -- while the partner's cleaning is
+// The ceiling is a PER-PARTY budget on the value slot count
+// effectiveKeyCount * recordCount, so the guidance is oriented to the party
+// it is shown to: it states the products the gate weighed, names which
+// side's declared size reached the budget, and offers each side's remedies
+// to the side that can apply them -- the two parties reach mirrored
+// verdicts (singlePassCeilingBreach), so the abort stays symmetric.
+// Reducing the record count or splitting the dataset is the actionable
+// remedy on a breaching side, and removing a fan-out is another when that
+// side declares one; the key count is an agreed term, so it is offered only
+// as a renegotiation (SINGLE_PASS_LOCAL_REMEDY). The partner's cleaning is
 // invisible here, so the partner's hint rests on the agreed width alone.
 //
-// Every remedy it names is a change one of the two operators can carry through, so
-// its raise site is a UsageError (CLI exit 64) rather than a transport or internal
-// fault -- the same class as the width refusals below. It interpolates the two
-// parties' declared effective key counts, their record counts, and the value slot
-// products of those, all of them authenticated session state, and no
-// partner-authored text.
+// Every remedy it names is a change one of the two operators can carry
+// through, so its raise site is a UsageError (CLI exit 64), the same class
+// as the width refusals below. It interpolates only authenticated session
+// state -- the two parties' declared effective key counts, record counts,
+// and value slot products -- and no partner-authored text.
 function singlePassOverCapMessage(
   id: string,
   numLinkageKeys: number,
@@ -986,15 +948,16 @@ function singlePassOverCapMessage(
   );
 }
 
-// The diagnosis for the send-time reply-cap backstop below, which is NOT an
-// over-ceiling condition: the ceiling gate has already passed there, so both
-// parties' declared sizes are within the budget and no dataset either operator
-// controls is what stopped the send. Reaching it means the built reply outgrew the
-// cap both parties derive from those same declared sizes -- an inconsistency
-// between this party's reply builder and that derivation -- so it names the two
-// byte counts and withholds the dataset remedies, which cannot move it. It is
-// raised as an InternalConsistencyError, the class whose classification carries
-// that remedy: report it, rather than fix an input or retry a transport.
+// The diagnosis for the send-time reply-cap safety check below, which is
+// NOT an over-ceiling condition: the ceiling gate has already passed, so
+// both parties' declared sizes are within budget and no dataset either
+// operator controls stopped the send. Reaching it means the built reply
+// outgrew the cap both parties derive from those same declared sizes -- an
+// inconsistency between this party's reply builder and that derivation --
+// so it names the two byte counts and withholds the dataset remedies, which
+// cannot move it. Raised as an InternalConsistencyError, whose
+// classification denotes the remedy: report it, rather than fix an input or
+// retry a transport.
 function singlePassReplyOverCapMessage(
   id: string,
   replyBytes: number,
@@ -1010,61 +973,56 @@ function singlePassReplyOverCapMessage(
   );
 }
 
-// Force a major collection to release a phase's transient allocations before the
-// next phase allocates, lowering the lifetime peak RSS that bounds the single-pass
-// dataset ceiling. The single-pass receiver's peak is dominated by GC-collectable
-// V8 garbage from the per-element JS<->native boundary marshalling -- the library
-// binding layer reached through createClientRequest/computeValueMatches/
-// createServerSetup -- not by the WebAssembly linear heap (a flat ~16 MB at
-// D = 14,000) or by retained JS (a ~20 MB live floor); collecting at the phase
-// boundaries recovers it (the measured sizes, methodology, and breakdown are in
-// docs/spec/PROTOCOL.md). A no-op
-// unless the runtime exposes a global gc: the CLI launches Node with --expose-gc
-// (the Dockerfile entrypoint and the apps/cli dev script), so it gets the relief;
-// a browser never exposes gc, so the web receiver does not, and its ceiling rests
-// on the same conservative cap.
-// Called only at the handful of coarse phase boundaries, never per element or per
-// key, so its pause is negligible beside the curve operations it follows.
+// Force a major collection to release a phase's transient allocations
+// before the next phase allocates, lowering the peak RSS that bounds the
+// single-pass dataset ceiling (measured sizes, methodology, and breakdown:
+// docs/spec/PROTOCOL.md). A no-op unless the runtime exposes a global gc:
+// the CLI launches Node with --expose-gc (the Dockerfile entrypoint and the
+// apps/cli dev script), so it gets the relief; a browser never exposes gc,
+// so the web receiver does not, and its ceiling rests on the same
+// conservative cap. Called only at a handful of coarse phase boundaries,
+// never per element or per key, so its pause is negligible beside the curve
+// operations it follows.
 function relieveTransientMemory(): void {
   (globalThis as typeof globalThis & { gc?: () => void }).gc?.();
 }
 
 /**
- * Whether the single-pass receiver withholds the sender's association-table half
- * ({@link linkViaSinglePassPSI}'s message 3) entirely, so a genuinely blind
- * helper's process never receives -- and so never learns -- its own membership
- * (which of its records matched).
+ * Whether the single-pass receiver withholds the sender's association-table
+ * half ({@link linkViaSinglePassPSI}'s message 3) entirely, so a blind
+ * helper's process never receives -- and so never learns -- its own
+ * membership (which of its records matched).
  *
  * Withhold exactly when the SENDER is a non-receiving helper (`expectsOutput:
- * false`, so it gets no result table of its own) that ALSO discloses no payload
- * (its metadata transmits no column, so it has no matched rows to enrich). That is
- * the one closeable case in a one-sided single-pass exchange: the helper needs its
- * association-table half only to build its own result (it has none) or to enrich
- * the payload it discloses (it discloses none), so withholding leaves it needing
- * nothing back. A helper that discloses payload still receives the full table (it
- * reads `associationTable[0]` to build enrichment for the overlap -- an intrinsic,
- * threat-model-accepted membership disclosure), and a party entitled to output
- * always receives it.
+ * false`, so it gets no result table of its own) that ALSO discloses no
+ * payload (its metadata transmits no column, so it has no matched rows to
+ * enrich). That is the one closeable case in a one-sided single-pass
+ * exchange: the helper needs its association-table half only to build its
+ * own result (it has none) or to enrich the payload it discloses (it
+ * discloses none), so withholding leaves it needing nothing back. A helper
+ * that discloses payload still receives the full table (it reads
+ * `associationTable[0]` to build enrichment for the overlap -- an
+ * intrinsic, threat-model-accepted membership disclosure), and a party
+ * entitled to output always receives it.
  *
  * Both parties compute this from the SAME authenticated session state -- the
- * resolved sender's output entitlement and its advertised `disclosesPayload` flag,
- * carried on the terms exchange -- so the receiver's decision to suppress the frame
- * and the sender's decision to skip awaiting it are always the same, keeping the
- * two in lockstep. The frame is suppressed ENTIRELY, never sent empty: an
- * empty-versus-populated association table would leak the match count by the
- * frame's presence and size, so only omitting it closes the channel. See
+ * resolved sender's output entitlement and its advertised `disclosesPayload`
+ * flag, declared on the terms exchange -- so the receiver's decision to
+ * suppress the frame and the sender's decision to skip awaiting it are
+ * always the same. The frame is suppressed ENTIRELY, never sent empty: an
+ * empty-versus-populated association table would leak the match count by
+ * the frame's presence and size, so only omitting it closes the channel. See
  * docs/notes/one-sided-disclosure.md and docs/spec/PROTOCOL.md.
  *
- * A deduplicating cardinality does not move the rule, and it cannot reach the
- * withheld path from the "many" side: a party declaring `deduplicate: true` must
- * declare `output.expectsOutput` (the linkage-terms schema refines it), so a "many"
- * sender is entitled to output and is never a non-receiving helper. What the
- * withheld path does cover under multiplicity is the design-intent shape -- the
- * "one" party a no-output helper, which role resolution then makes the SENDER,
- * since the party entitled to output becomes the receiver -- so the "many" party
- * resolves the whole pairing and applies the one-side uniqueness rule to the
- * helper's index table on its behalf. The helper needs nothing back there for the
- * same two reasons as under `one-to-one`. Pinned in psiLink.test.ts.
+ * A deduplicating cardinality does not move the rule and cannot reach the
+ * withheld path from the "many" side: a party declaring `deduplicate: true`
+ * must declare `output.expectsOutput`, so a "many" sender is always
+ * entitled to output. Under multiplicity, the withheld path covers the
+ * "one" party as a no-output helper, which role resolution makes the
+ * SENDER (the output-entitled party becomes the receiver); the "many" party
+ * then resolves the whole pairing, applying the one-side uniqueness rule to
+ * the helper's index table on its behalf, needing nothing back for the same
+ * two reasons as under `one-to-one`. Pinned in psiLink.test.ts.
  */
 export function withholdsSenderAssociationTable(
   senderExpectsOutput: boolean,
@@ -1096,14 +1054,15 @@ export interface SinglePassSessionBounds {
    */
   readonly keyWidths: ReadonlyArray<number>;
   /**
-   * The factor this party's own standardization multiplies its record count by
-   * (`localFanOutFactor`, fanOutFunctions.ts). This party's DECLARED record count
-   * -- what it carried on the terms exchange, and what the partner holds it to --
-   * is its row count times this factor, so the two are derived here from the data
-   * rather than passed in and left to diverge from it. It widens the per-cell
-   * bound this party's own table build is held to by exactly the multiple that
-   * declared count carries, and it is what makes this party ship the ragged layout
-   * when its local cleaning fans out but the agreed terms declare no width.
+   * The factor this party's own standardization multiplies its record count
+   * by (`localFanOutFactor`, fanOutFunctions.ts). This party's DECLARED
+   * record count -- what it declared on the terms exchange, and what the
+   * partner holds it to -- is its row count times this factor, so the two
+   * are derived here from the data rather than passed in and left to
+   * diverge from it. It widens the per-cell bound this party's own table
+   * build is held to by exactly that declared multiple, and it is what
+   * makes this party ship the ragged layout when its local cleaning fans
+   * out but the agreed terms declare no width.
    */
   readonly localFanOutFactor: number;
 }
@@ -1113,53 +1072,52 @@ export interface SinglePassSessionBounds {
  * produces the same matched row pairs but uses one network round-trip instead of
  * one per linkage key. exchange.ts chooses between the two on `linkageStrategy`.
  *
- * Keys are applied in order, most precise first; a record matched on an earlier
- * key is set aside before later keys are tried (this is the "cascade"). Here the
- * sender sends, in one shot, which of its records share a value under each key --
- * all records and all keys -- and the receiver replays that whole cascade itself.
- * It needs the full picture because whether a value is unique depends on which
- * records earlier keys already set aside: a value shared by two records becomes
- * usable on a later key once an earlier key has matched one of them. Along the
- * way the receiver sees some matches a less precise key would make that the
- * step-by-step cascade would have discarded, but only the cascade-equivalent
- * result is returned. Wire format and the extra disclosure this costs:
- * docs/spec/PROTOCOL.md; the PSI building blocks it calls are on
- * {@link PSIParticipant}.
+ * Keys are applied in order, most precise first; a record matched on an
+ * earlier key is set aside before later keys are tried (this is the
+ * "cascade"). Here the sender sends, in one shot, which of its records
+ * share a value under each key -- all records and all keys -- and the
+ * receiver replays that whole cascade itself, needing the full picture
+ * because whether a value is unique depends on which records earlier keys
+ * already set aside. Along the way the receiver sees some matches a less
+ * precise key would make that the step-by-step cascade would have
+ * discarded, but only the cascade-equivalent result is returned. Wire
+ * format and the extra disclosure this costs: docs/spec/PROTOCOL.md; the
+ * PSI building blocks it calls are on {@link PSIParticipant}.
  *
- * This is the one strategy fan-out matching is specified for, so `data` may yield
- * a record a candidate SET for a key: every candidate enters the round as its own
- * PSI entry, the within-round uniqueness rule applies per VALUE, and the
- * record-level pairing is resolved by the deterministic sweep in
- * {@link replaySinglePassCascade}. A fan-out-free exchange ships and replays
- * exactly what it did before fan-out existed.
+ * This is the one strategy fan-out matching is specified for, so `data` may
+ * yield a record a candidate SET for a key: every candidate enters the
+ * round as its own PSI entry, the within-round uniqueness rule applies per
+ * VALUE, and the record-level pairing is resolved by the deterministic
+ * sweep in {@link replaySinglePassCascade}.
  *
- * It matches the one-sided deduplicating cardinalities as well as `one-to-one`,
- * over the same frames: the index table already carries one value per (key,
- * record) for every party, so which side keeps a value several of its records hold
- * is a rule of the receiver's replay rather than anything on the wire
- * (docs/spec/PROTOCOL.md, The per-side rules). `many-to-many` throws, where the
- * cascade pairs it: this strategy's seam hands the sender a table it holds to a
- * length taken from the half that keeps its distinctness, and a both-sided
- * multiplicity leaves neither half distinct (see {@link singlePassResolves}).
- * exchange.ts refuses an agreed both-sided pair on this strategy before the run
- * (`assertBothSidedDeduplicateImplemented`, reached from
- * `resolveLinkageCardinality`), naming the strategy that stands in the way; this
- * is the strategy's own fail-closed half, which holds for a direct caller too.
+ * It matches the one-sided deduplicating cardinalities as well as
+ * `one-to-one`, over the same frames: the index table already holds one
+ * value per (key, record) for every party, so which side keeps a value
+ * several of its records hold is a rule of the receiver's replay rather
+ * than anything on the wire (docs/spec/PROTOCOL.md, The per-side rules).
+ * `many-to-many` throws, where the cascade pairs it: this strategy hands
+ * the sender a table held to a length taken from the half that keeps its
+ * distinctness, and a both-sided multiplicity leaves neither half distinct
+ * (see {@link singlePassResolves}). exchange.ts refuses an agreed
+ * both-sided pair on this strategy before the run
+ * (`assertBothSidedDeduplicateImplemented`), naming the strategy that
+ * stands in the way; this is the strategy's own fail-closed half, which
+ * holds for a direct caller too.
  *
- * @param bounds - The authenticated session state every derived bound reads; see
- *   {@link SinglePassSessionBounds}. Together they fix the per-exchange frame cap,
- *   the abort-if-over-ceiling gate, and which of the two message-2 index-table
- *   layouts the sender ships -- identically on both parties.
- * @param withholdSenderTable - When `true`, the receiver suppresses message 3
- *   (the sender's association-table half) ENTIRELY and the sender skips awaiting
- *   it, so a non-receiving, no-payload helper's process never receives -- and so
- *   never learns -- its own membership. Both parties pass the same value, derived
- *   from symmetric authenticated session state (see
- *   {@link withholdsSenderAssociationTable} and its caller in exchange.ts), so the
- *   suppress and the skip stay in lockstep and neither side blocks on a frame the
- *   other will not send. Defaults to `false` (the frame is exchanged as before).
- *   When it withholds, the sender returns an empty table `[[], []]` -- it genuinely
- *   does not learn its matches, which is the blindness this realizes.
+ * @param bounds - The authenticated session state every derived bound
+ *   reads; see {@link SinglePassSessionBounds}. Together they fix the
+ *   per-exchange frame cap, the abort-if-over-ceiling gate, and which of
+ *   the two message-2 index-table layouts the sender ships -- identically
+ *   on both parties.
+ * @param withholdSenderTable - When `true`, the receiver suppresses message
+ *   3 (the sender's association-table half) ENTIRELY and the sender skips
+ *   awaiting it, so a non-receiving, no-payload helper never learns its own
+ *   membership. Both parties pass the same value, derived from symmetric
+ *   authenticated session state (see {@link withholdsSenderAssociationTable}
+ *   and its caller in exchange.ts), keeping the suppress and the skip in
+ *   lockstep. Defaults to `false`. When it withholds, the sender returns an
+ *   empty table `[[], []]` -- it does not learn its matches, which is the
+ *   blindness this realizes.
  */
 export async function linkViaSinglePassPSI(
   protocol: {
@@ -1251,16 +1209,15 @@ export async function linkViaSinglePassPSI(
   const senderSize = isSender ? localSize : partnerSize;
   const receiverSize = isSender ? partnerSize : localSize;
 
-  // The value slots this party's own data actually occupies must fit the bound its
-  // declaration claims: the partner's decode, its element bounds, and its read
-  // gate are all derived from that claim, so exceeding it would have the partner
-  // reject a frame this party built. A candidate producer whose width the declared
-  // factors do not account for lands here rather than on the wire: a row within the
-  // per-record bound still overruns the slots when the key it widens is one the
-  // declared factors count as single-valued, which is what a producer outside
-  // FAN_OUT_FUNCTION_NAMES realizes -- `declaredKeyWidth` (fanOutFunctions.ts)
-  // declares a factor for each producer it knows. That producer is a configuration
-  // its operator can change, so the refusal is usage-typed rather than internal.
+  // The value slots this party's own data actually occupies must fit the
+  // bound its declaration claims: the partner's decode, its element bounds,
+  // and its read gate are all derived from that claim, so exceeding it
+  // would have the partner reject a frame this party built. A candidate
+  // producer whose width the declared factors do not account for lands
+  // here rather than on the wire -- a producer outside
+  // FAN_OUT_FUNCTION_NAMES, which `declaredKeyWidth` (fanOutFunctions.ts)
+  // has no factor for. That producer is a configuration its operator can
+  // change, so the refusal is usage-typed rather than internal.
   const localSlotBound = effectiveKeyCount * localRecordCount;
   if (slotCount > localSlotBound) {
     throw new UsageError(
@@ -1276,14 +1233,14 @@ export async function linkViaSinglePassPSI(
 
   // Authoritative, symmetric over-ceiling gate. Both parties compute it
   // identically from the exchanged counts and effective key counts, BEFORE
-  // exchanging any single-pass frame, so an over-cap exchange aborts on both
-  // sides in lockstep -- neither sends nor waits, so neither hangs to the
-  // inactivity timeout. The verdict is on the per-party budget, so the two
-  // parties' breach labels mirror each other (a "partner" breach here is a
-  // "local" one over there) while the abort decision itself is the same on both;
-  // the guidance that carries it is oriented to this party and does not recommend
-  // cascade. The prepareForExchange pre-flight is the coarse one-party shadow of
-  // this; this is the precise two-party check.
+  // exchanging any single-pass frame, so an over-cap exchange aborts on
+  // both sides in lockstep -- neither sends nor waits, so neither hangs to
+  // the inactivity timeout. The verdict is on the per-party budget, so the
+  // two parties' breach labels mirror each other (a "partner" breach here
+  // is a "local" one over there) while the abort decision is the same on
+  // both; the guidance shown is oriented to this party and does not
+  // recommend cascade. The prepareForExchange pre-flight is the coarse
+  // one-party shadow of this; this is the precise two-party check.
   const ceilingBreach = singlePassCeilingBreach(localSize, partnerSize);
   if (ceilingBreach !== undefined) {
     throw new UsageError(
@@ -1327,13 +1284,13 @@ export async function linkViaSinglePassPSI(
       sortedDistinctValueIndices,
     );
     // Send-time check against the SAME derived cap the receiver's read gate
-    // enforces (singlePassReplyByteCap), so the two are one computation. The
-    // over-ceiling gate above already aborted the common case from the counts
-    // alone; this is the defensive backstop, since the derived cap upper-bounds
-    // any legitimate reply, it fires only on a pathological build (an
-    // unexpectedly large serialized element). Its diagnosis is the
-    // builder-versus-derivation one rather than the over-ceiling guidance, which
-    // the gate above has already ruled out.
+    // enforces (singlePassReplyByteCap), so the two are one computation.
+    // The over-ceiling gate above already aborted the common case from the
+    // counts alone; this is the safety check for a pathological build (an
+    // unexpectedly large serialized element), since the derived cap
+    // upper-bounds any legitimate reply. Its diagnosis is the
+    // builder-versus-derivation one rather than the over-ceiling guidance,
+    // which the gate above has already ruled out.
     const replyCap = singlePassReplyByteCap(
       numLinkageKeys,
       senderSize,
@@ -1357,11 +1314,12 @@ export async function linkViaSinglePassPSI(
 
     if (withholdSenderTable) {
       // We are a non-receiving helper disclosing no payload: the receiver
-      // suppresses message 3, so do NOT await a frame it will not send (that would
-      // hang to the inactivity timeout). Return an empty table -- we genuinely do
-      // not learn which of our records matched, which is the blindness this path
-      // realizes. Both sides derived this from the same authenticated state, so the
-      // skip and the receiver's suppression agree.
+      // suppresses message 3, so do NOT await a frame it will not send
+      // (that would hang to the inactivity timeout). Return an empty table
+      // -- we do not learn which of our records matched, which is the
+      // blindness this path realizes. Both sides derived this from the
+      // same authenticated state, so the skip and the receiver's
+      // suppression agree.
       log.debug(
         `${participant.id}: association table withheld; staying blind to my ` +
           `own matches`,
@@ -1372,22 +1330,22 @@ export async function linkViaSinglePassPSI(
 
     // The resolved table is computed by the receiver, so this side cannot
     // recompute it -- but every index in it addresses a row one of the two
-    // parties counted, and both counts are authenticated session state. Check the
-    // two halves against them before the table becomes this party's match set,
-    // its payload row selection, and its attested record. The ascending order of
-    // the local half is checked with them: it is part of the AssociationTable
-    // contract (types.ts) that the cascade produces structurally and the receiver
-    // sorts this table into, and the result rows and the record's reconstruction
-    // of them read the table in it.
+    // parties counted, and both counts are authenticated session state.
+    // Check the two halves against them before the table becomes this
+    // party's match set, its payload row selection, and its attested
+    // record. The local half's ascending order is checked too: it is part
+    // of the AssociationTable contract (types.ts) that the cascade
+    // produces structurally and the receiver sorts this table into.
     //
-    // Under a deduplicating cardinality one half repeats -- the "one" side's rows,
-    // several of the MANY side's linking to each -- so the distinctness that
-    // otherwise makes the local half STRICTLY ascending and caps the table's length
-    // is relaxed on exactly that half, leaving it non-decreasing and the length
-    // pinned by the many side's row count instead (docs/spec/PROTOCOL.md, Deriving
-    // one table from the exchanged association maps). Which half that is comes from
-    // this party's own resolved label rather than from the table, and the other
-    // half -- the many side's, one entry per record it matched -- is the anchor.
+    // Under a deduplicating cardinality one half repeats -- the "one"
+    // side's rows, several of the MANY side's linking to each -- so the
+    // distinctness that otherwise makes the local half STRICTLY ascending
+    // and caps the table's length is relaxed on exactly that half, leaving
+    // it non-decreasing with the length pinned by the many side's row
+    // count instead (docs/spec/PROTOCOL.md, Deriving one table from the
+    // exchanged association maps). Which half that is comes from this
+    // party's own resolved label, not the table; the other half -- one
+    // entry per record the many side matched -- is the anchor.
     const table = await receiveParsed(conn, associationTableMessage);
     const localHalf = {
       what: "the resolved association table's local half",
@@ -1444,18 +1402,18 @@ export async function linkViaSinglePassPSI(
     distinctValueIndices: stackedDistinctValueIndices,
   } = decodeSinglePassReply(replyFrame);
 
-  // Validate every count the reply declares against authenticated state, before
-  // it drives any allocation. The sender packs the number of rows its table
-  // carries into the reply (part (c) of the wire format); it may declare no MORE
-  // than the record count the sender exchanged over the encrypted channel during
-  // role resolution (partnerRecordCount), which the over-ceiling gate above
-  // already bounded. The two are equal for a sender whose own cleaning does not
-  // fan out, and a fanning sender declares the multiple of its rows its factor
-  // stands for, so the tie is an upper bound rather than an equality. This ties
-  // the decoded count to authenticated state rather than trusting the frame, and
-  // the index-table check then confirms the frame's own shape against the agreed
-  // key count, that record count, and the sender's slot bound -- all before the
-  // allocations below, preserving the pre-allocation ordering.
+  // Validate every count the reply declares against authenticated state,
+  // before it drives any allocation. The sender packs the number of rows
+  // its table holds into the reply (part (c) of the wire format); it may
+  // declare no MORE than the record count the sender exchanged during role
+  // resolution (partnerRecordCount), which the over-ceiling gate above
+  // already bounded. The two are equal for a sender whose own cleaning
+  // does not fan out; a fanning sender declares the multiple of its rows
+  // its factor stands for, so the tie is an upper bound rather than an
+  // equality. This ties the decoded count to authenticated state rather
+  // than trusting the frame, and the index-table check then confirms the
+  // frame's own shape against the agreed key count, that record count, and
+  // the sender's slot bound -- all before the allocations below.
   if (numSenderRecords > partnerRecordCount) {
     throw partnerProtocolError(
       participant.id,
@@ -1463,17 +1421,18 @@ export async function linkViaSinglePassPSI(
         `more than the ${partnerRecordCount} the sender exchanged`,
     );
   }
-  // The sender's own fan-out factor, recovered from the two counts rather than
-  // advertised: its declared record count is its row count times the factor, so
-  // the quotient is that factor exactly. A local fan-out declares either no
-  // factor at all or one whole declared step's (localFanOutFactor,
-  // fanOutFunctions.ts), so those two quotients are the only ones an honest
-  // sender can produce and every other is refused -- a non-integer, a factor
-  // between them, one above the declared step's, and a frame declaring no rows
-  // against a positive exchanged count, which no factor multiplies up to. A
-  // sender holding no rows at all exchanged no records either, and that one
-  // legitimate zero case takes the unfanned factor. The sender's slot bound
-  // below stays derived from authenticated state whatever the frame says.
+  // The sender's own fan-out factor, recovered from the two counts rather
+  // than advertised: its declared record count is its row count times the
+  // factor, so the quotient is that factor exactly. A local fan-out
+  // declares either no factor or one whole declared step's
+  // (localFanOutFactor, fanOutFunctions.ts), so those two quotients are
+  // the only ones an honest sender can produce and every other is refused
+  // -- a non-integer, a factor between them, one above the declared
+  // step's, and a frame declaring no rows against a positive exchanged
+  // count. A sender holding no rows exchanged no records either, and that
+  // legitimate zero case takes the unfanned factor. The sender's slot
+  // bound below stays derived from authenticated state whatever the frame
+  // says.
   const senderFanOutFactor =
     partnerRecordCount === 0 ? 1 : partnerRecordCount / numSenderRecords;
   if (
@@ -1519,7 +1478,7 @@ export async function linkViaSinglePassPSI(
   // sender's rows in ascending order (see replaySinglePassCascade). The pairing is
   // a bijection over the matched values -- each party's values are distinct, and
   // two of them pair only when their plaintexts are equal -- so either direction
-  // carries the same information.
+  // gives the same information.
   const senderToReceiverDistinctValue = new Map<number, number>();
   for (let k = 0; k < senderDistinctValueIds.length; ++k) {
     senderToReceiverDistinctValue.set(
@@ -1569,7 +1528,7 @@ export async function linkViaSinglePassPSI(
   // The same pairs read from the sender's side, in that side's own row order. The
   // tiebreak is explicit because a deduplicating cardinality can put several pairs
   // on one sender row, and the order within such a run is part of what the
-  // sender's half carries.
+  // sender's half holds.
   const pairs = result[0].map((i, k): [number, number] => [result[1][k], i]);
   pairs.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
   const theirResult: AssociationTable = [
@@ -1630,7 +1589,7 @@ class RaggedKeyCells implements KeyCells {
 }
 
 // One key's column of this party's own value indices, in whichever layout its
-// declared width calls for. The two carry the same information; they differ only
+// declared width calls for. The two hold the same information; they differ only
 // in what they cost to build and to ship (see getSortedDistinctValueIndices).
 /** @internal the input getSortedDistinctValueIndices remaps onto the wire. */
 export type LocalKeyColumn =
@@ -1746,19 +1705,22 @@ function getDistinctValuesAndIndices(
   return { distinctValues, columns, numRecords, slotCount };
 }
 
-// Remap this party's index table from build order into the setup message's sorted
-// order, so it points at the distinct values as the setup message carries them,
-// and flatten it into the wire words of message 2 part (d). createServerSetup
-// yields permutation[sortedPos] = buildId, so the permutation is inverted first.
-// Uses fresh storage, leaving the caller's columns untouched.
+// Remap this party's index table from build order into the setup message's
+// sorted order, so it points at the distinct values as the setup message
+// holds them, and flatten it into the wire words of message 2 part (d).
+// createServerSetup yields permutation[sortedPos] = buildId, so the
+// permutation is inverted first. Uses fresh storage, leaving the caller's
+// columns untouched.
 //
-// Two layouts, chosen by the sender's declared width and read the same way on the
-// receiver (docs/spec/PROTOCOL.md, Wire-format deltas):
-//   - fixed-width: one word per (key, record), -1 where the record has no value;
-//   - ragged: per (key, record) a count word then that many value-index words,
-//     strictly ascending within the cell. The remap permutes the indices, so each
-//     cell is re-sorted after it -- the ordering is a property of the SORTED
-//     indices the receiver validates, not of the build order they came from.
+// Two layouts, chosen by the sender's declared width and read the same way
+// on the receiver (docs/spec/PROTOCOL.md, Wire-format deltas):
+//   - fixed-width: one word per (key, record), -1 where the record has no
+//     value;
+//   - ragged: per (key, record) a count word then that many value-index
+//     words, strictly ascending within the cell. The remap permutes the
+//     indices, so each cell is re-sorted after it -- the ordering is a
+//     property of the SORTED indices the receiver validates, not of the
+//     build order they came from.
 /** @internal exported for the index-table layout conformance vectors. */
 export function getSortedDistinctValueIndices(
   columns: Array<LocalKeyColumn>,
@@ -1827,17 +1789,18 @@ export function decodeFixedWidthIndexTable(
  * is no absent marker, a record with no value for the key being `c = 0`.
  *
  * Every bound comes from state the partner cannot choose: `keyWidths`, the
- * per-key widths the AGREED terms declare (scaled by the fan-out factor the two
- * exchanged record counts fix), whose length is the agreed key count; the number
- * of rows the reply declares, itself held to the sender's exchanged record count;
- * and `slotBound` -- the sender's effective key count times that exchanged record
- * count, which is also what bounds the setup frame's element count, so an index at
- * or above it can address no value the sender could legitimately have sent. The
- * checks, in the order the fixed-width layout's own length check ran: exactly
- * `keyWidths.length * numRecords` cells, each count within that key's declared
- * width, the counts totalling no more than the slot bound, each cell's indices
- * strictly ascending (which is also what rejects a repeat) and inside the value
- * bound, and the words ending exactly at the last index word.
+ * per-key widths the AGREED terms declare (scaled by the fan-out factor the
+ * two exchanged record counts fix); the number of rows the reply declares,
+ * held to the sender's exchanged record count; and `slotBound` -- the
+ * sender's effective key count times that exchanged record count, which
+ * also bounds the setup frame's element count, so an index at or above it
+ * addresses no value the sender could legitimately have sent. Checked, in
+ * the order the fixed-width layout's own length check ran: exactly
+ * `keyWidths.length * numRecords` cells, each count within that key's
+ * declared width, the counts totalling no more than the slot bound, each
+ * cell's indices strictly ascending (which also rejects a repeat) and
+ * inside the value bound, and the words ending exactly at the last index
+ * word.
  *
  * @internal exported for the malformed-frame wire-message tests.
  */
@@ -2033,28 +1996,28 @@ class RoundValueOwners {
  * 3. remove every record appearing in ANY of the round's candidate pairs --
  *    accepted or not -- from candidacy for every later key.
  *
- * The order is fixed normatively because it decides which of two ambiguous matches
- * wins, and both of its components are role-derived, so both parties and any other
- * implementation reproduce the same table from the same frames. Nothing here reads
- * a map's iteration order, a value's bytes, or an encrypted element's position:
- * the sweep walks sender rows in ascending order and sorts each row's receiver
- * candidates, so the pairs are emitted already in the normative order.
+ * The order is fixed normatively because it decides which of two ambiguous
+ * matches wins, and both of its components are role-derived, so both
+ * parties reproduce the same table from the same frames: the sweep walks
+ * sender rows ascending and sorts each row's receiver candidates, reading
+ * no map's iteration order, value bytes, or encrypted element position.
  *
- * `sides` carries the receiver's own resolved cardinality into both steps that a
- * deduplicating one relaxes, and nothing else moves: the "many" side keeps a value
- * several of its candidate records hold and stands the round's position for that
- * group -- {@link RoundValueOwners} materializes the receiver's, while a "many"
- * sender's is the rows its own ascending loop reaches, so it builds no
- * {@link RoundValueParticipation} -- and step 2's acceptance clause binds the MANY
- * side's record alone, whether or not the "one" side's record has already been
- * accepted (docs/spec/PROTOCOL.md, The per-side rules). Which side is which is read
- * from the receiver's label, so this reproduces what the cascade computes from the
- * two parties' mirror labels for the same exchange.
+ * `sides` holds the receiver's own resolved cardinality, feeding the two
+ * steps a deduplicating one relaxes and nothing else: the "many" side keeps
+ * a value several of its candidate records hold and stands the round's
+ * position for that group -- {@link RoundValueOwners} materializes the
+ * receiver's; a "many" sender needs no {@link RoundValueParticipation},
+ * its group being just the rows its own ascending loop reaches -- and step
+ * 2's acceptance clause binds the MANY side's record alone
+ * (docs/spec/PROTOCOL.md, The per-side rules). Which side is which is read
+ * from the receiver's label, reproducing what the cascade computes from
+ * the two parties' mirror labels for the same exchange.
  *
- * On inputs where every cell holds at most one value and neither side deduplicates
- * this reduces to the single-valued cascade: each round's candidate pairs are then
- * a partial one-to-one correspondence, so the sweep accepts every pair and removal
- * on a potential match coincides with removal on a match.
+ * On inputs where every cell holds at most one value and neither side
+ * deduplicates this reduces to the single-valued cascade: each round's
+ * candidate pairs are then a partial one-to-one correspondence, so the
+ * sweep accepts every pair and removal on a potential match coincides with
+ * removal on a match.
  *
  * @internal exported for the round-value participation differential test, which
  *   drives the sweep over instrumented cells.
@@ -2071,7 +2034,7 @@ export function replaySinglePassCascade(
   const senderKeepsDuplicates = sides.partnerKeepsDuplicates;
   // A side is held to one accepted pair per round exactly when it is NOT the "one"
   // side of a deduplicating cardinality -- which is to say, when the other side
-  // does not carry the multiplicity.
+  // does not hold the multiplicity.
   const senderAcceptsOnce = !receiverKeepsDuplicates;
   const receiverAcceptsOnce = !senderKeepsDuplicates;
 
@@ -2219,19 +2182,20 @@ export function decodeInt32LE(bytes: Uint8Array): Int32Array {
   return values;
 }
 
-// Pack the sender's whole single-pass reply -- setup, response, the record count,
-// and the distinct-value index table -- as one binary frame, so a high-latency
-// channel pays a single round-trip rather than one per piece. Layout (all
-// little-endian):
+// Pack the sender's whole single-pass reply -- setup, response, the record
+// count, and the distinct-value index table -- as one binary frame, so a
+// high-latency channel pays a single round-trip rather than one per piece.
+// Layout (all little-endian):
 //   uint32 setupLen | setup bytes
 //   uint32 responseLen | response bytes
 //   uint32 numRecords
 //   the rest: the distinct-value index table, as Int32 (encodeInt32LE)
-// setup and response carry explicit lengths; the index table is the remainder, so
-// its length is implied by the frame size. The table's words are the fixed-width
-// or the ragged layout, chosen by the sender's declared width and read the same
-// way on both sides with no wire flag (getSortedDistinctValueIndices, and
-// decodeFixedWidthIndexTable / decodeRaggedIndexTable). See docs/spec/PROTOCOL.md.
+// setup and response hold explicit lengths; the index table is the
+// remainder, so its length is implied by the frame size. The table's words
+// are the fixed-width or the ragged layout, chosen by the sender's
+// declared width and read the same way on both sides with no wire flag
+// (getSortedDistinctValueIndices, and decodeFixedWidthIndexTable /
+// decodeRaggedIndexTable). See docs/spec/PROTOCOL.md.
 /** @internal exported for the wire-message test. */
 export function encodeSinglePassReply(
   setup: Uint8Array,
