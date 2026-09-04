@@ -46,11 +46,14 @@ fail / 0 unclear from `install.sh`'s own end-of-install run.
 
 **The podman/Quadlet path remains undriven** -- everything measured above went
 through `psilink-relay-docker.service`, and nothing has exercised
-`psilink-relay.container` or its generator. The data leg to a responsive peer
-(`PSILINK_RELAY_VERIFY_PEER`) and a real relayed exchange between two parties
-have also not been exercised: the allocation and refusal probes were driven,
-not the exchange traffic itself. Fix what the next real run against those gets
-wrong rather than loosening a probe until it passes.
+`psilink-relay.container` or its generator. `verify.sh` has also not
+exercised the data leg to a responsive peer (`PSILINK_RELAY_VERIFY_PEER`):
+its allocation and refusal probes were driven, not exchange traffic. A
+relayed exchange has been driven through this relay separately; what that
+covered and what it did not is in
+[standing-relay-delivery.md](../../docs/notes/standing-relay-delivery.md).
+Fix what the next real run against those gets wrong rather than loosening a
+probe until it passes.
 
 `render-config.sh` and `mint-credential.sh` were also driven locally against a
 fixture before the live run: `render-config.sh` renders the template, writes

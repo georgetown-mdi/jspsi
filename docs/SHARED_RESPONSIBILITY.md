@@ -1,7 +1,7 @@
 ---
 title: "psilink Deployment Model and Shared Responsibility"
 review_owner: "psilink maintainers"
-last_reviewed: "2026-08-17"
+last_reviewed: "2026-09-04"
 ---
 
 # Deployment model and shared responsibility
@@ -23,6 +23,8 @@ No personal data is collected, transmitted, or retained by the project on its ow
 ## The two deployments
 
 The split differs by deployment, and a responsibility table written for one is misleading about the other. Read the section for the deployment in question.
+
+One responsibility precedes both and is the same in each: the decision to disclose -- its legal basis, the data sharing agreement behind it, and which columns are designated for disclosure -- together with the risk assessment, the privacy impact assessment, and the authorization that cover it. psilink conducts the exchange the two parties configured and makes no determination about whether a disclosure is lawful ([COMPLIANCE.md](COMPLIANCE.md#authority-to-operate)).
 
 ### Container deployment (CLI and local console)
 
