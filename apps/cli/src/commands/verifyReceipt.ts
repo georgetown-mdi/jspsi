@@ -60,6 +60,7 @@ import { parseSensitiveJson, parseSensitiveYaml } from "../sensitiveFile";
 import { loadSigningCertificate } from "../signingIdentityFile";
 import {
   configureLogging,
+  exitCodeForError,
   exitWithError,
   logLevelFlag,
   openInputSource,
@@ -1237,13 +1238,7 @@ export async function handler(argv: Arguments): Promise<void> {
     for (const line of lines) console.log(line);
     process.exitCode = exitCode;
   } catch (err) {
-    exitWithError(
-      log,
-      err,
-      err instanceof UsageError
-        ? 64
-        : ((err as { exitCode?: number }).exitCode ?? 69),
-    );
+    exitWithError(log, err, exitCodeForError(err));
   } finally {
     closeLogging();
   }

@@ -940,7 +940,7 @@ export async function handler(argv: Arguments): Promise<void> {
       try {
         await provisionKeyFileFromInvitation(invitation, options.keyFile);
       } catch (err) {
-        exitWithError(log, err, err instanceof UsageError ? 64 : 69);
+        exitWithError(log, err, exitCodeForError(err));
       }
     }
 
@@ -1058,7 +1058,7 @@ export async function handler(argv: Arguments): Promise<void> {
         termsIdentity,
       );
     } catch (err) {
-      exitWithError(log, err, err instanceof UsageError ? 64 : 69);
+      exitWithError(log, err, exitCodeForError(err));
     }
 
     // Establish SSH host-key trust: on an unpinned sftp config this prompts and
@@ -1070,8 +1070,6 @@ export async function handler(argv: Arguments): Promise<void> {
     // input cannot satisfy, an unconfirmed outbound payload, a signing identity
     // that is missing or bound to another party -- is decided from local inputs
     // alone; deciding those first is what keeps a refused run from connecting.
-    // A UsageError (non-TTY, or a declined prompt) maps to exit 64, a probe
-    // transport failure to 69.
     try {
       await establishHostKeyTrust(connection, {
         verbosity,
@@ -1081,7 +1079,7 @@ export async function handler(argv: Arguments): Promise<void> {
         persistence: { mode: "write-now", configPath: options.configFile },
       });
     } catch (err) {
-      exitWithError(log, err, err instanceof UsageError ? 64 : 69);
+      exitWithError(log, err, exitCodeForError(err));
     }
 
     const recordOutput = resolveRecordOutput({

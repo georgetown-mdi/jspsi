@@ -19,6 +19,7 @@ import {
 import {
   configureLogging,
   durationFlagSeconds,
+  exitCodeForError,
   exitWithError,
   logLevelFlag,
   parseOrExit,
@@ -295,12 +296,7 @@ export async function handler(argv: Arguments): Promise<void> {
     // human path keeps reading it off the rendered cause chain below.
     const diagnosis = json ? peerIdentificationDiagnosisOf(err) : undefined;
     if (diagnosis !== undefined) console.log(probeDiagnosisJsonLine(diagnosis));
-    // A UsageError (bad URL/scheme, malformed flag) is exit 64; anything else --
-    // a transport failure, or a non-canonical fingerprint -- is exit 69, matching
-    // the exchange command's mapping (probeHostKey.test.ts, "exit mapping: a
-    // non-sftp URL rejects UsageError (64)" and "exit mapping: a transport
-    // failure rejects a plain Error (69)").
-    exitWithError(log, err, err instanceof UsageError ? 64 : 69);
+    exitWithError(log, err, exitCodeForError(err));
   } finally {
     closeLogging();
   }

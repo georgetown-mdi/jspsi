@@ -1,7 +1,7 @@
 import type { Argv, Arguments } from "yargs";
 import logLibrary from "loglevel";
 
-import { UsageError, redactAndSanitizeForDisplay } from "@psilink/core";
+import { redactAndSanitizeForDisplay } from "@psilink/core";
 
 import { runMountChecks } from "../doctor/mount";
 import { runProbe } from "../doctor/probe";
@@ -16,6 +16,7 @@ import {
 import { addLoggingOptions } from "../optionDefinitions";
 import {
   configureLogging,
+  exitCodeForError,
   exitWithError,
   logLevelFlag,
   parseOrExit,
@@ -112,10 +113,9 @@ async function runDoctor(
     // not in use.
     process.exitCode = DOCTOR_EXIT_CODE[overallOf(report)];
   } catch (err) {
-    // A malformed input is a usage error (64); anything else escaping the
-    // checks -- they classify a tool failure rather than throwing -- is an
-    // availability failure (69), the same mapping the other commands apply.
-    exitWithError(log, err, err instanceof UsageError ? 64 : 69);
+    // Reached only by an error the checks did not classify: a failing tool
+    // becomes a verdict rather than a throw.
+    exitWithError(log, err, exitCodeForError(err));
   } finally {
     closeLogging();
   }

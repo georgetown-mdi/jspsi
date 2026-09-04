@@ -26,6 +26,7 @@ import {
 } from "../signingIdentityFile";
 import {
   configureLogging,
+  exitCodeForError,
   exitWithError,
   logLevelFlag,
   parseOrExit,
@@ -462,7 +463,7 @@ export async function handler(argv: Arguments): Promise<void> {
 
     report(log, action, identityPath, identity, fingerprint);
   } catch (err) {
-    exitWithError(log, err, err instanceof UsageError ? 64 : 69);
+    exitWithError(log, err, exitCodeForError(err));
   } finally {
     // Restore the loglevel factory (and close the log-file descriptor, for the
     // file sink) on the normal exit path. Writes are synchronous and already
