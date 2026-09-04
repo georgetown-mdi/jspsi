@@ -6,18 +6,17 @@ import { getLogger } from "@psilink/core";
 
 /**
  * Pre-flight validation for an authenticated exchange's key-file path, run
- * before any credential is presented so a misconfiguration fails deterministically
- * -- with no rendezvous I/O and before the partner can be left holding a rotated
- * token this side cannot persist. It mirrors what {@link saveKeyFile} will do
- * post-handshake (a recursive parent `mkdir`, a write, and -- on POSIX -- a
- * parent-directory fsync that opens the parent for reading) and rejects up front
- * the cases where that write would fail after a successful key exchange, when
- * recovery would otherwise require a re-invitation.
+ * before any credential is presented. Mirrors what {@link saveKeyFile} does
+ * post-handshake (recursive parent `mkdir`, a write, and on POSIX a
+ * parent-directory fsync that opens the parent for reading) and rejects up
+ * front the cases where that write would fail. Why the check runs
+ * pre-handshake: docs/spec/CREDENTIAL_STORAGE.md, "Writable-and-readable-
+ * parent pre-flight".
  *
- * Returns the trimmed key-file path: leading and trailing whitespace is removed
- * (a value like `"  ./key  "` is almost certainly a user typo) without mutating
- * the caller's value, and the trimmed result is what the caller must hand to
- * {@link saveKeyFile}. Throws -- with the user-facing error strings -- when:
+ * Returns the trimmed key-file path (leading/trailing whitespace removed,
+ * without mutating the caller's value); the trimmed result is what the
+ * caller must hand to {@link saveKeyFile}. Throws -- with the user-facing
+ * error strings -- when:
  *
  * - `keyFilePath` is missing or whitespace-only;
  * - the path already exists but is a directory or other non-regular node;
@@ -29,62 +28,37 @@ import { getLogger } from "@psilink/core";
  * even if a subsequent handshake or exchange fails.
  *
  * `log` receives the parent-directory-created notice; pass the same logger
- * `runProtocol` uses so the message carries the run's context.
+ * `runProtocol` uses so the message holds the run's context.
  */
 export function preflightKeyFilePath(
   keyFilePath: string,
   log: ReturnType<typeof getLogger>,
 ): string {
-  // Guards against a missing or whitespace-only keyFilePath (which would create a
-  // file named " " in the current directory rather than failing clearly). Trim
-  // leading and trailing whitespace from the supplied value before using it: a
-  // value like "  ./key  " is almost certainly user typo and would
-  // otherwise become "  ." for dirname and " ./key  " for the file name,
-  // producing a confusing on-disk artifact rather than the intended file.
+  // A missing or whitespace-only keyFilePath would otherwise create a file
+  // named " " in the current directory instead of failing clearly; trimming
+  // matches what the caller must hand to saveKeyFile (see the JSDoc above).
   if (typeof keyFilePath !== "string" || keyFilePath.trim().length === 0)
     throw new Error("authentication must include a non-empty keyFilePath");
   const kfp = keyFilePath.trim();
-  // Pre-validate the key path itself: it is fine as a regular file or a
-  // symlink, and rejected only if it already exists as a directory or other
-  // special node. saveKeyFile writes a temp file and renameSync()s it onto
-  // this path, and rename replaces the final component in place -- acting on a
-  // symlink as the link itself rather than following it -- so a regular file or
-  // a symlink (to anything, including a directory) is overwritten cleanly. Only
-  // a real directory or special node, which rename cannot overwrite, would make
-  // that write fail post-handshake, when the partner may already hold the
-  // rotated token and recovery needs a preventable re-invitation. Use lstatSync
-  // (not statSync) so a symlink is classified as a symlink and accepted as-is
-  // rather than resolved to its target's type.
+  // Accepted as-is if it is a regular file or a symlink (to anything,
+  // including a directory): saveKeyFile writes a temp file and renames it
+  // onto this path, and rename() replaces the final path component in
+  // place -- acting on a symlink as the link itself, never following it --
+  // so both are overwritten cleanly. Only a real directory or other special
+  // node, which rename() cannot overwrite, is rejected here. lstatSync (not
+  // statSync) classifies a symlink as itself rather than resolving to its
+  // target's type.
   let targetStat: fs.Stats | undefined;
   try {
     targetStat = fs.lstatSync(kfp);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
-    // Fall through (leaving targetStat undefined) ONLY for the codes the
-    // downstream parent/probe checks re-encounter and re-classify with
-    // actionable guidance, so the raw Node errno does not preempt it:
-    //   ENOENT  -- keyFilePath does not yet exist (first run after invite/
-    //              accept); saveKeyFile will create it.
-    //   ENOTDIR -- a path-prefix component is a regular file, so kfp cannot
-    //              exist; the parent check raises the more specific "parent
-    //              exists but is not a directory" error.
-    //   EACCES  -- a parent/ancestor directory lacks search permission. lstat
-    //              needs search on the parent to look up kfp, so this is always
-    //              a parent-side condition: the write probe (immediate parent)
-    //              or statSync(parent) (a higher ancestor) re-hits it and
-    //              yields the friendly "...is not writable: ... Restore write
-    //              permission..." or "...is not accessible" guidance.
-    //   ELOOP   -- a symlink loop in a non-final path component (lstat does not
-    //              follow the final component, so the loop is always parent-
-    //              side); statSync(parent) re-hits it and wraps it as
-    //              "...is not accessible".
-    // Any OTHER code is a key-path-specific failure the downstream checks do
-    // NOT reproduce -- above all ENAMETOOLONG on the final component, where the
-    // parent stat succeeds and the short-named probe and parent read-open both
-    // pass, so swallowing it would let pre-flight wrongly pass and leave
-    // saveKeyFile to fail on the long name post-handshake, after the secret has
-    // rotated. Rethrow those so they still halt pre-flight before any credential
-    // is presented, keeping the failure on the recoverable side of the handshake.
+    // Fall through (leaving targetStat undefined) only for ENOENT, ENOTDIR,
+    // EACCES, and ELOOP -- the codes the downstream parent/probe checks
+    // re-encounter and re-classify with actionable guidance. Any other code
+    // (above all ENAMETOOLONG, which those checks do not reproduce) is
+    // rethrown, so pre-flight does not wrongly pass and leave saveKeyFile to
+    // fail post-handshake, after the secret has rotated.
     if (
       code !== "ENOENT" &&
       code !== "ENOTDIR" &&
@@ -108,11 +82,9 @@ export function preflightKeyFilePath(
         }); saveKeyFile would fail after a successful key exchange. ` +
         "Remove or rename it before running the exchange.",
     );
-  // Pre-validate that the parent directory exists (creating it if missing,
-  // mirroring saveKeyFile's `mkdirSync({ recursive: true })`) and that it
-  // is a directory, so saveKeyFile failure cannot occur after a successful
-  // key exchange, where the partner may already hold the rotated token
-  // and recovery requires re-invitation.
+  // Pre-validate the parent: create it if missing (mirroring saveKeyFile's
+  // `mkdirSync({ recursive: true })`) and confirm it is a directory, so
+  // saveKeyFile cannot fail here after the handshake (see the JSDoc above).
   const parent = path.dirname(kfp);
   let parentStat: fs.Stats | undefined;
   try {
@@ -122,7 +94,7 @@ export function preflightKeyFilePath(
     // it via `mkdirSync({ recursive: true })`, so do the same here. Any
     // failure that prevents creation (EACCES on a read-only ancestor, a
     // dangling symlink whose target cannot be created) is the real
-    // misconfiguration and is surfaced with a clearer message.
+    // misconfiguration and is reported with a clearer message.
     if ((err as NodeJS.ErrnoException).code !== "ENOENT")
       throw new Error(
         `keyFilePath parent directory ${parent} is not accessible: ` +
@@ -130,9 +102,8 @@ export function preflightKeyFilePath(
       );
     try {
       fs.mkdirSync(parent, { recursive: true });
-      // Surface the side effect so users can see why a directory appeared
-      // even if the subsequent handshake or exchange fails and saveKeyFile
-      // never writes the key file into it.
+      // Logged so a directory that appeared is explained even if the run
+      // fails afterwards (see the JSDoc above).
       log.info(
         `created keyFilePath parent directory ${parent} (mirrors ` +
           "saveKeyFile's recursive mkdir; left in place on failure)",
@@ -159,34 +130,21 @@ export function preflightKeyFilePath(
       `keyFilePath parent ${parent} exists but is not a directory; ` +
         "saveKeyFile would fail after a successful key exchange",
     );
-  // Best-effort writability check: catches the common case of a read-only
-  // parent before the key exchange rotates the secret. fs.accessSync(W_OK) is
-  // unreliable on Windows (it consults only the read-only attribute, not
-  // the ACL) and can be inconsistent on Linux with capabilities such as
-  // CAP_DAC_OVERRIDE. A create-and-unlink probe on a sentinel file
-  // exercises the actual permission path that saveKeyFile will use, and
-  // works identically on every platform. PID + crypto-random nonce in the
-  // name prevents collisions with concurrent runs, and the unlink in
-  // `finally` cleans up even if open fails partway. The real rename in
-  // saveKeyFile may still fail (e.g. quota exceeded between probe and
-  // write), but the common misconfiguration is caught here before the
-  // partner can be left holding a rotated token this side cannot persist.
+  // Best-effort writability check for the common case of a read-only parent
+  // before the secret rotates: fs.accessSync(W_OK) is unreliable here
+  // (Windows checks only the read-only attribute; Linux can misreport under
+  // capabilities like CAP_DAC_OVERRIDE), so a create-and-unlink probe on a
+  // sentinel file exercises the real permission path saveKeyFile will use.
+  // PID + a random nonce avoid collisions between concurrent runs; the
+  // `finally` unlink cleans up even on a partial failure.
   //
-  // Sweep any stale probe files from previous SIGKILL'd / OOM'd runs first
-  // so the directory does not accumulate empty zero-byte litter. Names
-  // include a unique nonce, so unlinking other entries that match the
-  // pattern is safe on POSIX: a concurrent run that has already opened its
-  // probe does not care if the path is unlinked underneath it (the fd
-  // remains valid). On Windows the open file is held without
-  // FILE_SHARE_DELETE, so unlinkSync on a peer's probe fails with EPERM;
-  // the inner catch swallows the failure and the peer's probe remains.
-  // The leftover is cosmetic (zero-byte file) and is swept on the next
-  // non-concurrent invocation. This is documented rather than worked
-  // around because no Node API exposes FILE_SHARE_DELETE without addons.
-  // Match the exact probe-file name format produced below
-  // (`.psilink-write-probe-<pid>-<8 hex chars>`) so that an unrelated
-  // file the user happens to have placed with this prefix is not
-  // silently unlinked.
+  // Sweep stale probe files left by an earlier SIGKILL'd/OOM'd run so the
+  // directory does not accumulate zero-byte litter, matching the exact name
+  // pattern (`.psilink-write-probe-<pid>-<8 hex chars>`) so an unrelated
+  // file with this prefix is not unlinked. Safe on POSIX even against a
+  // concurrent run's open probe (unlink does not invalidate its fd); on
+  // Windows a peer's open probe cannot be unlinked (EPERM, swallowed) and
+  // is left as cosmetic litter for the next sweep.
   const PROBE_NAME_RE = /^\.psilink-write-probe-\d+-[0-9a-f]{8}$/;
   try {
     for (const entry of fs.readdirSync(parent)) {
@@ -201,7 +159,7 @@ export function preflightKeyFilePath(
     }
   } catch {
     /* readdir failure (permission, transient) is non-fatal: the probe
-     * itself will surface the underlying access problem with a clearer
+     * itself will report the underlying access problem with a clearer
      * message. */
   }
   const probeName =
@@ -238,14 +196,12 @@ export function preflightKeyFilePath(
        * created, in which case unlink ENOENT is expected. */
     }
   }
-  // saveKeyFile's post-rename durability step (fsyncParentDir) opens the parent
-  // directory for READ (openSync(parent, "r")) to flush the new directory entry
-  // durably. A parent that is write+execute but not readable (mode 0o300)
-  // passes the write probe above yet would fail that read-open with EACCES --
-  // after the handshake has already rotated the secret. Mirror the read-open
-  // here so the pre-flight covers that failure class up front instead of
-  // letting saveKeyFile fail post-handshake. POSIX-only, exactly like
-  // fsyncParentDir: on Windows openSync on a directory fails outright and the
+  // Mirrors saveKeyFile's post-rename durability step (fsyncParentDir opens
+  // the parent for read); a write+execute-but-not-readable parent (mode
+  // 0o300) would pass the write probe above yet fail that read-open after
+  // the handshake. Why the pre-flight covers it up front: docs/spec/
+  // CREDENTIAL_STORAGE.md, "Writable-and-readable-parent pre-flight".
+  // POSIX-only: on Windows openSync on a directory fails outright and the
   // parent fsync is skipped, so there is no read requirement to verify.
   if (process.platform !== "win32") {
     let parentReadFd: number | undefined;

@@ -81,7 +81,7 @@ const MS_PER_DAY = 86_400_000;
  * Build the `.psilink.key` contents to persist after a successful key exchange.
  * When `tokenMaxAgeDays` is set, stamp `expires` = `now` + `tokenMaxAgeDays` days
  * (ISO 8601) so a rotated token cannot outlive the operator's max-age policy;
- * when omitted, the rotated token carries no `expires` (the unchanged default).
+ * when omitted, the rotated token holds no `expires`.
  *
  * `now` is a parameter rather than read internally so the stamp reflects the
  * actual moment of rotation (where the caller invokes it) and the helper stays
@@ -104,14 +104,12 @@ export function buildRotatedKeyFile(
       "buildRotatedKeyFile: tokenMaxAgeDays must be a positive integer; got " +
         String(tokenMaxAgeDays),
     );
-  // Guard the date-range overflow too. A value large enough that now + N days
-  // leaves the representable Date range (or a 4-digit ISO year) would otherwise
-  // make toISOString() throw an opaque RangeError -- here, after a successful
-  // handshake the partner has already rotated against, with no clear cause and no
-  // recovery short of editing the config. The config schema bounds this at the
-  // front door (MAX_TOKEN_MAX_AGE_DAYS); this is the backstop for a caller that
-  // bypasses parse, failing as bad input (UsageError -> exit 64) before the
-  // broken expiry reaches disk, consistent with the positive-integer guard above.
+  // Guard the date-range overflow too: a value large enough that now + N days
+  // leaves the representable Date range (or a 4-digit ISO year) would
+  // otherwise make toISOString() throw an opaque RangeError. The config
+  // schema bounds this at the front door (MAX_TOKEN_MAX_AGE_DAYS); this is
+  // the safety check for a caller that bypasses parse, failing as bad input
+  // (UsageError -> exit 64) before the broken expiry reaches disk.
   const expires = new Date(now + tokenMaxAgeDays * MS_PER_DAY);
   if (Number.isNaN(expires.getTime()) || expires.getUTCFullYear() > 9999)
     throw new UsageError(
@@ -150,13 +148,12 @@ export function checkKeyFileExpiry(
 ): KeyFileExpiryStatus {
   if (keyFile.expires === undefined) return "ok";
   const expiresMs = new Date(keyFile.expires).getTime();
-  // Fail closed on an unparseable timestamp. loadKeyFile validates `expires` as an
-  // ISO datetime, so this is unreachable through the CLI, but a direct caller that
-  // bypasses that validation must not have a malformed value classified as "ok"
-  // (NaN <= now is false, which would otherwise fall through). The classification
-  // is driven in keyFile.test.ts ("checkKeyFileExpiry treats an unparseable
-  // expires as expired (fail closed)"), so the hard stop, not a silent pass, is
-  // the default for a security control.
+  // Fail closed on an unparseable timestamp: loadKeyFile validates `expires`
+  // as an ISO datetime, so this path only reaches a caller that bypasses that
+  // validation directly. NaN <= now is false, so an unguarded compare would
+  // read a malformed value as "ok"; the hard stop is the default for a
+  // security control (see keyFile.test.ts, "checkKeyFileExpiry treats an
+  // unparseable expires as expired (fail closed)").
   if (Number.isNaN(expiresMs) || expiresMs <= now) return "expired";
   const { warnThresholdDays } = opts;
   if (
@@ -181,17 +178,12 @@ export function saveKeyFile(
   data: KeyFile,
   options: { exclusive?: boolean } = {},
 ): void {
-  // Belt-and-suspenders runtime validation: the type system already requires
-  // `sharedSecret` to be a string, and today's only caller (runProtocol) derives
-  // it from HKDF and so always produces a valid base64url-encoded 32-byte
-  // value. Another caller (`invite` / `accept`, via provisionConfigAndKey)
-  // could write a malformed shared secret that loadKeyFile would later reject;
-  // fail here instead so the malformed value never reaches disk.
-  //
-  // UsageError (not a plain Error) so the CLI catch sites classify it as a
-  // caller/usage problem (exit 64) rather than a transport failure (exit 69) --
-  // a malformed shared secret supplied via invite/accept is bad input, and
-  // provisionConfigAndKey makes this the reachable write path.
+  // Belt-and-suspenders runtime validation before the write: the type system
+  // does not enforce the base64url format, and a caller other than
+  // runProtocol (`invite` / `accept`, via provisionConfigAndKey) can supply a
+  // malformed shared secret that loadKeyFile would later reject. UsageError
+  // (not a plain Error) so the CLI classifies it as bad input (exit 64)
+  // rather than a transport failure (exit 69).
   if (!SHARED_SECRET_REGEX.test(data.sharedSecret))
     throw new UsageError("saveKeyFile: " + SHARED_SECRET_FORMAT_MESSAGE);
   writeFileOwnerOnly(
@@ -220,27 +212,12 @@ function alreadyProvisionedError(keyFilePath: string): UsageError {
 /**
  * Provision the key file at `keyFilePath` from an invitation code (the same
  * encoded token `psilink accept` takes; `@path`-capable), for the party that
- * composed an exchange in the web app and downloaded a config that never carried
- * the secret. The code is decoded and validated fail-closed (checksum, schema,
- * expiry) through {@link decodeAndValidateInvitation} before anything is written,
- * so a malformed or expired code raises its {@link UsageError} and leaves the
- * filesystem untouched.
- *
- * The written key file carries the token's shared secret AND its expiry -- the
- * composing (inviter-side) party's own copy, matching what `psilink invite`
- * writes, so the invitation's bounded lifetime is enforced at exchange time
- * (contrast `accept`'s acceptor copy, which strips the expiry). The write uses
- * the owner-only key-file path.
- *
- * A key file already present at `keyFilePath` is a {@link UsageError}, not an
- * overwrite: after the first exchange the secret rotates, so re-supplying the
- * original code must never resurrect a stale secret. Provisioning is a first-time
- * step; a provisioned key is re-established only by re-inviting. The upfront
- * {@link detectFileConflicts} check gives the common case a fast, friendly
- * refusal before any decode work or network activity; the write itself is
- * additionally `exclusive`, so a file created concurrently between that check
- * and the write is never silently overwritten -- it hits the same refusal via
- * the {@link FileExistsError} mapped below, closing the check-then-write race.
+ * composed an exchange in the web app and downloaded a config that never held
+ * the secret. The fail-closed ordering (already-provisioned refusal before
+ * decode, decode-and-validate before any write, exclusive write closing the
+ * check-then-write race) and the expiry contrast with `accept`'s acceptor
+ * copy: docs/spec/EXCHANGE_FILE.md, "exchange --invitation fail-closed
+ * ordering" and "The secret's path".
  */
 export async function provisionKeyFileFromInvitation(
   invitation: string,
