@@ -2,7 +2,7 @@
 // Nested root-package check, run by static_checks.yaml on every PR.
 //
 // A workspace manifest bump can leave a second copy of a package the root
-// already carries: npm 11.17 does not hoist a later range bump incrementally
+// already has: npm 11.17 does not hoist a later range bump incrementally
 // while a root `overrides` block stands, so the stale hoisted copy is kept and
 // the raised version is nested under the workspace that asked for it. Nothing
 // at install time reports that split. What it costs is measured in
@@ -33,9 +33,9 @@
 //   - Its scope is the top level of the root node_modules against the top level
 //     of each workspace's. A copy nested deeper -- under another package's
 //     node_modules, at the root or inside a workspace -- is ordinary conflict
-//     resolution, which the committed tree carries dozens of; the class above
+//     resolution, which the committed tree holds dozens of; the class above
 //     was measured nesting directly under the workspace that raised its range.
-//     Out of scope too is a workspace-nested package the root does not carry:
+//     Out of scope too is a workspace-nested package the root does not have:
 //     with no root copy there is no root instance to be split against.
 //   - It does not tell a stale hoist from a split some declared range requires.
 //     The lockfile records neither the override nor which edge each copy
@@ -48,7 +48,7 @@
 //     package. Where the two disagree -- an npm alias pointing one of them at
 //     another package -- it REFUSES by name rather than reporting a duplicate
 //     of a package only one of them is. An alias standing anywhere else,
-//     including the `string-width-cjs` family the committed tree carries at the
+//     including the `string-width-cjs` family the committed tree holds at the
 //     root, is none of this check's business.
 //   - Workspace directories come from the lockfile's own keys that sit outside
 //     every node_modules, which is npm's record of the directories it resolved.
@@ -64,9 +64,9 @@ const SCRIPT = "scripts/check-nested-root-package.mjs";
 /**
  * The splits that are meant to stand, keyed by the nested entry's lockfile path
  * and valued by why that workspace cannot take the version the rest of the tree
- * resolves. An entry naming a path the lockfile no longer carries as a split
+ * resolves. An entry naming a path the lockfile no longer holds as a split
  * fails alongside the rest, so a split that gets fixed cannot leave its excuse
- * behind. Empty because the committed lockfile carries no split at all.
+ * behind. Empty because the committed lockfile contains no split at all.
  */
 export const NESTED_BY_DESIGN = {};
 

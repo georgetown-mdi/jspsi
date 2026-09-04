@@ -14,7 +14,7 @@
 // invitation and nothing reports it. This check is what fails instead.
 //
 // Two rules, read from the tag the run was triggered by and the manifest the
-// same checkout carries:
+// same checkout holds:
 //
 //   A. The tag names a release version: `vX.Y.Z`, the shape release.yaml's own
 //      trigger filter admits. A tag this cannot parse names no version to
@@ -24,14 +24,14 @@
 //      is the wrong one is the maintainer's call and not this check's.
 //
 // What this check cannot see:
-//   - Whether the version the two carry is the one the release was meant to
+//   - Whether the version the two hold is the one the release was meant to
 //     publish. It holds them to each other; wrong together is agreement.
 //   - Any build off the release path. It runs on a tag push, so an image built
 //     from a non-release tree, or from a release branch before its tag is
 //     pushed, is outside it -- the accept kit's remaining release-version limits,
 //     which docs/spec/SERVER_JOB_API.md states.
 //   - The shape the accept kit admits. `0.0.0` is the marker the unversioned
-//     manifests carry and the kit refuses it, so a `v0.0.0` tag agreeing with a
+//     manifests hold and the kit refuses it, so a `v0.0.0` tag agreeing with a
 //     `0.0.0` manifest passes here and still yields a kit naming the floating
 //     tag. The release process publishes no such version.
 

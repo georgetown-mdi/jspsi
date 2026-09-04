@@ -30,7 +30,7 @@ import {
 // The half of this file that matters drives the real npm. Every claim the check
 // rests on is a claim about what npm does with a tree of symlinks -- which entries
 // it reports as added when it cannot see into one, what its `--json` summary looks
-// like, whether a dry run writes anything -- and CLAUDE.md settles a question about
+// like, whether a dry run writes anything -- and CLAUDE.md decides a question about
 // an external tool by driving the tool, never by modeling it. So the fixtures below
 // are real installs: local tarballs packed by `npm pack`, installed by `npm install`
 // into a temp tree with its own cache, entirely offline and needing no registry.
@@ -339,7 +339,7 @@ describe("fileDependencyIntegrity", () => {
     expect(fileDependencyIntegrity(dir, lock)).toEqual(nothingToCompare);
   });
 
-  it("ignores a workspace's own local file: link, which carries no integrity", () => {
+  it("ignores a workspace's own local file: link, which has no integrity", () => {
     const lock = {
       packages: {
         "node_modules/@psilink/core": { resolved: "packages/core", link: true },
@@ -637,7 +637,7 @@ describe("driving npm against a real tree", () => {
     // npm rewrites uuid-shaped path segments in everything it prints, so an
     // install path in its summary can name a directory that cannot be opened --
     // and a tree under a temp directory named for a session id is exactly that.
-    // Probed as reported, every add entry reads as a missing package.
+    // Probed as reported, every add entry displays as a missing package.
     const masked = mirror(
       drifted,
       join(root, "11111111-2222-3333-4444-555555555555", "tree"),

@@ -14,8 +14,9 @@ import { parseFile, parseSource } from "./lib/typeScriptSources.mjs";
 // already happened. Each side's suite pins only its OWN copy against the
 // literal, so a coherent change to one workspace -- the constant and the
 // literals its own tests assert -- leaves both suites green while the server
-// classifies a value the CLI no longer exits with. This check is what fails
-// there: it reads both declarations out of source and compares them.
+// classifies a value that does not match the CLI's current exit code. This
+// check is what fails there: it reads both declarations out of source and
+// compares them.
 //
 // docs/spec/SERVER_JOB_API.md cites it rather than asserting the alignment in
 // prose.
@@ -36,7 +37,7 @@ import { parseFile, parseSource } from "./lib/typeScriptSources.mjs";
 // (apps/cli/test/unit/protocol.test.ts and
 // apps/web/test/unit/jobDriver.unit.test.ts).
 //
-// It reaches only this constant. The server module carries one other
+// It reaches only this constant. The server module has one other
 // cross-workspace mirror, the CLI's fd-3 event vocabulary, which is a type
 // rather than a value and is not read here.
 
@@ -101,7 +102,7 @@ function readDeclarations(
 
 /**
  * How the readable declarations disagree, one entry per module, or nothing when
- * they all carry the same value.
+ * they all hold the same value.
  */
 function divergence(readings) {
   const read = readings.filter((reading) => reading.value !== undefined);

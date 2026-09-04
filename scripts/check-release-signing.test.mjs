@@ -45,7 +45,7 @@ const releaseWorkflowSource = readRoot(RELEASE_WORKFLOW);
 const releasesDocSource = readRoot(RELEASES_DOC);
 
 // The committed identity and attestation signer, read rather than transcribed:
-// a fixture that carried its own copy would keep passing after the published
+// a fixture that held its own copy would keep passing after the published
 // one moved.
 const [IDENTITY] = certificateFlags(releasesDocSource).identities;
 const [SIGNER_WORKFLOW] = signerWorkflows(releasesDocSource);
@@ -175,7 +175,7 @@ describe("the certificate arguments a source publishes", () => {
     expect(new Set(issuers)).toEqual(new Set([ACTIONS_OIDC_ISSUER]));
   });
 
-  it("reads none from a source carrying neither", () => {
+  it("reads none from a source holding neither", () => {
     expect(certificateFlags("cosign sign --yes image@sha256:abc")).toEqual({
       identities: [],
       issuers: [],
@@ -224,7 +224,7 @@ describe("the signer a published identity names", () => {
   });
 
   it("refuses a pattern anchored at neither end or at one", () => {
-    // An unanchored pattern is satisfied by any identity carrying the published
+    // An unanchored pattern is satisfied by any identity containing the published
     // one as a substring -- a fork whose repository name ends in `jspsi`, or a
     // ref that merely starts with a release tag.
     for (const pattern of [
@@ -333,7 +333,7 @@ describe("the coupling between the published commands and the signer", () => {
     expect(violation).toContain("`*`");
   });
 
-  it("fails a trigger carrying no filter or several", () => {
+  it("fails a trigger having no filter or several", () => {
     for (const tags of [[], [TAG_FILTER, "v[0-9]+.[0-9]+"]]) {
       const [violation] = coupling({
         workflowSource: workflow({ tags, steps: orderedSteps }),
@@ -342,7 +342,7 @@ describe("the coupling between the published commands and the signer", () => {
     }
   });
 
-  it("fails a self-verify step carrying a different identity from the document", () => {
+  it("fails a self-verify step having a different identity from the document", () => {
     // The failure the self-verify would otherwise hide: the release verifies
     // itself against a pattern nobody publishes and passes, while the command
     // the partner runs refuses the same signature.
@@ -363,7 +363,7 @@ describe("the coupling between the published commands and the signer", () => {
     expect(violation).toContain("psilink");
   });
 
-  it("fails an issuer no GitHub Actions certificate carries", () => {
+  it("fails an issuer no GitHub Actions certificate has", () => {
     const violations = coupling({
       workflowSource: workflow({
         steps: [
@@ -546,7 +546,7 @@ describe("the publish sequence", () => {
     expect(violation).toContain("before");
   });
 
-  it("fails a pushing build carrying no id", () => {
+  it("fails a pushing build having no id", () => {
     const [violation] = sequence([
       buildStep("build", true).replace("        id: build\n", ""),
     ]);
@@ -632,7 +632,7 @@ describe("the arguments each verify step runs", () => {
 
   it("fails a verify step stripped of both arguments while another keeps them", () => {
     // The drift the file-wide agreement rule cannot see: the variant's step
-    // still carries the pair, so the file agrees with itself and with the
+    // still holds the pair, so the file agrees with itself and with the
     // document, and the stripped step still names the digest that credits it
     // with covering the image.
     const steps = [...orderedSteps];
@@ -678,7 +678,7 @@ describe("the arguments each verify step runs", () => {
     expect(violations[0]).toContain("accounts.google.com");
   });
 
-  it("holds a step to carrying both arguments with no published pair to match", () => {
+  it("holds a step to having both arguments with no published pair to match", () => {
     // A document publishing no single pair is the agreement rule's finding
     // rather than this one's, so a value is compared only against a value.
     const divergent = [

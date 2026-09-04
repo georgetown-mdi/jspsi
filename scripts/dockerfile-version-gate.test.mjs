@@ -26,7 +26,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 // a POSIX shell with node and npm stubbed, which is what lets the empty read and
 // the failing read be produced on demand.
 //
-// What this cannot settle: the image builds under busybox ash and this runs
+// What this cannot determine: the image builds under busybox ash and this runs
 // under /bin/sh, so a divergence between the two on `set -e` in an assignment is
 // outside it; the stubs are not npm and node; and nothing here observes vite
 // reading the exported value. A real build is CI's ground -- image_smoke.yaml
@@ -118,14 +118,14 @@ function runInstruction({ output, status }) {
 }
 
 describe("the manifest read the image build's version step performs", () => {
-  it("yields the release version the manifest carries", () => {
+  it("yields the release version the manifest has", () => {
     expect(readVersion('{"name":"psilink","version":"0.4.2"}')).toEqual({
       status: 0,
       stdout: "0.4.2\n",
     });
   });
 
-  it("yields nothing for a manifest carrying no version", () => {
+  it("yields nothing for a manifest with no version", () => {
     // `require(...).version` on a manifest without the key renders as the text
     // "undefined", which is non-empty and would sail through the gate below and
     // into the bundle. Yielding the empty string instead is what routes an
@@ -153,7 +153,7 @@ describe("the build step that bakes it", () => {
 
   it("fails, and never builds, when the read yields nothing", () => {
     // The failure this gate is for: an empty value reaches vite, the bundle
-    // carries no version, and the accept kit tells the partner to run the
+    // has no version, and the accept kit tells the partner to run the
     // floating tag while the image is published under a release tag.
     const run = runInstruction({ output: "", status: 0 });
     expect(run.status).not.toBe(0);

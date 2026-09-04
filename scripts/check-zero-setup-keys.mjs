@@ -8,7 +8,7 @@
 // authoring for exactly one reason -- every one of them is built from the
 // guaranteed-minimum PII both parties are sure to bring, which is what the
 // built-in FIELD set is. A key over a field outside that set strands the party
-// whose file does not carry it: either the two parties derive different key
+// whose file does not contain it: either the two parties derive different key
 // lists and the terms cross-check cancels the exchange, or the key survives over
 // a field the terms never declare and the terms are invalid. Neither failure
 // names its cause at the point it happens, and both arrive at run time on an
@@ -43,7 +43,7 @@
 //     makes.
 //   - The emitter itself. It reads the two declared sets, not
 //     getDefaultLinkageTerms; that the filter binds an element by semantic type
-//     -- which is what makes B load-bearing -- is covered by the core suite.
+//     -- which is what makes B critical -- is covered by the core suite.
 //   - A file that supplies a column of the right type but no usable value. The
 //     property here is that the KEYS stay inside the substrate, not that any
 //     given file matches on them.
@@ -90,7 +90,7 @@ export function keyFieldViolations({ fieldSet, keySet }) {
 
 /**
  * Read the tree at `root` and report what the property holds there, as
- * `{fieldSet, keySet, violations, blocked}`. `blocked` carries the reasons the
+ * `{fieldSet, keySet, violations, blocked}`. `blocked` contains the reasons the
  * check could not read a declaration at all, which fail rather than passing as
  * an empty set.
  */
@@ -126,7 +126,7 @@ export function substrateReport({ fieldSet, keySet }) {
 
 // CLI entry: only runs when invoked directly, so the tests can import the pure
 // functions without the process.exit. `--root` points the run at another tree,
-// which is how the tests drive a set this repository does not carry.
+// which is how the tests drive a set this repository does not hold.
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
   const rootFlag = args.indexOf("--root");

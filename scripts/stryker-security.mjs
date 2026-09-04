@@ -5,7 +5,7 @@
 // It runs Stryker over the files listed in packages/core/stryker.config.mjs,
 // then fails when any one of them scores below the floor committed beside it
 // there. A per-file gate rather than Stryker's own `thresholds.break`, which is
-// whole-run: a file whose tests were gutted can be carried by the others, and
+// whole-run: a file whose tests were gutted can be offset by the others, and
 // the score this leg exists to defend is each security-bearing file's own.
 //
 // Mutation score, per file, is the mutation-testing report definition:
@@ -151,7 +151,7 @@ export function scoreOf(mutants) {
  * The whole per-file gate: every file in `scoreFloors` checked against the
  * Stryker JSON report, with no I/O of its own. Returns the summary rows for
  * the report (one per file the score could be computed for, each already
- * carrying its display verdict and any raised-floor suggestion) and the
+ * holding its display verdict and any raised-floor suggestion) and the
  * failure messages -- a file missing from the report, a file whose mutants
  * all fell outside the ratio, and a file below its committed floor all add to
  * `failures` rather than a row, so `failures.length > 0` is the single signal
