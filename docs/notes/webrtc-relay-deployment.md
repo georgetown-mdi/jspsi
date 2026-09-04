@@ -47,8 +47,8 @@ over.
 ## Question 1: does TURN over TLS on 443 carry a restrictive network
 
 Relay is forced by network shape in every row. No configuration can force it:
-the WebRTC connection schema exposes no relay-only knob, and nothing in the CLI
-sets one.
+the WebRTC connection schema exposes no relay-only setting, and nothing in the
+CLI sets one.
 
 Two classes, as scoped: **class A**, UDP blocked outright; **class B**, TCP/443
 only, through an inspecting proxy.
@@ -69,8 +69,8 @@ the TURN host and the broker, both on 443), and a throwaway `getStats()`
 instrument whose nominated pair is `relay` to `host` with all three
 host-involving pairs failed. Both parties resolved the correct intersection.
 
-Two consequences the substitute settled on its own merits. **werift verifies the
-TURN server's certificate**: with the interception CA untrusted it gathers no
+Two consequences the substitute determined on its own merits. **werift verifies
+the TURN server's certificate**: with the interception CA untrusted it gathers no
 relay candidate at all, so TURNS through an inspecting proxy requires that CA on
 the CLI host. And **an interception point at the relay reads the STUN and TURN
 envelope only**, about 13 KB up and 11.5 KB down, while the linkage still
@@ -162,11 +162,11 @@ addresses, and its root volume; the shared figure assumes the box's 87 s
 bring-up divided across the seven exchanges it carried plus each exchange's own
 8.6 s.
 
-The per-exchange arithmetic flatters the shared shape in a way worth stating: a
-shared box is paid for while it idles. At the same rates a t4g.micro holding one
-elastic address continuously is about $9.80 a month whether it carries one
-exchange or a thousand, and that, not the per-exchange cent, is the figure a
-deployment decision turns on.
+The per-exchange arithmetic flatters the shared shape: a shared box is paid for
+while it idles. At the same rates a t4g.micro holding one elastic address
+continuously is about $9.80 a month whether it carries one exchange or a
+thousand, and that, not the per-exchange cent, is the figure a deployment
+decision turns on.
 
 ### Provisioning, phase by phase
 
@@ -254,8 +254,8 @@ TURN on 3478 and TURNS on 5349, and **does not list 443 at all**. Both classes
 here were carried on `turns:...:443?transport=tcp`, which the vendor answers
 even though it does not advertise it. A deployment that took the vendor's URL
 list at face value would configure 5349 and be blocked by exactly the networks
-the relay exists for. The port that works has to be chosen deliberately and
-re-checked, because nothing in the vendor's own response asserts it.
+the relay exists for. The port that works has to be chosen and re-checked,
+because nothing in the vendor's own response asserts it.
 
 **The posture.** A TURN relay forwards DTLS without terminating it, so a managed
 relay sees addresses, timing, and volume, and never exchange data. That is the
@@ -317,7 +317,7 @@ Two operational findings came out of the bring-up.
   reset on teardown, which is why the figures above come from host conntrack
   accounting. Whether that is a property of this coturn build or of the
   bring-up's log configuration -- simple-log, verbose directed to a file, an
-  abrupt teardown -- is not settled.
+  abrupt teardown -- is not determined.
 - **One credential username across back-to-back exchanges exhausts the
   allocation quota.** coturn's per-username quota interacts with the roughly
   eight-minute allocation linger a relayed run leaves behind, so reusing a
@@ -337,8 +337,8 @@ entry point, so nothing has to be extracted for that to be possible.
 The measurement does not prove it. The run stood the broker up by deploying the
 web app's own image and using its mounted signaling path, so the standalone
 entry point was never exercised on the account. Running that entry point beside
-coturn and completing one exchange against it is the one thing that would settle
-it.
+coturn and completing one exchange against it is the one thing that would
+determine it.
 
 If it does leave, the standing constraint in
 [web-server-runtime-role.md](web-server-runtime-role.md) reaches its trigger:
@@ -388,7 +388,7 @@ Candidate members, by title:
 
 ## What remains unmeasured
 
-| question | the one thing that would settle it |
+| question | the one thing that would determine it |
 | --- | --- |
 | Real partner and agency networks | a run from a machine on one, which the owner scoped as a follow-on rather than a blocker |
 | A browser on a restrictive network | the same exchange with the class applied to the browser's side, which needs the browser-side TURN entry first |
@@ -433,7 +433,7 @@ Candidate members, by title:
   it after a 90 s grace on eleven runs, so every completed row records a killed
   process rather than a clean exit. The exchanges themselves completed and both
   sides resolved the correct intersection. This is a CLI behaviour the
-  measurement surfaced and is filed separately, not a property of any shape here.
+  measurement exposed and is filed separately, not a property of any shape here.
 - **Every cost figure is computed from published rates**, not read from a bill.
 - **The exchange measured is small.** Two matched records over a dozen linkage
   keys, tens of kilobytes on the wire. Nothing here bounds a relay's behaviour

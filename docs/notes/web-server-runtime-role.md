@@ -55,18 +55,18 @@ server-side driver at all. The single-operator trust boundary the API's design
 rests on is the console's alone
 ([SECURITY_DESIGN.md](../SECURITY_DESIGN.md#single-party-appliance-trust-boundary)).
 
-## Why the framework's server half is not load-bearing
+## Why the framework's server half is not required
 
 TanStack entered `apps/web` as a full-stack solution, on the expectation that
 the server would take part in coordinating an exchange. It does not: the
 protocol is peer to peer, and the coordination that remains is the broker's.
 
 The broker is not the framework's either. It is a workspace of its own,
-`packages/peerjs-broker`, carrying an entry point that runs it as a standalone
+`packages/peerjs-broker`, with an entry point that runs it as a standalone
 service with no web app around it -- the CLI's signaling tests spawn exactly
 that ([TESTING.md](../TESTING.md)) -- and the web app imports that workspace
 (`apps/web/src/peerServer.ts`) rather than implementing signaling. That isolation
-boundary is the load-bearing one in this picture; the framework's server half
+boundary is the critical one in this picture; the framework's server half
 sits above it, delivering an app shell that anything able to serve static assets
 and one WebSocket mount could deliver.
 
@@ -81,8 +81,8 @@ Whether the direction below reaches them has not been decided.
 New server-side work in `apps/web` does not deepen framework-specific coupling
 where a framework-neutral shape costs the same. That is a tie-breaker, not a
 prohibition: it asks for no abstraction layer, no migration, and no work bought
-solely to keep the option open. Where a server-side capability genuinely needs
-the framework, it uses it.
+solely to keep the option open. Where a server-side capability needs the
+framework, it uses it.
 
 The job API is what that constraint has bound so far, and it holds there without
 having cost anything. Its machinery is a set of plain modules under

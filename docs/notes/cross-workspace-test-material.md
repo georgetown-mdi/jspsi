@@ -88,7 +88,7 @@ inlining it.
 
 ## The constraints, and where they bite
 
-Each is a property of configuration this repository already carries, so each is
+Each is a property of configuration this repository already has, so each is
 re-derivable rather than taken on trust.
 
 1. **Rollup externals.** `makeExternal` in `packages/core/rollup.config.ts`
@@ -148,7 +148,7 @@ alternatives below -- but no helper exists today that needs it, and the existing
 cross-workspace subjects reach their consumers through a channel that serves
 them. A package defined by where it may be imported
 from rather than by what it holds accretes, and the moment to draw its bright
-line is the moment it has a first genuine inhabitant -- which is also the moment
+line is the moment it has a first inhabitant -- which is also the moment
 the line can be drawn against a real example rather than an imagined one.
 
 **The accepted cost is unmeasured, not absent.** Test-only material published to
@@ -178,7 +178,7 @@ priced -- not this note.
   stays on the channel that serves it, and it ships.
 - `displayEscapingFixtures.ts` -- test-only. Hostile-input fixtures (control
   characters, bidirectional overrides, confusable donors) shared by core's tests
-  and the web browser suite. Same disposition, and the clearer shape of the
+  and the web browser suite. Same handling, and the clearer shape of the
   cost: a fixture wanted on two surfaces reaches them by living in a published
   package.
 - The helpers `testing.ts` defines -- `sortAssociationTable`,
@@ -202,16 +202,16 @@ priced -- not this note.
   `packages/testkit`. A `packages/*` package that is private, has no build and
   no `dist`, and whose `exports` map points at `./src/*.ts` is resolved through
   `node_modules` and therefore exempt from constraints 2 and 3. Core, the CLI
-  test config, and web all typecheck a consumer of one, its source is genuinely
-  inside each consumer's program rather than skipped, and it may import both a
+  test config, and web all typecheck a consumer of one, its source is inside
+  each consumer's program rather than skipped, and it may import both a
   dependency core does not declare and `@psilink/core` types at once -- no
   project-reference cycle arises, because no project reference exists in either
   direction. Its standing costs: each consumer typechecks the shared source
-  inside its own program, so an error there surfaces once per consuming project
-  rather than once globally, and it is a top-level package with an admission
-  rule to hold. The cost the first decision recorded against it -- the root
-  `build` script failing on a workspace that declares no `build` script -- was
-  already paid, that script being `--if-present`.
+  inside its own program, so an error there is reported once per consuming
+  project rather than once globally, and it is a top-level package with an
+  admission rule to hold. The cost the first decision recorded against it --
+  the root `build` script failing on a workspace that declares no `build`
+  script -- was already paid, that script being `--if-present`.
 - **Split core's tsconfig.** Take `test/**/*.ts` out of
   `packages/core/tsconfig.json`'s `include` and add a non-composite
   `tsconfig.test.json` covering source and tests, the shape `apps/cli` already
@@ -239,8 +239,8 @@ moving `typescript` into core's `devDependencies` changes nothing, because
 ## The composite and references wiring
 
 `packages/core` is `composite: true`, and both `apps/cli/tsconfig.json` and
-`apps/web/tsconfig.json` carry a reference to it, but nothing in this repository
-runs `tsc --build`: the root `typecheck` script is separate `tsc -p`
+`apps/web/tsconfig.json` declare a reference to it, but nothing in this
+repository runs `tsc --build`: the root `typecheck` script is separate `tsc -p`
 invocations. Two arms are open -- adopt `tsc -b` so the wiring is exercised, or
 remove the wiring as vestigial -- and this decision takes neither.
 

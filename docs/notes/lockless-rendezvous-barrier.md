@@ -30,7 +30,7 @@ The barrier file is the existing zero-byte ack marker named after the winner's
 hello, not a new symbol in the filename grammar: the loser's file is exactly
 what the rendezvous already writes there, so the entry guard, the retain-mode
 sweep, the message-scan discriminant, and the loop's file recognizer all accept
-it unchanged. A genuinely new symbol would cost a new grammar arm and a taxonomy
+it unchanged. A new symbol would cost a new grammar arm and a taxonomy
 row reconciled column by column across the [five enforcement
 sites](../spec/FILE_SYNC.md#the-five-enforcement-sites), for no functional gain.
 The properties the lockless path rests on survive either way: roles stay
@@ -39,10 +39,10 @@ exclusive-create is needed, and nothing is deleted.
 
 ## What it would buy, and what it would not
 
-One control file per exchange, and nominally one half round trip. The saving is
-worth measuring rather than dismissing, because the deployment behind it is
-agencies reconciling a shared folder through a sync service on an hour-scale
-cycle: a saved cycle there is an hour of wall clock, not a rounding error.
+One control file per exchange, and nominally one half round trip. The saving
+deserves a measurement, because the deployment behind it is agencies
+reconciling a shared folder through a sync service on an hour-scale cycle: a
+saved cycle there is an hour of wall clock, not a rounding error.
 
 The half round trip appears not to be on the critical path. _Confidence:
 reasoned from the protocol's structure, not measured._ Neither party can send
@@ -94,10 +94,10 @@ Any one of:
 - a re-scope as an advertised hello-envelope flag, which removes the flag-day
   stall, at the cost of being a third negotiated mode rather than a barrier
   tweak;
-- an unrelated change that makes the barrier's shape load-bearing for some other
+- an unrelated change that makes the barrier's shape critical for some other
   reason.
 
-In every case the remedy for the loser's lost fast fail travels with the change
+In every case the remedy for the loser's lost fast fail ships with the change
 and is not optional: the loser stays in its bounded loop after writing its
 barrier, watching for the winner's first message file to APPEAR -- presence
 only, by the message-scan grammar discriminant, never opening it -- bounded by
@@ -105,4 +105,4 @@ the same entry-hello window and attributed through the same machinery. It costs
 no wire-format change and no latency, since that side was going to wait for the
 message regardless. Its real cost is the thing to weigh: the rendezvous site
 acquires a dependency on the message-scan site's filename grammar, which the
-current split of the five enforcement sites deliberately avoids.
+current split of the five enforcement sites avoids by design.

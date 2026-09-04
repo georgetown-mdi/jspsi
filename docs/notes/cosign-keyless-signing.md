@@ -61,8 +61,8 @@ anchor -- the public key -- inside the repository, which is the weakness above.
 
 **Running both.** Two signatures over the same digest is coherent, and would
 let partners migrate at their own pace. With no partners to migrate it buys
-nothing, and it doubles the surface a verifier has to reason about and the
-project has to keep correct.
+nothing, and it doubles the surface a verifier has to reason about and what
+the project has to keep correct.
 
 **The verification UX, which the decision was conditional on.** The keyless
 command is longer: two required `--certificate-` arguments in place of one
@@ -105,13 +105,13 @@ What the runs established:
   pattern refuses a signature from a differently tagged run of the same
   workflow (run 31931280133), and verification against a different pinned
   issuer (`https://accounts.google.com`) refuses the signature outright. Both
-  arguments are load-bearing. The issuer control was driven in that mirror
+  arguments are required. The issuer control was driven in that mirror
   direction only -- the probe's Actions-issued certificate against a command
   pinning a foreign issuer; presenting a certificate actually issued elsewhere
   to the published command was not driven, and the refusal of that direction
   rests on the same issuer-equality comparison the mirror measured.
-- The signature lands at the conventional `sha256-<digest>.sig` tag beside the
-  image, not as an OCI referrer, so it needs nothing of a registry that the
+- The signature is written to the conventional `sha256-<digest>.sig` tag beside
+  the image, not as an OCI referrer, so it needs nothing of a registry that the
   key-based signature did not already need.
 
 The probe's durable evidence is Actions runs 31931204906 (branch push) and
@@ -145,8 +145,8 @@ cosign on such a host rather than by reading its source.
 Release tags stay signed with the maintainer's SSH key, and `allowed_signers`
 stays as it is: tag signing establishes who authored the release commit, which
 is a different claim from who published the image, and Sigstore has nothing to
-say about it. One consequence is worth naming, though, since an assessment will
-ask: the SSH tag signature is the only signature in a release that rests on a
-key a person holds. Every other claim over a release artifact rests on the
-release workflow's identity and on this repository's Actions configuration --
+say about it. An assessment will ask about one consequence: the SSH tag
+signature is the only signature in a release that rests on a key a person
+holds. Every other claim over a release artifact rests on the release
+workflow's identity and on this repository's Actions configuration --
 which [COMPLIANCE.md](../COMPLIANCE.md#release-integrity) states as a limit.

@@ -14,7 +14,7 @@ the idle-boundary outcome partition in
 [FILE_SYNC.md](../spec/FILE_SYNC.md#session-lifetime-across-an-idle-boundary),
 and the operator-facing surface in
 [EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md#sftp-only-options). This note
-carries the model and the rationale, not the rows. See
+states the model and the rationale, not the rows. See
 [docs/notes/README.md](README.md).*
 
 The model was named because the adapter's accounting defects were being
@@ -37,8 +37,8 @@ partitions living only in control flow -- which is what this model names.
 
 The session machine's spine -- the transition lock, its five kinds, the
 exhaustive `ABANDONED_TRANSITION_DISPOSITION` record, and the
-`assertTransitionHeld` identity chokepoint -- was already sound and is
-deliberately left alone. What the model adds is a named outcome for the boundary
+`assertTransitionHeld` identity chokepoint -- was already sound and is left
+alone. What the model adds is a named outcome for the boundary
 machine, one entry point and one span for the operation machine, and one place
 where a session's end is recorded.
 
@@ -47,7 +47,7 @@ where a session's end is recorded.
 ### States
 
 These names are the model's, not a type the adapter declares. What the code
-carries is the transition kind in flight, ssh2-sftp-client's session property,
+holds is the transition kind in flight, ssh2-sftp-client's session property,
 the generation the ledger holds live, and the boundary reading; a state below is
 a reading over those.
 
@@ -124,7 +124,7 @@ answer to what separates a partner loss from a deliberate release.
 > **INV-L1 -- no generation leaves the live state without exactly one recorded
 > loss cause.**
 
-This is the model's single load-bearing invariant, and it is the one thing the
+This is the model's single critical invariant, and it is the one thing the
 adapter's review history rediscovered over and over. It is held **structurally**
 rather than by assertion: every dial charges whatever end is still pending before
 advancing, and `SftpAdapterLedger.dialSucceeded` raises rather than silently
@@ -144,7 +144,7 @@ charged, per cause and per scenario.
 > outcome, drawn from a total and mutually exclusive partition, recorded exactly
 > once, by one recorder.
 
-`IdleBoundaryOutcome` carries that partition, in eleven members. The mode being
+`IdleBoundaryOutcome` holds that partition, in eleven members. The mode being
 off is **not** a boundary and not a member: the release returns before it enqueues
 anything, so a held-session run records nothing here rather than recording a
 no-op outcome. What each outcome is reached by, and what session it leaves the
@@ -180,7 +180,7 @@ outcome must state every answer or it does not compile, which is the
 exhaustive-`Record` pattern the adapter already uses for its abandon
 dispositions, extended to the event.
 
-One outcome is deliberately not a projection of the rest. A forced close leaves
+One outcome is not a projection of the rest, by design. A forced close leaves
 the entry classification standing, because the forcing says how the boundary
 concluded, not who ended the transport beneath it -- so a partner drop this side
 had to force closed stays charged to the partner rather than being exempted as a
@@ -197,9 +197,9 @@ recovery by a contract of their own. The second is its re-issue policy, applied
 only on the second attempt so that a delete-absent, rename-destination-exists or
 own-`EEXIST` reading cannot leak into first-attempt semantics.
 
-Both axes are carried by one value at one entry point. `OperationRecoverySpec`
+Both axes are held in one value at one entry point. `OperationRecoverySpec`
 has three arms -- `verbatim` for an operation whose re-run is the whole policy,
-`reissued` for one carrying its own idempotency relaxation as a closure, and
+`reissued` for one holding its own idempotency relaxation as a closure, and
 `none` for one that never enters recovery -- and `runOperation` is where each
 operation states its arm. The policies themselves are documented normatively in
 [CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md#re-issuing-an-operation).
@@ -243,7 +243,7 @@ where it stops, is in
 `SftpAdapterLedger` is one object holding the whole of an adapter's session
 accounting: the generations, the live one, the per-cause loss rows, the
 per-outcome boundary rows, the outstanding gauge and its hold stretches, the
-retry tallies, and the shared warn cadence. It is deliberately transport-blind --
+retry tallies, and the shared warn cadence. It is transport-blind by design --
 no ssh2 or ssh2-sftp-client type reaches it, and it holds no session, socket or
 client state -- so everything in it is this side's own integer and the end-of-run
 summary and the machine metrics event can read it back without a disclosure
@@ -262,7 +262,7 @@ robustly, and dissolves three defects of that arrangement at once:
 
 | defect | the rejected arrangement | as shipped |
 | --- | --- | --- |
-| the monotonic gate silently drops a genuine loss | an arm carrying a generation below the high-water mark passes through unrecorded, so two losses report as one | there is no such mechanism. `recordLoss` is called by the site that ends the generation, and its own generation check is what makes the charge once-per-loss -- no high-water mark, no accounted-generation set |
+| the monotonic gate silently drops a genuine loss | an arm holding a generation below the high-water mark passes through unrecorded, so two losses report as one | there is no such mechanism. `recordLoss` is called by the site that ends the generation, and its own generation check is what makes the charge once-per-loss -- no high-water mark, no accounted-generation set |
 | the budget is read before the re-dial and spent after | what holds the cap is the transition queue's coalescing rather than the check | the read and the charge live in one critical section under the transition lock, in `chargeRecoveredSessionLoss` |
 | a failed recovery re-dial charges nothing | the budget bounds successful recoveries | the LOSS is charged, so a re-dial that fails spends its unit like any other -- which is what the exhaustion message already tells the operator |
 
@@ -276,7 +276,7 @@ that fourth drop one more attempt. This is the smallest arrangement under
 which the budget means what its own message says.
 
 The public getters are projections over those rows, and the ones that predate the
-ledger are kept verbatim, which is what kept the blast radius near zero: the
+ledger are kept verbatim, which is what kept the scope of impact near zero: the
 reconnect total is the connect-time retries plus the partner losses, its
 mid-exchange sub-count is the partner losses alone, and the boundary counts read
 their own rows. Two readings have a getter that the counters underneath them
@@ -289,13 +289,13 @@ inverted relative to the rest. `pacedWarn` takes the caller's own running total
 for that condition rather than keeping a tally of its own, so every stream is
 paced on exactly the number its message quotes and the two cannot drift apart.
 
-One outcome is deliberately unpaced. The degraded tail where the release's own
+One outcome is unpaced by design. The degraded tail where the release's own
 `end()` left the transport still writable is the one outcome with no run total,
 so every occurrence is its own record rather than one in ten.
 
 ## Decisions taken
 
-The technical calls the model settled. Each is load-bearing in the code as
+The technical calls the model determined. Each is critical in the code as
 shipped.
 
 | # | decision |
@@ -306,7 +306,7 @@ shipped.
 | D4 | The outstanding span opens at the operation's single entry point, outside recovery. The arm's second span goes, and the uncovered window closes rather than being documented. |
 | D5 | `IdleBoundaryOutcome` is the recorded event; the session reading, the generation-ending answer and the counter are all exhaustive projections of it. |
 | D6 | Keep the existing public getters as projections, and keep the outstanding-operation reading under its own name. |
-| D7 | Do not touch the transition lock, the abandon dispositions, the seam resolvers, the deferred-cleanup record, or the SFTP test-server harness. |
+| D7 | Do not touch the transition lock, the abandon dispositions, the ssh2-internals resolvers, the deferred-cleanup record, or the SFTP test-server harness. |
 | D8 | Do not split the adapter module by line count. |
 | D9 | The unbracketed round-trip set stays a parse check, never a comment. |
 | D10 | The terminal close's single-use rule stays adapter-local, in the memoized `terminalClose`, rather than becoming a `FileTransportClient` contract change. |
@@ -330,7 +330,7 @@ rather than a clause to a paragraph.
 
 The model was ratified on 2026-08-02 and landed in three changes: the ledger and
 the counter consolidation (#663), the event model and the loss accounting (#665),
-and the tabulation of the specification sections that carry the normative rows
+and the tabulation of the specification sections that hold the normative rows
 (#666).
 
 Three things shipped differently from the model as first written, each for a

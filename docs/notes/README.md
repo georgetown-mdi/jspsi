@@ -3,8 +3,8 @@
 Tracked, citeable design records: the model behind a mechanism, the options
 weighed, and the decisions taken. Nothing here is normative -- a note binds no
 implementation, and points at the spec for the normative rows rather than
-restating them. A note carries a status line stating where its subject stands,
-from a direction still open to a decision taken and built.
+restating them. A note opens with a status line stating where its subject
+stands, from a direction still open to a decision taken and built.
 
 ## Index
 
@@ -44,7 +44,7 @@ from a direction still open to a decision taken and built.
 | [web-server-runtime-role.md](web-server-runtime-role.md) | Direction recorded; no removal scheduled. |
 | [webrtc-relay-deployment.md](webrtc-relay-deployment.md) | Measured, with a recommendation and a proposed epic; the recommendation is now deployed and verified against the standing relay. |
 
-Each note carries the full status statement at its own top; this table is a pointer, not a restatement.
+Each note states its full status at its own top; this table is a pointer, not a restatement.
 
 The maturity ladder:
 
