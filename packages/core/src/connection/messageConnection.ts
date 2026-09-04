@@ -7,23 +7,19 @@ import type { Connection } from "../types";
  *   exhausted (peer unreachable, dropped, inactivity timeout). Retrying the
  *   whole exchange is reasonable.
  * - `security`: an authentication/replay/ordering check failed. Must not be
- *   silently retried; surface it loudly as possible tampering.
+ *   silently retried; report it loudly as possible tampering.
  * - `usage`: the connection was misconfigured or used incorrectly (e.g. a send
  *   after close, a path shared by another session). The caller must fix
- *   something before retrying. This is the one kind the CLI's error->exit
- *   boundary reads, mapping it to 64 (EX_USAGE) alongside `UsageError`
- *   rather than to the 69 every other kind takes: the fault is deterministic in
- *   what the caller supplied, so the 69 that tells an unattended supervisor to
- *   retry would turn one refusal into a loop of whole exchanges.
+ *   something before retrying. The CLI's error->exit boundary maps only this
+ *   kind to 64 (EX_USAGE) alongside `UsageError`; every other kind takes 69.
  * - `protocol`: the peer violated the message protocol (e.g. sent out of turn).
- * - `closed`: a parked operation was cancelled by a deliberate local
+ * - `closed`: a parked operation was cancelled by a local
  *   {@link MessageConnection.close} (e.g. a signal-driven shutdown). Nothing
- *   went wrong; it is distinct from `usage` so a clean shutdown is not
- *   mistaken for a programming error, and distinct from `transport` so it is
- *   not remapped to a peer-timeout diagnostic. A clean *remote* close is
- *   deliberately not mapped here - it stays `transport`, and a future consumer
- *   needing to act on it should add a dedicated kind (e.g. `peer-closed`); see
- *   docs/COMMUNICATION.md ("Error handling") for the rationale.
+ *   went wrong; it is distinct from `usage` (not a programming error) and from
+ *   `transport` (not a peer-timeout diagnostic). A clean *remote* close stays
+ *   `transport`; a future consumer needing to act on it separately should add
+ *   a dedicated kind (e.g. `peer-closed`). See docs/COMMUNICATION.md ("Error
+ *   handling").
  */
 export type ConnectionErrorKind =
   "transport" | "security" | "usage" | "protocol" | "closed";
@@ -71,7 +67,7 @@ export function asConnectionError(
 /**
  * Pull-based transport abstraction. A consumer drives the conversation by
  * awaiting messages in order rather than registering listeners, so there is no
- * window in which an arriving message or error can be dropped. Errors surface
+ * window in which an arriving message or error can be dropped. Errors show up
  * as a rejection of the awaited {@link receive}/{@link send}, or - if the
  * failure lands between awaits - as a sticky terminal state observed by the
  * next call.
@@ -125,12 +121,12 @@ export interface TransportControls {
    * Latch an abnormal terminal error and tear the transport down; idempotent
    * after the first call (a later {@link fail}/{@link finish} no-ops). A frame
    * already buffered when this fires is still drained by
-   * {@link MessageConnection.receive} before the error surfaces (the
+   * {@link MessageConnection.receive} before the error is reported (the
    * abnormal-tail rule); only frames that arrive after the latch are dropped.
    */
   fail: (error: ConnectionError) => void;
   /**
-   * Half-close: latch a terminal error to surface once any buffered messages
+   * Half-close: latch a terminal error to report once any buffered messages
    * have been drained by {@link MessageConnection.receive}, and tear the
    * transport down now so an abandoned half-close cannot leak it. If the queue
    * is already empty it behaves exactly like {@link fail}. Idempotent once any
@@ -159,7 +155,7 @@ interface TransportHooks {
    */
   send: (data: unknown) => void | Promise<void>;
   /**
-   * Tears down the transport. `options.flush` is set on a deliberate clean
+   * Tears down the transport. `options.flush` is set on an explicit clean
    * close ({@link MessageConnection.close}) and unset on error teardown (via
    * {@link TransportControls.fail}). A transport that buffers outbound writes
    * should drain them before closing when `flush` is set, so a final frame
@@ -167,7 +163,7 @@ interface TransportHooks {
    * without an outbound buffer may ignore it.
    *
    * For a buffering transport this `flush` is the delivery contract's
-   * load-bearing half: because {@link TransportHooks.send} resolves on local
+   * critical half: because {@link TransportHooks.send} resolves on local
    * hand-off, not on peer delivery, such a transport's final frame is
    * guaranteed only by the flush on a clean close. A transport whose `send` is
    * durable (its write outlives the connection) has nothing in flight and may
@@ -212,7 +208,7 @@ interface SendGuard {
 // Generous upper bound on unconsumed inbound messages. A strictly lockstep
 // protocol never holds more than one, so tripping this means the peer is
 // sending out of turn; it exists only to bound memory against a misbehaving
-// peer, not as a tuning knob.
+// peer, not as a tuning setting.
 const DEFAULT_CAPACITY = 1024;
 
 // Maximum time a parked receive() will wait for the next inbound message
@@ -236,9 +232,9 @@ export const DEFAULT_INACTIVITY_TIMEOUT_MS = 120_000;
  *   {@link QueuedMessageConnection.receive} keeps draining the queue and the
  *   final drain promotes this to `failed`.
  * - `failed`: an abnormal terminal error ({@link TransportControls.fail}, a
- *   promoted `draining` error, or a failed send); `error` is surfaced by
+ *   promoted `draining` error, or a failed send); `error` is reported by
  *   `receive`/`send` once the queue is drained.
- * - `closed`: a deliberate local {@link MessageConnection.close}.
+ * - `closed`: a local {@link MessageConnection.close}.
  */
 type TerminalState =
   | { readonly kind: "draining"; readonly error: ConnectionError }
@@ -358,29 +354,26 @@ export class QueuedMessageConnection implements MessageConnection {
   }
 
   // Races the transport hand-off against the same inactivity budget that bounds
-  // a parked receive(), so a mid-exchange drop in the sender's encrypt-then-send
-  // window is surfaced as a terminal transport error rather than a silent exit
-  // 0. The parked-receive idle timer does not cover this window: nothing is
-  // parked while a send is in flight, so `armIdle` early-returns and no ref'd
-  // handle holds the event loop open. The per-operation transport deadlines that
-  // WOULD reject an orphaned write (the CLI SFTP adapter's 60 s bounds, the
-  // core whole-exchange budget) are all `.unref()`'d by design, so with nothing
-  // else ref'd the loop drains before any of them can fire and the process
-  // exits 0 (see docs/spec/CHANNEL_SECURITY.md, "Whole-exchange budget").
+  // a parked receive(), so a mid-exchange drop during send is a terminal
+  // transport error, not a silent exit 0. Nothing else holds the event loop
+  // open during a send: `armIdle` early-returns while no receive() is parked,
+  // and every per-operation transport deadline that would otherwise reject an
+  // orphaned write (the CLI SFTP adapter's 60 s bound, the core whole-exchange
+  // budget) is `.unref()`'d by design, so without this timer the loop would
+  // drain and the process would exit 0 before any of them could fire (see
+  // docs/spec/CHANNEL_SECURITY.md, "Whole-exchange budget").
   //
-  // The fix is one ref'd timer held only while the hand-off is outstanding. It
-  // holds the loop open, which lets a lower, faster `.unref()`'d per-operation
-  // deadline fire first and reject the write with its transport-specific cause;
-  // and it stands as the transport-agnostic backstop for any transport that has
-  // no such per-op bound, rejecting the send itself on expiry so the awaited
-  // call returns instead of orphaning. It settles the instant the hand-off
-  // settles, and every terminal path (fail/finish/close via failSends) rejects
-  // any still-outstanding send -- not merely clears its timer -- so a hand-off
-  // orphaned exactly as the connection goes terminal cannot leave the awaited
-  // send() hanging with the guard swept but the promise unsettled, and no timer
-  // survives to keep a healthy process alive at teardown. No inactivityHint is
-  // appended: that guidance is written for the receive-side peer-silence case
-  // ("has sent nothing since"), which misdescribes a stalled outbound write.
+  // One ref'd timer, held only while the hand-off is outstanding, keeps the
+  // loop open long enough for a faster `.unref()`'d per-operation deadline to
+  // fire first with its own transport-specific cause; absent such a deadline it
+  // rejects the send itself on expiry so the awaited call returns instead of
+  // orphaning. It settles the instant the hand-off settles, and every terminal
+  // path (fail/finish/close, via failSends) also rejects any still-outstanding
+  // send -- not merely clears its timer -- so an orphaned hand-off cannot leave
+  // the awaited send() hanging and no timer survives to keep a healthy process
+  // alive at teardown. No inactivityHint is appended: that guidance describes
+  // the receive-side peer-silence case, which does not fit a stalled outbound
+  // write.
   private sendWithLiveness(data: unknown): Promise<void> {
     const handoff = Promise.resolve(this.hooks.send(data));
     const ms = this.inactivityTimeoutMs;
@@ -447,7 +440,7 @@ export class QueuedMessageConnection implements MessageConnection {
 
   // deliver() is the consumer of FileSyncConnection's "data" event in
   // production (bridged via fromEventConnection's onData closure). It MUST NOT
-  // throw synchronously on any failure mode it handles -- notably the inbound
+  // throw synchronously on any failure mode it handles, including the inbound
   // overflow below, which latches a non-throwing fail() rather than throwing.
   // FileSyncConnection's retain-mode poll() advances recvSeq only after
   // emit("data", ...) returns, so a synchronous throw here would re-poll the
@@ -457,7 +450,7 @@ export class QueuedMessageConnection implements MessageConnection {
     // Ignore inbound once any terminal state is reached: a `draining` half-close
     // drains exactly what was buffered at close time and accepts nothing new,
     // while `failed`/`closed` accept nothing. PeerJS will not deliver after a
-    // close, so for that transport this is belt-and-suspenders, but it keeps the
+    // close, so for that transport this is defense-in-depth, but it keeps the
     // half-closed semantics crisp.
     if (this.state !== undefined) return;
     const waiter = this.waiters.shift();
@@ -493,7 +486,7 @@ export class QueuedMessageConnection implements MessageConnection {
     void Promise.resolve(this.hooks.close()).catch(() => {});
   }
 
-  // Half-close: latch a terminal error to be surfaced only after the queue
+  // Half-close: latch a terminal error to be reported only after the queue
   // drains, so a clean remote close that may have left the peer's final frame
   // queued returns that frame before failing. fail() is the abnormal
   // counterpart; both tear the transport down at call time.
@@ -530,7 +523,7 @@ export class QueuedMessageConnection implements MessageConnection {
   }
 
   receive(timeoutMs?: number): Promise<unknown> {
-    // Drain already-arrived frames before surfacing any terminal state: a frame
+    // Drain already-arrived frames before exposing any terminal state: a frame
     // that reached the queue before the connection went terminal is returned
     // ahead of the terminal error or close, uniformly across transports and
     // orderings (a clean half-close, an abnormal drop, or a capacity overflow).
@@ -547,8 +540,8 @@ export class QueuedMessageConnection implements MessageConnection {
       }
       return Promise.resolve(message);
     }
-    // Queue empty: surface the terminal state, if any. A deliberate close is a
-    // usage error; `failed`/`draining` surface the latched/deferred error.
+    // Queue empty: report the terminal state, if any. An explicit close is a
+    // usage error; `failed`/`draining` report the latched/deferred error.
     if (this.state !== undefined) {
       return this.state.kind === "closed"
         ? Promise.reject(new ConnectionError("connection closed", "usage"))
@@ -561,8 +554,8 @@ export class QueuedMessageConnection implements MessageConnection {
   }
 
   async send(data: unknown): Promise<void> {
-    // Reject on any terminal state. A deliberate close is local misuse;
-    // `failed`/`draining` surface the terminal error - the peer is gone (a
+    // Reject on any terminal state. An explicit close is local misuse;
+    // `failed`/`draining` report the terminal error - the peer is gone (a
     // half-close has latched an error behind still-buffered inbound frames), so
     // reject rather than write into the void.
     if (this.state !== undefined) {
@@ -591,7 +584,7 @@ export class QueuedMessageConnection implements MessageConnection {
     if (this.state !== undefined) return;
     this.state = { kind: "closed" };
     this.disarmIdle();
-    // A send or receive in flight when this deliberate close lands did nothing
+    // A send or receive in flight when this explicit close lands did nothing
     // wrong, so reject each as "closed" (a cancelled operation), not "usage"
     // (caller misuse). Rejecting the in-flight send -- rather than only clearing
     // its guard -- is what stops a cancelled exchange (e.g. a signal-driven close
@@ -601,7 +594,7 @@ export class QueuedMessageConnection implements MessageConnection {
     const cancelled = new ConnectionError("connection closed", "closed");
     this.failSends(cancelled);
     this.rejectWaiters(cancelled);
-    // Deliberate close: ask the transport to drain buffered outbound writes
+    // Explicit close: ask the transport to drain buffered outbound writes
     // before tearing down. fail() closes without flush, since an error means
     // the link is already unusable.
     await this.hooks.close({ flush: true });
@@ -630,7 +623,7 @@ export class QueuedMessageConnection implements MessageConnection {
  * connection fails as a `transport` error rather than hanging the exchange.
  *
  * `inactivityHint` is an optional transport-specific clause appended to that
- * peer-silence error. The bridge is transport-agnostic, so it carries no
+ * peer-silence error. The bridge is transport-agnostic, so it has no
  * guidance of its own; a caller that knows the transport (e.g. the file-sync
  * CLI naming likely receiver-side causes) supplies one, and a caller that omits
  * it gets the bare diagnostic. Supply a FUNCTION when the guidance depends on
@@ -700,7 +693,7 @@ interface ParseSchema<T> {
  * This is the parse half of {@link receiveParsed}, factored out for the
  * send-before-parse sites that must receive a frame, send an acknowledgement,
  * then parse -- and so cannot fold the receive and the parse into one call.
- * Routing those sites through it means a malformed final frame surfaces the same
+ * Routing those sites through it means a malformed final frame gets the same
  * clean `"protocol"` error there as everywhere else, instead of the validator's
  * raw throw escaping bare -- including a Zod `RangeError` ("Invalid string
  * length") built over a pathological-count payload, the residual the
@@ -745,7 +738,7 @@ export async function receiveParsed<T>(
 /**
  * Creates a connected in-memory pair of {@link MessageConnection}s. Messages
  * sent on one side are delivered asynchronously to the other; closing one side
- * surfaces a `transport` {@link ConnectionError} on the other. Intended for
+ * causes a `transport` {@link ConnectionError} on the other. Intended for
  * tests and local protocol exercises.
  */
 export function createMessagePipe(options?: {

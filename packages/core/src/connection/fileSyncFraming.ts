@@ -1,36 +1,36 @@
 // Message-frame envelope codec for the file-sync wire protocol: the pure
 // serialize/deserialize over the raw `version || type || seq || payload` bytes
-// every data-plane message file carries. Everything here is a pure function of
+// every data-plane message file holds. Everything here is a pure function of
 // its byte/number inputs -- no instance state, no I/O -- so the wire layout and
 // its validation live in one place.
 //
-// This module is deliberately NOT re-exported by the package barrel (main.ts
-// barrels fileSyncConnection.ts via `export *`, not this file), so an
-// `@internal` export here stays out of the package's public runtime surface
-// while a unit test can deep-import it -- the same pattern as fileSyncNames.ts
-// and fileSyncConstants.ts. The currently-public codec symbols
-// (MESSAGE_ENVELOPE_VERSION, MESSAGE_TYPE_OBJECT, MESSAGE_TYPE_BINARY,
-// MESSAGE_HEADER_BYTES, serializeFileSyncMessageHeader, serializeFileSyncMessage)
-// keep their public surface by being re-exported from fileSyncConnection.ts
-// (which IS barrelled).
+// Not re-exported by the package barrel (main.ts barrels
+// fileSyncConnection.ts via `export *`, not this file), so an `@internal`
+// export here stays out of the public runtime surface while a unit test can
+// deep-import it -- the same pattern as fileSyncNames.ts and
+// fileSyncConstants.ts. The public codec symbols (MESSAGE_ENVELOPE_VERSION,
+// MESSAGE_TYPE_OBJECT, MESSAGE_TYPE_BINARY, MESSAGE_HEADER_BYTES,
+// serializeFileSyncMessageHeader, serializeFileSyncMessage) keep their public
+// surface by being re-exported from fileSyncConnection.ts (which IS
+// barrelled).
 
-// Binary message-frame envelope. Every data-plane message file -- a JSON control
-// message (the pre-encryption handshake) and an encrypted binary PSI frame alike
-// -- is written as raw bytes `version || type || seq || payload`:
+// Binary message-frame envelope. Every data-plane message file -- a JSON
+// control message (the pre-encryption handshake) and an encrypted binary PSI
+// frame alike -- is written as raw bytes `version || type || seq || payload`:
 //
 //   byte 0      version/format marker (MESSAGE_ENVELOPE_VERSION)
-//   byte 1      payload type (MESSAGE_TYPE_OBJECT | MESSAGE_TYPE_BINARY) -- the
-//               OUTER, cleartext discriminator the reader keys on, because an
-//               encrypted frame's own type tag lives inside the AEAD ciphertext
-//               and cannot drive the transport read
+//   byte 1      payload type (MESSAGE_TYPE_OBJECT | MESSAGE_TYPE_BINARY): the
+//               outer, cleartext discriminator the reader keys on, since an
+//               encrypted frame's own type tag lives inside the AEAD
+//               ciphertext and cannot drive the transport read
 //   bytes 2..9  per-session sequence number, 8-byte big-endian
 //   bytes 10..  payload: UTF-8 JSON (MESSAGE_TYPE_OBJECT) or raw frame bytes
 //               (MESSAGE_TYPE_BINARY)
 //
-// Carrying the payload as raw bytes costs no base64 expansion and keeps the
-// read path off `Buffer.prototype.toString()` (which throws above Node's
-// maximum string length), so a frame larger than that limit can be read. The
-// send-time `ts` is not carried in the body; a timestamped filename records it.
+// Raw bytes cost no base64 expansion and keep the read path off
+// `Buffer.prototype.toString()`, which throws above Node's maximum string
+// length, so a frame larger than that limit can still be read. The send-time
+// `ts` is not held in the body; a timestamped filename records it.
 /** @internal */
 export const MESSAGE_ENVELOPE_VERSION = 1;
 /** @internal */
@@ -109,18 +109,16 @@ export interface DeserializedMessage {
   payload: Uint8Array;
 }
 
-// Thrown by deserializeFileSyncMessage when byte 0 -- the cleartext envelope
-// version marker -- is not this build's MESSAGE_ENVELOPE_VERSION. That byte is
-// the one signal that separates a same-version peer's (possibly corrupt) frame
-// from a foreign wire format: a JSON-text control message from a peer that
-// predates the binary envelope begins with '{' (0x7B), and any future
-// envelope-version bump raises the byte, so an unrecognized value most likely
-// means the partner is on an incompatible psilink version rather than that a
-// same-version frame corrupted. The read path translates this into an
-// operator-facing "likely incompatible partner version" hint instead of the raw
-// "malformed envelope" text. It cannot be perfectly precise -- a foreign format
-// that happens to reuse byte 0 == 1 would still fall through to the generic
-// checks -- so the message is a "likely" hint, not a certain diagnosis.
+// Thrown by deserializeFileSyncMessage when byte 0, the cleartext envelope
+// version marker, is not this build's MESSAGE_ENVELOPE_VERSION -- the one
+// signal separating a same-version peer's corrupt frame from a foreign wire
+// format: a pre-binary-envelope JSON control message begins with '{' (0x7B),
+// and a future version bump raises the byte, so an unrecognized value most
+// likely means an incompatible psilink version. The read path turns this
+// into a "likely incompatible partner version" hint rather than a raw
+// "malformed envelope" message; it is not a certain diagnosis, since a
+// foreign format that happens to reuse byte 0 == 1 still falls through to
+// the generic checks.
 export class IncompatibleEnvelopeVersionError extends Error {
   constructor(readonly foundVersion: number) {
     super(`unsupported message envelope version ${foundVersion}`);

@@ -18,7 +18,7 @@
 // the fingerprint digest / set-membership match / key-type decode live in
 // utils/sshHostKey.ts, modules this one neither owns nor extends.
 //
-// This module is deliberately NOT re-exported by the package barrel (main.ts
+// By design, this module is NOT re-exported by the package barrel (main.ts
 // barrels fileSyncConnection.ts via `export *`, not this file), so it stays out
 // of the package's public runtime surface while fileSyncConnection.ts composes
 // it -- the same pattern as abortMarker.ts and sftpConnect.ts. The connection
@@ -68,10 +68,10 @@ interface SftpSessionDeps {
  * {@link COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH} independently, so a link that mixes
  * first-party text with an adversary-chosen fragment lets the adversary spend
  * the whole budget and delete the text the operator has to act on. The
- * `summary` therefore carries first-party text plus format-validated values
+ * `summary` therefore holds first-party text plus format-validated values
  * only, and every fragment a server, a partner, or an unbounded config chose
  * gets a `details` entry of its own -- one per chooser, so one party's bytes
- * can never consume another's disclosure. Each detail carries its own
+ * can never consume another's disclosure. Each detail holds its own
  * first-party label, so no bare value renders unexplained.
  *
  * The caller renders these as a cause chain: `summary` as the error's own
@@ -289,8 +289,8 @@ export class SftpSession {
    * hostVerifier callback so the caller's connect catch can re-throw with the
    * detail rather than ssh2's opaque "Host denied (verification failed)". It is
    * set before verify(false), so it is populated by the time the rejection
-   * propagates from the caller's connect(). Every branch that refuses settles
-   * through it, including the two that fail while reading the key.
+   * propagates from the caller's connect(). Every branch that refuses sets it,
+   * including the two that fail while reading the key.
    *
    * It returns a {@link HostKeyRefusal} rather than one joined string because
    * the display boundary caps each cause-chain link separately: partitioning
@@ -342,7 +342,7 @@ export class SftpSession {
             } else {
               // Re-hash on the mismatch branch (which tears the connection down
               // anyway) rather than widen matchHostKeyFingerprint's contract to
-              // also surface the digest of a non-matching key.
+              // also expose the digest of a non-matching key.
               const presented = await computeHostKeyFingerprint(blob);
               // The type is the server's choice within keyTypeFromBlob's bound,
               // so it rides a link of its own and is escaped where the error is
@@ -393,11 +393,11 @@ export class SftpSession {
         })();
       };
     } else {
-      // No pin: fail closed (replaces the former warn-and-proceed). The CLI's
-      // first-use flow normally pins the key before open(), so this path is the
-      // backstop for a direct/library caller and the default posture for an
-      // unpinned config. The presented fingerprint is surfaced so a caller can
-      // verify it out-of-band and pin it.
+      // No pin: fail closed. The CLI's first-use flow normally pins the key
+      // before open(), so this path is the fallback for a direct/library
+      // caller and the default posture for an unpinned config. The presented
+      // fingerprint is included so a caller can verify it out-of-band and pin
+      // it.
       connectOptions["hostVerifier"] = (
         keyBlob: Buffer,
         verify: (permitted: boolean) => void,
@@ -462,7 +462,7 @@ export class SftpSession {
    * budget to guard, and the connect is already bounded by ssh2's readyTimeout.
    *
    * @throws if the connect resolves without the verifier firing (no key was
-   *   observed), or rejects for a reason other than the deliberate refusal.
+   *   observed), or rejects for a reason other than the expected refusal.
    */
   async probeHostKeyFingerprint(
     config: SFTPConnectionConfig,
@@ -488,7 +488,7 @@ export class SftpSession {
           captureError = err;
         }
         // Always refuse: this connection exists only to read the host key, never
-        // to authenticate. The refusal surfaces as the expected connect rejection
+        // to authenticate. That refusal becomes the expected connect rejection
         // below, from which `captured` is returned. settleVerify guards a late
         // refusal: if the handshake was already torn down (e.g. readyTimeout)
         // while computeHostKeyFingerprint was awaiting, verify(false) would throw
@@ -503,7 +503,7 @@ export class SftpSession {
       // A rejection is expected when the verifier fired: verify(false) aborts the
       // handshake, from which the captured key is returned below. Record the
       // cause ONLY when no key was read -- a genuine connect failure (e.g. an
-      // unreachable host) -- so it is surfaced rather than masked behind the
+      // unreachable host) -- so it is reported rather than masked behind the
       // generic "presented no key" message.
       if (captured === undefined) connectError = err;
     } finally {
