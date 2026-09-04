@@ -65,7 +65,7 @@ const SELF = "scripts/sftp-operation-spans.test.mjs";
 // interprocedural reach above.
 const OPERATION_ENTRY = "runOperation";
 
-// The round trips deliberately issued outside every outstanding span, matched by
+// The round trips issued outside every outstanding span by design, matched by
 // the method they are issued from and the callee they issue. Each reason states
 // why no span may cover it.
 const ALLOWED_OUTSIDE_THE_SPAN = [
@@ -92,7 +92,7 @@ const ALLOWED_OUTSIDE_THE_SPAN = [
   },
 ];
 
-/** Class declarations carrying a `runOperation` method: the adapter's own. */
+/** Class declarations holding a `runOperation` method: the adapter's own. */
 function classesDeclaringTheEntry(sourceFile) {
   return descendants(sourceFile).filter(
     (node) =>
@@ -230,7 +230,7 @@ describe("SFTP adapter round trips run inside a runOperation span", () => {
     ).toEqual([]);
   });
 
-  it("carries a span through the private single-attempt layer beneath it", () => {
+  it("propagates a span through the private single-attempt layer beneath it", () => {
     // The adapter's own shape, pinned so a propagation regression fails here
     // rather than emptying the check: no data-plane entry issues its round trip
     // directly, every one of them delegating to a private *Once method that

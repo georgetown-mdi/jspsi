@@ -13,15 +13,15 @@
 //      request touching nothing the filter globs skips the workflow, so its
 //      check runs are never created on that pull request at all.
 //
-// Two rules, one per footgun:
+// Two rules, one per hazard:
 //
 //   1. Every required status-check context on main and staging matches a job
 //      name under .github/workflows. Reading the rules needs a token, so this
 //      rule states a skip -- naming the reason, and raising a run annotation
 //      under Actions -- when it has none or the read fails. It never passes
 //      silently: a skip says which half did not run.
-//   2. The gating workflows in GATING_WORKFLOWS carry no `paths:` or
-//      `paths-ignore:` under `on.pull_request`, and do carry that trigger. No
+//   2. The gating workflows in GATING_WORKFLOWS declare no `paths:` or
+//      `paths-ignore:` under `on.pull_request`, and do declare that trigger. No
 //      API, so this rule runs on every invocation including rule 1's skips.
 //
 // The rules are read per protected branch rather than per ruleset name, so
@@ -29,11 +29,11 @@
 // what every active ruleset contributes to that branch.
 //
 // What this check cannot see:
-//   - Rule 1 compares literal text. A job whose `name:` carries a `${{ }}`
+//   - Rule 1 compares literal text. A job whose `name:` contains a `${{ }}`
 //     expression -- a matrix leg -- is collected but never matched, because
 //     resolving one means reimplementing the expansion GitHub performs. A
 //     required context satisfied by such a job fails here rather than passing
-//     on a guess; the failure names the templated jobs so the reason is legible.
+//     on a guess; the failure names the templated jobs so the reason is clear.
 //   - It matches names, not runs. That a job with the right name exists says
 //     nothing about whether the workflow holding it runs on a pull request to
 //     the protected branch, or whether the run succeeds. Rule 2 covers that
@@ -61,12 +61,12 @@ import {
   workflowDocument,
 } from "./lib/workflows.mjs";
 
-/** The branches whose rulesets carry the merge gate. */
+/** The branches whose rulesets hold the merge gate. */
 export const PROTECTED_BRANCHES = ["main", "staging"];
 
 /**
  * The workflows rule 2 holds filter-free: every file declaring a job the branch
- * rules require a status check from. Each is deliberately unfiltered, and the
+ * rules require a status check from. Each is unfiltered by design, and the
  * header comment in each says why and points back here. Making a job in some
  * other workflow required means adding that workflow here in the same edit --
  * nothing derives this list, so nothing else notices it went short.
@@ -90,7 +90,7 @@ const API_ROOT = "https://api.github.com";
 /**
  * The check-run name of every job a parsed workflow declares, with whether the
  * name is one a required context can literally match. A job with no `name:`
- * runs under its job id, so the id stands in -- unless the job carries a
+ * runs under its job id, so the id stands in -- unless the job declares a
  * matrix, whose nameless check runs render as "<id> (<matrix values>)" and
  * never the bare id.
  */
@@ -107,7 +107,7 @@ export function jobCheckNames(workflow) {
 
 /**
  * Every job name the workflow tree declares: `literal` is the set a context can
- * be matched against, `templated` the `{file, name}` pairs carrying an
+ * be matched against, `templated` the `{file, name}` pairs holding an
  * expression or a nameless matrix expansion, which no context can match here.
  */
 export function workflowJobIndex(root) {
@@ -202,7 +202,7 @@ export async function fetchBranchRules({
 }
 
 /**
- * The required status-check contexts one branch's rules carry, as
+ * The required status-check contexts one branch's rules state, as
  * `{branch, context, integrationId}` triples. An entry naming no integration
  * gets a null id: GitHub accepts such a context from any app.
  */
@@ -219,7 +219,7 @@ export function branchRequiredContexts(branch, rules) {
 }
 
 /**
- * The same contexts keyed once each, carrying every branch that requires them,
+ * The same contexts keyed once each, holding every branch that requires them,
  * so a context both rulesets share is reported once rather than per branch.
  */
 export function mergeContexts(contexts) {
@@ -282,7 +282,7 @@ export function contextViolations(merged, index) {
 
 /**
  * A parsed workflow's `on.pull_request` trigger: whether it is declared at all,
- * and which path-filter keys it carries.
+ * and which path-filter keys it declares.
  */
 export function pullRequestTrigger(workflow) {
   const on = workflow?.on;

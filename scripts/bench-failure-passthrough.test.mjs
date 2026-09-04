@@ -15,7 +15,7 @@ import {
 // A failure's alert is composed from the lifecycle's category alone, which is
 // what keeps relayed terminal text inert: a rendezvous directory is
 // partner-writable and core's foreign-file terminal names the offending files
-// verbatim, so a filename an untrusted party chose -- carrying the CLI's own
+// verbatim, so a filename an untrusted party chose -- holding the CLI's own
 // refusal wording -- reaches a seat inside a message this app composed no part
 // of. It can never select a title or the copy that tells an operator what to do,
 // because no per-run value reaches that choice. A seat that decorated the
@@ -65,7 +65,7 @@ const WEB_SOURCE_DIR = "apps/web/src";
 const COMPOSER_MODULE = "apps/web/src/bench/useInviterExchange.ts";
 
 // The exported name the seats import, the tail every import specifier of it must
-// carry, and the sink its result is passed to.
+// include, and the sink its result is passed to.
 const COMPOSER = "failureFor";
 const COMPOSER_MODULE_TAIL = "useInviterExchange";
 const SINK = "setFailure";
@@ -115,8 +115,8 @@ function composerBindings(sourceFile) {
 }
 
 /**
- * The node the result is handed to, reached out through the wrappers that carry
- * a value on unchanged, with the expression that arrives there.
+ * The node the result is handed to, reached out through the wrappers that pass
+ * a value through unchanged, with the expression that arrives there.
  */
 function receiverOfResult(call) {
   let arriving = call;
@@ -343,7 +343,7 @@ describe("no seat decorates the failure it composed", () => {
   });
 
   it("passes a call site the type-level wrappers leave undecorated", () => {
-    // Parentheses and a type assertion carry the value on unchanged, so a site
+    // Parentheses and a type assertion pass the value through unchanged, so a site
     // written through them is a pass-through and not a shape to answer for.
     const sources = {
       "wrapped/wrappedSeat.ts": `import { failureFor } from "./useInviterExchange";

@@ -4,12 +4,12 @@
 // .github/workflows/eb_deploy.yaml redeploys the Elastic Beanstalk environment
 // on a push whose changed paths match a hand-written filter. That filter is
 // narrower than the trees it names -- most pointedly
-// `packages/peerjs-broker/src/contrib/**`, which deliberately omits the sibling
-// `src/standalone.ts` on the premise that the local `npm start` entry is in no
-// deployed import graph. A premise like that is invisible when it breaks: let
+// `packages/peerjs-broker/src/contrib/**`, which by design omits the sibling
+// `src/standalone.ts` on the assumption that the local `npm start` entry is in no
+// deployed import graph. An assumption like that is invisible when it breaks: let
 // standalone.ts (or any other unfiltered source) into the deployed server and
 // edits to it stop triggering a deploy, production quietly serves the previous
-// build, and no run anywhere goes red. So the premise is encoded here instead of
+// build, and no run anywhere goes red. So the assumption is encoded here instead of
 // asserted in a comment: every repository source the deployed build actually
 // reads has to match the filter that redeploys it.
 //
@@ -29,7 +29,7 @@
 //
 // Neither half alone covers the deployed server, and REQUIRED_GRAPH_ROOTS below
 // fails the check when either stops producing paths, so a half that goes quiet
-// cannot read as a clean graph.
+// cannot be treated as a clean graph.
 //
 // WHAT THIS CHECK DOES NOT COVER:
 //
@@ -115,7 +115,7 @@ export const REQUIRED_GRAPH_ROOTS = [
 
 /**
  * Build products the graph legitimately reaches instead of the sources behind
- * them. Git does not track these, so a push can never carry one and the filter
+ * them. Git does not track these, so a push can never include one and the filter
  * cannot usefully name one; what the filter has to name is the tree they are
  * built from. An untracked graph entry under no declared product fails the
  * check rather than being waved through.

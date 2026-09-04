@@ -13,7 +13,7 @@
 // why the rewrite below is a rewrite and not a deletion. That list is written
 // for a reader; what the check enforces is the measurement, not the list.
 //
-// The refusal is a parse error in the module that carries the construct, so it
+// The refusal is a parse error in the module that holds the construct, so it
 // fires for anything anywhere in the config's transitive import graph, not just
 // the config file itself -- and the graph reaches app source
 // (`src/utils/serverConfig.ts` -> `src/utils/configManager.ts`,

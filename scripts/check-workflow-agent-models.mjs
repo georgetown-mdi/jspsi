@@ -5,7 +5,7 @@
 // fall back to the agent definition's pinned tier -- it inherits the session
 // model, silently, wherever the script happens to be run from. The tiering rule
 // in CLAUDE.md is therefore only as good as the pins written into the scripts
-// themselves, and prose cannot assert that every call carries one.
+// themselves, and prose cannot assert that every call has one.
 //
 // The PreToolUse hooks that gate the Agent tool see none of this: the model lives
 // inside a script string, not a top-level tool input. So the pin is encoded as a
@@ -17,8 +17,8 @@
 // call in either must pass a literal `model:` from the tier set in its own options
 // object, and Fable (which requires the owner's per-spawn approval and is never
 // inherited) may not be pinned in a committed script at all. That options object
-// is spelled out in the call: a spread into it can carry a `model` of its own and
-// settle the tier at run time, so the spread is itself a violation whether or not
+// is spelled out in the call: a spread into it can include a `model` of its own and
+// decide the tier at run time, so the spread is itself a violation whether or not
 // a literal sits beside it.
 //
 // The block reader and the lexer below are the shared half:
@@ -33,9 +33,10 @@
 // in for its caller's.
 //
 // What the scan cannot see, exactly:
-//   - a computed model value (`model: tier`) resolves only at run time; it reads
-//     as no pin at all and is reported as one. A hoisted options const reads the
-//     same way, deliberately -- the convention is an inline literal in the call.
+//   - a computed model value (`model: tier`) resolves only at run time; it is
+//     treated as no pin at all and is reported as one. A hoisted options const is
+//     treated the same way, by design -- the convention is an inline literal in
+//     the call.
 //   - `agent` reached under another name. A non-call use of the identifier is
 //     itself reported, because the scan cannot follow it; but a binding taken off
 //     a property (`const spawn = deps.agent`) is a member access, which this check
@@ -213,7 +214,7 @@ function readRegex(code, start) {
 
 /**
  * Lex a block of JavaScript into `{kind, text?, value?, start}` tokens, skipping
- * whitespace and comments. A string or a substitution-free template carries its
+ * whitespace and comments. A string or a substitution-free template has its
  * `value`; a template with substitutions is split into templateStart /
  * templateMiddle / templateEnd around the tokens of each substitution, so braces
  * and parentheses inside template TEXT never reach the structural scan.
@@ -351,7 +352,7 @@ const literalValue = (token) =>
 // argument is an object literal spelled out in the call -- pins at its top level:
 // the `model` literals it writes, and whether it spreads anything in. A key may be
 // quoted; a value that is not a string or a substitution-free template is not a
-// literal and yields nothing, so the call reads as unpinned. A spread nested
+// literal and yields nothing, so the call is treated as unpinned. A spread nested
 // deeper cannot reach the top-level `model` key, so only a top-level one counts.
 function optionsPins(tokens, openIndex, closeIndex) {
   const options = argumentSpans(tokens, openIndex, closeIndex)[1];
@@ -402,7 +403,7 @@ function summarize(text) {
 
 /**
  * Every appearance of the injected `agent` binding in a block, in source order,
- * as `{kind: "call" | "alias", text, line}`; a call also carries the literal
+ * as `{kind: "call" | "alias", text, line}`; a call also has the literal
  * `models` its options object pins and whether that object `spread`s anything in.
  * A member access (`runner.agent`) is somebody else's method and is not an
  * appearance at all.
@@ -447,7 +448,7 @@ export function pinnedModels(callText) {
 }
 
 /**
- * The blocks of JavaScript a scanned file carries: the fenced js blocks of a
+ * The blocks of JavaScript a scanned file contains: the fenced js blocks of a
  * Markdown source, or the whole of a checked-in Workflow script, which is one
  * unfenced block of script body from its first line.
  */
@@ -507,7 +508,7 @@ export function modelViolations(file, source) {
   return violations;
 }
 
-/** Count the `agent(` calls a source carries, for the pattern-rot guard. */
+/** Count the `agent(` calls a source contains, for the pattern-rot guard. */
 export function agentCallCount(file, source) {
   return codeBlocks(file, source).reduce(
     (total, block) => total + agentCalls(block.code).length,
