@@ -14,7 +14,7 @@
 // whatever the primary happens to hold, including an install that has fallen
 // behind its own lockfile, and nothing in the provisioning path ever consulted a
 // lockfile. That inheritance is silent and it bites: a worktree provisioned from
-// a primary carrying prettier 3.8.4 against a lockfile pinning 3.9.6 reformats
+// a primary holding prettier 3.8.4 against a lockfile pinning 3.9.6 reformats
 // dozens of untouched source files on `npm run format`.
 //
 // npm decides; this script only reads its verdict. CLAUDE.md: settle a question
@@ -55,12 +55,12 @@
 //     real directory holding the same version. Shape, not drift; ignored. (In the
 //     repo's drifted worktree, 549 of 603 change entries were this.)
 //   - `add`: npm does not walk into a linked package's own node_modules, so a dep
-//     nested under a shared package reads as absent. Ignored when the install path
+//     nested under a shared package is treated as absent. Ignored when the install path
 //     already holds the version npm names -- measured: all 71 add entries in the
 //     drifted worktree did -- failed as missing when the path holds nothing, and
 //     failed as a wrong version when it holds another version.
 //   - `remove`: a package on disk the lockfile does not list. Reported, never
-//     failed: a primary shared across branches legitimately carries packages this
+//     failed: a primary shared across branches legitimately holds packages this
 //     branch's lockfile never mentions, and an extra package cannot change what
 //     the lockfile does describe.
 //
@@ -88,7 +88,7 @@
 // it mirrors) rather than by re-deriving what npm would install.
 //
 // A record that cannot be read is two different situations, told apart by
-// whether node_modules is there at all, and the same measurement session settled
+// whether node_modules is there at all, and the same measurement session determined
 // both:
 //   - No node_modules: the dry run reports every package as an `add`, which the
 //     classes above already report as missing. Nothing is installed to be stale,
@@ -305,7 +305,7 @@ function nameFromInstallPath(path) {
 /**
  * What npm's own record of what it extracted, node_modules/.package-lock.json,
  * says about the lockfile's `file:` tarball dependencies (a `resolved` starting
- * "file:" carrying a string `integrity` -- a workspace's own local package links
+ * "file:" with a string `integrity` -- a workspace's own local package links
  * the same way but with neither, so it is not in scope here). `stale` names the
  * entries whose installed bytes no longer match `lock`'s recorded integrity
  * though the version string is unchanged: the class `driftFrom`'s version-keyed

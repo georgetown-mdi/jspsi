@@ -10,7 +10,7 @@
 //   3. The three required lines (Docs, CHANGELOG.md, Security review) must each
 //      open a line of their own -- the template says "Do not delete lines here"
 //      -- so prose naming one inside another line cannot stand in for it.
-//   4. Every checked line must carry a `-- <resolution>` clause with real text.
+//   4. Every checked line must contain a `-- <resolution>` clause with real text.
 //   5. An n/a resolution must be `n/a: <reason>` with a non-empty reason; a bare
 //      "n/a" (or "n/a" plus punctuation only) earns nothing.
 //   6. The Security review line must name the sha it reviewed, and that sha must
@@ -22,7 +22,7 @@
 //      titleBudget()'s 42-character fallback serves a direct call with no
 //      number, not reachable through this CLI.
 //
-// The limits are deliberate. This is a mechanical BACKSTOP for the tells that a
+// The limits are deliberate. This is a mechanical SAFETY CHECK for the tells that a
 // checklist was left unresolved or resolved dishonestly by shape; whether a
 // stated reason is true stays a review call, the same philosophy as
 // check-contributing-scope.mjs, and an author who edits the sha without
@@ -30,7 +30,7 @@
 // Only the first `## Checklist` section is read, so a line in a second one is
 // not.
 //
-// Rule 7's own limit: CONTRIBUTING.md lets a pull request carrying a single
+// Rule 7's own limit: CONTRIBUTING.md lets a pull request holding a single
 // commit skip a hand-written squash message, since GitHub takes that commit's
 // own message as the squash subject -- so for a single-commit PR, the title
 // checked here is not necessarily the subject that lands. This check enforces
