@@ -407,10 +407,12 @@ describe("the check as CI runs it", () => {
     );
     temporaryRoots.push(scriptRoot);
     mkdirSync(resolve(scriptRoot, "scripts/lib"), { recursive: true });
-    copyFileSync(
-      resolve(repoRoot, "scripts/lib/releaseManifest.mjs"),
-      resolve(scriptRoot, "scripts/lib/releaseManifest.mjs"),
-    );
+    for (const module of [
+      "scripts/lib/deferredObligation.mjs",
+      "scripts/lib/releaseManifest.mjs",
+    ]) {
+      copyFileSync(resolve(repoRoot, module), resolve(scriptRoot, module));
+    }
     const source = readRoot(CHECK_SOURCE);
     const edits = [
       [
