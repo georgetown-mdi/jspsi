@@ -21,9 +21,10 @@ name: CodeQL
 # raises from the uploaded SARIF, which is the half that turns red when a pull
 # request introduces an alert. Neither is path-filtered, so neither can
 # path-skip into the permanently-pending state a required check falls into when
-# its workflow is skipped -- the footgun image_smoke.yaml documents. The Merge
-# gate identities step in static_checks.yaml holds that: this file carrying a
-# path filter under on.pull_request fails it.
+# its workflow is skipped -- the footgun image_smoke.yaml documents. The
+# merge-gate identities check, run by the Repository checks step of
+# static_checks.yaml, holds that: this file carrying a path filter under
+# on.pull_request fails it.
 #
 # What promoted it, measured 2026-08-08 over the code-scanning alert history
 # since the 2026-07-23 baseline scan: 234 pull-request analyses across 178 pull

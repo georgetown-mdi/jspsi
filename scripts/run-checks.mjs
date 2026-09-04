@@ -26,10 +26,11 @@
 // OUT_OF_CHECK_ALL holds the checks that stay off the list, each with what puts
 // it there: a check needing the network, a token, a release trigger, or CI's own
 // install cannot run from a plain checkout, and one whose cost is measured in
-// minutes does not belong on the merge path. scripts/run-checks.test.mjs holds
-// every `check:*` script in the root package.json to one list or the other, so a
-// new check cannot be added without being classified, and holds the repo-guards
-// job to this one step plus the dependency audit.
+// minutes does not belong on the unfiltered merge path.
+// scripts/run-checks.test.mjs holds every `check:*` script in the root
+// package.json to one list or the other, so a new check cannot be added without
+// being classified, and holds the repo-guards job to this one step plus the
+// dependency audit.
 
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -178,11 +179,6 @@ export const CHECKS = [
       "The built-in field set and key set match the pin recorded for the version each declares, cascade order included.",
   },
   {
-    script: "check:deploy-trigger-graph",
-    description:
-      "eb_deploy.yaml's push path filter covers everything the web deployment build imports.",
-  },
-  {
     script: "check:release-signing",
     description:
       "The cosign verify command docs/RELEASES.md publishes, the release workflow's self-verify step, and the publish sequence name one release identity.",
@@ -213,6 +209,11 @@ export const OUT_OF_CHECK_ALL = [
     script: "check:prebuild-provenance",
     reason:
       "Run by .github/actions/setup ahead of every install in every workflow, and reaches `gh attestation verify` and the network once arming is switched on.",
+  },
+  {
+    script: "check:deploy-trigger-graph",
+    reason:
+      "Reads the deployed import graph out of a full apps/web production build, minutes the merge path does not have. Run by eb_build_and_test.yaml, path-filtered to the changes that can move that graph.",
   },
   {
     script: "test:mutation",

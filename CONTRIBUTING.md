@@ -186,11 +186,11 @@ Linting, formatting, and the repository's guard checks are enforced by CI. Run t
 npm run typecheck
 npm run lint
 npm run format
-npm run check:all            # every repo-wide guard the merge gate runs
+npm run check:all            # the repo-wide guards, driven from one list
 npm run check:all -- --list  # what each holds, and what it does not run
 ```
 
-`check:all` drives its checks from one list in [`scripts/run-checks.mjs`](scripts/run-checks.mjs), which also states which checks it does not run and why -- the production dependency audit needs the npm registry, and the rest need a token, a release tag, CI's own install, or minutes the merge path does not have. It runs past a failing check, so one red result does not hide the rest.
+`check:all` drives its checks from one list in [`scripts/run-checks.mjs`](scripts/run-checks.mjs), which also states which checks it does not run and why -- the production dependency audit needs the npm registry, the deploy-trigger graph check needs a full web build that `eb_build_and_test.yaml` already runs path-filtered, and the rest need a token, a release tag, CI's own install, or minutes the merge path does not have. It runs past a failing check, so one red result does not hide the rest.
 
 ## Documentation
 
