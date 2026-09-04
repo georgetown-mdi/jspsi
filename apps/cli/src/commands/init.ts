@@ -24,6 +24,7 @@ import {
   runOrExit,
   singleValue,
 } from "../util/cli";
+import { addLoggingOptions } from "../optionDefinitions";
 import { buildDataSpec } from "../onlineBootstrap";
 import {
   askIdentityAtPrompt,
@@ -33,45 +34,35 @@ import {
 } from "../partyIdentity";
 
 export function builder(cmd: Argv): Argv {
-  return (
-    cmd
-      // Capture positionals into `args` (rather than the global `_`) and treat an
-      // unknown `-`-leading token as a positional, so a bare `-` (stdin) or an
-      // input path is never swallowed or misread as a flag -- the same parsing the
-      // invite/accept commands use for their positionals.
-      .parserConfiguration({ "unknown-options-as-args": true })
-      .positional("args", {
-        type: "string",
-        array: true,
-        describe:
-          "optional CSV [INPUT_FILE] to infer column metadata, linkage fields, " +
-          "and standardizing transformations from; `-` reads it from stdin",
-      })
-      .option("config-file", {
-        type: "string",
-        describe: `where to write the template (default: ${DEFAULT_CONFIG_PATH})`,
-      })
-      .option("identity", {
-        type: "string",
-        describe: "identity string to pre-fill (name, org, contact)",
-      })
-      .option("log-level", {
-        type: "string",
-        describe: "silent, error, warn, info, debug, or trace (default: info)",
-      })
-      .option("log-file", {
-        type: "string",
-        describe: "append diagnostics to this file instead of the terminal",
-      })
-      .usage(
-        "Usage:\n" +
-          "  $0 init [options] [INPUT_FILE]\n\n" +
-          "Write a commented psilink.yaml template -- every option documented\n" +
-          "inline with defaults pre-filled -- then exit. No key file is created\n" +
-          "and no exchange is run. With an INPUT_FILE, column metadata, linkage\n" +
-          "fields, and standardizing transformations are inferred from it.\n\n" +
-          "INPUT_FILE may be `-` to read the CSV from stdin.",
-      )
+  const withoutLogging = cmd
+    // Capture positionals into `args` (rather than the global `_`) and treat an
+    // unknown `-`-leading token as a positional, so a bare `-` (stdin) or an
+    // input path is never swallowed or misread as a flag -- the same parsing the
+    // invite/accept commands use for their positionals.
+    .parserConfiguration({ "unknown-options-as-args": true })
+    .positional("args", {
+      type: "string",
+      array: true,
+      describe:
+        "optional CSV [INPUT_FILE] to infer column metadata, linkage fields, " +
+        "and standardizing transformations from; `-` reads it from stdin",
+    })
+    .option("config-file", {
+      type: "string",
+      describe: `where to write the template (default: ${DEFAULT_CONFIG_PATH})`,
+    })
+    .option("identity", {
+      type: "string",
+      describe: "identity string to pre-fill (name, org, contact)",
+    });
+  return addLoggingOptions(withoutLogging).usage(
+    "Usage:\n" +
+      "  $0 init [options] [INPUT_FILE]\n\n" +
+      "Write a commented psilink.yaml template -- every option documented\n" +
+      "inline with defaults pre-filled -- then exit. No key file is created\n" +
+      "and no exchange is run. With an INPUT_FILE, column metadata, linkage\n" +
+      "fields, and standardizing transformations are inferred from it.\n\n" +
+      "INPUT_FILE may be `-` to read the CSV from stdin.",
   );
 }
 

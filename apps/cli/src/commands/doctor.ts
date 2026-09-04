@@ -13,6 +13,7 @@ import {
   verdictJson,
   verdictLines,
 } from "../doctor/verdict";
+import { addLoggingOptions } from "../optionDefinitions";
 import {
   configureLogging,
   exitWithError,
@@ -29,24 +30,15 @@ import {
 // "Checking a network file drop", and docs/spec/CLI_DOCTOR.md.
 
 function commonOptions(cmd: Argv): Argv {
-  return cmd
-    .option("json", {
+  return addLoggingOptions(
+    cmd.option("json", {
       type: "boolean",
       default: false,
       describe:
         "print the machine-readable verdict on stdout instead of the " +
         "human-readable check lines",
-    })
-    .option("log-level", {
-      type: "string",
-      describe: "silent | error | warn | info | debug | trace; default=info",
-    })
-    .option("log-file", {
-      type: "string",
-      describe:
-        "append all log output to this file instead of the terminal; the " +
-        "parent directory must already exist",
-    });
+    }),
+  );
 }
 
 /** Handler for `psilink doctor probe`. */

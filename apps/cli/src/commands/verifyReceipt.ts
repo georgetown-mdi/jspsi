@@ -54,6 +54,7 @@ import {
   warnOnLinkageRuleSetCitationDrift,
 } from "../config";
 import { expandTilde } from "../fileUtils";
+import { addLoggingOptions } from "../optionDefinitions";
 import { keysPathFor } from "../recordFile";
 import { parseSensitiveJson, parseSensitiveYaml } from "../sensitiveFile";
 import { loadSigningCertificate } from "../signingIdentityFile";
@@ -98,7 +99,7 @@ import {
 // short of verified rather than failed.
 
 export function builder(cmd: Argv): Argv {
-  return cmd
+  const beforeLogging = cmd
     .usage(
       "Usage: $0 verify-receipt <record> [input-file] [result-file] [options]",
     )
@@ -160,17 +161,8 @@ export function builder(cmd: Argv): Argv {
       describe:
         "the partner's linkage terms (config or exported terms), for the " +
         "agreed-terms hash check; the partner's terms are not retained by default",
-    })
-    .option("log-level", {
-      type: "string",
-      describe: "silent | error | warn | info | debug | trace; default=info",
-    })
-    .option("log-file", {
-      type: "string",
-      describe:
-        "append all log output to this file instead of the terminal; the " +
-        "parent directory must already exist",
     });
+  return addLoggingOptions(beforeLogging);
 }
 
 // --- File readers ------------------------------------------------------------

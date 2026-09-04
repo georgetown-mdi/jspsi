@@ -25,6 +25,7 @@ import {
   singleValue,
 } from "../util/cli";
 import { asciiSafeJsonLine } from "../util/jsonLine";
+import { addLoggingOptions } from "../optionDefinitions";
 
 // `psilink probe-host-key` is the ssh-keyscan analogue: it connects only far
 // enough to read the SFTP server's presented host key, then refuses before any
@@ -58,7 +59,7 @@ const REAL_DEPS: ProbeHostKeyDeps = {
 };
 
 export function builder(cmd: Argv): Argv {
-  return cmd
+  const beforeLogging = cmd
     .usage("Usage: $0 probe-host-key SFTP_URL [options]")
     .positional("sftp-url", {
       type: "string",
@@ -81,24 +82,14 @@ export function builder(cmd: Argv): Argv {
         "other than an SSH server answered the port prints a diagnosis line " +
         '({"diagnosis":"non_ssh"|"closed_unanswered", ...}) on stdout before ' +
         "exiting 69, so a caller that discards stderr still gets the cause",
-    })
-    .option("log-level", {
-      type: "string",
-      describe: "silent | error | warn | info | debug | trace; default=info",
-    })
-    .option("log-file", {
-      type: "string",
-      describe:
-        "append all log output to this file instead of the terminal; the " +
-        "parent directory must already exist",
-    })
-    .option("verbose", {
-      alias: "v",
-      type: "count",
-      describe:
-        "generate additional logging information for sub-libraries at all " +
-        "logging levels",
     });
+  return addLoggingOptions(beforeLogging).option("verbose", {
+    alias: "v",
+    type: "count",
+    describe:
+      "generate additional logging information for sub-libraries at all " +
+      "logging levels",
+  });
 }
 
 /**

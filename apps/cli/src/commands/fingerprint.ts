@@ -17,6 +17,7 @@ import type { SigningIdentity } from "@psilink/core";
 
 import { DEFAULT_CONFIG_PATH } from "../config";
 import { expandTilde, FileExistsError, writeFileAtomic } from "../fileUtils";
+import { addLoggingOptions } from "../optionDefinitions";
 import { parseSensitiveYaml } from "../sensitiveFile";
 import { warnOnIdentityDivergence } from "../signingIdentityDivergence";
 import {
@@ -65,7 +66,7 @@ const NO_IDENTITY_PATH_REFUSAL =
   "before your receipts verify again.";
 
 export function builder(cmd: Argv): Argv {
-  return cmd
+  const beforeLogging = cmd
     .usage("Usage: $0 fingerprint [options]")
     .option("identity", {
       type: "string",
@@ -99,17 +100,8 @@ export function builder(cmd: Argv): Argv {
       describe:
         "also write this party's public certificate (no private key) to the " +
         "given path, for sharing with a partner",
-    })
-    .option("log-level", {
-      type: "string",
-      describe: "silent | error | warn | info | debug | trace; default=info",
-    })
-    .option("log-file", {
-      type: "string",
-      describe:
-        "append all log output to this file instead of the terminal; the " +
-        "parent directory must already exist",
     });
+  return addLoggingOptions(beforeLogging);
 }
 
 interface ConfigHints {
