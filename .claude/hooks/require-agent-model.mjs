@@ -11,7 +11,7 @@
 // inheritance this hook exists to stop is the documented and unavoidable behavior of
 // that spawn rather than a leak an author could have closed. Requiring a model there
 // refuses a correct call and teaches nothing: the value it demands changes no
-// outcome. So a fork passes with whatever it carries, and the tier check does not
+// outcome. So a fork passes with whatever model it was given, and the tier check does not
 // run on it either -- validating a string the platform discards is theater, and this
 // hook has nothing to say about a model that was never a choice.
 //
@@ -30,7 +30,7 @@
 // Fail-open scaffolding follows block-protected-push.mjs: JSON event on stdin, exit
 // 0 allows, exit 2 blocks and feeds stderr back to Claude. An unexpected failure
 // falls through to exit 0 -- EXCEPT the bare-spawn path (no explicit model), which
-// fails CLOSED: a bare spawn is the risky call with no downstream backstop, so if
+// fails CLOSED: a bare spawn is the risky call with no downstream safety check, so if
 // the allowlist read throws we exit 2 rather than let an unverifiable pin through.
 
 import { readFileSync, readdirSync } from "node:fs";
@@ -117,7 +117,7 @@ function main() {
       "could not read agent definitions to verify a pin; pass an explicit model",
     );
   }
-  // Structural fail-closed: hold the door shut regardless of how block() is later
+  // Structural fail-closed: block again regardless of how block() is later
   // implemented, so a refactor that stops block() from exiting cannot let an
   // unverifiable bare spawn through.
   if (!pinned) {
@@ -142,6 +142,6 @@ try {
   main();
 } catch {
   // Fail open on any error outside the bare-spawn read (that path exits inside
-  // main before returning here); never wedge Agent spawns on an unexpected error.
+  // main before returning here); never stall Agent spawns on an unexpected error.
   process.exit(0);
 }

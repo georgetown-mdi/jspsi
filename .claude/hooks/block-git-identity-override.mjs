@@ -6,7 +6,7 @@
 // Why this exists: every session and every subagent receives the harness login's
 // address in its context block, and an agent that reaches for it commits under an
 // identity that appears in no git config on the machine -- unrelated to the
-// repository's account, and invisible in review because the commit reads as
+// repository's account, and invisible in review because the commit is treated as
 // ordinary. Overriding the identity is never the agent's call: a wrong configured
 // identity is something to report to the maintainer, not to correct on the command
 // line. The refusal happens at the tool call because the after-the-fact repair is a
@@ -154,7 +154,7 @@ const CONFIG_WRITE_FLAGS = new Set([
 
 // Flags that clear a key rather than record a value under it. Naming the mode
 // keeps `git config --unset user.email <value-pattern>` -- key plus value, the
-// shape a bare write has -- from reading as a write.
+// shape a bare write has -- from being treated as a write.
 const CONFIG_CLEAR_FLAGS = new Set([
   "--unset",
   "--unset-all",

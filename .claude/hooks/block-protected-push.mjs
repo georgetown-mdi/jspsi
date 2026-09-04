@@ -81,7 +81,7 @@ function explicitDestinations(args) {
       continue;
     }
     if (a.startsWith("-")) {
-      // push options that take a separate value, so the value is not read as a
+      // push options that take a separate value, so the value is not treated as a
       // refspec (e.g. `--push-option staging`).
       if (/^(-o|--push-option|--repo|--exec|--receive-pack)$/.test(a)) {
         skipNext = true;
@@ -138,7 +138,7 @@ function main() {
     const args = gitPushArgs(tokenize(segment));
     if (!args) continue;
     // --all / --mirror push (or mirror) every ref, including staging and main, and
-    // carry no refspec to inspect -- so they would otherwise fall through to
+    // hold no refspec to inspect -- so they would otherwise fall through to
     // barePushVerdict and be allowed from a feature branch. Refuse them outright; a
     // legitimate feature-branch push names an explicit refspec, never --all/--mirror.
     if (args.some((a) => a === "--all" || a === "--mirror")) {

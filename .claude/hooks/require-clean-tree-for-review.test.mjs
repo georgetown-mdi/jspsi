@@ -62,7 +62,7 @@ function makeRepo(untracked = 0) {
   return dir;
 }
 
-// A linked worktree on `branch`, carrying a commit of its own so the branch's
+// A linked worktree on `branch`, holding a commit of its own so the branch's
 // tip differs from every other worktree's HEAD.
 function addWorktree(main, branch) {
   const path = `${main}-wt-${branch}`;
@@ -190,7 +190,7 @@ describe("require-clean-tree-for-review hook", () => {
   });
 
   it("blocks a round whose target worktree is dirty, from a clean caller", () => {
-    // The load-bearing case: the orchestrating session sits in a clean primary
+    // The critical case: the orchestrating session sits in a clean primary
     // checkout while the branch under review is uncommitted in its own tree.
     const main = track(makeRepo());
     const tree = track(addWorktree(main, "feature"));
@@ -278,7 +278,7 @@ describe("require-clean-tree-for-review hook", () => {
   });
 
   it("gates a round named by a saved workflow's name", () => {
-    // The requirement and the lock ride on any field that can carry the script:
+    // The requirement and the lock ride on any field that can hold the script:
     // scriptPath, workflow, or the name a saved workflow is invoked by.
     const main = track(makeRepo());
     track(addWorktree(main, "feature"));

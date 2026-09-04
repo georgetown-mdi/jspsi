@@ -17,7 +17,7 @@ export default defineConfig({
     // case. What that costs is set by how contended the machine is rather than
     // by anything the test asserts, so the default 5s leaves the slowest of them
     // (2.3s alone, 3.1s alongside the rest of the suite) inside a margin the
-    // next parallel build closes. Long enough that a real hang still surfaces
+    // next parallel build closes. Long enough that a real hang is still caught
     // well inside the file's own runtime.
     testTimeout: 30_000,
   },

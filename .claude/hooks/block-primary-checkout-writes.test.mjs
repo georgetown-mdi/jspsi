@@ -29,7 +29,7 @@ function runHook(payload) {
 const write = (file_path, cwd, tool_name = "Write") =>
   runHook({ tool_name, tool_input: { file_path, content: "x" }, cwd });
 
-// A throwaway repo carrying one tracked file, a gitignored scratch/, a source
+// A throwaway repo containing one tracked file, a gitignored scratch/, a source
 // directory holding no file yet, and room for a linked worktree nested under
 // .claude/worktrees/ the way the harness places them.
 function makeRepo() {
@@ -209,7 +209,7 @@ describe("block-primary-checkout-writes hook", () => {
     expect(write(join(sibling, "scratch", "notes.md"), own).status).toBe(0);
   });
 
-  it("allows a sibling-worktree write while that tree carries the sentinel", () => {
+  it("allows a sibling-worktree write while that tree contains the sentinel", () => {
     const dir = track(makeRepo());
     const own = addWorktree(dir, "feature");
     const sibling = addWorktree(dir, "other");
