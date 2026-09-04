@@ -369,9 +369,7 @@ describe("saved list route: an agreed schedule surfaces its due-ness", () => {
     app.render(createElement(SavedExchanges));
 
     await expect
-      .element(
-        page.getByText("2 agreed run windows in a row", { exact: false }),
-      )
+      .element(page.getByText("2 scheduled runs in a row", { exact: false }))
       .toBeInTheDocument();
     // Both checks: the partner, and this device's own clock.
     await expect
@@ -393,9 +391,7 @@ describe("saved list route: an agreed schedule surfaces its due-ness", () => {
     app.render(createElement(SavedExchanges));
 
     await expect
-      .element(
-        page.getByText("2 agreed run windows in a row", { exact: false }),
-      )
+      .element(page.getByText("2 scheduled runs in a row", { exact: false }))
       .toBeInTheDocument();
     // The escalation is a state to look into, not a failure: it takes the same
     // caution treatment the exchange's own surface renders it in, and the failure
@@ -404,7 +400,7 @@ describe("saved list route: an agreed schedule surfaces its due-ness", () => {
     // auto-pause").
     expect(
       app.container.querySelector(`.${styles.statusLineWarn}`)?.textContent,
-    ).toMatch(/2 agreed run windows in a row/);
+    ).toMatch(/2 scheduled runs in a row/);
     // The danger class reaches no part of the row, not just not this line.
     expect(app.container.innerHTML).not.toContain(styles.statusLineDanger);
   });

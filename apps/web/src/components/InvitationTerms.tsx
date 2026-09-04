@@ -1321,9 +1321,9 @@ export function InvitationTerms({
             <Term label="Linkage strategy">
               <Text size="sm">
                 This exchange matches in a single pass. That means one of you
-                sends the other everything it prepared for every matching rule
-                at once, so that party sees matches on the weaker rules too, not
-                only the strongest. Which of you that is is decided when the
+                sends the other everything it prepared for every linkage key at
+                once, so that party also sees matches on the weaker keys, not
+                only the strongest. Which of you sends is decided when the
                 exchange runs, so it may be you. Both parties must agree to
                 single-pass. The matched result is the same either way; what
                 differs is how much your partner can observe while it runs.

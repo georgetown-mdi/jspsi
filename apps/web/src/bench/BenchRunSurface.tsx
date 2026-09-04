@@ -52,10 +52,10 @@ export function peerWindowDurationPhrase(ms: number): string {
  * exchange actually runs under.
  */
 export const SERVER_JOB_PEER_WINDOW_BODY =
-  "Your partner's console must run its half while yours is running. This " +
-  `console waits about ${peerWindowDurationPhrase(DEFAULT_PEER_TIMEOUT_MS)} ` +
-  "for the partner before the exchange stops; if it stops, coordinate a time " +
-  "and run it again.";
+  "Your partner's console must run its half while yours is running. Yours " +
+  `waits about ${peerWindowDurationPhrase(DEFAULT_PEER_TIMEOUT_MS)} for the ` +
+  "partner before the exchange stops; if it stops, coordinate a time and run " +
+  "it again.";
 
 const PREVIEW_EDGE_CHARS = 8;
 const COPY_STATUS_CLEAR_MS = 2000;
@@ -485,9 +485,10 @@ export const UNKNOWN_RECORD_CONFIRM_TITLE =
  * ({@link ./RecordDownload}).
  */
 export const UNKNOWN_RECORD_CONFIRM_BODY =
-  "psilink cannot tell whether this run wrote a disclosure record. Continuing " +
-  "removes the run and anything it wrote, and neither party can recreate it. " +
-  "Reload this page to check first if you need the accounting entry.";
+  "This console stopped answering whether this run wrote a disclosure " +
+  "record. Going on removes the run and anything it wrote, and neither party " +
+  "can recreate it. Reload this page to check first if you need the " +
+  "accounting entry.";
 
 /**
  * What that confirm says while the ask is still running. Same unknown, different
@@ -496,9 +497,10 @@ export const UNKNOWN_RECORD_CONFIRM_BODY =
  * than at a reload that would start the asking over.
  */
 export const PENDING_RECORD_CONFIRM_BODY =
-  "psilink is still checking whether this run wrote a disclosure record. " +
-  "Continuing removes the run and anything it wrote, and neither party can " +
-  "recreate it. Wait for the answer first if you need the accounting entry.";
+  "This console has not yet answered whether this run wrote a disclosure " +
+  "record. Going on removes the run and anything it wrote, and neither party " +
+  "can recreate it. Wait for the answer first if you need the accounting " +
+  "entry.";
 
 /** The title the confirm heads with once the ask has landed on the appliance's own
  * denial while the dialog is open. The record is settled and there is none, so the

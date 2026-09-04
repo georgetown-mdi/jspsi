@@ -10,7 +10,7 @@ export const Route = createFileRoute("/direct")({
   component: DirectExchangeBench,
   head: () => ({
     meta: seo({
-      title: "psilink - direct exchange",
+      title: "Direct exchange - psilink",
       description:
         "Run an exchange you have already arranged, against a server you and your partner agreed on.",
     }),

@@ -198,10 +198,10 @@ export function DirectServerSection({
           ) : (
             <>
               {rendezvous.folderName === undefined ? (
-                <>Runs through the shared folder mounted on this console.</>
+                <>Runs through the shared directory mounted on this console.</>
               ) : (
                 <>
-                  Runs through the shared folder{" "}
+                  Runs through the shared directory{" "}
                   <span className={styles.mono}>{rendezvous.folderName}</span>{" "}
                   on this console.
                 </>

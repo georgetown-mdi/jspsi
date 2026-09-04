@@ -258,7 +258,7 @@ describe("managed exchange detail configuration", () => {
     // The failure surfaces beside the button, in the file's existing error voice.
     await expect
       .element(
-        page.getByText("The fresh invitation could not be created", {
+        page.getByText("Could not create a fresh invitation", {
           exact: false,
         }),
       )

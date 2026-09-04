@@ -55,7 +55,7 @@ export type AcceptorStep = AcceptorSpineStepName | "launched";
 
 /** The spine step labels shown in the top-bar stepper. */
 export const ACCEPTOR_STEP_LABELS: Record<AcceptorSpineStepName, string> = {
-  review: "Review configuration",
+  review: "Review the terms",
   consent: "Consent & your file",
   columns: "Confirm your columns",
 };

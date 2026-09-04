@@ -242,8 +242,7 @@ function ConfigurationView({
               title="Could not create a fresh invitation"
               mb="sm"
             >
-              The fresh invitation could not be created. Nothing changed here;
-              try again.
+              Nothing changed here; try again.
             </Alert>
           )}
           <Button

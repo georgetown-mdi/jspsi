@@ -7,7 +7,7 @@ export const Route = createFileRoute("/exchange")({
   component: InviterBench,
   head: () => ({
     meta: seo({
-      title: "Run an exchange - psilink",
+      title: "Create an exchange - psilink",
       description: "Run a private record linkage with your partner.",
     }),
   }),

@@ -694,8 +694,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
                 </p>
                 {exportFailed && (
                   <Alert color="red" title="Could not save the backup" mb="sm">
-                    The backup could not be saved. Nothing changed here; try
-                    again.
+                    Nothing changed here; try again.
                   </Alert>
                 )}
                 <Button
@@ -1037,8 +1036,7 @@ function ReinviteRecovery({
               title="Could not create a fresh invitation"
               mb="sm"
             >
-              The fresh invitation could not be created. Nothing changed here;
-              try again.
+              Nothing changed here; try again.
             </Alert>
           )}
           <Button mt="sm" onClick={onReinvite} loading={reinviting}>
@@ -1225,7 +1223,7 @@ function BackupPanel({
       </p>
       {failed && (
         <Alert color="red" title="Could not save the backup" mb="sm">
-          The backup could not be saved. Nothing changed here; try again.
+          Nothing changed here; try again.
         </Alert>
       )}
       <Button mt="sm" variant="default" onClick={onBackUp} loading={busy}>

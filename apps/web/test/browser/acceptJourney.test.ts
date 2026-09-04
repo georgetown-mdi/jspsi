@@ -157,7 +157,7 @@ test("acceptor journey reaches Done with a downloadable result driven only throu
   window.location.hash = await encodeRunToken();
   app.render(createElement(AcceptorBench));
 
-  // Review configuration -> Continue. The decode-to-terms handoff is the acquire
+  // Review the terms -> Continue. The decode-to-terms handoff is the acquire
   // phase's own state reaching the first rendered screen.
   await expect
     .element(page.getByText("Invitation from County Health Department"))

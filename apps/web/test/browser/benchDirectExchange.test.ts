@@ -798,7 +798,9 @@ describe("direct exchange transport step", () => {
       .getByRole("radio", { name: "A shared directory", exact: false })
       .click();
     await expect
-      .element(page.getByText("Runs through the shared folder mounted on this"))
+      .element(
+        page.getByText("Runs through the shared directory mounted on this"),
+      )
       .toBeInTheDocument();
     expect(page.getByText("rendezvous", { exact: true }).query()).toBeNull();
   });

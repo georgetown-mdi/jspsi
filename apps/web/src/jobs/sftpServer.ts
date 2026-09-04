@@ -502,7 +502,7 @@ function materializeRawCredential(
     filePath = materializeSftpCredential(scratchDir, credential.value);
   } catch {
     throw new JobApiConfigError(
-      "connection.credential could not be written to the console",
+      "connection.credential could not be saved on this console",
     );
   }
   return {

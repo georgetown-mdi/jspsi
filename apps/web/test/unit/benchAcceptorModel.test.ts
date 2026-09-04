@@ -132,7 +132,7 @@ describe("acceptor spine derivation", () => {
   test("review-current: the later two steps are pending and not navigable", () => {
     const spine = acceptorSpine("review");
     expect(spine.map((entry) => entry.label)).toEqual([
-      "Review configuration",
+      "Review the terms",
       "Consent & your file",
       "Confirm your columns",
     ]);

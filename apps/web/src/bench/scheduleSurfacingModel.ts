@@ -181,7 +181,7 @@ export function repeatedMissCoordination(
   if (misses < REPEATED_MISS_ESCALATION) return undefined;
   return {
     misses,
-    line: `${misses} agreed run windows in a row passed with no run; check with your partner, and check this device's clock.`,
+    line: `${misses} scheduled runs in a row have not happened; check with your partner, and check this device's clock.`,
     prompt: `${misses} scheduled runs in a row have not happened. Ask your partner whether they are still running this exchange, and check this device's clock -- if it is wrong, your run window and theirs never overlap. Nothing has been paused: the schedule stands, and the count resets after a successful run.`,
   };
 }

@@ -345,7 +345,7 @@ export function transportChooserCopy(
     filedropDescription: filedropRunsHere
       ? rendezvousShape.split === true
         ? 'Runs the exchange here against the two shared folders mounted on this console: it reads your partner\'s files out of one and writes yours into the other. That needs retain mode -- turn on "Keep every exchange file" below. Your file is read on this console, not uploaded from your browser. Your partner accepts with the same invitation code and runs their half against the same two folders.'
-        : "Runs the exchange here against the shared folder mounted on this console. Your file is read on this console, not uploaded from your browser. Your partner accepts with the same invitation code and runs their half against the same synced folder."
+        : "Runs the exchange here against the shared directory mounted on this console. Your file is read on this console, not uploaded from your browser. Your partner accepts with the same invitation code and runs their half against the same synced folder."
       : consoleBuild
         ? // The appliance's own reason wins where it has one: an incoherent pair
           // reports itself unconfigured, and the generic mount-a-directory

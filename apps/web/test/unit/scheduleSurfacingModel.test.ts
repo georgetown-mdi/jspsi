@@ -186,7 +186,7 @@ describe("repeated-miss coordination", () => {
   test("the second consecutive miss escalates, naming its count", () => {
     const coordination = repeatedMissCoordination(withMisses(2));
     expect(coordination?.misses).toBe(2);
-    expect(coordination?.line).toMatch(/^2 agreed run windows/);
+    expect(coordination?.line).toMatch(/^2 scheduled runs in a row/);
   });
 
   test("both phrasings name both checks: the partner and this device's clock", () => {
