@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 // Dependabot checklist-pin coverage check, run by static_checks.yaml on every PR.
 //
-// docs/spec/DEPENDENCY_PINS.md carries an "Upgrading ..." section for every
-// dependency this repository reaches past the public API of: the premises the
-// code rests on and the procedure that re-verifies them before a bump merges. A
-// checklist only fires if someone reads it, and a bump that arrives inside a
-// batched Dependabot pull request beside a dozen routine ones is not read that
-// way -- it is skimmed as routine, which is the whole point of batching it.
+// docs/spec/DEPENDENCY_PINS.md has an "Upgrading ..." section for every
+// dependency this repository reaches past the public API of: the assumptions
+// the code rests on and the procedure that re-verifies them before a bump
+// merges. A checklist only fires if someone reads it, and a bump that arrives
+// inside a batched Dependabot pull request beside a dozen routine ones is not
+// read that way -- it is skimmed as routine, which is the whole point of
+// batching it.
 // .github/dependabot.yml holds those packages out of the batch, and the two
 // files drift apart silently: a checklist added here reaches no config, and an
 // exclude entry dropped there reads exactly like one that was never needed. So
@@ -14,7 +15,7 @@
 //
 // The same silence covers the property every one of those checklists assumes
 // before any of that matters: that the package is pinned to the single version
-// whose internals the premises were read off. A caret slipping into a manifest
+// whose internals the assumptions were read off. A caret slipping into a manifest
 // installs a later one with no pull request for anyone to hold the checklist
 // against. So does a second manifest naming a different exact version: both
 // declarations pin, and both look deliberate, but the checklist was worked
@@ -68,8 +69,8 @@
 // `workspaces` globs reach. A declaration is a key of `dependencies`,
 // `devDependencies`, `optionalDependencies`, or `peerDependencies`, matched by
 // its exact name -- `@types/ssh2` is a package of its own, reaches no internal,
-// and carries no checklist. Exact means a bare `major.minor.patch`, optionally
-// carrying a prerelease or build suffix, and nothing else: a specifier that
+// and has no checklist. Exact means a bare `major.minor.patch`, optionally
+// including a prerelease or build suffix, and nothing else: a specifier that
 // pins by another route (a `file:` tarball, a git commit, an `npm:` alias)
 // fails here too, because whether such a route pins is a judgment per
 // dependency rather than a pattern, and a checklist for one wants this rule
@@ -96,18 +97,18 @@
 //     manifests declare; package-lock.json and node_modules are read by no
 //     rule, so a lockfile disagreeing with an exact declaration is `npm ci`'s
 //     to catch.
-//   - Whether the version pinned is the one the checklist's premises were read
+//   - Whether the version pinned is the one the checklist's assumptions were read
 //     off. That is what a bump's own review establishes; this holds only that
 //     a single version is named for it to have been read off.
-//   - The docker and github-actions update blocks, whose lists carry different
+//   - The docker and github-actions update blocks, whose lists hold different
 //     rationales; scripts/check-dependabot-ignore-shape.mjs owns the
 //     github-actions ignore list. No rule reaches a pin in another ecosystem:
-//     those carry a heading of another shape, which the extraction never
+//     those hold a heading of another shape, which the extraction never
 //     matches, and no npm manifest declares them.
-//   - Whether a package that ought to carry an upgrade checklist has one. The
+//   - Whether a package that ought to hold an upgrade checklist has one. The
 //     read runs from the document out to the config and the manifests, and
 //     never back.
-//   - A group `patterns` entry that carries a `*` inside an otherwise literal
+//   - A group `patterns` entry that contains a `*` inside an otherwise literal
 //     name -- e.g. a scoped org wildcard. The fourth rule reads a `patterns`
 //     entry as either a literal package name or the bare `*` npmGroups()
 //     already normalizes an absent `patterns` key to; a glob of any other
@@ -202,7 +203,7 @@ export function headingViolations(sections) {
 /**
  * The dependency groups the npm update blocks declare, as
  * `{block, name, patterns, excludePatterns}` in config order, or null when the
- * source carries no npm block at all. `block` is the position of the update
+ * source has no npm block at all. `block` is the position of the update
  * block the group was declared in among the npm blocks, so a rule reading this
  * flattened list can still tell two blocks' groups apart. A group declaring no
  * `patterns` is read as matching everything, which is Dependabot's documented
@@ -256,8 +257,8 @@ function swallowViolations(candidates, describe) {
 }
 
 /**
- * Every checklist-carrying package a group would swallow without excluding, as
- * message strings. Empty means no batched pull request can carry a bump whose
+ * Every checklist-holding package a group would swallow without excluding, as
+ * message strings. Empty means no batched pull request can hold a bump whose
  * upgrade checklist is recorded in the pins document.
  */
 export function coverageViolations(packages, groups) {
@@ -273,10 +274,10 @@ export function coverageViolations(packages, groups) {
  * group in the same update block would swallow into its own batch without
  * excluding, as message strings naming the package, the group that names it,
  * and the group whose exclusion is missing. Two groups share an update block
- * when they carry the same `block` from npmGroups(); a group in another block
+ * when they hold the same `block` from npmGroups(); a group in another block
  * is never compared, competing for no pull request with this one. Empty means
  * every package a group names outright is held out of every other group in its
- * block that would otherwise match it. Throws when a `patterns` entry carries
+ * block that would otherwise match it. Throws when a `patterns` entry contains
  * a `*` inside an otherwise literal name -- npmGroups() already normalizes an
  * absent `patterns` key to the bare `*` this treats as "names no package"; a
  * glob of any other shape is a package list this does not resolve to names, so
@@ -339,7 +340,7 @@ export function packageDeclarations(packages, manifests) {
 }
 
 /**
- * Every checklist-carrying package this workspace declares at something other
+ * Every checklist-holding package this workspace declares at something other
  * than an exact version, and every one it declares nowhere at all, as message
  * strings. Empty means each checklist covers a package pinned to one version.
  */
@@ -360,7 +361,7 @@ export function exactnessViolations(packages, declarations) {
 }
 
 /**
- * Every checklist-carrying package this workspace declares at more than one
+ * Every checklist-holding package this workspace declares at more than one
  * version, as message strings naming each declaration and its specifier. Empty
  * means each checklist covers one version wherever the package is declared.
  */

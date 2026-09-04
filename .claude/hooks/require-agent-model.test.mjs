@@ -147,7 +147,7 @@ describe("require-agent-model hook", () => {
     expect(stderr).toContain("spawn of 'general-purpose'");
   });
 
-  it("reads the exemption as an exact subagent_type, not a substring", () => {
+  it("treats the exemption as an exact subagent_type, not a substring", () => {
     const dir = makeProject({ worker: "opus" });
     dirs.push(dir);
     for (const subagent_type of ["forked-reviewer", "Fork", "fork "]) {
@@ -181,7 +181,7 @@ describe("require-agent-model hook", () => {
   });
 
   it("fails closed when the agent definitions cannot be read", () => {
-    // The bare-spawn path has no downstream backstop, so an unreadable
+    // The bare-spawn path has no downstream safety check, so an unreadable
     // allowlist blocks rather than allows.
     const empty = mkdtempSync(join(tmpdir(), "agent-model-noagents-"));
     dirs.push(empty);

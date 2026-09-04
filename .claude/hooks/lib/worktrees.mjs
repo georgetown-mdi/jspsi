@@ -3,9 +3,9 @@
 //
 // Agent worktrees live under .claude/worktrees/, inside the repository root, so
 // every linked worktree sits under the main worktree's own path prefix. The
-// worktree owning a path is therefore the longest registered path containing it
-// and not the first, which is the rule two hooks each parsed
-// `git worktree list --porcelain` for.
+// worktree owning a path is therefore the longest registered path containing it,
+// not the first; this module gives that rule to every hook that needs it rather
+// than each parsing `git worktree list --porcelain` on its own.
 
 import { git } from "./shell.mjs";
 
@@ -55,10 +55,10 @@ export function worktreeRecords(directory) {
 }
 
 /**
- * Whether `path` carries the prefix a child of `directory` carries. That prefix
+ * Whether `path` holds the prefix a child of `directory` holds. That prefix
  * is just "/" at the filesystem root, where appending a separator would build a
  * "//" that nothing starts with and `rm -rf /` would then contain no worktree at
- * all; the root is the one directory that reads as a child of itself.
+ * all; the root is the one directory that is treated as a child of itself.
  */
 export function isStrictlyInside(path, directory) {
   return path.startsWith(directory === "/" ? "/" : `${directory}/`);

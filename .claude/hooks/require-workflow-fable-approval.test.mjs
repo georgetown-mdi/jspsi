@@ -83,7 +83,7 @@ describe("require-workflow-fable-approval hook", () => {
     expect(out).toBe("");
   });
 
-  it("passes through a Workflow call carrying no inline script", () => {
+  it("passes through a Workflow call holding no inline script", () => {
     const out = runHook({
       tool_name: "Workflow",
       tool_input: { scriptPath: ".claude/workflows/whatever.mjs" },

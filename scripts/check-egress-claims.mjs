@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // URL-literal egress guard, run by static_checks.yaml on every PR.
 //
-// PRIVACY.md publishes load-bearing NEGATIVE claims to agency security,
+// PRIVACY.md publishes critical NEGATIVE claims to agency security,
 // compliance, and privacy reviewers: the container "makes no other network
 // connection" beyond the SFTP server or shared directory the operator
 // configures; the hosted web application has "no analytics or third-party
@@ -12,7 +12,7 @@
 // analytics snippet, or a version-check ping is one import away, and the
 // document that agency reviewers were handed goes quietly false. So the claim
 // is encoded as a check: a URL literal in shipped source that names a host
-// under one of the schemes below either sits on ALLOWLIST, each entry carrying
+// under one of the schemes below either sits on ALLOWLIST, each entry stating
 // the reason it does not contradict the document, or it fails the build.
 //
 // WHAT THIS CHECK DOES NOT COVER -- most of it past the reach of a literal
@@ -22,7 +22,7 @@
 //     operator-supplied value, or by string concatenation never appears as a
 //     literal. The invitation endpoint and the operator's SFTP server are
 //     legitimately of this kind, so a literal scan is the only shape available
-//     here; it is a backstop, not a proof of no egress.
+//     here; it is a safety check, not a proof of no egress.
 //   - Egress originating inside a dependency. Only first-party source under
 //     SCANNED_ROOTS and SCANNED_FILES is read; what a package does at runtime is
 //     the dependency review's ground (CONTRIBUTING.md, Dependency Policy).
@@ -38,7 +38,7 @@
 //     a scanned root, so the gap opens only for a file written under one of
 //     those roots and ignored there.
 //   - A text file in an encoding other than UTF-8. Every scanned file is
-//     decoded as UTF-8, so a UTF-16 one reads as its characters separated by
+//     decoded as UTF-8, so a UTF-16 one displays as its characters separated by
 //     NULs, matches nothing, and is still counted among the files scanned.
 //   - A URL literal inside a JavaScript or TypeScript comment. A comment holds
 //     no literal node, so a `@see` link in a JSDoc block and a trailing
@@ -63,7 +63,7 @@
 //     author who wants to hide it.
 //   - Schemes outside http, https, stun, stuns, turn, and turns: a `wss://`,
 //     `ws://`, `ftp://` or `file://` literal names a host and is not reported.
-//     Nor is a protocol-relative `//host` reference, which carries no scheme to
+//     Nor is a protocol-relative `//host` reference, which has no scheme to
 //     match.
 //   - An authority naming no host of its own: empty, a scheme followed by
 //     nothing but slashes, which is what a protocol comparison
@@ -116,12 +116,12 @@
 // over-report rather than under-report.
 //
 // SCANNED_ROOTS is source that ships or runs, not all TypeScript. Beside the
-// app and library trees and the web app's static assets it carries
+// app and library trees and the web app's static assets it includes
 // apps/web/server, the Nitro entry point the deployed server boots (named by
 // apps/web/nitro.config.ts). The signaling broker's whole src is among the
 // library trees: the web build bundles it into that same server, and its
 // standalone entry point runs the identical wiring as a service of its own.
-// SCANNED_FILES carries the shipped files that sit
+// SCANNED_FILES contains the shipped files that sit
 // outside any scanned tree, for both images: the two entrypoints,
 // docker-entrypoint.sh and docker-entrypoint-fips.sh, which run inside the
 // container the "no other network connection" claim is about (each is its
@@ -134,15 +134,15 @@
 // because a `RUN curl` or `ADD https://...` pulling a third party into the
 // image is what a reviewer of that claim wants shown.
 //
-// Deliberately outside both: the build and test configuration at each workspace
+// By design, outside both: the build and test configuration at each workspace
 // root and the sibling test/ trees; and apps/web/deploy, whose nginx and
 // platform-hook files configure the Elastic Beanstalk host rather than the
 // application, addressing the instance itself (127.0.0.1, the EC2 metadata
 // service) and belonging to deploy review. The test trees and the deploy files
 // reach no user; build configuration does, through what it emits, which is why
 // it is listed above as a gap rather than a safe exclusion. A tree that starts
-// shipping is added here, so an exclusion reads as the decision it is rather
-// than an oversight.
+// shipping is added here, so an exclusion is treated as the decision it is
+// rather than an oversight.
 //
 // Test files are NOT excluded. The scanned roots are shipped-source trees by
 // construction (the suites live in sibling test/ directories), so a `*.test.*`
@@ -274,7 +274,7 @@ const NOTICE_BASENAMES = new Set([
   "COPYING",
 ]);
 
-// Where a URL ends inside the text carrying it: whitespace, the quote forms,
+// Where a URL ends inside the text holding it: whitespace, the quote forms,
 // and the punctuation that brackets one in TypeScript, JSX, and CSS. Braces are
 // left out and read at endOfUrl instead, where whether a `}` closes syntax or
 // spells text is a question about the candidate rather than the character. `[`
@@ -336,7 +336,7 @@ function lineOf(source, position) {
  * wrote it. A segment is either literal text or, in a template, the `${...}`
  * span between two literal ones, and each records where its text starts in the
  * file. A segment whose text the file spells verbatim maps its own offsets
- * straight back; one the parser rewrote (a literal carrying an escape) reports
+ * straight back; one the parser rewrote (a literal holding an escape) reports
  * the position it begins at.
  *
  * A `raw` candidate is the whole text of a file no parser was run for, which
@@ -375,7 +375,7 @@ function positionOf(candidate, offset) {
 }
 
 /**
- * A template as one candidate, its literal spans carrying the source text of
+ * A template as one candidate, its literal spans holding the source text of
  * each `${...}` between them. Both template expressions and template literal
  * types are written this way, and the spans are read the same for either.
  *
@@ -417,8 +417,8 @@ function parsedLiterals(source, path) {
     SCRIPT_KIND_BY_EXTENSION.get(extname(path).toLowerCase()),
   );
   // `parseDiagnostics` is off the public SourceFile type. A TypeScript upgrade
-  // that renames it therefore reads as "cannot parse", which scans the file raw
-  // and over-reports, rather than as "parsed clean".
+  // that renames it therefore is treated as "cannot parse", which scans the
+  // file raw and over-reports, rather than as "parsed clean".
   if (parsed.parseDiagnostics?.length !== 0) return undefined;
 
   const literals = [];
@@ -449,7 +449,7 @@ function parsedLiterals(source, path) {
  * Where the URL beginning at `start` ends: the first terminator the candidate's
  * own reading of the text admits.
  *
- * A parsed candidate carries the parser's word on which spans interpolate, so a
+ * A parsed candidate holds the parser's word on which spans interpolate, so a
  * terminator inside one of them belongs to the expression rather than to the
  * URL, and a brace is never a terminator at all: in a template it opens or
  * closes a span whose text belongs to the authority the literal writes, and in
@@ -489,8 +489,8 @@ function endOfUrl(candidate, start) {
  * The host `new URL()` resolves `authority` to, or undefined where it rejects
  * it outright. The parser is the oracle for both directions, and it is handed
  * an authority position rather than the literal as written: `stun:` and `turn:`
- * URIs carry no `//` (RFC 7064, RFC 7065), and the slash count of a web URL
- * carries nothing either, since `new URL()` resolves `https:host/x` through
+ * URIs have no `//` (RFC 7064, RFC 7065), and the slash count of a web URL
+ * means nothing either, since `new URL()` resolves `https:host/x` through
  * `https:////host/x` alike and `fetch` dereferences them alike too.
  *
  * What that buys over judging the characters: an internationalized host is a
