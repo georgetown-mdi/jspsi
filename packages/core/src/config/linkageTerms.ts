@@ -27,314 +27,148 @@ import { exceedsOwnKeyCount } from "../utils/objectKeyCount.js";
 
 // --- Untrusted-input bounds --------------------------------------------------
 
-// These terms travel inside an invitation token, which the decoder accepts from
-// a counterparty whose token passed only a transcription checksum -- a check
-// anyone can recompute over a crafted payload, not an authenticity guarantee
-// (see invitation.ts) -- and they are parsed a second time off the exchange wire
-// (protocolSetup), where the binding size cap is the far larger
-// MAX_FRAME_SIZE_BYTES (~512 MiB, connection/frameSize.ts), not the 64 KiB
-// MAX_ENCODED_INVITATION_LENGTH of the token path. The rule below: every
-// partner-controlled free-text string carries a generous length `.max()`, and
-// every partner-controlled collection carries a count bound, applied BEFORE
-// per-element validation. The arrays take the boundedArray count gate -- the
-// top-level `linkageFields` and `linkageKeys`, each constraint's `exclude` list,
-// a `transform` step list, and a key's `elements`; the `transform.params` record
-// takes an inline permissive-stage + count-refine + pipe of the same shape (its
-// count refine is a cheap early-exit key count, see MAX_PARAMS_ENTRIES and
-// exceedsOwnKeyCount), since boundedArray itself is array-only. They all share a
-// RangeError exposure a bare `.max()` cannot close: Zod v4 validates every
-// element BEFORE the length check, so a partner array of millions of invalid
-// elements (a few MB of JSON, trivially under the wire-path frame cap)
-// accumulates one issue per element first. Zod then either spreads that issue
-// array up through an enclosing array/record/tuple frame and overflows its call
-// stack (`Maximum call stack size exceeded`, ~130k elements, for a collection
-// nested >=2 frames deep -- an intervening object frame does not prevent it), or,
-// for a flat top-level array with no such frame (`linkageFields`/`linkageKeys`),
-// throws `Invalid string length` building the error string from the issues
-// (~3.5M elements). Both reproduced on Zod 4.4.3. The permissive first stage lets
-// the count refine fire before either RangeError. For the `transform.params`
-// record the count refine also closes a distinct LINEAR cost: not a RangeError
-// but a multi-second event-loop burn that, before this gate, ran in full twice
-// over a millions-key record -- once in the snake->camel camelize pre-pass and
-// once in the permissive record stage -- before the count was even checked. Each
-// of those is an EXPENSIVE per-key pass (a snake->camel rewrite, a per-key Zod
-// validation); the count gate replaces both with the cheapest per-key pass, a
-// bare key count (exceedsOwnKeyCount; still O(n) in keys -- a materialized object
-// has no sub-linear count -- but far cheaper than either). The camelize pre-pass
-// leaves an over-count params value verbatim (parseLinkageTerms passes its bound
-// to camelizeKeys) instead of rewriting it, and the schema's refine rejects it
-// before the per-key record stage, so the over-count record is counted but never
-// rewritten or per-key-validated. Legitimate sizes vary -- a
-// denylist holds hundreds of values, hence the most generous bound
-// (MAX_EXCLUDE_ENTRIES) -- but each bound is far above any real config and far
-// below the RangeError thresholds. The `params` VALUE content carries a uniform
-// content bound of its own: every STRING value of the record is capped at
-// MAX_TRANSFORM_PARAM_LENGTH by the record's value stage, whatever the function
-// and param name, because a string param sizes what the rest of the element
-// pipeline receives on every row. A non-string value stays `z.unknown()`. Above
-// that uniform floor sit the stricter per-function caps, each a per-step refine
-// on TransformStep's schema below, for the params whose magnitude drives
-// unbounded per-row work in a shape a string length does not describe:
-// `pad_left`'s numeric `length` (an unbounded `padStart` allocation,
-// MAX_PAD_LEFT_LENGTH), `parse_date`'s `inputFormat` / `outputFormat` strings (an
-// unbounded per-row regex build and output allocation, MAX_DATE_FORMAT_LENGTH),
-// and the four `tier: "regex"` functions' raw `pattern` / `delimiter` (an
-// unbounded per-row regex compile under the linear-time engine, measured on the
-// COERCED source so a non-string param renders no larger a compile source,
-// MAX_TRANSFORM_PATTERN_LENGTH).
-//
-// The `payload` send/receive arrays carry no enclosing array/record/tuple frame
-// (only the root object), so a pathological count there cannot drive the ~130k
-// STACK overflow the nested collections hit -- but they are not RangeError-free:
-// a far larger count (~millions of invalid columns, still within the frame cap)
-// makes Zod throw building the error string (`RangeError: Invalid string length`,
-// ~3.5M on Zod 4.4.3). protocolSetup's parse-error catch already rendered that
-// harmlessly, but the count gate (MAX_PAYLOAD_ENTRIES, applied before per-element
-// validation) forestalls it at the source so the over-count payload fails with a
-// single clean issue. A count `.max()` suits these because a real payload shares
-// at most a few hundred columns -- unlike the two post-handshake exchange-wire
-// flat arrays, which share this Invalid-string-length class but are legitimately
-// in the millions: `payloadExchange.ts` `columns`/`rowIndices` and
-// `participant.ts` `numberArrayMessage` (and `link.ts`
-// `associationAndIterationArray`) are bounded with a single-issue element
-// validator (utils/singleIssueArray.ts) rather than a count cap no real result
-// could pass, as are the overflow-exposed `payloadExchange.ts` `rows` and
-// `participant.ts` `associationTableMessage`. The Connection, Standardization,
-// and Metadata schemas are out of the partner threat model entirely -- reached
-// only from the operator's own local config, never from a partner-supplied
-// payload -- so their count fields are left as trusted input. Every reachable
-// RangeError was caught harmlessly in protocolSetup's parse-error catch already
-// (a RangeError has no `.issues`, so it renders via the message fallback and the
-// exchange aborts cleanly); the bounds turn that ungraceful internal exception
-// into a clean, bounded rejection. They are defense-in-depth, not semantic
-// limits.
+// These terms travel inside an invitation token from an unauthenticated
+// counterparty, and again off the exchange wire under the far larger
+// MAX_FRAME_SIZE_BYTES cap (connection/frameSize.ts). Every partner-controlled
+// free-text string carries a generous length `.max()`, and every
+// partner-controlled collection carries a count bound applied BEFORE
+// per-element validation: `boundedArray` for an array, or an equivalent
+// count-refine + pipe for the `transform.params` record, which `boundedArray`
+// does not cover. The exchange-wire arrays whose real count is legitimately in
+// the millions (payloadExchange.ts, participant.ts, link.ts) take a
+// single-issue element validator instead (utils/singleIssueArray.ts). The
+// Connection, Standardization, and Metadata schemas are operator-local, not
+// partner-controlled, and carry no such bound.
 
 /**
- * Generous upper bound on a short partner-controlled string -- the identifier-
- * and spec-like fields: a linkage key, field, or element `name`, an element
- * `field` reference, an element-`swap` reference, a transform `function` name and
- * its `params` keys, a payload column `name`, a legal-agreement `reference`, the
- * `version` string, and a name-constraint `allowedCharacters` class. A real value
- * is a short label (tens of characters); 256 is far above any legitimate one yet
- * refuses a megabyte-scale string. The metadata `ColumnMetadata.name`
- * (config/metadata.ts) reuses this same bound for parity, though that field is
- * operator-local config, not partner-controlled.
+ * Upper bound on a short partner-controlled identifier- or spec-like string: a
+ * linkage key, field, or element `name`, an element `field` reference, an
+ * element-`swap` reference, a transform `function` name and its `params` keys,
+ * a payload column `name`, a legal-agreement `reference`, the `version`
+ * string, and a name-constraint `allowedCharacters` class. Also reused by the
+ * operator-local metadata `ColumnMetadata.name` (config/metadata.ts).
  */
 export const MAX_NAME_LENGTH = 256;
 
 /**
- * Generous upper bound on a prose-like or data-value free-text field: a party
- * `identity`, a legal-agreement `purpose`, a payload column `description`, or a
- * constraint `exclude` value (which can be a full email address, ~254
- * characters). Larger than {@link MAX_NAME_LENGTH} because these legitimately
- * hold a sentence, a name-plus-contact line, or a long data value rather than a
- * single label; 1 KiB is still comfortably above any real value.
- *
- * Those four fields are exactly the document's free-text set, and they carry the
- * shape rule beside this one as a set too: see
- * {@link TEXT_CONTROL_CHAR_PATTERN}, which is applied to each of them without
- * exception.
+ * Upper bound on a prose-like or data-value free-text field: a party
+ * `identity`, a legal-agreement `purpose`, a payload column `description`, or
+ * a constraint `exclude` value. Larger than {@link MAX_NAME_LENGTH} since
+ * these hold a sentence or a long data value rather than a single label. The
+ * same four fields carry {@link TEXT_CONTROL_CHAR_PATTERN} without exception.
  */
 export const MAX_TEXT_LENGTH = 1024;
 
 /**
- * The control characters no free-text field of a terms document may carry: the
- * C0 range (NUL among them), DEL, and C1. The rule reaches every
- * {@link MAX_TEXT_LENGTH}-bounded field the document holds -- the party
- * `identity`, the legal-agreement `purpose`, a payload column `description`, and
- * each constraint `exclude` entry -- with no field spared and no exception for
- * tab, line feed, or carriage return. Each of the four is a single-line value: a
- * party label, a one-sentence statement of the disclosure's purpose, a data-
- * dictionary line, and a data value a cell is compared against. None of them is
- * the multi-line note a whitespace-control exception exists for, so no control
- * byte in any of them is text a party meant to write.
+ * The control characters refused in every {@link MAX_TEXT_LENGTH}-bounded
+ * free-text field of a terms document -- party `identity`, legal-agreement
+ * `purpose`, payload column `description`, and each constraint `exclude`
+ * entry: the C0 range (NUL included), DEL, and C1, with no exception for tab,
+ * line feed, or carriage return.
  *
- * The reason the refusal sits at the schema rather than at each display sink is
- * that the sinks are not the whole reach of these values. A terms document is
- * swapped with the partner at exchange time and folded into the canonical
- * encoding both parties hash, and three of the four fields are written verbatim
- * into each party's exchange record, which is kept and read back long after the
- * run: the two parties' identities, the agreement `purpose`, and a payload
- * column's `description` (exchangeRecord.ts). A constraint `exclude` value
- * reaches no exchange record -- the record's account of the matching basis
- * carries a field's name and semantic type, never a constraint -- but it does
- * persist past the live document: `psilink accept` provisions a configuration
- * from the adopted terms, and `saveConfig` serializes the whole of them,
- * constraints included, into the acceptor's YAML config, which is itself
- * parsed back through this schema, so a control character still cannot ride
- * it that way either. The seams that
- * neutralize a control character (sanitizeErrorForDisplay.ts,
- * compatibilityMessage.ts) act where psilink itself renders one, not where a
- * later reader of the record opens it. Every seat that parses a LIVE terms
- * document shares this schema -- the operator's own config load and the
- * post-handshake wire re-parse (parseLinkageTerms), the invitation-token decode,
- * and the exchange-file and job-intent schemas that embed
- * {@link LinkageTermsSchema} -- so one refusal at parse covers all of them,
- * rather than each of those consumers carrying a guard of its own.
+ * Enforced once at parse so every seat that reads a live document -- the
+ * operator's own config load, the post-handshake wire re-parse
+ * (`parseLinkageTerms`), the invitation-token decode, and the exchange-file
+ * and job-intent schemas that embed {@link LinkageTermsSchema} -- inherits it,
+ * rather than each consumer carrying a guard of its own.
  *
- * The live document is the whole of the rule's reach, and two readers of values
- * already recorded sit outside it by design: the exchange-record reader
- * (exchangeRecord.ts) and the wire-certificate schema (signedReceipt.ts)
- * length-bound their free-text fields and apply no control-character rule. The
- * record reader is a frozen-log reader whose invariant is to accept what a
- * possibly-different-version writer recorded, and what either of them carries is
- * left to the display-escaping seams wherever psilink renders it.
+ * A reader of an already-recorded value -- the exchange-record reader
+ * (exchangeRecord.ts) and the wire-certificate schema (signedReceipt.ts) --
+ * is outside this rule and relies on its own display-escaping instead.
  *
- * Letters outside ASCII are untouched: the ranges stop below U+00A0, so a party
- * that writes its name, its purpose, or its denylist in its own script is
- * admissible.
+ * Letters outside ASCII are untouched: the ranges stop below U+00A0.
  *
- * The web console draws these same ranges over an operator's `--identity` label
- * (`IDENTITY_CONTROL_CHAR_PATTERN`, apps/web/src/psi/identityLabel.ts), a label
- * that becomes the `identity` of a terms document this schema then reads; the two
- * are held equal by the web suite's parity check
- * (apps/web/test/unit/identityLabelParity.test.ts) rather than by this note. The
- * console contract is strictly stricter -- the boundaries that apply it also
- * refuse a leading `-`.
+ * The web console applies these same ranges to an operator's `--identity`
+ * label (`IDENTITY_CONTROL_CHAR_PATTERN`, apps/web/src/psi/identityLabel.ts,
+ * held equal by apps/web/test/unit/identityLabelParity.test.ts) and is
+ * stricter, also refusing a leading `-`.
  */
 export const TEXT_CONTROL_CHAR_PATTERN = /[\u0000-\u001f\u007f-\u009f]/;
 
 /**
- * The one reason all four free-text fields report, so the document says the same
- * thing about the same class of value wherever it is refused.
- *
- * A fixed literal naming no submitted value: the offending field is located by
- * the issue `path`, which `describeDecodeError` escapes segment by segment. That
- * is the discipline the referential-integrity, dialect, and length refusals in
- * this file already follow, and the unsanitized parse-error path (protocolSetup)
- * depends on it -- a message echoing the value would put the partner's bytes
- * back in front of the operator, which is the very thing this rule removes.
+ * Shared refusal message for every free-text control-character rejection, so
+ * the document reports the same thing about the same class of value wherever
+ * it fires. A fixed literal naming no submitted value: the offending field is
+ * located by the issue `path`, which `describeDecodeError` escapes segment by
+ * segment, as the unsanitized parse-error path (protocolSetup) requires.
  */
 export const TEXT_CONTROL_CHAR_MESSAGE =
   "a linkage terms free-text value must not contain control characters";
 
 /**
- * Generous upper bound on the COUNT of entries in the `linkageFields` and
- * `linkageKeys` arrays. The default template ships ~14 keys / 5 fields and a
- * hand-authored set is of the same order; 256 is more than any real
- * configuration needs yet refuses a token padded with tens of thousands of
- * entries to exhaust the recipient on decode/render. The `.min(1)` floor and the
- * most-to-least-precise ordering of `linkageKeys` are unaffected.
+ * Upper bound on the COUNT of entries in the `linkageFields` and
+ * `linkageKeys` arrays, applied before per-element validation. The `.min(1)`
+ * floor and the most-to-least-precise ordering of `linkageKeys` are
+ * unaffected.
  */
 export const MAX_LINKAGE_ENTRIES = 256;
 
 /**
- * Generous upper bound on the COUNT of entries in a transform step's `params`
- * record. A standardizing function takes a handful of parameters (the bundled
- * functions use one to three); 256 is far above any real parameter list yet
- * refuses a record padded with tens of thousands of keys. The bound is enforced
- * by a bare key count (see {@link TransformStep}'s schema and
- * {@link exceedsOwnKeyCount}) that fires BEFORE the per-key length validation, so
- * an over-count record is rejected with a single issue rather than one issue per
- * key -- which on the wide wire-path frame would otherwise overflow Zod's call
- * stack. The same bound also short-circuits the camelize pre-pass for an
- * over-count record (see {@link parseLinkageTerms}), so the record is counted
- * (O(n) in keys, but no sub-linear count exists for a materialized object) yet
- * neither rewritten key by key by the camelize pass nor per-key-validated by the
- * record stage -- the two expensive passes the count replaces. See the
- * untrusted-input bounds note above.
+ * Upper bound on the COUNT of entries in a transform step's `params` record,
+ * enforced by a bare key count ({@link exceedsOwnKeyCount}, on
+ * {@link TransformStep}'s schema) that fires before the per-key length
+ * validation, so an over-count record is rejected with a single issue rather
+ * than one per key. The same bound short-circuits the camelize pre-pass for
+ * an over-count record (see {@link parseLinkageTerms}).
  */
 export const MAX_PARAMS_ENTRIES = 256;
 
 /**
- * Generous upper bound on the `length` param of a `pad_left` transform step --
- * a NUMERIC param value, so the uniform string bound
- * ({@link MAX_TRANSFORM_PARAM_LENGTH}) does not describe it and this per-function
- * cap is the only thing that does (the rest of the bounds in this file cap
- * COLLECTION counts, see the untrusted-input bounds note above).
- * `pad_left` runs per row inside the key-building pipeline
- * ({@link applyElementTransform}, driven by `buildKeyStrings`), and an unbounded
- * `length` makes every row allocate a `String.prototype.padStart(length, char)`
- * of that size -- a crafted `1e9` exhausts memory and hangs the acceptor (a
- * browser-tab freeze on the web path, a hung process on the CLI), the
- * memory-allocation sibling of the regex compile-cost vector
- * ({@link MAX_TRANSFORM_PATTERN_LENGTH}). A real left-pad target is tens
- * of characters (a zero-padded SSN is 9, a phone 10); 256 is far above any
- * legitimate pad yet far below an allocation that matters. Enforced by a per-step
- * refine on {@link TransformStep}'s schema before any per-row allocation; the
- * factory's positive-integer check (standardization.ts) remains the runtime
- * backstop for the operator-local standardization path, which never reaches this
- * schema. This is a DoS ceiling on the partner wire path, not a semantic limit.
+ * Upper bound on the `length` param of a `pad_left` transform step -- a
+ * numeric value, so the uniform string bound
+ * ({@link MAX_TRANSFORM_PARAM_LENGTH}) does not cover it. `pad_left` runs per
+ * row in the key-building pipeline ({@link applyElementTransform}), and an
+ * unbounded `length` drives an unbounded `String.prototype.padStart`
+ * allocation on every row. Enforced by a per-step refine on
+ * {@link TransformStep}'s schema before any per-row allocation; the factory's
+ * own positive-integer check (standardization.ts) remains the runtime
+ * safety check for the operator-local standardization path, which never
+ * reaches this schema. A DoS ceiling on the partner wire path, not a
+ * semantic limit.
  */
 export const MAX_PAD_LEFT_LENGTH = 256;
 
 /**
- * Generous upper bound on the `inputFormat` and `outputFormat` params of a
- * `parse_date` transform step -- stricter than the uniform string bound every
- * param value carries ({@link MAX_TRANSFORM_PARAM_LENGTH}), because these two
- * drive a per-row regex build rather than a one-time allocation (see the
- * untrusted-input bounds note above).
- * `parse_date` runs per row inside the key-building pipeline
- * ({@link applyElementTransform}, which recompiles each step per row): its factory
- * builds a regex from `inputFormat` and assembles the result from `outputFormat`.
- * This length cap bounds the per-row WORK SIZE -- an unbounded `inputFormat` would
- * compile an ever-larger regex per row, and an unbounded `outputFormat` would
- * allocate an ever-larger output per matched row -- with 256 far above any real
- * date layout ("MM/DD/YYYY", "YYYY-MM-DD") yet small enough that the per-row build
- * and output stay cheap. The format's MM/DD tokens expand into adjacent
- * `(\d{1,2})` groups that catastrophically backtrack on the JavaScript engine, but
- * `parse_date` compiles its regex under the linear-time engine
- * (standardization.ts), which bounds that -- a former-ReDoS format is driven in
- * linkageTerms.test.ts and linearRegex.test.ts -- so this cap is a
- * work-SIZE ceiling, no longer the backstop against a backtracking blow-up it once
- * shared with a separate screen. Enforced by a per-step refine on
- * {@link TransformStep}'s schema before any row runs. A DoS ceiling on the partner
- * wire path, not a semantic limit.
+ * Upper bound on the `inputFormat` and `outputFormat` params of a
+ * `parse_date` transform step, stricter than the uniform string bound every
+ * param value carries ({@link MAX_TRANSFORM_PARAM_LENGTH}): both drive a
+ * per-row regex build and output allocation in the key-building pipeline
+ * ({@link applyElementTransform}). `parse_date` compiles its regex under the
+ * linear-time engine (standardization.ts), so this cap bounds per-row work
+ * size rather than guarding against backtracking. Enforced by a per-step
+ * refine on {@link TransformStep}'s schema before any row runs. A DoS
+ * ceiling on the partner wire path, not a semantic limit.
  */
 export const MAX_DATE_FORMAT_LENGTH = 256;
 
 /**
  * Upper bound on the length of a raw partner-controlled regex pattern -- the
  * `pattern` of `replace_regex` / `extract_regex` / `filter_regex` and the
- * `delimiter` of `split_on` (the four `tier: "regex"` functions). These run per
- * row inside the key-building pipeline ({@link applyElementTransform}, which
- * recompiles each step per row), so an unbounded pattern would compile an
- * ever-larger linear-time-engine program on every row. The engine matches in
- * linear time regardless (no catastrophic backtracking), and its compile is
- * internally bounded (repeat counts capped, program size limited), so this is a
- * per-row COMPILE-COST ceiling, not a safety control -- it preserves the
- * parse-cost bound the removed `redos-detector` screen provided
- * (MAX_ANALYZED_PATTERN_LENGTH, also 1000). A real transform pattern is short
- * (tens of characters); 1000 is far above any legitimate one. Enforced in two
- * places before any row runs: a per-step refine on {@link TransformStep}'s schema
- * reports the precise over-length message, and the dialect gate on
- * {@link LinkageTermsSchema} is handed this same bound (as `maxPatternLength`) so
- * it rejects an oversized source WITHOUT compiling -- otherwise the gate's own
- * `RE2JS.compile`, whose cost is super-linear in source length, would stall
- * validation for seconds on a single oversized in-dialect pattern before the
- * refine reported it. A DoS ceiling on the partner wire path, not a semantic
- * limit.
+ * `delimiter` of `split_on`. These compile per row in the key-building
+ * pipeline ({@link applyElementTransform}) under the linear-time engine,
+ * which cannot backtrack catastrophically but whose compile cost is
+ * super-linear in source length; this is a compile-cost ceiling, not a
+ * safety control. Enforced twice before any row runs: a per-step refine on
+ * {@link TransformStep}'s schema, and the dialect gate on
+ * {@link LinkageTermsSchema} (as `maxPatternLength`), which rejects an
+ * oversized source without compiling it. A DoS ceiling on the partner wire
+ * path, not a semantic limit.
  */
 export const MAX_TRANSFORM_PATTERN_LENGTH = 1000;
 
 /**
  * Upper bound on the length of a STRING-valued partner-controlled transform
- * param -- the uniform content bound under the per-function caps above, applied
- * to every entry of a `transform.params` record whose value is a string,
- * whatever function or param name it sits under.
- *
- * A string param sizes what the rest of the element pipeline receives on every
- * row, so its length is per-row work regardless of which function reads it: a
- * `replace_regex` `replacement` rewrites the operator's own cell into a value of
- * the replacement's size, which every later step of that element carries, and
- * which the fuzzy expansion replicates across a row's candidates
- * ({@link MAX_FUZZY_EXPANSION_INPUT_LENGTH} bounds only the value the fuzzy
- * element itself expands, never a sibling element's transformed cell). Without a
- * content bound that size is held only by the ~512 MiB frame ceiling
- * (connection/frameSize.ts). The bound is uniform across params rather than
- * per-amplifier so content cannot be routed through a param no measurement
- * covered, and it is deliberately the same threshold as the raw pattern beside it
- * ({@link MAX_TRANSFORM_PATTERN_LENGTH}), so no string param in a record is more
- * generous than the pattern it accompanies. A real param value is a few
- * characters to a few hundred -- a replacement literal, a `coalesce` default, a
- * `null_if` value -- so 1000 is far above any legitimate authoring and three
- * orders of magnitude below an amplification that matters.
+ * param -- the uniform content bound under the per-function caps above,
+ * applied to every string-valued entry of a `transform.params` record,
+ * whatever function or param name it sits under, since a string param sizes
+ * per-row work in the key-building pipeline regardless of which function
+ * reads it. Deliberately the same threshold as
+ * {@link MAX_TRANSFORM_PATTERN_LENGTH}, so no string param is more generous
+ * than the pattern beside it.
  *
  * Enforced on the `params` record's VALUE stage (see {@link TransformStep}'s
- * schema) before any row runs, so every path that parses partner terms inherits
- * it, and the offending param is located by the issue `path` rather than echoed
- * -- consistent with the unsanitized parse-error path the referential-integrity
- * and dialect refines rely on.
+ * schema) before any row runs; the offending param is located by the issue
+ * `path` rather than echoed.
  *
  * It reaches a string VALUE of the record, not a string nested inside an array-
  * or object-valued param: no factory derives a per-row value from a nested string
