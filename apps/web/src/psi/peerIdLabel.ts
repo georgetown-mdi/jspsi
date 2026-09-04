@@ -18,13 +18,10 @@ export const MAX_PEER_ID_LENGTH = 64;
 /**
  * The shape a `peer_id` may take when it is authored in the console: a single
  * label that starts and ends with an ASCII letter or digit and otherwise admits
- * only ASCII letters, digits, spaces, `-`, and `_`.
- *
- * Core permits any non-empty string -- a CLI operator types their own config, and
- * core's filename-safety note is advisory there -- but a value that arrives over
- * the job API becomes a filename component in a directory the SERVER owns, so the
- * separators, dot runs, and leading dash that could compose a path, a traversal,
- * or a flag-shaped token are refused rather than left to fail at the transport.
+ * only ASCII letters, digits, spaces, `-`, and `_`. Core permits any non-empty
+ * string, but a value from the job API becomes a filename component in a
+ * directory the SERVER owns, so separators, dot runs, and a leading dash that
+ * could compose a path, a traversal, or a flag-shaped token are refused.
  */
 export const PEER_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9 _-]*[A-Za-z0-9])?$/;
 

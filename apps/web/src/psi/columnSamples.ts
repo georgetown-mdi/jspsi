@@ -19,7 +19,7 @@ import type { CSVRow } from "@psilink/core";
 /**
  * Row-sample size for the before->after preview: the first few rows with a
  * non-empty value for the field's input column. A small fixed window keeps the
- * preview cheap and legible. Settled at 5, coordinated with the non-empty
+ * preview cheap and clear. Settled at 5, coordinated with the non-empty
  * aggregate and its row threshold.
  */
 export const PREVIEW_SAMPLE_SIZE = 5;
@@ -30,14 +30,11 @@ export type ColumnSamples = ReadonlyMap<string, ReadonlyArray<string>>;
 
 /**
  * Pick up to `limit` non-empty raw values for `inputColumn`, in row order. A row
- * whose value is missing or blank after trimming carries no signal for the
- * preview, so it is skipped rather than shown as an empty before->after pair. The
- * raw (untrimmed) value is kept -- the preview shows the operator's own cell.
- *
- * Reads by own-property ({@link readRowColumn}) so a short row lacking the column
- * reads as absent even when the column is named an `Object.prototype` member; a
- * bare `row[inputColumn]` would surface the inherited function past the blank
- * check.
+ * whose value is missing or blank after trimming is skipped rather than shown as
+ * an empty before->after pair; the raw (untrimmed) value is kept for the ones
+ * that qualify. Reads by own-property ({@link readRowColumn}) so a short row
+ * lacking the column is treated as absent even when the column is named an
+ * `Object.prototype` member, rather than exposing the inherited function.
  */
 export function sampleInputValues(
   rawRows: ReadonlyArray<CSVRow>,

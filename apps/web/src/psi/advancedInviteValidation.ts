@@ -72,7 +72,7 @@ function todayIso(now: Date): string {
  * distinct from {@link messageForField}'s "Enable at least one linkage key." so an
  * operator can tell the two apart. Names no specific field: an offending
  * element's `field` reference can be partner-controlled, so echoing it would
- * surface partner text into the UI -- the same reason {@link messageForField} and
+ * expose partner text in the UI -- the same reason {@link messageForField} and
  * core's referential-integrity refine locate the offender by issue path rather
  * than value. The operator identifies the key from its red "not satisfiable"
  * badge in the key list instead. */
@@ -123,7 +123,7 @@ const UNENCODABLE_KEY_TRANSFORM_MESSAGE =
   "precisely. Open that key and correct that transform's parameters, or remove " +
   "the step.";
 
-/** Shown when a key's two swapped elements carry different cleaning steps: a swap
+/** Shown when a key's two swapped elements have different cleaning steps: a swap
  * has only the receiver read the pair in the other order, while each element's
  * steps stay on its own position, so the column cleans one way on the party that
  * swaps and another on the party that does not. The terms schema refuses it on the
@@ -168,7 +168,7 @@ const REVEAL_IDENTIFIERS_INSTEAD =
  * change, in this editor's own words rather than core's refusal text -- the same
  * split {@link messageForField} keeps for a schema failure, whose Zod message is
  * technical. The rules themselves are core's ({@link countOnlyShapeViolation}), so
- * only the wording lives here, and each message names the control that carries
+ * only the wording lives here, and each message names the control that holds
  * the setting it asks about. */
 const COUNT_ONLY_MESSAGES: Record<CountOnlyShapeViolation, string> = {
   linkageKeys:
@@ -226,7 +226,7 @@ function isCanonicallyEncodable(value: unknown): boolean {
  *
  * The dead case points at the badge rather than the key, the same reason
  * {@link UNSUPPLYABLE_KEY_MESSAGE} names no field: an imported document's key
- * names are partner-influenceable, and the key list carries the badge beside this
+ * names are partner-influenceable, and the key list has the badge beside this
  * message.
  */
 function shortfallRemedy(verdict: LinkageTermsVerdict): string {
@@ -314,7 +314,7 @@ export function validateAdvancedInvite(
   //
   // The offending value's location is asked of the encoder too, one transform at a
   // time, rather than read off the error: its message quotes the value and a path
-  // that can carry a partner-chosen param name, neither of which is surfaceable.
+  // that can hold a partner-chosen param name, neither of which is safe to show.
   const encodable = isCanonicallyEncodable(terms);
   if (!encodable && errors.keys === undefined) {
     errors.keys = terms.linkageKeys.some((key) =>
@@ -328,7 +328,7 @@ export function validateAdvancedInvite(
       : UNENCODABLE_TERMS_MESSAGE;
   }
 
-  // A swap pair whose two elements carry different transforms, which the schema
+  // A swap pair whose two elements have different transforms, which the schema
   // refuses on the linkageKeys path, needs its own message ahead of the mapping
   // for the same reason the checks above do. Placed after the encode dry run
   // because an un-encodable param makes a pair unmatchable too, and that fault has
@@ -346,7 +346,7 @@ export function validateAdvancedInvite(
   // time (`deriveAcceptedLinkageTerms` throws). Block it here so the inviter never
   // mints an invitation the partner cannot accept. Reads the same disclosed set
   // `buildAdvancedTerms` derives the send from, so it fires precisely when the
-  // built terms carry a payload.send the chosen direction makes unacceptable.
+  // built terms contain a payload.send the chosen direction makes unacceptable.
   if (
     !outputForDirection(draft.outputDirection).shareWithPartner &&
     disclosedColumnNames(draft.metadata).length > 0
@@ -424,7 +424,7 @@ export function validateAdvancedInvite(
     );
     if (!verdict.fullySatisfied) {
       // The shortfall fragment is core's, the one the run-boundary refusal states,
-      // so the editor cannot describe the fault in words of its own. It carries
+      // so the editor cannot describe the fault in words of its own. It states
       // counts only; the key names stay off this message. Taken on the draft
       // standing: these terms are the inviter's own, and Generate is the step that
       // would first put them in front of a partner.
@@ -455,7 +455,7 @@ export function validateAdvancedInvite(
   // The exception is a param the pipeline drops value-INDEPENDENTLY -- a key that
   // matches nothing for BOTH parties, refused in core instead: `pipelineAlwaysDrops`
   // grades such an element dead, so the linkage grading above, the mint, and the
-  // run boundary all refuse the same terms, and the key list carries a "won't
+  // run boundary all refuse the same terms, and the key list has a "won't
   // match" badge covering both the authored draft and an imported document. Its
   // measured instance is a `substring` window that reads nothing at any value
   // length (an absent or zero bound); a present non-integer bound is rejected
@@ -474,7 +474,7 @@ export function validateAdvancedInvite(
   // (`assertFanOutImplemented`) reads, and wider than it: core admits a fan-out
   // under single-pass, while this editor authors none at any strategy. Both
   // surfaces a fan-out can reach are checked: an authored cleaning step, and a
-  // linkage-key element transform, which an imported document carries (the step
+  // linkage-key element transform, which an imported document holds (the step
   // editor offers the family on neither). Written last and unconditionally -- a
   // fan-out step blocks generation whatever else the control reports, and
   // removing it is the only fix.
@@ -607,7 +607,7 @@ function messageForField(field: AdvancedField): string {
  * not yet honor (gated by {@link APPLIED_SETTINGS}), or `undefined` when none. The
  * editor refuses such an import rather than load a draft whose headline behavior
  * silently does not happen. Applied at the one door (import) that could otherwise
- * carry a gated setting in from outside; the GUI controls that enforce the same
+ * bring a gated setting in from outside; the GUI controls that enforce the same
  * gate are disabled, not removed, so they cannot clear a setting an import turned
  * on. */
 export function gatedActiveSettingMessage(
@@ -631,7 +631,7 @@ export function gatedActiveSettingMessage(
 }
 
 /**
- * A message refusing an import whose linkage fields carry constraints the editor
+ * A message refusing an import whose linkage fields hold constraints the editor
  * cannot represent, or `undefined` when none does -- the constraints counterpart of
  * {@link gatedActiveSettingMessage}, applied at the same door. The draft holds no
  * per-field constraint state, and `authoredLinkageFields` re-stamps each rebuilt
@@ -645,7 +645,7 @@ export function gatedActiveSettingMessage(
  * operator.
  *
  * Refuse, not preserve: the editor has no surface to view or edit per-field
- * constraints, so preserving them would carry hash- and warning-relevant state the
+ * constraints, so preserving them would hold hash- and warning-relevant state the
  * operator can neither see nor change -- a worse hazard than refusing. Fail-closed
  * at the one door (import) that can introduce a constraint the authoring UI never
  * produces.
@@ -656,7 +656,7 @@ export function gatedActiveSettingMessage(
  * in the canonical form the agreement hashes (`canonicalString`). Name and type
  * are reproduced verbatim, so a surviving field whose canonical form differs
  * differs only in its constraints. This also catches the inverse -- an import
- * that STRIPS a default the rebuild adds back. An import carrying only
+ * that STRIPS a default the rebuild adds back. An import holding only
  * type-default constraints rebuilds identically and is accepted unchanged.
  *
  * The message names no field value, the same reason {@link UNSUPPLYABLE_KEY_MESSAGE}
@@ -758,8 +758,8 @@ const CITATION_DROP_NO_SUPPLYABLE_KEY =
   "column of the type a linkage key needs to keep it.";
 
 /**
- * The notice for an imported rule-set citation the rebuilt document will not carry,
- * or `undefined` when it carries it (or when the draft imported nothing, or
+ * The notice for an imported rule-set citation the rebuilt document will not include,
+ * or `undefined` when it includes it (or when the draft imported nothing, or
  * imported a document that cited nothing).
  *
  * It blocks nothing: dropping the citation is correct in all three cases --
@@ -783,13 +783,13 @@ export function importedCitationDropNotice(
 }
 
 /**
- * The fields whose declared cleaning or linkage-key transform carries a
+ * The fields whose declared cleaning or linkage-key transform includes a
  * `coalesce` that substitutes nothing where it sits, named by their safe
  * semantic-type label and de-duplicated in first-seen order.
  *
  * Both surfaces a coalesce can reach are read: the per-party cleaning the
  * operator authors here, and a linkage-key element transform, authored in the
- * key editor or carried by an imported document.
+ * key editor or held by an imported document.
  *
  * Labels, never names: an imported document's field names are
  * partner-influenceable, the same reason {@link UNSUPPLYABLE_KEY_MESSAGE} names
@@ -849,7 +849,7 @@ function inertCoalesceFieldLabels(
  * step editor, which has a row to attach advice to, names the failing one
  * instead (`INERT_COALESCE_ADVICE`).
  *
- * Blocks nothing: a terms document carrying this shape is valid, mints, and
+ * Blocks nothing: a terms document holding this shape is valid, mints, and
  * runs, with the step as a pass-through. Not one of
  * {@link validateAdvancedInvite}'s errors, whose every member holds the Generate
  * gate shut.

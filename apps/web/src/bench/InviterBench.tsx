@@ -249,7 +249,7 @@ function isSection(value: string): value is Section {
 const SAMPLE_INVITER_NAME = "Sample County Health Dept";
 
 /**
- * The inviter's working surface: one bench whose top bar walks the three-step
+ * The inviter's working surface: one console whose top bar walks the three-step
  * required spine while the work column swaps sections in place. The draft
  * seeds from the file the moment it is read (step 1) and every step-2 edit
  * flows through the shared draft model, so the Customize facts and the
@@ -339,7 +339,7 @@ export function InviterBench() {
   const [manageStatus, setManageStatus] = useState<ManageOfferStatus>("idle");
 
   // Fetch the console's authored SFTP connection once on a console build; one
-  // fetch per bench serves the session, and the default transport reads its
+  // fetch per console serves the session, and the default transport reads its
   // presence (SFTP when authored, else the filedrop save-a-file card). The helper
   // resolves to null on any failure or when none is authored, so Create then falls
   // back to the save-file surface rather than arming a server-job run with no
@@ -356,9 +356,9 @@ export function InviterBench() {
   }, [sftpInfo]);
 
   // Fetch the console's rendezvous mount once on a console build; the mount is
-  // boot-static on the server, so one fetch per bench serves the session. The helper
-  // resolves to `{ configured: false }` on any failure, so the filedrop card stays
-  // disabled unless the console confirms a mounted directory.
+  // boot-static on the server, so one fetch per console serves the session. The
+  // helper resolves to `{ configured: false }` on any failure, so the filedrop
+  // card stays disabled unless the console confirms a mounted directory.
   useEffect(() => {
     if (!isConsoleBuild() || rendezvous !== undefined) return;
     let cancelled = false;
@@ -395,11 +395,11 @@ export function InviterBench() {
 
   // The live run starts the moment a live invitation exists (the hook drives
   // the partner exchange right away) and is torn down when the invitation is
-  // discarded or the bench unmounts. A `save-file` run mode never runs live:
+  // discarded or the console unmounts. A `save-file` run mode never runs live:
   // its invitation is minted for the save surface, so it is withheld from the
   // hook and `invitation` alone (not the withheld value) proves nothing dials
   // for a saved exchange. A `server-job` run mode runs live too -- the console
-  // carries it out -- so it drives the hook exactly as `browser` does.
+  // performs it -- so it drives the hook exactly as `browser` does.
   const runsLive = chosenRunMode !== "save-file";
   // Which tuning controls the chosen transport can hold: the SFTP session mode
   // applies only where a session exists.
@@ -460,7 +460,7 @@ export function InviterBench() {
 
   // Full-CSV coverage for the Cleaning tab, the Customize menu's Cleaning-attention
   // value, and the coverage Problems entry -- one sweep shared by all three, lifted
-  // to the bench so the fact and the create gate render regardless of the active
+  // to the console so the fact and the create gate render regardless of the active
   // section (the AcceptorBench lift). The hook must run every render, so it takes
   // stable empty inputs until a file is acquired.
   const {
@@ -573,7 +573,7 @@ export function InviterBench() {
 
   // Apply a section arriving from a browser Back/Forward: set the step state
   // without pushing a new history entry (the browser already moved the cursor).
-  // The bench stays mounted throughout, so the loaded file, the derived terms,
+  // The console stays mounted throughout, so the loaded file, the derived terms,
   // and every in-progress edit survive the transition untouched. A section whose
   // backing state is gone (a `share` entry left behind by a start-over) clamps
   // to a step that can still render; the settled section is returned so the hook
@@ -604,14 +604,14 @@ export function InviterBench() {
   });
 
   // The live exchange itself, armed exactly where the guard above disarms and
-  // held until the run settles: this browser listens from the mint onward, an
-  // unload ends the session for BOTH parties, and the app-shell update notice
-  // renders its Reload button above this route throughout the run. A server-job
-  // run stays out for the same reason it is out above -- the console carries
-  // that one out. A sample-seeded mint (?demo=1 walked to a real mint) starts a
-  // real session with a real secret while demoActive is still true, but its
-  // partner is ordinarily the same operator's other tab, so losing it is judged
-  // not worth an unload prompt.
+  // held until the run settles: this browser listens from the mint onward,
+  // an unload ends the session for BOTH parties, and the app-shell update
+  // notice renders its Reload button above this route throughout the run. A
+  // server-job run stays out for the same reason it is out above -- the
+  // console performs it. A sample-seeded mint (?demo=1 walked to a real mint)
+  // starts a real session with a real secret while demoActive is still true,
+  // but its partner is ordinarily the same operator's other tab, so losing it
+  // is judged not worth an unload prompt.
   useBeforeUnloadPrompt(
     chosenRunMode === "browser" &&
       invitation !== undefined &&
@@ -758,12 +758,12 @@ export function InviterBench() {
     }
   }
 
-  // Commit a profiled mounted file (the console picker's "Use this file") as the
-  // acquired file. A blank header cell is refused early with the shared unnameable
-  // alert (as readFile does), or core's inferMetadata would throw at seed time and
-  // unmount the bench. Re-profiling the same committed file keeps the authored draft
-  // when its columns are unchanged and only refreshes the profile-derived facts;
-  // otherwise it reseeds from the profile.
+  // Commit a profiled mounted file (the console picker's "Use this file") as
+  // the acquired file. A blank header cell is refused early with the shared
+  // unnameable alert (as readFile does), or core's inferMetadata would throw
+  // at seed time and unmount the console. Re-profiling the same committed file
+  // keeps the authored draft when its columns are unchanged and only refreshes
+  // the profile-derived facts; otherwise it reseeds from the profile.
   function commitConsoleFile(profile: ProfiledJobInput) {
     const emptyPositions = emptyColumnPositions(profile.columns);
     if (emptyPositions.length > 0) {

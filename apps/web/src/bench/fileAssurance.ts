@@ -10,15 +10,12 @@ export const BROWSER_ONLY_FILE_ASSURANCE =
   "uploaded to our server.";
 
 /**
- * The console appliance's truthful file-assurance line, for a surface whose intake
- * reads the input from the appliance's mounted work directory rather than the
- * browser (the console inviter's and acceptor's server-file pickers). It is
- * deliberately NOT the value {@link fileAssuranceLine} resolves for the console
- * build: surfaces that never switch to the mounted-directory intake -- the lobby,
- * which makes no per-file claim, and the receipt verifier, which parses locally in
- * the browser on every build -- would state a claim false for them if this were the
- * blanket console line, so each mounted-input surface opts into this copy explicitly
- * rather than inheriting it.
+ * The console's truthful file-assurance line, for a surface whose intake reads
+ * the input from the console's mounted work directory rather than the browser
+ * (the console inviter's and acceptor's server-file pickers). It is not the
+ * value {@link fileAssuranceLine} resolves for the console build: the lobby and
+ * the receipt verifier never switch to mounted-directory intake, so each
+ * mounted-input surface opts into this copy explicitly.
  */
 export const APPLIANCE_FILE_ASSURANCE =
   "Files are read from this console's mounted work directory; your browser " +
@@ -27,12 +24,9 @@ export const APPLIANCE_FILE_ASSURANCE =
 /**
  * Decide the file-assurance line from whether this deployment's server
  * receives files. `false` (the hosted, browser-only deployment) renders
- * {@link BROWSER_ONLY_FILE_ASSURANCE} unchanged. `true` omits the claim
- * rather than substituting different copy: the browser-only claim would be
- * false for that deployment, but no replacement claim has been verified yet
- * either, and an unverified claim is worse than no claim. The deployment that
- * legitimately receives files (the console appliance) supplies its own
- * truthful copy when it ships.
+ * {@link BROWSER_ONLY_FILE_ASSURANCE} unchanged. `true` omits the claim rather
+ * than substituting unverified copy: the deployment that receives files (the
+ * console) supplies its own truthful copy when it ships.
  */
 export function fileAssuranceLine(
   serverReceivesFiles: boolean,
@@ -42,12 +36,10 @@ export function fileAssuranceLine(
 
 /**
  * The single resolved file-assurance line (or its absence) for this build. The
- * server receives files exactly on the console appliance ({@link isConsoleBuild}),
- * where the browser-only claim no longer holds. BenchLobby (which makes no per-file
- * claim of its own) renders this constant directly; the two mounted-input surfaces
- * (AcceptorBench, YourFileSection) render it on the hosted build but opt into
- * {@link APPLIANCE_FILE_ASSURANCE} on the console, where their intake reads the file
- * from the appliance rather than the browser. The deployment-awareness lives here
- * rather than in each surface reading the profile or hardcoding the claim.
+ * server receives files exactly on the console ({@link isConsoleBuild}), where
+ * the browser-only claim is false. BenchLobby renders this constant directly;
+ * the two mounted-input surfaces (AcceptorBench, YourFileSection) render it on
+ * the hosted build but opt into {@link APPLIANCE_FILE_ASSURANCE} on the console,
+ * where their intake reads the file from the console rather than the browser.
  */
 export const FILE_ASSURANCE_LINE = fileAssuranceLine(isConsoleBuild());
