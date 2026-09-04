@@ -63,6 +63,7 @@ import {
   logLevelFlag,
   openInputSource,
   parseOrExit,
+  RECEIPT_VERIFICATION_FAILED_EXIT_CODE,
   singleValue,
 } from "../util/cli";
 
@@ -503,7 +504,11 @@ export function formatVerificationReport(
           "self-attested. Pass --signed-record with the exchange's dual-signed " +
           "record (psilink-receipt-*.json) to check them.",
   );
-  return { lines, exitCode: report.outcome === "failed" ? 1 : 0 };
+  return {
+    lines,
+    exitCode:
+      report.outcome === "failed" ? RECEIPT_VERIFICATION_FAILED_EXIT_CODE : 0,
+  };
 }
 
 const CERTIFICATE_BINDING_WORD: Record<CertificateBindingStatus, string> = {
@@ -749,7 +754,11 @@ export function formatSignedRecordReport(
       "session key, which only the two parties held).",
   );
   lines.push(...verdict.guidance.map(guidanceLine));
-  return { lines, exitCode: headline.tone === "failed" ? 1 : 0 };
+  return {
+    lines,
+    exitCode:
+      headline.tone === "failed" ? RECEIPT_VERIFICATION_FAILED_EXIT_CODE : 0,
+  };
 }
 
 // --- Handler -----------------------------------------------------------------

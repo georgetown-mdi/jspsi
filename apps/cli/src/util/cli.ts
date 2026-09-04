@@ -251,6 +251,21 @@ export function parseOrExit<T>(parse: () => T): T {
 export const INTERNAL_FAULT_EXIT_CODE = 70;
 
 /**
+ * The process exit code `psilink verify-receipt` reports for a definite
+ * verification failure: `EX_DATAERR` (65), the sysexits code for input data
+ * that was incorrect in some way. Read by both of the command's report
+ * renderers -- the unsigned record and the dual-signed record -- and rolled up
+ * by the command handler with `Math.max` alongside the 0 the other outcomes
+ * report, so a failure on either half still reports this code.
+ *
+ * Distinct from the top-level catch-all (`process.exit(1)` in `index.ts`),
+ * which stays 1: an unattended supervisor that sees this code knows the run
+ * itself completed and rendered a definite bad-data verdict, rather than
+ * hitting an error no command handler caught. See docs/CLI.md, Exit codes.
+ */
+export const RECEIPT_VERIFICATION_FAILED_EXIT_CODE = 65;
+
+/**
  * The process exit code a caught command error reports: EX_USAGE (64) for a
  * {@link UsageError} or a {@link ConnectionError} of kind `usage`,
  * {@link INTERNAL_FAULT_EXIT_CODE} (70) for an {@link InternalConsistencyError},

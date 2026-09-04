@@ -46,6 +46,7 @@ import {
   readVerificationKeysFile,
   toRetainedResult,
 } from "../../src/commands/verifyReceipt";
+import { RECEIPT_VERIFICATION_FAILED_EXIT_CODE } from "../../src/util/cli";
 import {
   argv,
   captureStdio,
@@ -184,7 +185,7 @@ describe("formatVerificationReport", () => {
     expect(exitCode).toBe(0);
   });
 
-  test("failed exits 1 and does not assert tamper", () => {
+  test("failed exits 65 and does not assert tamper", () => {
     const { lines, exitCode } = formatVerificationReport(report("failed"), []);
     expect(lines[0]).toMatch(/^VERIFICATION FAILED/);
     // The message allows for a re-supply mismatch, not only tampering.
@@ -192,7 +193,7 @@ describe("formatVerificationReport", () => {
     expect(lines.join("\n")).toContain(
       "commitment localPayloadSent: DOES NOT MATCH",
     );
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(RECEIPT_VERIFICATION_FAILED_EXIT_CODE);
   });
 
   test("warnings are surfaced as notes", () => {
@@ -259,7 +260,7 @@ describe("formatVerificationReport: the recorded result size", () => {
       "the recorded figure is what disagrees, not the data",
     );
     expect(out).not.toContain("commitment associationTable: DOES NOT MATCH");
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(RECEIPT_VERIFICATION_FAILED_EXIT_CODE);
   });
 
   test("an unchecked size names what would let it be recounted", () => {
@@ -310,7 +311,7 @@ describe("formatVerificationReport: the recorded result size", () => {
     expect(lines[0]).toContain("the files you re-supplied check out");
     expect(lines[0]).not.toContain("may have been altered");
     expect(lines[0]).not.toContain("does not match this exchange");
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(RECEIPT_VERIFICATION_FAILED_EXIT_CODE);
   });
 
   test("a commitment failing alongside the size keeps the two-cause headline", () => {
@@ -517,7 +518,7 @@ describe("formatSignedRecordReport", () => {
     // A pinned value that reached nothing is not the same as none supplied, and
     // the line answering it is not followed by advice to supply one.
     expect(lines.join("\n")).not.toContain("trust not established");
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(RECEIPT_VERIFICATION_FAILED_EXIT_CODE);
   });
 
   test("a named signing identity reaching neither certificate is named as the failure", () => {
@@ -588,7 +589,7 @@ describe("formatSignedRecordReport", () => {
     expect(out).toContain("matches a fingerprint you pinned out-of-band");
     // And the operator is told how to pair them.
     expect(out).toContain("so pair them by that stamp");
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(RECEIPT_VERIFICATION_FAILED_EXIT_CODE);
   });
 
   test("a record of an unsigned run says so rather than reporting a mismatch", () => {
@@ -600,7 +601,7 @@ describe("formatSignedRecordReport", () => {
       "receipt-record pairing: the exchange record carries no run binder",
     );
     expect(out).toContain("produced no signed receipt");
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(RECEIPT_VERIFICATION_FAILED_EXIT_CODE);
   });
 
   test("a receipt verified with no record names the invocation that pairs it", () => {
@@ -638,7 +639,7 @@ describe("formatSignedRecordReport", () => {
     expect(exitCode).toBe(0);
   });
 
-  test("each failure class is named distinctly and exits 1", () => {
+  test("each failure class is named distinctly and exits 65", () => {
     const { lines, exitCode } = formatSignedRecordReport(
       report({
         outcome: "failed",
@@ -663,7 +664,7 @@ describe("formatSignedRecordReport", () => {
       "asserted identity: DOES NOT MATCH an identity expected",
     );
     expect(out).toContain("agreed-terms hash: DOES NOT MATCH");
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(RECEIPT_VERIFICATION_FAILED_EXIT_CODE);
   });
 
   test("a verified verdict over an unanchored certificate is refused, not phrased", () => {
@@ -1292,7 +1293,7 @@ describe("handler", () => {
     // The commitments the result does reproduce still open, and the verdict is
     // still a failure: the note is a cause to check, not an exoneration.
     expect(stdout).toContain("commitment localPayloadSent: opened and matches");
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(RECEIPT_VERIFICATION_FAILED_EXIT_CODE);
   });
 
   test("a mismatch with no empty cells earns no note", async () => {
@@ -1327,7 +1328,36 @@ describe("handler", () => {
     expect(stdout).not.toContain(
       "cannot distinguish a committed empty string from a committed null",
     );
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(RECEIPT_VERIFICATION_FAILED_EXIT_CODE);
+  });
+
+  test("a failing record report and a passing signed report still roll up to the failure code", async () => {
+    // The handler folds the two renderers' codes with Math.max, so a record
+    // verdict that already failed must survive a signed-record verdict that
+    // passes after it, not be overwritten back to 0.
+    const { recordPath, signedPath, identityPath, pin } =
+      await exchangeArtifacts({
+        associationTable: [[0], [0]],
+        partnerPayloadReceived: { columns: ["status"], rows: [["active"]] },
+      });
+    const dir = tmp();
+    const inputPath = join(dir, "input.csv");
+    writeFileSync(inputPath, "pid,dose\nP0,10mg\n");
+    const resultPath = join(dir, "result.csv");
+    writeFileSync(resultPath, "pid,row_id,status\nP0,0,inactive\n");
+
+    const { stdout, exits, exitCode } = await runVerify({
+      record: recordPath,
+      "input-file": inputPath,
+      "result-file": resultPath,
+      "signed-record": signedPath,
+      "identity-file": identityPath,
+      "partner-fingerprint": pin,
+    });
+    expect(exits).toEqual([]);
+    expect(stdout).toContain("VERIFICATION FAILED");
+    expect(stdout).toContain("SIGNED RECEIPT VERIFIED");
+    expect(exitCode).toBe(RECEIPT_VERIFICATION_FAILED_EXIT_CODE);
   });
 
   test("a dual-signed record positional verifies the signatures alone", async () => {
@@ -1462,7 +1492,7 @@ describe("handler", () => {
     expect(stdout).toContain("receipt signature: verifies over this receipt's");
     expect(stdout).toContain("asserted identity: matches an identity expected");
     expect(stdout).toContain("agreed-terms hash: matches the terms");
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(RECEIPT_VERIFICATION_FAILED_EXIT_CODE);
   });
 
   test("a record of an exchange that produced no receipt is reported as unpaired", async () => {
@@ -1478,7 +1508,7 @@ describe("handler", () => {
     expect(stdout).toContain(
       "receipt-record pairing: the exchange record carries no run binder",
     );
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(RECEIPT_VERIFICATION_FAILED_EXIT_CODE);
   });
 
   test("a dual-signed record verified alone leaves the pairing unchecked", async () => {
@@ -1569,7 +1599,7 @@ describe("handler", () => {
     expect(stdout).toContain(
       "the signing identity you named is neither certificate in this record",
     );
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(RECEIPT_VERIFICATION_FAILED_EXIT_CODE);
   });
 
   test("a --identity-file that does not exist is refused, not verified unanchored", async () => {
