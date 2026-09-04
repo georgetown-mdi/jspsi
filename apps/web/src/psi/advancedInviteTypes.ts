@@ -26,26 +26,19 @@ import type {
  * (a field reference chosen from the declared list, a per-element transform
  * pipeline, and a two-of-N swap) and imports/exports the whole terms document.
  *
- * Per-element fuzzy comparisons are GATED: the terms mapping clamps them to the
- * applied behavior (no-fuzzy) while their `APPLIED_SETTINGS` flag is false, the
- * editor control is disabled to match, and an import that turns one on is refused
- * -- so the editor can never mint an invitation whose headline behavior silently
- * does not happen. `deduplicate` reads the same flag through the same clamp, which
- * passes it: the exchange applies the setting. A fan-out transform
- * step is held back the same way against core's own list rather than an
- * `APPLIED_SETTINGS` flag: the step editor does not offer the family, and a
- * document that carries one -- in a cleaning step or a linkage-key element
- * transform -- blocks generation and is refused at the mint. That gate is this
- * editor's own and wider than core's refusal by design: core admits a fan-out
- * under single-pass, while this editor authors none at any strategy, having no
- * control on which to weigh a fan-out's consequences for the operator.
- * No payload block is authored into the terms.
- * The output direction is settable now that one-sided output is honored
- * end-to-end (the acceptor mirrors the inviter's output and the exchange withholds
- * the result from a non-receiving party). The column METADATA is editable and
- * threaded into the inviter's own `prepareForExchange` (never the token), so its
- * disclosure choices govern what the inviter sends without touching the agreed
- * terms.
+ * Per-element fuzzy comparisons are GATED: clamped to no-fuzzy while
+ * `APPLIED_SETTINGS` is false, editor control disabled to match, and an import
+ * that turns one on is refused. `deduplicate` reads the same flag through the
+ * same clamp. A fan-out transform step is gated against core's own list instead
+ * of a flag: the step editor offers no fan-out family, and an imported document
+ * carrying one -- in a cleaning step or a key-element transform -- is refused at
+ * the mint; this editor authors none at any strategy, wider than core's own
+ * single-pass allowance.
+ *
+ * No payload block is authored into the terms. The output direction is settable
+ * end-to-end (the acceptor mirrors the inviter's output; the exchange withholds
+ * the result from a non-receiving party). Column METADATA is threaded into the
+ * inviter's own `prepareForExchange`, never the token.
  */
 
 /** The per-element fuzzy-comparison expansion, derived from the core element type
@@ -59,33 +52,27 @@ export type FuzzyComparison = NonNullable<
  * either the set it cited, carried with the rules it cited them over, or the
  * explicit statement that it cited none.
  *
- * The uncited case is a state of its own rather than an absent field because the
- * two answers differ: a document that cites nothing is re-exported citing
- * nothing, while a draft that was never imported is entitled to the built-in
- * citation its own rules earn. Reading absence as "decide it fresh" would hand an
- * uncited import a provenance claim its source declined, and move the terms hash
- * across the round trip.
+ * The uncited case is its own state rather than an absent field: a document
+ * citing nothing re-exports citing nothing, while a draft never imported earns
+ * the built-in citation its own rules earn -- reading absence as "decide it
+ * fresh" would hand an uncited import a provenance claim its source declined.
  *
- * `honoredAtImport` records whether the citation survived the editor's
- * arrival-time narrowing -- whether the terms the draft built the instant it
- * imported still carried it. It is fixed at import and never re-derived, so a
- * later drop is attributed to what caused it: an edit that took honored rules out
- * of the set (the operator's, reversible), rather than a document whose rules
- * could never honor the citation it named (the document's, no edit restores it).
+ * `honoredAtImport` is fixed at import, never re-derived: whether the citation
+ * survived the editor's arrival-time narrowing, so a later drop attributes to
+ * an edit (reversible) rather than the document's own rules (not).
  */
 export type ImportedRuleSetCitation =
   | { kind: "cited"; ruleSet: BuiltInLinkageRuleSet; honoredAtImport: boolean }
   | { kind: "uncited" };
 
 /** One linkage key in the editor, paired with whether it is active. Display and
- * match order is the array position (linkage keys are applied most-precise-first,
- * so order is significant); a disabled key is dropped from the built terms.
+ * match order is the array position (linkage keys are applied most-precise-first);
+ * a disabled key is dropped from the built terms.
  *
- * The list holds both what the built-in rule set offers and what
- * `optInLinkageKeys` offers beside it, which is why an entry carries no mark of
- * its own: the two are the same thing to every operation over the list, and a
- * surface that must tell them apart asks `isOptInDraftKey` about the key rather
- * than reading a flag a rename or an import could falsify. */
+ * The list holds both the built-in rule set's keys and what `optInLinkageKeys`
+ * offers beside it, with no mark distinguishing them -- a caller that must tell
+ * them apart asks `isOptInDraftKey`, not a flag a rename or import could
+ * falsify. */
 export interface DraftKey {
   key: LinkageKey;
   enabled: boolean;
@@ -97,12 +84,10 @@ export interface DraftKey {
  * - `"inviter"` -- only the inviter ("me") receives; the partner is the helper.
  * - `"partner"` -- only the partner receives; the inviter is the helper.
  *
- * This is the editor's representation of the {@link Output} pair. Modeling it as
- * a 3-value choice (rather than two independent booleans) is what keeps the
- * forbidden "neither party receives" combination out of a draft: no direction maps
- * to `{ expectsOutput: false, shareWithPartner: false }`, which
- * `validateCompatibility` rejects ("neither party expects output"), and
- * advancedInviteTypes.test.ts drives every direction against that pair.
+ * The editor's representation of the {@link Output} pair: a 3-value choice
+ * rather than two independent booleans, so the forbidden "neither party
+ * receives" combination -- `{ expectsOutput: false, shareWithPartner: false }`,
+ * which `validateCompatibility` rejects -- has no direction to map to.
  */
 export type OutputDirection = "both" | "inviter" | "partner";
 
@@ -122,14 +107,11 @@ export function outputForDirection(direction: OutputDirection): Output {
 }
 
 /** Inverse of {@link outputForDirection}: map an {@link Output} pair to the 3-way
- * direction for an imported terms set. The "neither receives"
- * `{ expectsOutput: false, shareWithPartner: false }` pair has no direction; it is
- * NOT rejected by `safeParseLinkageTerms` (the schema accepts any two output
- * booleans -- the "neither party expects output" check runs later, in
- * `validateCompatibility` at exchange time), so an imported set could carry it. The
- * final branch maps that (malformed, exchange-rejected) pair to the safe `"both"`
- * default, which the inviter sees selected and reviews before generating, rather
- * than loading a forbidden state silently. */
+ * direction for an imported terms set. The "neither receives" pair
+ * (`{ expectsOutput: false, shareWithPartner: false }`) is not rejected by
+ * `safeParseLinkageTerms` -- that check runs later, in `validateCompatibility` --
+ * so an imported set could carry it; the final branch maps it to the safe
+ * `"both"` default rather than loading a forbidden state silently. */
 export function directionForOutput(output: Output): OutputDirection {
   if (output.expectsOutput && output.shareWithPartner) return "both";
   if (output.expectsOutput) return "inviter";
@@ -175,13 +157,11 @@ export interface AdvancedInviteDraft {
   deduplicate: boolean;
   /** How the agreed linkage keys are exchanged (see {@link LinkageStrategy}).
    * `cascade` (the default) matches keys one round at a time; `single-pass`
-   * batches them into one exchange for a round-trip count constant in the number
-   * of keys, at the cost of disclosing the sender's full per-key value structure
-   * to the receiver. Like {@link AdvancedInviteDraft.algorithm} it is NOT gated --
-   * single-pass is honored end-to-end -- so {@link buildAdvancedTerms} writes it
-   * straight through with no clamp; the
-   * consent tradeoff is surfaced at the control. Seeded from the default terms
-   * (`cascade`) and reflected from an imported document. */
+   * batches them into one exchange at the cost of disclosing the sender's full
+   * per-key value structure to the receiver. NOT gated -- honored end-to-end, so
+   * {@link buildAdvancedTerms} writes it straight through; the consent tradeoff
+   * shows at the control. Seeded from the default terms (`cascade`) and
+   * reflected from an imported document. */
   linkageStrategy: LinkageStrategy;
   legalAgreement?: DraftLegalAgreement;
   /** The inviter's per-party column metadata (semantic type + disclosure role),
@@ -193,17 +173,14 @@ export interface AdvancedInviteDraft {
   metadata: Metadata;
   /**
    * The inviter's per-party standardization: the ordered cleaning steps and the
-   * input-column binding for each field. Seeded from `inviterDefaultStandardization`
-   * (so the editor opens on the recommended cleaning for every matchable column the
-   * file carries, and -- with no edits -- `authoredLinkageFields` over it declares
-   * the same fields it declares over the metadata alone, keeping the cross-party
-   * terms byte-identical). The data-prep workbench
-   * edits it; {@link buildAdvancedTerms} derives the linkage FIELDS from it via
-   * `authoredLinkageFields`, which is what lets two transformations of one
-   * semantic type bind to distinct columns and declare two fields. Threaded into the
-   * inviter's own `prepareForExchange` (never the token), so the cleaning it authors
-   * is the cleaning the run applies. Reconciled against a metadata edit by
-   * {@link setDraftMetadata}. */
+   * input-column binding for each field. Seeded from
+   * `inviterDefaultStandardization`, so with no edits `authoredLinkageFields`
+   * over it declares the same fields as over the metadata alone, keeping the
+   * cross-party terms byte-identical. {@link buildAdvancedTerms} derives the
+   * linkage FIELDS from it via `authoredLinkageFields`, letting two
+   * transformations of one semantic type bind to distinct columns. Threaded
+   * into the inviter's own `prepareForExchange`, never the token. Reconciled
+   * against a metadata edit by {@link setDraftMetadata}. */
   standardization: Standardization;
   keys: Array<DraftKey>;
   /**
@@ -215,17 +192,14 @@ export interface AdvancedInviteDraft {
   importedLinkageFields?: Array<LinkageField>;
   /**
    * An IMPORTED terms document's rule-set citation state, carried so
-   * {@link buildAdvancedTerms} re-emits what the document claimed instead of
-   * re-deciding it -- the round-trip fidelity {@link importedLinkageFields} gives
-   * the field declaration, extended to the provenance claim over it. Set by
-   * {@link draftFromTerms} on every import, cited or not; absent for the seed,
-   * guided, and expert paths, which earn the built-in citation on content.
+   * {@link buildAdvancedTerms} re-emits what the document claimed rather than
+   * re-deciding it. Set by {@link draftFromTerms} on every import, cited or not;
+   * absent for the seed, guided, and expert paths, which earn the built-in
+   * citation on content.
    *
-   * A cited import carries the rules it cited along with the reference, because
-   * the citation is not re-emitted unconditionally: an import narrowed by
-   * disabling keys still builds rules drawn from the imported document, while one
-   * whose keys were edited, reordered, or added to does not, and a citation over
-   * those would claim a provenance they no longer have.
+   * A cited import carries the rules it cited: an import narrowed by disabling
+   * keys still builds rules drawn from the imported document, while one whose
+   * keys were edited, reordered, or added to does not.
    */
   importedRuleSetCitation?: ImportedRuleSetCitation;
 }

@@ -7,7 +7,7 @@ import { useNarrowBench } from "./narrowViewport";
 import type { ReactNode } from "react";
 
 /**
- * The linkage bench's working surface: a full-width top bar above a two-region
+ * The linkage console's working surface: a full-width top bar above a two-region
  * grid, the work column in the center and the standing disclosure ledger on
  * the right. The work column is the page's single `<main>` landmark; the
  * ledger is a landmark of its own (`<aside>` in {@link Ledger}), as is the

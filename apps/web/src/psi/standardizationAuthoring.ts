@@ -62,16 +62,15 @@ export function applyStepOverrides(
 }
 
 /**
- * Layer per-field input-column overrides onto a derived standardization: rebind a
- * field (`output`) to an operator-chosen input column. The derived steps are kept
- * unchanged -- the host only offers columns of the field's own semantic type, so the
- * recommended cleaning still applies. This is what lets two fields of one semantic
- * type bind to DISTINCT columns: the default type fallback binds every same-typed
- * field to the FIRST column of the type (see {@link resolveFieldColumns}), so an
- * explicit per-field input is the only way to give the second its own column. Pure;
- * the host re-derives `base` from the current metadata each render and passes only
- * overrides whose column is still a valid same-typed binding, so a remap that
- * invalidates an override drops it rather than rebinding a wrong-typed column.
+ * Layer per-field input-column overrides onto a derived standardization: rebind
+ * a field (`output`) to an operator-chosen input column. The derived steps are
+ * kept unchanged -- the host only offers columns of the field's own semantic
+ * type, so the recommended cleaning still applies. This is what lets two fields
+ * of one semantic type bind to DISTINCT columns, since the default type fallback
+ * binds every same-typed field to the FIRST column of the type (see
+ * {@link resolveFieldColumns}). Pure; the host passes only overrides whose
+ * column is still a valid same-typed binding, so a remap that invalidates an
+ * override drops it rather than rebinding a wrong-typed column.
  */
 export function applyInputOverrides(
   base: Standardization,
@@ -89,9 +88,9 @@ export function applyInputOverrides(
  * The descriptor for a function name, or `undefined` for a name core does not
  * recognize. The descriptor table is a total `Record`, so a bare index is typed
  * as always-present; the `Object.hasOwn` guard models the genuinely-absent case
- * (an own-property check, so a name reachable only on the prototype chain is never
- * read as a descriptor), which the editor and the function-display helper depend
- * on for an unrecognized step.
+ * (an own-property check, so a name reachable only on the prototype chain is
+ * never treated as a descriptor), which the editor and the function-display
+ * helper depend on for an unrecognized step.
  */
 export function descriptorFor(
   name: string,
@@ -126,7 +125,7 @@ export interface StandardizationFunctionGroup {
  * both directions, so a standard-tier function added to core cannot ship without a
  * group here, and a regex-tier function cannot leak into the menu.
  *
- * The grouping is web-local intent metadata the descriptor table does not carry;
+ * The grouping is web-local intent metadata the descriptor table does not hold;
  * the per-function label and one-line blurb come from the descriptor.
  */
 export const STANDARDIZATION_FUNCTION_GROUPS: Array<StandardizationFunctionGroup> =
@@ -167,19 +166,18 @@ export const authorableFunctionNames: ReadonlySet<string> = new Set(
 /**
  * The raw-pattern functions (`tier: "regex"`), grouped under the "advanced"
  * section of the add-step menu. Each authors an operator-supplied regular
- * expression: it runs under the linear-time engine (so a pattern cannot backtrack
- * catastrophically) and the descriptor's schema bounds the pattern's length and
- * rejects out-of-dialect syntax, but a wrong pattern still shapes which records
- * match. So they sit apart from {@link STANDARDIZATION_FUNCTION_GROUPS} (the
- * standard menu) and are never surfaced as a recommended fix. The per-party
- * cleaning editors offer these directly; only the cross-party, token-embedded
- * element-transform editor holds them back (read-only), via the same
- * `allowRawPatterns` gate.
+ * expression: it runs under the linear-time engine (no catastrophic backtrack)
+ * and the descriptor's schema bounds the pattern's length and dialect, but a
+ * wrong pattern still shapes which records match -- so these sit apart from
+ * {@link STANDARDIZATION_FUNCTION_GROUPS} and are never shown as a recommended
+ * fix. The per-party cleaning editors offer them directly; the cross-party,
+ * token-embedded element-transform editor holds them back (read-only) via the
+ * same `allowRawPatterns` gate.
  *
  * A parity test ({@link expertFunctionNames}) pins this set to the descriptor
- * table's `tier: "regex"` names in both directions, so a regex-tier function added
- * to core cannot ship without a group here, and a standard-tier function cannot
- * leak into the expert menu.
+ * table's `tier: "regex"` names in both directions, so a regex-tier function
+ * added to core cannot ship without a group here, and a standard-tier function
+ * cannot leak into the expert menu.
  */
 export const STANDARDIZATION_EXPERT_FUNCTION_GROUPS: Array<StandardizationFunctionGroup> =
   [
@@ -209,17 +207,16 @@ export const expertFunctionNames: ReadonlySet<string> = new Set(
 /**
  * The advanced groups as the add-step menu offers them: the raw-pattern family
  * minus every function core classes as fan-out (`FAN_OUT_FUNCTION_NAMES`). A
- * fan-out matches under the single-pass strategy alone and carries consequences
- * of its own -- matching per candidate, the removal that follows a match, and the
- * candidate grouping the single-pass receiver is handed -- which this editor has
- * no control for the operator to weigh them on, so it offers no step that
- * declares one and its Generate gate refuses one an imported document carries
- * (`advancedInviteValidation.ts`). That gate is wider than core's own refusal by
- * design, not by drift.
+ * fan-out has consequences of its own (matching per candidate, the removal that
+ * follows a match, the candidate grouping the single-pass receiver is handed)
+ * that this editor gives the operator no control to weigh, so it offers no step
+ * that declares one, and its Generate gate refuses one an imported document
+ * holds (`advancedInviteValidation.ts`) -- wider than core's own refusal, by
+ * design and not by drift.
  *
- * Derived from core's list rather than a second web-side one, so the menu follows
- * whatever core classes as a fan-out with no edit here. An imported document's
- * fan-out step still RENDERS -- {@link STANDARDIZATION_EXPERT_FUNCTION_GROUPS}
+ * Derived from core's list rather than a second web-side one, so the menu
+ * follows whatever core classes as a fan-out with no edit here. An imported
+ * document's fan-out step still RENDERS -- {@link STANDARDIZATION_EXPERT_FUNCTION_GROUPS}
  * keeps the full family for the descriptor-backed read-only row and its parity
  * test -- so the operator can see and remove it rather than meet an unlabeled
  * step.
@@ -234,32 +231,27 @@ export const OFFERED_EXPERT_FUNCTION_GROUPS: Array<StandardizationFunctionGroup>
 
 /**
  * The plain-language label the add-step menu and the step rows show for
- * `coalesce`, in place of the descriptor's SQL term: an operator should not need
- * to know it. It states the condition core's descriptor states -- a value an
- * earlier rule of the SAME pipeline emptied -- rather than offering to fill in
- * for an absent or empty input, which is the framing that invites an author to
- * declare a coalesce and expect blank-ish records to participate. A record whose
- * field is absent never enters the pipeline at all; the semantics are in
- * `docs/EXCHANGE_REFERENCE.md`, "Null propagation", and in
- * `coalesceSubstitutesConstant`'s own doc comment.
+ * `coalesce`, in place of the descriptor's SQL term. It states the condition
+ * core's descriptor states -- a value an earlier rule of the SAME pipeline
+ * emptied -- rather than the "fill in for an absent or empty input" framing,
+ * which would invite an author to expect blank-ish records to participate. A
+ * record whose field is absent never enters the pipeline at all; semantics are
+ * in `docs/EXCHANGE_REFERENCE.md`, "Null propagation".
  */
 const COALESCE_LABEL = "Substitute a default where a rule emptied the value";
 
 /**
  * The editor-facing label and one-line blurb for a function. The blurb is always
- * the descriptor's own, so a later correction in core reaches this surface with
- * no second edit here; the label is the descriptor's except for `coalesce`, which
- * takes {@link COALESCE_LABEL}.
+ * the descriptor's own; the label is the descriptor's except for `coalesce`,
+ * which takes {@link COALESCE_LABEL}.
  *
- * Falls back to the function name as the label when no descriptor matches. That
- * branch is unreachable from the add-step menu (which only offers descriptor-backed
- * functions, asserted by the parity test) BUT IS reachable via an imported linkage-
- * terms document, whose transform `function` is free text: an unrecognized name is
- * rendered raw here. So the fallback name is run through {@link sanitizeForDisplay}
- * -- a partner-controlled string must never reach the DOM (even as escaped text or
- * an aria-label) carrying control / bidi-override / homoglyph bytes that could spoof
- * a different, benign function name. The acceptor consent screen sanitizes the same
- * value; this closes it on the inviter's editing surface too.
+ * Falls back to the function name as the label when no descriptor matches --
+ * unreachable from the add-step menu (parity-tested) but reachable via an
+ * imported linkage-terms document, whose transform `function` is free text and
+ * rendered raw. The fallback name is run through {@link sanitizeForDisplay}: a
+ * partner-controlled string must never reach the DOM holding control, bidi-
+ * override, or homoglyph bytes that could spoof a different, benign function
+ * name -- the same sanitizing the acceptor consent screen applies.
  */
 export function functionDisplay(functionName: string): {
   label: string;
@@ -291,21 +283,15 @@ export type InertCoalesceCause = "no-emptying-rule" | "no-text-default";
  * where it does substitute (and for any other function).
  *
  * The verdict is core's: {@link coalesceSubstitutesConstant} decides whether the
- * substitution fires at all, and {@link stepCanEmptyRealizedValue} decides its
- * position half. This surface classifies nothing of its own, so it cannot drift
- * from the runtime. The cause follows by elimination from those two -- a
- * substitution that does not fire although some earlier step CAN empty a value is
- * held back by the declared `default` -- so a change to either rule in core moves
- * this answer with it.
+ * substitution fires, {@link stepCanEmptyRealizedValue} decides its position
+ * half, and the cause follows by elimination between them -- this function
+ * classifies nothing of its own, so it cannot drift from the runtime. Position
+ * is checked first because a coalesce with no preceding emptying rule
+ * substitutes nothing regardless of its declared default.
  *
- * Position is reported ahead of the default, because a coalesce no emptying rule
- * precedes substitutes nothing whatever its default says: declaring one would not
- * reach the fault.
- *
- * `precedingSteps` are the steps that run before `step` in the same pipeline,
- * required rather than defaulted for the reason core requires them: the verdict
- * is a property of the position, not of the step alone. So adding an emptying
- * step ahead of the coalesce, or moving the coalesce after one, re-answers this.
+ * `precedingSteps` is required rather than defaulted: the verdict is a property
+ * of the position, not of the step alone, so adding or moving an emptying step
+ * re-answers this.
  */
 export function inertCoalesceCause(
   step: TransformStep,
@@ -321,7 +307,7 @@ export function inertCoalesceCause(
 /**
  * What the step editor tells an author about a coalesce that substitutes nothing
  * where it sits, one line per {@link InertCoalesceCause}, each naming the remedy
- * that reaches its own cause. Advice, not a refusal: a pipeline carrying such a
+ * that reaches its own cause. Advice, not a refusal: a pipeline holding such a
  * step is valid, mints, and runs -- core runs the step as a pass-through.
  */
 export const INERT_COALESCE_ADVICE: Record<InertCoalesceCause, string> = {
@@ -383,7 +369,7 @@ export interface ParamField {
   kind: ParamFieldKind;
   /** True when the schema marks the param `.optional()` (no value is required). */
   optional: boolean;
-  /** The schema-declared default, when the param carries one via `.default(...)`. */
+  /** The schema-declared default, when the param holds one via `.default(...)`. */
   defaultValue?: unknown;
   /** The allowed values, present only for an `enum` param. */
   enumOptions?: Array<string>;
@@ -409,7 +395,7 @@ const PARAM_LABELS: Record<string, string> = {
   includeOriginal: "Keep the original value too",
 };
 
-// The Zod v4 internal `_def` carries the discriminant `type` and the wrapper's
+// The Zod v4 internal `_def` holds the discriminant `type` and the wrapper's
 // `innerType`/`defaultValue`/`entries`; reading it is the documented way to drive
 // editor form fields off a schema (see the descriptor table's `params` JSDoc).
 // `_def` is intentionally outside Zod's public type surface, so this narrows the
@@ -510,7 +496,7 @@ export function describeParamFields(
  * descriptor, so the editor accepts or rejects an input exactly as core's schema
  * would (a fractional `substring` start, a multi-character `pad_left` fill, a `0`
  * start position all fail; a well-formed value passes). Returns the first issue's
- * message on rejection so the control can surface it inline. An unknown key is
+ * message on rejection so the control can show it inline. An unknown key is
  * rejected rather than silently passed.
  */
 export function validateParamValue(
@@ -527,16 +513,15 @@ export function validateParamValue(
 }
 
 /**
- * Whether every parameter of `step` is well-formed for its function: each required
- * param present and each value matching the descriptor's declared type (the same
- * check {@link validateParamValue} drives the inline input errors from). This is
- * the basis for gating launch on a well-formed pipeline -- a step the operator left
- * mid-edit (e.g. a cleared `substring.start`, which the `NumberInput` reports as an
- * empty string) is not valid, so the host keeps it out of the exchange, where a
- * malformed param would otherwise run as a silent full-field exclusion or throw at
- * compile. A step naming a function core does not recognize is treated as valid:
- * it is not authored through this surface and its params are not editable, so there
- * is nothing here to judge.
+ * Whether every parameter of `step` is well-formed for its function: each
+ * required param present and each value matching the descriptor's declared type
+ * (the same check {@link validateParamValue} drives the inline input errors
+ * from). This gates launch on a well-formed pipeline -- a step left mid-edit
+ * (e.g. a cleared `substring.start`) is not valid, so the host keeps it out of
+ * the exchange rather than running a malformed param as a silent full-field
+ * exclusion or throwing at compile. A step naming a function core does not
+ * recognize is treated as valid: it is not authored through this surface and
+ * its params are not editable, so there is nothing here to judge.
  */
 export function isStepValid(step: StandardizationStep): boolean {
   const descriptor = descriptorFor(step.function);

@@ -55,7 +55,7 @@ export const PERSISTENCE_LOSS_EXIT_CODE = 73;
  *   exchange completed and a local write did not, so the run must not be
  *   repeated -- re-running would re-send this party's data for an exchange that
  *   already happened. What was lost is named by the `warning` events the CLI
- *   emitted before its terminal event, which the relay already carries.
+ *   emitted before its terminal event, which the relay already holds.
  */
 export type JobOutcome =
   "succeeded" | "failed" | "cancelled" | "completedWithPersistenceLoss";
@@ -75,7 +75,7 @@ export interface CliDriverHandlers {
   onEvent: (event: RelayEvent) => void;
   /**
    * A degradation notice (a malformed/unknown fd-3 line, or an oversized stream)
-   * surfaced as a synthesized warning rather than crashing the relay.
+   * reported as a synthesized warning rather than crashing the relay.
    */
   onDegraded: (message: string) => void;
   /** The run's reconciled terminal state, delivered exactly once. */
@@ -130,7 +130,7 @@ export function resolveCliBinaryPath(
 /**
  * The maximum length of child stderr retained as a diagnostic tail, in UTF-16
  * code units. Bounded so a chatty or hostile child cannot grow server memory
- * without limit; the tail is sanitized before it is surfaced and is never
+ * without limit; the tail is sanitized before it is exposed and is never
  * streamed to the client raw.
  */
 export const STDERR_TAIL_CAP = 8192;
@@ -158,21 +158,15 @@ export interface CliRunControls {
 
 /**
  * The extra argv a run's diagnostic and recovery choices contribute, shared by
- * both invocation forms so the two cannot state them differently.
+ * both invocation forms so they cannot state them differently.
  *
- * A diagnostic run raises the CLI's own log level and turns on the sub-library
- * verbosity that `-v` carries -- the console offers one control, not two -- and
- * routes the whole lot to `--log-file` in the job's workdir. The file, rather
- * than the child's stderr the driver already tails, is what the CLI's own append
- * and owner-only-create semantics apply to, and it is a whole run's log rather
- * than a rolling tail; the log path is composed server-side from the workdir and
- * a fixed name, never from a request.
+ * A diagnostic run raises the CLI's log level, turns on `--verbose`, and routes
+ * output to `--log-file` in the job's workdir; the log path is always composed
+ * server-side, never from a request. `--sweep-exchange-files` passes straight
+ * through to the CLI, which owns the protocol-file classification and the
+ * retain-mode guard.
  *
- * `--sweep-exchange-files` is passed straight through to the CLI, which owns the
- * protocol-file classification and the retain-mode guard entirely; the console
- * reimplements neither and never offers `--force-retain-sweep`.
- *
- * Every value-bearing flag here uses the single `--flag=value` token form, so a
+ * Every value-bearing flag uses the single `--flag=value` token form, so a
  * value cannot be misparsed by yargs as its own flag.
  */
 function runControlArgv(controls: CliRunControls): Array<string> {
@@ -191,7 +185,7 @@ function runControlArgv(controls: CliRunControls): Array<string> {
 /**
  * Spawn the CLI to run an `exchange` (config-and-key driven), wiring fd 3 for the
  * event stream. argv is assembled from a fixed template plus server-generated
- * absolute paths. The one path carrying a client value is `inputPath`: the mounted
+ * absolute paths. The one path holding a client value is `inputPath`: the mounted
  * `inputFile.name`, admitted to a single safe segment and joined under the
  * server-anchored input mount, so the argv element is always an absolute path
  * passed positionally -- no client string is ever an interpretable token or flag.
@@ -243,25 +237,19 @@ export function spawnExchangeJob(args: {
 
 /**
  * Spawn the CLI to run a zero-setup exchange -- the positional `$0` form
- * (`psilink URL INPUT OUTPUT`), no subcommand token. There is no `--config-file`,
- * no `--key-file`, and never `--save`: a zero-setup run infers its terms from the
- * input file, carries no shared secret, and persists nothing beyond the single
- * job's record. `connectionArgs` is the connection portion of the argv -- the URL
- * positional and, for sftp, the `--server-*` flags -- built server-side by
- * {@link zeroSetupSftpArgv} / {@link zeroSetupFiledropArgv}; every credential in it
- * is an `@path` reference the CLI child resolves at live-use, so no secret byte is
- * on argv. `optionArgs` is the tuning portion -- the retain-mode trio,
- * `--peer-id`, and the connection-tuning flags -- built server-side by
- * {@link zeroSetupOptionsArgv} from the intent's validated `options`, standing
- * in for the composed config's `options` block a zero-setup run has no document
- * to carry. `identity` and
- * `linkageStrategy`, when set, are a bounded label and a closed enum, forwarded
- * as single `--identity=<value>` / `--linkage-strategy=<value>` tokens (the `=`
- * form so a `-`-leading value cannot be misparsed by yargs as its own flag).
+ * (`psilink URL INPUT OUTPUT`), no subcommand token, no `--config-file`, no
+ * `--key-file`, and never `--save`: it infers its terms from the input file,
+ * holds no shared secret, and persists nothing beyond the job's record.
+ * `connectionArgs` (the URL and, for sftp, the `--server-*` flags) and
+ * `optionArgs` (the retain-mode trio, `--peer-id`, connection tuning) are built
+ * server-side by {@link zeroSetupSftpArgv} / {@link zeroSetupFiledropArgv} and
+ * {@link zeroSetupOptionsArgv}; every credential in them is an `@path`
+ * reference, so no secret byte is on argv. `identity` and `linkageStrategy`
+ * forward as single `--flag=value` tokens so a `-`-leading value cannot be
+ * misparsed by yargs as its own flag.
  *
- * Shares the whole post-spawn tail (fd-3 reader, stderr tail, terminal
- * reconciliation) with {@link spawnExchangeJob} through {@link runCliChild}; the
- * two differ only in the argv they build.
+ * Shares the post-spawn tail with {@link spawnExchangeJob} through
+ * {@link runCliChild}; the two differ only in the argv they build.
  */
 export function spawnZeroSetupJob(args: {
   binaryPath: string;
@@ -285,12 +273,10 @@ export function spawnZeroSetupJob(args: {
   const { identity, linkageStrategy, optionArgs } = args;
 
   // The URL is the first positional (connectionArgs[0]); input and output are the
-  // trailing positionals. Every value-bearing flag is emitted as a single
-  // `--flag=value` token, never a two-token `["--flag", value]` pair: a value that
-  // begins with `-` (a crafted identity, say) would otherwise be misparsed by yargs
-  // as its own flag and could steer the run (synthesizing --save). Boolean flags
-  // carry no value and stay bare. No subcommand token, no --config-file/--key-file,
-  // no --save.
+  // trailing positionals. Every value-bearing flag is a single `--flag=value`
+  // token, never a two-token pair, so a `-`-leading value cannot be misparsed by
+  // yargs as its own flag. Boolean flags hold no value and stay bare. No
+  // subcommand token, no --config-file/--key-file, no --save.
   const argv: Array<string> = [
     binaryPath,
     ...connectionArgs,
@@ -313,15 +299,15 @@ export function spawnZeroSetupJob(args: {
  * Spawn `node argv` for a driven CLI run and attach the shared readers: the fd-3
  * event stream, the bounded stderr tail, and the terminal-state reconciliation.
  * `argv[0]` is the CLI binary path; `shell` is never used, so every element is an
- * allowlisted argv token, not an interpretable shell string. The one path carrying
+ * allowlisted argv token, not an interpretable shell string. The one path holding
  * a client-derived segment (the input file's final name) is always passed
  * positionally, never as a flag. Shared by {@link spawnExchangeJob} and
  * {@link spawnZeroSetupJob}, which each contribute only their argv builder.
  *
- * `spawn` (not `execFile`) is used deliberately: the caller passes an argv ARRAY
- * with `shell: false`, which gives identical allowlisted-argv, no-shell safety,
- * and unlike `execFile` it exposes the fd-3 pipe the event stream requires
- * (execFile caps stdio at three pipes and cannot carry fd 3).
+ * `spawn` (not `execFile`) is used by design: passing an argv ARRAY with
+ * `shell: false` gives the same allowlisted-argv, no-shell safety, but unlike
+ * `execFile` it exposes the fd-3 pipe the event stream requires (`execFile`
+ * caps stdio at three pipes and cannot hold fd 3).
  */
 function runCliChild(
   argv: Array<string>,
@@ -369,7 +355,7 @@ export function sanitizedChildEnv(): NodeJS.ProcessEnv {
  * Line-buffer fd 3 as NDJSON. Each complete line is parsed, schema-validated
  * against the v1 vocabulary, and every string field sanitized before it reaches
  * the handler. A malformed or unknown line does not crash the relay: it is
- * surfaced as a degradation notice and dropped. The buffer is capped so an
+ * reported as a degradation notice and dropped. The buffer is capped so an
  * unterminated flood cannot grow without bound.
  */
 function attachFd3Reader(
@@ -450,47 +436,24 @@ const RELAY_EVENT_TYPES = new Set<RelayEventType>([
 /**
  * Validate a parsed fd-3 value against the v1 event vocabulary and sanitize every
  * string field (recursively, through arrays and nested objects) before it is
- * buffered or relayed. The CLI already sanitizes at construction; re-sanitizing
- * here is deliberate defense in depth at the trust-boundary crossing, so a
- * hostile string that somehow reached the stream cannot inject a control
- * sequence into a downstream consumer. Returns null for anything that does not
- * match the schema.
+ * buffered or relayed -- defense in depth on top of the CLI's own construction-
+ * time sanitizing. Returns null for anything that does not match the schema.
  *
- * The relay knows which source handed it a string, which is what lets the budget
- * differ by field: a `warning` event's own `message` is a whole composition the
- * CLI fitted to {@link WARNING_MESSAGE_MAX_DISPLAY_LENGTH}, so this pass takes
- * that same budget and the console seat receives the explanation and the
- * recovery instruction the CLI put in it. Every other string keeps the per-value
- * default: a stage label, a nested value anywhere, and this event's own keys are
- * each one value.
+ * A `warning` event's own `message` keeps the wider
+ * {@link WARNING_MESSAGE_MAX_DISPLAY_LENGTH} budget the CLI composed it to;
+ * every other string (a stage label, a nested value, an event's own keys) takes
+ * the per-value default.
  *
- * A terminal `error` event's `message` is not one value either: the CLI renders
- * it through `sanitizeErrorForDisplay`, so what crosses is a whole cause chain --
- * up to `MAX_ERROR_CAUSE_DEPTH` links at `COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH`
- * each, joined by the renderer's own framing. It crosses STRUCTURALLY rather than
- * under a wider flat cap: {@link ERROR_MESSAGE_CHAIN_FIELD} carries the links
- * apart, each escaped at the budget the renderer gave it and the count held to
- * the renderer's own depth bound, so the relay admits exactly the volume the
- * renderer emits and no more, and the seat rebuilds the chain from the links
- * (`errorMessageOf` in `../psi/serverJobExchangeDriver.ts`). Splitting first is
- * what keeps the recovery step intact: charged as one value, the chain is cut
- * wherever 256 characters fall, which on a refusal composed as a partition by
- * chooser is inside its first link or two, and the recovery the partition
- * deliberately moves onto a later link never reaches the operator.
+ * A terminal `error` event's `message` crosses as a structured chain in
+ * {@link ERROR_MESSAGE_CHAIN_FIELD} instead of one flat-capped value: up to
+ * `MAX_ERROR_CAUSE_DEPTH` links, each escaped at
+ * `COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH`, rebuilt by the seat (`errorMessageOf`
+ * in `../psi/serverJobExchangeDriver.ts`). Splitting first keeps a later link's
+ * recovery instruction from being cut off by a single flat 256-character cap.
  *
- * Every relayed link is still whole-escaped, so no raw byte of the renderer's
- * framing crosses either: the newline that joins the chain is re-introduced by
- * the seat that renders it, never carried in a relayed field, and the property
- * that a relayed event holds no unescaped control character is unchanged.
- *
- * The chain field is the relay's own on every event type and every path. The
- * field pass DROPS a same-named key a subverted source put on the event, and an
- * `error` event is then assigned this pass's derivation from `message`: the
- * links when it is a string, and no links when the event carries no string
- * `message` to render, which leaves the seat on the flat-field fallback it
- * already takes for an event no chain was derived for. So the depth bound and
- * the per-link budget hold wherever the field is emitted, and what the seat
- * renders is never a chain the source handed over whole.
+ * The chain field is the relay's own on every event type: a same-named key from
+ * the source is dropped, then reassigned from this pass's own derivation, so no
+ * source ever hands the seat a whole chain directly.
  */
 export function validateAndSanitizeEvent(value: unknown): RelayEvent | null {
   if (value === null || typeof value !== "object" || Array.isArray(value))
@@ -506,10 +469,9 @@ export function validateAndSanitizeEvent(value: unknown): RelayEvent | null {
   const sanitized: Record<string, unknown> = {};
   for (const [key, field] of Object.entries(record)) {
     const outKey: string = sanitizeForDisplay(key);
-    // A source key of the chain field's name is dropped rather than copied, on
-    // every event type: only the derivation below may reach that field, and
-    // dropping it here is what leaves no path carrying the source's own. The
-    // ESCAPED key decides it, since that is the key that would land.
+    // A source key of the chain field's name is dropped on every event type: the
+    // derivation below is the only writer of that field. The ESCAPED key decides
+    // this, since that is the key that would land.
     if (outKey === ERROR_MESSAGE_CHAIN_FIELD) continue;
     sanitized[outKey] =
       type === "warning" && key === "message" && typeof field === "string"
@@ -596,7 +558,7 @@ function attachTerminalReconciliation(
   // and the manager would synthesize a misclassified terminal in its place.
   child.on("close", (code, signal) => deliver(code, signal));
   child.on("error", (error: Error) => {
-    // The child could not be spawned or died abnormally; surface a diagnostic and
+    // The child could not be spawned or died abnormally; report a diagnostic and
     // classify as a failure so the manager always reaches a terminal state.
     handlers.onDegraded(
       `CLI process error: ${sanitizeForDisplay(error.message)}${

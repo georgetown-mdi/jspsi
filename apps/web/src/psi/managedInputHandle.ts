@@ -6,25 +6,22 @@
  * detect platform support, and re-point (replace) the handle. It is the pointer
  * side of the no-second-copy invariant: the record holds a `FileSystemFileHandle`,
  * never file content, and every run reads through the handle with `getFile()` at
- * run start rather than retaining a `File` across runs, so dropping the current
- * period's extract over the same name is the data-refresh workflow (see
+ * run start rather than retaining a `File` across runs (see
  * docs/MANAGED_EXCHANGE.md, "The input file each run", and
  * docs/spec/MANAGED_EXCHANGE_RECORD.md, the `inputFileHandle` row).
  *
  * The pure standing-terms guard and the input-rejection classification are in
  * {@link ./managedInputGuard.ts}; this module composes them with the platform reads
- * so a run-start acquisition failure (missing file, gone permission, no handle
- * where one is required) or a linkage shortfall each surfaces as the same
- * benign {@link ManagedInputError}, before any connection, on every run path.
+ * so a run-start acquisition failure or a linkage shortfall each shows as the
+ * same benign {@link ManagedInputError}, before any connection, on every run path.
  *
  * The permission layer is a non-standard File System Access extension
- * (`queryPermission` / `requestPermission`) the DOM lib does not type and some
- * handle sources (a picker handle) offer while others (an origin-private-file-
- * system handle) do not. It is reached through {@link browserHandleReadPermission},
- * which feature-detects the methods and treats their absence as an already-usable
- * grant, so a handle without the extension reads through without prompting -- and
- * the {@link HandleReadPermissionQuery} seam stays injectable for tests that cannot
- * summon a real picker grant.
+ * (`queryPermission` / `requestPermission`) the DOM lib does not type; some handle
+ * sources (a picker handle) offer it while others (an origin-private-file-system
+ * handle) do not. Reached through {@link browserHandleReadPermission}, which
+ * feature-detects the methods and treats their absence as an already-usable grant;
+ * {@link HandleReadPermissionQuery} stays injectable for tests that cannot summon
+ * a real picker grant.
  */
 
 import {
@@ -50,12 +47,10 @@ export function fileSystemAccessSupported(): boolean {
 
 /**
  * Whether a record's stored input-file pointer can actually be followed in this
- * runtime: a handle is held AND {@link fileSystemAccessSupported} says there is an
- * API to open it with. Both halves are required -- a held handle on a runtime
- * without the API is a pointer nothing here can read -- so the run path (which
- * reads the input through it) and the schedule surface (which owes the operator the
- * standing consequence of holding no usable pointer) decide it identically rather
- * than each spelling the conjunction out.
+ * runtime: a handle is held AND {@link fileSystemAccessSupported} says there is
+ * an API to open it with. Both halves are required, so the run path and the
+ * schedule surface decide it identically rather than each spelling the
+ * conjunction out.
  */
 export function storedInputHandleUsable(
   handle: FileSystemFileHandle | undefined,
@@ -65,11 +60,10 @@ export function storedInputHandleUsable(
 
 /** A selected file that MAY carry a File System Access handle. The bench's file
  * intake (Mantine's Dropzone over `file-selector`) attaches a `handle` to a
- * dropped file in a secure context on Chromium, so a managed deposit can capture
- * the operator's existing selection without a second picker dialog; every other
- * selection path (a click-to-open input, a browser without the API) yields a plain
- * `File` and no handle. Declared locally because the DOM `File` lib does not type
- * the `file-selector` extension. */
+ * dropped file in a secure context on Chromium; every other selection path (a
+ * click-to-open input, a browser without the API) yields a plain `File` and no
+ * handle. Declared locally because the DOM `File` lib does not type the
+ * `file-selector` extension. */
 interface FileWithOptionalHandle {
   handle?: FileSystemFileHandle;
 }
@@ -77,15 +71,11 @@ interface FileWithOptionalHandle {
 /**
  * Read the File System Access handle a drop attached to `file`, or `undefined`
  * when the selection path did not yield one. On Chromium in a secure context,
- * `file-selector` (under the bench's Dropzone) calls
- * `DataTransferItem.getAsFileSystemHandle()` on a drop and attaches the handle to
- * the `File`; a click-to-open selection and a browser without the API leave it
- * absent. The presence of the handle is also gated on
+ * `file-selector` calls `DataTransferItem.getAsFileSystemHandle()` on a drop and
+ * attaches the handle to the `File`; a click-to-open selection and a browser
+ * without the API leave it absent. Also gated on
  * {@link fileSystemAccessSupported}, so a foreign object carrying a `handle`
- * property on a runtime without the API is not mistaken for a real handle. This is
- * the capture-at-deposit seam: no extra dialog is shown to obtain a handle the
- * operator's existing selection already carries, and no handle is persisted when
- * the selection cannot yield one (the record field is optional).
+ * property on a runtime without the API is not mistaken for a real handle.
  */
 export function capturedInputHandle(
   file: File,
@@ -119,12 +109,11 @@ interface FileSystemHandlePermission {
   }) => Promise<HandleReadPermissionState>;
 }
 
-/** The one operation the permission layer performs, factored into a seam so a run
- * path can query without prompting (the unattended path) or request with a gesture
- * (the attended path), and so a test can inject a permission outcome a real
- * origin-private-file-system handle cannot report (it implements neither method).
- * The default is {@link browserHandleReadPermission}, the feature-detecting
- * platform implementation. */
+/** The one operation the permission layer performs, factored into an interface so
+ * a run path can query without prompting (unattended) or request with a gesture
+ * (attended), and so a test can inject an outcome a real origin-private-file-
+ * system handle cannot report. The default is {@link browserHandleReadPermission},
+ * the feature-detecting platform implementation. */
 export interface HandleReadPermissionQuery {
   /** Report the handle's current read-permission state WITHOUT prompting -- the
    * only check the unattended path may make, since a scheduled run has no operator
@@ -180,12 +169,11 @@ export class HandleReadPermissionError extends Error {
 export type ManagedRunAttendance = "unattended" | "attended";
 
 /**
- * Secure read permission for `handle` for a run of the given `attendance`, or throw
- * {@link HandleReadPermissionError}. The unattended path queries only: a
- * non-`"granted"` state throws, because a scheduled run has no operator to answer a
- * prompt (the spec's "the unattended path can only proceed on an existing grant --
- * it must not prompt"). The attended path may additionally request where the state
- * is `"prompt"`, so a one-action re-run is at most one permission gesture.
+ * Secure read permission for `handle` for a run of the given `attendance`, or
+ * throw {@link HandleReadPermissionError}. The unattended path queries only: a
+ * non-`"granted"` state throws (the unattended path may only proceed on an
+ * existing grant; it must not prompt). The attended path may additionally
+ * request where the state is `"prompt"`.
  */
 export async function ensureHandleReadPermission(
   handle: FileSystemFileHandle,
@@ -194,8 +182,6 @@ export async function ensureHandleReadPermission(
 ): Promise<void> {
   const current = await permission.query(handle);
   if (current === "granted") return;
-  // A scheduled run has nobody present to answer a prompt, so it proceeds only on
-  // an already-granted permission and fails benignly on any other state.
   if (attendance === "unattended") throw new HandleReadPermissionError(current);
   if (current === "denied") throw new HandleReadPermissionError("denied");
   const afterPrompt = await permission.request(handle);
@@ -244,12 +230,10 @@ export type ManagedInputSource =
 
 /**
  * Read a run's input through its source and parse its column names, throwing a
- * benign {@link ManagedInputError} `"acquire"` rejection on any failure BEFORE the
- * column guard or any connection: a missing entry (the file deleted, moved, or
- * renamed away, so `getFile()` rejects), a gone or refused read permission, or an
- * unreadable file. The `File` is read at THIS run start and never retained across
- * runs. On the handle path, permission is secured first (queried for an unattended
- * run, requestable for an attended one).
+ * benign {@link ManagedInputError} `"acquire"` rejection on any failure BEFORE
+ * the column guard or any connection: a missing entry, a gone or refused read
+ * permission, or an unreadable file. The `File` is read at THIS run start and
+ * never retained across runs. On the handle path, permission is secured first.
  *
  * @throws {ManagedInputError} an `"acquire"` rejection carrying the underlying
  *   error, so the runner records the benign `"input"` failure and knows no
@@ -267,10 +251,8 @@ export async function acquireManagedInput(
         source.attendance,
         permission,
       );
-      // getFile() reads whatever file currently exists at the handle's path -- a
-      // missing entry rejects here, the clean not-found the benign input state
-      // rests on. The File is this run's point-in-time reference; it is never
-      // retained past the run.
+      // getFile() rejects on a missing entry, which is the clean not-found this
+      // benign input state rests on.
       file = await source.handle.getFile();
     } else {
       file = source.file;
@@ -294,17 +276,14 @@ export async function acquireManagedInput(
 /**
  * Acquire and validate a run's input against the record's standing terms in one
  * step, the guard every run path applies before any connection. Reads the input
- * through {@link acquireManagedInput} (missing file, gone permission, and
- * unreadable file all surface as a benign `"acquire"` rejection), then rejects an
- * input that cannot satisfy every linkage key the standing terms declare as a
- * benign `"columns"` rejection ({@link assessManagedInputColumns}) -- never silently
- * linked, never routed through desync/attack framing. Returns the read `File` and
- * its columns when the input is accepted, for the runner to feed the exchange.
+ * through {@link acquireManagedInput}, then rejects an input that cannot satisfy
+ * every linkage key the standing terms declare as a benign `"columns"` rejection
+ * ({@link assessManagedInputColumns}) -- never silently linked. Returns the read
+ * `File` and its columns when the input is accepted.
  *
- * @throws {ManagedInputError} an `"acquire"` or `"columns"` rejection, both benign
- *   pre-run failures detected before any connection and recorded under the kind
- *   each one's remedy calls for (`managedInputFailureKind` in
- *   {@link ./managedInputGuard.ts}).
+ * @throws {ManagedInputError} an `"acquire"` or `"columns"` rejection, both
+ *   benign pre-run failures recorded under the kind each one's remedy calls for
+ *   (`managedInputFailureKind` in {@link ./managedInputGuard.ts}).
  */
 export async function acquireValidatedManagedInput(
   exchangeFile: ExchangeSpec,

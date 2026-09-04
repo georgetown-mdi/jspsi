@@ -3,24 +3,21 @@
  * cadence, what is wrong with it, what it resolves to, and the one cross-field
  * problem a stored max-token-age policy raises against it.
  *
- * Entry is where the host time zone is READ. The operator agrees a wall-clock
- * cadence with their partner ("09:00 Tuesdays") and types it on their own clock;
- * {@link resolveLocalCadenceAnchor} turns that into the stored UTC anchor once,
- * here, and {@link localCadenceFromAnchor} reads it back when the form re-opens on
- * a stored schedule. Nothing downstream reads the zone again -- every window
- * afterwards is fixed-millisecond arithmetic off the anchor -- which is what keeps
- * a daylight-saving shift from moving an agreed window out from under one of the
- * two runners (docs/spec/MANAGED_EXCHANGE_RECORD.md, "The schedule object").
+ * Entry is where the host time zone is READ. {@link resolveLocalCadenceAnchor}
+ * turns the operator's wall-clock cadence into the stored UTC anchor once, here;
+ * {@link localCadenceFromAnchor} reads it back when the form re-opens on a stored
+ * schedule. Nothing downstream reads the zone again -- every window afterwards is
+ * fixed-millisecond arithmetic off the anchor (docs/spec/MANAGED_EXCHANGE_RECORD.md,
+ * "The schedule object").
  *
  * The bounds here are the record schema's, restated as field errors so an
- * out-of-range value fails at the field the operator can fix rather than as a
- * store-write failure after the click. The window-width FLOOR is the one bound
- * entry adds beyond the schema: width is the design's only clock-skew mitigation,
- * so a minutes-wide window would guarantee perpetual self-inflicted misses even
- * though the schema's structural floor admits it.
+ * out-of-range value fails at the field rather than at the store write. The
+ * window-width FLOOR is the one bound entry adds beyond the schema's own
+ * structural floor of one second: width is the design's only clock-skew
+ * mitigation.
  *
- * `now` is injected rather than read, matching the clock discipline of the managed
- * modules, so every derivation is a pure function of its inputs.
+ * `now` is injected rather than read, matching the clock discipline of the
+ * managed modules.
  */
 
 import {
@@ -37,15 +34,12 @@ import { dateTimeLabel } from "./inviterModel";
 
 import type { ManagedExchangeSchedule } from "@psi/managedExchangeRecord";
 
-/** Seconds in an hour, the unit the width is entered in: a several-hour window is
- * the intended range, so hours are what an operator agrees with their partner. */
+/** The unit the width field is entered in. */
 const SECONDS_PER_HOUR = 3600;
 
 /** The narrowest window entry accepts, in hours. The schema's structural floor is
- * one second; this is the UX-level floor the design requires, since width is the
- * only mitigation for the clock skew between two machines that never exchange a
- * clock reading (docs/spec/MANAGED_EXCHANGE_RECORD.md, "Clock skew and the window
- * width"). */
+ * one second; this is the UX-level floor width's clock-skew mitigation requires
+ * (docs/spec/MANAGED_EXCHANGE_RECORD.md, "Clock skew and the window width"). */
 export const MIN_SCHEDULE_WINDOW_HOURS = 1;
 
 /** The widest window entry accepts, in hours -- the record schema's own ceiling,
@@ -53,8 +47,8 @@ export const MIN_SCHEDULE_WINDOW_HOURS = 1;
 export const MAX_SCHEDULE_WINDOW_HOURS =
   MAX_SCHEDULE_WINDOW_SECONDS / SECONDS_PER_HOUR;
 
-/** Re-exported beside the width bounds above so an entry component reads every
- * bound it enforces from one module, rather than half from the record schema. */
+/** Re-exported beside the width bounds so a caller reads every entry bound from
+ * one module. */
 export { MAX_SCHEDULE_INTERVAL_DAYS };
 
 /** The cadence as the operator types it. The two instants are strings because a
@@ -159,18 +153,13 @@ function anchorEntryFields(anchor: string): {
 }
 
 /**
- * The stored width where the width field still shows exactly it, so a save that
- * edited some OTHER field carries the stored seconds through rather than
- * re-deriving them from a display value in hours.
+ * The stored width, when the width field still shows exactly it -- so a save
+ * that edited another field carries the stored seconds through rather than
+ * re-deriving them from the display value in hours. A stored width finer than
+ * the field's unit would otherwise be rewritten to the hours it displays as.
  *
- * Without this, a stored width finer than the field's unit -- 5400 seconds from
- * an import or a hand-edited record -- would be rewritten to the hours it
- * displays as by an edit to the period alone, silently changing the width the
- * partnership agreed.
- *
- * It is also the exception {@link scheduleEntryErrors} reads: the value it
- * returns is one the operator inherited rather than entered, so entry's bounds
- * have nothing to hold it to.
+ * Also the exception {@link scheduleEntryErrors} reads: a carried value is
+ * inherited rather than entered, so entry's bounds do not apply to it.
  */
 function carriedWindowSeconds(
   fields: ScheduleEntryFields,
@@ -183,11 +172,9 @@ function carriedWindowSeconds(
 }
 
 /**
- * The stored anchor where the date and time fields still show exactly the wall
- * clock it reads back as, carried through for the same reason as the width: the
- * fields resolve only to the minute, so an anchor carrying seconds would be
- * rewritten by an edit to the period alone. It also keeps such an edit from
- * re-resolving a wall clock the operator's zone skips or repeats, which does not
+ * The stored anchor, when the date and time fields still show exactly the wall
+ * clock it reads back as -- carried through so an edit to another field does not
+ * re-resolve a wall clock the operator's zone skips or repeats, which does not
  * round-trip (see {@link scheduleEntryUnchanged}).
  *
  * @throws {RangeError} if the stored anchor is not a usable UTC instant.
@@ -208,19 +195,13 @@ function carriedAnchor(
  * What is wrong with an entered cadence, field by field. An empty result means
  * every field is usable and {@link buildScheduleFromEntry} will resolve it.
  *
- * The date and time are checked together against the calendar, through the same
- * resolver the save uses, so a 29 February that the year does not have fails here
- * rather than at the write.
+ * The date and time are checked together through the resolver the save uses, so
+ * a date the calendar does not have fails here rather than at the write.
  *
  * `stored` is the schedule the form opened on, where there is one. A width it
- * carries stands as it is while the operator leaves it alone -- the save carries
- * those seconds through untouched, so there is nothing at that field to correct
- * -- while a width the operator CHANGES takes entry's bounds and the whole-hour
- * rule like any other entry. The exception covers the floor as well as the unit:
- * a width below the floor arrives only from an import or a hand-edited record,
- * and refusing it would block every OTHER edit the form makes -- a label, a
- * max-age policy -- on a value the operator never entered and this form will not
- * rewrite for them.
+ * carries stands untouched while the operator leaves it alone, including one
+ * below entry's floor; a width the operator CHANGES takes entry's bounds and the
+ * whole-hour rule like any other entry.
  */
 export function scheduleEntryErrors(
   fields: ScheduleEntryFields,
@@ -270,18 +251,14 @@ export function scheduleEntryUsable(
  * clock resolved to the UTC `anchor` once, the period and width as whole
  * integers, and fresh bookkeeping.
  *
- * `nextWindow` is the first window that has not closed at `now` rather than the
- * anchor's own window, so a cadence anchored to a date already past does not hand
- * the catch-up walk a run of windows that elapsed before the operator agreed it
- * -- each of which it would count as a miss the partnership never had. The miss
- * count starts at zero for the same reason: an edited cadence is a new lattice,
- * and a count of windows on the old one says nothing about this one.
+ * `nextWindow` is the first window that has not closed at `now`, not the
+ * anchor's own window -- a cadence anchored to a past date does not count the
+ * elapsed windows as misses. The miss count starts at zero: an edited cadence is
+ * a new lattice.
  *
- * `stored` is the schedule the form opened on, where there is one. The anchor and
- * the width are carried from it VERBATIM while the fields that display them are
- * untouched (see {@link carriedAnchor} and {@link carriedWindowSeconds}), so
- * editing one field of a cadence never rewrites another that the display fields
- * hold at a coarser resolution than the record does.
+ * `stored` is the schedule the form opened on, where there is one; its anchor
+ * and width are carried VERBATIM while the display fields are untouched (see
+ * {@link carriedAnchor} and {@link carriedWindowSeconds}).
  *
  * @throws {RangeError} if any field is unusable (see
  *   {@link scheduleEntryErrors}), if the width does not resolve to the whole
@@ -309,7 +286,7 @@ export function buildScheduleFromEntry(
     carriedWindowSeconds(fields, stored) ??
     fields.windowHours * SECONDS_PER_HOUR;
   // A width in hours that is not a whole number of seconds has no record to be
-  // written to: the schema stores integer seconds, so it would surface as a
+  // written to: the schema stores integer seconds, so it would show as a
   // validation failure at the store write rather than here.
   if (!Number.isInteger(windowSeconds))
     throw new RangeError(
@@ -334,17 +311,13 @@ export function buildScheduleFromEntry(
  * The entry fields a stored schedule re-opens as: the UTC anchor read back on the
  * operator's own clock, and the period and width in the units the fields use.
  *
- * A width the schema admits but entry does not (a stored schedule from an import,
- * or one entered before the floor existed) reads back as the EXACT hours it is,
- * fractional where its seconds are not a whole hour, so the form shows what the
- * partnership agreed rather than a rounded value the operator would take for it.
- * It stands while the operator leaves it alone -- below entry's floor as much as
- * merely finer than the field's unit ({@link scheduleEntryErrors}) -- and the
- * save carries its seconds through untouched ({@link buildScheduleFromEntry}).
+ * A width the schema admits but entry does not reads back as the EXACT hours it
+ * is, fractional where its seconds are not a whole hour ({@link
+ * scheduleEntryErrors}), and the save carries its seconds through untouched
+ * ({@link buildScheduleFromEntry}).
  *
- * The anchor is read back only to the minute, which is the resolution the fields
- * carry; a stored anchor finer than that is likewise carried through rather than
- * re-resolved from the reading.
+ * The anchor is read back only to the minute; a stored anchor finer than that is
+ * carried through rather than re-resolved.
  *
  * @throws {RangeError} if the stored anchor is not a usable UTC instant.
  */
@@ -359,20 +332,13 @@ export function scheduleEntryFieldsFrom(
 }
 
 /**
- * Whether an entry still says exactly what a stored schedule does, so a save that
- * touched only the label or the max-age policy writes NO schedule at all instead
- * of rebuilding it.
+ * Whether an entry still says exactly what a stored schedule does, so a save
+ * that touched only the label or the max-age policy writes NO schedule at all.
  *
- * What rests on this is the schedule's bookkeeping: the planned window and the
- * consecutive-miss count belong to the runner, which advances them under a page
- * left open, so such a save must neither rebuild the cadence -- which resets both
- * -- nor write the object the form opened on back, which rewinds them to what the
- * page last read. The agreed instant itself is held either way -- a
- * cadence field the operator did not touch is carried through verbatim even on a
- * save that edited another (see {@link buildScheduleFromEntry}), so a wall clock
- * the operator's zone repeats or skips, which does not round-trip through the
- * local reading, is never re-resolved off that reading
- * (docs/spec/MANAGED_EXCHANGE_RECORD.md, the `anchor` row).
+ * The planned window and consecutive-miss count belong to the runner, which
+ * advances them under a page left open; such a save must neither rebuild the
+ * cadence (resets both) nor write back the object the form opened on (rewinds
+ * them) (docs/spec/MANAGED_EXCHANGE_RECORD.md, the `anchor` row).
  */
 export function scheduleEntryUnchanged(
   fields: ScheduleEntryFields,
@@ -389,9 +355,7 @@ export function scheduleEntryUnchanged(
 
 /** The cadence an entry form opens on when no schedule is stored: a weekly window
  * three hours wide, starting at the top of the hour after `now` on the operator's
- * own clock. It is a starting point to edit against the cadence the partnership
- * agreed, never a default anything runs on -- entry is opt-in, and nothing is
- * written until the operator saves. */
+ * own clock. Entry is opt-in; nothing is written until the operator saves. */
 export function defaultScheduleEntryFields(now: number): ScheduleEntryFields {
   const start = new Date(now);
   start.setMinutes(0, 0, 0);
@@ -411,10 +375,9 @@ export function defaultScheduleEntryFields(now: number): ScheduleEntryFields {
  * The UTC instant an entered cadence resolves to, phrased for display, or
  * `undefined` while the cadence is not usable.
  *
- * It is shown back because the resolution is not always the identity an operator
+ * Shown back because the resolution is not always the identity an operator
  * expects: a wall-clock time their zone skips or repeats across a daylight-saving
- * transition resolves to an instant naming a different wall clock, and the
- * partnership agreed an instant rather than a string (see
+ * transition resolves to an instant naming a different wall clock (see
  * {@link resolveLocalCadenceAnchor}).
  */
 export function resolvedFirstWindowLabel(
@@ -434,15 +397,12 @@ export function resolvedFirstWindowLabel(
 
 /**
  * The problem an entered cadence raises against an opted-in max-token-age policy,
- * or `undefined` when the two are compatible (which includes every exchange with
- * no policy set -- the default).
+ * or `undefined` when the two are compatible (including no policy set).
  *
- * A successful run restamps the bound to `tokenMaxAgeDays` past the run, and the
- * next chance to run is one `intervalDays` later, so a cadence at or past the
- * bound lapses the stored secret before the window that would have refreshed it:
- * the partnership stops on a lapsed secret rather than on anything either party
- * did, and recovery is a re-invite. Surfaced rather than refused -- an operator
- * who renews by hand is entitled to that cadence -- but never silently accepted.
+ * A successful run restamps the bound to `tokenMaxAgeDays` past the run; a
+ * cadence at or past the bound therefore lapses the stored secret before the
+ * next window could refresh it, and recovery is a re-invite. Surfaced rather
+ * than refused: an operator who renews by hand is entitled to that cadence.
  */
 export function cadenceAgainstTokenBound(
   intervalDays: number | string,

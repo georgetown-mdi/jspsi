@@ -16,27 +16,22 @@ import type { JobSftpServerEntry } from "./sftpServer";
 /**
  * The recurring-run hand-off: the portable, secret-free material an operator
  * needs to graduate a prototyped console exchange to a scheduled `psilink`
- * command-line run. The console composes every path it runs the CLI over as a
- * CONTAINER-internal path (the credential `@path`, the filedrop rendezvous
- * directory), and the shared secret lives only in the on-disk `.psilink.key` that
- * never crosses the browser. So the hand-off is a PORTABLE TEMPLATE, not a
- * turnkey export: the machine-independent parts (SFTP host/port/username, the
- * host-key fingerprint pin, and the linkage terms exactly as they ran) are filled
- * in, while the machine-specific paths are shown as clearly-labelled placeholders
- * the operator sets for their own machine.
+ * command-line run. The console composes every path it runs the CLI over as
+ * a CONTAINER-internal path, and the shared secret lives only in the on-disk
+ * `.psilink.key`, which never crosses the browser. The hand-off is a
+ * PORTABLE TEMPLATE, not a turnkey export: the machine-independent parts
+ * (SFTP host/port/username, the host-key fingerprint pin, the linkage terms
+ * exactly as they ran) are filled in, while machine-specific paths are shown
+ * as labelled placeholders the operator sets for their own machine.
  *
- * Two hard invariants are enforced by the compose helpers below and driven in
- * jobHandoff.unit.test.ts (the placeholdered credential and rendezvous paths) and
- * jobHandoffParity.unit.test.ts (the template's keys are exactly the routed ones):
- * - No shared secret, key-file body, or inline credential value is ever present:
- *   the exchange config the compose functions emit carries the credential only as
- *   an `@path` reference (the secret rides the key file), and the zero-setup
- *   command carries no secret at all.
- * - No container-internal path is ever present: the credential `@path`, every
- *   filedrop rendezvous mount -- the single shared directory, or both legs of a
- *   split appliance's pair -- and the signing identity file are replaced with fixed
- *   placeholder tokens before the template is composed, so the real container path
- *   is never emitted.
+ * Two invariants, enforced by the compose helpers below and driven in
+ * jobHandoff.unit.test.ts and jobHandoffParity.unit.test.ts:
+ * - No shared secret, key-file body, or inline credential value is ever
+ *   present: the exchange config holds the credential only as an `@path`
+ *   reference, and the zero-setup command holds no secret at all.
+ * - No container-internal path is ever present: the credential `@path`,
+ *   every filedrop rendezvous mount, and the signing identity file are
+ *   replaced with fixed placeholder tokens before the template is composed.
  */
 export interface JobHandoff {
   /** The mode the run used: `exchange` (invitation, config-and-key driven) or
@@ -46,27 +41,26 @@ export interface JobHandoff {
   channel: "sftp" | "filedrop";
   /**
    * Whether the run wrote a `.psilink.key` the operator must copy to their
-   * recurring folder. True for the exchange mode (which carries a shared secret in
-   * the key file), false for the zero-setup mode (which carries none).
+   * recurring folder. True for the exchange mode (which holds a shared secret
+   * in the key file), false for the zero-setup mode (which holds none).
    */
   usedKeyFile: boolean;
   /**
-   * Whether the authored SFTP credential arrived as a PASTED value (materialized
-   * to a server-owned file) rather than a file the operator owns. The panel shows
-   * the save-it-to-a-file caveat when true, since a pasted credential is not a file
-   * the recurring run can reference. Always false on the filedrop channel, which
-   * carries no credential.
+   * Whether the authored SFTP credential arrived as a PASTED value
+   * (materialized to a server-owned file) rather than a file the operator
+   * owns. The panel shows the save-it-to-a-file caveat when true. Always
+   * false on the filedrop channel, which has no credential.
    */
   credentialPasted: boolean;
   /**
-   * Whether the run signed receipts under a long-lived signing identity. True for
-   * a `certificate`-mode exchange, false otherwise (including every zero-setup
-   * run, which composes no config and signs nothing).
+   * Whether the run signed receipts under a long-lived signing identity.
+   * True for a `certificate`-mode exchange, false otherwise (every
+   * zero-setup run signs nothing).
    *
-   * The panel shows the carry-the-identity caveat when true: the signing key is a
-   * file, not a setting, and the recurring run must load THE SAME one -- a fresh
-   * `psilink fingerprint` on the scheduling machine mints a different key with a
-   * different fingerprint, which the partner's pin would then reject.
+   * The panel shows the carry-the-identity caveat when true: the recurring
+   * run must load the SAME signing key file, since a fresh `psilink
+   * fingerprint` on the scheduling machine mints a different key the
+   * partner's pin would reject.
    */
   usedSigningIdentity: boolean;
   /** The portable template itself: the exchange config document (exchange mode) or
@@ -103,14 +97,13 @@ export const HANDOFF_SHARED_DIRECTORY_PLACEHOLDER =
 export const HANDOFF_SHARED_DIRECTORY_URL_PLACEHOLDER =
   "file:///path/to/your/shared-directory";
 
-/** The placeholder a split appliance's INBOUND (peer-written) rendezvous mount is
+/** The placeholder a split console's INBOUND (peer-written) rendezvous mount is
  * shown as, in the exchange config's `connection.inbound_path`. Named for the
- * direction rather than "shared", because the whole point of the pair is that the
- * two folders are not one. */
+ * direction rather than "shared": the two folders are not one. */
 export const HANDOFF_INBOUND_DIRECTORY_PLACEHOLDER =
   "/path/to/your/inbound-directory";
 
-/** The placeholder a split appliance's OUTBOUND (self-written) rendezvous mount is
+/** The placeholder a split console's OUTBOUND (self-written) rendezvous mount is
  * shown as, in `connection.outbound_path` and on `--outbound-path`. */
 export const HANDOFF_OUTBOUND_DIRECTORY_PLACEHOLDER =
   "/path/to/your/outbound-directory";
@@ -122,14 +115,13 @@ export const HANDOFF_INBOUND_DIRECTORY_URL_PLACEHOLDER =
   "file:///path/to/your/inbound-directory";
 
 /**
- * The placeholder the signing identity file is shown as in the exchange config's
- * `signing.identity_file`.
+ * The placeholder the signing identity file is shown as in the exchange
+ * config's `signing.identity_file`.
  *
- * The identity itself is a real file the operator has -- it lives in the mounted
- * working directory, so it is on their host under a path of their own -- but the
- * path the appliance loads it by is the CONTAINER's, which their host does not
- * have. So the template names the file rather than the location, and the panel
- * says which file to point it at.
+ * The identity is a real file on the operator's host, but the console loads
+ * it by the CONTAINER's path, which their host does not have. The template
+ * names the file rather than the location, and the panel says which file to
+ * point it at.
  */
 export const HANDOFF_SIGNING_IDENTITY_PLACEHOLDER =
   "/path/to/your/signing-identity.json";
@@ -140,15 +132,14 @@ const HANDOFF_INPUT_NAME = "input.csv";
 const HANDOFF_OUTPUT_NAME = "results.csv";
 
 /**
- * Rebuild the authored SFTP server entry with every container-internal credential
- * `@path` replaced by a placeholder, keeping every portable field verbatim (host,
- * port, username, the REMOTE working directories, the host-key fingerprint,
- * and the keyboard-interactive toggle). Constructed field-by-field -- never by
- * spreading the entry -- so no real credential `@path` and no future field can ride
- * along into a template. The remote directories -- the shared `path`, or the split
- * `inbound_path`/`outbound_path` pair -- are directories on the partner's SFTP
- * server, identical on any machine, so they stay; only the LOCAL credential files
- * differ per machine and become placeholders.
+ * Rebuild the authored SFTP server entry with every container-internal
+ * credential `@path` replaced by a placeholder, keeping every portable field
+ * verbatim (host, port, username, the REMOTE working directories, the
+ * host-key fingerprint, the keyboard-interactive toggle). Constructed
+ * field-by-field, never by spreading the entry, so no real credential
+ * `@path` and no future field can ride along. The remote directories are on
+ * the partner's SFTP server and identical on any machine, so they stay;
+ * only the LOCAL credential files differ per machine.
  */
 function placeholderServerEntry(entry: JobSftpServerEntry): JobSftpServerEntry {
   const sanitized: JobSftpServerEntry = {
@@ -177,34 +168,33 @@ function placeholderServerEntry(entry: JobSftpServerEntry): JobSftpServerEntry {
 }
 
 /**
- * The signing paths the TEMPLATE names, as against the ones the live run used.
+ * The signing paths the TEMPLATE names, as against the ones the live run
+ * used.
  *
- * The identity is placeholdered: the appliance loads it by a container path the
- * operator's host does not have (see
+ * The identity is placeholdered: the console loads it by a container path
+ * the operator's host does not have (see
  * {@link HANDOFF_SIGNING_IDENTITY_PLACEHOLDER}).
  *
- * The receipt output is OMITTED rather than placeholdered, and that is a
- * behavioural choice, not a redaction: with the key absent the CLI writes a
- * timestamped receipt into the run's own working directory, so a schedule
- * accumulates one receipt per run. Carrying the appliance's single fixed name
- * over would have each scheduled run overwrite the last run's receipt -- the
- * opposite of what a non-repudiable audit trail is for. The live run pins the
- * name because it serves that one file once; a schedule wants the trail.
+ * The receipt output is OMITTED rather than placeholdered: with the key
+ * absent, the CLI writes a timestamped receipt into the run's own working
+ * directory, so a schedule accumulates one receipt per run. Reusing the
+ * console's single fixed name would have each scheduled run overwrite the
+ * last run's receipt. The live run pins the name because it serves that one
+ * file once; a schedule wants the trail.
  */
 const HANDOFF_SIGNING_PATHS: JobSigningPaths = {
   identityFile: HANDOFF_SIGNING_IDENTITY_PLACEHOLDER,
 };
 
 /**
- * Compose the exchange mode's portable `psilink.yaml` template. It recomposes
- * through the SAME compose functions the live run used, so the linkage terms,
- * metadata, standardization, host, port, username, fingerprint, signing mode,
- * pinned partner fingerprint, and retention note are byte-for-byte what ran --
- * only the container paths are substituted first: the sftp arm passes a
- * placeholder-credential server entry, the filedrop arm a placeholder rendezvous
- * path, and both pass {@link HANDOFF_SIGNING_PATHS}. Recomposing (rather than
- * reading and munging the on-disk file) keeps the container path out by
- * construction and never reads the secret-adjacent config off disk.
+ * Compose the exchange mode's portable `psilink.yaml` template through the
+ * SAME compose functions the live run used, so linkage terms, metadata,
+ * standardization, and connection fields are byte-for-byte what ran, with
+ * only the container paths substituted first (a placeholder-credential
+ * server entry on sftp, a placeholder rendezvous path on filedrop, and
+ * {@link HANDOFF_SIGNING_PATHS} on both). Recomposing, rather than reading
+ * and munging the on-disk file, keeps the container path out by
+ * construction.
  */
 function buildExchangeHandoffTemplate(
   intent: JobExchangeIntent,
@@ -243,17 +233,16 @@ function buildExchangeHandoffTemplate(
 
 /**
  * Compose the zero-setup mode's portable command tokens: `psilink` plus the
- * connection portion (the sftp arm's `sftp://` URL and `--server-*` flags with the
- * credential `@path` placeholdered, or the filedrop arm's placeholder `file://`
+ * connection portion (sftp's `sftp://` URL and `--server-*` flags with the
+ * credential `@path` placeholdered, or filedrop's placeholder `file://`
  * locator), the run's tuning flags, its identity and linkage-strategy
- * selectors when set, and the input/output positionals. The sftp arm reuses
- * {@link zeroSetupSftpArgv} against a placeholder-credential entry, so the URL,
- * username, and mandatory fingerprint pin are exactly what ran while no credential
- * `@path` is emitted. The tuning flags come from {@link zeroSetupOptionsArgv} --
- * the same builder the live run's argv uses -- so a retained-transcript run
- * graduates to a recurring command that retains identically, and a run tuned for
- * a slow peer graduates to one tuned the same way; the flags name no path and
- * carry no credential, so they are portable verbatim.
+ * selectors when set, and the input/output positionals.
+ *
+ * The sftp arm reuses {@link zeroSetupSftpArgv} against a
+ * placeholder-credential entry, so the URL, username, and mandatory
+ * fingerprint pin are exactly what ran while no credential `@path` is
+ * emitted. The tuning flags come from {@link zeroSetupOptionsArgv} -- the
+ * same builder the live run's argv uses -- and name no path or credential.
  */
 function buildZeroSetupHandoffTemplate(
   intent: JobZeroSetupIntent,
@@ -294,7 +283,7 @@ function buildZeroSetupHandoffTemplate(
 
 /**
  * What the MANAGER knows about the run that the intent does not: whether the
- * credential was pasted, and whether this appliance rendezvouses over a split pair.
+ * credential was pasted, and whether this console rendezvouses over a split pair.
  * A record rather than two positional flags, because the two are same-typed and a
  * transposed pair would otherwise typecheck.
  */
@@ -302,11 +291,11 @@ export interface JobHandoffRunFacts {
   /**
    * Whether the sftp credential the run used was a PASTED, server-materialized
    * value rather than a file the operator owns. Forced false on the filedrop
-   * channel, which carries no credential.
+   * channel, which has no credential.
    */
   credentialPasted: boolean;
   /**
-   * Whether this appliance provisions the inbound/outbound rendezvous pair. Read
+   * Whether this console provisions the inbound/outbound rendezvous pair. Read
    * only on the filedrop channel, whose template it decides between the single
    * shared directory and the two-directory form.
    */
