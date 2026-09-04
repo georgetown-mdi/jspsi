@@ -88,7 +88,7 @@ export function inferDateFormat(values: Iterable<string>): string | undefined {
   let anyElimination = false;
 
   for (const value of values) {
-    // Empty values carry no format signal and do not count toward the cap, so
+    // Empty values hold no format signal and do not count toward the cap, so
     // skip them without spending the scan budget.
     if (value === undefined || value.trim() === "") continue;
     // Stop once a single candidate remains or the cap is reached; checked before

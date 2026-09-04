@@ -19,40 +19,42 @@ const CLOSE_BRACKET = 0x5d; // ]
 
 /**
  * Scans a JSON document -- its UTF-8 bytes, or the UTF-16 code units of an
- * already-decoded string -- and returns `true` if it carries a structure that
+ * already-decoded string -- and returns `true` if it has a structure that
  * must be rejected BEFORE `JSON.parse` runs:
  *
  * - any single object with more than `maxObjectKeys` members,
  * - any single array with more than `maxArrayElements` elements, or
  * - structural nesting (objects and arrays) deeper than `maxDepth`.
  *
- * Each is a structural pathology a partner-controlled frame can reach within the
- * frame-size cap and that `JSON.parse` cannot be allowed to meet: a single
- * object wide enough, OR a single array long enough, drives the engine into an
- * internal limit (a per-object property ceiling, or its array backing-store
- * length limit) and terminates the process -- not by a thrown exception the
- * surrounding `try`/`catch` could intercept, but by an uncatchable abort. So the
- * bound has to fire ahead of the parse rather than catch its failure. The depth
- * cap additionally bounds THIS scan's own per-container stack, so a degenerate
- * body that is all `{`/`[` is rejected here rather than exhausting memory in the
- * pre-pass. See docs/spec/CHANNEL_SECURITY.md.
+ * Each is a structural pathology a partner-controlled frame can reach
+ * within the frame-size cap, one `JSON.parse` cannot be allowed to meet:
+ * a single object wide enough, or a single array long enough, drives the
+ * engine into an internal limit (a per-object property ceiling, or its array
+ * backing-store length limit) and terminates the process -- not a thrown
+ * exception a surrounding `try`/`catch` could intercept, but an uncatchable
+ * abort. The bound must fire ahead of the parse, since it cannot catch the
+ * parse's failure. The depth cap also bounds THIS scan's own per-container
+ * stack, so a degenerate body that is all `{`/`[` is rejected here rather
+ * than exhausting memory in the pre-pass. See docs/spec/CHANNEL_SECURITY.md.
  *
- * Counting is structural. An object's members are counted by their colons; an
- * array's elements by their separating commas (the element count is the comma
- * count plus one for a non-empty array, so this undercounts elements by one,
- * immaterial against a budget far above any legitimate array and far below the
- * engine limit). On well-formed JSON every colon and every element-comma falls
- * directly inside the innermost open container and is charged to it. Two
- * approximations are deliberate and safe. The colon count over-counts an object
- * that repeats a key (the parse keeps one member per name), which only rejects
- * sooner, and no legitimate message repeats keys. And on malformed JSON a colon
- * or comma can be mischarged: one outside any container is charged to nothing,
- * and a mismatched close pops without checking the bracket type, so a later
- * marker may land on an outer frame. Neither approximation can hide a crash: a
- * malformed body never reaches an engine limit (`JSON.parse` rejects it as
- * invalid first), and the bound errs only toward an earlier rejection, never
- * toward letting a too-wide object or too-long array through. The scan is a
- * single O(n) pass with early exit, ahead of the parse's own pass.
+ * Counting is structural. An object's members are counted by their colons;
+ * an array's elements by their separating commas (the element count is the
+ * comma count plus one for a non-empty array, so this undercounts by one --
+ * immaterial against a budget far above any legitimate array and far below
+ * the engine limit). On well-formed JSON every colon and every element-comma
+ * falls directly inside the innermost open container and is charged to it.
+ *
+ * Two approximations are intentional and safe. The colon count over-counts
+ * an object that repeats a key (the parse keeps one member per name), which
+ * only rejects sooner, and no legitimate message repeats keys. On malformed
+ * JSON a colon or comma can be mischarged: one outside any container is
+ * charged to nothing, and a mismatched close pops without checking the
+ * bracket type, so a later marker may land on an outer frame. Neither
+ * approximation can hide a crash: a malformed body never reaches an engine
+ * limit (`JSON.parse` rejects it as invalid first), and the bound errs only
+ * toward an earlier rejection, never toward letting a too-wide object or
+ * too-long array through. The scan is a single O(n) pass with early exit,
+ * ahead of the parse's own pass.
  */
 export function exceedsJsonStructureBound(
   input: Uint8Array | string,

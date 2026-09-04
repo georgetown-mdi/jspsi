@@ -13,11 +13,11 @@
 // "/./", and trailing slashes alike) while preserving the absolute-vs-relative
 // distinction. Pure string work so it stays browser-safe (no node:path).
 //
-// It deliberately does NOT resolve ".." (unsafe across a symlink, and rare in a
-// configured directory), fold case (Windows filesystems are case-insensitive),
-// or expand a relative path against an SFTP login home -- none of those can be
-// settled client-side. So it only ever UNDER-collapses: it never reports two
-// genuinely distinct directories as the same (no false rejection), but a config
+// It does NOT resolve ".." (unsafe across a symlink, and rare in a configured
+// directory), fold case (Windows filesystems are case-insensitive), or
+// expand a relative path against an SFTP login home -- none of those can be
+// settled client-side. So it only ever UNDER-collapses: it never reports
+// two distinct directories as the same (no false rejection), but a config
 // that hits one of those residuals can still slip through, which is the
 // operator's responsibility (documented in docs/EXCHANGE_REFERENCE.md).
 export function pathsResolveToSameDir(a: string, b: string): boolean {

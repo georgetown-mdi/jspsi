@@ -5,7 +5,7 @@ import * as z from "zod";
  * most ONE issue, rather than Zod's default one-issue-per-invalid-element.
  *
  * Why this exists, not a plain `z.array(element)` or a count `.max()`: a
- * partner-controlled post-handshake wire message can carry an array of millions
+ * partner-controlled post-handshake wire message can hold an array of millions
  * of INVALID elements. Under `z.array(element)` Zod accumulates one issue per
  * element, which raises one of TWO distinct `RangeError`s (both verified on Zod
  * 4.4.3), depending on the array's framing:
@@ -29,7 +29,7 @@ import * as z from "zod";
  *
  * Validating the element TYPE in one `every` pass caps issue accumulation at one
  * regardless of count: an arbitrarily large VALID message still parses, while a
- * hostile one fails as a clean, bounded rejection -- surfaced as a
+ * hostile one fails as a clean, bounded rejection -- reported as a
  * `ConnectionError("protocol")` by `receiveParsed` (or `parseOrProtocolError` at
  * a send-before-parse site) -- instead of an uncaught `RangeError`. The receive
  * path already caught the `RangeError` harmlessly; this turns that ungraceful

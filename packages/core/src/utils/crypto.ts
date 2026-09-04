@@ -7,7 +7,7 @@ export const enc = new TextEncoder();
  * substituting U+FFFD - a caller decoding authenticated-but-possibly-malformed
  * bytes (e.g. the AEAD layer) needs the rejection, not silent corruption. Use
  * only for one-shot, non-streaming decodes: never call `decFatal.decode(chunk,
- * { stream: true })` on this shared instance, since streaming mode carries
+ * { stream: true })` on this shared instance, since streaming mode holds
  * decoder state across calls and would corrupt unrelated decodes elsewhere in
  * the process. A caller that needs streaming must construct its own decoder.
  */
@@ -96,10 +96,10 @@ export function bytesEqual(
  * Derive `lengthBytes` bytes from `ikm` using HKDF-SHA-256 with a zero salt
  * and the given `info` string.
  *
- * A zero salt is used deliberately: `info` carries all domain separation, so
- * the salt adds no security.  RFC 5869 section 3.1 explicitly permits this when the
- * IKM is high-entropy key material, which is always true here (callers pass
- * either a session key or a decoded 32-byte base64url token).
+ * A zero salt is used by design: `info` holds all domain separation,
+ * so the salt adds no security. RFC 5869 section 3.1 explicitly permits
+ * this when the IKM is high-entropy key material, which is always true here
+ * (callers pass either a session key or a decoded 32-byte base64url token).
  */
 export async function hkdfDerive(
   ikm: Uint8Array<ArrayBuffer>,
