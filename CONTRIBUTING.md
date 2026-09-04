@@ -10,7 +10,7 @@ Thank you for your interest in contributing. psilink handles personally identifi
 
 This is the pre-contribution quickstart: repository layout, how to build and test, the conventions CI and review enforce, and the pull-request and dependency-review process. It is not a reference. Keep deeper material out of it:
 
-- Dependency-internal premises and upgrade runbooks -> [docs/spec/DEPENDENCY_PINS.md](docs/spec/DEPENDENCY_PINS.md).
+- Dependency-internal assumptions and upgrade runbooks -> [docs/spec/DEPENDENCY_PINS.md](docs/spec/DEPENDENCY_PINS.md).
 - Test-infrastructure internals and the coverage rationale -> [docs/TESTING.md](docs/TESTING.md).
 - Wire formats, constants, algorithm steps, and the "would only need revisiting if..." rationale behind them -> [docs/spec/](docs/spec/README.md).
 
@@ -115,8 +115,8 @@ not add one. Rationale and what the report covers: [docs/TESTING.md](docs/TESTIN
 
 - **TypeScript** with strict mode throughout. Avoid `any`; if you must use it, add a comment explaining why.
 - **Naming**: `camelCase` in TypeScript; `snake_case` in user-facing JSON and YAML files. Semicolons required. Prefer a long, explicit, self-documenting name over a short one plus a clarifying comment.
-- **Comments**: write one only when the _why_ is non-obvious - a hidden constraint, subtle invariant, or known limitation. Do not restate what the code does. Multi-line `//` blocks are permitted for complex runtime constraints that cannot fit on one line.
-- **Encode runtime invariants as checks, not prose**: a claim that something does not happen at runtime -- a line that never fires, an unreachable branch, a callback that never runs -- belongs in an executable check that fails when the claim breaks, not a comment or doc note that cannot, and a best-effort check says so, because a backstop is not a guarantee. The worked case, its premise and its enforcing check -- a prose note there went stale while the check did not, the point of the rule: [docs/spec/DEPENDENCY_PINS.md](docs/spec/DEPENDENCY_PINS.md#upgrading-the-sftp-stack-ssh2--ssh2-sftp-client) and the CLI integration console sentinel (`apps/cli/test/consoleSentinel.ts`).
+- **Comments**: write one only when the _why_ is non-obvious - a hidden constraint, subtle invariant, or known limitation. Do not restate what the code does. Multi-line `//` blocks are permitted for complex runtime constraints that cannot fit on one line, under the six-line bound in **Plain language** below.
+- **Encode runtime invariants as checks, not prose**: a claim that something does not happen at runtime -- a line that never fires, an unreachable branch, a callback that never runs -- belongs in an executable check that fails when the claim breaks, not a comment or doc note that cannot, and a best-effort check says so, because a safety check is not a guarantee. The worked case, its assumption and its enforcing check -- a prose note there went stale while the check did not, the point of the rule: [docs/spec/DEPENDENCY_PINS.md](docs/spec/DEPENDENCY_PINS.md#upgrading-the-sftp-stack-ssh2--ssh2-sftp-client) and the CLI integration console sentinel (`apps/cli/test/consoleSentinel.ts`).
 - **JSDoc**: `/** */` on all exports; `/** @internal */` (with no description) for test-only exports.
 - **Validation**: define the TypeScript interface first, then derive the Zod schema with `z.ZodType<Interface>`. Apply `camelizeKeys` before Zod parsing so user-facing YAML/JSON remains `snake_case` while TypeScript sees `camelCase`.
 - **Transport branching**: `connection.channel` is the discriminant. Use allowlists (not blocklists) so a new channel is rejected unless explicitly added. The guards are in `packages/core/src/config/connection.ts`, `packages/core/src/config/invitation.ts`, `packages/core/src/config/exchangeFile.ts`, `apps/cli/src/commands/exchange.ts`, `apps/cli/src/protocol.ts`, and `apps/cli/src/onlineBootstrap.ts`.
@@ -128,30 +128,53 @@ not add one. Rationale and what the report covers: [docs/TESTING.md](docs/TESTIN
 - **CLI durations**: a duration-valued CLI flag parses its value through the shared `parseDuration` / human-readable `<int><unit>` format (`apps/cli/src/util/duration.ts`), read from args via `durationFlagSeconds` (`apps/cli/src/util/cli.ts`), never a bare integer of seconds, so the accepted value syntax stays consistent across flags.
 - **CLI flag naming**: a flag names the object of the action rather than the mechanism, stays self-scoping (a generic `--yes` overclaims), does not stutter with its subcommand, and a weighty or irreversible action gets no terse short form.
 - **Windows paths**: support wherever a user can supply a local path. Normalize backslashes on ingestion; use `fileURLToPath` for `file://` URLs.
-- **Plain language**: use the plainest accurate word. Do not coin a metaphor where a domain word exists, and do not promote an internal name into text a user reads. A user-visible string states what happened and what to do, and nothing else -- no justification of the design, no reassurance the reader cannot act on, no refutation of an objection they did not raise. A comment states a constraint, not an argument, and stays under roughly six lines; when the reasoning is longer than that, it is a design record and belongs in `docs/notes/`. This applies to hook and script headers as much as to source comments. The negative wordlist below is the list to check a rewrite against; it is a prompt to reread a sentence, not a substitution table, and no CI check enforces it -- a word-list check would fire on `mintExchangeFile` and `honest-but-curious` and teach contributors to route around it.
+- **Plain language**: use the plainest accurate word. Do not coin a metaphor where a domain word exists, and do not promote an internal name into text a user reads. A user-visible string states what happened and what to do, and nothing else -- no justification of the design, no reassurance the reader cannot act on, no refutation of an objection they did not raise. A comment inside code states a constraint, not an argument, and stays under roughly six lines -- the ceiling on the multi-line blocks the **Comments** bullet above permits; when the reasoning is longer than that, it is a design record and belongs in `docs/notes/`. A file header that `CLAUDE.md` or this document cites as the documentation of a hook, check script, or module is bounded by what it documents rather than by that length, and it still states constraints rather than arguing for them. The negative wordlist below is the list to check a rewrite against; it is a prompt to reread a sentence, not a substitution table, and no CI check enforces it -- a word-list check would fire on `mintExchangeFile` and `honest-but-curious` and teach contributors to route around it.
 
   Prefer the right-hand word. Judge each in context; none is a safe blind substitution.
 
-      carries | carry | carried      -> has / holds / includes / states / sends
+      carries | carry | carried      -> has / holds / contains / includes / states
+          "sends" only where the subject is a party or a channel, never a message,
+          list, or field. In a MUST, pick the verb that keeps what the sentence
+          requires: a requirement about what a list or field holds takes "contains".
       honest | honestly              -> accurate / correct / does not overstate
-      load-bearing                   -> critical / required / name the consequence
+      load-bearing                   -> required / critical
+          "required" where a rule or check demands it, "critical" where losing it
+          breaks a behavior the sentence names.
       seam | seams                   -> boundary / call site / name the function
-      surface | surfaces | surfaced  -> shows / reports / exposes  (VERB only)
-      backstop                       -> fallback / safety check / name the mechanism
+      surface | surfaces | surfaced  -> shows / reports / exposes / raise (VERB only)
+          "raise" where the object goes to a person ("raise it with the owner").
+      backstop                       -> safety check / fallback
+          "safety check" where it catches what the main path missed, "fallback"
+          where it runs in the main path's place.
       premise | premises             -> assumption
-      footgun | foot-gun             -> hazard / mistake / name the failure
+      footgun | foot-gun             -> hazard / mistake
+          "hazard" for the shape that invites the error, "mistake" for what the
+          person does with it.
       blast radius                   -> scope of impact / what it touches
       escape hatch                   -> override / opt-out / documented exception
       reads as                       -> is treated as / displays as
-      settles                        -> determines / fixes  (value sense only)
+      settles                        -> determines / decides / fixes  (value sense only)
       deliberately                   -> delete, or "by design"
       worth naming/stating/carrying  -> delete the signpost
       true up | trued | true the     -> correct / fix
       first-class                    -> fully supported / primary
       genuinely | materially | crucially | notably -> delete
+          Delete it where it only intensifies. Keep it where it is the one thing
+          distinguishing two cases the sentence contrasts -- a "genuinely-null"
+          received cell against an empty string (`docs/spec/EXCHANGE_RECORD.md`).
       bubble up | paper over | knob | legible -> raise / hide / setting / clear
-      appliance | bench              -> console
-      battery | lock-in | warn-not-enforce -> name the thing plainly
+      appliance | bench              -> console (prose and user-visible text only)
+          The `/bench` route segments, `apps/web/src/bench`, identifiers, CSS
+          classes, storage keys and test selectors are renamed by the console
+          split, not by this rule.
+      battery                        -> the checks / the run
+          The doctor code's own words (`apps/cli/src/doctor`): "the checks" for the
+          set, "the run" for one execution of them ("stopped the battery" becomes
+          "stopped the run").
+      lock-in                        -> commitment / enforcement
+          "commitment" for the recorded declaration, "enforcement" for the runtime
+          check that aborts on a mismatch.
+      warn-not-enforce               -> advisory (it warns and does not block)
 
   These words are grounded in this repository and are NOT on the list: gate, mint, fan-out, round, ledger, canonical, attest, invariant, in flight, pin, drift, reconcile, sweep, harden, posture, hygiene, and the noun surface (attack surface, consent surface, `ConsentSurfaceName`). Neither are the terms of art -- honest-but-curious, semi-honest, honest party, the PSI round and round-trip, Promise settlement -- nor any identifier, filename, type name, fixture, or schema key.
 
@@ -181,7 +204,7 @@ When behavior changes, update the matching tier:
 
 If you are writing a constant value, a byte/wire layout, an HKDF info string or other algorithm step, or the "would only need revisiting if..." rationale behind one of those, it belongs in `docs/spec/` - regardless of which doc you currently have open. Overview docs (`docs/`) stay conceptual and operational, including operational rationale such as the coverage-gate decision.
 
-All three documentation tiers (`docs/`, `docs/spec/`, `docs/notes/`) must stay scannable: no multi-hundred-word paragraphs -- use subheadings and lists. When an edit lands in a section that is already a wall of text, restructure the section rather than growing a sentence in place.
+All three documentation tiers (`docs/`, `docs/spec/`, `docs/notes/`) must stay scannable: no multi-hundred-word paragraphs -- use subheadings and lists. When an edit lands in a section that is already a wall of text, restructure the section rather than growing a sentence in place. One exception: a `docs/spec/` paragraph holding a MUST, SHOULD, MUST NOT, or NEVER is not split by this rule, because the keyword binds the sentences of its own paragraph and splitting it changes what the spec requires -- that is a spec change, made on its own. Spec prose with no normative keyword stays inside the bound.
 
 Write documentation as the target state, not a narration of what changed -- no "now", "previously", or "no longer"; the reader cannot see the diff, and change history belongs in the commit message. This holds in all three tiers and in source comments.
 
@@ -242,7 +265,7 @@ Modifying an existing control in these areas is in scope exactly as adding one i
 
 psilink is licensed under [Apache 2.0](LICENSE.md); add third-party dependencies conservatively. For every new dependency:
 
-1. Confirm the license permits Apache 2.0 distribution. Copyleft licenses (GPL, AGPL) are not compatible. The [Dependency Review workflow](.github/workflows/dependency_review.yaml) enforces this automatically for the strong-copyleft GPL/AGPL family via its `deny-licenses` blocklist, failing any PR that introduces a dependency under one. That gate is a backstop, not the whole rule: it fails only on a _declared_ denied SPDX id, so a passing check is not proof a dependency is clean -- one that ships no license metadata (or `NOASSERTION`) is reported but does not fail it. This review stays the authority for weak copyleft (LGPL, MPL), whose acceptability is linkage-dependent, and for any dependency whose license the action cannot resolve or that declares none (exempt a mis-flagged dependency with the workflow's `allow-dependencies-licenses` and clear it here).
+1. Confirm the license permits Apache 2.0 distribution. Copyleft licenses (GPL, AGPL) are not compatible. The [Dependency Review workflow](.github/workflows/dependency_review.yaml) enforces this automatically for the strong-copyleft GPL/AGPL family via its `deny-licenses` blocklist, failing any PR that introduces a dependency under one. That gate catches part of the rule, not all of it: it fails only on a _declared_ denied SPDX id, so a passing check is not proof a dependency is clean -- one that ships no license metadata (or `NOASSERTION`) is reported but does not fail it. This review stays the authority for weak copyleft (LGPL, MPL), whose acceptability is linkage-dependent, and for any dependency whose license the action cannot resolve or that declares none (exempt a mis-flagged dependency with the workflow's `allow-dependencies-licenses` and clear it here).
 2. Run `npm audit --omit=dev -w packages/core -w apps/cli -w apps/web` -- the scope the shipped image runs -- and resolve any known vulnerabilities before merging. [Static Checks](.github/workflows/static_checks.yaml) runs that exact command as a merge gate on every pull request and fails on any finding, so this is a faster local answer rather than the only one; resolve a red gate by a reviewed bump, never by `npm audit fix`. A finding outside that scope is a development-tree finding, reported by the scheduled [Dependency Audit](.github/workflows/dependency_audit.yaml) and triaged separately rather than at merge time; see [docs/spec/DEPENDENCY_PINS.md](docs/spec/DEPENDENCY_PINS.md).
 3. Prefer packages that are actively maintained and publish a security policy.
 4. If the package ships its own `NOTICE` file and is redistributed to end users, fold its attribution into the top-level [`NOTICE`](NOTICE).
@@ -251,7 +274,7 @@ On a dependency-bump pull request, scope the review by the changed (`+`/`-`) man
 
 **Cryptographic dependencies** - `@openmined/psi.js`, `@noble/curves`, and any AEAD, key-agreement, or key-derivation library - require explicit security review and maintainer approval before merging. These libraries underpin the privacy and integrity guarantees of every exchange. Dependency upgrades driven by security advisories take priority over feature work.
 
-**The SFTP stack (`ssh2` / `ssh2-sftp-client`) and the WebRTC stack (`peerjs` / `peerjs-js-binarypack`)** are reached past their public APIs into internals, so each is exact-pinned (in `apps/cli/package.json` and `apps/web/package.json` respectively). Every bump is a deliberate, security-reviewed edit -- never an `npm audit fix` that slips in unreviewed -- and must re-verify the internal premises first. Why they are pinned, the premises, and the per-stack upgrade checklist: [docs/spec/DEPENDENCY_PINS.md](docs/spec/DEPENDENCY_PINS.md).
+**The SFTP stack (`ssh2` / `ssh2-sftp-client`) and the WebRTC stack (`peerjs` / `peerjs-js-binarypack`)** are reached past their public APIs into internals, so each is exact-pinned (in `apps/cli/package.json` and `apps/web/package.json` respectively). Every bump is a deliberate, security-reviewed edit -- never an `npm audit fix` that slips in unreviewed -- and must re-verify the internal assumptions first. Why they are pinned, the assumptions, and the per-stack upgrade checklist: [docs/spec/DEPENDENCY_PINS.md](docs/spec/DEPENDENCY_PINS.md).
 
 Per-dependency licenses are recorded authoritatively in the CycloneDX SBOM attached to each release - every direct and transitive dependency with its license; see [docs/RELEASES.md](docs/RELEASES.md#software-bill-of-materials-sbom). Attributions for redistributed and vendored components are in the top-level [`NOTICE`](NOTICE).
 
