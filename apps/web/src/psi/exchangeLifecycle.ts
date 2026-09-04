@@ -27,19 +27,13 @@ import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 const log = getLogger("exchangeLifecycle");
 
 /**
- * The operator-facing notice for a run that reported its result and whose clean
- * close then waited for the peer up to its ceiling: every frame is out of this
- * side's hands, but the signal that says the peer took the final one never came,
- * so the exchange succeeded here without that being true of the partner.
- *
- * Composed here rather than in the transport because this is the layer that owns
- * the run's operator vocabulary; the transport reports how its wait ended
- * (`onCloseOutcome`) and knows nothing about how a run words it. Composed RAW,
- * like every warning this app raises itself: the seat that renders it escapes
- * what it folds, once, at its display boundary (see
- * `apps/web/src/bench/runWarnings.ts`). It names no duration -- the ceiling is a
- * constant the operator did not set and cannot see -- and it names the check
- * that resolves it, since this party's own result is not what is in doubt.
+ * Operator notice for a run that reported its result whose clean close then
+ * waited for the peer up to the ceiling without the peer's take signal
+ * arriving: this side's exchange finished, but the partner's may not have.
+ * Composed raw and escaped once at the display boundary
+ * (`apps/web/src/bench/runWarnings.ts`). Names no duration -- the operator
+ * does not set or see the ceiling -- and directs the operator to confirm with
+ * the partner, since only the partner's result is in doubt.
  */
 export const FINAL_FRAME_UNCONFIRMED_WAIT_EXPIRED_WARNING =
   "your partner did not confirm taking the final message before the wait " +
@@ -48,20 +42,13 @@ export const FINAL_FRAME_UNCONFIRMED_WAIT_EXPIRED_WARNING =
   "finished before either of you relies on their copy.";
 
 /**
- * The operator-facing notice for the same run when the close ended because the
- * link went instead: the peer connection died under it, the channel was already
- * out of `open` when the wait began, or the run was cancelled while the wait
- * stood, which takes the link down from this side.
- *
- * A separate sentence rather than a reuse of the one above, because the two say
- * different things about the partner's copy. A wait that ran out means the
- * partner was still reachable and never confirmed; a link that went can equally
- * have carried the message and died after the partner read it, or lost whatever
- * was still buffered -- and nothing on this side can tell those apart. The
- * wording therefore claims neither, and keeps the same closing instruction,
- * since the check that resolves it is the same one. That is also why a
- * cancellation takes this sentence rather than the one above: the wait did not
- * run out, it was cut, and what the partner got is equally unknowable.
+ * Operator notice for the same run when the close ends because the link went
+ * instead -- the peer connection died, the channel was already closed when
+ * the wait began, or the run was cancelled mid-wait. A separate message from
+ * the one above because delivery is unknowable here: the message may have
+ * reached the partner before the link died, or never gone at all. The wording
+ * claims neither, and gives the same closing instruction, since the same
+ * check resolves it.
  */
 export const FINAL_FRAME_UNCONFIRMED_LINK_LOST_WARNING =
   "the connection closed before your partner could confirm taking the final " +
@@ -71,19 +58,15 @@ export const FINAL_FRAME_UNCONFIRMED_LINK_LOST_WARNING =
 
 /**
  * What a run tells its operator about each way the clean close's wait for the
- * peer can end ({@link PeerCloseOutcome}); `undefined` is the deliberate
- * silence. The peer's own close is the delivery signal, so a run that got it has
- * nothing to report; every other exit ends with no such signal, so the partner's
- * copy is in doubt and the operator hears which kind of doubt it is. This map
- * says what an exit MEANS; which notices reach an operator is each run wiring's
- * emit gate -- {@link runExchangeLifecycle} for a one-shot run and the managed
- * re-run driver for a recurring one, both withholding every notice from a failed
- * or cancelled run -- so a cancelled run's entry here is not a claim that anyone
- * reads it.
- *
- * A total map rather than a chain of comparisons: a new outcome fails to compile
- * here until this layer has decided what a run says about it, instead of
- * defaulting into silence the way an unmatched branch would.
+ * peer can end ({@link PeerCloseOutcome}). `undefined` means silence by
+ * design: the peer's own close is the delivery signal, so that exit has
+ * nothing to report; every other exit means the partner's copy is in doubt,
+ * and states which kind. A total map, so a new outcome fails to compile here
+ * until this layer decides what it says; which notices actually reach an
+ * operator is a separate emit gate in each run wiring ({@link
+ * runExchangeLifecycle} for a one-shot run and the managed re-run driver for
+ * a recurring one, both withholding every notice from a failed or cancelled
+ * run).
  */
 export const CLOSE_OUTCOME_WARNINGS: Record<
   PeerCloseOutcome,
@@ -105,58 +88,43 @@ export interface StageDefinition {
 }
 
 /** Which half of the lifecycle a failure came from, so the UI can choose its
- * alert: an `"exchange"` failure (acquire/open/run) invites a re-run, whereas an
- * `"output"` failure means the privacy-sensitive exchange already succeeded and
- * only local results-file generation failed - the user must not re-run it. A
- * `"security"` failure is the trust-boundary subset of an exchange failure: the
- * authenticated key exchange (or, once it is wrapped, the AEAD layer) reported a
- * wrong secret, tamper, or replay, so the user must NOT silently re-run it -- it
- * is surfaced as an authentication failure rather than a retryable transport
- * drop. A `"config"` failure is an {@link OperatorConfigError} raised during the
- * PREPARE phase (inside `acquire`, before any peer connection): a prepare-time
- * fault whose message names only this party's OWN configuration. Not a transport
- * drop, so retrying as-is fails identically; the message is actionable and safe to
- * surface. It is scoped to that base type, NOT to any prepare-phase `UsageError`:
- * a sibling guard whose message can embed partner-influenced column names (the
- * accept side's payload-send disclosure check) stays a plain `UsageError` and lands
- * in the generic (message-swallowing) `"exchange"` alert. Keying on the type lets
- * a future local-config check -- e.g. the disclosure-commitment drift a recurring
- * web exchange reaches -- join the `config` alert by extending `OperatorConfigError`
- * at its throw site, with no change here.
+ * alert. `"exchange"` (acquire/open/run) invites a re-run. `"output"` means
+ * the exchange already succeeded and only local results-file generation
+ * failed -- never re-run. `"security"` is the trust-boundary subset of an
+ * exchange failure: the authenticated key exchange (or, once wrapped, the
+ * AEAD layer) reported a wrong secret, tamper, or replay, so the UI shows it
+ * as an authentication failure rather than a retryable transport drop.
+ * `"config"` is an {@link OperatorConfigError} raised in the PREPARE phase
+ * (inside `acquire`, before any peer connection), whose message names only
+ * this party's own configuration -- not a transport drop, so retrying as-is
+ * fails identically and the message is safe to show. Scoped to that type
+ * only: a sibling prepare-phase `UsageError` whose message can embed
+ * partner-influenced values (e.g. the accept side's disclosure check) stays
+ * the generic `"exchange"`.
  *
- * The one other member is {@link LinkageTermsUnsatisfiableError}, admitted for the
- * AFFORDANCE rather than the message: it is a deterministic pre-connection refusal
- * whose recovery is a different file or new terms, so offering a retry would loop
- * an unattended run on a fault every attempt reproduces. Its message names the
- * agreed terms' own key and field names, partner-authored on every accept path, so
- * it does NOT inherit the message-rendering half of this category -- the alert
- * builder gives it fixed copy of its own. `"exchange"` and `"output"` are
- * owner-local discriminants (an output-generation failure is not a connection
- * error). */
+ * {@link LinkageTermsUnsatisfiableError} also classifies `"config"`, for the
+ * no-retry affordance rather than the message: it is a deterministic
+ * pre-connection refusal whose message names the agreed terms' own key and
+ * field names, partner-authored on every accept path, so the alert builder
+ * supplies fixed copy instead of rendering it. */
 export type ExchangeErrorCategory =
   "exchange" | "output" | "security" | "config";
 
-/** Maps a lifecycle failure to the alert {@link ExchangeErrorCategory} the UI
- * shows, given the `phase` it came from. A `security`-kind {@link ConnectionError}
- * -- the authenticated key exchange failing closed on a wrong secret/tamper/replay
- * -- is a trust failure the user must not silently retry; every other failure is
- * the retryable generic `"exchange"`. (An `"output"` failure is classified at its
- * own call site, since the exchange already succeeded there.) Keying off the
- * connection-error kind rather than the handshake step means a future
- * `EncryptedMessageConnection` surfacing a `security` failure mid-exchange is
- * routed the same way for free. An {@link OperatorConfigError} is classified
- * `config` ONLY in the `"prepare"` phase, which runs `prepareForExchange`. Both
- * discriminants are structural: the TYPE narrows it to a prepare-phase fault whose
- * message is composed only of local config (see `OperatorConfigError`), keeping
- * the partner-influenceable payload-send `UsageError` out of the message-surfacing
- * alert; the PHASE keeps a mid-`"run"` `OperatorConfigError` -- the local
- * certificate/terms refusal a signing run holds is one -- from being mislabeled
- * `config`; it falls through and classifies `"exchange"` instead -- neither is a
- * prose claim about what the other half throws. The CLI's `classifyTerminalError`
- * drops the phase from this rule, because the category it emits has to agree with
- * an exit code no alert here has. A {@link LinkageTermsUnsatisfiableError}
- * joins the category on the same phase discriminant, for the non-retry affordance
- * rather than the message (see {@link ExchangeErrorCategory}). */
+/** Maps a lifecycle failure to the {@link ExchangeErrorCategory} the UI
+ * shows, for the given `phase`. A `security`-kind {@link ConnectionError} --
+ * the authenticated key exchange failing closed on a wrong secret, tamper, or
+ * replay -- routes on its `kind`, not the handshake step, so a future
+ * `security` failure anywhere in the exchange classifies the same way; every
+ * other failure is the retryable generic `"exchange"`. (An `"output"`
+ * failure is classified at its own call site.) An {@link OperatorConfigError}
+ * classifies `"config"` only in the `"prepare"` phase (`acquire`, which runs
+ * `prepareForExchange`); the same error type mid-`"run"` -- e.g. a signing
+ * run's certificate/terms refusal -- falls through to `"exchange"` instead,
+ * since its message is not guaranteed to be local-only there. The CLI's
+ * `classifyTerminalError` drops the phase, since its category has to agree
+ * with an exit code this alert has no counterpart for. See {@link
+ * ExchangeErrorCategory} for what each category means and for {@link
+ * LinkageTermsUnsatisfiableError}'s membership. */
 function classifyExchangeFailure(
   error: unknown,
   phase: "prepare" | "run",
@@ -185,8 +153,9 @@ export interface AcquiredExchange {
   prepared: PreparedExchange;
 }
 
-/** The seams an {@link Acquire} drives while it loads/prepares and draws in the
- * peer. All no-op once the owner's signal aborts. */
+/** The `signal` and stage-reporting hooks an {@link Acquire} uses while it
+ * loads/prepares and draws in the peer. Every hook no-ops once `signal`
+ * aborts. */
 export interface AcquireContext {
   signal: AbortSignal;
   /** Activate a stage (e.g. "waiting for peer" immediately before a wait). */
@@ -247,7 +216,7 @@ interface ReceivedExchangeOutputs extends ExchangeOutputsBase {
  * downloads. The exchange withheld the result table from this party (its agreed
  * terms give it no output; `ExchangeResult.associationTable` is undefined), so the
  * UI shows that it contributed to the match but receives no result table, rather
- * than an empty CSV that reads like a zero-match run. */
+ * than an empty CSV that looks like a zero-match run. */
 interface WithheldExchangeOutputs extends ExchangeOutputsBase {
   kind: "withheld";
 }
@@ -262,8 +231,8 @@ interface CountOnlyExchangeOutputs extends ExchangeOutputsBase {
   intersectionCount: number;
   /** Whether the count arrived as the PARTNER's report rather than as a figure this
    * party computed (`countIsPartnerReported` in `@psilink/core`). The sender seat of
-   * a both-entitled count-only run reads a number it cannot check, so its surface
-   * carries the trust-contingent caveat; the receiver computed its own and does
+   * a both-entitled count-only run reads a number it cannot check, so the UI shows
+   * the trust-contingent caveat; the receiver computed its own and does
    * not. */
   countReportedByPartner: boolean;
 }
@@ -272,9 +241,8 @@ interface CountOnlyExchangeOutputs extends ExchangeOutputsBase {
  * object URL the UI exposes as a download with a timestamped filename. The matched
  * result is present XOR withheld XOR counted, so the cases are a discriminated union
  * over `kind` rather than independent optionals -- the invalid states ("both a result
- * and withheld", "neither") are unrepresentable, and a surface that gains a fourth
- * outcome without handling it is a compile error rather than a case silently
- * rendered as one of the others. */
+ * and withheld", "neither") are unrepresentable, and an unhandled fourth outcome is
+ * a compile error rather than a case silently rendered as one of the others. */
 export type ExchangeOutputs =
   ReceivedExchangeOutputs | WithheldExchangeOutputs | CountOnlyExchangeOutputs;
 
@@ -297,11 +265,11 @@ export interface RunExchangeLifecycleOptions<
    * authenticated key exchange. */
   exchangeRole: "initiator" | "responder";
   /** The invitation's shared secret (base64url), fed to the authenticated key
-   * exchange the owner runs at the `mc` seam before `runExchange`. Both peers
+   * exchange the owner runs against `mc` before `runExchange`. Both peers
    * must hold the same value; a mismatch fails the handshake closed and never
    * reaches the PSI exchange. */
   sharedSecret: string;
-  /** The invitation's `expires` (ISO 8601), if it carries one, threaded
+  /** The invitation's `expires` (ISO 8601), if present, threaded
    * alongside `sharedSecret` into the authenticated key exchange so core's pre-
    * and post-handshake expiry guards evaluate it -- an invitation that lapses
    * before or during the handshake fails closed before any PSI frame. Undefined
@@ -317,12 +285,12 @@ export interface RunExchangeLifecycleOptions<
     error: unknown;
   }) => void;
   /** A non-fatal, operator-relevant notice raised mid-run. Two sources, arriving
-   * at opposite ends of the run: what the agreed terms resolved to, raised at
-   * the post-terms, pre-round seam and composed by core
+   * at opposite ends of the run: what the agreed terms resolved to, raised
+   * right after the terms resolve and before the first round, composed by core
    * ({@link describeResolvedRunShape}); and the clean close ending on any exit
-   * that carries no delivery signal rather than on the peer's close
+   * that has no delivery signal rather than on the peer's close
    * ({@link CLOSE_OUTCOME_WARNINGS}), which is raised only on a run that reported
-   * its result. Optional: an owner with no warning surface omits it and the
+   * its result. Optional: an owner with no warning sink omits it and the
    * notice is dropped. Never a terminal; the run still ends in exactly one
    * `onResult`/`onError`, and a notice raised during teardown arrives after
    * that one. */
@@ -339,7 +307,8 @@ export interface RunExchangeLifecycleOptions<
  * - **Teardown always runs, exactly once, and never throws** (F1, F2). It is a
  *   run-once latch: even when two triggers race (a wait timeout and an
  *   unmount-abort), the effect runs once. A teardown-only failure is logged and
- *   surfaces no alert - the results are available and it is not user-actionable.
+ *   raises no alert -- the results are available and there is nothing for the
+ *   operator to act on.
  * - **The exchange-vs-output distinction survives** (F2). A failure from
  *   acquire/open/run is `"exchange"`, except a trust failure from the
  *   authenticated key exchange (a `security`-kind {@link ConnectionError}), which
@@ -352,7 +321,7 @@ export interface RunExchangeLifecycleOptions<
  * - **Abort tears down in any phase** (F1, F3). On abort the owner closes the
  *   connection regardless of phase; an in-flight `runExchange` then rejects with
  *   a `closed` ConnectionError and lands in the same latched teardown. Every
- *   owner-driven seam no-ops once aborted, so no setState fires after unmount on
+ *   owner-driven hook no-ops once aborted, so no setState fires after unmount on
  *   any path (success, progress, or error).
  */
 export async function runExchangeLifecycle<
@@ -372,7 +341,7 @@ export async function runExchangeLifecycle<
     onWarning,
   } = options;
 
-  // Every owner-driven React seam is a no-op once the signal aborts, so an
+  // Every owner-driven React callback is a no-op once the signal aborts, so an
   // unmount that lands in the same tick as a resolving stage/result/error
   // cannot setState on an unmounted component.
   const ifLive =
@@ -388,25 +357,22 @@ export async function runExchangeLifecycle<
     onResult(outputs);
   });
   const emitError = ifLive(onError);
-  // Two gates, both load-bearing on the one seam that can fire during teardown.
-  // The live gate every other seam takes, which here also silences a cancelled
-  // run: the teardown a cancellation drives ends its close without a delivery
-  // signal exactly as a finished exchange can, and a partner notice on a run the
-  // operator stopped is noise. And this side's success terminal, because the notice
-  // speaks for a completed exchange ("Your own results are complete"): a run
-  // that failed -- including one whose failure never put the connection in a
-  // terminal state, leaving teardown's close the real flushing one -- drains
-  // that close exactly the same way, but has already told the operator
-  // something stronger through onError.
+  // Two gates guard emitWarning, the one callback that can still fire during
+  // teardown: the live gate, which also silences a cancelled run's teardown
+  // close (it ends without a delivery signal the same way a finished run's
+  // can); and the reportedResult gate, since the notice claims the exchange
+  // finished ("Your own results are complete") -- not true of a run that
+  // failed, which has already told the operator something stronger through
+  // onError.
   const emitWarning = ifLive((message: string) => {
     if (reportedResult) onWarning?.(message);
   });
-  // The mid-run notice sink, which takes the live gate alone. The success
-  // terminal above is specific to the teardown seam: a notice raised at the
-  // pre-round seam speaks for the run the operator is watching, and gating it on
-  // a result the run has not reached yet would hold it until after the exchange
-  // it describes -- or drop it on the run that failed, which is exactly the run
-  // whose resolved shape the operator has to read.
+  // The mid-run notice sink, gated on `signal` alone. The reportedResult gate
+  // above is specific to the teardown close: a notice raised before the first
+  // round speaks for the run the operator is watching right now, so gating it
+  // on a result not yet reached would hold it until after the exchange it
+  // describes, or drop it entirely on a run that fails -- exactly the run
+  // whose resolved shape the operator most needs to read.
   const emitRunNotice = ifLive((message: string) => onWarning?.(message));
 
   let acquired: AcquiredExchange;
@@ -421,9 +387,9 @@ export async function runExchangeLifecycle<
     // nothing here for the owner to release. On abort, emitError no-ops. This is
     // the PREPARE phase: acquire runs prepareForExchange, so a prepare-phase
     // OperatorConfigError -- the type whose message is composed only of this
-    // party's own configuration -- surfaces as an actionable "config" alert rather
-    // than the generic retryable "exchange" one; a plain load/transport failure --
-    // and every other prepare-phase UsageError -- stays "exchange".
+    // party's own configuration -- classifies as the actionable "config" alert
+    // rather than the generic retryable "exchange" one; a plain load/transport
+    // failure -- and every other prepare-phase UsageError -- stays "exchange".
     emitError({ category: classifyExchangeFailure(error, "prepare"), error });
     return;
   }
@@ -457,12 +423,12 @@ export async function runExchangeLifecycle<
     try {
       if (mc !== undefined) {
         // Flushing close: waits for the peer to take the final outbound frame
-        // and detaches the channel listeners. This is the teardown-exclusive
-        // effect. On a run that reported its result, a wait that ends on
-        // anything but the peer's close raises the matching operator warning
-        // through emitWarning (see openPeerMessageConnection), which is why
-        // teardown can emit after the run's terminal event; a failed or
-        // cancelled run drains the same close silently.
+        // and detaches the channel listeners. On a run that reported its
+        // result, a wait that ends on anything but the peer's close raises the
+        // matching operator warning through emitWarning (see
+        // openPeerMessageConnection), which is why teardown can emit after the
+        // run's terminal event; a failed or cancelled run drains the same
+        // close silently.
         await mc.close();
       } else {
         // The wrapper never materialized (abort/timeout before the open await
@@ -472,15 +438,15 @@ export async function runExchangeLifecycle<
     } catch (err) {
       log.error("teardown: closing the connection failed:", err);
     }
-    // disconnect() frees the broker id but deliberately leaves the data channel
-    // alive: the close above waits for the peer to take the final frame, and on
-    // its ceiling path the frame can still be in flight (the send/close delivery
-    // contract; see docs/COMMUNICATION.md and the Connection interface in core).
-    // Do NOT "upgrade" this to peer.destroy():
-    // destroy() routes through the abrupt RTCPeerConnection.close(), which
-    // discards buffered outbound data and would drop the final frame. The local
-    // connection is reaped without it - via the data channel's native onclose on
-    // a clean close, or by ICE-failure detection if the peer vanished.
+    // disconnect() frees the broker id and leaves the data channel alive by
+    // design: the close above waits for the peer to take the final frame, and
+    // on its ceiling path the frame can still be in flight (the send/close
+    // delivery contract; see docs/COMMUNICATION.md and the Connection interface
+    // in core). Do NOT upgrade this to peer.destroy(): it routes through the
+    // abrupt RTCPeerConnection.close(), which discards buffered outbound data
+    // and would drop the final frame. The local connection is still reaped --
+    // via the data channel's native onclose on a clean close, or by
+    // ICE-failure detection if the peer vanished.
     try {
       peer.disconnect();
     } catch (err) {
@@ -503,9 +469,9 @@ export async function runExchangeLifecycle<
   try {
     // Fixed order. openPeerMessageConnection attaches the QueuedMessageConnection's
     // inbound `data` listener synchronously in its constructor (the server's
-    // listener-first guarantee, F6), so the initiator's unprompted first frame --
-    // now its first handshake frame -- is buffered rather than dropped no matter
-    // how long this side then takes to read it.
+    // listener-first guarantee, F6), so the initiator's first frame -- its
+    // handshake frame -- is buffered rather than dropped no matter how long
+    // this side then takes to read it.
     mc = await openPeerMessageConnection(conn, {
       onCloseOutcome: (outcome) => {
         const warning = CLOSE_OUTCOME_WARNINGS[outcome];
@@ -520,14 +486,14 @@ export async function runExchangeLifecycle<
     // fails closed on a wrong secret or tampered/malformed frame, so an
     // unauthenticated peer never reaches runExchange. Its 32-byte session key is
     // discarded here (web is single-use and, under DTLS, declines the AEAD wrap --
-    // see authenticateExchange); deriving it is the act of authenticating. A trust
-    // failure surfaces as a security-kind ConnectionError, which the catch below
-    // routes to the distinct authentication-failure alert.
+    // see authenticateExchange); deriving it is the act of authenticating. A
+    // trust failure is a security-kind ConnectionError, routed by the catch
+    // below to the distinct authentication-failure alert.
     //
     // This runs BEFORE `await psi`: the handshake needs no PSI library, and
     // authenticating first keeps the responder's WASM load out of the handshake's
-    // critical path -- otherwise a load that approached the per-message kex
-    // timeout could time out the initiator's wait for the responder's reply -- and
+    // critical path -- a load that approached the per-message kex timeout could
+    // otherwise time out the initiator's wait for the responder's reply -- and
     // spends no WASM load on a peer that fails authentication.
     await authenticateExchange(mc, exchangeRole, sharedSecret, expires);
     // Resolves before runExchange: instant for the initiator (it loaded the

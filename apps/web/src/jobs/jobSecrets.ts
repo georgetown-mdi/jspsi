@@ -18,10 +18,10 @@ declare global {
 
 /**
  * Resolve the secrets directory to an absolute path from
- * {@link JOB_SECRETS_DIR_ENV}, or undefined when it is unset -- deliberately with
- * NO data-root fallback. A plain resolve: the mount is the operator's own
- * directory, and the browse contract re-confines every path against its realpath
- * rather than trusting this resolution.
+ * {@link JOB_SECRETS_DIR_ENV}, or undefined when it is unset -- with NO data-root
+ * fallback. A plain resolve: the mount is the operator's own directory, and the
+ * browse contract re-confines every path against its realpath rather than
+ * trusting this resolution.
  */
 function loadJobSecretsDir(env: NodeJS.ProcessEnv): string | undefined {
   const configured = (env[JOB_SECRETS_DIR_ENV] ?? "").trim();

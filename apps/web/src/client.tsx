@@ -24,13 +24,11 @@ hydrateRoot(
   </StrictMode>,
 );
 
-// The app-shell worker belongs to the hosted deployment alone. The console
-// appliance is a local prototyping GUI for one exchange whose code is upgraded
-// by pulling a new image -- an offline shell buys it nothing and a cached one
-// could outlive the container it was served from. A dev server is excluded for
-// the same reason in the small: a worker in front of `npm run dev` serves the
-// last document it saw. Registration waits for `load` so the precache does not
-// compete with the first render's own requests.
+// The app-shell worker registers only in the hosted deployment: a console build
+// upgrades by pulling a new image, and a cached shell could outlive the
+// container that served it. A dev server is excluded because a worker in front
+// of `npm run dev` serves the last document it saw. Registration waits for
+// `load` so the precache does not compete with the first render's requests.
 if (!isConsoleBuild() && !import.meta.env.DEV && "serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     void registerAppShell(navigator.serviceWorker);

@@ -1,8 +1,8 @@
-/* Design tokens for the linkage bench, lifted from the approved mockup
-   (design/web-redesign/proposal-c.html) and namespaced --bench-* so they
-   cannot collide with Mantine's variables. The dark set keys off Mantine's
-   color-scheme attribute rather than prefers-color-scheme so the bench
-   follows whatever scheme the app resolves (including a future toggle). */
+/* Design tokens for the linkage bench, matching the mockup at
+   design/web-redesign/proposal-c.html and namespaced --bench-* so they cannot
+   collide with Mantine's variables. The dark set keys off Mantine's
+   color-scheme attribute rather than prefers-color-scheme, so it follows the
+   scheme the app resolves. */
 :root {
   --bench-surface: #f6f5f1;
   --bench-column: #ffffff;

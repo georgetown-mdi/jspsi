@@ -1,7 +1,7 @@
 /**
  * The restore-clamp predicates for the two benches: given a step a history entry
  * names and the backing state the bench currently holds, the step that can
- * actually render. A browser Back can land on an entry whose work column reads
+ * render. A browser Back can land on an entry whose work column reads
  * state a later action cleared -- an inviter `share` entry a start-over emptied
  * of its invitation, an acceptor `launched` entry a back-to-columns recovery
  * emptied of its launch -- and rendering it would leave the operator on a blank

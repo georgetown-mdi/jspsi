@@ -7,7 +7,7 @@ export const Route = createFileRoute("/saved/$id")({
   // The managed-exchange store is IndexedDB, origin-isolated and browser-only, so
   // the run surface must render client-side.
   ssr: false,
-  // The recurring run surface belongs only to the hosted browser build; a console
+  // The recurring run surface exists only in the hosted browser build; a console
   // build has no managed store, so it never reaches a saved exchange.
   beforeLoad: () => {
     if (isConsoleBuild()) throw redirect({ to: "/" });
@@ -17,10 +17,9 @@ export const Route = createFileRoute("/saved/$id")({
 
 function RunRoute() {
   const { id } = Route.useParams();
-  // Key by id so a client-side navigation between two saved exchanges (this route
-  // matches once on the dynamic param and would otherwise NOT remount) tears down and
-  // rebuilds the surface: every per-exchange state slot resets, so exchange A's
-  // leftover state -- including a live re-invite token in its panel -- can never render
-  // on exchange B's page.
+  // Key by id so navigating between two saved exchanges remounts the surface.
+  // This route matches once on the dynamic param and would otherwise keep its
+  // state, letting exchange A's leftovers -- including a live re-invite token --
+  // render on exchange B's page.
   return <ManagedRunSurface key={id} id={id} />;
 }

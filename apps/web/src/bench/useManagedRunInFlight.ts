@@ -29,7 +29,7 @@ export interface ManagedRunInFlight {
  * surface did not start -- but it is held only across the window in which a run can
  * still rotate the secret, and it is a poll rather than an event. `runningHere` is
  * this surface's own run state: instant, and standing for the run's whole life
- * including the data exchange the lock is deliberately not held across.
+ * including the data exchange the lock is not held across.
  *
  * What this gates is presentation. The lock can be taken or released between the poll
  * and the click that follows it, so a hand-off that spends the secret decides its own
@@ -46,8 +46,8 @@ export function useManagedRunInFlight(
 
   const recheckLock = useCallback(async (): Promise<boolean> => {
     // A query this browser will not answer leaves the gate open rather than shut:
-    // the reading is an affordance either way, since the spend behind the gate
-    // takes the lock itself and refuses what this could not see.
+    // the reading is advisory either way, since the spend behind the gate takes
+    // the lock itself and refuses what this could not see.
     const held = await managedExchangeRunLockHeld(id).catch(() => false);
     setLockHeld(held);
     return held;

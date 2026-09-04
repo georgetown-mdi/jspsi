@@ -15,13 +15,12 @@ import { gateJobRoute, validateJobIdParam } from "@jobs/routeSupport";
  * is PRIVATE material -- a salt plus the record's commitment can open a committed
  * value -- so it is gated and no-store identically to the result route.
  *
- * What the keys are GOOD for varies with the record beside them, and that is the
- * client's to state rather than this route's to withhold: a terminated run wrote
- * no result file, and all three of the record's commitments re-supply from one, so
- * nothing can be opened against that run's keys
- * (docs/spec/EXCHANGE_RECORD.md, When a record is owed). The file is still the
- * operator's own material, written beside the record it pairs with, so it is
- * served and the surface says what it can and cannot do.
+ * What the keys are GOOD for varies with the record beside them, and the client
+ * states that rather than this route withholding them: a terminated run wrote no
+ * result file, and all three of the record's commitments re-supply from one, so
+ * nothing can be opened against that run's keys (docs/spec/EXCHANGE_RECORD.md,
+ * When a record is owed). The file is the operator's own material, written beside
+ * the record it pairs with, so it is served.
  *
  * The download name the browser saves is set by the driver's `download` attribute;
  * the Content-Disposition name here is a stable fallback.

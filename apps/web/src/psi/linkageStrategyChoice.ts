@@ -4,11 +4,10 @@
  * ({@link ../bench/KeysTab}) and the console's Direct-exchange confirm screen
  * ({@link ../bench/DirectConfirmSection}).
  *
- * Extracted for the reason {@link ./identityLabel} is: the disclosure note is
- * the consent-critical half of the choice -- it is the browser's voicing of the
- * CLI's own `singlePassDisclosureNotice`, and the partner reads the same
- * tradeoff on the terms panel -- so a second surface stating it in weaker words
- * than the first is the drift this prevents.
+ * Separate for the same reason as {@link ./identityLabel}: the disclosure note
+ * is the consent-critical half of the choice -- the browser's wording of the
+ * CLI's own `singlePassDisclosureNotice`, which the partner reads again on the
+ * terms panel -- so both surfaces must state it in the same words.
  */
 
 import type { LinkageStrategy } from "@psilink/core";

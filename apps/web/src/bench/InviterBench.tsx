@@ -261,7 +261,7 @@ export function InviterBench() {
   const [section, setSection] = useState<Section>("file");
   const [lastSpineStep, setLastSpineStep] = useState<SpineStep>("file");
   const [acquired, setAcquired] = useState<AcquiredCsv>();
-  // The console profile behind the acquired shape: the appliance reads the file, so
+  // The console profile behind the acquired shape: the console reads the file, so
   // the browser holds only the profile (name, size, mtime, columns, samples, date
   // format). It backs the mint (columns), the run (the mounted-file reference), the
   // coverage sweep, and the preview samples. Undefined on the hosted build, which
@@ -278,15 +278,13 @@ export function InviterBench() {
   const [reading, setReading] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const [invitation, setInvitation] = useState<GeneratedInvitation>();
-  // The current invitation as the mint fixed it for the partner's accept kit:
-  // the rendezvous locator minted into the token, so the sheet prints back
-  // exactly what the token carries, and the retain-mode choice the run carries,
-  // so the sheet cannot describe a file-handling regime the authoring controls
-  // moved to after the mint. Set only where an invitation is minted for a
-  // partner who accepts from the command line (a console sftp/filedrop run);
-  // undefined otherwise, which is what withholds the kit from a WebRTC exchange
-  // and from the hosted build (whose CLI transports route to the save surface
-  // and mint nothing here).
+  // The current invitation as the mint fixed it for the partner's accept kit: the
+  // token's own locator and the run's retain-mode choice, so the sheet cannot
+  // describe a regime the authoring controls moved to after the mint. Set only
+  // where an invitation is minted for a partner who accepts from the command line
+  // (a console sftp/filedrop run); undefined for a WebRTC exchange and for the
+  // hosted build, whose CLI transports route to the save surface and mint nothing
+  // here.
   const [acceptKitExchange, setAcceptKitExchange] =
     useState<AcceptKitExchange>();
   const [minting, setMinting] = useState(false);
@@ -340,7 +338,7 @@ export function InviterBench() {
   const [demoActive, setDemoActive] = useState(false);
   const [manageStatus, setManageStatus] = useState<ManageOfferStatus>("idle");
 
-  // Fetch the appliance's authored SFTP connection once on a console build; one
+  // Fetch the console's authored SFTP connection once on a console build; one
   // fetch per bench serves the session, and the default transport reads its
   // presence (SFTP when authored, else the filedrop save-a-file card). The helper
   // resolves to null on any failure or when none is authored, so Create then falls
@@ -357,10 +355,10 @@ export function InviterBench() {
     };
   }, [sftpInfo]);
 
-  // Fetch the appliance's rendezvous mount once on a console build; the mount is
+  // Fetch the console's rendezvous mount once on a console build; the mount is
   // boot-static on the server, so one fetch per bench serves the session. The helper
   // resolves to `{ configured: false }` on any failure, so the filedrop card stays
-  // disabled unless the appliance confirms a mounted directory.
+  // disabled unless the console confirms a mounted directory.
   useEffect(() => {
     if (!isConsoleBuild() || rendezvous !== undefined) return;
     let cancelled = false;
@@ -388,8 +386,8 @@ export function InviterBench() {
   // create branch and the live run both read it.
   const chosenRunMode = transportRunMode(available, transport);
 
-  // The console reads the mounted file on the appliance, so a server-job run carries
-  // only a REFERENCE (the opaque name), never the content.
+  // The console reads the mounted file, so a server-job run holds only a REFERENCE
+  // (the opaque name), never the content.
   const inputSource: JobInputSource | undefined =
     consoleSource !== undefined
       ? { kind: "workFile", name: consoleSource.name }
@@ -401,13 +399,13 @@ export function InviterBench() {
   // its invitation is minted for the save surface, so it is withheld from the
   // hook and `invitation` alone (not the withheld value) proves nothing dials
   // for a saved exchange. A `server-job` run mode runs live too -- the console
-  // appliance carries it out -- so it drives the hook exactly as `browser` does.
+  // carries it out -- so it drives the hook exactly as `browser` does.
   const runsLive = chosenRunMode !== "save-file";
-  // Which tuning controls the chosen transport can carry: the SFTP session mode
+  // Which tuning controls the chosen transport can hold: the SFTP session mode
   // applies only where a session exists.
   const tuningCapabilities =
     transport === "sftp" ? SFTP_CONNECTION_TUNING : FILEDROP_CONNECTION_TUNING;
-  // The tuning options the run carries, resolved from both authored drafts in one
+  // The tuning options the run holds, resolved from both authored drafts in one
   // place: the run and the partner's accept kit read the same block, so the
   // sheet cannot describe a file-handling regime the run does not have.
   const runOptions = withConnectionTuning(
@@ -437,8 +435,8 @@ export function InviterBench() {
   });
 
   // The coverage input, unified across builds: the browser's parsed rows on the
-  // hosted build, the mounted-file reference on the console (whose sweep is a fetch
-  // to the appliance). Memoized so a standardization edit reuses the provider and
+  // hosted build, the mounted-file reference on the console (its sweep is a fetch,
+  // not parsed rows). Memoized so a standardization edit reuses the provider and
   // only a new file rebuilds it. The console reads no rows -- `acquired.rawRows` is a
   // throwing getter there -- so this never touches it on that path.
   const coverageInput = useMemo<BenchCoverageInput>(() => {
@@ -483,7 +481,7 @@ export function InviterBench() {
 
   // The operator authored an SFTP connection in-console (its credential-free
   // projection): hold it and drop any save-a-file preference so the run mode flips
-  // to server-job. The connection lives in appliance memory, scoped to the one
+  // to server-job. The connection lives in console memory, scoped to the one
   // exchange; the browser holds only the locator. A freshly authored server is a
   // different rendezvous directory, so any sweep confirmation is re-asked.
   function authorSftpConnection(connection: SftpConnectionProjection) {
@@ -492,7 +490,7 @@ export function InviterBench() {
     setRunDiagnostics(runDiagnosticsAfterRetarget);
   }
 
-  // Clear the authored connection: forget it on the appliance and locally, so the
+  // Clear the authored connection: forget it on the console and locally, so the
   // card returns to the authoring empty state.
   function clearSftpConnection() {
     setSftpInfo({ connection: null });
@@ -504,9 +502,9 @@ export function InviterBench() {
   // already torn down; the hook drops the run state), and the operator lands
   // back on Review & create, where the next create mints a fresh secret.
   function startOver() {
-    // A server-job run the operator is leaving is deliberately abandoned:
-    // cancel-if-running and DELETE, which also frees the appliance's single slot
-    // for the fresh create. A no-op on a browser run.
+    // A server-job run the operator is leaving is abandoned: cancel-if-running
+    // and DELETE, which also frees the console's single slot for the fresh
+    // create. A no-op on a browser run.
     abandonRun();
     setEditor((current) =>
       current === undefined ? current : unsealEditor(current),
@@ -520,13 +518,12 @@ export function InviterBench() {
 
   // Deposit a managed-exchange record for this exchange as the inviter: the
   // standing terms plus the secret embedded in the just-minted invitation, so the
-  // same partnership can run again later. The connection block is composed from
-  // this app's own signaling location -- the same window.location source the
+  // partnership can run again later. The connection block is composed from this
+  // app's own signaling location -- the same window.location source the
   // invitation's endpoint was built from -- not read back off the encoded token.
-  // The secret is the minted invitation's; the one-shot run that follows discards
-  // its own derived rotation, so the record stays coherent at this value until a
-  // managed re-run rotates it. Declining is simply not pressing Manage, so there
-  // is no discard path here.
+  // The secret is the minted invitation's, not the one-shot run's own derived
+  // rotation; only a managed re-run rotates it. Declining is simply not pressing
+  // Manage, so there is no discard path here.
   async function manageExchange(choices: ManageOfferChoices) {
     if (invitation === undefined || editor === undefined) return;
     setManageStatus("depositing");
@@ -598,7 +595,7 @@ export function InviterBench() {
   // The unload guard arms once a file is loaded and disarms once the exchange is
   // finalized -- the invitation minted (a browser run is listening) or the
   // exchange file saved. A console server-job run is NOT armed: leaving the page
-  // does not abandon it (the appliance keeps running it and the recovery panel is
+  // does not abandon it (the console keeps running it and the recovery panel is
   // the way back), so a prompt would assert a loss that does not happen.
   useUnloadGuard({
     hasFile: acquired !== undefined,
@@ -610,7 +607,7 @@ export function InviterBench() {
   // held until the run settles: this browser listens from the mint onward, an
   // unload ends the session for BOTH parties, and the app-shell update notice
   // renders its Reload button above this route throughout the run. A server-job
-  // run stays out for the same reason it is out above -- the appliance carries
+  // run stays out for the same reason it is out above -- the console carries
   // that one out. A sample-seeded mint (?demo=1 walked to a real mint) starts a
   // real session with a real secret while demoActive is still true, but its
   // partner is ordinarily the same operator's other tab, so losing it is judged
@@ -630,8 +627,7 @@ export function InviterBench() {
     pushStep(next);
   }
 
-  // Non-announcing edits clear the live region (the old editor's
-  // cleared-by-the-next-interaction rule), so a stale notice never lingers
+  // Non-announcing edits clear the live region, so a stale notice never lingers
   // and a repeated identical notice re-announces.
   function applyEditor(next: InviterEditor) {
     setEditor(next);
@@ -680,7 +676,7 @@ export function InviterBench() {
   }, []);
 
   // Moving between sections replaces the whole work column, so focus is sent
-  // to the incoming h1 (they carry tabIndex -1) or a screen-reader user is
+  // to the incoming h1 (they have tabIndex -1) or a screen-reader user is
   // left on a control that no longer exists. Skipped on mount: initial focus
   // stays at the top of the document.
   const headingRef = useRef<HTMLDivElement>(null);
@@ -712,7 +708,7 @@ export function InviterBench() {
     // A real drop clears the sample marker; the sample seed sets it. Editing the
     // sample's terms never re-reads, so the marker survives edits.
     setDemoActive(seed !== undefined);
-    // The sample seed carries its own inviter name so step 1 lands complete; a
+    // The sample seed has its own inviter name so step 1 lands complete; a
     // real drop keeps whatever the operator typed. Applied before the read so
     // the derived editor's identity and the name field agree.
     const identity = seed?.name ?? name;
@@ -904,8 +900,8 @@ export function InviterBench() {
     // mints NOTHING here: the code and the config YAML are minted together on
     // the save surface, from the authored locator. Seal, discard any prior
     // saved artifacts, and route to save. A server-job run mode (sftp on the
-    // console appliance) instead mints here and routes to the live run, exactly
-    // as the browser path does.
+    // console) instead mints here and routes to the live run, exactly as the
+    // browser path does.
     if (chosenRunMode === "save-file") {
       setEditor(sealEditor(editor));
       setSavedExchange(undefined);
@@ -914,15 +910,15 @@ export function InviterBench() {
       return;
     }
     // An sftp server-job run authors the invitation's endpoint from the
-    // authored connection's locator -- the same connectionEndpoint seam the
+    // authored connection's locator -- the same connectionEndpoint field the
     // save surface's free-text fields feed -- so the partner's CLI meets the
-    // appliance where it will actually connect. A missing connection here means
+    // console where it will actually connect. A missing connection here means
     // the fetch had not resolved or reported none; refuse rather than mint a
     // code with no rendezvous.
     let connectionEndpoint: ConnectionEndpointRequest | undefined;
     // The accept kit's locator is the SAME value minted into the token, taken
     // from the one place it is built, so the sheet can print back only what the
-    // partner's own invitation already carries.
+    // partner's own invitation already contains.
     let kitEndpoint: AcceptKitEndpoint | undefined;
     if (transport === "sftp") {
       if (sftpConnection == null) return;
@@ -950,8 +946,8 @@ export function InviterBench() {
         undefined
       )
         return;
-      // A console filedrop server-job carries NAMES as the invitation's advisory
-      // locator -- one, or the split pair -- never the appliance's absolute paths;
+      // A console filedrop server-job's invitation contains NAMES as its advisory
+      // locator -- one, or the split pair -- never the console's absolute paths;
       // the server decides which names those are. The mounts are server-side, so a
       // missing locator means the rendezvous state changed mid-create: refuse
       // rather than mint a code with none.
@@ -976,7 +972,7 @@ export function InviterBench() {
         metadata: editor.draft.metadata,
         standardization: editor.draft.standardization,
         ...(connectionEndpoint !== undefined ? { connectionEndpoint } : {}),
-        // Declared on the token from the options block the run itself carries, the
+        // Declared on the token from the options block the run itself holds, the
         // same source the accept kit's disclosure reads, so the sheet and the
         // partner's consent display state one mode. Gated on a file-sync endpoint
         // because retain mode is a file-sync setting; a webrtc mint declares
@@ -987,7 +983,7 @@ export function InviterBench() {
       setEditor(sealEditor(editor));
       setInvitation(minted);
       // The bilateral file-handling choices are captured beside the locator,
-      // taken from the options block the run itself carries rather than from
+      // taken from the options block the run itself holds rather than from
       // the raw toggles, so the sheet states the settings as the run resolved
       // them -- retain mode's implication of the lockless rendezvous included.
       setAcceptKitExchange(
@@ -1005,14 +1001,14 @@ export function InviterBench() {
       if (error instanceof InvitationFileError) {
         // The mint re-parses the retained file, so it can fail in the same
         // user-actionable ways step 1 gates on (the file changed on disk, or
-        // its satisfiability shifted with the edited terms); surface the same
+        // its satisfiability shifted with the edited terms); show the same
         // shared alerts rather than a generic failure.
         setCreateAlert(invitationFileAlert(error.failure));
       } else {
         // Internal and non-user-actionable: a fixed message avoids echoing
-        // internals into a secret-bearing flow, the default log carries only
+        // internals into a secret-bearing flow, the default log states only
         // the error type, and the detail reaches the console only under
-        // diagnostic mode -- the legacy invite surface's rule, applied literally.
+        // diagnostic mode.
         console.error(
           "invitation creation failed:",
           error instanceof Error ? error.name : typeof error,
@@ -1032,7 +1028,7 @@ export function InviterBench() {
   }
 
   // Mint the invitation code and the CLI config YAML together and trigger the
-  // download. The invitation carries the authored sftp/filedrop locator; the
+  // download. The invitation contains the authored sftp/filedrop locator; the
   // YAML is derived from that same minted invitation and the same locator, so
   // the code and the file point at one rendezvous. Re-saving after an edit
   // re-mints both: the atomic savedExchange update replaces the old code and
@@ -1073,7 +1069,7 @@ export function InviterBench() {
       } else {
         // Internal and non-user-actionable (a schema/encoding fault): a fixed
         // message keeps internals out of a secret-bearing flow, the default
-        // log carries only the error type, and the detail is diagnostic-gated.
+        // log states only the error type, and the detail is diagnostic-gated.
         console.error(
           "exchange file save failed:",
           error instanceof Error ? error.name : typeof error,
@@ -1094,7 +1090,7 @@ export function InviterBench() {
 
   // Write the partner's accept kit to disk through the same blob download the
   // exchange-file save uses. The sheet is composed from the minted exchange and
-  // this build's own release version alone: it carries no secret, no invitation
+  // this build's own release version alone: it contains no secret, no invitation
   // token (the partner pastes their own copy over the sheet's placeholder), and
   // nothing else from this machine. The retain-mode flag selects fixed text and
   // a fixed command flag rather than reaching the sheet as a value.
@@ -1113,7 +1109,7 @@ export function InviterBench() {
 
   // Inside a Customize tab no spine step is current; the step the operator
   // came from stays navigable like any completed step. The share and save
-  // sections carry their own rails, so neither is a Customize tab.
+  // sections have their own rails, so neither is a Customize tab.
   const inTab =
     !isSpineStep(section) && section !== "share" && section !== "save";
   const currentPosition = SPINE_ORDER.indexOf(

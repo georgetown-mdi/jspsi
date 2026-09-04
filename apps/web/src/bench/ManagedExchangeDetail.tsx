@@ -72,18 +72,16 @@ import type { StoredDisclosureAccounting } from "@psi/disclosureAccounting";
 /**
  * The managed exchange detail sections composed onto the per-partnership home at
  * `/saved/$id` (below the run affordance in {@link ./ManagedRunSurface.tsx}): the
- * read-only configuration a compliance user inspects, the local-fields editor, the
- * agreed run schedule where one exists, the run history, and the accounting of
- * disclosures. Each is its own component so the run surface stays the run
- * affordance and these compose beside it; the derivations and copy are the pure
- * {@link ./managedDetailModel.ts}'s and {@link ./disclosureAccountingModel.ts}'s.
+ * read-only configuration, the local-fields editor, the agreed run schedule
+ * where one exists, the run history, and the accounting of disclosures.
+ * Derivations and copy come from {@link ./managedDetailModel.ts} and
+ * {@link ./disclosureAccountingModel.ts}.
  *
- * The agreed terms are read-only here -- fixed for this partnership; a change to
- * them is a new exchange, not an in-place edit ({@link ConfigurationView} says so
- * and offers the fast re-invite on the same terms) -- while the local fields edit
- * in place without touching the partnership ({@link LocalFieldsEditor}). The
- * accounting frames what it shows honestly as self-attested and links to the
- * existing verify page; it never claims a signed receipt.
+ * The agreed terms are read-only here and fixed for this partnership; changing
+ * them means a new exchange, not an in-place edit ({@link ConfigurationView}
+ * offers a re-invite on the same terms instead). The local fields edit in place
+ * without touching the partnership ({@link LocalFieldsEditor}). The accounting
+ * is self-attested and links to the verify page; it is never a signed receipt.
  */
 export function ManagedExchangeDetail({
   record,
@@ -106,12 +104,12 @@ export function ManagedExchangeDetail({
   /** Destroy the stored accounting so the exchange can file disclosures again,
    * leaving the exchange itself untouched. Offered only from the unreadable state,
    * behind an explicit confirm, and after the export. Rejects on a store failure;
-   * the confirm surfaces the failure and stays open. */
+   * the confirm shows the failure and stays open. */
   onResetAccounting: () => Promise<void>;
   /** Read the accounting again, for a read that never reached the store. */
   onRetryAccountingRead: () => void;
   /** Persist an in-place edit to the local fields (label, max-token-age policy).
-   * Rejects on a store failure; the editor surfaces the failure and keeps the
+   * Rejects on a store failure; the editor shows the failure and keeps the
    * form. */
   onSaveLocalFields: (edits: ManagedExchangeLocalEdits) => Promise<void>;
   /** Enter the fast re-invite flow -- refresh the partnership with a new secret on
@@ -124,9 +122,9 @@ export function ManagedExchangeDetail({
   canReinvite: boolean;
   /** Whether a re-invite is in flight, so the terms button shows loading. Shared
    * with the run surface's own re-invite state (see {@link ./ManagedRunSurface.tsx}),
-   * so an in-flight re-invite reads the same on a healthy exchange as on a failed one. */
+   * so an in-flight re-invite displays the same on a healthy exchange as on a failed one. */
   reinviting: boolean;
-  /** Whether the last re-invite attempt failed, so the terms button surfaces the
+  /** Whether the last re-invite attempt failed, so the terms button shows the
    * failure beside it. Shared with the run surface's re-invite state. */
   reinviteFailed: boolean;
 }) {
@@ -153,19 +151,16 @@ export function ManagedExchangeDetail({
 }
 
 /**
- * Render one read-only configuration row: a term and its value, its value list,
- * or its muted empty state.
+ * Renders one read-only configuration row: a term and its value, its value
+ * list, or its muted empty state.
  *
- * A value list renders one entry per item, never joined: every list this view
- * carries holds partner- or operator-authored names, and a name containing the
- * separator would read as two entries in joined text. Keyed by index because a
- * name is not unique across entries and the derivation's order is fixed.
+ * A value list renders one entry per item, never joined, since a partner- or
+ * operator-authored name could contain the separator. Keyed by index because a
+ * name is not unique across entries.
  *
- * A caveat wraps onto its own line below the value rather than sitting beside it,
- * so the reader meets the value and its qualification in that order. It carries
- * this app's own fixed copy, on the same footing as the row's label and its empty
- * state; a value somebody else chose reaches the row through the display-boundary
- * fields instead.
+ * A caveat (`row.note`) renders below the value, on its own line: it is this
+ * app's own fixed copy, not a value the partner or operator chose (those reach
+ * the row through `row.value` / `row.values` / `row.muted` instead).
  */
 function ConfigRowItem({ row }: { row: ConfigRow }) {
   return (
@@ -194,12 +189,12 @@ function ConfigRowItem({ row }: { row: ConfigRow }) {
 /**
  * The read-only configuration view: this party's side, the channel and partner
  * endpoint, and the agreed linkage terms. The agreed terms are the persisted
- * exchange-file document, fixed for this partnership by design -- a change to them
- * is a new exchange, not an in-place edit (see docs/spec/MANAGED_EXCHANGE_RECORD.md,
- * the `exchangeFile` row). The re-invite affordance here refreshes the partnership
- * with a new secret on the SAME terms, honestly labeled: the inviter mints a fresh
- * invitation; the acceptor is told the terms cannot change by re-invite and that
- * different terms mean a new exchange from the partner.
+ * exchange-file document, fixed for this partnership -- a change to them is a
+ * new exchange, not an in-place edit (see docs/spec/MANAGED_EXCHANGE_RECORD.md,
+ * the `exchangeFile` row). The re-invite affordance refreshes the partnership
+ * with a new secret on the SAME terms: the inviter mints a fresh invitation; the
+ * acceptor is told the terms cannot change by re-invite, and that different
+ * terms mean a new exchange from the partner.
  */
 function ConfigurationView({
   record,
@@ -270,17 +265,16 @@ function ConfigurationView({
  * The local-fields editor: the label, the agreed run schedule, and the
  * max-token-age policy edit in place, without touching the partnership (see
  * docs/spec/MANAGED_EXCHANGE_RECORD.md -- a reschedule or a label change is
- * neither a terms change nor a credential). Editing the max-age policy re-derives
- * `expires` conservatively at the store boundary (an edit never extends the stored
- * credential's life without a rotation), so this form only collects the policy;
- * the derivation is not the form's to make.
+ * neither a terms change nor a credential). Editing the max-age policy
+ * re-derives `expires` conservatively at the store boundary (an edit never
+ * extends the stored credential's life without a rotation); this form only
+ * collects the policy, not the derivation.
  *
- * The schedule and the max-age policy share this one form rather than sitting in
- * sections of their own, because they constrain each other: a cadence that opens
- * its next window past the bound lapses the stored secret between runs, and the
- * operator can only weigh that where both values are in front of them (see
- * {@link cadenceAgainstTokenBound}). One Save writes both through the store's
- * single local-fields edit.
+ * The schedule and the max-age policy share one form because they constrain
+ * each other: a cadence that opens its next window past the bound lapses the
+ * stored secret between runs, and the operator needs both values in front of
+ * them to weigh that (see {@link cadenceAgainstTokenBound}). One Save writes
+ * both through the store's single local-fields edit.
  */
 function LocalFieldsEditor({
   record,
@@ -344,18 +338,17 @@ function LocalFieldsEditor({
    * What this save does to the stored schedule: the resolved cadence to write,
    * `null` to drop it, or `undefined` to leave the stored object alone.
    *
-   * A cadence the operator did not touch is OMITTED rather than written back.
-   * The form holds the record as the page mounted on it, while the schedule
-   * object also carries bookkeeping the unattended runner advances under an open
-   * page -- `nextWindow` and `consecutiveMisses` (see
-   * docs/spec/MANAGED_EXCHANGE_RECORD.md, "The schedule object") -- so writing
-   * the mount-time object back on a label or max-age edit would rewind the
-   * runner's own advance to a window it has already accounted for.
+   * A cadence the operator did not touch is OMITTED rather than written back:
+   * the schedule object also holds bookkeeping the unattended runner advances
+   * under an open page -- `nextWindow` and `consecutiveMisses` (see
+   * docs/spec/MANAGED_EXCHANGE_RECORD.md, "The schedule object") -- and writing
+   * back the object as the page mounted it would rewind that advance to a
+   * window the runner has already accounted for.
    *
-   * A cadence the operator DID edit is resolved afresh, and it is handed the
-   * stored schedule: the fields the edit did not touch are carried from there
-   * verbatim rather than re-derived from what they display, so editing one of
-   * them rewrites no other (see {@link scheduleEntryUnchanged}).
+   * A cadence the operator DID edit is resolved afresh against the stored
+   * schedule: fields the edit did not touch are copied from it verbatim rather
+   * than re-derived from what they display, so editing one field rewrites no
+   * other (see {@link scheduleEntryUnchanged}).
    */
   function scheduleEdit(): ManagedExchangeSchedule | null | undefined {
     if (!scheduleEnabled)
@@ -498,15 +491,15 @@ function LocalFieldsEditor({
 
 /**
  * The cadence fields of {@link LocalFieldsEditor}, shown once the operator opts
- * the exchange into a schedule. The entered wall-clock time is echoed back as the
- * instant it resolves to, because the resolution is not always the identity: a
- * time the operator's zone skips or repeats across a daylight-saving transition
- * names a different instant than the wall clock reads, and the instant is what
- * both runners meet at (see {@link ./scheduleEntryModel.ts}).
+ * the exchange into a schedule. The entered wall-clock time is echoed back as
+ * the instant it resolves to: a time the operator's zone skips or repeats
+ * across a daylight-saving transition names a different instant than the wall
+ * clock reads, and the instant is what both runners meet at (see
+ * {@link ./scheduleEntryModel.ts}).
  *
  * The date and time are native inputs rather than a date picker: the value is a
- * cadence agreed with a partner and read off a message, and typing it back is the
- * shortest path from that message to the field.
+ * cadence agreed with a partner and read off a message, and typing it back is
+ * the shortest path from that message to the field.
  */
 function ScheduleEntryFieldset({
   fields,
@@ -518,14 +511,13 @@ function ScheduleEntryFieldset({
   onEdit: (edits: Partial<ScheduleEntryFields>) => void;
 }) {
   const resolved = resolvedFirstWindowLabel(fields);
-  // The width field ROUNDS what it displays while decimals are off, and rewrites
-  // a value outside its bounds to the nearest one on blur, so a stored width
-  // finer than whole hours or below entry's floor -- an import, a hand-edited
-  // record -- would show the operator a number that is not the width their
-  // partner agreed, and a bare focus and blur would carry that number into the
-  // save. Decimals are opened exactly where the stored value needs them and the
-  // clamp is off entirely; the bounds stay the entry model's, which names them
-  // at the field either way (see scheduleEntryErrors).
+  // NumberInput rounds what it displays and clamps an out-of-range value to
+  // bounds on blur when decimals are off; on a stored width finer than whole
+  // hours or below the entry floor (an import, a hand-edited record), a bare
+  // focus and blur would silently write that rounded, clamped number into the
+  // save. Decimals are opened exactly where the stored value needs them and
+  // the clamp is off entirely; scheduleEntryErrors still enforces the bounds
+  // at the field.
   const widthNeedsDecimals = !Number.isInteger(fields.windowHours);
   return (
     <>
@@ -587,21 +579,20 @@ function ScheduleEntryFieldset({
 }
 
 /**
- * The agreed run schedule, read-only: the cadence, where the recurrence stands at
- * this render, and the states this runtime owes the operator honestly around it --
- * whether an unattended run happens here at all, that a browser holding no pointer
- * to the input file cannot meet a window with nobody present, and, once misses
- * have accumulated, the coordination prompt.
+ * The agreed run schedule, read-only: the cadence, where the recurrence stands
+ * at this render, and the states this runtime owes the operator accurately
+ * around it -- whether an unattended run happens here at all, that a browser
+ * holding no pointer to the input file cannot meet a window with nobody
+ * present, and, once misses have accumulated, the coordination prompt.
  *
- * A record with no agreed schedule renders nothing here: it is attended-only, and
- * the local-fields editor above is where a schedule is entered, so an empty state
- * would duplicate that form.
+ * A record with no agreed schedule renders nothing here: it is attended-only,
+ * and the local-fields editor above is where a schedule is entered.
  *
- * The instant is read at render (`Date.now()`) rather than held in state: the
- * section is a reading of where the recurrence stands when the operator opened it,
- * and a window that opens or closes while they sit on the page is the next visit's
- * reading, not a ticking one. The runtime reading beside it is read the same way
- * and cannot change while the page is open (see {@link isInstalledRuntime}).
+ * The instant is read at render (`Date.now()`) rather than held in state: this
+ * section reads where the recurrence stands when the operator opened it, and a
+ * window that opens or closes while they sit on the page is the next visit's
+ * reading, not a ticking one. The runtime reading beside it is read the same
+ * way and cannot change while the page is open (see {@link isInstalledRuntime}).
  */
 function RunSchedule({ record }: { record: ManagedExchangeRecord }) {
   const view = scheduleView(
@@ -637,12 +628,12 @@ function RunSchedule({ record }: { record: ManagedExchangeRecord }) {
 }
 
 /**
- * The run history: what the most recent run DID, whether or not it completed. The
- * record's own bookkeeping keeps only that one run (see
- * docs/spec/MANAGED_EXCHANGE_RECORD.md, the `lastRun` row), which is why this
- * section is scoped to it and says so; the disclosures of every completed run are
- * the accounting below, which a run that failed before disclosing never enters. A
- * saved-but-never-run exchange shows the honest empty state.
+ * The run history: what the most recent run DID, whether or not it completed.
+ * The record's own bookkeeping keeps only that one run (see
+ * docs/spec/MANAGED_EXCHANGE_RECORD.md, the `lastRun` row), so this section is
+ * scoped to it. Every completed run's disclosures are in the accounting below;
+ * a run that failed before disclosing never enters it. A saved-but-never-run
+ * exchange renders the plain empty state.
  */
 function RunHistory({ record }: { record: ManagedExchangeRecord }) {
   const entries = runHistoryEntries(record);
@@ -673,9 +664,9 @@ function RunHistory({ record }: { record: ManagedExchangeRecord }) {
   );
 }
 
-/** One disclosure fact as a configuration row, so a disclosure renders in the same
- * voice as the agreed terms above it: its values when it carries any, its named
- * empty state when it does not. */
+/** One disclosure fact as a configuration row, rendered in the same voice as
+ * the agreed terms above it: its values when it has any, its named empty state
+ * when it does not. */
 function factRow(fact: DisclosureFact): ConfigRow {
   return fact.values.length > 0
     ? {
@@ -687,37 +678,38 @@ function factRow(fact: DisclosureFact): ConfigRow {
 }
 
 /**
- * The accounting of disclosures: one entry per completed run, each read off that
- * run's own self-attested exchange record (see docs/spec/EXCHANGE_RECORD.md), plus
- * the CSV a compliance reader is handed. The entries are the records themselves
- * rather than a summary beside them, so this surface has no facts of its own to
- * drift from the artifact.
+ * The accounting of disclosures: one entry per completed run, each read off
+ * that run's own self-attested exchange record (see
+ * docs/spec/EXCHANGE_RECORD.md), plus the CSV a compliance reader is handed.
+ * Entries are the records themselves, not a summary beside them, so this view
+ * holds no facts of its own that could drift from the underlying record.
  *
- * A failed read renders as its own state, never as an empty accounting: "nothing
- * was disclosed" is a claim, and this surface must not make it on a read it could
- * not perform. Which failed state it is comes from the read's own classification,
- * not from this view: a stored value written under an EARLIER record format
- * carries the export-then-reset recovery ({@link UnreadableAccountingRecovery}),
- * one written under a LATER one carries the reload notice
- * ({@link StalePageAccountingNotice}), and a store that never yielded a value at
- * all carries the transient notice ({@link UnavailableAccountingNotice}). Only
- * the first offers anything destructive: the other two describe a condition
+ * A failed read renders as its own state, never as an empty accounting -- an
+ * empty accounting is a claim ("nothing was disclosed") this view must not
+ * make on a read it could not perform. The read's own classification picks
+ * which state: a value written under an EARLIER record format routes to the
+ * export-then-reset recovery ({@link UnreadableAccountingRecovery}); one
+ * written under a LATER one routes to the reload notice
+ * ({@link StalePageAccountingNotice}); a store that never yielded a value
+ * routes to the transient notice ({@link UnavailableAccountingNotice}). Only
+ * the first offers anything destructive -- the other two describe a condition
  * outside the stored records, which clearing them would not fix. All three
- * replace the CSV export and the footer's offer of it, which speak for entries
- * this read did not obtain. Each entry starts collapsed behind its date and
- * partner, so a long history stays scannable and the reader opens the run they
- * came for.
+ * replace the CSV export and the footer's offer of it, since neither can
+ * speak for entries this read did not obtain.
  *
- * A read still IN FLIGHT is its own state for the same reason: an absent
- * classification is not the `"none"` one, so the empty accounting must not stand in
- * for it while the store has yet to answer. It carries no affordance either -- the
- * recovery arms belong to a read that reached a verdict.
+ * Each entry starts collapsed behind its date and partner, keeping a long
+ * history scannable.
  *
- * Every count and empty state here speaks for THIS browser's copy and says so: the
- * export/import artifact migrates the runnable exchange without its accounting
- * (see {@link ../psi/managedExchangeStore.ts}), so a device that imported one
- * starts an accounting of its own. An unqualified "this exchange has disclosed
- * nothing" would read there as the partnership's whole disclosure history.
+ * A read still IN FLIGHT is its own state: an absent classification is not
+ * the `"none"` one, so the empty accounting must not stand in for it. It has
+ * no affordance either -- the recovery arms belong to a read that reached a
+ * verdict.
+ *
+ * Every count and empty state here speaks for THIS browser's copy: the
+ * export/import artifact migrates the runnable exchange without its
+ * accounting (see {@link ../psi/managedExchangeStore.ts}), so an imported
+ * device starts an accounting of its own, where an unqualified "nothing was
+ * disclosed" would be treated as the partnership's whole history.
  */
 function DisclosureAccountingView({
   read,
@@ -726,8 +718,8 @@ function DisclosureAccountingView({
   onRetryRead,
 }: {
   read: DisclosureAccountingRead | undefined;
-  /** Whether the record beside this accounting remembers a completed run, which
-   * an empty accounting has to be honest about (see
+  /** Whether the record beside this accounting remembers a completed run,
+   * which an empty accounting must reflect accurately (see
    * {@link EmptyAccountingNotice}). */
   completedRunOnRecord: boolean;
   onReset: () => Promise<void>;
@@ -818,17 +810,17 @@ function DisclosureAccountingView({
 }
 
 /**
- * The store was read and holds no accounting for this exchange, said in the terms
+ * The store was read and holds no accounting for this exchange, in the terms
  * the record beside it supports.
  *
  * An empty accounting is not by itself evidence that no run has completed: the
- * recovery reset destroys the entries and leaves the exchange -- run history
- * included -- standing, and the export/import artifact carries the runnable
- * exchange without its accounting. So where the record remembers a completed run,
- * this states the emptiness as the fact it is and names the two ways an operator
- * reaches it, rather than reporting an absence of runs the record beside it
- * refutes. Where the record remembers no completed run there is nothing to refute,
- * and the plain empty state stands.
+ * recovery reset destroys the entries while leaving the exchange -- run
+ * history included -- standing, and the export/import artifact migrates the
+ * runnable exchange without its accounting. Where the record remembers a
+ * completed run, this states the emptiness as fact and names those two paths
+ * to it, rather than reporting an absence of runs the record beside it
+ * refutes. Where the record remembers no completed run, the plain empty state
+ * stands.
  *
  * Neither reading claims the exchange disclosed nothing: both speak for this
  * browser's copy, since the accounting does not travel with the exchange.
@@ -862,16 +854,16 @@ function EmptyAccountingNotice({
 }
 
 /**
- * The state where the accounting could not be OBTAINED: the browser's store did
- * not open, or the read did not complete. Nothing is known about what is stored,
- * so this state makes no claim about it and offers no arm of the recovery -- in
- * particular not the reset, which destroys records this read has no evidence are
- * damaged. The documented cause is transient and self-healing (another tab holding
- * an older version of the store open; see {@link ../psi/managedExchangeStore.ts}),
- * so the affordance is to read again.
+ * The state where the accounting could not be OBTAINED: the browser's store
+ * did not open, or the read did not complete. Nothing is known about what is
+ * stored, so this state makes no claim about it and offers no arm of the
+ * recovery -- not the reset, which destroys records this read has no evidence
+ * are damaged. The documented cause is transient and self-healing (another tab
+ * holding an older version of the store open; see
+ * {@link ../psi/managedExchangeStore.ts}), so the affordance is to read again.
  *
- * Reading again rather than reloading the page: a reload ends a run in progress,
- * and this section sits below the run controls.
+ * Reading again rather than reloading the page: a reload ends a run in
+ * progress, and this section sits below the run controls.
  */
 function UnavailableAccountingNotice({
   onRetryRead,
@@ -909,26 +901,25 @@ function downloadStoredAccounting(stored: StoredDisclosureAccounting): void {
 }
 
 /**
- * The state where the stored entries were written by a LATER version of the app
- * than this page is running: a new deployment activated while this tab went on
- * running the code it loaded with (the service worker does not swap code under a
- * running page; see {@link ../utils/appShellUpdate.ts}), and the entries that
- * build filed name a record format this one does not admit.
+ * The state where the stored entries were written by a LATER version of the
+ * app than this page is running: a new deployment activated while this tab
+ * went on running the code it loaded with (the service worker does not swap
+ * code under a running page; see {@link ../utils/appShellUpdate.ts}), and the
+ * entries that build filed name a record format this one does not admit.
  *
- * The records are not stranded and nothing here is damaged -- a build that reads
- * them exists, and this page simply is not it. So this state offers no reset:
- * clearing would destroy records the current version reads, over a condition a
- * reload clears. The stored-form export stays, since handing back stored bytes
- * asserts nothing about them and costs nothing.
+ * The records are not stranded and nothing here is damaged -- a build that
+ * reads them exists, and this page simply is not it. This state offers no
+ * reset: clearing would destroy records the current version reads, over a
+ * condition a reload clears. The stored-form export stays, since handing back
+ * stored bytes asserts nothing about them and costs nothing.
  *
- * What it does carry from the stranded state is the append: this build's read
- * failure is a write failure too, so a run from this page discloses and files
- * nothing. That is what makes the reload urgent rather than cosmetic, and it is
- * said here.
+ * Like the stranded state, a run from this page discloses and files nothing
+ * here: this build's read failure is a write failure too, which is what makes
+ * the reload urgent rather than cosmetic.
  *
- * The reload is named rather than pressed. This section sits below the run
- * controls, and a reload ends a run in progress; the app's own update banner
- * carries the button, above every route.
+ * The reload is named rather than pressed: this section sits below the run
+ * controls, a reload ends a run in progress, and the app's own update banner
+ * holds the reload button, above every route.
  */
 function StalePageAccountingNotice({
   stored,
@@ -971,30 +962,27 @@ function StalePageAccountingNotice({
 }
 
 /**
- * The recovery affordance for an accounting this build can no longer read, which
- * an app upgrade that moved the exchange-record format forward produces: the
- * stored entries stay at rest, admissible under the format current when they were
- * written, and the validating read refuses them wholesale. Reached only for
- * entries this build is AHEAD of; the opposite direction is a stale page rather
- * than a stranded accounting, and takes {@link StalePageAccountingNotice}.
+ * The recovery affordance for an accounting this build can no longer read: an
+ * app upgrade moved the exchange-record format forward, the stored entries
+ * stay admissible under the format they were written under, and the
+ * validating read refuses them wholesale. Reached only for entries this build
+ * is AHEAD of; the opposite direction is a stale page rather than a stranded
+ * accounting, and takes {@link StalePageAccountingNotice}.
  *
- * Two arms, offered in one fixed order, because neither alone covers the failure.
- * The EXPORT is the only thing that retains the record -- the accounting is a
- * HIPAA/FERPA disclosure source and nothing else holds it -- and it hands over the
- * stored form rather than a reading of it, since this build cannot say what an
- * earlier record's fields meant. The RESET is the only thing that restores
- * appendability: the read failure is an append failure too, so a still-scheduled
- * exchange keeps disclosing and files nothing until the stored value is cleared.
- * Export first, then reset: the export does not restore appendability, and the
- * reset destroys what the export would have saved.
+ * Two arms, offered export-then-reset (see
+ * docs/spec/MANAGED_EXCHANGE_RECORD.md, "The recovery offered is export then
+ * reset"): the EXPORT is the only thing that retains the record -- the
+ * accounting is a HIPAA/FERPA disclosure source and nothing else holds it --
+ * and the RESET is the only thing that restores appendability, since the read
+ * failure is an append failure too. Reversing the order loses the record the
+ * export would have saved.
  *
- * Whether the export is offered is read off the stored value rather than assumed.
- * A record-version bump leaves the envelope parsable and the entries not, so the
- * entries come back whole; corruption that takes the envelope leaves nothing to
- * hand over, and that state says so instead of offering a download it cannot
- * honor. The reset is offered either way -- it is what makes the exchange able to
- * file again -- but it never fires as a read's side effect: it takes an explicit
- * confirm that names what is destroyed and what is kept.
+ * Whether the export is offered is read off the stored value: a
+ * record-version bump leaves the envelope parsable and the entries come back
+ * whole; corruption that takes the envelope leaves nothing to hand over, and
+ * that state says so. The reset is offered either way -- it is what restores
+ * appendability -- but only behind an explicit confirm naming what is
+ * destroyed and what is kept.
  */
 function UnreadableAccountingRecovery({
   stored,
@@ -1024,7 +1012,7 @@ function UnreadableAccountingRecovery({
       .then(() => setConfirming(false))
       .catch(() => {
         // A rejected delete leaves the accounting standing: keep the modal open and
-        // surface the failure, so the operator retries rather than believing a
+        // show the failure, so the operator retries rather than believing a
         // destructive step took that did not.
         setResetFailed(true);
       })

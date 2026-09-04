@@ -38,8 +38,8 @@ const UNIT_LABELS: Record<DurationUnit, string> = {
 };
 
 /** One duration control: the magnitude beside the unit it is authored in. The
- * unit select carries no visible label -- the pairing is visual -- so its
- * accessible name names the field it belongs to. */
+ * unit select has no visible label -- the pairing is visual -- so its accessible
+ * name names the field it belongs to. */
 function DurationRow({
   label,
   description,
@@ -89,11 +89,11 @@ function DurationRow({
  * attempt, how many times it retries, and -- on SFTP -- whether it opens a fresh
  * session for each check. Offered as a closed disclosure beside the file-handling
  * card, since the defaults are right for a first run and these are the settings an
- * operator reaches for deliberately: a slow peer, a firewalled link, or a server
- * that caps how long a session may last.
+ * operator reaches for in a specific situation: a slow peer, a firewalled link, or
+ * a server that caps how long a session may last.
  *
- * Two properties are load-bearing and belong to {@link connectionTuningModel}, not
- * to this component: the unit conversion into the milliseconds the job intent
+ * Two behaviors belong to {@link connectionTuningModel}, not to this component:
+ * the unit conversion into the milliseconds the job intent
  * speaks, and the two advisories the CLI raises at run time, raised here while the
  * operator can still act on them. The advisories never block -- both values are
  * legitimate against a server the operator controls, and the command line refuses
@@ -107,7 +107,7 @@ export function ConnectionTuningCard({
   onChange,
 }: {
   draft: ConnectionTuningDraft;
-  /** Which controls this flow can carry; a shared-directory flow omits the SFTP
+  /** Which controls this flow supports; a shared-directory flow omits the SFTP
    * session mode rather than accepting a value its client cannot honour. */
   capabilities: ConnectionTuningCapabilities;
   open: boolean;

@@ -7,8 +7,8 @@ import { BenchPage } from "@bench/BenchPage";
 import type { ReactNode } from "react";
 
 export function NotFound({ children }: { children?: ReactNode }) {
-  // A root-level error surface outside any route layout: it renders itself on
-  // the bench page ground and supplies its own <main> landmark and padding.
+  // Rendered outside any route layout, so it supplies its own <main> landmark
+  // and padding.
   return (
     <BenchPage>
       <Stack component="main" gap="sm" p="xl">

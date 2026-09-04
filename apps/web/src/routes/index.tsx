@@ -7,10 +7,10 @@ import { isConsoleBuild } from "@utils/clientConfig";
 import { seo } from "@utils/seo";
 
 /** The home route. A hosted build renders the managed-exchange home, which
- * surfaces the recurring list once the store holds one. A console build has no
- * managed store: it renders the plain lobby, fronted by the strand-recovery panel
- * so an operator returning finds the way back to an exchange still running from a
- * prior visit (the panel renders nothing when there is none). */
+ * shows the recurring list once the store holds one. A console build has no
+ * managed store: it renders the strand-recovery panel above the plain lobby, so
+ * a returning operator can pick up an exchange still running from an earlier
+ * visit (the panel renders nothing when there is none). */
 function IndexHome() {
   if (isConsoleBuild())
     return (

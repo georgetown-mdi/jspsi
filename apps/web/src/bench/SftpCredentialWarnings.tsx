@@ -3,10 +3,10 @@ import { IconAlertTriangle } from "@tabler/icons-react";
 
 /**
  * The non-blocking credential warnings for an authored SFTP connection, rendered
- * below the connection summary as a yellow (warning) Alert. Each warning is
- * appliance-generated and names a credential field and a directory only -- never a
- * path or secret. The exchange still runs; these only guide the operator toward a
- * separate read-only secrets mount. Renders nothing when there are no warnings.
+ * below the connection summary as a yellow (warning) Alert. The console writes
+ * each warning, and it names a credential field and a directory only -- never a
+ * path or a secret. The exchange still runs; the warnings point the operator at
+ * a separate read-only secrets mount. Renders nothing when there are none.
  */
 export function SftpCredentialWarnings({
   warnings,

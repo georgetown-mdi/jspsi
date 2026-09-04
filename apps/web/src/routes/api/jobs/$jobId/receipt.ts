@@ -16,10 +16,8 @@ import { jobFileExists } from "@jobs/workdir";
  *
  * Unlike the record, this is NOT gated on the job having succeeded. The receipt is
  * written from the mutually-verifiable facts once the signature swap completes,
- * independently of the local record build and of whatever the run's exit code
- * ends up being -- a persistence-loss exit (73) is a completed exchange whose
- * receipt is exactly the artifact that survived. Gating on success would withhold
- * the one third-party-verifiable artifact of the run most in need of one.
+ * independently of the local record build and of the run's exit code -- a
+ * persistence-loss exit (73) is a completed exchange whose receipt survived.
  */
 export const Route = createFileRoute("/api/jobs/$jobId/receipt")({
   server: {

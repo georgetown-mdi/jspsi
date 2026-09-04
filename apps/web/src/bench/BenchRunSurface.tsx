@@ -15,11 +15,10 @@ import type { ReactNode } from "react";
 import type { RunFailure } from "./useInviterExchange";
 
 /**
- * The keep-open callout body for a run the console appliance conducts on the
- * operator's behalf (a server-job run): the appliance runs the exchange, so
- * leaving the page leaves it running -- the console re-attaches to it (or discards
- * it) on return, rather than losing it. Shared by both seats' run columns so the
- * two cannot drift.
+ * The keep-open callout body for a server-job run: the console runs the
+ * exchange, so leaving the page leaves it running -- the console re-attaches
+ * to it (or discards it) on return, rather than losing it. Shared by both
+ * seats' run columns so the two cannot drift.
  */
 export const SERVER_JOB_KEEP_OPEN_BODY =
   "This console is running the exchange. If you leave this page the run " +
@@ -45,11 +44,11 @@ export function peerWindowDurationPhrase(ms: number): string {
 
 /**
  * The peer-coordination callout body for a server-job run: the exchange needs
- * both consoles running their halves at once, and the appliance waits only about
- * the peer-timeout window before it stops. Its duration is derived from core's
- * `DEFAULT_PEER_TIMEOUT_MS` so the copy cannot drift from the CLI default. The
- * console never sets `peerTimeoutMs`, so this is the window every console-composed
- * exchange actually runs under.
+ * both consoles running their halves at once, and the console waits only
+ * about the peer-timeout window before it stops. Its duration is derived
+ * from core's `DEFAULT_PEER_TIMEOUT_MS` so the copy cannot drift from the
+ * CLI default. The console never sets `peerTimeoutMs`, so this is the
+ * window every console-composed exchange actually runs under.
  */
 export const SERVER_JOB_PEER_WINDOW_BODY =
   "Your partner's console must run its half while yours is running. Yours " +
@@ -62,12 +61,11 @@ const COPY_STATUS_CLEAR_MS = 2000;
 
 /**
  * The short preview of a copy-only artifact: the secret's first and last
- * {@link PREVIEW_EDGE_CHARS} characters around an ellipsis, with a deep link's
- * origin-and-route head (everything through the first `#`, mirroring
- * `tokenFromInput`'s split) rendered in full. Built by slicing the string --
- * never CSS truncation over the full value, which would still hand the whole
- * secret to screen readers and select-all. A value too short to elide renders
- * whole.
+ * {@link PREVIEW_EDGE_CHARS} characters around an ellipsis, with a deep
+ * link's origin-and-route head (through the first `#`, mirroring
+ * `tokenFromInput`'s split) rendered in full. Sliced rather than
+ * CSS-truncated, since truncation would still hand the whole secret to
+ * screen readers and select-all. A value too short to elide renders whole.
  */
 function previewFor(value: string): string {
   const hash = value.indexOf("#");
@@ -83,16 +81,14 @@ function previewFor(value: string): string {
 }
 
 /**
- * A labelled, copy-to-clipboard view of one shareable artifact -- the invitation
- * link/code on the share screen and the save surface. The DOM carries only a
- * head/tail preview of the value; the Copy button puts the full value on the
- * clipboard (announced through a polite status region), and a disclosure
- * toggle expands an in-place readonly textarea holding the full value for the
- * cases where the clipboard cannot be used. The reveal never persists: a fresh
- * mount is collapsed. Both surfaces mount from a handler rather than at first
- * render; the `typeof navigator` check is what holds the copy path together
- * wherever the render runs, and it hides the button on non-secure origins too,
- * where `navigator.clipboard` is undefined -- the reveal remains for a manual copy.
+ * A labelled, copy-to-clipboard view of one shareable artifact -- the
+ * invitation link/code on the share screen and the save surface. The DOM
+ * holds only a head/tail preview of the value; Copy puts the full value on
+ * the clipboard (announced through a polite status region), and a
+ * disclosure toggle reveals the full value in a readonly textarea for when
+ * the clipboard is unavailable. The reveal never persists across a mount,
+ * and the Copy button is hidden wherever `navigator.clipboard` is
+ * undefined.
  */
 export function CopyRow({
   label,
@@ -177,19 +173,18 @@ export function CopyRow({
 }
 
 /**
- * The role-neutral run/completion furniture shared by both bench seats' run
- * columns: the download rows, the completion panel, the withheld-result inset,
- * the failure alert block, and the "set up another exchange" workfoot. Each
- * inviter-rendered output is preserved byte for byte -- the inviter section
- * composes these, the acceptor section composes the same pieces with its own
- * vocabulary. Nothing here is role-aware; the calling section decides which
- * downloads exist, what the failure recoveries are, and what the panel says.
+ * The role-neutral run/completion furniture shared by both console seats'
+ * run columns: the download rows, the completion panel, the withheld-result
+ * inset, the failure alert block, and the "set up another exchange"
+ * workfoot. Nothing here is role-aware -- the calling section decides which
+ * downloads exist, what the failure recoveries are, and what the panel
+ * says.
  */
 
-/** A labelled download link. The accessible name carries the caveat as well as
- * the filename: the caveat is part of what the operator agrees to by
- * downloading, so a screen reader browsing links must hear it, not only the
- * filename. */
+/** A labelled download link. The accessible name includes the caveat as
+ * well as the filename: the caveat is part of what the operator agrees to
+ * by downloading, so a screen reader browsing links must hear it, not only
+ * the filename. */
 export function DownloadRow({
   label,
   caveat,
@@ -226,12 +221,11 @@ export function DownloadRow({
 }
 
 /**
- * What the completion headline names after "Exchange complete", or undefined when
- * this run produced nothing for it to name. A matched run names its row count; a
- * count-only run names the MODE and not the figure, because the count is stated
- * once, in the inset that stands where the result would be -- the one block every
- * surface renders, including the recovery panel, which carries no completion
- * headline at all. A withheld helper names neither, having received neither.
+ * What the completion headline names after "Exchange complete", or
+ * undefined when this run produced nothing to name. A matched run names its
+ * row count; a count-only run names the mode only, since the count itself
+ * is stated once, in the inset that stands where the result would be. A
+ * withheld run names neither.
  *
  * `count`, when present, renders in the mono voice ahead of `label`.
  *
@@ -247,8 +241,8 @@ export function completionOutcome(
     case "counted":
       return { label: "count only" };
     case "matched":
-      // Absent on the console's server-job path, which holds the result on the
-      // appliance and counts no rows: the headline states completion alone rather
+      // Absent on the server-job path: the console holds the result itself
+      // and counts no rows, so the headline states completion alone rather
       // than inventing a figure.
       return outputs.matchedRecordCount === undefined
         ? undefined
@@ -312,15 +306,15 @@ function WithheldResultInset() {
 }
 
 /**
- * The trust-contingent caveat a count this party did NOT compute carries, stated
- * where the number is read rather than only where the exchange was accepted: only
- * one party runs the count-only round, and the other's copy travels back as that
- * party's word over a leg psilink does not check against a run of its own. The
- * seat that computed its own count gets no such line -- the count-only mode is
- * enforced for it, and a caveat there would be false.
+ * The trust-contingent caveat attached to a count this party did not
+ * compute, stated where the number is read: only one party runs the
+ * count-only round, and the other's copy travels back as that party's word
+ * over a leg psilink does not check against a run of its own. The seat that
+ * computed its own count gets no such line, since the count-only mode is
+ * enforced for it there.
  *
- * The sentence is pinned as literals in the bench browser cases rather than
- * through this export.
+ * The sentence is pinned as literals in the console browser cases rather
+ * than through this export.
  *
  * @internal
  */
@@ -329,12 +323,13 @@ export const REPORTED_COUNT_CAVEAT =
   "check a count it is sent against a run of its own, so the figure is your " +
   "partner's word for it.";
 
-/** The count-only inset, standing where the result download would be and carrying
- * the run's whole result: the count itself, what the run did not produce, and -- on
- * a seat handed a number it did not compute -- the caveat that figure comes with.
- * The count is stated HERE rather than in the completion headline because this block
- * is the one every surface renders; the recovery panel has no headline, and a count
- * stated only there would vanish on re-attachment. */
+/** The count-only inset, standing where the result download would be and
+ * holding the run's whole result: the count itself, what the run did not
+ * produce, and -- for a seat handed a number it did not compute -- the
+ * caveat that figure comes with. The count is stated here rather than in
+ * the completion headline because the recovery panel renders this inset but
+ * has no headline, so a count stated only there would vanish on
+ * re-attachment. */
 function CountOnlyResultInset({
   count,
   countReportedByPartner,
@@ -386,16 +381,13 @@ export function NoResultFileInset({
 }
 
 /**
- * The sink a {@link RunFailure} message is shown through. The seat composes that
- * message as a cause chain framed by the error renderer's own newline
- * (`sanitizedFailureMessage` in `./useInviterExchange`), so it reads as a chain
- * only where that newline lays out as a line break -- what `pre-line` does and
- * what the default `normal` collapses into a space. Both RunFailure alerts --
- * this file's `FailureAlert` and `RecoveredExchangePanel`'s own -- show the
- * message through here rather than styling a span of their own, which is
- * what makes the RunFailure layout one measurement instead of one per alert:
- * `test/browser/failureMessageLayout.test.ts` mounts this and counts the line
- * boxes a two-link chain lands on.
+ * The sink a {@link RunFailure} message is shown through. The seat composes
+ * the message as a cause chain relying on `pre-line` to turn the error
+ * renderer's newline (`sanitizedFailureMessage` in `./useInviterExchange`)
+ * into a line break. Both `FailureAlert` and `RecoveredExchangePanel` render
+ * their message through here rather than styling their own span, keeping
+ * the layout `test/browser/failureMessageLayout.test.ts` measures to one
+ * component.
  */
 export function FailureMessage({ message }: { message: string }) {
   return <span style={{ whiteSpace: "pre-line" }}>{message}</span>;
@@ -440,10 +432,10 @@ export function FailureAlert({
 export const UNTAKEN_RECORD_CONFIRM_TITLE = "Leave the exchange record behind?";
 
 /**
- * What the untaken-record confirm says. The record of a disclosure that already
- * happened is on the appliance, and the recovery the operator pressed removes the
- * run's folder with it. Stated as the irreversible removal it is, and pointed at
- * the download standing on the same screen.
+ * What the untaken-record confirm says. The record of a disclosure that
+ * already happened is on the console, and the recovery the operator
+ * pressed removes the run's folder with it. Stated as the irreversible
+ * removal it is, and pointed at the download standing on the same screen.
  */
 export const UNTAKEN_RECORD_CONFIRM_BODY =
   "This run exchanged data before it stopped, and this console holds its " +
@@ -451,17 +443,18 @@ export const UNTAKEN_RECORD_CONFIRM_BODY =
   "and neither party can recreate it. Download it from the exchange-record " +
   "panel on this page first if you need the accounting entry.";
 
-/** The title the confirm heads with over a record the appliance holds and cannot
- * read. It names the file rather than the record's contents, which is the part
- * that is established. */
+/** The title the confirm heads with over a record the console holds and
+ * cannot read. It names the file rather than the record's contents, which
+ * is the part that is established. */
 export const UNDESCRIBABLE_RECORD_CONFIRM_TITLE =
   "Leave the unreadable exchange record behind?";
 
 /**
- * What that confirm says. The appliance offers no download for such a file, so the
- * confirm cannot point at the panel's own download as the untaken-record one does;
- * it points at the file where it sits instead. It claims only the file's presence,
- * not what the record states, since that is precisely what could not be read.
+ * What that confirm says. The console offers no download for such a file,
+ * so the confirm cannot point at the panel's own download as the
+ * untaken-record one does; it points at the file where it sits instead. It
+ * claims only the file's presence, not what the record states, since that
+ * is precisely what could not be read.
  */
 export const UNDESCRIBABLE_RECORD_CONFIRM_BODY =
   "This console holds a file for this run that it cannot read as an exchange " +
@@ -477,11 +470,11 @@ export const UNKNOWN_RECORD_CONFIRM_TITLE =
   "Leave a possible exchange record behind?";
 
 /**
- * What that confirm says. It names the silence rather than the record: the ask
- * ended without the appliance ever saying whether this run wrote one, so what the
- * operator is deciding is whether to remove a run that MAY hold the record of a
- * disclosure. Pointed at the one thing that turns the unknown back into an answer,
- * matching the standing notice on the record panel itself
+ * What that confirm says. It names the silence rather than the record: the
+ * ask ended without the console ever saying whether this run wrote one, so
+ * the operator is deciding whether to remove a run that may hold the record
+ * of a disclosure. Pointed at the one thing that turns the unknown back
+ * into an answer, matching the standing notice on the record panel itself
  * ({@link ./RecordDownload}).
  */
 export const UNKNOWN_RECORD_CONFIRM_BODY =
@@ -502,9 +495,10 @@ export const PENDING_RECORD_CONFIRM_BODY =
   "can recreate it. Wait for the answer first if you need the accounting " +
   "entry.";
 
-/** The title the confirm heads with once the ask has landed on the appliance's own
- * denial while the dialog is open. The record is settled and there is none, so the
- * question is only about the recovery the operator already pressed. */
+/** The title the confirm heads with once the ask has landed on the
+ * console's own denial while the dialog is open. The record is settled and
+ * there is none, so the question is only about the recovery the operator
+ * already pressed. */
 export const NO_RECORD_CONFIRM_TITLE = "Go on and remove this run?";
 
 /**
@@ -525,29 +519,14 @@ export interface UntakenRecordConfirm {
 }
 
 /**
- * The confirm a control that discards the run owes in this record-ask state, or
- * undefined where it owes none and can act straight through.
+ * The confirm a control that discards the run owes in this record-ask
+ * state, or undefined where it owes none and can act straight through.
  *
- * Only one state buys the straight-through control, and it is the appliance's own
- * `none`: the one definitive not-available answer there is, since a run that failed
- * before disclosing owes no record and wrote none. The discard then costs nothing
- * the operator has not already seen and is not worth interrupting. A seat that puts
- * no ask at all -- a browser run, with no appliance job to discard a record from --
- * is undefined here and takes the same exit.
- *
- * Every other state confirms, because a run that got as far as exchanging data owes
- * a record whether or not the appliance has said so, and the discard cannot be
- * undone. They are not all the same interruption. `available` is a record the
- * operator has been offered and the discard destroys. `undescribable` is a record
- * file the appliance holds and cannot read, which it therefore offers nowhere --
- * the one state where the confirm is the only warning the operator gets.
- * `unanswered` is an ask that ended having established nothing
- * ({@link @psi/jobExchangeRecord}), and `asking` is one still running
- * ({@link ./useJobExchangeRecordOffer}) -- the state a settled failed run sits in
- * from the moment its alert appears until the ask lands, which on an appliance
- * that has stopped answering is the whole of the ask's bound. Both confirm under
- * copy claiming only what an unanswered ask supports, differing in what they tell
- * the operator to do about it.
+ * Only the console's own `none` -- and a seat with no ask at all -- skip
+ * the confirm: `none` is the one definitive answer that the run wrote no
+ * record, so discarding costs nothing unseen. Every other state confirms,
+ * because a run that got this far may owe a record and the discard cannot
+ * be undone.
  */
 export function untakenRecordConfirm(
   offer: JobExchangeRecordOfferState | undefined,
@@ -576,32 +555,23 @@ export function untakenRecordConfirm(
 }
 
 /**
- * One recovery a failure surface offers -- Try again, Start over, Back to your
- * columns -- with the confirm the console's discard hazard calls for.
+ * One recovery a failure surface offers -- Try again, Start over, Back to
+ * your columns -- with the confirm the console's discard hazard calls for.
  *
- * Every one of these recoveries discards the appliance's exchange for this run:
- * the run's whole folder is DELETEd so the single slot frees, which is
- * irreversible and appliance-only. On most failures that costs nothing the
- * operator has not already seen, so the control acts straight through and stays as
- * cheap as it looks. Where the run may have left an exchange record standing
- * untaken ({@link untakenRecordConfirm}), it does not: the record attests a
- * disclosure that happened and cannot be recreated, so the recovery confirms first
- * -- the same trade the completion path makes ({@link AnotherExchangeFoot}).
+ * Every recovery here discards the console's exchange for this run: the
+ * run's folder is DELETEd to free the single slot, which is irreversible.
+ * It acts straight through except where the run may have left an exchange
+ * record standing untaken ({@link untakenRecordConfirm}), which it confirms
+ * first, since that record cannot be recreated.
  *
- * `to` carries the recoveries that leave the bench rather than re-running in place
- * (the acceptor's fresh-invitation link); the confirm's own commit button then
- * navigates, so the confirmed and unconfirmed forms land in the same place.
+ * `to` marks a recovery that navigates away rather than re-running in
+ * place; the confirmed and unconfirmed forms land in the same place either
+ * way. The confirming form sets `aria-haspopup="dialog"`, since the two
+ * forms share a label and only that attribute states which one is showing.
  *
- * The two forms carry the same label, so the confirming one advertises
- * `aria-haspopup="dialog"`: a control that opens a dialog rather than acting says
- * so, and which form is standing is then something the page states rather than
- * something only a press discovers.
- *
- * An open confirm outlives the state that opened it. The ask that decides the copy
- * is in flight for the first seconds of a settled failed run, so it can land while
- * the operator is reading the dialog it opened: the dialog stays mounted and states
- * the answer that arrived, rather than vanishing mid-read and leaving a pressed
- * recovery that did nothing.
+ * An open confirm outlives the state that opened it: if the record-offer
+ * ask answers while the dialog is open, the dialog stays mounted and shows
+ * the answer that arrived rather than closing under the operator.
  */
 export function FailureRecoveryButton({
   label,
@@ -682,13 +652,14 @@ export function FailureRecoveryButton({
 }
 
 /**
- * The run's non-fatal warnings, accumulated in arrival order -- the driver's
- * `onWarning` slot rendered for the operator (e.g. the CLI's cross-party
- * host-key divergence notice, which must reach the appliance operator). Not a
- * terminal and not dismissible: it stays up through completion or failure so a
- * warning cannot be scrolled away by the run finishing. Renders nothing while
- * no warning has arrived. Messages are sanitized by the owning hook at its
- * display boundary before they reach this prop.
+ * The run's non-fatal warnings, accumulated in arrival order -- the
+ * driver's `onWarning` slot rendered for the operator (e.g. the CLI's
+ * cross-party host-key divergence notice, which must reach the console
+ * operator). Not a terminal and not dismissible: it stays up through
+ * completion or failure so a warning cannot be scrolled away by the run
+ * finishing. Renders nothing while no warning has arrived. Messages are
+ * sanitized by the owning hook at its display boundary before they reach
+ * this prop.
  */
 export function RunWarningsAlert({
   warnings,
@@ -722,8 +693,8 @@ export function RunWarningsAlert({
 /** The three states a re-attached run can be in, and the control-neutral
  * recovery heading each shows -- shared with the strand-recovery panel
  * ({@link ./RecoveredExchangePanel}) so the copy an operator sees when
- * re-attaching to an exchange the appliance already holds cannot drift between
- * the two surfaces. */
+ * re-attaching to an exchange the console already holds cannot drift
+ * between the two surfaces. */
 export type ReattachedRunState = "running" | "finished" | "stopped";
 
 /**
@@ -742,15 +713,14 @@ export function recoveredExchangeHeading(state: ReattachedRunState): string {
 }
 
 /**
- * The recovery-style lead a re-attached bench run shows under its heading, in
- * place of the fresh-run share framing: it names why the operator is on an
- * exchange they did not just start. On a still-running re-attachment it also
- * carries the leave-and-return reassurance the fresh-run keep-open callout would
- * have -- this is the surface built for leaving and coming back. Unlike the
- * strand-recovery panel's body, it references no Stop/Discard controls -- the
- * bench run column carries its own (Try again, Set up another exchange) -- so it
- * stays control-neutral. `role="status"` announces the swap into recovery, so a
- * screen-reader or not-looking operator hears the transition.
+ * The recovery-style lead a re-attached console run shows under its
+ * heading, in place of the fresh-run share framing: it names why the
+ * operator is on an exchange they did not just start, and on a
+ * still-running re-attachment includes the leave-and-return reassurance the
+ * fresh-run keep-open callout would have. It references no Stop/Discard
+ * controls, unlike the strand-recovery panel's body -- the console run
+ * column has its own (Try again, Set up another exchange) -- so it stays
+ * control-neutral. `role="status"` announces the swap into recovery.
  */
 export function ReattachedRunNotice({ state }: { state: ReattachedRunState }) {
   return (
@@ -775,19 +745,20 @@ export function ReattachedRunNotice({ state }: { state: ReattachedRunState }) {
   );
 }
 
-/** The heading a re-attached run shows during the brief reconnecting interim,
- * in place of the fresh-run title, so the surface never reads "Your invitation
- * is ready" while it is actually re-attaching to an exchange the appliance
- * already holds. */
+/** The heading a re-attached run shows during the brief reconnecting
+ * interim, in place of the fresh-run title, so the surface never reads
+ * "Your invitation is ready" while it is actually re-attaching to an
+ * exchange the console already holds. */
 export const RECONNECTING_HEADING = "Reconnecting to your exchange";
 
 /**
- * The interim notice shown the moment a busy (409) create is detected, before the
- * liveness probe resolves: it stands in for the fresh-run share block (which is
- * suppressed the same instant, so it never flashes) and announces (`role="status"`)
- * that the surface is reconnecting to the exchange already holding the appliance's
- * slot. It gives way to the full recovery view on a live probe, or to the run's
- * alert when no live exchange is found.
+ * The interim notice shown the moment a busy (409) create is detected,
+ * before the liveness probe resolves: it stands in for the fresh-run share
+ * block (which is suppressed the same instant, so it never flashes) and
+ * announces (`role="status"`) that the surface is reconnecting to the
+ * exchange already holding the console's slot. It gives way to the full
+ * recovery view on a live probe, or to the run's alert when no live
+ * exchange is found.
  */
 export function ReattachingNotice() {
   return (
@@ -803,18 +774,19 @@ export function ReattachingNotice() {
   );
 }
 
-/** The workfoot link out to a fresh exchange, shown at completion and after an
- * output failure (whose exchange already succeeded). `onNavigate` fires as the
- * operator leaves for a new exchange -- the console seat passes its `abandonRun`
- * here so a settled server-job exchange is discarded (cancel-if-needed + DELETE),
- * freeing the appliance's single slot for the next one; the browser seat leaves
- * it unset. It does not block the navigation.
+/** The workfoot link out to a fresh exchange, shown at completion and after
+ * an output failure (whose exchange already succeeded). `onNavigate` fires
+ * as the operator leaves for a new exchange -- the console seat passes its
+ * `abandonRun` here so a settled server-job exchange is discarded
+ * (cancel-if-needed + DELETE), freeing the console's single slot for the
+ * next one; the browser seat leaves it unset. It does not block the
+ * navigation.
  *
- * On a server-job completion the result/record/keys exist only as appliance
- * endpoint hrefs -- there is no browser blob -- so the discard is an irreversible
- * removal of data the operator may not have downloaded. `confirmBeforeLeave` gates
- * the leave behind a confirm there; a browser run keeps its results in local blobs
- * and needs none, so it stays false and navigates straight through. */
+ * On a server-job completion the result/record/keys exist only as console
+ * endpoint hrefs, with no browser blob, so the discard is an irreversible
+ * removal of data the operator may not have downloaded. `confirmBeforeLeave`
+ * gates the leave behind a confirm there; a browser run keeps its results
+ * in local blobs and needs none, so it stays false. */
 export function AnotherExchangeFoot({
   onNavigate,
   confirmBeforeLeave = false,

@@ -1,6 +1,6 @@
 /**
  * Body-shape helpers shared by the same-origin job-API clients. Both the
- * work-input and SFTP-authoring clients narrow an appliance response before
+ * work-input and SFTP-authoring clients narrow a console response before
  * reading fields off it, so the narrowing lives once here.
  */
 
@@ -11,7 +11,7 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /** Decode a response body as JSON, or null when it is empty or not JSON (an
- * error response may carry no body). */
+ * error response may have no body). */
 export async function readJsonOrNull(response: Response): Promise<unknown> {
   try {
     return (await response.json()) as unknown;

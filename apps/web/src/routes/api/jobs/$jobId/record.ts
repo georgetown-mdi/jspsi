@@ -12,15 +12,14 @@ import { gateJobRoute, validateJobIdParam } from "@jobs/routeSupport";
  * inside its workdir (never derived from client input). The gate is the status
  * route's own record availability, so the two cannot disagree about what is
  * offered: the run has settled and the readable pair is on disk. That includes a
- * run that disclosed and then terminated, whose record is precisely the
+ * run that disclosed and then terminated, whose record is the
  * disclosure-accounting artifact its operator needs; a failure before the
- * disclosure owes no record, writes none, and is 404 here on the same rule.
+ * disclosure writes no record and is 404 here on the same rule.
  *
  * A record file this bundle cannot describe -- an `outcome` it does not know, a
  * body it cannot parse, or a missing keys half -- is 404 too rather than served
  * unvalidated, and the status body says so through `recordUnavailableReason`, so
- * the operator learns the file is there from a surface that can also say what it
- * cannot vouch for.
+ * the operator learns the file is there and why it is not served.
  *
  * The download name the browser saves is set by the driver's `download` attribute;
  * the Content-Disposition name here is a stable fallback.

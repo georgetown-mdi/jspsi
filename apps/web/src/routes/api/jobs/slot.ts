@@ -16,12 +16,12 @@ import { jobJsonResponse } from "@jobs/gate";
  * discloses exactly what a busy `POST /api/jobs` 409 already does -- occupied plus
  * the occupant's id, a non-secret v4 UUID reachable only over the loopback-local
  * origin -- and nothing more: no job list (`GET /api/jobs` stays absent) and no
- * run detail. Clearing the slot rides the existing per-id `DELETE /api/jobs/:jobId`
+ * run detail. Clearing the slot uses the existing per-id `DELETE /api/jobs/:jobId`
  * through the panel's Discard; this route adds no destructive endpoint.
  *
- * The static `slot` segment can never be captured as a `$jobId` parameter: job ids
- * are validated as canonical v4 UUIDs before any use, which `slot` is not -- the
- * same argument the sibling `sftp` segment rests on.
+ * The static `slot` segment is not reachable as a `$jobId` parameter: job ids are
+ * validated as canonical v4 UUIDs before any use, and `slot` is not one -- the
+ * same rule the sibling `sftp` segment relies on.
  */
 export const Route = createFileRoute("/api/jobs/slot")({
   server: {

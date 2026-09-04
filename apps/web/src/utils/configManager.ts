@@ -13,7 +13,7 @@ export class ConfigManager<TEnv> {
   // serverConfig.ts, and the paths that evaluate that config with no transform
   // in front of them -- Vite's `configLoader: "native"`, a plain `node` import
   // -- hand it to Node's strip-only type stripping, which refuses a parameter
-  // property outright. Held by scripts/check-web-config-native-load.mjs.
+  // property outright. Checked by scripts/check-web-config-native-load.mjs.
   private readonly schema: JSONSchemaType<TEnv>;
 
   config: TEnv | null;

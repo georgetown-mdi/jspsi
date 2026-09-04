@@ -2,11 +2,11 @@ import type { JobRunStatus } from "@psi/serverJobExchangeDriver";
 import type { ReattachedRunState } from "./BenchRunSurface";
 
 /**
- * The recovery state a re-attached bench run heads with, shared by both run
- * sections and the strand-recovery panel: a delivered terminal (a run failure, or
- * received outputs) wins, else the busy probe's initial status seeds it so a
- * re-attached terminal run never flashes "still running" before the replay lands.
- * A `stopped` run promises no downloads.
+ * The state a re-attached bench run starts in, used by both run sections and the
+ * strand-recovery panel: a delivered terminal result (a run failure, or received
+ * outputs) wins; otherwise the busy probe's initial status decides, so a
+ * re-attached terminal run never shows "still running" before the replay
+ * arrives. A `stopped` run has no downloads.
  */
 export function reattachedRunState(args: {
   failed: boolean;

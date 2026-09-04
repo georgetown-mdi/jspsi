@@ -79,28 +79,16 @@ export interface RunFailure {
 }
 
 /**
- * Escape a surfaced failure's text at this display boundary, as the composition
- * it is rather than as one value: a message is first-party explanation and
- * recovery text, and an appliance run's is a whole rendered cause chain (the
- * console relay carries a terminal error's links apart and the driver rejoins
- * them), so each link takes the composed-message budget and the count takes the
- * renderer's own depth bound. Escaping the chain as a single value instead caps
- * it at the per-value default, which cuts a chain inside its first link or two
- * and drops the recovery step a later link carries.
- *
- * WHICH pass a failure takes is decided by its type, not by what its text looks
- * like. Only a {@link RelayedTerminalError} carries a chain the relay already
- * rendered and escaped, and only there is splitting on the renderer's framing
- * exact -- an escaped link holds no raw newline, so the framing is the only one
- * the message can carry. Every other failure is a RAW error thrown in this
- * browser, and it goes through the escaping renderer itself, which escapes each
- * link before any framing is joined onto it. Splitting a raw message on that
- * framing instead is what would let a literal `\ncaused by:` inside one become a
- * link of its own, indistinguishable at the seat from a cause psilink rendered.
- *
- * The framing between links is the renderer's own newline, and what lays it out
- * as a line break is `FailureMessage` in `./BenchRunSurface`, the component the
- * failure alerts show this message through.
+ * Escape a failure's text at this boundary rather than with
+ * `sanitizeErrorForDisplay`'s per-value default. A {@link RelayedTerminalError}
+ * alone holds a chain the relay already rendered and escaped link-by-link, so
+ * it alone is safe to split on the renderer's framing and rejoin -- escaping
+ * that chain as one value instead cuts it inside the first link or two
+ * (docs/spec/CLI_EVENTS.md, "Sanitization"; docs/spec/CHANNEL_SECURITY.md,
+ * "Display sanitization escape format"). Every other failure is raw, thrown in
+ * this browser, and goes straight through `sanitizeErrorForDisplay`. The
+ * framing is the renderer's own newline, laid out as a line break by
+ * `FailureMessage` in `./BenchRunSurface`.
  */
 function sanitizedFailureMessage(error: unknown): string {
   return error instanceof RelayedTerminalError
@@ -116,11 +104,11 @@ export function failureFor(
   channel?: Transport,
   seat: ExchangeSeat = "inviter",
 ): RunFailure {
-  // The appliance already holds an exchange (its single slot is occupied), so the
+  // The console already holds an exchange (its single slot is occupied), so the
   // create was rejected 409 -- the driver categorizes it retryable `exchange`. The
-  // copy is honest about the one-slot model: the run is not lost, it is elsewhere,
-  // and the ways back are its own page, the recovery panel's discard, or a restart.
-  // Retry then succeeds once the slot is freed.
+  // copy is accurate about the one-slot model: the run is not lost, it is
+  // elsewhere, and the ways back are its own page, the recovery panel's discard,
+  // or a restart. Retry then succeeds once the slot is freed.
   if (error instanceof JobApiRequestError && error.status === 409) {
     return {
       category: "exchange",
@@ -131,14 +119,14 @@ export function failureFor(
         "restarting the console also clears it.",
     };
   }
-  // A console job create rejected the mounted file: a 400 the driver categorized
-  // `config`. The operator's terms are fine -- the file is the fault -- so the alert
-  // names the file cause. On the sftp channel that same empty-bodied 400 is as likely
-  // a vanished picked remote, so the copy names both causes. Each recovery names the
-  // control the seat's alert actually offers: the inviter's start-over reaches the
-  // file picker, while the acceptor's only recovery returns to its columns step
-  // (whose own Back link re-selects the file). The accept guard admits no sftp
-  // endpoint, so the sftp branch is the inviter's alone.
+  // A console job create rejected the mounted file: a 400 the driver categorizes
+  // `config`. The file is the likely fault, so the alert names it -- except on
+  // the sftp channel, where a vanished picked remote is equally likely, so that
+  // copy names both causes. Each recovery names the control the seat's alert
+  // offers: the inviter's start-over reaches the file picker; the acceptor's
+  // only recovery returns to its columns step (whose Back link re-selects the
+  // file). The accept guard admits no sftp endpoint, so the sftp branch is the
+  // inviter's alone.
   if (
     category === "config" &&
     inputSource?.kind === "workFile" &&
@@ -163,17 +151,13 @@ export function failureFor(
     };
   }
   if (category === "output") {
-    // The exchange succeeded; only a local write failed. The user must not be
-    // told to re-run a privacy-sensitive exchange, so unlike the other
-    // categories this alert offers no way to run again -- and it says so, since
-    // an operator who reads a failure and finds no retry control looks for one
-    // elsewhere (the console's own start-over, or the command line) rather than
-    // concluding the run must not be repeated. The cause it carries is either
-    // this browser's own results-file build or the appliance's report of a lost
-    // local write it cannot name, so the lead claims only that a local write
-    // failed -- naming the results file would contradict the second message.
-    // Sanitized at the display boundary: the output error is local, but the
-    // alert is operator-facing, so escape it like any other.
+    // The exchange succeeded; only a local write failed, so this alert must
+    // not invite a re-run of a privacy-sensitive exchange -- unlike the other
+    // categories it offers no retry control, and says so explicitly. The
+    // cause is either this browser's own results-file build or the console's
+    // report of a lost local write it cannot name, so the message claims only
+    // that a local write failed. Sanitized at the display boundary like any
+    // operator-facing alert.
     return {
       category,
       title: "Results unavailable",
@@ -186,11 +170,11 @@ export function failureFor(
   }
   if (error instanceof LinkageTermsUnsatisfiableError) {
     // The pre-connection refusal for a file that cannot supply every linkage key
-    // the agreed terms declare. Fixed and non-oracular: the refusal enumerates the
-    // agreed terms' own key and field names, partner-authored on every accept
-    // path, and the operator reads which keys are short off the per-key verdict on
-    // the columns step rather than out of an alert. Classified `config`, so the
-    // alert offers start-over rather than a retry -- the same file refuses
+    // the agreed terms declare. Fixed and non-oracular: the refusal enumerates
+    // only the agreed terms' own key and field names (partner-authored on every
+    // accept path); the operator reads which keys are short off the per-key
+    // verdict on the columns step, not from this alert. Classified `config`, so
+    // the alert offers start-over rather than a retry -- the same file refuses
     // identically however many times it runs.
     return {
       category: "config",
@@ -204,13 +188,12 @@ export function failureFor(
     };
   }
   if (category === "config") {
-    // A prepare-time fault in the operator's OWN config, safe to surface
-    // because an OperatorConfigError's message names only local content (the
-    // lifecycle scopes "config" to that type). Not a transport drop: retrying
-    // as-is fails identically, so the message -- actionable -- is surfaced and
-    // the alert offers start-over (back to Review & create with every input
-    // intact, where the work column's Problems block routes to the fix)
-    // rather than a retry.
+    // A prepare-time fault in the operator's OWN config, safe to show because
+    // an OperatorConfigError's message names only local content (the
+    // lifecycle scopes "config" to that type). Not a transport drop -- retrying
+    // as-is fails identically -- so the alert offers start-over (back to
+    // Review & create with every input intact, where the work column's
+    // Problems block routes to the fix) rather than a retry.
     return {
       category,
       title: "Could not prepare the exchange",
@@ -219,9 +202,9 @@ export function failureFor(
   }
   if (category === "security") {
     // A tagged credential/expiry error's message is composed only from local
-    // values and carries its own recovery guidance (core's recovery-hint
+    // values and holds its own recovery guidance (core's recovery-hint
     // contract, preserved across authenticateExchange's re-wrap), so it is
-    // safe and more accurate to surface than partner-blame copy: an expired
+    // safe and more accurate to show than partner-blame copy: an expired
     // invitation is not a failed partner check. Still the security category,
     // so the alert offers only a fresh invitation -- correct for expiry too.
     if (hasRecoveryHint(error)) {
@@ -234,10 +217,9 @@ export function failureFor(
     // The authenticated key exchange failed closed: this connection could not
     // be confirmed as the invited partner. Not retryable -- a silent retry
     // would re-run into the same wrong secret, or into a peer that is
-    // tampering -- so the copy forbids it and the alert steers to a fresh
-    // invitation. The underlying error is dev-gated to the console (below)
-    // and deliberately kept out of the alert: the kex failure message is
-    // intentionally non-oracular.
+    // tampering -- so the copy forbids it and steers to a fresh invitation.
+    // The underlying error is dev-gated to the console (below) and kept out
+    // of the alert: the kex failure message is non-oracular by design.
     return {
       category,
       title: "Could not verify your partner",
@@ -247,11 +229,11 @@ export function failureFor(
         "invitation.",
     };
   }
-  // Generic, retryable transport/exchange failure. The raw error reads as an
-  // internal/developer message and can embed partner-/server-controlled
-  // bytes, so the alert uses a fixed, friendly message; the detailed error
-  // stays in the dev-gated console.error for diagnosis. A mid-run drop lands
-  // here too, after agreed payload columns may already have flowed to the
+  // Generic, retryable transport/exchange failure. The raw error is written
+  // for a developer and can embed partner-/server-controlled bytes, so the
+  // alert uses a fixed, friendly message; the detailed error stays in the
+  // dev-gated console.error for diagnosis. A mid-run drop lands here too,
+  // after agreed payload columns may already have flowed to the
   // authenticated partner, so the copy must not claim the data stayed local.
   //
   // A filedrop run never opens a connection: its two halves rendezvous through a
@@ -273,26 +255,26 @@ export function failureFor(
 
 /**
  * Assemble the {@link ServerJobExchangeDriverConfig} for a console server-job
- * invite -- a file-drop or an SFTP exchange the console appliance runs on this
- * party's behalf. The `transport` picks the intent arm (the SFTP arm carries no
- * connection field: the appliance reads the operator-authored connection off
+ * invite -- a file-drop or an SFTP exchange the console runs on this party's
+ * behalf. `transport` picks the intent arm; the SFTP arm has no connection
+ * field because the console reads the operator-authored connection off
  * `GET /api/jobs/sftp`, so no host, credential, or fingerprint transits the
- * browser); everything below the discriminant is channel-independent. The
- * `linkageTerms` are the very terms embedded in the minted token, reused verbatim
- * rather than re-derived, so the set the partner adopts and the set this run
- * executes on cannot diverge.
+ * browser. Everything below the discriminant is channel-independent.
+ * `linkageTerms` is the same value embedded in the minted token, reused
+ * rather than re-derived, so the terms the partner adopts cannot diverge
+ * from the terms this run executes on.
  *
- * This party's authored metadata and standardization ride along when the mint
- * resolved them, so the appliance's CLI honors the operator's data-prep edits
- * instead of inferring metadata from the CSV column names. An unresolved field is
- * forwarded as absent, mirroring how the browser path guards these.
+ * This party's authored metadata and standardization ride along when the
+ * mint resolved them, so the console's CLI honors the operator's data-prep
+ * edits rather than inferring metadata from the CSV column names; an
+ * unresolved field is forwarded as absent, matching how the browser path
+ * guards these fields.
  *
- * The stated `side` is the inviter's, which is what makes the composed config
- * carry NO `outbound_payload_consent`: this party authored its own outbound set at
- * mint, so the invitation IS the statement of what it sends. The acceptance is the
- * side whose outbound set is unauthored and therefore recorded (see
- * `acceptorServerJobConfig`). The received-payload lock-in is likewise the
- * acceptor's alone, so no `expectedPayloadColumns` is set here.
+ * `side` is the inviter's, so the config has no `outbound_payload_consent` --
+ * this party authored its own outbound set at mint, and the invitation is
+ * that statement. The acceptor's outbound set is unauthored and recorded
+ * instead (see `acceptorServerJobConfig`); likewise only the acceptor sets
+ * `expectedPayloadColumns`.
  *
  * Pure and exported so the derivation is the tested boundary, pinned without
  * running the hook.
@@ -315,7 +297,7 @@ export function inviterServerJobConfig({
   transport: ServerJobExchangeTransport;
   /** The review step's file-handling choices, already resolved through core's
    * retain-mode implication. Absent when the operator changed nothing, so the
-   * composed config carries no `options` block at all. */
+   * composed config has no `options` block at all. */
   options?: JobExchangeOptions;
   /** The review step's per-run diagnostic and recovery choices, forwarded to the
    * intent unchanged. */
@@ -341,18 +323,18 @@ export function inviterServerJobConfig({
 }
 
 /**
- * The run half of the inviter bench, started the moment the invitation is
+ * The run half of the inviter console, started the moment the invitation is
  * minted: listen on the invitation's derived id, run the exchange when the
- * partner connects, and surface the downloads. The connection lifecycle
+ * partner connects, and show the downloads. The connection lifecycle
  * (acquire/open/run/teardown, abort in any phase) is {@link runExchangeLifecycle},
  * exactly as the current exchange screen drives it; this hook owns the single
  * AbortController per invitation and folds the lifecycle's events into the
- * bench's pure {@link ExchangeRun} model for the timeline and status panel.
+ * console's pure {@link ExchangeRun} model for the timeline and status panel.
  *
  * A regenerated invitation (a new object after start-over) restarts the whole
  * run: the effect keyed on `invitation` aborts the old lifecycle and starts a
- * fresh one, the bench-side equivalent of the current app keying its exchange
- * subtree by the shared secret.
+ * fresh one, the console-side equivalent of the current app keying its
+ * exchange subtree by the shared secret.
  */
 export function useInviterExchange({
   invitation,
@@ -370,12 +352,12 @@ export function useInviterExchange({
    * this run builds. A live run only ever starts for a channel the selector maps
    * to a live kind; the owner withholds the invitation for a save-file channel. */
   channel: Transport;
-  /** Where the appliance reads this party's input from on a server-job run
+  /** Where the console reads this party's input from on a server-job run
    * ({@link JobInputSource}): the console picker's mounted-file reference. Undefined
    * on the browser path, which re-parses the retained rows off the minted invitation
    * and never reads this. */
   inputSource: JobInputSource | undefined;
-  /** Whether the appliance has an authored SFTP connection -- the selector's third
+  /** Whether the console has an authored SFTP connection -- the selector's third
    * input, threaded from the owner's fetch so this hook and the owner route
    * identically. */
   sftpConfigured: boolean;
@@ -395,13 +377,13 @@ export function useInviterExchange({
   outputs: RunOutputs | undefined;
   failure: RunFailure | undefined;
   warnings: ReadonlyArray<string>;
-  /** The appliance job id of the current server-job run, once created; undefined
+  /** The console job id of the current server-job run, once created; undefined
    * on a browser run and before the job exists. Drives the completed-run recurring
    * hand-off panel. */
   jobId: string | undefined;
   /** The live status of the exchange this run re-attached to on a busy (409)
    * create, or undefined on a fresh run. Set when a start-time 409 re-attaches to
-   * the exchange holding the appliance's single slot -- the run surface then heads
+   * the exchange holding the console's single slot -- the run surface then heads
    * with recovery-style copy rather than fresh-success copy. */
   reattached: JobRunStatus | undefined;
   /** True from the moment a busy (409) create is detected until the liveness probe
@@ -425,27 +407,27 @@ export function useInviterExchange({
   // the fresh-run share-block suppression; reset when a run restarts or the
   // invitation is discarded.
   const [reattaching, setReattaching] = useState(false);
-  // The current run's appliance job id as reactive state (the ref below drives the
+  // The current run's console job id as reactive state (the ref below drives the
   // synchronous discard paths). Set on create, cleared when a run restarts or the
   // invitation is discarded, so the recurring hand-off panel reads only the live run.
   const [currentJobId, setCurrentJobId] = useState<string>();
 
   // The job API client used by the deliberate-discard paths (try again, start
-  // over, run another): one instance per hook so the strand-recovery DELETEs ride
-  // the same fetch seam the driver does. The server-job driver keeps its own
+  // over, run another): one instance per hook so the strand-recovery DELETEs use
+  // the same fetch client the driver does. The server-job driver keeps its own
   // default client; this hook only needs one for `discardServerJob`.
   const jobApiClient = useMemo(() => createFetchJobApiClient(), []);
 
-  // The appliance job id of the current run, stamped by the driver's `onJobCreated`
+  // The console job id of the current run, stamped by the driver's `onJobCreated`
   // once `POST /api/jobs` resolves. Read by `tryAgain` (to DELETE the failed job
   // before recreating, which reject-until-DELETE would otherwise 409) and by
-  // `abandonRun` (to discard the current job when the operator deliberately leaves).
+  // `abandonRun` (to discard the current job when the operator leaves).
   // Undefined on a browser run, and until the first job is created.
   const currentJobIdRef = useRef<string | undefined>(undefined);
 
   // Drives the lifecycle's AbortSignal; the effect cleanup below aborts it so
   // an unmount (or a superseded invitation) tears down any in-flight wait or
-  // exchange and every owner-driven seam stops firing. The cleanup also
+  // exchange and every owner-driven callback stops firing. The cleanup also
   // clears the ref: under React StrictMode's mount/unmount/mount the start
   // effect re-runs, and a stale aborted controller left in the ref would trip
   // the re-entry guard and the real run would never start.
@@ -485,7 +467,7 @@ export function useInviterExchange({
     setReattaching(false);
 
     // Output-generation half. The URLs the build creates are revoked when the
-    // outputs are replaced or the bench unmounts (effect above); a throw
+    // outputs are replaced or the console unmounts (effect above); a throw
     // mid-build revokes its own partial URLs (see buildRunOutputs).
     const generateOutput: GenerateOutput<RunOutputs> = (result, prepared) => {
       log.info("linkage complete, generating results and record files");
@@ -505,7 +487,7 @@ export function useInviterExchange({
       ).then((selection) => selection.library);
       // The owner awaits `psi` late; if connection setup fails or the signal
       // aborts first, that await is never reached. A fire-and-forget handler
-      // keeps a rejecting PSI() on a torn-down exchange from surfacing as an
+      // keeps a rejecting PSI() on a torn-down exchange from becoming an
       // unhandled rejection -- the real `await psi` still throws.
       void psi.catch(() => undefined);
 
@@ -549,20 +531,20 @@ export function useInviterExchange({
         generateOutput,
       });
 
-    // The transport a server-job run rides: an sftp channel carries no
-    // connection field (the appliance holds the authored server), any other
+    // The transport a server-job run rides: an sftp channel has no
+    // connection field (the console holds the authored server), any other
     // server-job channel is filedrop. Reached only for a server-job selection,
     // which the selector never produces for `browser`.
     const serverJobTransport = (): ServerJobExchangeTransport =>
       channel === "sftp" ? { channel: "sftp" } : { channel: "filedrop" };
 
-    // The console appliance carries out the exchange: the driver POSTs the
-    // sealed terms, this party's authored metadata/standardization (when
+    // The console carries out the exchange: the driver POSTs the sealed
+    // terms, this party's authored metadata/standardization (when
     // present, so the CLI honors the operator's data-prep edits rather than
-    // inferring), the shared secret, and the input source to the job API and maps
-    // the server's event stream onto the same lifecycle events. On the console the
-    // input source is a REFERENCE to the operator-mounted file (no content transits
-    // the browser). It owns no peer connection or PSI library, so
+    // inferring), the shared secret, and the input source to the job API, then
+    // maps the server's event stream onto the same lifecycle events. The input
+    // source is a REFERENCE to the operator-mounted file, so no content
+    // transits the browser. It owns no peer connection or PSI library, so
     // `acquire`/`generateOutput` go unused on this path.
     const serverJobDriver = (): ExchangeDriver<RunOutputs> => {
       if (inputSource === undefined)
@@ -578,7 +560,7 @@ export function useInviterExchange({
           ...(receipts !== undefined ? { receipts } : {}),
         }),
         // Persist the created job's id so a reload or hard tab close can re-attach
-        // to the appliance's run, and track it for the deliberate-discard paths.
+        // to the console's run, and track it for the deliberate-discard paths.
         onJobCreated: (jobId) => {
           currentJobIdRef.current = jobId;
           setCurrentJobId(jobId);
@@ -606,7 +588,7 @@ export function useInviterExchange({
 
     // The run's lifecycle callbacks, built once so a busy (409) re-attach folds
     // the already-running exchange's stream onto the SAME surface. A busy create
-    // at start re-attaches to the exchange holding the appliance's single slot
+    // at start re-attaches to the exchange holding the console's single slot
     // (recovery-style copy, `reattached`) rather than dead-ending on the "already
     // running" alert; every other failure raises its alert.
     const runEvents: ExchangeDriverEvents<RunOutputs> = {
@@ -622,7 +604,7 @@ export function useInviterExchange({
         setWarnings((current) => appendSanitizedRunWarning(current, message)),
       onError: ({ category, error }) => {
         // Dev-gated: the raw Error object's message/cause can embed partner-/
-        // server-controlled bytes, so a production console carries none of it,
+        // server-controlled bytes, so a production console holds none of it,
         // while a developer (or a deployed client with the diagnostics toggle
         // on) keeps the full object. The user-facing alert is separately
         // sanitized in failureFor.
@@ -671,7 +653,7 @@ export function useInviterExchange({
     })();
   }
 
-  // Start the run the moment an invitation exists -- the bench's partner may
+  // Start the run the moment an invitation exists -- the console's partner may
   // open the link right away, so the inviter listens without a Start press,
   // exactly as the current app's post-generate screen does. Keyed on the
   // invitation: a superseded or discarded invitation aborts its run, and a
@@ -682,7 +664,7 @@ export function useInviterExchange({
     if (invitation === undefined) {
       // Start-over discarded the invitation: drop the finished run's state so
       // the output URLs are revoked now (the revocation effect's cleanup)
-      // rather than lingering until the bench unmounts.
+      // rather than lingering until the console unmounts.
       setRun(initialRun());
       setOutputs(undefined);
       setFailure(undefined);
@@ -724,7 +706,7 @@ export function useInviterExchange({
     const failedJobId = currentJobIdRef.current;
     // A server-job retry must DELETE the failed (already-terminal) job before
     // recreating: reject-until-DELETE 409s the create while the prior exchange
-    // still occupies the appliance's single slot. A browser retry re-listens with
+    // still occupies the console's single slot. A browser retry re-listens with
     // no server job to discard.
     if (runMode === "server-job" && failedJobId !== undefined) {
       currentJobIdRef.current = undefined;
@@ -736,11 +718,11 @@ export function useInviterExchange({
     start(retryInvitation);
   }
 
-  // Discard the current server-job exchange when the operator deliberately leaves
-  // (start over, run another): cancel-if-running, DELETE, clear the recovery
-  // record. Fire-and-forget -- the caller navigates away -- and a no-op on a
-  // browser run or before any job exists. This is what frees the appliance's
-  // single slot for the next exchange.
+  // Discard the current server-job exchange when the operator leaves (start
+  // over, run another): cancel-if-running, DELETE, clear the recovery record.
+  // Fire-and-forget -- the caller navigates away -- and a no-op on a browser
+  // run or before any job exists. This is what frees the console's single
+  // slot for the next exchange.
   function abandonRun() {
     const jobId = currentJobIdRef.current;
     if (jobId === undefined) return;

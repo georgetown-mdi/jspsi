@@ -10,7 +10,7 @@
  * profile is measured. The rationale, and why this intake budget is distinct from
  * the comparison-step memory, lives in `docs/spec/PROTOCOL.md`.
  *
- * No-silent-truncation is the invariant that actually matters here, and it is
+ * No-silent-truncation is the invariant that matters here, and it is
  * pinned directly by a multi-chunk correctness test
  * (`test/browser/loadCSVFile.test.ts`), not by holding the cap below the chunk
  * size. Each intake dropzone passes this constant through as `maxSize` rather

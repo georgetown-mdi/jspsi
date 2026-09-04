@@ -13,11 +13,11 @@ import { jobEmptyResponse, jobJsonResponse } from "@jobs/gate";
  * restart-forgotten id is a clean 404, indistinguishable from an unknown route.
  *
  * The response is the manager's {@link JobHandoff}, composed at job creation and
- * held on the record. By construction it carries NO shared secret, NO key-file
- * body, and NO inline credential value, and NO container-internal path: the
- * credential `@path` (sftp) and the filedrop rendezvous directory are shown as
- * fixed placeholders, while the portable host/port/username, host-key fingerprint,
- * and linkage terms are the values that actually ran.
+ * held on the record. It holds NO shared secret, NO key-file body, NO inline
+ * credential value, and NO container-internal path: the credential `@path` (sftp)
+ * and the filedrop rendezvous directory are shown as fixed placeholders, while
+ * the portable host/port/username, host-key fingerprint, and linkage terms are
+ * the values the run used.
  */
 export const Route = createFileRoute("/api/jobs/$jobId/handoff")({
   server: {

@@ -16,7 +16,7 @@ import type { CSVRow } from "@psilink/core";
  */
 
 // Worker globals are not in the app's DOM lib; narrow `globalThis` to the one
-// dedicated-worker affordance this entry uses rather than pulling the WebWorker lib
+// dedicated-worker API this entry uses rather than pulling the WebWorker lib
 // into the whole program (which would clash with DOM on `self`/`postMessage`).
 interface WorkerScope {
   onmessage: ((event: { data: AggregateRequest }) => void) | null;
@@ -34,12 +34,11 @@ scope.onmessage = (event) => {
     seeded = true;
     return;
   }
-  // The controller seeds the rows synchronously in its constructor before any compute
-  // and worker messages are delivered in order, so a compute always arrives seeded.
-  // Guard it regardless: computing over the empty default would report 0% for every
-  // field -- a false silent-empty alarm, the exact failure this module exists to
-  // surface honestly. Throwing routes to the controller's onerror, which settles the
-  // check to "unavailable" (an honest unknown) rather than a fabricated collapse.
+  // The controller seeds the rows synchronously in its constructor before any
+  // compute, and worker messages are delivered in order. Guard anyway: computing
+  // over the empty default would report 0% for every field, a false silent-empty
+  // alarm. Throwing routes to the controller's onerror, which reports the check
+  // as "unavailable" instead.
   if (!seeded)
     throw new Error("aggregate worker computed before rows were seeded");
   scope.postMessage({

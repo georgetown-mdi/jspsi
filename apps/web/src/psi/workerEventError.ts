@@ -1,6 +1,6 @@
 /** Turn a worker `onerror` / `onmessageerror` event into an Error. The event is a
  * browser ErrorEvent whose `message` names the fault; fall back to `fallbackMessage`
- * when it carries none. */
+ * when it has none. */
 export function errorFromWorkerEvent(
   event: unknown,
   fallbackMessage: string,

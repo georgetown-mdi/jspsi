@@ -10,8 +10,7 @@
  */
 
 /** Whether the browser reports a usable network interface. `true` outside a
- * browser (server rendering), where there is no signal to read and the honest
- * default is to claim nothing. */
+ * browser (server rendering), where there is no signal to read. */
 export function isOnline(): boolean {
   if (typeof navigator === "undefined") return true;
   return navigator.onLine;

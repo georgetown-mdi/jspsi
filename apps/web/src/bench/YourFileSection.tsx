@@ -29,8 +29,8 @@ import type { FileRejection } from "@mantine/dropzone";
  *
  * The intake surface is deployment-specific. The hosted build reads the file in
  * the browser through a dropzone (file card once read, recommended-terms callout
- * when the file can back an exchange). The console appliance never reads the file
- * in the browser: it renders {@link ServerFilePicker} over the operator-mounted
+ * when the file can back an exchange). The console never reads the file in the
+ * browser: it renders {@link ServerFilePicker} over the operator-mounted
  * work-input directory, and the file-assurance line and sample-data copy say so.
  */
 export function YourFileSection({
@@ -64,7 +64,7 @@ export function YourFileSection({
   onCommit?: (profile: ProfiledJobInput) => void;
   onContinue: () => void;
   /** Seed the synthetic sample into this exchange in place. Hosted build only -- the
-   * console cannot read an in-browser file, so its sample affordance is download-only. */
+   * console cannot read an in-browser file, so its sample path is download-only. */
   onLoadSample: () => void;
   /** Download the two sample CSVs client-side, uploading nothing. */
   onDownloadSamples: () => void;
@@ -79,8 +79,8 @@ export function YourFileSection({
   }, [alert]);
 
   // The dropzone enforces the size cap and type list itself but only flashes a
-  // reject icon; surface why, or a refused drop is a silent no-op. Codes only
-  // in the log -- a rejected file's NAME can itself be sensitive here.
+  // reject icon; say why, or a refused drop is a silent no-op. Codes only in the
+  // log -- a rejected file's NAME can itself be sensitive here.
   const [rejectionMessage, setRejectionMessage] = useState<string>();
   const maxMb = MAX_CSV_FILE_BYTES / 1024 ** 2;
   function handleReject(rejections: Array<FileRejection>) {

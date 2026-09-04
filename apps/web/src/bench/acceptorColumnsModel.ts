@@ -39,30 +39,28 @@ import type { FieldStepOverride } from "@psi/standardizationAuthoring";
 import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
 
 /**
- * The pure, React-free model behind the acceptor bench's "Confirm your columns"
- * step -- a port of the hardened legacy column editor's derivations, moved out
- * of the component so the verdict, mapper, cleaning-attention, launch-payload,
- * and gate logic are the one
- * tested boundary and React stays thin. No I/O and no state; every consent/verdict
- * semantic re-surfaces the existing logic layer ({@link decideLinkageTermsVerdict},
- * {@link normalizeForEditor}/{@link inferMetadata}, {@link defaultStandardizationForRows},
- * the override-layering helpers, {@link isStepValid}, {@link hasMultipleIdentifiers}),
- * never a re-derivation.
+ * The pure, React-free model behind the acceptor console's "Confirm your columns"
+ * step: the verdict, mapper, cleaning-attention, launch-payload, and gate logic are
+ * the one tested boundary, keeping the React component thin. No I/O and no state;
+ * every consent/verdict semantic reuses the existing logic layer
+ * ({@link decideLinkageTermsVerdict}, {@link normalizeForEditor}/{@link inferMetadata},
+ * {@link defaultStandardizationForRows}, the override-layering helpers,
+ * {@link isStepValid}, {@link hasMultipleIdentifiers}), never a re-derivation.
  *
  * The verdict and the launch payload derive from the SAME `{ metadata, standardization }`
  * pair ({@link acceptorColumnsEditorState} produces it once; {@link acceptorVerdict}
  * and {@link acceptorLaunchPayload} both read it), so the gate the operator sees and
- * the exchange that runs cannot disagree -- the invariant the legacy editor held.
+ * the exchange that runs cannot disagree.
  *
  * The acceptor cannot edit fields or keys: they are adopted verbatim from the
  * invitation's `linkageTerms`. Satisfiability is assessed against those exact terms.
  */
 
 /**
- * The acceptor's own parsed CSV, held in bench state on a passing parse (instead of
- * discarded): the column list and raw rows the columns step and its verdict consume,
- * plus the file's name and byte size for display. The run package feeds `columns` /
- * `rawRows` straight into the exchange with no re-parse.
+ * The acceptor's own parsed CSV, held in console state on a passing parse (instead
+ * of discarded): the column list and raw rows the columns step and its verdict
+ * consume, plus the file's name and byte size for display. The run package feeds
+ * `columns` / `rawRows` straight into the exchange with no re-parse.
  */
 export interface AcceptorAcquiredCsv {
   fileName: string;
@@ -75,18 +73,17 @@ export interface AcceptorAcquiredCsv {
   /** A pre-inferred date-of-birth input layout
    * ({@link dateInputFormatForColumns}), set only by sources that profile it
    * without rows (the console); when absent, derivations infer it from the
-   * rows as before. */
+   * rows. */
   dateInputFormat?: string;
 }
 
 /**
- * The acceptor's column-step working state, layered exactly as the legacy editor
- * held it: the seed metadata, plus two override LAYERS (input-column rebinds and
- * authored step edits) over the standardization derived from the current
- * metadata. Held as
- * layers rather than a whole standardization so the binding is always re-derived and
- * the verdict stays honest; an empty override map means the effective standardization
- * equals the derived default byte for byte.
+ * The acceptor's column-step working state: the seed metadata, plus two override
+ * LAYERS (input-column rebinds and authored step edits) over the standardization
+ * derived from the current metadata. Held as layers rather than a whole
+ * standardization so the binding is always re-derived and the verdict stays
+ * accurate; an empty override map means the effective standardization equals the
+ * derived default byte for byte.
  */
 export interface AcceptorColumnsState {
   metadata: Metadata;
@@ -130,7 +127,7 @@ export function acceptorInitialColumnsState(
  *    seen as stale and dropped after a remap rather than silently cleaning a different
  *    column.
  *
- * The input rebind running before the step layer is load-bearing: it is what makes a
+ * The input rebind running before the step layer is critical: it is what makes a
  * post-remap step override stale. With no overrides the result equals the derived
  * default.
  */
@@ -175,7 +172,7 @@ export type AcceptorVerdictKind = "blocked" | "partial" | "allClear";
 /**
  * The verdict view-model: which alert to render, its exact visible title, and the
  * deferred announcement string (worded distinctly from the visible title, per the
- * announcement contract). The dead-key count is carried here too, since it is
+ * announcement contract). The dead-key count is included here too, since it is
  * derived from the same satisfiability assessment.
  */
 export interface AcceptorVerdictViewModel {
@@ -202,8 +199,8 @@ export interface AcceptorVerdictViewModel {
 
 /**
  * The live linkage-terms verdict over the EDITED `{ metadata, standardization }`.
- * Re-surfaces {@link decideLinkageTermsVerdict} against the adopted terms -- never
- * a re-derivation -- and maps its result to the mockup's exact copy and the spoken
+ * Reuses {@link decideLinkageTermsVerdict} against the adopted terms -- never a
+ * re-derivation -- and maps its result to the mockup's exact copy and the spoken
  * announcement. Blocked when no key can match, partial when some but not all can,
  * all-clear when every key is covered.
  *
@@ -261,7 +258,7 @@ export interface AcceptorUnsatisfiedType {
 /**
  * The field types the file cannot currently produce, de-duplicated by type (several
  * fields can share a type). `LinkageField["type"]` is a closed semantic-type enum,
- * so its label is safe; the partner-controlled field NAME is never surfaced. The
+ * so its label is safe; the partner-controlled field NAME is never exposed. The
  * quick-fix mapper renders one Select per entry, and ONLY when this list is
  * non-empty.
  */
@@ -290,7 +287,7 @@ export function acceptorUnsatisfiedTypes(
  */
 export interface AcceptorLaunchStepBlocks {
   /** Whether the browser reports no network. Every accept ends in a live
-   * two-party session -- in this browser, or on the console appliance -- so an
+   * two-party session -- in this browser, or on the console -- so an
    * offline device blocks the launch outright. Only this direction is a block:
    * a device reporting online is no promise the partner is reachable (see
    * `apps/web/src/utils/networkStatus.ts`). */
@@ -310,7 +307,7 @@ export interface AcceptorLaunchStepBlocks {
    * separate card, gated separately for the same reason. */
   receiptsBlocked: boolean;
   /** The requirement a split rendezvous makes of the file-handling choices, in the
-   * console's own words, or undefined when it is met. Carried as its own SENTENCE
+   * console's own words, or undefined when it is met. Held as its own SENTENCE
    * rather than a flag, because the remedy is the one control to turn on and the
    * blocked-launch line is where the operator meets it. */
   splitDirectoryProblem?: string;
@@ -326,47 +323,30 @@ const NO_STEP_BLOCKS: AcceptorLaunchStepBlocks = {
 };
 
 /**
- * The launch gate, expressed as the sentence the step shows beside the disabled
+ * The launch gate's sentence, exactly as the step renders it beside the disabled
  * button and points its `aria-describedby` at -- `undefined` exactly when nothing
- * blocks, which is what the step disables on. Ported from the legacy editor's
- * predicate and widened to core's own grading: the file cannot be run under the
- * adopted terms (`verdict.fullySatisfied` is false), OR a count-only
- * invitation meets a marked column ({@link countOnlyTransmitsColumn}) -- an
- * arrangement the algorithm forecloses whatever the declaration says -- OR the
- * marked columns disagree with the payload set the invitation declares for this
- * party
- * ({@link acceptorPayloadDeclarationConflict}) -- a pair the exchange refuses to run
- * on -- OR a marked column's name is too long to carry
- * ({@link acceptorOverlongDisclosedColumns}) -- a name the partner's parse refuses
- * once the frame is already sent -- OR the metadata carries more than one identifier
- * column, OR an authored cleaning step is invalid/mid-edit, OR one of the step's own
- * blocks.
+ * blocks, which is what the step disables on. Widened to core's own grading: the
+ * file cannot be run under the adopted terms (`verdict.fullySatisfied` is false),
+ * a count-only invitation meets a marked column
+ * ({@link countOnlyTransmitsColumn}), the marked columns disagree with the payload
+ * set the invitation declares for this party
+ * ({@link acceptorPayloadDeclarationConflict}), a marked column's name is too long
+ * to fit in the frame ({@link acceptorOverlongDisclosedColumns}), the metadata has
+ * more than one identifier column, an authored cleaning step is invalid or
+ * mid-edit, or one of the step's own blocks holds.
  *
- * The linkage clause is three sentences over one gate, because the three shortfalls
- * have three different remedies: missing coverage is remapped in the quick-fix
- * mapper above, partial coverage is remapped there or settled with the partner, and
- * a dead key is the partner's to correct -- it came with the invitation and no edit
- * on this screen clears it. Each states the remedy in the words of the notice it
- * sits under, and none names a partner-controlled key.
+ * The gate and the explanation are ONE derivation, so a state that disables the
+ * button while telling a screen-reader operator nothing is unrepresentable. The
+ * declaration conflict holds that shape across its own variants too: its title and
+ * the button's reason are chosen in a single place.
  *
- * The gate and the explanation are ONE derivation rather than two that agree, so a
- * state that disables the button while telling a screen-reader operator nothing is
- * unrepresentable rather than merely tested against. The declaration conflict holds
- * that shape across its own variants too: the sentence is the one the conflict
- * itself carries, so the notice's title and the button's reason are chosen in a
- * single place and cannot name different directions of the same disagreement.
- *
- * The chain opens with the one blocker that is not on the screen at all -- a
- * device reporting no network, which no edit here clears -- and then follows the
- * step's own reading order, so the sentence names the topmost unresolved surface
- * and an operator working down the screen is sent to the first thing they meet:
- * the verdict, then the count-only refusal, then the declaration conflict, then
- * the over-long name notice, then the grid's identifier rule, then the cleaning
- * steps, then the connection, the split rendezvous's retain-mode requirement, and
- * the file-handling and connection-tuning cards below them. Each names what to fix
- * on this screen, in the words of the notice it points at -- naming the card it is
- * about, since the collapsed cards below show no problem of their own until
- * opened.
+ * Checks run in the step's own reading order -- offline first, since it is not on
+ * the screen at all and no edit here clears it, then the verdict, the count-only
+ * refusal, the declaration conflict, the over-long name notice, the identifier
+ * rule, the cleaning steps, the connection, the split rendezvous's retain-mode
+ * requirement, and the file-handling and connection-tuning cards -- so an operator
+ * working down the screen is sent to the first unresolved card. Each reason is
+ * worded from the notice it points at, and none names a partner-controlled key.
  */
 export function acceptorLaunchBlockedReason(
   verdict: AcceptorVerdictViewModel,
@@ -390,13 +370,12 @@ export function acceptorLaunchBlockedReason(
     );
   }
   // A count-only invitation answers the payload question outright, ahead of the
-  // declaration conflict below: the algorithm carries no data column in either
+  // declaration conflict below: the algorithm holds no data column in either
   // direction whichever party the terms entitle to the count, so a marked column
-  // is refused rather than reconciled against a declaration -- and an invitation
-  // that declares no `payload.receive` at all leaves that comparison with nothing
-  // to say. Core's own refusal at accept holds the same fact
-  // (`assertCountOnlyTransmitsNoColumn`); this is the sentence that lets the
-  // operator clear it here.
+  // is refused here rather than compared against a declaration -- and an
+  // invitation with no `payload.receive` at all leaves that comparison nothing to
+  // compare against. Core's own refusal at accept enforces the same fact
+  // (`assertCountOnlyTransmitsNoColumn`).
   if (countOnlyTransmitsColumn(invitationTerms.algorithm, editorState.metadata))
     return "Unmark the columns you send above before you can start: a count-only exchange sends none.";
   const declarationConflict = acceptorPayloadDeclarationConflict(
@@ -434,7 +413,7 @@ export function acceptorLaunchBlockedReason(
 
 /** Whether every authored cleaning step is well-formed, gating launch so a
  * malformed pipeline (which core would run as a silent full-field exclusion or throw
- * at compile) never reaches the exchange. Re-surfaces {@link isStepValid}. */
+ * at compile) never reaches the exchange. Reuses {@link isStepValid}. */
 export function acceptorStandardizationValid(
   standardization: Standardization,
 ): boolean {
@@ -448,7 +427,7 @@ export function acceptorStandardizationValid(
  * {@link AcceptorDataEdits} expects. The pair is the SAME one the verdict consumed,
  * so the gate and the run cannot disagree.
  *
- * It carries no coverage advisory: partial coverage stops the launch
+ * It includes no coverage advisory: partial coverage stops the launch
  * ({@link acceptorLaunchBlockedReason}), so an exchange that reaches this payload is
  * one whose every agreed key the file can produce, and there is nothing left to warn
  * the run surface about.
@@ -472,8 +451,8 @@ export function acceptorDisclosedColumns(metadata: Metadata): Array<string> {
 }
 
 /**
- * The 1-based positions of the marked columns whose name is too long to carry to
- * the partner, gated on at launch and named in its own notice. Re-surfaces
+ * The 1-based positions of the marked columns whose name is too long to fit in the
+ * frame, gated on at launch and named in its own notice. Reuses
  * {@link overlongDisclosedColumnPositions}, the same predicate core's prepare-time
  * refusal reads, so this screen refuses exactly the names the run would -- the
  * acceptor's metadata is seeded by {@link inferMetadata} over its own header, which
@@ -481,10 +460,10 @@ export function acceptorDisclosedColumns(metadata: Metadata): Array<string> {
  * partner's parse and be refused only after the frame was sent.
  *
  * Empty when the inviting party is entitled to no result: the payload step then
- * transmits nothing whatever the operator marks, so there is no carried name to
- * bound -- and a refusal here would contradict the panel beside it, which states
- * that nothing is sent. The same gate {@link acceptorPayloadDeclarationConflict}
- * applies to the empty declaration, and core's own refusal applies to this bound.
+ * transmits nothing whatever the operator marks, so there is no name to bound --
+ * and a refusal here would contradict the panel beside it, which states that
+ * nothing is sent. The same gate {@link acceptorPayloadDeclarationConflict} applies
+ * to the empty declaration, and core's own refusal applies to this bound.
  */
 export function acceptorOverlongDisclosedColumns(
   invitationTerms: LinkageTerms,
@@ -497,7 +476,7 @@ export function acceptorOverlongDisclosedColumns(
 /**
  * One column the invitation's declared payload set names that this party's marks do
  * not send -- core's OVER-declaration. The remedy for it is mostly the partner's, so
- * the entry carries what decides which remedies exist rather than the name alone.
+ * the entry includes what decides which remedies exist rather than the name alone.
  */
 export interface AcceptorDeclaredColumnGap {
   /**
@@ -512,7 +491,7 @@ export interface AcceptorDeclaredColumnGap {
   /**
    * Whether the operator's own file has a column of that name, which is what decides
    * whether marking it to send exists as a remedy at all. Read from the metadata,
-   * which carries one entry per column of the chosen file.
+   * which holds one entry per column of the chosen file.
    */
   inFile: boolean;
 }
@@ -530,9 +509,9 @@ export type AcceptorPayloadDeclarationConflictKind =
 /**
  * The disagreement between the payload set the invitation declares for this party
  * and the columns the operator's marks disclose: the pair
- * `assertPayloadSendDisclosed` refuses inside `prepareForExchange`, surfaced before
+ * `assertPayloadSendDisclosed` refuses inside `prepareForExchange`, shown before
  * the operator launches into it. Both directions can hold at once -- core reports
- * them in one refusal -- so both are carried here and stated together, rather than
+ * them in one refusal -- so both are held here and stated together, rather than
  * one being revealed after the other is cleared.
  */
 export interface AcceptorPayloadDeclarationConflict {
@@ -540,7 +519,7 @@ export interface AcceptorPayloadDeclarationConflict {
   /** The notice's visible title, naming the direction(s) that hold. */
   title: string;
   /**
-   * The launch gate's sentence for this conflict, carried beside the title so the
+   * The launch gate's sentence for this conflict, held beside the title so the
    * button's reason and the notice it points at are chosen in one place.
    */
   launchBlockedReason: string;
@@ -563,30 +542,25 @@ export interface AcceptorPayloadDeclarationConflict {
 
 /**
  * The disagreement between the invitation's declared payload set for this party and
- * the operator's marks, or `undefined` when there is nothing to state -- so the
- * notice and the launch gate read ONE derivation and cannot disagree, and it clears
- * as the operator re-marks.
+ * the operator's marks, or `undefined` when there is nothing to state. The notice
+ * and the launch gate read this one derivation, so they cannot disagree, and it
+ * clears as the operator re-marks.
  *
- * Mirrors {@link assertPayloadSendDisclosed} exactly: an exact-set comparison in
- * both directions, with the ONE gate core has. Read from the INVITATION's own
- * perspective, which is the terms this step holds. An ABSENT `payload.receive` is
- * the lazy direction -- reconciled against this party's own disclosure when the
- * exchange runs, never held to equality -- while a PRESENT one mirrors onto this
- * party as the `payload.send` core enforces (`deriveAcceptedLinkageTerms`).
+ * Mirrors {@link assertPayloadSendDisclosed}: an exact-set comparison in both
+ * directions, read from the INVITATION's own perspective. An ABSENT
+ * `payload.receive` is reconciled against this party's own disclosure when the
+ * exchange runs, never held to equality; a PRESENT one mirrors onto this party as
+ * the `payload.send` core enforces (`deriveAcceptedLinkageTerms`).
  *
- * Only the EMPTY declaration is gated on the inviting party's `output.expectsOutput`
- * (core's `shareWithPartner` on the mirrored side): an inviting party entitled to no
- * result is sent no payload at all, so the run transmits nothing whatever the
- * operator marks, core refuses nothing, and stating a conflict would contradict the
- * panel beside it -- which renders core's no-payload sentence off that same fact. A
- * NON-EMPTY declaration is ungated in both directions, exactly as core leaves it: it
- * is an accuracy control over a dictionary that is exchanged, consented to, and
- * written into the exchange record whatever the output direction. That cannot
- * contradict the same panel either, and by construction rather than by a second
- * gate here -- `LinkageTermsSchema` refuses a non-empty `payload.receive` alongside
- * `expectsOutput: false`, so an invitation carrying one never reaches this step
- * (packages/core/test/linkageTerms.test.ts drives that refusal, which is what
- * keeps this ungated).
+ * The EMPTY declaration is gated only when the inviting party expects output
+ * (`output.expectsOutput`, core's `shareWithPartner` on the mirrored side): when it
+ * does not, the run transmits nothing whatever the operator marks, so there is
+ * nothing to conflict with. A NON-EMPTY declaration is always gated, since it is an
+ * accuracy control over a dictionary that is exchanged and written into the
+ * exchange record regardless of output direction; `LinkageTermsSchema` refuses a
+ * non-empty `payload.receive` alongside `expectsOutput: false`
+ * (packages/core/test/linkageTerms.test.ts), so that combination never reaches
+ * this step.
  */
 export function acceptorPayloadDeclarationConflict(
   invitationTerms: LinkageTerms,
@@ -674,8 +648,8 @@ function declarationConflictWording(
   };
 }
 
-/** Whether the metadata carries more than one identifier column, surfaced as the
- * identifier-conflict hint and gated on at launch. Re-surfaces
+/** Whether the metadata has more than one identifier column, shown as the
+ * identifier-conflict hint and gated on at launch. Reuses
  * {@link hasMultipleIdentifiers}. */
 export function acceptorHasIdentifierConflict(metadata: Metadata): boolean {
   return hasMultipleIdentifiers(metadata);

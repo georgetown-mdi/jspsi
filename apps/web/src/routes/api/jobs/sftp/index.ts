@@ -23,7 +23,7 @@ import type { SftpConnectionProjection } from "@jobs/jobManager";
  *   mapped, credential-free projection: `{ configured: false }` or
  *   `{ configured: true, host, port?, path?, inboundPath?, outboundPath?,
  *   credentialWarnings }` -- the remote directory in whichever single form the
- *   connection carries, the split `inboundPath`/`outboundPath` pair being mutually
+ *   connection holds, the split `inboundPath`/`outboundPath` pair being mutually
  *   exclusive with `path`; no username, credential reference, or fingerprint;
  *   `credentialWarnings` names any credential field that resolves inside the data
  *   root or rendezvous mount (field and directory only). The console web build
@@ -33,8 +33,8 @@ import type { SftpConnectionProjection } from "@jobs/jobManager";
  *   validation failure is a `400` naming a field path, never a value.
  * - `DELETE` forgets the authored connection (idempotent `204`).
  *
- * The static `sftp` segment can never be captured as a `$jobId` parameter: job
- * ids are validated as v4 UUIDs before any use, which `sftp` is not. `POST` stays
+ * The static `sftp` segment is not reachable as a `$jobId` parameter: job ids are
+ * validated as v4 UUIDs before any use, and `sftp` is not one. `POST` stays
  * closed on `/api/jobs` -- all authored connection material flows through this
  * endpoint, so the job-create intent gains no connection field.
  */
@@ -67,7 +67,7 @@ export const Route = createFileRoute("/api/jobs/sftp/")({
           connection = gate.manager.authorSftpServer(body.value);
         } catch (error) {
           // A validation failure names a field path only (never a submitted
-          // value), so surfacing the message helps the operator fix the input
+          // value), so showing the message helps the operator fix the input
           // without leaking a credential reference or secret.
           if (error instanceof JobApiConfigError)
             return jobJsonResponse({ error: error.message }, 400);

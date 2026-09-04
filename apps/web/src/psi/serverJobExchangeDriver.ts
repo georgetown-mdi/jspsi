@@ -34,36 +34,33 @@ const log = getLogger("serverJobExchangeDriver");
 
 /** The channel a server job runs over, mirroring the {@link JobExchangeIntent}
  * discriminant so the driver stays transport-blind past intent construction.
- * The sftp variant carries no connection field at all: the appliance runs the
- * one authored SFTP connection (`GET /api/jobs/sftp`), so every host, port,
- * path, and credential reference lives on the appliance, never in the
- * browser. */
+ * The sftp variant has no connection field at all: the console runs the one
+ * authored SFTP connection (`GET /api/jobs/sftp`), so every host, port, path,
+ * and credential reference lives on the console, never in the browser. */
 export type ServerJobExchangeTransport =
   { channel: "filedrop" } | { channel: "sftp" };
 
 /**
- * Where the appliance reads this party's input from. `inline` carries the CSV
- * content the browser holds (the hosted-shaped path: the server writes it to the
- * fixed workdir name). `workFile` carries only a REFERENCE to a file in the
- * operator-mounted work-input directory -- an opaque single-segment name -- so no
- * content transits the browser and the CLI reads the file in place. `intentFor`
- * maps `inline` to the intent's `inputCsv` arm and `workFile` to its `inputFile`
- * arm (exactly one of the two is ever set). */
+ * Where the console reads this party's input from. `inline` holds the CSV
+ * content the browser has; the server writes it to the fixed workdir name.
+ * `workFile` holds only a reference -- an opaque single-segment name -- to a
+ * file in the operator-mounted work-input directory, so no content transits
+ * the browser and the CLI reads the file in place. `intentFor` maps `inline`
+ * to `inputCsv` and `workFile` to `inputFile` (exactly one is ever set). */
 export type JobInputSource =
   { kind: "inline"; csv: string } | { kind: "workFile"; name: string };
 
-/** The construction-time inputs a server-job driver needs: the analog of the
- * browser driver's config, minus everything that only a peer-to-peer run has (no
- * `acquire`, no PSI library, no `generateOutput`). These are exactly the
- * {@link JobExchangeIntent} fields the wiring agent draws from the prepared
- * exchange; `transport` picks the intent arm and the driver stamps
- * `eventStream: true` itself, so a caller supplies only the exchange payload
- * and the channel it rides. */
+/** The construction-time inputs a server-job driver needs: the browser
+ * driver's config minus everything only a peer-to-peer run has (no `acquire`,
+ * no PSI library, no `generateOutput`). These map onto the
+ * {@link JobExchangeIntent} fields: `transport` picks the intent arm and the
+ * driver stamps `eventStream: true` itself, so a caller supplies only the
+ * exchange payload and the channel it rides. */
 export interface ServerJobExchangeDriverConfig {
   transport: ServerJobExchangeTransport;
   /**
    * Which side of the partnership this run is. Required, not optional: it decides
-   * whether the composed config carries an `outbound_payload_consent` record (only
+   * whether the composed config holds an `outbound_payload_consent` record (only
    * an acceptance's outbound set is unauthored, so only an acceptance records
    * one), and a side omitted into a default would silently leave a later
    * unattended run of that config unheld to any set. Every caller states it.
@@ -71,13 +68,13 @@ export interface ServerJobExchangeDriverConfig {
   side: JobExchangeSide;
   linkageTerms: LinkageTerms;
   sharedSecret: string;
-  /** Where the appliance reads this party's input from: inline CSV content, or a
+  /** Where the console reads this party's input from: inline CSV content, or a
    * reference to a file in the operator-mounted work-input directory
    * ({@link JobInputSource}). Mapped to the intent's `inputCsv` / `inputFile` arm by
    * {@link intentFor}. */
   inputSource: JobInputSource;
   /** This party's authored column metadata (which columns are sent vs ignored,
-   * their roles/types). Carried into the intent so the appliance's CLI uses the
+   * their roles/types). Included in the intent so the console's CLI uses the
    * operator's edits instead of inferring metadata from the column names -- an
    * inferred column defaults to disclosed payload, so an omitted metadata would
    * silently disclose a column the operator marked ignored. Forwarded only when
@@ -86,41 +83,38 @@ export interface ServerJobExchangeDriverConfig {
   /** This party's authored standardization pipeline, paired with {@link metadata}.
    * Forwarded only when present. */
   standardization?: Standardization;
-  /** The acceptor's received-payload lock-in (partner-namespace column names),
-   * mirrored from the invitation's disclosed set. Carried into the intent so the
-   * CLI enforces it explicitly instead of relying on the lazy `payload.receive`
-   * fallback, which fails open when the token discloses columns but carries no
-   * `payload.send`. Forwarded whenever present, INCLUDING an empty array (a strict
-   * "receive nothing"); only an omitted field reconciles lazily. The inviter path
-   * leaves it undefined -- the lock-in is the acceptor's. */
+  /** The acceptor's received-payload commitment (partner-namespace column
+   * names), mirrored from the invitation's disclosed set. Included in the
+   * intent so the CLI enforces it explicitly rather than falling back to the
+   * lazy `payload.receive`, which fails open when the token discloses columns
+   * but has no `payload.send`. Forwarded whenever present, including an empty
+   * array (a strict "receive nothing"); an omitted field reconciles lazily. */
   expectedPayloadColumns?: Array<string>;
-  /** The acceptor's terms-side lock-in: the `deduplicate` the invitation declared
-   * for the INVITER's own side. Carried into the intent so the composed config
-   * binds it and the CLI refuses a partner presenting any other value at the
-   * terms exchange, before any key or payload moves. The inviter path leaves it
-   * undefined -- the binding is the acceptor's, and an absent field binds
-   * nothing. */
+  /** The acceptor's terms-side commitment: the `deduplicate` the invitation
+   * declared for the INVITER's own side. Included in the intent so the
+   * composed config binds it and the CLI refuses a partner presenting any
+   * other value at the terms exchange, before any key or payload moves. The
+   * inviter path leaves it undefined -- the commitment is the acceptor's, and
+   * an absent field binds nothing. */
   expectedPartnerDeduplicate?: boolean;
   options?: JobExchangeOptions;
   /** The operator's per-run diagnostic and recovery choices, forwarded to the
-   * intent unchanged ({@link RunDiagnosticsIntentFields}). Absent for a run that
-   * asked for neither, which is the intent every caller sent before the controls
-   * existed. */
+   * intent unchanged ({@link RunDiagnosticsIntentFields}). Absent for a run
+   * that asked for neither. */
   runDiagnostics?: RunDiagnosticsIntentFields;
-  /** The operator's receipt-signing and retention choices, forwarded to the intent
-   * unchanged ({@link ReceiptsIntentFields}). Absent for an exchange that signs no
-   * receipt and files no note, which is the intent every caller sent before the
-   * card existed. */
+  /** The operator's receipt-signing and retention choices, forwarded to the
+   * intent unchanged ({@link ReceiptsIntentFields}). Absent for an exchange
+   * that signs no receipt and files no note. */
   receipts?: ReceiptsIntentFields;
   /** Invoked with the created job's id the moment `POST /api/jobs` resolves,
-   * before the event stream opens. The seam the console's strand-recovery record
-   * is written from ({@link ../psi/consoleJobAttachment}): the job exists on the
-   * appliance from this point, so persisting its id here lets a reload or a hard
-   * tab close re-attach to the run. */
+   * before the event stream opens. This is where the console's strand-recovery
+   * record is written ({@link ../psi/consoleJobAttachment}): the job exists on
+   * the console from this point, so persisting its id here lets a reload or a
+   * hard tab close re-attach to the run. */
   onJobCreated?: (jobId: string) => void;
 }
 
-/** The exchange-record pair's availability on the appliance, read off
+/** The exchange-record pair's availability on the console, read off
  * `GET /api/jobs/:id`. Available only when the record and its verification keys
  * are both on disk and the record's `createdAt` parsed; the driver stamps the
  * download filenames from that `createdAt`. */
@@ -155,13 +149,9 @@ export interface JobApiClient {
    * races a job the operator has already left, and a 404 for an already-gone id
    * is a no-op. */
   deleteJob: (jobId: string) => Promise<void>;
-  /** `GET /api/jobs/:id`, resolving a {@link JobStatusProbe} the recovery probe and
-   * the discard poll both read. A confirmed HTTP 404 is `gone` -- the exchange is
-   * not on the appliance (deleted, or forgotten by a restart) -- and is the only
-   * outcome that authorizes a destructive reclaim. A network error or any other
-   * non-2xx is `unreachable`: a transient fault, NOT a confirmed removal, so the
-   * caller leaves the record intact for the next probe rather than deleting a
-   * still-live exchange over a blip. A 200 is `live` with the run status. */
+  /** `GET /api/jobs/:id`, resolving a {@link JobStatusProbe} the recovery probe
+   * and the discard poll both read. See {@link JobStatusProbe} for how `gone`
+   * is distinguished from `unreachable`. */
   fetchJobStatus: (
     jobId: string,
     signal: AbortSignal,
@@ -183,16 +173,16 @@ export interface JobApiClient {
 export type JobRunStatus = "running" | "succeeded" | "failed" | "cancelled";
 
 /** The status body a recovery probe or a discard poll needs off
- * `GET /api/jobs/:id`: only the run status. The endpoint carries more (terminal,
- * record availability), but re-attachment reconstructs the run from the event
- * stream, so the status view stays minimal. */
+ * `GET /api/jobs/:id`: only the run status. The endpoint returns more
+ * (terminal, record availability), but re-attachment reconstructs the run from
+ * the event stream, so the status view stays minimal. */
 export interface JobStatusView {
   status: JobRunStatus;
 }
 
 /** The outcome of a `GET /api/jobs/:id` probe, distinguishing a CONFIRMED-gone
  * exchange from a transient failure so only the former drives a destructive
- * reclaim. `live` carries the run status off a 200; `gone` is a confirmed HTTP
+ * reclaim. `live` holds the run status from a 200; `gone` is a confirmed HTTP
  * 404 (deleted, or forgotten by a restart); `unreachable` is a network error or
  * any other non-2xx -- a transient blip the caller must not treat as removal. */
 export type JobStatusProbe =
@@ -200,13 +190,13 @@ export type JobStatusProbe =
   | { kind: "gone" }
   | { kind: "unreachable" };
 
-/** A non-2xx response from the job API, carrying the status so the driver can
+/** A non-2xx response from the job API, holding the status so the driver can
  * pick the failure category (a 400 is a rejected/invalid intent -> `config`;
  * any other non-2xx is a transport/server fault -> `exchange`). A busy (409)
- * create carries {@link activeJobId}, the id of the exchange occupying the
- * appliance's single slot, parsed from the response body -- the browser
+ * create includes {@link activeJobId}, the id of the exchange occupying the
+ * console's single slot, parsed from the response body -- the browser
  * re-attaches to it rather than surfacing the "already running" alert (see
- * `bench/reattachOnBusy`). Present only on a 409 whose body carried one. */
+ * `bench/reattachOnBusy`). Present only on a 409 whose body held one. */
 export class JobApiRequestError extends Error {
   constructor(
     readonly status: number,
@@ -218,19 +208,13 @@ export class JobApiRequestError extends Error {
   }
 }
 
-/** The failure a relayed terminal `error` event raises, whose `message` is a
- * RENDERED cause chain rather than a raw one: every piece of it came off the
- * relay's own display pass -- the links {@link ERROR_MESSAGE_CHAIN_FIELD}
- * carried apart, rejoined by the renderer's own framing, or the escaped flat
- * field when the relay derived no chain (see {@link errorMessageOf}).
- *
- * The type is what carries that provenance to a seat, and the provenance is what
- * makes splitting the message back into links exact: an escaped link cannot hold
- * a raw newline, so the only one the message can carry is the framing. A seat
- * that split a RAW message on the same framing would turn a literal
- * `\ncaused by:` in the text into a forged link of its own, which is why the
- * seat renders anything that is not one of these through the escaping renderer
- * instead (`sanitizedFailureMessage` in `@bench/useInviterExchange`). */
+/** The failure a relayed terminal `error` event raises. Its `message` is a
+ * RENDERED cause chain, not a raw one: every piece came off the relay's own
+ * display pass -- the links {@link ERROR_MESSAGE_CHAIN_FIELD} held apart,
+ * rejoined by the renderer's own framing, or the escaped flat field when the
+ * relay derived no chain (see {@link errorMessageOf}). Anything else renders
+ * through the escaping renderer instead (`sanitizedFailureMessage` in
+ * `@bench/useInviterExchange`). */
 export class RelayedTerminalError extends Error {
   constructor(message: string) {
     super(message);
@@ -238,7 +222,7 @@ export class RelayedTerminalError extends Error {
   }
 }
 
-/** The result CSV of a server-driven job lives on the appliance, retrievable
+/** The result CSV of a server-driven job lives on the console, retrievable
  * through this endpoint rather than as a browser object URL. */
 function jobResultUrl(jobId: string): string {
   return `/api/jobs/${jobId}/result`;
@@ -247,7 +231,7 @@ function jobResultUrl(jobId: string): string {
 /** The default {@link JobApiClient}, hitting the real same-origin job endpoints
  * with a streaming `fetch` (not `EventSource`, which is harder to drive from a
  * unit test). Every connect replays the job's full event history and the
- * server closes the stream after the terminal event, so one request carries a
+ * server closes the stream after the terminal event, so one request spans a
  * whole run's lifecycle. */
 export function createFetchJobApiClient(
   fetchImpl: typeof fetch = fetch,
@@ -264,9 +248,9 @@ export function createFetchJobApiClient(
         throw new JobApiRequestError(
           response.status,
           `POST /api/jobs failed with status ${response.status}`,
-          // A busy (409) body carries `{ id }` -- the exchange occupying the
+          // A busy (409) body holds `{ id }` -- the exchange occupying the
           // single slot -- so the caller can re-attach to it. Absent on every
-          // other status (an empty-bodied 400/413/500 reads as no id).
+          // other status (an empty-bodied 400/413/500 is treated as no id).
           response.status === 409 ? await readBodyJobId(response) : undefined,
         );
       const body: unknown = await response.json();
@@ -298,7 +282,7 @@ export function createFetchJobApiClient(
         // removal: report it so the caller leaves the record intact.
         return { kind: "unreachable" };
       }
-      // A confirmed 404 is the only "gone": the exchange is not on the appliance
+      // A confirmed 404 is the only "gone": the exchange is not on the console
       // (deleted, or a restart forgot it). Any other non-2xx is a transient fault.
       if (response.status === 404) return { kind: "gone" };
       if (!response.ok) return { kind: "unreachable" };
@@ -308,8 +292,8 @@ export function createFetchJobApiClient(
           status: jobStatusViewOf(await response.json()).status,
         };
       } catch {
-        // A 200 proves the exchange is present; an unparseable body reads as
-        // running, never gone.
+        // A 200 proves the exchange is present; an unparseable body is
+        // treated as running, never gone.
         return { kind: "live", status: "running" };
       }
     },
@@ -330,7 +314,7 @@ export function createFetchJobApiClient(
 }
 
 /** Read a `{ id }` string off a job-API response body, or undefined when the
- * body is absent, unparseable, or carries no non-empty string id. Used to pull
+ * body is absent, unparseable, or has no non-empty string id. Used to pull
  * the occupying exchange's id off a busy (409) create so the caller can
  * re-attach; a body without one (an older server, or an empty 409) is undefined,
  * and the caller falls back to its persisted id. */
@@ -372,11 +356,11 @@ export type SlotOccupancy =
 
 /**
  * Probe the console's single exchange slot (`GET /api/jobs/slot`). Fail-safe
- * toward "not occupied": a non-2xx (a disabled API's 404 among them), a network
- * error, an aborted request, a `{ occupied: false }` body, or a malformed
- * `{ occupied: true }` body missing a usable id all resolve to unoccupied, so the
- * recovery panel behaves exactly as it does today (renders nothing) rather than
- * adopting an id it cannot re-attach to.
+ * toward "not occupied": a non-2xx (a disabled API's 404 among them), a
+ * network error, an aborted request, a `{ occupied: false }` body, or a
+ * malformed `{ occupied: true }` body missing a usable id all resolve to
+ * unoccupied, so the recovery panel renders nothing rather than adopting an
+ * id it cannot re-attach to.
  */
 export async function fetchSlotOccupancy(
   signal: AbortSignal,
@@ -395,7 +379,7 @@ export async function fetchSlotOccupancy(
 }
 
 /** Validate the slot response body into a {@link SlotOccupancy}, failing safe to
- * unoccupied for anything but an `{ occupied: true }` body carrying a non-empty
+ * unoccupied for anything but an `{ occupied: true }` body holding a non-empty
  * string id. */
 function slotOccupancyOf(body: unknown): SlotOccupancy {
   if (body === null || typeof body !== "object" || Array.isArray(body))
@@ -415,12 +399,12 @@ export interface SftpConnectionInfo {
 }
 
 /**
- * Fetch the appliance's authored SFTP connection (`GET /api/jobs/sftp`) as the
+ * Fetch the console's authored SFTP connection (`GET /api/jobs/sftp`) as the
  * validated locator. Fail-safe toward "none configured": a non-2xx, a network
  * error, a `{ configured: false }` body, or a malformed `{ configured: true, ... }`
- * body all resolve to a null connection, so the bench offers in-app authoring
- * (or the save-a-file alternative) rather than arming a server-job run it has no
- * connection for.
+ * body all resolve to a null connection, so the console offers in-app
+ * authoring (or the save-a-file alternative) rather than arming a
+ * server-job run it has no connection for.
  */
 export async function fetchSftpConnection(
   fetchImpl: typeof fetch = fetch,
@@ -436,18 +420,20 @@ export async function fetchSftpConnection(
 }
 
 /**
- * Validate the sftp response body into the credential-free projection, or null
- * when it reports `configured: false` or is malformed -- a partial or ill-formed
- * body fails closed rather than arming a run against a connection the operator did
- * not provision. The non-blocking `credentialWarnings` default to an empty array:
- * a missing or malformed field reads as "no warnings" rather than dropping the
- * connection (a warning is advisory, not load-bearing).
+ * Validate the sftp response body into the credential-free projection, or
+ * null when it reports `configured: false` or is malformed -- a partial or
+ * ill-formed body fails closed rather than arming a run against a connection
+ * the operator did not provision. The non-blocking `credentialWarnings`
+ * default to an empty array: a missing or malformed field is treated as "no
+ * warnings" rather than dropping the connection (a warning is advisory, not
+ * critical).
  *
- * The remote directory is admitted in exactly one of its two forms: the single
- * shared `path`, or a COMPLETE `inboundPath`/`outboundPath` pair. A half pair, or
- * a pair alongside `path`, is a shape the appliance cannot have authored, so it
- * drops the connection rather than arming a run against a directory layout the
- * browser would then misreport in the invitation it mints.
+ * The remote directory is admitted in exactly one of its two forms: the
+ * single shared `path`, or a COMPLETE `inboundPath`/`outboundPath` pair. A
+ * half pair, or a pair alongside `path`, is a shape the console cannot have
+ * authored, so it drops the connection rather than arming a run against a
+ * directory layout the browser would then misreport in the invitation it
+ * mints.
  *
  * @internal exported for the authoring client, which parses the same projection
  * off a `PUT /api/jobs/sftp` success body.
@@ -507,8 +493,8 @@ export function sftpConnectionProjectionOf(
 
 /**
  * The waits before each successive reconnect attempt, and by its length the
- * attempt budget. The budget resets whenever a connection carries the stream
- * forward (a frame with an id past the last one delivered), so a long run
+ * attempt budget. The budget resets whenever a connection advances the
+ * stream (a frame with an id past the last one delivered), so a long run
  * survives repeated drops while a server that answers but never progresses is
  * still bounded.
  */
@@ -519,7 +505,7 @@ const EVENT_STREAM_RECONNECT_DELAYS_MS = [250, 500, 1000, 2000, 4000];
 const EVENT_STREAM_LOST_MESSAGE =
   "the connection to the exchange event stream was lost; the run may still be in progress on the console -- reload to re-attach";
 
-/** One connection's frames: the SSE id that carried each (null for a keepalive
+/** One connection's frames: the SSE id attached to each (null for a keepalive
  * or any frame without an `id:` line) alongside the parsed event (null for a
  * frame that is not a relay event). */
 interface SseFrame {
@@ -531,15 +517,12 @@ interface SseFrame {
  * A frame that is not a JSON object with the relay-event shape is skipped rather
  * than yielded, mirroring the server's own fail-safe validation.
  *
- * A stream that ends before its terminal event has been dropped rather than
- * completed -- a proxy restart, a network blip, a tab the browser suspended -- so
- * the connection is re-opened from the last id delivered and the run's events
- * continue where the operator left off. The server retains the full history, so
- * the resume loses nothing and starts nothing: the exchange itself never
- * restarts. A failure on the FIRST connect is not retried -- nothing has been
- * established to resume, so a non-2xx or a network fault surfaces at once -- and
- * a confirmed 404 (the job is gone from the appliance) stops the retries whenever
- * it lands. */
+ * A stream that ends before its terminal event is a drop, not a completion:
+ * the connection re-opens from the last id delivered so the run continues
+ * where it left off, and the resume loses and restarts nothing since the
+ * server retains full history. A failure on the FIRST connect is not
+ * retried (nothing exists yet to resume), and a confirmed 404 (the job is
+ * gone from the console) stops retries immediately. */
 async function* streamJobEvents(
   fetchImpl: typeof fetch,
   jobId: string,
@@ -674,7 +657,7 @@ function waitBeforeReconnect(
 }
 
 /** Read the monotonic event id off an SSE frame's `id:` line, or null when the
- * frame carries none (a keepalive comment) or carries an unparseable one. */
+ * frame has none (a keepalive comment) or has an unparseable one. */
 function sseFrameId(frame: string): number | null {
   for (const line of frame.split("\n")) {
     if (!line.startsWith("id:")) continue;
@@ -723,7 +706,7 @@ function parseSseFrame(frame: string): RelayEvent | null {
 }
 
 /** Read a stage tree off a `stages` relay event, defaulting to an empty tree so
- * a malformed frame cannot crash the run. The relay event carries only `id` and
+ * a malformed frame cannot crash the run. The relay event has only `id` and
  * `label` (the CLI's stage vocabulary); each stage opens in
  * {@link ProcessState.BeforeStart}, and a later `stage` event activates it, so
  * the tree lands in the progress UI exactly as the browser lifecycle's does. */
@@ -753,32 +736,18 @@ function countOnlyResultCount(event: RelayEvent): number | undefined {
     : undefined;
 }
 
-/** The base bench {@link RunOutputs} for a `result` relay event, before the
- * record pair is attached. A server job writes its result on the appliance, so
- * there is no browser object URL: a received result points `resultsUrl` at the
- * job's appliance result endpoint (a real same-origin download href), and a
- * withheld result is the withheld variant exactly as the browser driver
- * produces it.
+/** The base console {@link RunOutputs} for a `result` relay event, before the
+ * record pair is attached. A server job writes its result on the console, so
+ * `resultsUrl` points at the job's console result endpoint rather than a
+ * browser object URL; a withheld result is the withheld variant exactly as
+ * the browser driver produces it.
  *
- * `resultWritten` is the outer discriminant, exactly as the contract states it
- * (docs/spec/CLI_EVENTS.md, `result`): a written result is a written result, and a
- * count rides only the `false` arm. Reading the count first would let an
- * out-of-contract event that carries both cost this party the download link for a
- * result the appliance did in fact write.
- *
- * Within that arm the count separates the two outcomes the contract gives it: a
- * count-only run withheld nothing from this party -- the count is what its terms
- * promised, and there is no result file for either party -- while its absence is the
- * helper's withheld result.
- *
- * `countReportedByPartner` rides the same event and decides whether the count-only
- * surface carries the trust-contingent caveat. It is read strictly: only a literal
- * `true` caveats, so a frame that omits it or carries a non-boolean renders the
- * count as this party's own reading. That is the direction the CLI's contract fixes
- * -- the field is emitted with every count, and the seat that computes its own count
- * emits `false` -- and it keeps a malformed frame from putting a caveat on a
- * locally computed count, which would be a false statement about an enforced
- * outcome. */
+ * `resultWritten` is checked before the count (docs/spec/CLI_EVENTS.md,
+ * `result`): a written result always wins, and only its `false` arm has a
+ * count. A present count means a count-only outcome (no result file for
+ * either party); its absence means withheld. `countReportedByPartner` caveats
+ * the count only on a literal `true`; anything else -- omitted, or a
+ * non-boolean -- is treated as this party's own count, per the contract. */
 function baseResultOutputs(event: RelayEvent, jobId: string): RunOutputs {
   if (event.resultWritten !== false)
     return { kind: "matched", resultsUrl: jobResultUrl(jobId) };
@@ -793,7 +762,7 @@ function baseResultOutputs(event: RelayEvent, jobId: string): RunOutputs {
 }
 
 /** Attach the record-pair downloads to the base outputs, pointed at the
- * appliance's record/keys endpoints with filenames byte-identical to the
+ * console's record/keys endpoints with filenames byte-identical to the
  * in-browser path's (the record's own `createdAt`, made filesystem-safe). The
  * record is written even for a withheld result, so it attaches in either
  * branch. */
@@ -820,24 +789,21 @@ function errorCategoryOf(event: RelayEvent): ExchangeErrorCategory {
     : "exchange";
 }
 
-/** Stands in for a relayed link carrying no text of its own. The renderer frames
+/** Stands in for a relayed link holding no text of its own. The renderer frames
  * such a link like any other -- a cause thrown as an empty string is one, and
  * reaches the relay from a real failure -- so the rebuild below shows the
  * stand-in rather than closing the gap: a chain rendered one link shorter than
- * the one the CLI composed reads as a different failure, and its links then name
- * the wrong causes for each other. */
+ * the one the CLI composed displays as a different failure, with its links
+ * naming the wrong causes for each other. */
 export const EMPTY_CHAIN_LINK = "[no message]";
 
 /** Read the display-safe message off an `error` relay event, rebuilding the
- * cause chain from the links the relay carried apart
- * ({@link ERROR_MESSAGE_CHAIN_FIELD}) so a terminal error arrives whole -- its
- * explanation AND the recovery step a later link carries -- rather than cut at
- * whatever the flat `message` field's per-value cap left of it. A link with no
- * text is rendered as {@link EMPTY_CHAIN_LINK}, keeping the rebuilt chain the
- * length the relay carried. The flat field is the fallback, taken when the chain
- * holds no text at all: an event the relay did not derive a chain for (a
- * manager-synthesized terminal, whose text is one first-party sentence) carries
- * only that. */
+ * cause chain from the links the relay held apart
+ * ({@link ERROR_MESSAGE_CHAIN_FIELD}) so a terminal error arrives whole
+ * rather than cut at the flat `message` field's per-value cap. A link with
+ * no text renders as {@link EMPTY_CHAIN_LINK}, keeping the rebuilt chain the
+ * length the relay sent. The flat field is the fallback, used when the relay
+ * derived no chain at all. */
 function errorMessageOf(event: RelayEvent): string {
   const chain = event[ERROR_MESSAGE_CHAIN_FIELD];
   if (
@@ -857,7 +823,7 @@ function errorMessageOf(event: RelayEvent): string {
 
 /** Build the {@link JobExchangeIntent} a run POSTs from the driver config: the
  * `transport` picks the arm (neither adds a connection field -- the sftp arm
- * carries no `remote`, the appliance runs the one authored connection), and
+ * has no `remote`, the console runs the one authored connection), and
  * everything after the discriminant is channel-independent. */
 function intentFor(config: ServerJobExchangeDriverConfig): JobExchangeIntent {
   const {
@@ -899,15 +865,16 @@ function intentFor(config: ServerJobExchangeDriverConfig): JobExchangeIntent {
 
 /** The construction-time inputs a zero-setup server-job driver needs. The
  * analog of {@link ServerJobExchangeDriverConfig} for the CLI's positional
- * `$0`/zero-setup command: it carries NONE of the exchange mode's credential or
+ * `$0`/zero-setup command: it has none of the exchange mode's credential or
  * terms material (no `sharedSecret`, `linkageTerms`, `metadata`,
  * `standardization`, `expectedPayloadColumns`, or
- * `expectedPartnerDeduplicate`), because both parties infer terms from their own
- * files and there is no application-layer encryption to key. It supplies only the channel, the input source, the tuning subset, and
- * the two optional bounded selectors the zero-setup intent carries. */
+ * `expectedPartnerDeduplicate`), because both parties infer terms from their
+ * own files and there is no application-layer encryption to key. It supplies
+ * only the channel, input source, tuning subset, and the zero-setup intent's
+ * two optional bounded selectors. */
 export interface ServerJobZeroSetupDriverConfig {
   transport: ServerJobExchangeTransport;
-  /** Where the appliance reads this party's input from ({@link JobInputSource}):
+  /** Where the console reads this party's input from ({@link JobInputSource}):
    * inline CSV content, or a reference to a file in the operator-mounted
    * work-input directory. Mapped to the intent's `inputCsv` / `inputFile` arm. */
   inputSource: JobInputSource;
@@ -916,7 +883,7 @@ export interface ServerJobZeroSetupDriverConfig {
    * exchange mode's ({@link RunDiagnosticsIntentFields}). */
   runDiagnostics?: RunDiagnosticsIntentFields;
   /** The optional operator label forwarded to the CLI's `--identity`: what the
-   * partner reads as this party's name, and what attributes the disclosure record.
+   * partner sees as this party's name, and what attributes the disclosure record.
    * Omitted when blank -- the run then names no party, which every surface shows
    * as an absence rather than filling in. */
   identity?: string;
@@ -924,17 +891,17 @@ export interface ServerJobZeroSetupDriverConfig {
    * (a closed enum); omitted for the cascade default. */
   linkageStrategy?: JobZeroSetupLinkageStrategy;
   /** Invoked with the created job's id the moment `POST /api/jobs` resolves,
-   * before the event stream opens -- the same strand-recovery seam the exchange
-   * driver exposes. */
+   * before the event stream opens -- the same strand-recovery call site the
+   * exchange driver exposes. */
   onJobCreated?: (jobId: string) => void;
 }
 
 /** Build the {@link JobZeroSetupIntent} a zero-setup run POSTs from the driver
  * config: the `transport` picks the arm (neither adds a connection field -- the
- * sftp arm carries none, the appliance composes the connection from its own
+ * sftp arm has none, the console composes the connection from its own
  * effective server; the filedrop arm from the rendezvous mount), and everything
  * after the discriminant is channel-independent. Mirrors {@link intentFor} but
- * carries no shared secret or linkage terms -- the zero-setup mode's whole
+ * has no shared secret or linkage terms -- the zero-setup mode's whole
  * point. */
 function zeroSetupIntentFor(
   config: ServerJobZeroSetupDriverConfig,
@@ -962,11 +929,11 @@ function zeroSetupIntentFor(
  * only in the {@link JobCreateIntent} the caller composed.
  *
  * Cancellation stays on the run's signal: an already-aborted signal starts
- * nothing, and an abort mid-run stops consuming the stream silently. It carries
- * NO cancel intent -- an unmount, reload, or tab close leaves the appliance's
- * exchange running, and only an explicit discard (start over, try again, run
- * another, or the recovery panel's Stop/Discard) cancels or deletes it. So the
- * driver never POSTs a cancel off the signal.
+ * nothing, and an abort mid-run stops consuming the stream silently. The
+ * driver sends no cancel intent -- an unmount, reload, or tab close leaves
+ * the console's exchange running; only an explicit discard (start over, try
+ * again, run another, or the recovery panel's Stop/Discard) cancels or
+ * deletes it.
  */
 async function runCreatedJob(
   intent: JobCreateIntent,
@@ -989,9 +956,9 @@ async function runCreatedJob(
     return;
   }
 
-  // The job now exists on the appliance; persist its id (the console's
-  // strand-recovery seam) before opening the stream, so a hard tab close
-  // between here and the terminal can still re-attach.
+  // The job now exists on the console; persist its id here (the
+  // strand-recovery call site) before opening the stream, so a hard tab
+  // close between here and the terminal can still re-attach.
   onJobCreated?.(jobId);
 
   await consumeJobStream(client, jobId, events);
@@ -999,13 +966,12 @@ async function runCreatedJob(
 
 /**
  * Build a server-job {@link ExchangeDriver}: `run` POSTs a
- * {@link JobExchangeIntent} for the config's transport (filedrop, or sftp over
- * the operator-authored connection) to the job API and maps the server's
- * SSE event stream onto the typed lifecycle events, so it is a drop-in for the
- * in-browser WebRTC driver behind the same contract. It owns no peer
- * connection, PSI library, or exchange result -- the result is written on the
- * console appliance, not downloaded in the browser. Past intent construction
- * every step is channel-independent.
+ * {@link JobExchangeIntent} for the config's transport (filedrop, or sftp
+ * over the operator-authored connection) to the job API and maps the
+ * server's SSE event stream onto the typed lifecycle events -- a drop-in for
+ * the in-browser WebRTC driver behind the same contract. It owns no peer
+ * connection, PSI library, or exchange result: the result is written on the
+ * console, not downloaded in the browser.
  *
  * Faithful mapping: `stages`/`stage` forward in order; `result` fires
  * `onResult` once; `error` fires `onError` once with the CLI-classified
@@ -1026,13 +992,14 @@ export function createServerJobExchangeDriver(
 
 /**
  * Build a zero-setup server-job {@link ExchangeDriver}: `run` POSTs a
- * {@link JobZeroSetupIntent} (the console "Direct exchange" flow) to the job API
- * and folds its event stream onto the same lifecycle events the exchange driver
- * does. It carries no shared secret and no linkage terms -- both parties run the
- * CLI's positional `$0` form against the same server, terms inferred from each
- * file -- only the input source, the tuning subset, and the optional identity /
- * linkage-strategy selectors. The event mapping and cancellation posture are the
- * exchange driver's exactly, since both share {@link runCreatedJob}.
+ * {@link JobZeroSetupIntent} (the console "Direct exchange" flow) to the job
+ * API and folds its event stream onto the same lifecycle events the exchange
+ * driver does. It has no shared secret and no linkage terms -- both parties
+ * run the CLI's positional `$0` form against the same server, terms inferred
+ * from each file -- only the input source, tuning subset, and optional
+ * identity / linkage-strategy selectors. The event mapping and cancellation
+ * posture are exactly the exchange driver's, since both share
+ * {@link runCreatedJob}.
  */
 export function createServerJobZeroSetupDriver(
   config: ServerJobZeroSetupDriverConfig,
@@ -1050,14 +1017,14 @@ export function createServerJobZeroSetupDriver(
 }
 
 /**
- * Re-attach to an already-created job by id: `run` skips creation and consumes
- * `GET /api/jobs/:id/events` from offset 0. The SSE full-history replay
- * reconstructs the whole lifecycle -- stages, warnings, and the terminal -- for a
- * finished run in one request, and continues live for a running one, so the same
- * event fold the hooks use drives the recovery surface unchanged. A 404 from the
- * events route (the job was deleted, or a restart forgot it) surfaces as the
- * existing terminal error the recovery panel maps to "stale". Carries no intent
- * and no cancel: it only reads the stream.
+ * Re-attach to an already-created job by id: `run` skips creation and
+ * consumes `GET /api/jobs/:id/events` from offset 0. The SSE full-history
+ * replay reconstructs the whole lifecycle -- stages, warnings, and the
+ * terminal -- for a finished run in one request, and continues live for a
+ * running one, so the same event fold the hooks use drives the recovery
+ * surface unchanged. A 404 from the events route (the job was deleted, or a
+ * restart forgot it) shows as the existing terminal error the recovery panel
+ * maps to "stale". Sends no intent and no cancel: it only reads the stream.
  */
 export function createServerJobReattachDriver(
   jobId: string,
@@ -1106,9 +1073,9 @@ async function consumeJobStream(
         }
         case "warning": {
           // Dev-gated like onError: event.message is server/CLI-controlled,
-          // so a production console carries none of it. The consumer's
-          // optional onWarning is the operator-facing slot; it renders
-          // through its own display-boundary sanitization.
+          // so a production console has none of it. The consumer's optional
+          // onWarning is the operator-facing slot; it renders through its
+          // own display-boundary sanitization.
           whenDiagnostic(() => log.warn("server job warning:", event.message));
           const message = event.message;
           if (
@@ -1143,14 +1110,14 @@ async function consumeJobStream(
         default:
           // `stageEnd` and `metrics` are recognized progress/summary events
           // (in RELAY_EVENT_TYPES so the relay does not degrade them) that the
-          // console does not yet surface; they carry no lifecycle mapping, so
+          // console does not yet expose; they have no lifecycle mapping, so
           // consume and ignore them rather than treating them as an error.
           break;
       }
     }
     // The job API reconciles a terminal event for every job before it closes
     // the stream, so a terminal-less close is a truncated stream rather than
-    // a completed run. Surface it so the contract's exactly-one-terminal
+    // a completed run. Report it so the contract's exactly-one-terminal
     // guarantee holds at the driver boundary instead of leaving the run hung.
     if (!aborted())
       onError({
