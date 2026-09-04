@@ -174,7 +174,9 @@ Documentation-tier placement is in scope for code review: a reviewer flags spec-
 - Imperative mood, present tense: "Fix key rotation after failed exchange", not "Fixed ..." or "Fixes ...".
 - Subject line 50 characters or fewer. For a squash-merge message that budget
   includes the " (#NNNN)" pull-request suffix GitHub appends on merge, so
-  draft the subject itself to roughly 42 characters.
+  draft the subject itself to roughly 42 characters; the PR title carries this
+  budget, and `npm run check:pr-checklist` enforces it there, since the title
+  becomes the squash subject.
 - Include a body for non-trivial commits explaining motivation and context, not just what changed. Hard-wrap body lines at roughly 70 characters.
 - A pull request is squash-merged, so its squash message is the commit that lands. `node .claude/scripts/squash-message.mjs <pr-number>` drafts one from the branch's commits, the PR body, and this document, and prints it for the maintainer to review before pasting; it merges nothing. A pull request carrying a single commit needs no hand-written squash message -- GitHub takes that commit's own message -- so the script refuses one and the work goes into the commit itself.
 
