@@ -31,7 +31,7 @@ HMAC-SHA1 credential on a one-hour expiry. Two operational findings from the
 bring-up. First, no per-session relayed-byte summary appeared in coturn's
 container logs during the bring-up -- only a connection reset on teardown -- so
 the byte witness came from host conntrack accounting rather than the relay's own
-log; whether that is a property of this coturn build or an artefact of the
+log; whether that is a property of this coturn build or an artifact of the
 bring-up's log configuration (simple-log, verbose directed to a file, abrupt
 teardown) is not yet settled, and a board spike is scoped to drive it out.
 Second,
