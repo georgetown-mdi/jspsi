@@ -28,9 +28,13 @@ TURN-over-TLS on 443, completed a mutually-authenticated PSI exchange over ten
 matched records; host conntrack witnessed its entire data-channel traffic crossing the relay
 (about 29 KB up, 36 KB down to the relay on 443), with a per-exchange
 HMAC-SHA1 credential on a one-hour expiry. Two operational findings from the
-bring-up. First, this coturn build logs no per-session relayed-byte summary to
-its container logs -- only a connection reset on teardown -- so the byte witness
-came from host conntrack accounting rather than the relay's own log. Second,
+bring-up. First, no per-session relayed-byte summary appeared in coturn's
+container logs during the bring-up -- only a connection reset on teardown -- so
+the byte witness came from host conntrack accounting rather than the relay's own
+log; whether that is a property of this coturn build or an artifact of the
+bring-up's log configuration (simple-log, verbose directed to a file, abrupt
+teardown) is not yet settled, and a board spike is scoped to drive it out.
+Second,
 coturn's per-username allocation quota interacts with the roughly eight-minute
 allocation linger a relayed run leaves behind: reusing one credential username
 across rapid back-to-back exchanges exhausts the quota and gets new allocations
