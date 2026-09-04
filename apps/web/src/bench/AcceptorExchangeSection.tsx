@@ -37,11 +37,11 @@ import type { RunOutputs } from "./runOutputs";
  * The acceptor's run/completion work column, re-using the shared run furniture
  * ({@link BenchRunSurface}) with the acceptor's own vocabulary. Unlike the
  * inviter, the acceptor has no share phase: it dials on arrival, so the column
- * opens at the running screen and settles at the completion panel. The status
+ * opens at the running screen and ends at the completion panel. The status
  * panel spans both from one stable mount so its live region persists.
  *
- * The run's own non-fatal warnings -- the appliance's rendezvous preflight among
- * them -- surface through the shared {@link RunWarningsAlert}, which a failure
+ * The run's own non-fatal warnings -- the console's rendezvous preflight among
+ * them -- show through the shared {@link RunWarningsAlert}, which a failure
  * does not clear.
  *
  * A failed run renders the failure vocabulary's alert for its category, each
@@ -73,17 +73,17 @@ export function AcceptorExchangeSection({
    * survive a failure: a preflight warning the failure may have followed from must
    * not vanish with the run. */
   runWarnings: ReadonlyArray<string>;
-  /** Whether this accept executes on the console appliance (a server-job run)
-   * rather than in this browser. On the appliance the CLI child conducts the
+  /** Whether this accept executes on the console (a server-job run)
+   * rather than in this browser. On the console the CLI child conducts the
    * exchange while the tab stays open, so the keep-open callout names the running
    * exchange the tab is holding. */
   serverJob: boolean;
-  /** The appliance job id of a server-job accept, once created. Threads the run's
+  /** The console job id of a server-job accept, once created. Threads the run's
    * job to the recurring hand-off panel; undefined on a browser accept. */
   jobId: string | undefined;
   /** The live status of the exchange this accept re-attached to on a busy (409)
    * create, or undefined on a fresh run. When set, the surface heads with
-   * recovery-style copy (it is watching an exchange the appliance already held,
+   * recovery-style copy (it is watching an exchange the console already held,
    * not a fresh one) and drops the fresh-run keep-open framing, while keeping the
    * completion affordances -- the results summary and the recurring hand-off -- so
    * the operator still sees their run's outcome and graduation. */
@@ -99,17 +99,17 @@ export function AcceptorExchangeSection({
   onFixColumns: () => void;
   /** Discard the current server-job exchange (cancel-if-running + DELETE), fired as
    * the operator leaves for a fresh invitation (the start-over link) or a new
-   * exchange (the completion workfoot), so the appliance's single slot frees. A
+   * exchange (the completion workfoot), so the console's single slot frees. A
    * no-op on a browser run. */
   onAbandon: () => void;
 }) {
   const phase = outputs !== undefined ? "done" : "running";
-  // The run reached a terminal, which is what the three appliance-artifact
+  // The run reached a terminal, which is what the three console-artifact
   // panels below key on: each states its artifact's standing once the run is
   // past producing it.
   const settled = phase === "done" || failure !== undefined;
 
-  // Where this run's exchange record stands on the appliance -- the one ask that
+  // Where this run's exchange record stands on the console -- the one ask that
   // both offers the record and decides whether the failure recoveries, each of
   // which DELETEs the run's folder, confirm before doing so.
   const recordOffer = useJobExchangeRecordOffer(
@@ -119,9 +119,9 @@ export function AcceptorExchangeSection({
   const recordConfirm = untakenRecordConfirm(recordOffer);
 
   // A busy (409) create at start re-attached this surface to an exchange the
-  // appliance already held (a second tab, a navigate-away-and-back, or an orphaned
+  // console already held (a second tab, a navigate-away-and-back, or an orphaned
   // job). It then heads with recovery-style copy and drops the fresh-run keep-open
-  // framing, so it never reads as a fresh success -- but the completion affordances
+  // framing, so it never displays as a fresh success -- but the completion affordances
   // (the results summary and the recurring hand-off) still show, since those hold
   // however the operator reached completion.
   const reattachedRun = reattached !== undefined;
@@ -138,7 +138,7 @@ export function AcceptorExchangeSection({
   // A retry is genuine only while the invitation can still be accepted:
   // re-dialing a lapsed credential cannot succeed, so an expired exchange failure
   // routes to the fresh-invitation link instead. A token without `expires`
-  // carries no deadline and stays retryable.
+  // has no deadline and stays retryable.
   const expires = invitation.token.expires;
   const retryable =
     failure?.category === "exchange" &&
@@ -147,7 +147,7 @@ export function AcceptorExchangeSection({
   // The section-level focus throughline. On mount the h1 is focused (this is the
   // entry move -- the acceptor pressed "Start the exchange", whose button
   // unmounts, so a keyboard/screen-reader user lands on the run screen rather
-  // than on nothing; the bench host does not drive focus for this step). Within
+  // than on nothing; the console host does not drive focus for this step). Within
   // the section focus moves again at completion (so the results are read) and
   // after a retry clears the alert -- the alert (which may hold focus, on Try
   // again) unmounts, orphaning focus onto <body>, so it is recovered onto the
@@ -226,7 +226,7 @@ export function AcceptorExchangeSection({
           )}
         </FailureAlert>
       )}
-      {/* The appliance conducts this accept and the tab only watches it: leaving
+      {/* The console conducts this accept and the tab only watches it: leaving
           does not stop the run, and the recovery panel is the way back. The callout
           drops the moment a failure lands (the run it describes has torn down), so
           it outlives no failure. Absent for the hosted in-browser accept, which owns

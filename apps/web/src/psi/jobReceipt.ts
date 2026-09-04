@@ -1,55 +1,54 @@
 /**
  * The browser-side reader for a console run's dual-signed receipt: whether the
- * appliance holds one for a job, where to download it from, and what to name the
+ * console holds one for a job, where to download it from, and what to name the
  * saved file.
  *
- * The appliance is the authority on all three. A seat asks it rather than
+ * The console is the authority on all three. A seat asks it rather than
  * remembering what it requested, which is what lets a re-attached run -- another
  * tab, or a return after a reload -- offer the receipt at all.
  *
- * The ask is deliberately independent of how the run ended. A receipt is written
- * from the mutually-verifiable facts once the signature swap completes,
- * independently of the local record build and of the run's exit code, so a
- * persistence-loss exit is a completed exchange whose receipt may be precisely
- * the artifact that survived. `GET /api/jobs/:jobId/receipt` is not gated on
- * success for that reason (docs/spec/SERVER_JOB_API.md), and a reader that
- * offered the download only off a successful terminal would put the gate back on
- * the client side.
+ * The ask is independent of how the run ended. A receipt is written from the
+ * mutually-verifiable facts once the signature swap completes, independent of
+ * the local record build and the run's exit code -- a persistence-loss exit can
+ * still have a receipt as the one artifact that survived. `GET
+ * /api/jobs/:jobId/receipt` is not gated on success for that reason
+ * (docs/spec/SERVER_JOB_API.md); a reader must not gate the download on a
+ * successful terminal either.
  *
- * An ask the appliance does not answer is not a run without a receipt: it says
- * nothing at all, and a seat that read it as one would hide a receipt the
- * appliance holds behind a single hiccup at the moment the run settled, showing
- * the operator nothing while it did. Consecutive unanswered asks are bounded
- * instead, and the ask ends on an outcome the seat can state.
+ * An ask the console does not answer is not a run without a receipt -- it says
+ * nothing at all. Treating it as "no receipt" would silently hide one the
+ * console holds, behind a single hiccup at the moment the run settled.
+ * Consecutive unanswered asks are bounded instead, and the ask ends on an
+ * outcome the seat can state.
  */
 
 import { delayUntilAborted } from "@psi/delayUntilAborted";
 
 import { recordFileStamp } from "@bench/runOutputs";
 
-/** The appliance endpoint the receipt downloads from. The browser never composes
- * the file's path: the appliance resolves it inside the job's own workdir. */
+/** The console endpoint the receipt downloads from. The browser never composes
+ * the file's path: the console resolves it inside the job's own workdir. */
 export function jobReceiptUrl(jobId: string): string {
   return `/api/jobs/${jobId}/receipt`;
 }
 
 /**
  * What one ask told the seat about this run's receipt: the file and its download
- * name, a run that asked for a receipt the appliance does not hold, nothing to
- * say at all, or an ask carrying no answer about the receipt.
+ * name, a run that asked for a receipt the console does not hold, nothing to
+ * say at all, or an ask holding no answer about the receipt.
  *
  * `missing` is kept apart from `none` for the same reason the diagnostic log
  * keeps its own two apart ({@link ./jobDiagnosticLog}): only `receiptRequested`
- * -- the appliance's own record of the intent it launched -- separates a receipt
+ * -- the console's own record of the intent it launched -- separates a receipt
  * that was never asked for from one that was asked for and is not there.
  *
- * `unanswered` is kept apart from both, and for the same reason the log keeps
- * its own: a rejected request, a job the appliance has forgotten across a
- * restart, a lost connection, a body that will not parse. None of those said
- * this run has no receipt, and `none` is rendered as nothing at all, so folding
- * them into it would hide a real receipt silently. A body that IS readable and
- * carries neither field is `none`: the appliance answered, and its answer
- * establishes nothing for the seat to state.
+ * `unanswered` is kept apart from both, for the same reason the log keeps its
+ * own: a rejected request, a job the console has forgotten across a restart, a
+ * lost connection, a body that will not parse -- none of those said this run
+ * has no receipt, and folding them into `none` (rendered as nothing at all)
+ * would hide a real receipt silently. A body that IS readable and holds
+ * neither field is `none`: the console answered, and its answer establishes
+ * nothing for the seat to state.
  */
 export type JobReceiptOffer =
   | { kind: "available"; receiptUrl: string; receiptFileName: string }
@@ -64,12 +63,12 @@ export type JobReceiptOffer =
  * operator's console and command-line runs file the artifact under one
  * convention.
  *
- * The stamp falls back to the job id where the same status body reports no
- * record to take one from: a run can hold a receipt and no record -- the case the
- * receipt endpoint is deliberately not success-gated for -- and withholding the
- * download for want of a filename would hide the one third-party-verifiable
- * artifact that survived. The id names the run as unambiguously as the timestamp
- * does, and is the stamp the diagnostic log's own download name already carries.
+ * The stamp falls back to the job id where the status body reports no record to
+ * take one from: a run can hold a receipt with no record -- the case the
+ * receipt endpoint is not success-gated for -- so the download must not be
+ * withheld for want of a filename. The id names the run as unambiguously as the
+ * timestamp does, matching the stamp the diagnostic log's own download name
+ * already holds.
  */
 function receiptFileName(jobId: string, status: JobStatusFields): string {
   const stamp =
@@ -93,7 +92,7 @@ interface JobStatusFields {
  * Where this job's receipt stands, read off `GET /api/jobs/:jobId` in one ask.
  *
  * The two receipt fields are read strictly and together: only a literal `true` on
- * either answers, so a readable body that omits one, carries a non-boolean, or is
+ * either answers, so a readable body that omits one, holds a non-boolean, or is
  * not this endpoint's status body at all falls to `none` and the seat says
  * nothing about this run's receipt rather than reporting one missing on the
  * strength of a malformed frame.
@@ -127,19 +126,19 @@ export async function fetchJobReceiptOffer(
 }
 
 /**
- * The gap between asks after one that carried no answer. What a longer wait
+ * The gap between asks after one that held no answer. What a longer wait
  * costs is how long the download stays missing on a settled run the operator is
- * already looking at; what a shorter one costs is a burst of asks at an
- * appliance that has just stopped answering.
+ * already looking at; what a shorter one costs is a burst of asks at a
+ * console that has just stopped answering.
  */
 const RECEIPT_AVAILABILITY_RETRY_MS = 2_000;
 
 /**
  * Consecutive asks that answer nothing about the receipt before the seat gives
  * up on this run. Every unanswerable shape looks alike from the browser -- a job
- * the appliance forgot across a restart, a route erroring, a connection that
+ * the console forgot across a restart, a route erroring, a connection that
  * stopped reaching it -- so a bound is the only thing separating a blip the next
- * ask recovers from an appliance that will never answer for this run. At
+ * ask recovers from a console that will never answer for this run. At
  * {@link RECEIPT_AVAILABILITY_RETRY_MS} apiece this spends under ten seconds
  * before the seat says so, on a run that has already reached its terminal.
  *
@@ -148,16 +147,16 @@ const RECEIPT_AVAILABILITY_RETRY_MS = 2_000;
 export const RECEIPT_AVAILABILITY_UNANSWERED_LIMIT = 5;
 
 /**
- * Ask the appliance where this job's receipt stands, re-asking while the ask
- * itself carries no answer.
+ * Ask the console where this job's receipt stands, re-asking while the ask
+ * itself holds no answer.
  *
- * One ask settles every answer the appliance actually gives: the seat asks a run
+ * One ask settles every answer the console actually gives: the seat asks a run
  * that has already settled, so `available`, `missing`, and `none` cannot change
- * and asking again would tell it the same thing. It is the ask that comes back
- * with nothing that cannot be left alone -- a hiccup at the moment the run
- * settles would otherwise hide a receipt the appliance holds for the whole life
- * of the seat, and hide it in silence, `none` being rendered as no control at
- * all. Consecutive unanswered asks are re-asked up to
+ * and asking again would tell it the same thing. Only the answer that comes
+ * back with nothing gets re-asked -- a hiccup at the moment the run settles
+ * would otherwise hide a receipt the console holds for the whole life of the
+ * seat, silently, since `none` renders as no control at all. Consecutive
+ * unanswered asks are re-asked up to
  * {@link RECEIPT_AVAILABILITY_UNANSWERED_LIMIT} times, so a transient failure
  * costs a couple of seconds while a persistent one ends in `unanswered` -- the
  * outcome a seat states rather than renders as nothing.

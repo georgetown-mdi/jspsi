@@ -79,11 +79,11 @@ export async function createWorkdir(
 
 /**
  * Resolve a fixed-name file inside a server-anchored directory -- a job workdir,
- * or the appliance's mounted data root -- and verify the resolved path stays
+ * or the console's mounted data root -- and verify the resolved path stays
  * strictly under that directory, returning null when it does not.
  *
  * The counterpart of {@link resolveWorkdir} one level down, for the fixed-name
- * files the appliance composes inside a directory it owns. Every such name is a
+ * files the console composes inside a directory it owns. Every such name is a
  * server constant today ({@link JOB_FILE_NAMES} and the signing-identity
  * names), so this can only fail on a caller bug -- which is exactly why it is a
  * check rather than a comment saying so: a name that ever became client-derived,
@@ -149,7 +149,7 @@ export interface JobRecordSummary {
 /** The shape the status path holds a record file to: core's own `createdAt` rule
  * (ISO-8601, so the stamp is a timestamp rather than any non-empty string) and
  * core's accepted outcome set. Both are required, matching the record format,
- * which carries an outcome on every record and states it rather than leaving a
+ * which has an outcome on every record and states it rather than leaving a
  * reader to infer one from silence (docs/spec/EXCHANGE_RECORD.md, When a record is
  * owed). */
 const recordSummarySchema = z.object({
@@ -159,15 +159,15 @@ const recordSummarySchema = z.object({
 
 /**
  * Read the summary the status path needs from a server-produced record file, or
- * null if the file cannot be read, is not JSON, or does not carry both a valid
+ * null if the file cannot be read, is not JSON, or does not have both a valid
  * `createdAt` and a recognized `outcome`. The file is small and server-produced
  * (the CLI wrote it), so it is read whole; the defensive null keeps a missing or
  * malformed record from throwing on the status path -- the caller treats null as
  * "record unavailable".
  *
  * Requiring the outcome is what lets every surface downstream state how the run
- * ended rather than guess: a file this appliance's own CLI wrote always carries
- * one, so a record without a recognized outcome is not a record this appliance can
+ * ended rather than guess: a file this console's own CLI wrote always has
+ * one, so a record without a recognized outcome is not a record this console can
  * describe, and it is refused here instead of being offered under a completed
  * run's framing.
  */

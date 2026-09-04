@@ -79,14 +79,14 @@ const DIRECTION_CHOICES: ReadonlyArray<{
  * Step 3 of the inviter spine: the review-time decisions (lifetime, result
  * direction, transport), the check-your-answers restatement of the whole
  * proposal, the dropped-citation notice where an imported document's citation
- * will not be carried, and the create action -- the point of no return whose copy
+ * will not be included, and the create action -- the point of no return whose copy
  * says so. The transport chooser offers the live-browser exchange and the two
  * command-line transports (SFTP and a shared directory); its copy comes from
  * {@link transportChooserCopy}, which reflects whether the deployment runs a
- * shared-directory or SFTP exchange here (the console appliance) or saves an
+ * shared-directory or SFTP exchange here (the console) or saves an
  * exchange file for the command-line tool. On a console build, choosing SFTP
  * shows the authored connection's locator under the card: the exchange runs here
- * through that connection, and the connection material stays on the appliance.
+ * through that connection, and the connection material stays on the console.
  */
 export function ReviewCreateSection({
   editor,
@@ -131,25 +131,25 @@ export function ReviewCreateSection({
    * updated when the operator authors or clears one); undefined before the fetch
    * resolves (or off a console), null when none is effective. */
   sftpConnection: SftpConnectionProjection | null | undefined;
-  /** Whether the operator deliberately chose to run SFTP through their own
+  /** Whether the operator chose to run SFTP through their own
    * command-line tool (save-a-file) instead of authoring a connection here. */
   sftpSaveFilePreferred: boolean;
-  /** The appliance's rendezvous provisioning, or undefined before it resolves (or
+  /** The console's rendezvous provisioning, or undefined before it resolves (or
    * off a console). The filedrop card runs here when it reports a mount and renders
-   * disabled with the appliance's own reason when it does not; a split pair also
-   * carries the retain-mode precondition into this step's create gate. Off a console
+   * disabled with the console's own reason when it does not; a split pair also
+   * brings the retain-mode precondition into this step's create gate. Off a console
    * build it is unused (filedrop saves a file). */
   rendezvous: JobRendezvousConfig | undefined;
-  /** The operator's file-handling choices for a run the appliance conducts. Only
-   * the console's file-sync transports carry them, so the card renders there. */
+  /** The operator's file-handling choices for a run the console conducts. Only
+   * the console's file-sync transports have them, so the card renders there. */
   exchangeFiles: ExchangeFilesDraft;
   /** Whether the file-handling disclosure is expanded (held by the host so a
    * re-render of this step does not collapse it). */
   exchangeFilesOpen: boolean;
   onExchangeFiles: (draft: ExchangeFilesDraft) => void;
   onExchangeFilesOpen: (open: boolean) => void;
-  /** The operator's connection-tuning choices for the same run. Carried by the
-   * same transports the file-handling card is offered on. */
+  /** The operator's connection-tuning choices for the same run, offered on the
+   * same transports as the file-handling card. */
   connectionTuning: ConnectionTuningDraft;
   /** Whether the connection-tuning disclosure is expanded (held by the host for
    * the same reason as the file-handling one). */
@@ -246,7 +246,7 @@ export function ReviewCreateSection({
   // set up: block the seal and say so, rather than minting a code with no
   // rendezvous.
   const connectionIncomplete = transport === "sftp" && sftpAuthoringRequired;
-  // The appliance conducts a console file-sync run, so its file-handling card is
+  // The console conducts a file-sync run there, so its file-handling card is
   // offered there and nowhere else: a browser exchange has no shared directory,
   // and a save-a-file transport hands the settings to the operator's own command
   // line, where the flags already live.
@@ -272,8 +272,8 @@ export function ReviewCreateSection({
   // withholds it on the shared-directory transport.
   const tuningCapabilities =
     transport === "sftp" ? SFTP_CONNECTION_TUNING : FILEDROP_CONNECTION_TUNING;
-  // The rendezvous and the retain-mode toggle are settled in separate places, so
-  // a split rendezvous -- an authored split SFTP connection, or an appliance
+  // The rendezvous and the retain-mode toggle are decided in separate places, so
+  // a split rendezvous -- an authored split SFTP connection, or a console
   // provisioned with two filedrop mounts -- can outlive the retain choice it
   // required: hold the create here, where both are known, rather than minting a
   // partner-facing accept kit for a rendezvous the run would then refuse. Read
@@ -286,7 +286,7 @@ export function ReviewCreateSection({
       : splitRendezvousRetainProblem(rendezvous, exchangeFiles.retainFiles);
   // A create that begins a live run cannot succeed with no network: this browser
   // listens for the partner from the mint onward, and a console server-job run
-  // dials from the appliance. A save-a-file create connects to nothing -- it
+  // dials from the console. A save-a-file create connects to nothing -- it
   // seals the terms and hands an exchange file to the command line -- so it
   // stays available offline. Only the offline direction is gated: being online
   // is no promise the partner is there (see @utils/networkStatus).
@@ -303,7 +303,7 @@ export function ReviewCreateSection({
     problemCount: problems.length,
   });
   // A mint already under way is the one hold with nothing to say: the button
-  // carries it as its own loading state.
+  // holds it as its own loading state.
   const canCreate = createStatus.ready && !minting;
   // Voiced when the create gate flips either way; deferred so a blocked state
   // present when the section mounts still announces.
@@ -451,7 +451,7 @@ export function ReviewCreateSection({
         <CitationDropNotice notice={citationDrop} />
       )}
       {/* The other fact the restatement below cannot show: a declared default the
-        run will not substitute is a term that reads as widening the match and
+        run will not substitute is a term that is treated as widening the match and
         does nothing. Stated where the terms are sealed, since the step editor's
         own advisory sits inside a card an operator need never reopen. It holds
         nothing shut -- such terms are valid and run. */}

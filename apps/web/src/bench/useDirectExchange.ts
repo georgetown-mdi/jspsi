@@ -36,19 +36,19 @@ import type { RunFailure } from "./useInviterExchange";
 import type { RunOutputs } from "./runOutputs";
 
 /**
- * The run half of the direct-exchange bench. Unlike the inviter bench, which
+ * The run half of the direct-exchange console. Unlike the inviter console, which
  * auto-starts the moment an invitation is minted, a direct exchange starts on an
  * explicit Run press (after the trust affirmation), so this hook exposes an
  * imperative {@link start} rather than an invitation-keyed effect. It always
- * drives the console appliance (a zero-setup server job) -- there is no browser or
+ * drives the console (a zero-setup server job) -- there is no browser or
  * save-file path -- so it owns no peer connection or PSI library and folds the
- * appliance's SSE stream onto the same {@link ExchangeRun} model the other benches
+ * console's SSE stream onto the same {@link ExchangeRun} model the other consoles
  * use.
  *
- * The single AbortController is torn down on unmount, carrying NO cancel intent:
- * leaving the page leaves the appliance's run going (the strand-recovery panel is
+ * The single AbortController is torn down on unmount, holding NO cancel intent:
+ * leaving the page leaves the console's run going (the strand-recovery panel is
  * the way back). Only the deliberate paths -- {@link tryAgain} and
- * {@link abandonRun} -- discard the appliance job and free its single slot.
+ * {@link abandonRun} -- discard the console job and free its single slot.
  */
 export function useDirectExchange({
   channel,
@@ -60,19 +60,19 @@ export function useDirectExchange({
 }: {
   /** The agreed transport; maps to the zero-setup intent's channel. */
   channel: DirectTransport;
-  /** Where the appliance reads this party's input from -- the console picker's
+  /** Where the console reads this party's input from -- the console picker's
    * mounted-file reference. Undefined until a file is committed; {@link start}
    * refuses to run without it. */
   inputSource: JobInputSource | undefined;
   /** The optional operator label threaded to the CLI's `--identity`: what the
-   * partner reads as this party's name, and what attributes the disclosure record.
-   * Omitted when blank, which the run carries as an unnamed party. */
+   * partner treats as this party's name, and what attributes the disclosure record.
+   * Omitted when blank, which the run treats as an unnamed party. */
   identity?: string;
   /** The optional linkage strategy forwarded to the CLI's `--linkage-strategy`. */
   linkageStrategy?: JobZeroSetupLinkageStrategy;
   /** The agreed-server step's file-handling choices, already resolved through
    * core's retain-mode implication. They reach the run as CLI flags, a zero-setup
-   * command carrying no configuration document; undefined when the operator
+   * command with no configuration document; undefined when the operator
    * changed nothing. */
   options?: JobExchangeOptions;
   /** The agreed-server step's per-run diagnostic and recovery choices, forwarded
@@ -84,12 +84,12 @@ export function useDirectExchange({
   failure: RunFailure | undefined;
   warnings: ReadonlyArray<string>;
   started: boolean;
-  /** The appliance job id of the current run, once created; undefined before the
+  /** The console job id of the current run, once created; undefined before the
    * job exists. Drives the completed-run recurring hand-off panel. */
   jobId: string | undefined;
   /** The live status of the exchange this run re-attached to on a busy (409)
    * create, or undefined on a fresh run. Set when a start-time 409 re-attaches to
-   * the exchange holding the appliance's single slot -- the run surface then heads
+   * the exchange holding the console's single slot -- the run surface then heads
    * with recovery-style copy rather than fresh-success copy. */
   reattached: JobRunStatus | undefined;
   /** True from the moment a busy (409) create is detected until the liveness probe
@@ -115,25 +115,25 @@ export function useDirectExchange({
   // before the liveness probe settles. Drives the interim reconnecting notice and
   // the fresh-run framing suppression; reset when a run restarts or is reset.
   const [reattaching, setReattaching] = useState(false);
-  // The current run's appliance job id as reactive state (the ref below drives the
+  // The current run's console job id as reactive state (the ref below drives the
   // synchronous discard paths). Set on create, cleared when a run restarts or is
   // reset, so the recurring hand-off panel reads only the live run.
   const [currentJobId, setCurrentJobId] = useState<string>();
 
   // One job-API client for the deliberate-discard paths (try again, run another);
   // the driver keeps its own default client, both riding the same same-origin
-  // fetch seam.
+  // fetch boundary.
   const jobApiClient = useMemo(() => createFetchJobApiClient(), []);
 
-  // The appliance job id of the current run, stamped by the driver's onJobCreated.
+  // The console job id of the current run, stamped by the driver's onJobCreated.
   // Read by tryAgain (to DELETE the failed job before recreating, which
   // reject-until-DELETE would otherwise 409) and abandonRun (to discard on a
   // deliberate leave). Undefined until the first job is created.
   const currentJobIdRef = useRef<string | undefined>(undefined);
 
   // Drives the run's AbortSignal; the unmount cleanup aborts it so an in-flight
-  // stream stops being consumed. It carries no cancel intent, matching the
-  // inviter path: the appliance keeps running and the recovery panel is the way
+  // stream stops being consumed. It has no cancel intent, matching the
+  // inviter path: the console keeps running and the recovery panel is the way
   // back.
   const abortRef = useRef<AbortController | undefined>(undefined);
   useEffect(
@@ -172,7 +172,7 @@ export function useDirectExchange({
       ...(runDiagnostics !== undefined ? { runDiagnostics } : {}),
       // Persist the created job's id so a reload or hard tab close can re-attach,
       // and track it for the deliberate-discard paths. The strand-recovery record
-      // carries a seat only to label the re-attached run's waiting stage; a direct
+      // holds a seat only to label the re-attached run's waiting stage; a direct
       // exchange is symmetric, and "Waiting for your partner" reads correctly for
       // it, so it rides the inviter seat rather than widening the seat union.
       onJobCreated: (jobId) => {
@@ -191,7 +191,7 @@ export function useDirectExchange({
 
     // The run's lifecycle callbacks, built once so a busy (409) re-attach folds
     // the already-running exchange's stream onto the SAME surface. A busy create
-    // at start re-attaches to the exchange holding the appliance's single slot
+    // at start re-attaches to the exchange holding the console's single slot
     // (recovery-style copy, `reattached`) rather than dead-ending on the "already
     // running" alert; every other failure raises its alert.
     const runEvents: ExchangeDriverEvents<RunOutputs> = {
@@ -207,7 +207,7 @@ export function useDirectExchange({
         setWarnings((current) => appendSanitizedRunWarning(current, message)),
       onError: ({ category, error }) => {
         // Dev-gated: the raw error can embed server/CLI-controlled bytes, so a
-        // production console carries none of it; the user-facing alert is
+        // production console holds none of it; the user-facing alert is
         // separately sanitized in failureFor.
         whenDiagnostic(() => console.error(error));
         if (isExchangeBusyError(error)) {
@@ -242,7 +242,7 @@ export function useDirectExchange({
     void driver.run(runEvents);
   }
 
-  // Offered by the retryable-failure alert alone: the run is over (the appliance
+  // Offered by the retryable-failure alert alone: the run is over (the console
   // reconciled a terminal), so a fresh run cannot race it. A server-job retry must
   // DELETE the failed (already-terminal) job before recreating, or reject-until-
   // DELETE 409s the create while the prior run still occupies the single slot.
@@ -263,9 +263,10 @@ export function useDirectExchange({
   // other non-output stop). Unlike tryAgain it does NOT restart -- the operator
   // returns to the file step to begin afresh -- so it clears started/failure/outputs
   // (re-enabling Run and unlocking the stepper) AND discards the terminal job through
-  // the same seam tryAgain uses, freeing the appliance's single slot so the fresh run
-  // creates rather than 409ing. Clearing abortRef too is essential: start()'s
-  // re-entry guard bails while it holds the finished run's controller.
+  // the same discardServerJob call tryAgain uses, freeing the console's single
+  // slot so the fresh run creates rather than 409ing. Clearing abortRef too is
+  // essential: start()'s re-entry guard bails while it holds the finished run's
+  // controller.
   function reset() {
     abortRef.current?.abort();
     abortRef.current = undefined;
@@ -284,9 +285,9 @@ export function useDirectExchange({
     setReattaching(false);
   }
 
-  // Discard the current server-job exchange when the operator deliberately leaves
+  // Discard the current server-job exchange when the operator leaves
   // (run another): cancel-if-running, DELETE, clear the recovery record. This is
-  // what frees the appliance's single slot for the next exchange. Fire-and-forget
+  // what frees the console's single slot for the next exchange. Fire-and-forget
   // -- the caller navigates away -- and a no-op before any job exists.
   function abandonRun() {
     const jobId = currentJobIdRef.current;

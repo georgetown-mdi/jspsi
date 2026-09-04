@@ -9,15 +9,15 @@ import { DISPLAY_TRUNCATION_MARKER, MAX_NAME_LENGTH } from "@psilink/core";
  * declaration-sourced names take the escape instead), the grid's live regions, and the
  * ledger's "You will send" row -- so one name reads the same wherever the screen
  * puts it. That last notice is the one place two provenances meet, and its split
- * costs a collision this accepts: a declared name the operator's file also carries
+ * costs a collision this accepts: a declared name the operator's file also holds
  * reaches them escaped in the notice and verbatim here in the grid row the notice
  * sends them to, so the two forms are the same string only for a name of printable
- * ASCII carrying no backslash. Escaping the half the operator cannot inspect is
- * worth reading one name in two forms.
+ * ASCII holding no backslash. Escaping the half the operator cannot inspect costs
+ * reading one name in two forms.
  *
  * These names are the operator's OWN CSV header, read from the file they chose,
  * not the partner-controlled text `sanitizeForDisplay` exists for, so they do not
- * take its escape. What they do need is layout containment: a header carrying a
+ * take its escape. What they do need is layout containment: a header holding a
  * right-to-left override, or an embedding it never closes, otherwise reorders the
  * sentence, label, or table row it is interpolated into -- and this is the screen
  * where the operator decides what leaves their machine, so the copy around a name
@@ -45,26 +45,24 @@ import { DISPLAY_TRUNCATION_MARKER, MAX_NAME_LENGTH } from "@psilink/core";
  * A column name cut to what paints: {@link MAX_NAME_LENGTH} code points, then
  * {@link DISPLAY_TRUNCATION_MARKER}. Nothing bounds a CSV header at intake and
  * isolation escapes nothing, so without this an arbitrarily long header paints
- * whole over the screen that holds the launch gate. The ceiling is the wire's --
- * the partner's parse of the payload frame refuses a longer name, as does
- * `ColumnMetadata.name` wherever metadata is parsed rather than inferred -- so the
- * cut can never reach a name an exchange completes on, and two carryable headers
- * sharing a prefix stay distinct. It does reach longer ones: this screen's metadata
- * comes from `inferMetadata` over the file's own header, which no schema bounds, so
- * an oversized header renders cut here. What such a header cannot do is leave the
- * machine: marking it to send closes the launch gate
- * (`acceptorOverlongDisclosedColumns`, over the same predicate core's prepare-time
- * `assertDisclosedNamesCarriable` reads), so the cut bounds what paints on a name
- * the run refuses to carry.
+ * whole over the screen that holds the launch gate. The ceiling matches the
+ * wire's -- the partner's parse of the payload frame refuses a longer name, as
+ * does `ColumnMetadata.name` wherever metadata is parsed rather than inferred
+ * -- so the cut never reaches a name an exchange completes on. This screen's
+ * metadata comes from `inferMetadata` over the file's own unbounded header, so
+ * an oversized name still renders cut here; what it cannot do is leave the
+ * machine, since marking it to send closes the launch gate
+ * (`acceptorOverlongDisclosedColumns`, over the predicate core's prepare-time
+ * `assertDisclosedNamesCarriable` reads).
  *
- * The cut counts code points -- so it never splits a surrogate pair, and an override
- * it leaves open is closed by the isolate around it -- while both of those ceilings
- * count UTF-16 units. The two disagree in one direction only: a name long enough to
- * cut is past the ceiling on either count, so the mark never elides a name that
- * transmits. The other direction is silent, and the absence of a mark is no verdict
- * on what can be carried -- a header of {@link MAX_NAME_LENGTH} astral characters is
- * twice that many units, renders whole and unmarked here, and is still refused on
- * the wire.
+ * The cut counts code points -- so it never splits a surrogate pair, and an
+ * override it leaves open is closed by the isolate around it -- while the wire's
+ * ceilings count UTF-16 units. The two disagree in one direction only: a name
+ * long enough to cut is always past the wire ceiling too, so the mark never
+ * elides a name that transmits. The reverse is silent: the absence of a mark is
+ * no verdict on what the wire will accept -- a header of {@link MAX_NAME_LENGTH}
+ * astral characters is twice that many units, renders whole and unmarked here,
+ * and is still refused on the wire.
  */
 function boundedName(name: string): string {
   const codePoints = [...name];
@@ -79,25 +77,23 @@ function boundedName(name: string): string {
  * them is laid out on its own resolved direction, and the whole isolate counts as
  * a single neutral character to the text around it, so nothing inside can reorder
  * anything outside. PDI also terminates any embedding or override (RLE, LRE, RLO,
- * LRO, a missing PDF) the isolated text left open, which is what bounds an
- * unbalanced name of that class. The isolate class itself is the residual, and
- * BOTH forms carry it: a name whose unmatched PDI closes the wrapper early leaves
- * an override written after that break running over the copy that follows, in the
- * characters {@link isolatedColumnName} composes and equally in the `<bdi>`
- * {@link ColumnName} renders. What holds it off a sink is the arrangement rather
- * than the wrapper: a name given a block of its own -- a grid row header, a chip,
- * a list item -- has no copy beside it for the leak to run over, while any sink
- * that puts literal copy in one text block with a wrapped name -- separators
- * between names, a sentence after them -- can have that copy reordered. Which
- * sinks are of which shape is a measurement rather than a claim to make here:
+ * LRO, a missing PDF) the isolated text left open, bounding an unbalanced name of
+ * that class.
+ *
+ * The isolate class itself is the residual, and BOTH forms hold it: a name whose
+ * unmatched PDI closes the wrapper early leaves an override running over the copy
+ * that follows, in the characters {@link isolatedColumnName} composes and equally
+ * in the `<bdi>` {@link ColumnName} renders. What holds it off a sink is the
+ * arrangement rather than the wrapper: a name given a block of its own has no
+ * copy beside it for the leak to run over, while a sink that puts literal copy in
+ * one text block with a wrapped name can have that copy reordered.
  * test/browser/benchInviterSharing.test.ts and test/browser/benchAccept.test.ts
- * drive both forms, the block containment, and the sinks measured to reach the
- * residual, and a sink no check drives is not asserted to contain it. What bounds
- * the impact is the trust basis the module note above records -- these are the
- * operator's own CSV headers.
+ * measure which sinks are of which shape; a sink no check drives is not asserted
+ * to contain the residual. The trust basis is the module note above: these are
+ * the operator's own CSV headers.
  *
  * The one hole no check here covers, stated as UAX #9 states it rather than as a
- * measurement: a name carrying an unmatched RLI, LRI, or FSI consumes the closing
+ * measurement: a name holding an unmatched RLI, LRI, or FSI consumes the closing
  * PDI, so the wrapper opens and never closes. The same trust basis bounds it.
  */
 const FIRST_STRONG_ISOLATE = "\u2068";
@@ -106,7 +102,7 @@ const POP_DIRECTIONAL_ISOLATE = "\u2069";
 /**
  * One column name for a STRING sink -- an `aria-label`, a native `<option>`
  * label, a live-region sentence -- where the surrounding copy is one string and
- * no element can carry the isolation. {@link ColumnName} is the same treatment
+ * no element can hold the isolation. {@link ColumnName} is the same treatment
  * where the sink takes JSX; prefer it, since it leaves the isolation in the
  * markup rather than in the text the operator can select and copy.
  *
@@ -121,7 +117,7 @@ export function isolatedColumnName(name: string): string {
 /**
  * One column name as rendered text: the name inside a `<bdi>`, whose
  * `unicode-bidi: isolate` is the markup form of {@link isolatedColumnName}. The
- * element carries the isolation, so the name the operator selects and copies out
+ * element holds the isolation, so the name the operator selects and copies out
  * of the page is their own header and nothing more.
  */
 export function ColumnName({ name }: { name: string }) {

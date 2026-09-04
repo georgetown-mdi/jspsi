@@ -14,7 +14,7 @@
  * untouched.
  *
  * Import reconciles against a spent husk before installing fresh. When the artifact
- * matches a record spent by the DEVICE MIGRATION -- same `sharedSecret`, the honest
+ * matches a record spent by the DEVICE MIGRATION -- same `sharedSecret`, the correct
  * match, since a spent-and-unrun-since record's artifact holds exactly its secret
  * (compared in memory, never persisted) -- the import REVIVES that record in place: it
  * updates the record's fields from the artifact, keeps its `id` and any persisted
@@ -36,7 +36,7 @@
  * installed secret (so the exchange reads green rather than immediately prompting a
  * re-export), and the import marker is the desync tiering's evidence that a restore
  * happened -- a restored copy can hold a secret the partnership has rotated past, so a
- * later handshake failure surfaces as the benign import/restore tier, not the attack
+ * later handshake failure shows as the benign import/restore tier, not the attack
  * path (see {@link ./managedFailureTiers.ts}).
  */
 
@@ -54,7 +54,7 @@ import type { ManagedSpentHandoff } from "./managedLocalStateShape";
 /**
  * Raised when an import is refused because the artifact's secret matches a record
  * this device handed off under {@link handoff}: the exchange runs from what that
- * hand-off saved, so nothing is revived and nothing is installed. Carries the stored
+ * hand-off saved, so nothing is revived and nothing is installed. Holds the stored
  * record's operator label (which may be empty) so the surface can name the exchange
  * the operator still has here.
  */
@@ -74,7 +74,7 @@ export class ManagedImportHandedOffError extends Error {
   }
 }
 
-/** The platform seams the import drives, injected so the flow is testable. */
+/** The platform boundaries the import drives, injected so the flow is testable. */
 export interface ManagedImportDeps {
   /** Reconcile the reconstructed artifact against the spent records: revive a
    * migration-spent secret-match in place (keeping its id and input handle, clearing
@@ -93,7 +93,7 @@ export interface ManagedImportDeps {
   now: () => Date;
 }
 
-/** The default seams: revive or install through the store, mark through the sibling
+/** The default boundaries: revive or install through the store, mark through the sibling
  * store, and read the wall clock. */
 const defaultDeps: ManagedImportDeps = {
   reviveSpent: reviveSpentManagedExchange,
@@ -126,7 +126,7 @@ const defaultDeps: ManagedImportDeps = {
  * The import mark on a fresh install is best-effort after the install succeeds: a
  * valid record is already durable, so a failed marker write must not report the
  * import failed (a retry would then duplicate the record). The exchange simply reads
- * "backup needed" and carries no restore evidence until the next export -- the same
+ * "backup needed" and holds no restore evidence until the next export -- the same
  * bookkeeping-after-durable-write discipline the run path follows.
  *
  * @throws {UsageError} if the bytes are not parseable JSON or the embedded document
@@ -151,7 +151,7 @@ export async function importManagedExchange(
     await deps.markImported(installed.id, at);
   } catch {
     // Best-effort: the record is durable; a failed marker only shows "backup
-    // needed" and carries no restore evidence, and reporting failure here would
+    // needed" and holds no restore evidence, and reporting failure here would
     // duplicate on retry.
   }
   return installed;

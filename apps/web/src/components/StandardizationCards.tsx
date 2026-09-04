@@ -29,14 +29,14 @@ import type { ReactNode } from "react";
  * the acceptor derives it from metadata and layers per-field overrides. The component
  * is blind to which.
  *
- * The load-bearing contract point: {@link onStepsChange} carries the transformation's
+ * The critical contract point: {@link onStepsChange} passes the transformation's
  * `input` column AS RENDERED (the effective, post-override binding), echoed back
  * unchanged. The acceptor's override layer detects a stale step-edit by comparing the
  * stored override's input against the current binding; passing any other notion of
  * input would silently drop the operator's edit on the next render.
  *
  * Each card is collapsed by default to its semantic-type label, so a section of many
- * fields reads as a scannable index; expanding reveals the step editor, the coverage
+ * fields displays as a scannable index; expanding reveals the step editor, the coverage
  * readout (the host's {@link renderCoverage}, the silent-empty safety signal), and a
  * further-collapsible before/after sample preview. A silent-empty collapse
  * ({@link isFieldSilentEmpty}) is flagged in the collapsed header too, so the safety
@@ -222,13 +222,11 @@ export function StandardizationCards({
 }
 
 /** One field's card: collapsed by default to its semantic-type label, so a long
- * list of fields reads as a scannable index. Expanding reveals the step editor, the
- * coverage readout, and a further-collapsible sample preview. When the field's
- * whole-file coverage is a silent-empty collapse, a compact warning is shown in the
- * collapsed header (the card's `summary`), so the safety signal is not buried while
- * the body is closed -- the full coverage alarm sits inside, and the editor-wide
- * live region announces it for assistive tech. The card header carries the type
- * label, so the step editor's own label is suppressed (`hideFieldLabel`). */
+ * list of fields displays as a scannable index. Expanding reveals the step editor,
+ * the coverage readout, and a further-collapsible sample preview. A silent-empty
+ * collapse shows a compact warning in the collapsed header too, so the safety
+ * signal is not buried with the body. The header has the type label, so the step
+ * editor's own label is suppressed (`hideFieldLabel`). */
 function StandardizationCard({
   field,
   inputColumn,

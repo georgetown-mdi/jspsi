@@ -94,7 +94,7 @@ function elementIdentifier(element: LinkageKeyElement): string {
 
 /**
  * The expert key-authoring surface: an ordered list of linkage keys, each fully
- * editable element-by-element. A key carries a name, an ordered list of elements
+ * editable element-by-element. A key has a name, an ordered list of elements
  * (each a field reference chosen from the declared list, an optional alias, a
  * transform pipeline, and a gated fuzzy expansion), and an optional two-of-N swap
  * over its own element identifiers. Keys and elements add, remove, and reorder
@@ -280,14 +280,12 @@ export function ExpertKeyEditor({
           const keyId = idFor(keyIds.current, key);
           const keyOpen = expandedKeys.has(keyId);
           const keyBodyId = `key-body-${keyId}`;
-          // One swap option per element, keyed by its identifier. Deduplicated by
-          // value: two elements can transiently share an identifier while being
-          // edited (e.g. the operator clears an alias so it falls back to a field
-          // name another element already uses) -- an invalid state validation flags
-          // and blocks Generate on, but one Mantine's MultiSelect would otherwise
-          // throw on (duplicate option values), crashing the whole editor instead of
-          // surfacing the inline error. addElement avoids creating the collision in
-          // the first place; this keeps a hand-edited collision from being fatal.
+          // One swap option per element, keyed by its identifier, deduplicated by
+          // value: two elements can transiently share an identifier mid-edit (e.g.
+          // an alias clears to a name another element already uses). Mantine's
+          // MultiSelect throws on a duplicate option value, crashing the editor
+          // instead of showing the inline error the state validation would flag;
+          // addElement avoids the collision, so this guards only a hand edit.
           const seenSwapIds = new Set<string>();
           const swapData = key.elements.flatMap((el) => {
             const value = elementIdentifier(el);
@@ -301,7 +299,7 @@ export function ExpertKeyEditor({
                 <Group justify="space-between" wrap="nowrap" align="center">
                   {/* Collapse toggle: the chevron plus the key name, which is the
                       button's accessible label. Keys start collapsed, so the list
-                      reads as an overview; the editor body is one expand down. */}
+                      displays as an overview; the editor body is one expand down. */}
                   <UnstyledButton
                     onClick={() => toggleKeyExpanded(keyId)}
                     aria-expanded={keyOpen}
@@ -650,7 +648,7 @@ export function ExpertKeyEditor({
             // Expand the freshly added key (appended last) so the operator lands in
             // its editor rather than a collapsed header. idFor mints its stable id
             // here; the same key object carries that id into the next render, so it
-            // reads as expanded.
+            // displays as expanded.
             const newKey = next.keys[next.keys.length - 1].key;
             setExpandedKeys((prev) =>
               new Set(prev).add(idFor(keyIds.current, newKey)),

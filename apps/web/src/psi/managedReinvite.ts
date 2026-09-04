@@ -7,7 +7,7 @@
  * re-exchanges the setup secret, rather than re-authoring the exchange. The operator
  * re-authors nothing.
  *
- * Re-invite is an INVITER-role act. The invitation carries the linkage terms in the
+ * Re-invite is an INVITER-role act. The invitation holds the linkage terms in the
  * inviter's own namespace, which the partner's accept mirrors into its perspective
  * (core's `deriveAcceptedLinkageTerms`) and locks its receive set against. Only the
  * `side: "inviter"` party holds those terms verbatim; the acceptor's stored document
@@ -17,15 +17,15 @@
  * {@link canReinviteFromRecord}). This mirrors the CLI, where a re-invite is generated
  * from the existing configuration by the inviting party.
  *
- * What the freshly minted invitation must carry so the partner's accept still locks in
- * correctly, sourced from the stored inviter document:
+ * What the freshly minted invitation must include so the partner's accept
+ * still locks in correctly, sourced from the stored inviter document:
  *
  * - `linkageTerms` -- the document's terms verbatim (the inviter's own perspective),
  *   so the partner adopts the same set it did originally.
  * - `disclosedPayloadColumns` -- the document's own committed send set (empty is a
  *   strict "sends nothing" commitment and is preserved; absent stays absent), so the
- *   partner's receive lock-in re-crystallizes to the same set it consented to -- never
- *   a re-derivation that could drift.
+ *   partner's receive enforcement re-crystallizes to the same set it consented to --
+ *   never a re-derivation that could drift.
  * - `connectionEndpoint` -- built FRESH from this app's current signaling location,
  *   not the document's stored `server` locator: the inviter derives its rendezvous
  *   from `window.location` on the re-run path, so the stored locator is inert (see
@@ -36,7 +36,7 @@
  *   never the setup lifetime -- the record's `expires` provenance is single-source
  *   (see {@link buildReinviteRotation}).
  *
- * The ongoing cost this recovery carries, which the copy must not hide: every
+ * The ongoing cost of this recovery, which the copy must not hide: every
  * re-invite puts a fresh live setup secret on the out-of-band channel, so the
  * invitation-confidentiality requirement is ongoing, not one-time (see
  * docs/MANAGED_EXCHANGE.md, "Recovery: fast re-invite").
@@ -78,9 +78,9 @@ export function canReinviteFromRecord(record: ManagedExchangeRecord): boolean {
 export interface ManagedReinvite {
   /** The encoded invitation string -- the bare-string copy artifact. */
   encoded: string;
-  /** The deep-link URL carrying the token in its fragment -- the URL copy artifact. */
+  /** The deep-link URL holding the token in its fragment -- the URL copy artifact. */
   deepLink: string;
-  /** The fresh setup secret the token carries and the record adopts. */
+  /** The fresh setup secret the token holds and the record adopts. */
   sharedSecret: string;
   /** The token's bounded setup expiry (the invitation-in-transit bound), ISO 8601. */
   tokenExpires: string;
@@ -112,13 +112,13 @@ export function buildReinviteRotation(
  * Build the fresh invitation token a re-invite mints from the stored inviter
  * document: the document's linkage terms and committed send set verbatim, a fresh
  * webrtc endpoint from the current location, the fresh setup secret, and the bounded
- * setup expiry. The token carries no credential -- the endpoint is credential-free by
+ * setup expiry. The token holds no credential -- the endpoint is credential-free by
  * construction and `encodeInvitation` re-validates it through the strict endpoint
  * schema (see {@link ./invitation.ts}).
  *
- * The document's `disclosedPayloadColumns` is carried through verbatim, including the
+ * The document's `disclosedPayloadColumns` passes through verbatim, including the
  * strict empty set; only an absent field is omitted, so the token cannot mint a
- * commitment the document did not carry.
+ * commitment the document did not hold.
  */
 export function buildReinviteToken(
   record: ManagedExchangeRecord,
@@ -138,9 +138,9 @@ export function buildReinviteToken(
   };
 }
 
-/** The seams a re-invite injects: fresh-secret generation and token encoding are
+/** What a re-invite injects: fresh-secret generation and token encoding are
  * core's, and the setup lifetime is bounded here exactly as {@link generateInvitation}
- * bounds it, so this seam cannot mint an unbounded or effectively-permanent token. */
+ * bounds it, so none of these can mint an unbounded or effectively-permanent token. */
 export interface ManagedReinviteSeams {
   /** Mint a fresh setup secret (core's `generateSharedSecret`). */
   generateSecret: () => string;

@@ -82,17 +82,17 @@ export function InviterExchangeSection({
    * applies: a WebRTC partner accepts in their browser and needs none, and the
    * hosted build's CLI transports mint on the save surface rather than here. */
   onDownloadAcceptKit?: () => void;
-  /** Whether this run executes on the console appliance (a server-job run) rather
-   * than in this browser. On the appliance the CLI child conducts the exchange
+  /** Whether this run executes on the console (a server-job run) rather
+   * than in this browser. On the console the CLI child conducts the exchange
    * while the tab stays open, so the keep-open callout names the running exchange
    * the tab is holding rather than a browser listener. */
   serverJob: boolean;
-  /** The appliance job id of a server-job run, once created. Threads the run's job
+  /** The console job id of a server-job run, once created. Threads the run's job
    * to the recurring hand-off panel; undefined on a browser run. */
   jobId: string | undefined;
   /** The live status of the exchange this run re-attached to on a busy (409)
    * create, or undefined on a fresh run. When set, the surface heads with
-   * recovery-style copy (it is watching an exchange the appliance already held,
+   * recovery-style copy (it is watching an exchange the console already held,
    * not a fresh one) and drops the fresh-run share / keep-open framing, while
    * keeping the completion affordances -- the results summary and the recurring
    * hand-off -- so the operator still sees their run's outcome and graduation. */
@@ -106,20 +106,20 @@ export function InviterExchangeSection({
   onStartOver: () => void;
   /** Discard the current server-job exchange (cancel-if-running + DELETE), fired
    * as the operator leaves for a fresh exchange from the completion workfoot, so
-   * the appliance's single slot frees for the next one. A no-op on a browser run
-   * (no appliance job). */
+   * the console's single slot frees for the next one. A no-op on a browser run
+   * (no console job). */
   onAbandon: () => void;
 }) {
   const phase =
     outputs !== undefined ? "done" : awaitingPartner(run) ? "share" : "running";
-  // The run reached a terminal, which is what the three appliance-artifact
+  // The run reached a terminal, which is what the three console-artifact
   // panels below key on: each states its artifact's standing once the run is
   // past producing it.
   const settled = phase === "done" || failure !== undefined;
 
-  // Where this run's exchange record stands on the appliance. Asked only once the
+  // Where this run's exchange record stands on the console. Asked only once the
   // run has settled and only where the completion downloads are not already
-  // carrying the pair, so the ordinary successful run makes no second request. The
+  // holding the pair, so the ordinary successful run makes no second request. The
   // one answer drives both the record panel and whether the failure recoveries --
   // each of which DELETEs the run's folder -- confirm before doing so.
   const recordOffer = useJobExchangeRecordOffer(
@@ -129,9 +129,9 @@ export function InviterExchangeSection({
   const recordConfirm = untakenRecordConfirm(recordOffer);
 
   // A busy (409) create at start re-attached this surface to an exchange the
-  // appliance already held (a second tab, a navigate-away-and-back, or an orphaned
+  // console already held (a second tab, a navigate-away-and-back, or an orphaned
   // job). It then heads with recovery-style copy and drops the fresh-run share /
-  // keep-open framing, so it never reads as a fresh success -- but the completion
+  // keep-open framing, so it never displays as a fresh success -- but the completion
   // affordances (the results summary and the recurring hand-off) still show, since
   // those hold however the operator reached completion.
   const reattachedRun = reattached !== undefined;
@@ -158,7 +158,7 @@ export function InviterExchangeSection({
   const offersStartOver =
     !retryable && failure !== undefined && failure.category !== "output";
 
-  // The phase-level focus throughline. The bench host moves focus to the h1
+  // The phase-level focus throughline. The console host moves focus to the h1
   // when the section mounts; within the section, focus moves again when the
   // partner connects or a retry clears the alert -- the share block or the
   // alert (either of which may hold focus, on a copy button or the Try again
@@ -281,7 +281,7 @@ export function InviterExchangeSection({
         )}
       {/* The keep-open callout drops the moment any failure lands: the run it
           describes has torn down, so it outlives no failure, not even a retryable
-          one. On a server-job run the appliance conducts the exchange and this tab
+          one. On a server-job run the console conducts the exchange and this tab
           only watches it, so the callout persists into the running phase -- leaving
           does not stop the run, and the recovery panel is the way back. The browser
           listener's copy is share-only: once the partner connects, nothing it says
@@ -347,7 +347,7 @@ export function InviterExchangeSection({
         </>
       )}
       {/* The hand-off is composed at job creation and served for the record's
-          lifetime, so the panel stands from the moment the appliance holds the
+          lifetime, so the panel stands from the moment the console holds the
           job: collapsed while the run is still in flight (graduation is not the
           job at hand yet), expanded once the run completes and it is. It drops
           on a failure, whose surface offers its own one way forward. */}

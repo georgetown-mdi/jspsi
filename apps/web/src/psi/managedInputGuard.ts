@@ -29,12 +29,12 @@ import type { ExchangeSpec, LinkageField } from "@psilink/core";
  * - `"acquire"` -- the file could not be read at run start: the entry is missing
  *   (deleted, moved, or renamed away), the read permission is gone, no handle is
  *   held where one is required, or the file is unreadable or malformed (the CSV
- *   parse fails). The underlying error is carried for the caller to surface
+ *   parse fails). The underlying error is included for the caller to display
  *   (sanitized) and log.
  * - `"columns"` -- the file was read, but it cannot satisfy every linkage key the
  *   standing terms declare, so an exchange would match on fewer keys than both
  *   parties agreed to while its record still named every field the terms declare.
- *   The linkage fields the columns cannot produce are carried so the caller can
+ *   The linkage fields the columns cannot produce are included so the caller can
  *   name the missing field types.
  */
 export type ManagedInputRejection =
@@ -43,7 +43,7 @@ export type ManagedInputRejection =
        * an absent required handle, or an unreadable/malformed file the CSV parse
        * rejects). */
       reason: "acquire";
-      /** The underlying acquisition error, for the caller to surface and log. */
+      /** The underlying acquisition error, for the caller to display and log. */
       cause: unknown;
     }
   | {
@@ -56,7 +56,7 @@ export type ManagedInputRejection =
     };
 
 /**
- * Raised when the run-start input cannot back the standing terms, carrying the
+ * Raised when the run-start input cannot back the standing terms, holding the
  * {@link ManagedInputRejection} that discriminates the benign cause. Distinct from
  * a handshake or data-exchange failure so the runner records the kind
  * {@link managedInputFailureKind} derives from the rejection and knows no
@@ -114,7 +114,7 @@ export function managedInputFailureKind(
  * looser pre-check the boundary can still overturn.
  *
  * Returns `undefined` when the input may run; returns a `"columns"`
- * {@link ManagedInputRejection} carrying the unproducible linkage fields otherwise.
+ * {@link ManagedInputRejection} holding the unproducible linkage fields otherwise.
  * The grade is over column SHAPE, not row values, with the one value-independent
  * exception core's dead-key detection covers (see
  * {@link decideLinkageTermsVerdict}): it can only over-accept a same-shaped wrong

@@ -62,11 +62,11 @@ interface RecoveryTarget {
 
 /**
  * Resolve the exchange to recover: the persisted attachment when this browser has
- * one, else an occupancy probe of the appliance's single slot so a browser that
+ * one, else an occupancy probe of the console's single slot so a browser that
  * never started the exchange still sees it. A probe-adopted target is held in
  * component state only -- never written to storage -- until the operator acts
  * (re-attach or discard). Returns null when there is nothing to recover; the probe
- * fails safe to unoccupied, so a probe fault reads as nothing to recover.
+ * fails safe to unoccupied, so a probe fault is treated as nothing to recover.
  */
 async function resolveRecoveryTarget(
   signal: AbortSignal,
@@ -90,7 +90,7 @@ async function resolveRecoveryTarget(
  * started in this browser; the probe-adopted variant does not claim that -- the id
  * came from the slot probe, so another browser (or this one before its attachment
  * was lost) may have started it -- and drops the "you", saying "started here" so
- * "it" refers only to the exchange and "here" carries the appliance.
+ * "it" refers only to the exchange and "here" names the console.
  */
 function recoveryLead(
   state: ReattachedRunState,
@@ -110,7 +110,7 @@ function recoveryLead(
  * and its results is at stake. */
 export const DISCARD_CONFIRM_TITLE = "Discard this exchange?";
 
-/** What that confirm says: the removal is appliance-only and irreversible, and it
+/** What that confirm says: the removal is console-only and irreversible, and it
  * covers a run still going. It names no artifact beyond the results, which is why
  * a record standing on this panel takes {@link untakenRecordConfirm}'s copy
  * instead. */
@@ -121,13 +121,13 @@ export const DISCARD_CONFIRM_BODY =
 
 /**
  * The console's strand-recovery surface: a self-contained way back to the one
- * exchange the appliance holds, mounted on an idle bench entry and the console
+ * exchange the console holds, mounted on an idle console entry and the console
  * lobby. It is NOT a job list and NOT accept-later -- there is exactly one
  * exchange, named by this browser's stored attachment or, failing that, by the
- * appliance's single-slot occupancy.
+ * console's single-slot occupancy.
  *
  * On mount it resolves the exchange to recover -- the persisted attachment when
- * this browser holds one, else an occupancy probe of the appliance's single slot
+ * this browser holds one, else an occupancy probe of the console's single slot
  * (`GET /api/jobs/slot`) so a browser that never started it still finds it -- then
  * probes `GET /api/jobs/:id`. Nothing to recover renders nothing. A probe-adopted
  * id is held in state only, never persisted, until the operator acts (re-attach or
@@ -139,17 +139,17 @@ export const DISCARD_CONFIRM_BODY =
  * exchange. A live id renders the panel: one of three headings -- still running,
  * finished, or stopped (failed/cancelled) -- the run's non-fatal warnings, the
  * re-attached run's timeline (replayed through the same run-state fold the hooks
- * use), the appliance download hrefs on a finished run only, the collapsed "run
+ * use), the console download hrefs on a finished run only, the collapsed "run
  * this on a schedule" graduation hand-off on any run that is not stopped
  * (self-gated away when the hand-off is unavailable), "Stop this exchange" while
  * running, and "Discard" (behind a confirm, since it is an irreversible removal
- * of appliance-only data -- naming the exchange record instead of the results
+ * of console-only data -- naming the exchange record instead of the results
  * where the run may have left one standing) always.
  *
- * Unmounting the panel aborts only its own stream consumption -- it carries no
- * cancel intent, so the appliance's run keeps going and the panel is the way back
- * on the next visit. Only Discard (and the benches' deliberate-leave paths) cancel
- * or delete. The re-attached outputs are appliance ENDPOINT hrefs, so the panel
+ * Unmounting the panel aborts only its own stream consumption -- it has no
+ * cancel intent, so the console's run keeps going and the panel is the way back
+ * on the next visit. Only Discard (and the consoles' deliberate-leave paths) cancel
+ * or delete. The re-attached outputs are console ENDPOINT hrefs, so the panel
  * creates no object URLs and there is nothing to revoke.
  */
 export function RecoveredExchangePanel() {
@@ -195,7 +195,7 @@ export function RecoveredExchangePanel() {
       );
       if (aborted()) return;
       if (status.kind === "gone") {
-        // A CONFIRMED 404: the exchange is not on the appliance (deleted, or a
+        // A CONFIRMED 404: the exchange is not on the console (deleted, or a
         // restart forgot it). The id's last duty is to bound a restart-orphaned
         // workdir's at-rest exposure through the disk-only DELETE arm; then clear
         // any stored record and render nothing.
@@ -250,7 +250,7 @@ export function RecoveredExchangePanel() {
     };
   }, [client]);
 
-  // Stop halts the appliance's run without removing its files (a graceful cancel);
+  // Stop halts the console's run without removing its files (a graceful cancel);
   // the re-attached stream then delivers the cancelled terminal and the panel
   // settles. Discard is the explicit disk-remover.
   function stop() {
@@ -354,7 +354,7 @@ export function RecoveredExchangePanel() {
       )}
       <RecordDownload offer={recordOffer} />
       <ReceiptDownload jobId={attachment.jobId} settled={!running} />
-      {/* Available for as long as the appliance holds the job, collapsed
+      {/* Available for as long as the console holds the job, collapsed
           throughout on this compact panel -- the run seats' rule, less the
           expanded completion render this panel has no room for. A stopped
           (failed or cancelled) run has nothing to graduate. */}

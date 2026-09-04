@@ -31,17 +31,17 @@ export interface AcceptorDataEdits {
 
 /** A decoded invitation that has passed every locally-checkable precondition for
  * acceptance: valid format/checksum (via `decodeInvitation`), not expired, and
- * carrying an endpoint this build can drive. */
+ * holding an endpoint this build can drive. */
 export interface AcceptableInvitation {
   token: InvitationToken;
   /** The connection endpoint, narrowed from the token's `connectionEndpoint` to
    * the subset this build can drive: a WebRTC signaling endpoint the acceptor
    * dials in this browser, or -- on a console build -- a file-drop or SFTP
-   * endpoint the console appliance runs through the job API. A hosted build never
-   * admits file-drop or SFTP (neither is browser-drivable). An SFTP endpoint
-   * carries only its credential-free locator (host/port/path) by construction;
-   * the operator supplies the username, credential, and host-key fingerprint when
-   * authoring the connection the appliance runs. */
+   * endpoint the console runs through the job API. A hosted build never admits
+   * file-drop or SFTP (neither is browser-drivable). An SFTP endpoint holds
+   * only its credential-free locator (host/port/path); the operator supplies
+   * the username, credential, and host-key fingerprint when authoring the
+   * connection the console runs. */
   endpoint: WebRTCEndpoint | FileDropEndpoint | SFTPEndpoint;
 }
 
@@ -49,35 +49,22 @@ export interface AcceptableInvitation {
  * Decode and validate an encoded invitation for acceptance, failing closed
  * before any rendezvous or connection is attempted.
  *
- * `decodeInvitation` validates format and checksum but deliberately does not
- * check expiry, so this calls {@link isInvitationExpired} (which fails closed at
- * the boundary and on an unparseable `expires`) and rejects an expired token
- * here. It also requires a `connectionEndpoint` this build can drive: a WebRTC
- * endpoint always (the acceptor reaches the inviter through the PeerJS signaling
- * endpoint the invitation carries), or a file-drop or SFTP endpoint on a console
- * build (the appliance runs the exchange through its job API). A file-drop or
- * SFTP endpoint on a non-console build is rejected, and so is a token with no
- * endpoint. The admitted channels are exactly what {@link selectExchangeDriver}
- * drives (webrtc -> browser, filedrop/sftp on console -> server-job); the
- * allowlist is of what THIS build can drive, a narrow per-channel widening, never
- * a loosening to arbitrary endpoints. An admitted SFTP endpoint carries only its
- * credential-free locator; the review step still refuses a console SFTP accept
- * whose shape the appliance cannot run (a split inbound/outbound pair), the
- * file-sync sibling of the file-drop shape gate. It also refuses the one terms
- * combination the run cannot honor -- a deduplicating term under a strategy that
- * matches no deduplicating cardinality -- so such an invitation reaches neither
- * the consent screen nor a connection. Because every failure throws, a caller
- * that only proceeds on success cannot dial or launch on an expired, malformed,
- * undrivable, or unrunnable invitation.
+ * `decodeInvitation` does not check expiry, so this also calls
+ * {@link isInvitationExpired} (fails closed on an unparseable `expires`) and
+ * rejects an expired token. It requires a `connectionEndpoint` this build can
+ * drive -- webrtc always, filedrop/sftp only on a console build -- matching
+ * {@link selectExchangeDriver}'s own allowlist; a non-drivable or missing
+ * endpoint is rejected. It also rejects a token whose linkage terms declare a
+ * `deduplicate` strategy the run cannot honor (`assertDeduplicateImplemented`),
+ * before the consent screen or any connection. Every failure throws.
  *
  * @param encoded  The encoded invitation string (bare code or deep-link
  *                 fragment).
  * @param options.now      The instant to compare `expires` against; injectable
  *                         for tests. Defaults to now.
  * @param options.profile  This build's deployment profile, deciding whether a
- *                         file-drop endpoint is drivable (console only). Injected
- *                         rather than read from the global so the guard stays pure
- *                         and testable, mirroring {@link selectExchangeDriver}.
+ *                         file-drop endpoint is drivable (console only).
+ *                         Injected rather than read from the global.
  * @throws {Error}    on an expired token, or one whose endpoint this build cannot
  *   drive.
  * @throws {UsageError} on a token whose linkage terms declare `deduplicate`
@@ -111,13 +98,10 @@ export async function prepareAcceptedInvitation(
     );
   }
 
-  // The terms half of the same fail-closed rule, at the boundary that decides
-  // whether the review step is reached at all: a deduplicating term under a
-  // strategy that matches no deduplicating cardinality is refused by the run, so
-  // it is refused here -- before the consent screen states what its grouping
-  // discloses, and before any rendezvous. The launch path applies the same
-  // refusal through `deriveAcceptedLinkageTerms`; this is what puts it ahead of
-  // the display. See `assertDeduplicateImplemented`.
+  // The terms half of the fail-closed check: a deduplicating term under a
+  // strategy that matches no deduplicating cardinality is refused before the
+  // consent screen or any rendezvous, matching the refusal
+  // `deriveAcceptedLinkageTerms` applies on the launch path.
   assertDeduplicateImplemented(token.linkageTerms);
 
   return { token, endpoint };
@@ -127,10 +111,10 @@ export async function prepareAcceptedInvitation(
  * Whether THIS build can drive an accepted invitation's connection endpoint: a
  * WebRTC endpoint always (the acceptor reaches the inviter through the PeerJS
  * signaling endpoint), or a file-drop or SFTP endpoint on a console build (the
- * appliance runs the exchange through its job API). The switch is exhaustive over
+ * console runs the exchange through its job API). The switch is exhaustive over
  * the channel union with no default, so a newly added channel fails to compile
- * here until it is deliberately classified -- the allowlist discipline, never a
- * blocklist that admits an unvetted channel.
+ * here until classified -- the allowlist discipline, never a blocklist that
+ * admits an unvetted channel.
  */
 function endpointDrivableHere(
   endpoint: ConnectionEndpoint,
@@ -146,33 +130,26 @@ function endpointDrivableHere(
 }
 
 /**
- * Build the data-preparation spec a web acceptor runs against its own CSV. It
- * adopts the inviter's `linkageTerms` (decoded from the invitation and shown on
- * the consent screen), so the PSI run is governed by the terms the acceptor
- * reviewed and consented to rather than a default inferred from the acceptor's
- * own columns. The agreed fields/keys are adopted verbatim, but the acceptor's
- * own perspective is derived via {@link deriveAcceptedLinkageTerms}: its identity
- * replaces the inviter's (so the inviter's `identity` does not leak into the
- * acceptor's prepared terms), and its `output` and `payload` are MIRRORED, not
- * copied (output's `expectsOutput`/`shareWithPartner` swapped, payload's
- * `send`/`receive` swapped). A verbatim copy only happens to satisfy
- * `validateCompatibility`'s mirrors in the symmetric case and would abort any
- * asymmetric exchange. The payload mirror is what makes the acceptor's `receive`
- * the inviter's `send` (so it validates exactly what it gets) while leaving its
- * `send` open when the inviter left `receive` unauthored. The same helper backs
- * the CLI acceptor (`apps/cli/src/commands/accept.ts`).
+ * Build the data-preparation spec a web acceptor runs against its own CSV,
+ * adopting the inviter's `linkageTerms` (from the invitation) rather than a
+ * default inferred from the acceptor's own columns. Fields/keys are adopted
+ * verbatim; the acceptor's own perspective comes from
+ * {@link deriveAcceptedLinkageTerms}: identity is replaced (the inviter's does
+ * not leak into the acceptor's terms), and `output`/`payload` are MIRRORED, not
+ * copied (`expectsOutput`/`shareWithPartner` and `send`/`receive` swapped) --
+ * a verbatim copy would abort any asymmetric exchange, satisfying
+ * `validateCompatibility`'s mirrors only in the symmetric case. Also backs the
+ * CLI acceptor (`apps/cli/src/commands/accept.ts`).
  *
  * When the acceptor has prepared its data in the editor, its edited `metadata`
  * and `standardization` are supplied alongside the adopted terms; otherwise
- * {@link prepareForExchange} infers both from the acceptor's CSV. Either way the
- * metadata and standardization are PER-PARTY and LOCAL: they are not embedded in
- * the token and never cross-checked, and `validateCompatibility` compares only
- * `linkageFields` / `linkageKeys` / payload names -- so editing them changes only
- * this party's own match rate and disclosure, never the cross-party agreement or
- * its receipt. Supplying an explicit `standardization` does run
- * `validateStandardizationAgainstTerms` (output names must be declared linkage
- * fields, function names must be known); the editor produces a spec that satisfies
- * it (its outputs are the adopted fields' names, via `getDefaultStandardization`).
+ * {@link prepareForExchange} infers both from the acceptor's CSV. Both are
+ * PER-PARTY and LOCAL: not embedded in the token, and `validateCompatibility`
+ * compares only `linkageFields`/`linkageKeys`/payload names, so editing them
+ * changes only this party's own match rate and disclosure. An explicit
+ * `standardization` still runs `validateStandardizationAgainstTerms` (output
+ * names must be declared linkage fields); the editor's own output satisfies it
+ * (`getDefaultStandardization`).
  *
  * @param linkageTerms  The inviter's linkage terms from the decoded token.
  * @param acceptorName  The accepting party's name, recorded as the prepared
