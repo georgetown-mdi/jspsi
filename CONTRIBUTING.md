@@ -1,10 +1,10 @@
 ---
-title: "Contributing to PSI-Link"
+title: "Contributing to psilink"
 ---
 
-# Contributing to PSI-Link
+# Contributing to psilink
 
-Thank you for your interest in contributing. PSI-Link handles personally identifiable information in high-stakes environments; correctness, security, and auditability matter more than velocity. Please read this document before opening a pull request.
+Thank you for your interest in contributing. psilink handles personally identifiable information in high-stakes environments; correctness, security, and auditability matter more than velocity. Please read this document before opening a pull request.
 
 ## Scope of this document
 
@@ -16,7 +16,7 @@ This is the pre-contribution quickstart: repository layout, how to build and tes
 
 ## Repository Structure
 
-PSI-Link is organized as an npm workspaces monorepo. The workspaces and the supporting directories, all of them:
+psilink is organized as an npm workspaces monorepo. The workspaces and the supporting directories, all of them:
 
 | Path             | Description                                                                                |
 | ---------------- | ------------------------------------------------------------------------------------------ |
@@ -136,7 +136,7 @@ npm run format
 
 ## Documentation
 
-PSI-Link documentation is three-tier:
+psilink documentation is three-tier:
 
 - `docs/` (overview) - conceptual and operational documents for program officers, security reviewers, compliance officers, IT staff, and contributors.
 - `docs/spec/` - the technical specification tier: wire formats, byte encodings, normative constant values, protocol internals, and implementation-level design, for implementors and auditors. See [`docs/spec/README.md`](docs/spec/README.md) for the index and routing guide.
@@ -162,7 +162,7 @@ Documentation-tier placement is in scope for code review: a reviewer flags spec-
 
 ## Changelog
 
-`CHANGELOG.md` is reader-facing release notes for whoever runs or vets PSI-Link from outside this repo, browsing to learn what it does and whether it is worth adopting -- not a second copy of the git history. It is a short list of the product's headline capabilities, not a record of the work done.
+`CHANGELOG.md` is reader-facing release notes for whoever runs or vets psilink from outside this repo, browsing to learn what it does and whether it is worth adopting -- not a second copy of the git history. It is a short list of the product's headline capabilities, not a record of the work done.
 
 - Pre-release, the default answer to "does this PR need a changelog entry?" is no. Add one only for a genuinely major feature -- a new capability a reader browsing the repo needs to know exists -- or a breaking change to something already listed. Everything else is skipped: individual flags and config fields, UI polish, operational and error-handling refinements, bug fixes, changed defaults, exit-code and format tweaks, internal refactors, test/CI/tooling changes, `@psilink/core` API reshapes, and doc-only edits. When in doubt, leave it out; a reviewer adds an entry back far more cheaply than the log recovers from bloat.
 - One or two lines per entry, stating the capability; push rationale and wire detail to `docs/`, `docs/spec/`, or the PR and link it with a trailing `See docs/...`.
@@ -205,7 +205,7 @@ A change requires explicit security review and maintainer approval before mergin
 
 Modifying an existing control in these areas is in scope exactly as adding one is: a change that weakens or removes a guarantee triggers review no less than a new control does.
 
-PSI-Link is licensed under [Apache 2.0](LICENSE.md); add third-party dependencies conservatively. For every new dependency:
+psilink is licensed under [Apache 2.0](LICENSE.md); add third-party dependencies conservatively. For every new dependency:
 
 1. Confirm the license permits Apache 2.0 distribution. Copyleft licenses (GPL, AGPL) are not compatible. The [Dependency Review workflow](.github/workflows/dependency_review.yaml) enforces this automatically for the strong-copyleft GPL/AGPL family via its `deny-licenses` blocklist, failing any PR that introduces a dependency under one. That gate is a backstop, not the whole rule: it fails only on a _declared_ denied SPDX id, so a passing check is not proof a dependency is clean -- one that ships no license metadata (or `NOASSERTION`) is reported but does not fail it. This review stays the authority for weak copyleft (LGPL, MPL), whose acceptability is linkage-dependent, and for any dependency whose license the action cannot resolve or that declares none (exempt a mis-flagged dependency with the workflow's `allow-dependencies-licenses` and clear it here).
 2. Run `npm audit --omit=dev -w packages/core -w apps/cli -w apps/web` -- the scope the shipped image runs -- and resolve any known vulnerabilities before merging. [Static Checks](.github/workflows/static_checks.yaml) runs that exact command as a merge gate on every pull request and fails on any finding, so this is a faster local answer rather than the only one; resolve a red gate by a reviewed bump, never by `npm audit fix`. A finding outside that scope is a development-tree finding, reported by the scheduled [Dependency Audit](.github/workflows/dependency_audit.yaml) and triaged separately rather than at merge time; see [docs/spec/DEPENDENCY_PINS.md](docs/spec/DEPENDENCY_PINS.md).
@@ -222,7 +222,7 @@ Per-dependency licenses are recorded authoritatively in the CycloneDX SBOM attac
 
 ## Export Control
 
-PSI-Link incorporates cryptographic software. Distribution may be subject to U.S. Export Administration Regulations (EAR). Most open-source cryptographic software qualifies for License Exception ENC under ECCN 5D002, but the exception requires a one-time notification to BIS and NSA. This notification is pending and will be completed before the 1.0 release. See [docs/COMPLIANCE.md](docs/COMPLIANCE.md#export-control-ear) for the full regulatory framing.
+psilink incorporates cryptographic software. Distribution may be subject to U.S. Export Administration Regulations (EAR). Most open-source cryptographic software qualifies for License Exception ENC under ECCN 5D002, but the exception requires a one-time notification to BIS and NSA. This notification is pending and will be completed before the 1.0 release. See [docs/COMPLIANCE.md](docs/COMPLIANCE.md#export-control-ear) for the full regulatory framing.
 
 ## Reporting Security Issues
 

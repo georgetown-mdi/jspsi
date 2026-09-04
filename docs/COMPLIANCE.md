@@ -1,7 +1,7 @@
 ---
 title: "PSI-Link Compliance"
 review_owner: "PSI-Link maintainers"
-last_reviewed: "2026-08-30"
+last_reviewed: "2026-09-04"
 ---
 
 # PSI-Link compliance
@@ -78,8 +78,6 @@ The following table summarizes the data classifications PSI-Link is and is not d
 | Federal Tax Information (FTI) under IRS Pub 1075 | Not validated | PSI-Link has not been assessed against IRS Publication 1075. Do not use for FTI workloads without an independent assessment. |
 | Classified information | No | The tool is not designed or evaluated for classified workloads. |
 
-<!-- TODO: confirm whether any deployments have completed a CJIS or IRS 1075 assessment and document the result. -->
-
 ## Federal frameworks
 
 These are the framework-level positions an assessor works through control by control: what each control family maps to in the design, what the FIPS 140 claim is scoped to and where an unqualified version of it fails, and the authorization, accessibility, and export-control postures. The policy-level answers they support are in [Start here](#start-here) above.
@@ -108,8 +106,6 @@ The table below maps PSI-Link's design to relevant control families of [NIST SP 
 ### FedRAMP and StateRAMP
 
 PSI-Link is software, not a service offering, and is not in scope for FedRAMP or StateRAMP authorization on its own. An agency that deploys the web application as a hosted service is responsible for any required authorization of that hosting environment.
-
-<!-- TODO: if a reference hosted deployment is offered, document its FedRAMP or StateRAMP posture here. -->
 
 ### FIPS 140
 
@@ -203,13 +199,9 @@ What the client puts on the wire is captured evidence rather than a reading of t
 
 The CLI has no graphical interface and is not subject to Section 508's web or software accessibility requirements. The web application has not been formally evaluated against WCAG 2.1 Level AA or Section 508. A Voluntary Product Accessibility Template (VPAT) is not yet available; an accessibility assessment is targeted ahead of the 1.0 release (see [ROADMAP.md](ROADMAP.md)).
 
-<!-- TODO: publish a VPAT or an Accessibility Conformance Report once the web application has been assessed. -->
-
 ### Export control (EAR)
 
 PSI-Link incorporates cryptographic software. Distribution may be subject to the U.S. Export Administration Regulations (EAR). Most open-source cryptographic software qualifies for License Exception ENC under ECCN 5D002, but the exception requires a one-time notification to the Bureau of Industry and Security (BIS) and the National Security Agency. This notification is pending and will be completed before the 1.0 release.
-
-<!-- TODO: record the BIS/NSA ENC notification reference once filed. -->
 
 ## Sector-specific framings
 
@@ -229,7 +221,7 @@ For HIPAA-regulated deployments:
   - The retention/disposition pointer is not itself a 164.528 accounting element; it is a local convenience recording where the result was filed and under what schedule, so an operator can locate and evidence the disposition during an audit without a separate lookup.
   - Whether a given disclosure is accountable, and the retention and production of the accounting, remain the agency's responsibility.
 
-<!-- TODO: provide a sample HIPAA-conduit determination memo template that agencies can adapt. -->
+No sample HIPAA conduit-exception determination memo is available yet; a deploying agency should have its own counsel prepare that determination.
 
 ### FERPA considerations
 
@@ -255,7 +247,7 @@ PSI-Link should not be used for FTI workloads without an independent assessment.
 
 State and local privacy laws (for example, California CCPA/CPRA, New York SHIELD Act, Texas DIR rules, Illinois BIPA where biometric identifiers are involved, and analogous statutes in other jurisdictions) impose requirements that vary by jurisdiction. PSI-Link does not enforce jurisdiction-specific controls; the deploying agency is responsible for assessing applicability and for any required notices, opt-outs, retention limits, or data-subject rights workflows.
 
-<!-- TODO: collect and link the most common state-law guidance documents that agencies have asked about. -->
+No collected set of state-law guidance documents is available yet; a deploying agency should consult its own counsel on applicable state and local requirements.
 
 ## Supply chain
 

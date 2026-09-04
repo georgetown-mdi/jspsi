@@ -1,7 +1,6 @@
-PSI-Link
-========
+# psilink
 
-PSI-Link is an open-source tool that lets two organizations find the records (individuals) they have in common with the option of exchanging data about those shared records, without either organization revealing anything about the records they do not share. It performs privacy-preserving record linkage (PPRL) using a cryptographic protocol called private set intersection (PSI).
+psilink is an open-source tool that lets two organizations find the records (individuals) they have in common with the option of exchanging data about those shared records, without either organization revealing anything about the records they do not share. It performs privacy-preserving record linkage (PPRL) using a cryptographic protocol called private set intersection (PSI).
 
 ## Key features
 
@@ -30,7 +29,7 @@ A third option combines the two: the same Docker image can serve the web interfa
 
 This repository includes two synthetic datasets you can use to try the tool without touching real records: [`test_data/fake_data_1.csv`](test_data/fake_data_1.csv) and [`test_data/fake_data_2.csv`](test_data/fake_data_2.csv). Each contains fabricated names, SSNs, and dates of birth, with partial overlap between the two files, so you can run a complete practice exchange. One party uses each file and one initiates and then provides the generated link to the other party (e.g., via Slack or email).
 
-# Web App Quickstart
+## Web App Quickstart
 
 1. Clone this repository: `git clone https://github.com/georgetown-mdi/jspsi.git` and `cd` into it
 2. Install Node.js and NPM
@@ -46,7 +45,7 @@ To try it out, use the files in [`test_data/`](test_data/) as each party's input
 
 See [apps/web](apps/web) for more details.
 
-# CLI App Quickstart
+## CLI App Quickstart
 
 This app has a pre-built Docker image that can be used.
 
@@ -89,7 +88,7 @@ To practice before using real data, the repository provides two synthetic input 
 
 For more information, see [apps/cli](apps/cli/).
 
-# Web Console Quickstart
+## Web Console Quickstart
 
 The same Docker image serves the guided web experience from your own machine, with no Node.js setup, and runs the exchange (over SFTP or a shared directory) on that machine rather than browser-to-browser. It serves one party and is never shared beyond that host.
 
@@ -108,17 +107,17 @@ docker run --rm -p 127.0.0.1:3000:3000 --env JOB_DATA_ROOT=/work -v "${PWD}:/wor
 
 The one mounted directory holds your input, the exchange's working files, and its results; the console reads your CSV in place. Publishing to `127.0.0.1` keeps the unauthenticated console reachable only from this machine, and works the same on Linux, macOS, and Windows. For SFTP exchanges, or to keep the partner-synced directory separate from your files, see [Server job API](docs/DEPLOYMENT.md#server-job-api).
 
-Mounting `$PWD` means the console writes the working files and results into that directory as uid 1000, the account the container runs as, and `serve` is the one role that cannot instead be run as your own account with `--user`: it keeps container-internal state belonging to that uid. Docker Desktop -- on Mac, Windows, or Linux -- presents the mount to that account, so the command above works as written. Under Docker Engine on Linux the directory keeps its own ownership, so give it to that uid once -- `sudo chown 1000:1000 "$PWD"` -- if your account is not itself uid 1000, and expect what the console leaves behind to belong to uid 1000 rather than to you, so `sudo` may be needed to move or delete it afterwards. See [The user the image runs as](docs/DEPLOYMENT.md#the-user-the-image-runs-as).
+The `serve` role is the one that cannot instead be run as your own account with `--user`: it keeps container-internal state belonging to uid 1000, so what it leaves behind in the mounted directory belongs to uid 1000 as well, and `sudo` may be needed to move or delete it afterwards. See the uid 1000 guidance above, and [The user the image runs as](docs/DEPLOYMENT.md#the-user-the-image-runs-as).
 
-# Podman
+## Podman
 
 [Podman](https://podman.io/) can be used as a drop-in replacement for Docker. The only change needed is to replace calls to the `docker` executable with calls to `podman`.
 
-# CLI App
+## CLI App
 
-## SFTP parameters
+### SFTP parameters
 
-### Passwords
+#### Passwords
 
 Special characters in passwords can be interpreted incorrectly by your shell. To avoid this, encase the whole connection string in single-quotation marks or escape the problematic characters. As an example of an exchange running from the current directory (indicated by mounting `$PWD`, or **p**rinting the **w**orking **d**irectory):
 
@@ -134,7 +133,7 @@ docker run --rm --mount type=bind,src=$PWD,dst=/work vdorie/psi-link:latest \
    sftp://user:passw\!rd@example.org/psi input.csv output.csv
 ```
 
-### Command line flags
+#### Command line flags
 
 Connection parameters can also be specified individually as command line flags to the script. Among others, they include:
    * `--server-port` - port number of the server
@@ -154,17 +153,17 @@ docker run --rm --mount type=bind,src=$PWD,dst=/work vdorie/psi-link:latest \
 
 Note that because Docker prevents the container from accessing any path on your host system that isn't explicitly mounted, if you wish to use a pre-existing private key the program cannot access `~/.ssh` by default. In that case, either add a read-only mount to the key folder or copy the key to the working directory.
 
-## Windows
+### Windows
 
-### Windows Subsystem for Linux
+#### Windows Subsystem for Linux
 
 Docker for Windows requires that the Windows Subsystem for Linux be installed. Docker will ask you to install this the first time it starts up.
 
-### Docker terminal
+#### Docker terminal
 
 To execute commands, launch a terminal from within Docker Desktop by clicking on the `>_` icon on the lower-right of the application's status bar.
 
-## Paths and invocation
+### Paths and invocation
 
 Paths can be given to Docker using standard Windows-style back-slashes. One exception is at the very end of the string: a trailing back-slash can cause Docker to fail to understand the end of the string. It is safe to remove it as it will still be treated as a directory.
 
@@ -174,7 +173,7 @@ Additionally, the line-continuation markers given in the examples (the `\` at th
 docker run --rm --mount type=bind,src='C:\Users\me\Documents\psi-link',dst=/work vdorie/psi-link:latest sftp://user:password@example.org/psi input.csv output.csv
 ```
 
-## Docker run background
+### Docker run background
 
 The `docker run` command has two parts. The first is the Docker invocation, which mounts `WORK_PATH` at `/work` so the container can read your input and write the output there (see Docker's own docs for [`--rm`](https://docs.docker.com/reference/cli/docker/container/run/#rm) and [`--mount`](https://docs.docker.com/reference/cli/docker/container/run/#mount)):
 
@@ -194,7 +193,7 @@ However, you can place anything here you wish to pass on to the program. For exa
 docker run --rm vdorie/psi-link:latest --help
 ```
 
-# Documentation
+## Documentation
 
 The full documentation set lives in [docs/](docs/README.md) and covers the protocol, threat model, exchange specification, deployment, and operations. The role-based reading guide there points each audience (program officers, security reviewers, IT staff, contributors, partner agencies) to the most relevant documents. An agency security review starts with [docs/SHARED_RESPONSIBILITY.md](docs/SHARED_RESPONSIBILITY.md), which states the deployment model and what the project operates versus what the deploying agency operates.
 
