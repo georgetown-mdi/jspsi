@@ -4,8 +4,10 @@ title: "WebRTC Relay and Deployment Shape"
 
 # The WebRTC relay, and the shape that deploys it
 
-_Status: measured, with a recommendation and a proposed epic; nothing here is
-ratified, scheduled, or built. This note records what TURN over TLS on 443
+_Status: measured, with a recommendation and a proposed epic, and the
+recommendation is now deployed and verified -- a relayed exchange has been driven
+against the standing relay it recommended (see the bring-up addendum below). This
+note stays the measurement record. It records what TURN over TLS on 443
 carried on two restrictive network classes, what a per-exchange provisioned
 deployment costs and leaves behind, how a self-hosted relay compares with a
 managed one, and which shape the evidence favours. Nothing here is normative:
@@ -23,7 +25,7 @@ standing relay described in
 verified to carry a relayed exchange. A CLI party with all outbound and inbound
 UDP dropped (only loopback allowed), whose only possible transport is
 TURN-over-TLS on 443, completed a mutually-authenticated PSI exchange over ten
-matched records; host conntrack witnessed its entire media crossing the relay
+matched records; host conntrack witnessed its entire data-channel traffic crossing the relay
 (about 29 KB up, 36 KB down to the relay on 443), with a per-exchange
 HMAC-SHA1 credential on a one-hour expiry. Two operational findings from the
 bring-up. First, this coturn build logs no per-session relayed-byte summary to

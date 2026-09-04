@@ -113,7 +113,7 @@ running relay -- a real handshake, a real allocation, and an observed refusal of
 an allocation toward an internal address, so its probes now key on measured
 behaviour rather than documented exit statuses. Then a relayed exchange was
 driven through it: a CLI party with UDP blocked outright completed a
-mutually-authenticated exchange whose entire media the relay carried, with the
+mutually-authenticated exchange whose entire data-channel traffic the relay carried, with the
 credential minted per exchange by `mint-credential.sh`. The byte evidence and the
 two operational findings the bring-up surfaced are in
 [webrtc-relay-deployment.md](webrtc-relay-deployment.md), not restated here.
