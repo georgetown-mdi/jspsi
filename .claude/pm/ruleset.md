@@ -293,9 +293,9 @@ Ratified by the owner:
 
 - **CI and test coverage** (board 10) -- Done is: no prose runtime claim
   survives in shipped source, no test is held green by a retry or a skip, and
-  the merge gate's critical path is measured and includes no serial work that
+  the merge gate's critical path is measured and carries no serial work that
   could run beside it -- each claim is a check that fails on the
-  claimed-impossible state, each timing test has a measured margin, and
+  claimed-impossible state, each timing test carries a measured margin, and
   setup is paid once per pull request rather than once per job.
 - **Issue Orchestration** (board 10) -- Done is: every rule the issue-to-PR flow
   depends on is enforced by a hook or a check rather than by prose alone, and
@@ -306,11 +306,11 @@ Ratified by the owner:
   declared-but-inert path implemented or refused.
 - **Application Encryption** (board 9) -- Done is:
   escape-once-at-the-display-sink and bound-at-composition hold across every
-  operator-facing sink, kept true by checks rather than by a fix per fragment.
+  operator-facing sink, carried by checks rather than by a fix per fragment.
 - **Partnership identity and consent** (board 9) -- Done is: no exchange
   proceeds past a consent surface whose disclosure list and terms binding are
   unverified, on the invite, accept, and unattended paths alike.
-- **Web Exchange Rework** (board 9) -- Done is: the reworked screens complete a
+- **Web Exchange Rework** (board 9) -- Done is: the reworked screens carry a
   full invite-to-result exchange in the browser with the interop suite green,
   and no screen remains on the pre-rework flow.
 - **Agency security review readiness** (board 10) -- Done is: one agency
@@ -330,7 +330,7 @@ Ratified by the owner:
   constant, and the broker's provenance, deployment shape, and runtime surface
   are decided rather than inherited from the vendored server.
 - **Linkage rule sets** (board 9) -- Done is: an operator picks a built-in rule
-  set at authoring time, and no rule set that reaches a partner can include a term
+  set at authoring time, and no rule set that reaches a partner can carry a term
   that fails at the mint or whose per-row cost is unbounded.
 - **Scheduled exchanges** (board 9) -- Done is: a recurring exchange configured
   in the browser runs to completion unattended for a full schedule period with

@@ -1,9 +1,10 @@
 // Reading a Bash command line, and putting a read-only question to git.
 //
-// Every hook that splits a command line into stages and tokens, or asks git a
-// read-only question about a repository, uses this module, so a fix to the
-// splitters or the tokenizer applies everywhere at once. They are pragmatic,
-// not exhaustive, about it.
+// Three hooks split a command line into stages and tokenize it before
+// deciding anything, and five ran git to answer a question about a
+// repository. Each carried its own copy. The splitters and the tokenizer are
+// the code most likely to need a shared fix -- they are pragmatic and say so
+// -- and a hole closed in one copy stayed open in the others.
 //
 // None of this is a shell parser and none will become one. What it reads is a
 // plain command line: a subshell, a brace group, a command substitution, an

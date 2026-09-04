@@ -111,7 +111,7 @@ A gated claim or confirmed review finding has four dispositions, not one:
    `docs/spec/` line, and NO BOARD ITEM -- the ledger entry is the record, and it
    is durable because the ledger is per branch and survives the round.
 
-The last two are the cheap ones. A true finding whose fix would
+The last two are the cheap ones, not failures. A true finding whose fix would
 grow the guarded surface is usually best narrowed, and one that costs nothing a
 user or partner can reach is usually best stated.
 

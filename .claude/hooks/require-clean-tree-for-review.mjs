@@ -39,9 +39,9 @@
 // named by branch.
 //
 // This is the OPPOSITE default from block-protected-push.mjs. That hook fails OPEN
-// because GitHub branch protection is a safety check for a push it misses.
-// Here nothing is a safety check for a false clean, so every state where a
-// target cannot be CONFIRMED clean must block: a non-git cwd, a git error, a
+// because GitHub branch protection backstops a push it misses. Here nothing
+// backstops a false clean, so every state where a target cannot be CONFIRMED
+// clean must block: a non-git cwd, a git error, a
 // missing cwd, an unreadable `args`, a ref that does not resolve, a dirty
 // status, and a lock that cannot be written all exit 2. So does a payload that
 // parses to a JSON value other than an object -- null, an array, a primitive

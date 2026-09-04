@@ -771,7 +771,7 @@ function gitCleanVerdict(
   // force counter a real -f does. git >= 2.45 stopped feeding that counter from
   // the config, so there this shape only reaches the single-force threshold and
   // the guard, which blocks it either way, conservatively over-refuses it rather
-  // than model the git version. That boundary was fixed by driving real git
+  // than model the git version. That boundary was settled by driving real git
   // across it (the 2.44/2.45 versions), not by reading git.
   const force =
     flagForce +

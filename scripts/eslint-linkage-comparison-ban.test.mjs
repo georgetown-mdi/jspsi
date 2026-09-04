@@ -20,7 +20,7 @@ import {
 // key's opt-in badge and the terms' rule-set citation rather than failing.
 //
 // The ban itself fails silently in the other direction: an import specifier or
-// import-name that stops matching keeps reporting zero problems, which displays the
+// import-name that stops matching keeps reporting zero problems, which reads the
 // same as clean source. It is also held by two config objects that flat
 // config replaces rather than merges -- the src block, and the block below it
 // that repeats the src block's groups alongside this ban and exempts the
