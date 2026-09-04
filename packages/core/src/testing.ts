@@ -94,14 +94,14 @@ const captures: Array<{
 }> = [];
 let interceptorInstalled = false;
 
-/** Installs the loglevel `methodFactory` interceptor that backs `withCapturedLogs`,
- * idempotently. `withCapturedLogs` calls this on its first use, so a standalone
- * caller never needs it; call it eagerly from test setup -- before any named logger
- * is constructed -- to close the creation-order gap noted on `withCapturedLogs`.
- * loglevel binds a logger's methods from the factory live at `getLogger` time, so a
- * named logger built before the interceptor exists never routes through capture;
- * installing here first makes every later-created logger bind to capture regardless
- * of creation order. */
+/** Installs the loglevel `methodFactory` interceptor that backs
+ * `withCapturedLogs`, idempotently. `withCapturedLogs` calls this on its
+ * first use, so a standalone caller needs it only to close the
+ * creation-order gap noted on `withCapturedLogs`: call it from test setup
+ * before any named logger is constructed. loglevel binds a logger's
+ * methods from the factory live at `getLogger` time, so installing here
+ * first is what lets a later-created logger bind to capture regardless of
+ * creation order. */
 export function installCapturedLogsInterceptor(): void {
   if (interceptorInstalled) return;
   interceptorInstalled = true;
@@ -130,28 +130,28 @@ export function installCapturedLogsInterceptor(): void {
   logLibrary.setLevel(logLibrary.getLevel());
 }
 
-/** Intercepts log output during `fn` and returns it alongside the function result.
- * By default only `WARN` messages are captured; pass `levelFilter` to change which
- * levels are collected. A message is suppressed from normal output only when every
- * concurrent capture's filter claims it; otherwise it passes through unchanged, so
- * concurrent calls do not affect each other's observable output.
- * If `fn` rejects, captured logs are discarded and the rejection propagates.
- * Limitations: messages below loglevel's current threshold are never delivered to
- * `methodFactory` (loglevel assigns `noop` directly) and will not be captured. A
- * `getLoggerForVerbosity` logger never sets a level more verbose than the current
- * root, so a `.debug()` line at `verbose: 1` is captured only once the root itself
- * is raised (e.g. `logLibrary.setLevel("trace")`) before the logger is constructed
- * -- driven in capturedLogs.test.ts.
- * Separately, a named logger created before the interceptor is installed binds to
- * the pre-install factory and bypasses capture -- call `installCapturedLogsInterceptor`
- * from test setup, ahead of any logger, to close that creation-order gap (the CLI
- * integration suite does, so its loggers are captured regardless of creation order).
- * Separately still, a diagnostic sink installed via `setDiagnosticSink` (the CLI's
- * stderr / `--log-file` routing) is consulted at emit time DOWNSTREAM of this
- * interceptor, so while such a sink is active `setLogPrefixer` routes to it and
- * never reaches the captured factory -- output is not captured here. Do not pair
- * `withCapturedLogs` with a command handler that installs a sink; drive the inner
- * seam directly, as the integration suite does. */
+/** Intercepts log output during `fn` and returns it alongside the function
+ * result. By default only `WARN` messages are captured; pass `levelFilter`
+ * to change which levels are collected. A message is suppressed from
+ * normal output only when every concurrent capture's filter claims it;
+ * otherwise it passes through unchanged, so concurrent calls do not affect
+ * each other's observable output. If `fn` rejects, captured logs are
+ * discarded and the rejection propagates.
+ *
+ * Limitations: messages below loglevel's current threshold never reach
+ * `methodFactory` (loglevel assigns `noop` directly) and are not captured.
+ * A `getLoggerForVerbosity` logger never sets a level more verbose than
+ * the current root, so a `.debug()` line at `verbose: 1` is captured only
+ * once the root itself is raised (e.g. `logLibrary.setLevel("trace")`)
+ * before the logger is constructed -- driven in capturedLogs.test.ts. A
+ * named logger created before {@link installCapturedLogsInterceptor} runs
+ * bypasses capture; call it from test setup, ahead of any logger, to
+ * close that gap (the CLI integration suite does). A diagnostic sink
+ * installed via `setDiagnosticSink` (the CLI's stderr / `--log-file`
+ * routing) is consulted downstream of this interceptor, so while one is
+ * active, output routes to it and is not captured here -- do not pair
+ * `withCapturedLogs` with a command handler that installs a sink; call the
+ * underlying function directly instead, as the integration suite does. */
 export function withCapturedLogs<T>(
   fn: () => Promise<T>,
   levelFilter?: (level: string) => boolean,

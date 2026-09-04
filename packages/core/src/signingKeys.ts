@@ -9,11 +9,11 @@ import { UsageError } from "./errors.js";
 // module configured beneath the platform performs all of them.
 //
 // Why the format is pinned above crypto.subtle rather than delegated to it: the
-// certificate body carries the public key as its literal JWK strings, and the
+// certificate body holds the public key as its literal JWK strings, and the
 // pinned fingerprint is a hash of those strings. Two different encodings of one
 // point would therefore be two different fingerprints for one key. importKey
 // admits more than the canonical form -- driven against Node, a coordinate
-// carrying a 33rd leading zero byte and a base64 (padded) coordinate are both
+// holding a 33rd leading zero byte and a base64 (padded) coordinate are both
 // accepted and re-decode to the same point -- so the canonical encoding is
 // checked here, before import, and importKey is left only the question it
 // answers authoritatively: whether the point is on the curve.

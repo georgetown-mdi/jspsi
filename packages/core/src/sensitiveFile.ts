@@ -18,11 +18,11 @@ import { parseBoundedJson } from "./utils/boundedJson.js";
 // parsers across packages/core/src (this module is the exempt chokepoint),
 // apps/web/src, apps/cli/src (outside the CLI's thin re-export of this module),
 // and packages/peerjs-broker/src, so no caller can silently reopen a leak
-// channel. The filesystem READ stays with each CLI caller -- an errno carries
+// channel. The filesystem READ stays with each CLI caller -- an errno holds
 // only a path and code, no content.
 //
-// Centralizing matters because the parsers leak through several independent
-// channels that are easy to reintroduce one call site at a time:
+// The parsers leak through several independent channels, each easy to
+// reintroduce at a single call site:
 //
 //   1. YAML.parse throws a YAMLParseError on a syntax error and a plain
 //      ReferenceError on an unresolved alias; both messages embed a snippet of
@@ -31,16 +31,17 @@ import { parseBoundedJson } from "./utils/boundedJson.js";
 //      and defers alias resolution: an unresolved alias leaves doc.errors empty
 //      and throws only when the document is materialized (toString / toJS),
 //      echoing the alias token. Both are guarded here.
-//   3. YAML.parse / parseDocument emit NON-fatal warnings (an unresolved custom
-//      tag, a bad !!int/!!float cast) and then return normally, so no try/catch
-//      fires. The warning carries the full source line; the yaml package routes it
-//      to process.emitWarning (STDERR) under Node, or to console.warn in a browser
-//      where process is absent (the same secret-bearing text, just a different
-//      sink). logLevel "error" suppresses BOTH sinks while still THROWING on fatal
-//      errors -- this module is shared with the browser, so closing the
-//      console.warn sink matters as much as the Node one. (logLevel "silent" would
-//      also swallow the fatal-error throw, returning a mangled partial object, so
-//      it is NOT used.)
+//   3. YAML.parse / parseDocument emit NON-fatal warnings (an unresolved
+//      custom tag, a bad !!int/!!float cast) and then return normally, so no
+//      try/catch fires. The warning holds the full source line; the yaml
+//      package routes it to process.emitWarning (STDERR) under Node, or to
+//      console.warn in a browser where process is absent (the same
+//      secret-bearing text, just a different sink). logLevel "error"
+//      suppresses BOTH sinks while still THROWING on fatal errors -- this
+//      module is shared with the browser, so closing the console.warn sink
+//      matters as much as the Node one. (logLevel "silent" would also swallow
+//      the fatal-error throw, returning a mangled partial object, so it is NOT
+//      used.)
 //   4. JSON.parse throws a SyntaxError that, on a non-JSON document start, echoes
 //      a leading span of the source (the shared secret / private key if the
 //      document leads with it). Path only.
@@ -53,12 +54,12 @@ import { parseBoundedJson } from "./utils/boundedJson.js";
  * yaml parse options for a credential-bearing document: suppress non-fatal
  * warnings (they echo source to stderr; see channel 3 above) while still
  * throwing on fatal errors, and cap alias expansion so an alias bomb
- * (billion-laughs) cannot blow up memory before the schema's own bounds bite.
+ * (billion-laughs) cannot blow up memory before the schema's own bounds
+ * bite.
  *
- * `maxAliasCount: 100` is the library's current default; pinning it makes the
- * alias-bomb bound an explicit, enforced check here rather than an implicit
- * reliance on a default a future yaml release could change. The web import path
- * also length-caps the input before this runs.
+ * `maxAliasCount: 100` pins the library's current default as an explicit,
+ * enforced check rather than an implicit one a future yaml release could
+ * change; the web import path also length-caps the input before this runs.
  */
 const SAFE_YAML_OPTIONS = { logLevel: "error", maxAliasCount: 100 } as const;
 
@@ -90,7 +91,7 @@ export function parseSensitiveYaml(source: string, fileLabel: string): unknown {
  * `JSON.stringify` it back into an error elsewhere -- the one leak channel the
  * ESLint ban cannot see (a method call on a Document instance, not on the YAML
  * namespace). Guards the syntax-error channel (doc.errors, before the edit) and
- * the deferred-alias channel (the alias surfaces only when toString materializes
+ * the deferred-alias channel (the alias shows only when toString materializes
  * the document, after the edit). An error the `edit` callback itself throws
  * propagates unchanged.
  */

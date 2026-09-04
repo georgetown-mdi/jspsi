@@ -71,8 +71,9 @@ export async function deriveRendezvousPeerId(
     );
   }
   // Runtime guard for an untyped (plain-JS or `as`-cast) caller, mirroring
-  // deriveAeadKey: an unknown role would otherwise silently derive an id the two
-  // parties never agree on, surfacing only as a rendezvous that never connects.
+  // deriveAeadKey: an unknown role would otherwise silently derive an id
+  // the two parties never agree on, showing up only as a rendezvous that
+  // never connects.
   if (!(RENDEZVOUS_ROLES as readonly string[]).includes(role)) {
     throw new Error(
       `deriveRendezvousPeerId: unknown role ${JSON.stringify(role)}; ` +

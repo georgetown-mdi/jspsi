@@ -32,26 +32,20 @@ interface InferredDateInputFormat {
 }
 
 /**
- * Read a CSV source's header and infer its date-of-birth column's date-input
- * format, in one bounded streaming pass -- the composition every "derive a config
- * from a file" path shares. It locates the DOB column with
- * {@link inferDateOfBirthColumn}, samples that column's first
- * {@link INFER_DATE_SCAN_CAP} non-empty values through {@link loadCSVColumnSample}
- * (which stops as soon as the sample is full), and runs {@link inferDateFormat}
- * over the sample.
+ * Read a CSV source's header and infer its date-of-birth column's
+ * `parse_date` input format, in one bounded streaming pass -- the
+ * composition every "derive a config from a file" path shares.
  *
- * The bound is exact, not heuristic: the sample caps at {@link INFER_DATE_SCAN_CAP}
- * non-empty values, the same cap {@link inferDateFormat} stops its own scan at, so
- * the format inferred from the bounded sample is IDENTICAL to one inferred from a
- * full-column read. That cap-exactness is what lets a caller infer the format
- * without materializing the file: the CLI's `init` and the web server's file
- * profile both rely on it, so a mounted CLI-scale file (millions of rows) profiles
- * at header-plus-one-chunk peak memory rather than scaling with the file.
+ * The bound is exact, not heuristic: the sample cap matches
+ * {@link inferDateFormat}'s own scan cap, so the inferred format equals one
+ * from a full-column read. The CLI's `init` and the web server's file
+ * profile rely on that equivalence to profile a CLI-scale file (millions of
+ * rows) at bounded, not file-sized, peak memory.
  *
- * Resolves the header columns, the resolved DOB column (absent when the header has
- * none), and the inferred format (absent when there is no DOB column or the
- * sample yields no format signal); rejects on a read/parse error or a single-line
- * ceiling trip, the same contract as {@link loadCSVColumnSample}.
+ * Resolves the header columns, the DOB column (absent without one), and the
+ * format (absent without a DOB column or a signal in its sample); rejects,
+ * like {@link loadCSVColumnSample}, on a read/parse error or line-ceiling
+ * trip.
  */
 export async function inferDateInputFormatFromSource(
   file: LocalFile,

@@ -30,15 +30,16 @@ import { exceedsOwnKeyCount } from "../utils/objectKeyCount.js";
 // These terms travel inside an invitation token from an unauthenticated
 // counterparty, and again off the exchange wire under the far larger
 // MAX_FRAME_SIZE_BYTES cap (connection/frameSize.ts). Every partner-controlled
-// free-text string carries a generous length `.max()`, and every
-// partner-controlled collection carries a count bound applied BEFORE
-// per-element validation: `boundedArray` for an array, or an equivalent
-// count-refine + pipe for the `transform.params` record, which `boundedArray`
-// does not cover. The exchange-wire arrays whose real count is legitimately in
-// the millions (payloadExchange.ts, participant.ts, link.ts) take a
-// single-issue element validator instead (utils/singleIssueArray.ts). The
-// Connection, Standardization, and Metadata schemas are operator-local, not
-// partner-controlled, and carry no such bound.
+// free-text string has a generous length `.max()`, and every
+// partner-controlled collection has a count bound applied before per-element
+// validation: `boundedArray` for an array, or an equivalent count-refine +
+// pipe for the `transform.params` record, which `boundedArray` does not
+// cover. The exchange-wire arrays whose real count is legitimately in the
+// millions (payloadExchange.ts, participant.ts, link.ts) use a single-issue
+// element validator instead (utils/singleIssueArray.ts). The Connection,
+// Standardization, and Metadata schemas are operator-local, not
+// partner-controlled, and have no such bound. Full reasoning:
+// docs/spec/CHANNEL_SECURITY.md, "Application-layer parsed-input bounds".
 
 /**
  * Upper bound on a short partner-controlled identifier- or spec-like string: a
@@ -55,7 +56,7 @@ export const MAX_NAME_LENGTH = 256;
  * `identity`, a legal-agreement `purpose`, a payload column `description`, or
  * a constraint `exclude` value. Larger than {@link MAX_NAME_LENGTH} since
  * these hold a sentence or a long data value rather than a single label. The
- * same four fields carry {@link TEXT_CONTROL_CHAR_PATTERN} without exception.
+ * same four fields apply {@link TEXT_CONTROL_CHAR_PATTERN} without exception.
  */
 export const MAX_TEXT_LENGTH = 1024;
 
@@ -70,7 +71,7 @@ export const MAX_TEXT_LENGTH = 1024;
  * operator's own config load, the post-handshake wire re-parse
  * (`parseLinkageTerms`), the invitation-token decode, and the exchange-file
  * and job-intent schemas that embed {@link LinkageTermsSchema} -- inherits it,
- * rather than each consumer carrying a guard of its own.
+ * rather than each consumer holding a guard of its own.
  *
  * A reader of an already-recorded value -- the exchange-record reader
  * (exchangeRecord.ts) and the wire-certificate schema (signedReceipt.ts) --
@@ -114,95 +115,62 @@ export const MAX_LINKAGE_ENTRIES = 256;
 export const MAX_PARAMS_ENTRIES = 256;
 
 /**
- * Upper bound on the `length` param of a `pad_left` transform step -- a
- * numeric value, so the uniform string bound
- * ({@link MAX_TRANSFORM_PARAM_LENGTH}) does not cover it. `pad_left` runs per
- * row in the key-building pipeline ({@link applyElementTransform}), and an
- * unbounded `length` drives an unbounded `String.prototype.padStart`
- * allocation on every row. Enforced by a per-step refine on
- * {@link TransformStep}'s schema before any per-row allocation; the factory's
- * own positive-integer check (standardization.ts) remains the runtime
- * safety check for the operator-local standardization path, which never
- * reaches this schema. A DoS ceiling on the partner wire path, not a
- * semantic limit.
+ * Upper bound on the numeric `length` param of a `pad_left` transform step
+ * (the uniform string bound {@link MAX_TRANSFORM_PARAM_LENGTH} does not
+ * cover a number). `pad_left` runs per row in the key-building pipeline
+ * ({@link applyElementTransform}); an unbounded `length` drives an unbounded
+ * `padStart` allocation on every row. The factory's own positive-integer
+ * check (standardization.ts) remains the runtime safety check for the
+ * operator-local path, which never reaches this schema. Full reasoning:
+ * docs/spec/CHANNEL_SECURITY.md, "Unbounded transform-parameter rejection".
  */
 export const MAX_PAD_LEFT_LENGTH = 256;
 
 /**
  * Upper bound on the `inputFormat` and `outputFormat` params of a
  * `parse_date` transform step, stricter than the uniform string bound every
- * param value carries ({@link MAX_TRANSFORM_PARAM_LENGTH}): both drive a
- * per-row regex build and output allocation in the key-building pipeline
+ * param value has ({@link MAX_TRANSFORM_PARAM_LENGTH}): both drive a per-row
+ * regex build and output allocation in the key-building pipeline
  * ({@link applyElementTransform}). `parse_date` compiles its regex under the
  * linear-time engine (standardization.ts), so this cap bounds per-row work
- * size rather than guarding against backtracking. Enforced by a per-step
- * refine on {@link TransformStep}'s schema before any row runs. A DoS
- * ceiling on the partner wire path, not a semantic limit.
+ * size rather than guarding against backtracking. Full reasoning:
+ * docs/spec/CHANNEL_SECURITY.md, "Unbounded transform-parameter rejection".
  */
 export const MAX_DATE_FORMAT_LENGTH = 256;
 
 /**
- * Upper bound on the length of a raw partner-controlled regex pattern -- the
+ * Upper bound on the length of a raw partner-controlled regex pattern: the
  * `pattern` of `replace_regex` / `extract_regex` / `filter_regex` and the
- * `delimiter` of `split_on`. These compile per row in the key-building
- * pipeline ({@link applyElementTransform}) under the linear-time engine,
- * which cannot backtrack catastrophically but whose compile cost is
- * super-linear in source length; this is a compile-cost ceiling, not a
- * safety control. Enforced twice before any row runs: a per-step refine on
+ * `delimiter` of `split_on`. These compile per row under the linear-time
+ * engine, which cannot backtrack catastrophically but whose compile cost is
+ * super-linear in source length -- a compile-cost ceiling, not a
+ * backtracking guard. Enforced twice: a per-step refine on
  * {@link TransformStep}'s schema, and the dialect gate on
- * {@link LinkageTermsSchema} (as `maxPatternLength`), which rejects an
- * oversized source without compiling it. A DoS ceiling on the partner wire
- * path, not a semantic limit.
+ * {@link LinkageTermsSchema} (`maxPatternLength`). Full reasoning:
+ * docs/spec/CHANNEL_SECURITY.md, "Transform-regex linear-time dialect".
  */
 export const MAX_TRANSFORM_PATTERN_LENGTH = 1000;
 
 /**
  * Upper bound on the length of a STRING-valued partner-controlled transform
- * param -- the uniform content bound under the per-function caps above,
- * applied to every string-valued entry of a `transform.params` record,
- * whatever function or param name it sits under, since a string param sizes
- * per-row work in the key-building pipeline regardless of which function
- * reads it. Deliberately the same threshold as
- * {@link MAX_TRANSFORM_PATTERN_LENGTH}, so no string param is more generous
- * than the pattern beside it.
- *
- * Enforced on the `params` record's VALUE stage (see {@link TransformStep}'s
- * schema) before any row runs; the offending param is located by the issue
- * `path` rather than echoed.
- *
- * It reaches a string VALUE of the record, not a string nested inside an array-
- * or object-valued param: no factory derives a per-row value from a nested string
- * (`null_if` compares its `values` entries against the cell and emits the cell or
- * null; every other factory that reads a string param falls back to its default
- * for a non-string, pinned in standardization.test.ts), and an array param a
- * regex factory would render into a compile source is separately bounded on the
- * COERCED source by {@link MAX_TRANSFORM_PATTERN_LENGTH}.
- *
- * What it removes is the partner's ability to supply an unbounded-LENGTH param,
- * not the ability to amplify the value a row derives from one: this cap does not
- * bound the transformed value, because a `replace_regex` replacement is a
- * substitution TEMPLATE whose match-context sequences re-insert the operator's
- * own cell at every match position, and transform steps compose. The produced
- * value carries its own ceiling where the row runs, on what a key element reads
- * and on what each of its steps produces (`MAX_TRANSFORMED_VALUE_LENGTH` in
- * standardization.ts), so the two bounds are complementary: this one is what the
- * partner may WRITE, that one what a row may DERIVE. The substitution sequences
- * keep their wire meaning under it.
- *
- * A DoS ceiling on the partner wire path, not a semantic limit: an in-range value
- * is preserved verbatim, never clamped, since both parties must derive
- * byte-identical keys.
+ * param: applies to every string entry of a `transform.params` record,
+ * whatever function or param name it sits under. By design the same
+ * threshold as {@link MAX_TRANSFORM_PATTERN_LENGTH}. Bounds what the partner
+ * may WRITE, not what a row may DERIVE from it -- see
+ * {@link MAX_TRANSFORMED_VALUE_LENGTH} (standardization.ts) for that
+ * complementary ceiling. Full reasoning: docs/spec/CHANNEL_SECURITY.md,
+ * "Unbounded transform-parameter rejection".
  */
 export const MAX_TRANSFORM_PARAM_LENGTH = 1000;
 
 /**
  * Generous upper bound on the COUNT of values in a constraint `exclude`
- * denylist. A denylist legitimately holds hundreds of values (a list of invalid
- * SSN patterns, blocked test values, an email blocklist), so this is the most
- * generous of the collection-count bounds; 4096 is far above any real denylist
- * yet well below the ~130k count at which Zod's issue accumulation overflows the
- * call stack (see the untrusted-input bounds note above). Enforced before
- * per-element validation by {@link boundedArray}.
+ * denylist. A denylist legitimately holds hundreds of values (a list of
+ * invalid SSN patterns, blocked test values, an email blocklist), so this is
+ * the most generous of the collection-count bounds -- far above any real
+ * denylist yet well below the RangeError threshold documented in the
+ * untrusted-input bounds note above. Enforced before per-element validation
+ * by {@link boundedArray}.
  */
 export const MAX_EXCLUDE_ENTRIES = 4096;
 
@@ -226,13 +194,12 @@ export const MAX_TRANSFORM_STEPS = 256;
 export const MAX_KEY_ELEMENTS = 256;
 
 /**
- * Generous upper bound on the COUNT of columns in a payload `send` or `receive`
- * list. A payload shares a curated set of output columns -- a handful to a few
- * dozen, at most a few hundred for an unusually wide dataset; 4096 is far above
- * any real column set yet far below the ~3.5M count at which Zod's error-string
- * construction throws `RangeError: Invalid string length` (see the untrusted-
- * input bounds note above). Enforced before per-element validation by
- * {@link boundedArray}.
+ * Generous upper bound on the COUNT of columns in a payload `send` or
+ * `receive` list. A payload shares a curated set of output columns -- a
+ * handful to a few dozen, at most a few hundred for an unusually wide
+ * dataset -- far above any real column set yet far below the RangeError
+ * threshold documented in the untrusted-input bounds note above. Enforced
+ * before per-element validation by {@link boundedArray}.
  */
 export const MAX_PAYLOAD_ENTRIES = 4096;
 
@@ -316,27 +283,14 @@ interface NameConstraints {
 
 const NameConstraintsSchema: z.ZodType<NameConstraints> = z.object({
   // Validated to compile as a character class under the linear-time engine
-  // (re2js) -- the SAME engine that executes it: the core value-level constraint
-  // check (`checkValueConstraints` in standardization.ts, shared by the web
-  // workbench and the CLI) compiles `^[allowedCharacters]$` under that engine, one
-  // code point at a time, to flag values outside the class -- escaping a leading
-  // `^` (and a `-` immediately after it) to a literal first so the class is read as
-  // an allow-list, not a negation. Validating with the engine that runs it
-  // guarantees a class accepted here compiles at check time (if escaping a leading
-  // caret yields a form re2js cannot compile, the check over-flags rather than
-  // failing open -- see withinAllowedCharacters -- so a refine-accepted class is
-  // never silently un-checked),
-  // so the advisory cannot silently fail open on a class the native engine accepts
-  // but re2js rejects (a backreference, a POSIX/Unicode class, or the degenerate
-  // empty class).
-  //
-  // The length short-circuit in the refine is a real pre-compile gate, not an
-  // ordering assumption: a failed `.max()` does NOT stop the refine from running
-  // (Zod does not short-circuit chained checks), so without the guard an oversized
-  // partner-controlled value would be interpolated into `[${val}]` and compiled
-  // under re2js -- super-linear in length, a multi-second synchronous stall. An
-  // over-length value passes the refine so `.max()` rejects it on length alone;
-  // only an in-length class reaches patternConformsToDialect.
+  // (re2js), the SAME engine that executes it (`checkValueConstraints`,
+  // standardization.ts): a leading `^` is escaped to a literal first so the
+  // class is treated as an allow-list, not a negation. The length check runs
+  // before the compile so an oversized value never reaches it -- Zod does
+  // not short-circuit chained checks, so the refine still runs after a
+  // failed `.max()`; an over-length value passes the refine on that
+  // short-circuit and is rejected by `.max()` alone. Full reasoning:
+  // docs/spec/CHANNEL_SECURITY.md, "Name-constraint character class".
   allowedCharacters: z
     .string()
     .max(MAX_NAME_LENGTH)
@@ -518,15 +472,12 @@ export interface TransformStep {
 }
 
 // One value of a transform step's `params` record: any JSON value, with a
-// content bound on a string. The bound is on the VALUE STAGE rather than a
-// per-step refine so it holds for every function and every param name at once --
-// including a function this build does not implement -- which is what makes it
-// undodgeable by routing content through a param no per-function refine covers.
-// A non-string value passes through untouched (`z.unknown()`), leaving each
-// factory's own runtime coercion contract unchanged; the params whose non-string
-// magnitude drives per-row work carry their own stricter refines on
-// TransformStepSchema below. See MAX_TRANSFORM_PARAM_LENGTH for the model and the
-// bound's stated reach.
+// content bound on a string. The bound sits on the VALUE STAGE rather than a
+// per-step refine so it holds for every function and param name at once,
+// including one this build does not implement. A non-string value passes
+// through untouched (`z.unknown()`); the params whose non-string magnitude
+// drives per-row work have their own stricter refines on TransformStepSchema
+// below. See MAX_TRANSFORM_PARAM_LENGTH.
 const TransformParamValueSchema = z
   .unknown()
   .refine(
@@ -544,31 +495,15 @@ const TransformParamValueSchema = z
 // base the pad_left refine below chains onto (mirrors LinkageTermsBaseSchema).
 const TransformStepBaseSchema = z.object({
   function: z.string().min(1).max(MAX_NAME_LENGTH),
-  // The record's KEYS are partner-controlled strings (parameter names), so they
-  // are length-bounded like every other free-text string, and each string VALUE
-  // is length-bounded by TransformParamValueSchema above. The entry COUNT is
-  // bounded at MAX_PARAMS_ENTRIES, and -- critically -- that gate is a bare key
-  // count (see exceedsOwnKeyCount) that runs BEFORE the per-key length check. The
-  // `z.unknown()` first stage accepts the value untouched, doing no per-key VALIDATION
-  // of its own -- unlike a permissive `z.record(z.string(), z.unknown())` first
-  // stage, which would parse every key (a ZodType per key) before the refine
-  // could fire. The count itself still enumerates the keys (O(n); a materialized
-  // object has no sub-linear count), but a plain count is far cheaper than that
-  // per-key parse, so the refine rejects an over-count record for roughly the
-  // cost of one key enumeration; `.pipe` re-validates the now count-capped record
-  // against the per-key length bound. The refine passes a non-record value
-  // (null/array/primitive) straight through so the pipe surfaces the same
-  // record-type error as before. A length-bounded `z.record` first stage would
-  // not help either -- Zod walks and validates every key during that record's own
-  // parse, before any refine runs, both burning O(n) on a millions-key record and
-  // (on the wide wire-path frame, MAX_FRAME_SIZE_BYTES, far above the 64 KiB
-  // invitation cap) overflowing its call stack at ~130k bad keys as it spreads
-  // that issue array up through the nesting. The camelize pre-pass
-  // (parseLinkageTerms) is short-circuited for the same over-count record by the
-  // same bound, so the record is rewritten by neither pass before this rejection.
-  // The pipe keeps the post-cap `invalid_key` path -- and its parse-error
-  // sanitization -- intact for an in-range over-long key, and carries the
-  // per-value content bound for an in-range one.
+  // The record's keys (parameter names) are length-bounded like every other
+  // free-text string, and each string value is length-bounded by
+  // TransformParamValueSchema above. The entry count is bounded at
+  // MAX_PARAMS_ENTRIES by a bare key count (exceedsOwnKeyCount) that runs
+  // before the per-key length check -- the same permissive-stage +
+  // count-refine + pipe shape as boundedArray, so an over-count record is
+  // rejected for the cost of one key enumeration rather than a per-key Zod
+  // parse. Full reasoning: docs/spec/CHANNEL_SECURITY.md, "Application-layer
+  // parsed-input bounds".
   params: z
     .unknown()
     .refine(
@@ -586,25 +521,22 @@ const TransformStepBaseSchema = z.object({
     .optional(),
 });
 
-// Per-function content bounds, stricter than the uniform string bound every param
-// value already carries (TransformParamValueSchema), on the partner-controlled
-// VALUES whose magnitude drives per-row work in a shape a string length does not
-// describe: a number, a per-row regex build, and a compile source read off a value
-// of any type. Each is a per-step refine on this wire schema -- not on the editor
-// descriptor an attacker-authored token never passes through -- and each message
-// names no partner value, consistent with the unsanitized parse-error path the
-// referential-integrity and dialect refines rely on.
+// Per-function content bounds, stricter than the uniform string bound every
+// param value already has (TransformParamValueSchema), on values whose
+// magnitude drives per-row work in a shape a string length does not
+// describe: a number, a per-row regex build, and a compile source read off a
+// value of any type. Each is a per-step refine on this wire schema -- not on
+// the editor descriptor an attacker-authored token never passes through --
+// and each message names no partner value. Full reasoning:
+// docs/spec/CHANNEL_SECURITY.md, "Unbounded transform-parameter rejection".
 const TransformStepSchema: z.ZodType<TransformStep> = TransformStepBaseSchema
-  // `pad_left` runs per row in the key-building pipeline (standardization.ts
-  // applyElementTransform, driven by buildKeyStrings), so an unbounded `length`
-  // makes every row allocate a `padStart(length, char)` of that size -- a crafted
-  // 1e9 exhausts memory and hangs the acceptor, the memory-allocation sibling of
-  // the regex compile-cost cap below (MAX_TRANSFORM_PATTERN_LENGTH). Only a
-  // positive-integer `length` ever reaches padStart (padLeftFactory throws on a
-  // non-number, non-integer, or non-positive value before it allocates), so
-  // rejecting positive integers above MAX_PAD_LEFT_LENGTH closes the whole
-  // allocation vector; a malformed `length` is left to that runtime check, whose
-  // clean-abort path is unchanged.
+  // `pad_left` runs per row in the key-building pipeline
+  // (applyElementTransform, driven by buildKeyStrings), so an unbounded
+  // `length` makes every row allocate a `padStart` of that size. Only a
+  // positive-integer `length` ever reaches it (padLeftFactory throws on any
+  // other value before allocating); a malformed `length` is left to that
+  // runtime check. Full reasoning: docs/spec/CHANNEL_SECURITY.md,
+  // "Unbounded transform-parameter rejection".
   .refine(
     (step) => {
       if (step.function !== "pad_left") return true;
@@ -620,15 +552,14 @@ const TransformStepSchema: z.ZodType<TransformStep> = TransformStepBaseSchema
       path: ["params", "length"],
     },
   )
-  // `parse_date` builds a regex from `inputFormat` and assembles its result from
-  // `outputFormat`, both recompiled per row by applyElementTransform. This length
-  // cap bounds the per-row WORK SIZE: an unbounded `inputFormat` compiles an
-  // ever-larger regex per row, an unbounded `outputFormat` allocates an ever-larger
-  // per-row output. Only a string value drives either (the factory treats a
-  // non-string as an empty/absent format), so the bound is on the string length.
-  // The catastrophic-backtracking risk in the expanded regex (adjacent `(\d{1,2})`
-  // from MM/DD tokens) is closed by running parse_date on the linear-time engine
-  // (standardization.ts), not by this cap or a separate screen.
+  // `parse_date` builds a regex from `inputFormat` and assembles its result
+  // from `outputFormat`, both recompiled per row -- an unbounded value
+  // drives an ever-larger regex or per-row output. Only a string value
+  // drives either; a non-string is left to the factory's own
+  // empty/absent-format fallback. The catastrophic-backtracking risk in the
+  // expanded regex is closed by the linear-time engine (standardization.ts),
+  // not by this cap. Full reasoning: docs/spec/CHANNEL_SECURITY.md,
+  // "Unbounded transform-parameter rejection".
   .refine(
     (step) => {
       if (step.function !== "parse_date") return true;
@@ -645,19 +576,14 @@ const TransformStepSchema: z.ZodType<TransformStep> = TransformStepBaseSchema
       path: ["params"],
     },
   )
-  // An EMPTY `outputFormat` renders every date to the empty string, and it is the
-  // one width-shaping param that can settle a derived width of ZERO: a
-  // `parse_date` element's width is the rendered layout's own length, where
-  // `substring` and `pad_left` derive theirs from a POSITIVE integer length alone
-  // and `phonetic` from a fixed code length (elementValueWidthBound,
-  // keyElementWidth.ts). A zero declares a key narrower than the single candidate
-  // the row builder emits for it, so an honest row would be refused at the width
-  // seam -- over a step the PARTNER authored. The derivation floors at 1 so no
-  // consumer can read a zero; this refuses the shape where the document is read,
-  // on every parse path a partner's terms travel, because no honest template
-  // declares a date that renders to nothing. A non-string outputFormat is a
-  // different shape: the factory falls back to the default layout, which the
-  // derivation reads too.
+  // An EMPTY `outputFormat` renders every date to the empty string -- the
+  // one width-shaping param that can settle a derived width of zero, where
+  // `substring`/`pad_left` derive theirs from a positive integer length and
+  // `phonetic` from a fixed code length (elementValueWidthBound,
+  // keyElementWidth.ts). A zero declares a key narrower than the single
+  // candidate the row builder emits for it, so an honest row would be
+  // refused at the width bound over a step the PARTNER authored. No honest
+  // template declares a date that renders to nothing.
   .refine(
     (step) => {
       if (step.function !== "parse_date") return true;
@@ -671,18 +597,16 @@ const TransformStepSchema: z.ZodType<TransformStep> = TransformStepBaseSchema
       path: ["params", "outputFormat"],
     },
   )
-  // The four `tier: "regex"` functions compile their raw `pattern` / `delimiter`
-  // under the linear-time engine. applyElementTransform compiles each step once per
-  // distinct transform array (memoized), so this caps that one-time compile and
-  // source-parse cost (see MAX_TRANSFORM_PATTERN_LENGTH). The engine bounds
-  // backtracking by construction (a pattern that compiles cannot blow up
-  // exponentially); this length cap is the orthogonal source-length sanity bound.
-  // It measures the COERCED source the factory actually compiles
-  // (coerceToPatternString), not the raw value: a non-string param renders via
-  // String(...) to the literal that compiles, and an array (`["a", "a", ...]`)
-  // renders to an arbitrarily long source -- so capping only string-typed values
-  // would let an array slip an oversized source past this bound. Dialect
-  // conformance is enforced separately on LinkageTermsSchema.
+  // The four `tier: "regex"` functions compile their raw `pattern` /
+  // `delimiter` under the linear-time engine, which bounds backtracking by
+  // construction; this length cap is the orthogonal source-length
+  // compile-cost bound (applyElementTransform compiles each step once per
+  // distinct transform array, memoized). It measures the COERCED source the
+  // factory actually compiles (coerceToPatternString), not the raw value, so
+  // an array param cannot slip an oversized source past it. Dialect
+  // conformance is enforced separately on LinkageTermsSchema. Full
+  // reasoning: docs/spec/CHANNEL_SECURITY.md, "Transform-regex linear-time
+  // dialect".
   .refine(
     (step) => {
       const paramKey = REGEX_STEP_PATTERN_PARAM[step.function];
@@ -698,17 +622,14 @@ const TransformStepSchema: z.ZodType<TransformStep> = TransformStepBaseSchema
       path: ["params"],
     },
   )
-  // `substring` slices by numeric `start` / `length`. A non-integer bound never
-  // slices as intended -- substringFactory drops it to an all-null fn, so the
-  // step silently excludes every row rather than erroring. Reject a present
-  // non-integer bound at parse instead, mirroring the descriptor schema's own
-  // `int` requirement. An ABSENT bound drops every row just the same, and is
-  // deliberately admitted here rather than rejected: it is refused one layer up,
-  // by the dead-pipeline grading (`pipelineAlwaysDrops` via
-  // `substringWindowDropsEveryValue`), which reaches every degenerate window
-  // this shape-level refine cannot express -- a `start` of 0, a `length` of 0 --
-  // and locates the offender by key rather than costing the whole document its
-  // parse.
+  // `substring` slices by numeric `start` / `length`. A non-integer bound
+  // never slices as intended (substringFactory drops it to an all-null fn,
+  // silently excluding every row), so a present non-integer bound is
+  // rejected at parse. An ABSENT bound drops every row the same way and is
+  // admitted here by design: it is refused one layer up, by the
+  // dead-pipeline grading (`pipelineAlwaysDrops` via
+  // `substringWindowDropsEveryValue`), which locates the offender by key
+  // rather than costing the whole document its parse.
   .refine(
     (step) => {
       if (step.function !== "substring") return true;
@@ -807,37 +728,25 @@ const LinkageKeySchema: z.ZodType<LinkageKey> = z.object({
 
 /**
  * The set of linkage-field names referenced by at least one element of
- * `linkageKeys` -- the union of every element's `field`. The exchange standardizes
- * and consumes exactly these fields, so a caller filters its declared linkage
- * fields down to this set (a declared field no key references is read by nothing in
- * the exchange): the constraint sweep, the default-terms field derivation, and the
- * advanced-invite field derivation all apply the same
- * `field => referenced.has(field.name)` filter, and share this one definition of
- * "referenced" rather than re-deriving it.
+ * `linkageKeys` -- the union of every element's `field`. The exchange
+ * standardizes and consumes exactly these fields, so the constraint sweep,
+ * the default-terms field derivation, and the advanced-invite field
+ * derivation all filter declared linkage fields down to this set.
  *
- * DISCLOSURE-RELEVANT: two of those callers -- the default-terms and
- * advanced-invite field derivations -- use the result to choose which
- * `linkageFields` enter the constructed terms, and so the cross-party terms hash
- * (the canonical encoding both parties agree on); only the constraint sweep is
- * warn-only and off the wire. A change to which names this set includes or excludes
- * therefore silently moves that hash and breaks interop, so it is in the
- * security-review scope: preserve the exact membership. A change here that altered a
- * constructed-terms field set would fail the field-set regression tests for the
- * default and advanced-invite paths (which derive one side without this function),
- * rather than silently moving the hash.
+ * DISCLOSURE-RELEVANT: the default-terms and advanced-invite derivations use
+ * the result to choose which `linkageFields` enter the constructed terms,
+ * and so the cross-party terms hash. Preserve the exact membership -- in the
+ * security-review scope.
  *
- * `swap` does not widen this FIELD set: it only permutes `field` among a key's
- * existing elements at receive time, so the union over the authored (un-swapped)
- * elements already names every field any swapped order could reference. Callers pass
- * keys as authored, without resolving swap. (It does widen the CANDIDATE set a
- * record contributes, which is the declared width's concern rather than this one.)
+ * `swap` does not widen this set: it only permutes `field` among a key's
+ * existing elements at receive time, so the union over the authored,
+ * un-swapped elements already names every field a swapped order could
+ * reference.
  *
- * This is the UNION, distinct from the per-key satisfiability predicate
- * (`key.elements.every(...)`) the satisfiability checker and {@link LinkageTermsSchema}'s
- * referential-integrity refine compute. The returned set may include a name that is
- * not a declared linkage field for a terms object not built through that schema
- * (whose refine forbids a dangling element `field`); used as a membership filter,
- * such a stray name matches no declared field and is harmless.
+ * The UNION, distinct from the per-key satisfiability predicate
+ * ({@link LinkageTermsSchema}'s referential-integrity refine). A name here
+ * for a terms object built outside that schema may not be a declared field;
+ * as a membership filter, such a stray name is harmless.
  */
 export function referencedLinkageFieldNames(
   linkageKeys: readonly LinkageKey[],
@@ -884,10 +793,8 @@ export interface Payload {
 
 const PayloadSchema: z.ZodType<Payload> = z.object({
   // The column COUNT is bounded at MAX_PAYLOAD_ENTRIES before per-element
-  // validation; see boundedArray and the untrusted-input bounds note. The count
-  // gate forestalls the `Invalid string length` RangeError a pathological-count
-  // partner payload would otherwise raise (Zod accumulates one issue per invalid
-  // column, then throws building the error string from millions of them).
+  // validation; see boundedArray and docs/spec/CHANNEL_SECURITY.md,
+  // "Application-layer parsed-input bounds".
   send: boundedArray(
     PayloadColumnSchema,
     MAX_PAYLOAD_ENTRIES,
@@ -915,10 +822,10 @@ interface LegalAgreement {
    * Readable statement of the purpose or authority for the disclosure under
    * this agreement (e.g. "Audit and evaluation of the State tutoring
    * program"). A single agreement can authorize multiple purposes; this names
-   * the one this exchange happened for. Carried in cleartext in the exchange
-   * record so it stands alone as a HIPAA 164.528 accounting / FERPA 99.32
-   * disclosure-log entry without opening the agreement. Metadata only -- never
-   * a protected, linkage-field, or payload value.
+   * the one this exchange happened for. Recorded in cleartext in the
+   * exchange record so it stands alone as a HIPAA 164.528 accounting /
+   * FERPA 99.32 disclosure-log entry without opening the agreement.
+   * Metadata only -- never a protected, linkage-field, or payload value.
    */
   purpose: string;
   /** Date after which the exchange will be refused (ISO 8601, YYYY-MM-DD). */
@@ -980,21 +887,20 @@ const LinkageSetIdentitySchema: z.ZodType<LinkageSetIdentity> = z.object({
 
 /**
  * Which named rule set the linkage fields and keys of a terms document were
- * drawn from. The fields and the keys are separately named and separately
- * versioned: the fields are a generic substrate (which PII is matched on and how
- * each element is cleaned) where the keys are specific (which combinations count
- * as a match, and in what cascade order), and an edit to one leaves the other's
- * citation untouched.
+ * drawn from. The fields and keys are separately named and versioned: the
+ * fields are a generic substrate (which PII is matched on and how each
+ * element is cleaned), the keys are specific (which combinations count as a
+ * match, and in what cascade order).
  *
- * A citation, not a specification: the fields and keys a run actually matched on
- * are the terms document's own `linkageFields` and `linkageKeys`, which travel
- * with the exchange and are compared between the parties whole. Terms derived
- * from an input file leave out any key that input cannot supply, so a reference
- * is an upper bound on what was tried rather than the account of what ran.
+ * A citation, not a specification: the fields and keys a run actually
+ * matched on are the terms document's own `linkageFields` and
+ * `linkageKeys`, which travel with the exchange and are compared whole. A
+ * reference derived from an input file that leaves out a key is an upper
+ * bound on what was tried, not an account of what ran.
  *
- * Optional throughout: terms whose rules were authored rather than drawn from a
- * named set carry no reference, and the absence is the honest statement rather
- * than a default.
+ * Optional throughout: terms whose rules were authored rather than drawn
+ * from a named set have no reference; the absence is the honest statement,
+ * not a default.
  */
 export interface LinkageRuleSetReference {
   /** The set the `linkageFields` were drawn from. */
@@ -1014,10 +920,10 @@ const LinkageRuleSetReferenceSchema: z.ZodType<LinkageRuleSetReference> =
  * specific artifact and the fields the substrate they are built from, so a
  * reader meets the narrower claim before the broader one.
  *
- * Each half renders through {@link ruleSetCitation}, the seam's grammar for the
- * pair, so a name carrying a space, this clause's own " over ", or a delimiter
- * of its own reads as content of one value rather than as structure the clause
- * asserted.
+ * Each half renders through {@link ruleSetCitation}, which supplies the
+ * shared grammar for the pair, so a name holding a space, this clause's own
+ * " over ", or a delimiter of its own is treated as content of one value
+ * rather than as structure the clause asserted.
  */
 function describeRuleSet(
   reference: LinkageRuleSetReference,
@@ -1078,7 +984,6 @@ function describeRuleSet(
  *
  * TODO: versioning compatibility rules (migration paths between semver
  * versions).
- *
  */
 export interface LinkageTerms {
   /**
@@ -1093,12 +998,12 @@ export interface LinkageTerms {
    *
    * Absent when the party supplied no name: psilink invents none, so nothing
    * fills the gap and no surface stands a label in it (`partyIdentityDisplay.ts`
-   * carries the marker every surface shows instead). The commands that
+   * holds the marker every surface shows instead). The commands that
    * author a durable partnership -- `psilink invite` and `psilink accept` --
    * require one at their own interface, so the field is absent only on a run
    * that authored its terms without a name.
    *
-   * Consistency: none -- parties may differ, and either may carry none.
+   * Consistency: none -- parties may differ, and either may have none.
    */
   identity?: string;
   /**
@@ -1167,14 +1072,13 @@ const LinkageTermsBaseSchema = z.object({
   linkageStrategy: LinkageStrategySchema.default("cascade"),
   output: OutputSchema,
   deduplicate: z.boolean(),
-  // Element COUNT bounded at MAX_LINKAGE_ENTRIES before per-element validation,
-  // with the existing .min(1) floor preserved; see boundedArray and the
-  // untrusted-input bounds note. A plain .max() is insufficient: these flat
-  // top-level arrays sit directly below the root, so a pathological count does
-  // not overflow the call stack, but a partner array of millions of invalid
-  // entries still makes Zod throw `Invalid string length` building its error from
-  // one issue per entry, because .max() is checked only AFTER per-element
-  // validation.
+  // Element COUNT bounded at MAX_LINKAGE_ENTRIES before per-element
+  // validation, with the existing .min(1) floor preserved. A plain .max() is
+  // insufficient here: these flat top-level arrays sit directly below the
+  // root, so a pathological count does not overflow the call stack, but
+  // still throws building the error string from one issue per invalid
+  // entry. See boundedArray and docs/spec/CHANNEL_SECURITY.md,
+  // "Application-layer parsed-input bounds".
   linkageFields: boundedArray(
     LinkageFieldSchema,
     MAX_LINKAGE_ENTRIES,
@@ -1196,31 +1100,28 @@ const LinkageTermsBaseSchema = z.object({
 
 /**
  * Which of the count-only shape rules a `psi-c` terms document breaks. The
- * terms-carried rules only: the fifth refusal the specification lists reads this
- * party's own INPUT METADATA, which no linkage-terms document carries, and lives
- * beside the disclosure predicate it asks
+ * rules this document holds only: the fifth refusal the specification lists
+ * reads this party's own INPUT METADATA, which no linkage-terms document
+ * holds, and lives beside the disclosure predicate it asks
  * ({@link countOnlyTransmitsColumn}, `config/metadata.ts`).
  */
 export type CountOnlyShapeViolation =
   "linkageKeys" | "linkageStrategy" | "deduplicate" | "payload";
 
 /**
- * The refusal message for each count-only shape rule, keyed by the rule broken.
- * One message per rule, read by every enforcement point -- the
- * {@link LinkageTermsSchema} refines below (so every parse path refuses),
- * {@link assertCountOnlyTermsShape} (the authoring, mint, and accept
- * boundaries), and the surfaces' own gates -- so an operator meets the same
- * account of what is wrong wherever the document is stopped.
+ * The refusal message for each count-only shape rule, keyed by the rule
+ * broken. Read by every enforcement point -- the {@link LinkageTermsSchema}
+ * refines below, {@link assertCountOnlyTermsShape}, and the surfaces' own
+ * gates -- so an operator meets the same account wherever the document is
+ * stopped.
  *
- * Each message names the rule broken and the two ways out: bring the document
- * into the count-only shape, or ask for the identifier-revealing algorithm that
- * admits it. Fixed literals only, never a value read off the document: a
- * `psi-c` document can arrive on a partner's invitation, and the parse-error
- * path is left unsanitized (see protocolSetup), which is the same reason the
- * referential-integrity refines locate an offender by issue `path` rather than
- * by echoing it.
+ * Each message names the rule broken and the two ways out: bring the
+ * document into the count-only shape, or ask for the identifier-revealing
+ * algorithm that admits it. Fixed literals only, never a value read off the
+ * document -- a `psi-c` document can arrive on a partner's invitation, and
+ * the parse-error path is left unsanitized (see protocolSetup).
  *
- * The rules and the reasoning behind each are docs/spec/PROTOCOL.md, PSI-C.
+ * The rules and the reasoning behind each: docs/spec/PROTOCOL.md, PSI-C.
  */
 export const COUNT_ONLY_SHAPE_REFUSALS: Readonly<
   Record<CountOnlyShapeViolation | "transmittedColumns", string>
@@ -1258,21 +1159,20 @@ export const COUNT_ONLY_SHAPE_REFUSALS: Readonly<
 };
 
 /**
- * Which count-only shape rule a terms document breaks, or `undefined` when it
- * breaks none -- including for every `psi` document, which these rules leave
- * untouched.
+ * Which count-only shape rule a terms document breaks, or `undefined` when
+ * it breaks none -- including for every `psi` document, which these rules
+ * leave untouched.
  *
- * The single reading of the specified shape (docs/spec/PROTOCOL.md, PSI-C: one
- * key, one round, cascade only, no deduplication, no payload), so the schema,
- * the asserts, and the two front ends' own gates cannot come to different
- * verdicts about the same document. Order is the specification's listing order;
- * a document breaking several rules reports the first, and fixing it surfaces
+ * The single reading of the specified shape (docs/spec/PROTOCOL.md, PSI-C:
+ * one key, one round, cascade only, no deduplication, no payload), so the
+ * schema, the asserts, and the two front ends' own gates cannot come to
+ * different verdicts. Order is the specification's listing order; a
+ * document breaking several rules reports the first, and fixing it surfaces
  * the next.
  *
- * A document already in the specified shape is NOT a violation here: whether the
- * algorithm has a run path at all is the algorithm gate's question
- * (`assertAlgorithmImplemented`), a statement about what this build implements
- * rather than about the document.
+ * A document already in the specified shape is NOT a violation here: whether
+ * the algorithm has a run path at all is `assertAlgorithmImplemented`'s
+ * question, not this function's.
  */
 export function countOnlyShapeViolation(
   terms: LinkageTerms,
@@ -1290,31 +1190,26 @@ export function countOnlyShapeViolation(
 }
 
 /**
- * Refuse a `psi-c` terms document outside the shape the specification admits,
- * fail-closed: an over-broad count-only document is never narrowed to one key,
- * never promoted off `cascade`, never partially derived, and never downgraded to
- * a `psi` run -- narrowing would deliver a disclosure the operator did not agree
- * to, and downgrading would reveal the matched identifiers under terms that
- * asked for a count.
+ * Refuse a `psi-c` terms document outside the shape the specification
+ * admits, fail-closed: an over-broad count-only document is never narrowed
+ * to one key, never promoted off `cascade`, and never downgraded to a `psi`
+ * run -- narrowing or downgrading would deliver a disclosure the operator
+ * did not agree to.
  *
- * Applied where a document is authored or minted into an invitation, and again
- * where a received one is accepted ({@link deriveAcceptedLinkageTerms}); every
- * PARSE path inherits the same rules from {@link LinkageTermsSchema}'s refines,
- * so a document that reached a caller through a schema already met them and this
- * is the boundary for one built or mutated without a parse.
+ * Applied where a document is authored or minted, and again where a
+ * received one is accepted ({@link deriveAcceptedLinkageTerms}); every PARSE
+ * path inherits the same rules from {@link LinkageTermsSchema}'s refines, so
+ * this is the boundary for a document built or mutated without a parse.
  *
- * This rule is the count-only algorithm's own constraint, distinct from the
- * combinations `assertDeduplicateImplemented` and `resolveLinkageCardinality`
- * refuse for want of a matching path: a count-only run reports a size and hands
- * neither party a record-by-record result, so there is no multiplicity for it to
- * honor whatever the cascade implements. It reaches the parse and accept
- * boundaries those two do not.
+ * Distinct from what `assertDeduplicateImplemented` and
+ * `resolveLinkageCardinality` refuse: a count-only run reports a size and
+ * hands neither party a record-by-record result, so there is no
+ * multiplicity for those to reach.
  *
- * Plain {@link UsageError}, deliberately NOT an `OperatorConfigError`, for the
- * same reason as `assertAlgorithmImplemented`: on the accept side these values
- * are adopted verbatim from the partner's invitation, so the fault is not
- * unconditionally this operator's own content. The messages carry only fixed
- * literals.
+ * Plain {@link UsageError}, not an `OperatorConfigError`: on the accept side
+ * these values are adopted verbatim from the partner's invitation, so the
+ * fault is not unconditionally this operator's own. The messages hold only
+ * fixed literals.
  */
 export function assertCountOnlyTermsShape(terms: LinkageTerms): void {
   const violation = countOnlyShapeViolation(terms);
@@ -1324,22 +1219,20 @@ export function assertCountOnlyTermsShape(terms: LinkageTerms): void {
 
 /**
  * Which linkage strategies realize a deduplicating match, one entry per
- * strategy. Both do: the cascade re-expands a match on a kept value across the
- * group in each round (`linkViaPSI`), and `single-pass` applies the same per-side
- * rules in the receiver's local replay over the index table it already ships
- * (`linkViaSinglePassPSI`).
+ * strategy. Both do: the cascade re-expands a match on a kept value across
+ * the group in each round (`linkViaPSI`), and `single-pass` applies the same
+ * per-side rules in the receiver's local replay over the index table it
+ * already ships (`linkViaSinglePassPSI`).
  *
- * A total table over {@link LinkageStrategy} rather than a comparison against one
- * named strategy: a strategy added to the union states its own verdict here or
- * the build fails, so neither the refusal below nor the consent copy that reads
- * the same verdict can be left behind by an addition. That is what the table is
- * for while no shipped strategy answers `false`: the entry is where a new strategy
- * declares it cannot match a group, and the refusal below is what then stops the
- * run. Typed `boolean` rather than the literal values so each reader's gate gives
+ * A total table over {@link LinkageStrategy} rather than a comparison
+ * against one named strategy, so a strategy added to the union states its
+ * own verdict here or the build fails -- neither the refusal below nor the
+ * consent copy reading the same verdict can be left behind by an addition.
+ * Typed `boolean` rather than the literal values so each reader's gate gives
  * a genuine runtime branch.
  *
- * @internal exported for the tests that drive its readers over every strategy,
- * here and in the web editor's own Generate gate.
+ * @internal exported for the tests that drive its readers over every
+ * strategy, here and in the web editor's own Generate gate.
  */
 export const DEDUPLICATE_IMPLEMENTED_BY_STRATEGY: Record<
   LinkageStrategy,
@@ -1353,11 +1246,10 @@ export const DEDUPLICATE_IMPLEMENTED_BY_STRATEGY: Record<
  * Whether an exchange on `strategy` honors a `deduplicate: true` term.
  *
  * The one predicate behind both readers of that verdict:
- * {@link assertDeduplicateImplemented} refuses the pair it returns `false` for,
- * and the consent summary's `deduplicateApplied` withholds the grouping
- * disclosure copy on the same answer (`invitationSummary.ts`). Stating it twice
- * would let the copy stay withheld for a strategy the refusal had stopped
- * refusing -- a silent divergence, since each side's own tests keep passing.
+ * {@link assertDeduplicateImplemented} refuses the pair it returns `false`
+ * for, and the consent summary's `deduplicateApplied` withholds the
+ * grouping disclosure copy on the same answer (`invitationSummary.ts`), so
+ * the two cannot silently diverge.
  */
 export function deduplicateIsImplementedForStrategy(
   strategy: LinkageStrategy,
@@ -1366,50 +1258,34 @@ export function deduplicateIsImplementedForStrategy(
 }
 
 /**
- * Refuse a linkage-terms `deduplicate: true` the run cannot honor, before any
- * matching begins: the term under a linkage strategy that does not match a
- * deduplicating cardinality ({@link deduplicateIsImplementedForStrategy}).
+ * Refuse a linkage-terms `deduplicate: true` the run cannot honor, before
+ * any matching begins: the term under a linkage strategy that does not
+ * match a deduplicating cardinality
+ * ({@link deduplicateIsImplementedForStrategy}).
  *
- * Both shipped strategies match one (`linkViaPSI` and `linkViaSinglePassPSI`), and
- * the surfaces downstream of the association table -- the payload frame, the output
- * table, and the exchange record with its re-supply path -- carry a table with
- * several links per record, so this refuses nothing an operator can configure
- * today. It stays as the boundary a strategy answering `false` in
- * {@link DEDUPLICATE_IMPLEMENTED_BY_STRATEGY} is stopped at: refusing the pair here
- * puts the answer where the operator is still configuring, rather than mid-round
- * against terms that asked for a group, and keeps the strategy's own guard as the
- * second, fail-closed half rather than the first. The combination that IS refused
- * today is the agreed `(true, true)` pair under a strategy that pairs no
- * both-sided cardinality, which this guard cannot express: it reads one party's
- * document, where that pair is a property of BOTH. Its own boundary is
+ * Both shipped strategies match one today, so this refuses nothing an
+ * operator can configure currently; it stays as the boundary a strategy
+ * answering `false` in {@link DEDUPLICATE_IMPLEMENTED_BY_STRATEGY} is
+ * stopped at. The combination that IS refused today is the agreed
+ * `(true, true)` pair under a strategy that pairs no both-sided
+ * cardinality, which this guard cannot express since it reads one party's
+ * document alone -- its own boundary is
  * {@link assertBothSidedDeduplicateImplemented}.
  *
- * Applied where a document is authored or minted, at the local prepare step
- * (`prepareForExchange`), where a received invitation is accepted
- * ({@link deriveAcceptedLinkageTerms}), and for both parties' agreed terms by
- * `resolveLinkageCardinality` after the terms exchange, before the PSI rounds
- * begin. The accept boundary is what keeps a crafted pair off the consent
- * surfaces: an acceptance refused here reaches neither a consent display nor a
- * connection, so no surface states what a deduplicating run discloses for a run
- * that cannot happen.
+ * Applied where a document is authored or minted, where a received
+ * invitation is accepted ({@link deriveAcceptedLinkageTerms}), and for both
+ * parties' agreed terms by `resolveLinkageCardinality` after the terms
+ * exchange, before the PSI rounds begin. The accept boundary is what keeps
+ * a crafted pair off the consent surfaces.
  *
- * It sits beside {@link assertCountOnlyTermsShape} rather than in `exchange.ts`
- * for the reason that guard does: the accept path is here, and importing the run
- * module from it would close an import cycle.
+ * Reads the whole terms document rather than the two values, so a caller
+ * cannot pass one party's `deduplicate` against the other's strategy.
  *
- * Reads the whole terms document rather than the two values, so a caller cannot
- * pass one party's `deduplicate` against the other's strategy. `linkageStrategy`
- * is a mandatory-consistency term, so the agreed pair carries one value and both
- * parties reach the same verdict from their own copy; the resolver asserts over
- * both documents regardless, which makes the refusal symmetric in the pair even
- * where the consistency check has not run.
- *
- * Plain {@link UsageError}, deliberately NOT an `OperatorConfigError`, for the
- * same reason as `assertAlgorithmImplemented`: the refusing party is not
- * necessarily the one whose value refuses, since `resolveLinkageCardinality`
- * asserts over the PARTNER's terms document as well as its own, and the accept
- * boundary reads the partner's invitation, so the fault is not unconditionally
- * this operator's own content. The message carries only fixed literals.
+ * Plain {@link UsageError}, not an `OperatorConfigError`: the refusing party
+ * is not necessarily the one whose value refuses, since
+ * `resolveLinkageCardinality` asserts over the PARTNER's terms document too,
+ * so the fault is not unconditionally this operator's own. The message
+ * holds only fixed literals.
  */
 export function assertDeduplicateImplemented(terms: LinkageTerms): void {
   if (!terms.deduplicate) return;
@@ -1424,26 +1300,23 @@ export function assertDeduplicateImplemented(terms: LinkageTerms): void {
 }
 
 /**
- * Which linkage strategies pair the BOTH-sided deduplicating cardinality, one
- * entry per strategy. The cascade does, applying the "many" rule to each party so
- * a matched value contributes the two groups' product; `single-pass` does not --
- * its seam holds the resolved table to a length taken from the half that keeps its
- * distinctness, and a both-sided multiplicity leaves neither half holding it
- * (docs/spec/PROTOCOL.md, Deduplicating cardinalities: many-to-X matching).
+ * Which linkage strategies pair the BOTH-sided deduplicating cardinality,
+ * one entry per strategy. The cascade does, applying the "many" rule to
+ * each party so a matched value contributes the two groups' product;
+ * `single-pass` does not (docs/spec/PROTOCOL.md, Deduplicating
+ * cardinalities: many-to-X matching).
  *
- * Separate from {@link DEDUPLICATE_IMPLEMENTED_BY_STRATEGY} because the two answer
- * different questions: that table asks whether a strategy honors one party's
- * `deduplicate: true` at all, and this asks whether it pairs the cardinality the
- * agreed PAIR resolves to when both parties declare it. Single-pass answers `true`
- * to the first and `false` to the second, which is exactly why the both-sided
- * refusal cannot be expressed through the per-party guard.
+ * Separate from {@link DEDUPLICATE_IMPLEMENTED_BY_STRATEGY}: that table asks
+ * whether a strategy honors one party's `deduplicate: true` at all, this
+ * asks whether it pairs the cardinality the agreed PAIR resolves to when
+ * both parties declare it. Single-pass answers `true` to the first and
+ * `false` to the second.
  *
- * A total table over {@link LinkageStrategy} for the same reason as its sibling: a
- * strategy added to the union states its own verdict here or the build fails.
- * Typed `boolean` rather than the literal values so each reader's gate gives a
- * genuine runtime branch.
+ * A total table over {@link LinkageStrategy}, typed `boolean`, for the same
+ * reason as its sibling.
  *
- * @internal exported for the tests that drive its readers over every strategy.
+ * @internal exported for the tests that drive its readers over every
+ * strategy.
  */
 export const MANY_TO_MANY_IMPLEMENTED_BY_STRATEGY: Record<
   LinkageStrategy,
@@ -1458,12 +1331,10 @@ export const MANY_TO_MANY_IMPLEMENTED_BY_STRATEGY: Record<
  * cardinality.
  *
  * The one predicate behind both readers of that verdict:
- * {@link assertBothSidedDeduplicateImplemented} refuses the agreed pair it returns
- * `false` for, and the strategy's own fail-closed half reads it at the seam that
- * would otherwise pair it (`singlePassResolves`, `link.ts`). Stating it twice
- * would let the strategy start pairing a cardinality the run boundary still
- * refused, or the reverse -- a silent divergence, since each side's own tests keep
- * passing.
+ * {@link assertBothSidedDeduplicateImplemented} refuses the agreed pair it
+ * returns `false` for, and the strategy's own fail-closed half reads it at
+ * the boundary that would otherwise pair it (`singlePassResolves`,
+ * `link.ts`), so the two cannot silently diverge.
  */
 export function manyToManyIsImplementedForStrategy(
   strategy: LinkageStrategy,
@@ -1472,41 +1343,27 @@ export function manyToManyIsImplementedForStrategy(
 }
 
 /**
- * Refuse the agreed `(true, true)` pair on a linkage strategy that does not pair
- * the both-sided cardinality it resolves to, before any matching begins.
+ * Refuse the agreed `(true, true)` pair on a linkage strategy that does not
+ * pair the both-sided cardinality it resolves to, before any matching
+ * begins.
  *
- * The both-sided sibling of {@link assertDeduplicateImplemented}, and the seam
- * that guard cannot be: `deduplicate` is per-party, so a per-party reading
- * answers `true` for a single-pass party whose own `deduplicate: true` is
- * perfectly runnable -- it is one-sided until the partner's document arrives.
- * Only the agreed pair settles which cardinality the run resolves, so only a
- * check over BOTH documents can refuse the combination the strategy will not
- * pair, and a one-sided deduplicating run under the same strategy is left alone.
+ * The both-sided sibling of {@link assertDeduplicateImplemented}: a
+ * per-party reading answers `true` for a single-pass party whose own
+ * `deduplicate: true` is perfectly runnable one-sided, so only a check over
+ * BOTH documents can refuse the combination the strategy will not pair.
  *
  * Called from `resolveLinkageCardinality` (`exchange.ts`) after the terms
- * exchange and before the first round. Symmetric in the pair -- it reads both
- * documents' strategies and refuses if EITHER fails to carry the cardinality --
- * so a refused pair aborts both parties at the same point rather than starting a
- * round one side would refuse. `linkageStrategy` is a mandatory-consistency term,
- * so an honest pair carries one value and the two readings coincide; reading both
- * keeps the symmetry where the consistency check has not run.
+ * exchange and before the first round. Symmetric in the pair -- it reads
+ * both documents' strategies and refuses if EITHER fails to hold the
+ * cardinality, so a refused pair aborts both parties at the same point.
  *
- * It sits beside {@link assertDeduplicateImplemented} rather than in `exchange.ts`
- * for the reason that guard does: importing the run module from here would close
- * an import cycle.
+ * The message names the STRATEGY rather than the pair, read off
+ * {@link MANY_TO_MANY_IMPLEMENTED_BY_STRATEGY} so a strategy that later
+ * pairs the cardinality is named the moment its entry says so.
  *
- * The message names the STRATEGY rather than the pair, because the pair is what
- * runs: the cascade pairs it and resolves into the entity clusters specified in
- * docs/spec/PROTOCOL.md, and what stands between this operator and that run is
- * the strategy the two parties agreed. The strategies to move to are read off
- * {@link MANY_TO_MANY_IMPLEMENTED_BY_STRATEGY} rather than written out, so a
- * strategy that later pairs the cardinality is named the moment its entry says
- * so, and a build where none does still states the remedy that remains.
- *
- * Plain {@link UsageError}, deliberately NOT an `OperatorConfigError`, for the
- * same reason as its sibling: this check reads the PARTNER's document as well as
- * this party's, so the fault is not unconditionally this operator's own content.
- * The message carries only fixed literals and the strategy names of a schema enum.
+ * Plain {@link UsageError}, not an `OperatorConfigError`, for the same
+ * reason as its sibling: this check reads the PARTNER's document as well as
+ * this party's, so the fault is not unconditionally this operator's own.
  */
 export function assertBothSidedDeduplicateImplemented(
   localTerms: LinkageTerms,
@@ -1559,20 +1416,17 @@ function swapPairedElements(
 }
 
 // Whether two swap-paired positions declare the same transform pipeline. An
-// absent `transform` and an empty one are both the identity pipeline, so both
-// normalize to the empty list; standardization.test.ts pins that equivalence at
-// the layer that runs them. Equality is by canonical encoding rather than a
-// structural walk: a
-// `params` record's key order is not significant to the agreed terms -- which are
-// hashed in this same canonical form -- so two spellings of one pipeline must
-// compare equal.
+// absent `transform` and an empty one are both the identity pipeline, so
+// both normalize to the empty list. Equality is by canonical encoding
+// rather than a structural walk, since a `params` record's key order is not
+// significant to the agreed terms, which are hashed in this same canonical
+// form.
 //
-// `transform.params` values are `z.unknown()`, so a partner value outside the
-// reproducible canonical domain (a JSON integer beyond 2^53) survives schema
-// parsing and then fails to encode. Such a pair is reported as DIFFERING rather
-// than propagating the throw out of a `safeParse`: a pipeline that cannot be
-// encoded cannot be shown to match its partner position, and the swap semantics
-// this predicate establishes are the thing being refused on.
+// `transform.params` values are `z.unknown()`, so a partner value outside
+// the reproducible canonical domain (a JSON integer beyond 2^53) survives
+// schema parsing and then fails to encode. Such a pair is reported as
+// DIFFERING rather than propagating the throw: a pipeline that cannot be
+// encoded cannot be shown to match its partner position.
 function swapPairDeclaresOneTransform(
   first: LinkageKeyElement,
   second: LinkageKeyElement,
@@ -1589,23 +1443,20 @@ function swapPairDeclaresOneTransform(
 }
 
 /**
- * Whether the two elements this key's `swap` names declare DIFFERENT transforms,
- * the shape {@link LinkageTermsSchema} refuses.
+ * Whether the two elements this key's `swap` names declare DIFFERENT
+ * transforms, the shape {@link LinkageTermsSchema} refuses.
  *
- * A swap moves the field references and leaves each element's own transform on
- * its position, so only a pair whose transforms agree compares like-normalized
- * values on both sides of the swapped key -- and only such a pair reaches the
- * same verdict whichever party role resolution designates as receiver, a role
- * settled per run from the parties' record counts rather than carried by the
- * terms. An omitted transform and an empty one are the same identity pipeline,
- * and two `params` records differing only in key order are one pipeline.
+ * A swap moves the field references and leaves each element's own transform
+ * on its position, so only a pair whose transforms agree compares
+ * like-normalized values on both sides of the swapped key. An omitted
+ * transform and an empty one are the same identity pipeline, and two
+ * `params` records differing only in key order are one pipeline.
  *
- * False for a key declaring no swap, and for one whose swap target resolves to no
- * element -- the dangling case the schema answers by its own rule.
+ * False for a key declaring no swap, and for one whose swap target resolves
+ * to no element -- the dangling case the schema answers by its own rule.
  *
- * Exported for an authoring surface that wants to name this fault before the
- * schema refuses the document, so the rule is read in one place rather than
- * restated per surface.
+ * Exported so an authoring surface can name this fault before the schema
+ * refuses the document.
  */
 export function swapPairTransformsDiffer(key: LinkageKey): boolean {
   const paired = swapPairedElements(key);
@@ -1620,18 +1471,15 @@ export function swapPairTransformsDiffer(key: LinkageKey): boolean {
  * refuses beside {@link swapPairTransformsDiffer}.
  *
  * A swap moves only the field references and leaves each position's own
- * expansion where it is, so a mismatched pair would expand a column one way on
- * the party that swaps and another on the party that does not -- two readings of
- * one agreed document, neither party able to see the divergence from its own
- * copy.
+ * expansion where it is, so a mismatched pair would expand a column one way
+ * on the party that swaps and another on the party that does not.
  *
- * False for a key declaring no swap, and for one whose swap target resolves to no
- * element -- the dangling case the schema answers by its own rule.
+ * False for a key declaring no swap, and for one whose swap target resolves
+ * to no element -- the dangling case the schema answers by its own rule.
  *
  * Exported for the key-read layer, which reads the pair's two positions as
  * interchangeable when it assembles the swapped order (`planKeyRead`,
- * standardization.ts) and refuses rather than resting that on a rule enforced
- * only where the terms are decoded.
+ * standardization.ts).
  */
 export function swapPairFuzzyComparisonsDiffer(key: LinkageKey): boolean {
   const paired = swapPairedElements(key);
@@ -1697,14 +1545,11 @@ export const LinkageTermsSchema: z.ZodType<LinkageTerms> =
     // Referential integrity, element field -> declared linkage field. Every
     // key element's `field` must name a member of linkageFields[].name. A
     // dangling field reference parses cleanly but resolves to no values at
-    // exchange time (buildStandardizedDataset builds only declared fields, so
-    // getField returns undefined and the key collapses to null), producing a
-    // silent empty/missed-match result byte-indistinguishable from a
-    // legitimately empty intersection. Enforce it once here so no consumer ever
-    // sees a dangling reference. The message names no partner-controlled value:
-    // the parse-error path is left unsanitized (see protocolSetup and the test
-    // pinning it), so the offending element is located by its issue `path`, not
-    // by echoing its raw field string.
+    // exchange time (buildStandardizedDataset builds only declared fields),
+    // producing a silent empty/missed-match result indistinguishable from a
+    // legitimately empty intersection. The message names no partner value:
+    // the offending element is located by its issue `path`, not by echoing
+    // its raw field string.
     .refine(
       (a) => {
         const declared = new Set(a.linkageFields.map((f) => f.name));
@@ -1740,16 +1585,13 @@ export const LinkageTermsSchema: z.ZodType<LinkageTerms> =
         path: ["linkageKeys"],
       },
     )
-    // A swap pair's two positions must declare the SAME fuzzy expansion. The swap
-    // moves only the field references and leaves each position's own
-    // `generateFuzzyComparisons` where it is, so a mismatched pair applies one
-    // expansion to a column on the party that swaps and a different one on the
-    // party that does not -- two readings of the same agreed terms, and neither
-    // party can see that from its own copy. Binding the pair here is what lets
-    // the key-read layer resolve the expansion from the position it already holds
-    // (`planFuzzyExpansions`, standardization.ts). A pair whose targets do not
-    // resolve is left to the referential-integrity refine above, which owns that
-    // fault. As above, the message echoes no partner-controlled value.
+    // A swap pair's two positions must declare the SAME fuzzy expansion. The
+    // swap moves only the field references and leaves each position's own
+    // `generateFuzzyComparisons` where it is, so a mismatched pair would
+    // apply one expansion to a column on the party that swaps and a
+    // different one on the party that does not. Binding the pair here is
+    // what lets the key-read layer resolve the expansion from the position
+    // it already holds (`planFuzzyExpansions`, standardization.ts).
     .refine((a) => !a.linkageKeys.some(swapPairFuzzyComparisonsDiffer), {
       message:
         "the two elements a linkage key swap names must declare the same " +
@@ -1769,19 +1611,16 @@ export const LinkageTermsSchema: z.ZodType<LinkageTerms> =
         "transform a column differently on the two parties",
       path: ["linkageKeys"],
     })
-    // Reject a transform regex outside the linear-time dialect before it can run.
-    // Element-transform regex patterns are partner-controlled and execute per row
-    // over the full dataset, under the linear-time engine (utils/linearRegex.ts),
-    // so they cannot backtrack catastrophically; this rejects a pattern that
-    // engine cannot compile (a backreference, lookaround, or unsupported escape)
-    // -- fail closed, before any execution and before both parties commit to terms
-    // they could not evaluate identically. The check belongs here so every parse
-    // path (initiator/joiner parseLinkageTerms, the invitation-token decode, and
-    // ExchangeSpecSchema) inherits it. See transformRegexDialect.ts for the model
-    // and docs/spec/PROTOCOL.md for the normative dialect. The message names no
-    // partner-controlled value -- the offending pattern is located by inspection,
-    // not echoed -- consistent with the unsanitized parse-error path the
-    // referential-integrity refines above rely on.
+    // Reject a transform regex outside the linear-time dialect before it can
+    // run. Element-transform regex patterns are partner-controlled and
+    // execute per row over the full dataset under the linear-time engine
+    // (utils/linearRegex.ts), so they cannot backtrack catastrophically;
+    // this rejects a pattern that engine cannot compile -- fail closed,
+    // before any execution and before both parties commit to terms they
+    // could not evaluate identically. Covers every parse path
+    // (parseLinkageTerms, invitation-token decode, ExchangeSpecSchema). Full
+    // reasoning: docs/spec/CHANNEL_SECURITY.md, "Transform-regex
+    // linear-time dialect".
     .refine(
       (a) =>
         !linkageTermsHaveNonConformantTransformRegex(a, {
@@ -1795,15 +1634,13 @@ export const LinkageTermsSchema: z.ZodType<LinkageTerms> =
         path: ["linkageKeys"],
       },
     )
-    // The count-only shape, one refine per rule so a document breaking one is
-    // located by its own issue path and answered by its own message. The rules
-    // are docs/spec/PROTOCOL.md, PSI-C; placed here so EVERY parse path refuses
-    // -- parseLinkageTerms, the invitation-token decode (a partner's document),
-    // and ExchangeSpecSchema -- which puts the refusal on a received document as
-    // it is read, ahead of the prepare step the specification names. `psi` terms
-    // are untouched: each rule reads the algorithm first. The verdict comes from
-    // the one shared reading (countOnlyShapeViolation) rather than a second copy
-    // of the rule, so schema and asserts cannot diverge.
+    // The count-only shape, one refine per rule so a document breaking one
+    // is located by its own issue path and answered by its own message. The
+    // rules are docs/spec/PROTOCOL.md, PSI-C; placed here so EVERY parse
+    // path refuses -- parseLinkageTerms, the invitation-token decode, and
+    // ExchangeSpecSchema. The verdict comes from the one shared reading
+    // (countOnlyShapeViolation) rather than a second copy of the rule, so
+    // schema and asserts cannot diverge.
     .refine((a) => countOnlyShapeViolation(a) !== "linkageKeys", {
       message: COUNT_ONLY_SHAPE_REFUSALS.linkageKeys,
       path: ["linkageKeys"],
@@ -1827,12 +1664,9 @@ export const LinkageTermsSchema: z.ZodType<LinkageTerms> =
  * Keys whose object value the camelize pre-pass leaves verbatim once its key
  * count exceeds the bound, rather than rewriting every key (see
  * {@link camelizeKeys}). Only `transform.params` is partner-controlled and
- * key-count-bounded, so an over-count params record is handed to the schema --
- * whose own key-count refine rejects it -- without the multi-second snake->camel
- * rewrite a pathological-count payload would otherwise incur:
- * the pre-pass counts its keys but does not rewrite them. The bound matches
- * {@link MAX_PARAMS_ENTRIES}, so any record the pre-pass leaves verbatim here is
- * one the schema also rejects.
+ * key-count-bounded; the bound matches {@link MAX_PARAMS_ENTRIES}, so any
+ * record left verbatim here is one the schema also rejects. Full reasoning:
+ * docs/spec/CHANNEL_SECURITY.md, "Application-layer parsed-input bounds".
  */
 const PARAMS_WIDTH_BOUND: ReadonlyMap<string, number> = new Map([
   ["params", MAX_PARAMS_ENTRIES],
@@ -1872,132 +1706,65 @@ export function safeParseLinkageTerms(raw: unknown) {
 
 /**
  * Derive the {@link LinkageTerms} an ACCEPTOR runs from the inviter's terms
- * decoded from an invitation. The acceptor adopts the inviter's shared, agreed
- * fields verbatim -- `version`, `algorithm`, `linkageFields`, `linkageKeys`,
- * `linkageRuleSet`, `legalAgreement`, and so on are cross-checked for equality at
- * exchange time, so both sides must carry an identical set -- but the facets
- * below are the acceptor's own perspective and are derived, not copied:
+ * decoded from an invitation. The acceptor adopts the inviter's shared,
+ * agreed fields verbatim -- `version`, `algorithm`, `linkageFields`,
+ * `linkageKeys`, `linkageRuleSet`, `legalAgreement`, and so on are
+ * cross-checked for equality at exchange time -- but four facets are the
+ * acceptor's own perspective and are derived, not copied:
  *
- * - `identity` is replaced with the acceptor's own name, so the inviter's
- *   identity does not leak into the acceptor's prepared terms (and from there
- *   into its exchange record). It is the one value this function introduces, and
- *   it is free text the accepting operator supplies -- a CLI flag or prompt, a
- *   browser field -- so it is held at entry to every rule the schema holds a
- *   party `identity` to: the document's control-character rule
- *   ({@link TEXT_CONTROL_CHAR_PATTERN}), the non-empty floor, and the
- *   {@link MAX_TEXT_LENGTH} ceiling, each under a refusal that names the local
- *   input. Left to the re-check at the end they would fail the mirrored document
- *   instead, reporting an invitation psilink cannot accept and sending the
- *   operator to its partner over a name it typed itself.
- * - `output` is MIRRORED, not copied. {@link validateCompatibility}, run by both
- *   parties, compares output as a mirror: it requires
- *   `local.output.shareWithPartner === partner.output.expectsOutput` and
- *   `local.output.expectsOutput === partner.output.shareWithPartner`. So the
- *   acceptor's `expectsOutput` is the inviter's `shareWithPartner`, and the
- *   acceptor's `shareWithPartner` is the inviter's `expectsOutput`. A verbatim
- *   copy is only ACCIDENTALLY correct for the symmetric "both receive" case
- *   (`expectsOutput` and `shareWithPartner` both true, where each value equals
- *   its mirror); for any one-sided configuration a copy makes both sides claim to
- *   receive, fails the mirror, and aborts the exchange before any data moves.
+ * - `identity` is replaced with the acceptor's own name (a CLI flag or
+ *   prompt, a browser field), so the inviter's identity does not leak into
+ *   the acceptor's terms. Held here to the same rules the schema holds a
+ *   party `identity` to (control characters, non-empty,
+ *   {@link MAX_TEXT_LENGTH}), under a refusal naming the local input,
+ *   rather than at the generic re-check below.
+ * - `output` is MIRRORED, not copied: {@link validateCompatibility} compares
+ *   it as a mirror (`local.expectsOutput` against `partner.shareWithPartner`
+ *   and vice versa), so a verbatim copy is only accidentally correct for the
+ *   symmetric "both receive" case.
+ * - `payload` is MIRRORED for the same reason: the acceptor's `send` becomes
+ *   the inviter's `receive` and vice versa. An absent inviter `receive`
+ *   yields an absent acceptor `send` (lazy); an explicit empty inviter
+ *   `receive: []` yields an explicit empty acceptor `send: []` (strict),
+ *   matching {@link validateCompatibility}'s lazy/strict reading.
+ * - `deduplicate` is DEFAULTED to false, neither copied nor mirrored: it is
+ *   per-party and declares that several of the DECLARING party's own
+ *   records may match the partner's, so it is never the inviter's to set
+ *   for the acceptor -- copying it would let a hostile inviter claim
+ *   `deduplicate: true` to put the acceptor on the "many" side, then
+ *   present `false` at the terms exchange. The invitation's declared value
+ *   for the inviter's own side is retained separately by a caller holding
+ *   the token, as `expectedPartnerDeduplicate` (`PreparedExchange`,
+ *   exchange.ts); its widened-disclosure consequence for the acceptor is
+ *   stated on the consent surfaces (`DEDUPLICATE_ACCEPTOR_SIDE_NOTE`).
  *
- * - `payload` is MIRRORED, for the same reason as `output`:
- *   {@link validateCompatibility} compares payload as a `send` <-> `receive` mirror,
- *   so the acceptor's `send` is the inviter's `receive` and its `receive` is the
- *   inviter's `send`. A verbatim copy is only accidentally correct for symmetric
- *   payload; the common invite/accept shape (the inviter authors a `send` and no
- *   `receive`) fails the mirror under a copy. With the inviter's `receive` absent,
- *   the acceptor's `send` comes out absent -- which is correct: the acceptor's own
- *   transmission is governed by its metadata, and the inviter is lazy about what it
- *   receives (an unauthored `receive` is not cross-checked; see
- *   {@link validateCompatibility}). The acceptor's `receive` becomes the inviter's
- *   `send`, so the acceptor validates exactly what it will get. An explicit empty
- *   inviter `receive: []` (strict "send me nothing"; see {@link validateCompatibility})
- *   mirrors to an explicit empty acceptor `send: []` -- present, not absent -- which
- *   is coherent: the acceptor declares it sends nothing, the inviter strictly expects
- *   nothing, and `sameColumnSet([], [])` passes both directions. This is the strict
- *   empty case kept distinct from the absent case above, which yields an absent send.
+ * Metadata and standardization stay per-party and local; this function
+ * shapes only the agreed linkage terms.
  *
- * - `deduplicate` is DEFAULTED to false, neither copied nor mirrored. The term is
- *   per-party -- it declares that several of the DECLARING party's own records may
- *   match one of its partner's -- and nothing binds the value an invitation carried
- *   to what the inviter presents at the terms exchange. Copying it would let a
- *   hostile inviter carry `deduplicate: true`, have the acceptor take the "many"
- *   side and disclose its record grouping, then present `deduplicate: false` at the
- *   exchange so the run proceeds as many-to-one at the acceptor's expense. Deriving
- *   it as false makes that unrepresentable rather than refused: the acceptor's own
- *   side of the cardinality is never the inviter's to set, so this party's records
- *   are never grouped. An accepted deduplicating invitation resolves to the
- *   one-sided pair the cascade runs -- the inviter the "many" side, this party the
- *   "one" -- which is the direction the consent surfaces state ahead of the accept.
- *   An acceptor that wants its OWN records grouped authors that in its own
- *   configuration, which does not call this function.
+ * It fails closed: a config valid for the INVITER can mirror to one
+ * incoherent for the acceptor (an inviter that is the sole receiver may
+ * have a `payload.send` that needs the acceptor to receive output, but the
+ * acceptor mirrors to `expectsOutput: false`). The derived terms are
+ * re-checked against {@link LinkageTermsSchema} and an incoherent result
+ * throws, aborting acceptance cleanly. The re-check's message names no
+ * partner-controlled value: `identity` -- the one substituted value, and the
+ * accepting operator's own -- is refused above under an account naming the
+ * local input if it fails its own rules, so nothing the operator supplied
+ * reaches this message.
  *
- *   What the derived value does not carry, and what an accept path must retain
- *   separately, is the value the invitation declared for the INVITER's side. It
- *   is what the consent surfaces stated, and nothing in the agreed terms compares
- *   the two sides afterwards -- so a caller holding the token records it as the
- *   run's `expectedPartnerDeduplicate` (`PreparedExchange`, exchange.ts), which
- *   binds what the partner presents at the terms exchange to what it declared.
+ * It also refuses a `psi-c` document outside the count-only shape
+ * ({@link assertCountOnlyTermsShape}) and a deduplicating invitation under a
+ * strategy that cannot match one ({@link assertDeduplicateImplemented}),
+ * both read from the INVITER's terms before the mirror is built, so the
+ * refusal names the rule the received document breaks and keeps such an
+ * invitation off the consent surfaces and off the wire.
  *
- *   What the derived `false` does NOT hold constant is how many of this party's
- *   records match. A value the inviter holds on several rows is ambiguous under
- *   `one-to-one` and drops out of the round, so this party's record holding it goes
- *   unmatched; under the deduplicating run the inviter contributes that value once
- *   and the record matches, disclosing its membership and any payload columns this
- *   party sends. The inviter's declaration therefore widens this party's own
- *   outbound disclosure, which the consent surfaces state (see
- *   `DEDUPLICATE_ACCEPTOR_SIDE_NOTE`). It is a widening rather than a new
- *   capability: an inviter that collapsed its own duplicate rows before the
- *   exchange would match exactly the same records one-to-one.
- *
- * Metadata and standardization stay per-party and local (they are never embedded in
- * the token); this function shapes only the agreed linkage terms.
- *
- * It fails closed. A config that is valid for the INVITER can mirror to one that is
- * incoherent for the acceptor: an inviter that is the sole receiver (it shares no
- * result with the partner) may carry a non-empty `payload.send`, which requires the
- * PARTNER to receive output -- the inviter's `send` mirrors to the acceptor's
- * `receive` -- but the acceptor mirrors to `expectsOutput: false`, which the
- * schema's cross-field rules forbid. (The inviter's own `payload.receive` mirrors to
- * the acceptor's `send`, which needs no output, so it is never the trigger; the
- * schema's other rule for a non-receiving party, that it must not deduplicate, is
- * met by the derived `false` whatever the invitation carried.)
- * The front ends above never produce such an inviter config, but a hand-authored
- * CLI config or a crafted invitation token could, and the derived terms are not
- * otherwise re-validated before the run. So the derived terms are re-checked
- * against {@link LinkageTermsSchema} here and an incoherent result throws, aborting
- * acceptance cleanly rather than running an invalid configuration. Its message
- * names no partner-controlled value and accounts for the failure as the
- * invitation's, which is the account the re-check is left to give: the inviter's
- * terms were already validated at decode, `deduplicate`, `output`, and `payload`
- * are derived rather than authored by either party, and `identity` -- the one
- * free text substituted here, and the accepting operator's own -- carries the
- * whole of the field's own rule at entry above (control characters, the non-empty
- * floor, the {@link MAX_TEXT_LENGTH} ceiling), so no value the accepting operator
- * supplied itself reaches this message: each is refused above under an account
- * naming the local input.
- *
- * It also refuses a `psi-c` document outside the count-only shape, before the
- * mirror is built rather than after ({@link assertCountOnlyTermsShape}): the
- * message then names the rule the received document breaks, where the generic
- * re-check below would report the mirror. Reading the INVITER's terms rather
- * than the derived ones is what makes the account the partner's document: the
- * mirror moves payload between the two directions, and the rule refuses both.
- *
- * It refuses a deduplicating invitation under a strategy that cannot match one
- * on the same reading and for the same reason ({@link assertDeduplicateImplemented}):
- * the pair the exchange boundary refuses is readable from the invitation alone --
- * `linkageStrategy` is a mandatory-consistency term, so the invitation's value is
- * the agreed one -- and the derived `deduplicate: false` would otherwise hide it
- * from every check between here and the run. Refusing at the accept boundary
- * keeps such an invitation off the consent surfaces and off the wire.
- *
- * @throws {UsageError} when `acceptorIdentity` carries a control character, is
- *   empty, or exceeds {@link MAX_TEXT_LENGTH}, or when the inviter's terms are
- *   `psi-c` outside the count-only shape or declare `deduplicate` under a
- *   strategy that matches no deduplicating cardinality.
- * @throws {Error} when the inviter's terms cannot be coherently accepted for the
- *   mirrored output direction.
+ * @throws {UsageError} when `acceptorIdentity` contains a control character,
+ *   is empty, or exceeds {@link MAX_TEXT_LENGTH}, or when the inviter's
+ *   terms are `psi-c` outside the count-only shape or declare `deduplicate`
+ *   under a strategy that matches no deduplicating cardinality.
+ * @throws {Error} when the inviter's terms cannot be coherently accepted
+ *   for the mirrored output direction.
  */
 export function deriveAcceptedLinkageTerms(
   inviterTerms: LinkageTerms,
@@ -2027,10 +1794,11 @@ export function deriveAcceptedLinkageTerms(
   const derived: LinkageTerms = {
     ...inviterTerms,
     identity: acceptorIdentity,
-    // This party's own side of the cardinality, which the invitation does not carry
-    // to it: whether SEVERAL of this party's records may match one of the partner's
-    // is a disclosure about this party's own data, so it starts closed and is
-    // authored in this party's own configuration (see the doc comment).
+    // This party's own side of the cardinality, which the invitation does
+    // not pass to it: whether SEVERAL of this party's records may match one
+    // of the partner's is a disclosure about this party's own data, so it
+    // starts closed and is authored in this party's own configuration (see
+    // the doc comment).
     deduplicate: false,
     output: {
       expectsOutput: inviterTerms.output.shareWithPartner,
@@ -2076,18 +1844,17 @@ interface CompatibilityResult {
 /**
  * Cross-party consistency check for a pair of {@link LinkageTerms}.
  *
- * Returns errors for mandatory mismatches that must cancel the exchange, and
- * warnings for soft mismatches (currently only `date`) that produce a notice
- * but allow the exchange to continue.
+ * Returns errors for mandatory mismatches that must cancel the exchange,
+ * and warnings for soft mismatches (currently only `date`) that produce a
+ * notice but allow the exchange to continue.
  *
- * Every diagnostic it composes names its terms values through the delimiting
- * seam in `config/compatibilityMessage.ts`, so no value a partner chooses can
- * close a delimiter or spell a second clause of psilink's own prose. The
- * enumeration is enforced by type rather than kept as a list here: the two
- * accumulators hold `CompatibilityMessageFragment`, so a message composed any
- * other way does not compile. `test/compatibilityMessage.test.ts` drives the
- * adversarial value shapes through each message and asserts the clause structure
- * is the one this function wrote.
+ * Every diagnostic it composes names its terms values through the
+ * delimiting boundary in `config/compatibilityMessage.ts`, so no value a
+ * partner chooses can close a delimiter or spell a second clause of
+ * psilink's own prose. Enforced by type: the two accumulators hold
+ * `CompatibilityMessageFragment`, so a message composed any other way does
+ * not compile. `test/compatibilityMessage.test.ts` drives adversarial value
+ * shapes through each message and asserts the clause structure holds.
  */
 export function validateCompatibility(
   local: LinkageTerms,
@@ -2097,45 +1864,34 @@ export function validateCompatibility(
   // is the whole of the sweep below: a diagnostic reaches either list only
   // through the compatibilityMessage tagged template, whose interpolations are
   // fragments and whose fixed spans the compiler supplies. So a terms value put
-  // into a message without passing the delimiting seam -- an edit to a message
-  // here, or a mismatch check added later -- does not compile. Both lists are
-  // returned as the `string[]` of CompatibilityResult, which the brand is
-  // transparent to.
+  // into a message without passing the delimiting boundary -- an edit to a
+  // message here, or a mismatch check added later -- does not compile. Both
+  // lists are returned as the `string[]` of CompatibilityResult, which the
+  // brand is transparent to.
   const errors: CompatibilityMessageFragment[] = [];
   const warnings: CompatibilityMessageFragment[] = [];
 
-  // The threat both arrays below carry is the partner side: a
-  // mutually-distrusting party controls reference/purpose/set/column names, and
-  // it controls them on the side these messages call "local" as well, since
+  // Both arrays below answer the same threat: a mutually-distrusting
+  // partner controls reference/purpose/set/column names, and controls them
+  // on the side these messages call "local" too, since
   // deriveAcceptedLinkageTerms adopts the inviter's legalAgreement and
-  // linkageRuleSet verbatim. Two distinct controls answer it.
+  // linkageRuleSet verbatim.
   //
-  // DELIMITING is applied here, at composition, to every value either list names
-  // (config/compatibilityMessage.ts): a value is rendered as one delimited run,
-  // or bare only where it is checked to carry nothing a clause boundary is made
-  // of. It answers the reading attack the escape cannot -- a value of printable
-  // ASCII that spells this diagnostic's own clause structure -- and it emits only
-  // printable ASCII, so it neither duplicates the escape nor is rewritten by it.
-  //
-  // ESCAPING stays assigned to one altitude per route, which differs between the
-  // two lists. `errors` becomes an Error message here and an abort frame the
-  // partner renders at its own display boundary; an error is escaped once by
-  // sanitizeErrorForDisplay where it is shown, so the values inside the delimiters
-  // are the RAW ones. `warnings` is handed to the caller as display text
-  // (runExchange's onWarning slot) with no error to carry it, so it is escaped
-  // here, and redacted here too: a warning ends at a log line and at the warning
-  // event, both of which redact the whole composed string, and every fragment
-  // below precedes the first-party sentence that explains the mismatch. The CLI
-  // escapes each warning again as it reaches a log line and the event stream, so
-  // a warning makes two passes on that route; every value interpolated below is
-  // schema-constrained to a shape the escape does not rewrite, which is what
-  // keeps the second pass unobservable. CHANNEL_SECURITY.md records why neither
-  // pass is removed. On that route the escape runs BEFORE the delimiting, so the
-  // truncation inside it can never take the closing delimiter off a run.
+  // DELIMITING is applied here, at composition, to every value either list
+  // names (config/compatibilityMessage.ts). ESCAPING stays assigned to one
+  // altitude per route: `errors` becomes an Error message, escaped once by
+  // sanitizeErrorForDisplay where it is shown, so the values inside the
+  // delimiters are the RAW ones; `warnings` is handed to the caller as
+  // display text with no error to hold it, so it is escaped and redacted
+  // here. The CLI escapes each warning again downstream, which stays
+  // unobservable because every value interpolated below is
+  // schema-constrained to a shape the escape does not rewrite. Full
+  // reasoning: docs/spec/CHANNEL_SECURITY.md, "Display sanitization escape
+  // format".
   //
   // The equality CHECKS always compare the RAW values either way -- both
-  // transforms are display-only and the escape is lossy (it truncates), so
-  // comparing transformed forms could mask a genuine mismatch.
+  // transforms are display-only and the escape is lossy, so comparing
+  // transformed forms could mask a genuine mismatch.
   if (local.version !== partner.version) {
     // TODO: implement migration when new versions exist
     errors.push(
@@ -2187,42 +1943,31 @@ export function validateCompatibility(
     );
   }
 
-  // Compare by canonical form (RFC 8785): two field/key sets are equal iff their
-  // canonical encodings match -- the same encoding that is hashed into the
-  // exchange-agreement receipt, so equality here means hash-equality there. The
-  // canonical encoder sorts keys, so property-insertion order (which differs
-  // between plain and Zod-parsed objects) does not affect the result; fields are
-  // pre-sorted by name because their array order is not significant, whereas
-  // linkage keys are ordered most-to-least precise and compared in place.
+  // Compare by canonical form (RFC 8785): two field/key sets are equal iff
+  // their canonical encodings match -- the same encoding hashed into the
+  // exchange-agreement receipt, so equality here means hash-equality there.
+  // The canonical encoder sorts keys, so property-insertion order does not
+  // affect the result; fields are pre-sorted by name (their array order is
+  // not significant), while linkage keys are ordered most-to-least precise
+  // and compared in place.
   //
-  // No casing fold is applied here: `transform.params` keys (the only
-  // partner-controlled keys whose form could vary) are normalized to camelCase at
-  // every parse chokepoint that produces a LinkageTerms -- config load and the
-  // post-handshake wire path via parseLinkageTerms, and the invitation decode path
-  // via its own camelize pre-pass (config/invitation.ts) -- so both sides reach
-  // this comparison in the one camelCase form. The encoder sorts keys but does not fold casing, which
-  // is why the normalization is a parse-layer invariant rather than something this
-  // comparison re-does (and why the agreed-terms hash, which also does not fold,
-  // stays cross-party reproducible: it hashes the same camelCase form).
+  // No casing fold is applied here: `transform.params` keys are normalized
+  // to camelCase at every parse chokepoint that produces a LinkageTerms, so
+  // both sides reach this comparison in the one camelCase form already.
   //
   // canonicalString throws CanonicalEncodingError on a value outside the
-  // reproducible domain. A partner can reach this: transform `params` is
-  // `z.unknown()`, so a JSON integer beyond 2^53 survives schema parsing and
-  // then fails to canonicalize. validateCompatibility's contract is to report
-  // problems via `errors` (its callers abort the exchange on a non-empty list),
-  // not to throw, so surface such a value as an error instead of crashing.
+  // reproducible domain -- a partner can reach this via a `transform.params`
+  // JSON integer beyond 2^53. validateCompatibility's contract is to report
+  // problems via `errors`, not to throw, so such a value becomes an error
+  // instead of a crash.
   //
-  // When canonicalOrError returns null the value could not be encoded, so the
-  // mismatch comparisons below are skipped for that side: an un-encodable value
-  // cannot be compared, and emitting "do not match" on top of the encoding
-  // error would be misleading. The encoding error already aborts the exchange.
-  // The cost is diagnostic only -- if one side is both un-encodable AND differs,
-  // the operator sees the encoding error first and the divergence on a re-run.
+  // When canonicalOrError returns null the value could not be encoded, so
+  // the mismatch comparisons below are skipped for that side: an
+  // un-encodable value cannot be compared, and the encoding error already
+  // aborts the exchange.
   //
-  // `label` is first-party copy the caller composes through the same tagged
-  // template, and the encoder's own message is delimited: it names the offending
-  // JSON path, built from the encoded object's keys, which on a partner document
-  // are the partner's.
+  // `label` is first-party copy composed through the same tagged template;
+  // the encoder's own message is delimited, naming the offending JSON path.
   const canonicalOrError = (
     value: unknown,
     label: CompatibilityMessageFragment,
@@ -2282,19 +2027,17 @@ export function validateCompatibility(
     errors.push(compatibilityMessage`linkage keys do not match`);
   }
 
-  // The rule-set citation, checked only where BOTH parties declare one. It names
-  // rules the two documents already had to agree on field by field and key by
-  // key, so a disagreement here is a disagreement about the NAME of matching
-  // content -- which still cancels, because each party records its own citation
-  // in its own exchange record and two records naming different rules for one run
-  // is the thing the naming exists to prevent. Skipped where either party
-  // declares none: a hand-authored document carries no citation, and holding it
-  // to the partner's would refuse an exchange whose rules match exactly. Compared
-  // by canonical form, like the fields and keys above, so the comparison is
-  // byte-exact and property order does not enter it. The set names are delimited
-  // by describeRuleSet, and the values inside those delimiters stay raw for the
-  // same reason the legal-agreement mismatches below are: an error is escaped
-  // once where it is shown.
+  // The rule-set citation, checked only where BOTH parties declare one. It
+  // names rules the two documents already had to agree on field by field
+  // and key by key, so a disagreement here is a disagreement about the NAME
+  // of matching content -- which still cancels, since each party records
+  // its own citation in its own exchange record. Skipped where either party
+  // declares none: a hand-authored document has no citation, and holding it
+  // to the partner's would refuse an exchange whose rules match exactly.
+  // Compared by canonical form, like the fields and keys above. The set
+  // names are delimited by describeRuleSet, and the values inside those
+  // delimiters stay raw for the same reason the legal-agreement mismatches
+  // below are: an error is escaped once where it is shown.
   if (
     local.linkageRuleSet !== undefined &&
     partner.linkageRuleSet !== undefined
@@ -2358,44 +2101,35 @@ export function validateCompatibility(
     }
   }
 
-  // Payload mirror, LAZY on the receive side. Each of the two directions is gated
-  // on whether the RECEIVING party declared a `payload.receive` expectation:
+  // Payload mirror, LAZY on the receive side. Each of the two directions is
+  // gated on whether the RECEIVING party declared a `payload.receive`
+  // expectation:
   //
-  // - `receive` DECLARED (the field is present, even if empty) asserts "I expect
-  //   exactly these columns": the partner's `send` must match it byte-for-byte or
-  //   the exchange aborts -- the strict mirror, unchanged. This is the recurring /
-  //   loaded-config case, where both parties carry an agreed payload. An explicit
-  //   empty `receive: []` is strict BY INTENT: it asserts "the
-  //   partner sends nothing," distinct from an absent `receive`, so a partner that
-  //   discloses any column fails this check. Empty-is-strict is chosen here to agree
-  //   with the received-payload runtime lock-in -- an empty committed set
-  //   (`expectedPayloadColumns` / reconcileReceivedPayload) is likewise strict
-  //   ("receive nothing") and only `undefined` is lazy -- and with the web consent
-  //   display, which renders a declared-empty receive as a "(none)" lock-in, not
-  //   lazy. Reading `[]` as lazy here would admit an exchange the runtime lock-in
-  //   then aborts. Only a hand-authored config or crafted token can produce `[]`.
-  // - `receive` ABSENT means "take whatever I'm given": that direction is skipped.
-  //   This is what lets the invite/accept flow reconcile without the inviter
-  //   knowing the acceptor's schema. The inviter authors only its `send` and leaves
-  //   `receive` unset (lazy); the acceptor mirrors the inviter's `send` into its own
-  //   `receive` and so validates exactly what it will get; and the inviter accepts
-  //   whatever the acceptor discloses. A zero-setup exchange, which authors no
-  //   payload, is lazy on both sides.
+  // - `receive` DECLARED (present, even if empty) asserts "I expect exactly
+  //   these columns": the partner's `send` must match it byte-for-byte or
+  //   the exchange aborts. An explicit empty `receive: []` is strict BY
+  //   INTENT -- "the partner sends nothing" -- distinct from an absent
+  //   `receive`, matching the received-payload runtime enforcement (an
+  //   empty committed set is likewise strict; only `undefined` is lazy) and
+  //   the web consent display, which renders a declared-empty receive as a
+  //   "(none)" commitment, not lazy.
+  // - `receive` ABSENT means "take whatever I'm given": that direction is
+  //   skipped. This is what lets the invite/accept flow reconcile without
+  //   the inviter knowing the acceptor's schema -- the inviter authors only
+  //   `send` and leaves `receive` unset; the acceptor mirrors the inviter's
+  //   `send` into its own `receive`; a zero-setup exchange is lazy on both
+  //   sides.
   //
-  // Laziness relaxes only this cross-party DECLARATION check; it never widens what a
-  // party sends. Transmission is governed by each party's own metadata
-  // (`isDisclosedToPartner`) and `assertPayloadSendDisclosed`, both
-  // unchanged -- so a lazy receiver accepts only what the sender's own consented
-  // metadata discloses, and receiving is not disclosing. The gate is symmetric: each
-  // direction keys on the same receiver's declared `receive`, so the two parties
-  // (which call this with swapped arguments) compute identical verdicts. The
-  // equality is byte-exact and element-wise -- compared per sorted column, NOT by
-  // a delimiter-joined string, so a partner-controlled name containing the
+  // Laziness relaxes only this cross-party DECLARATION check; it never
+  // widens what a party sends -- transmission is governed by each party's
+  // own metadata (`isDisclosedToPartner`) and `assertPayloadSendDisclosed`,
+  // unchanged. The gate is symmetric: each direction keys on the same
+  // receiver's declared `receive`, so the two parties (which call this with
+  // swapped arguments) compute identical verdicts. The equality is
+  // byte-exact and element-wise -- compared per sorted column, NOT by a
+  // delimiter-joined string, so a partner-controlled name containing the
   // separator cannot make two distinct sets join equal (`["a,b"]` vs
-  // `["a","b"]`) and slip a genuine mismatch past the check. The rendering keeps
-  // that partition visible, delimiting each name in its own run
-  // (quoteTermsValueList), so the operator reading the diagnostic counts the same
-  // columns the comparison did. Matching the messages elsewhere.
+  // `["a","b"]`) and slip a genuine mismatch past the check.
   const sameColumnSet = (a: Array<string>, b: Array<string>): boolean =>
     a.length === b.length && a.every((name, i) => name === b[i]);
 

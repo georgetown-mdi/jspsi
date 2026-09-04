@@ -7,7 +7,7 @@ import {
 } from "./psiEngine";
 import type { Config } from "./types";
 
-// The runtime-agnostic PSI worker seam. It moves the
+// The runtime-agnostic PSI worker boundary. It moves the
 // blocking elliptic-curve masking off the thread that owns the network transport
 // and the event loop, so a long masking call no longer starves keepalives, timers,
 // or (in the browser) the UI. The host side ({@link WorkerPsiEngine}) is a
@@ -61,11 +61,11 @@ export type PsiWorkerResponse =
 
 /**
  * The narrow, runtime-agnostic view {@link WorkerPsiEngine} needs of a spawned
- * worker: post a request, register the reply / error listeners, and terminate. The
- * CLI implements it over a `worker_threads` Worker, the browser over a Web Worker;
- * a test implements it in-process. Kept deliberately minimal so the two worker APIs
- * (`postMessage` + `on("message")` vs `postMessage` + `onmessage`) collapse to one
- * shape here and nothing above forks on runtime.
+ * worker: post a request, register the reply / error listeners, and terminate.
+ * The CLI implements it over a `worker_threads` Worker, the browser over a Web
+ * Worker; a test implements it in-process. Kept minimal by design so the two
+ * worker APIs (`postMessage` + `on("message")` vs `postMessage` + `onmessage`)
+ * collapse to one shape here and nothing above forks on runtime.
  */
 export interface PsiWorkerHandle {
   postMessage(request: PsiWorkerRequest): void;
@@ -85,11 +85,12 @@ export interface PsiWorkerHandle {
  * reply and to fail every outstanding call at once on worker death or
  * {@link dispose}. That invariant is enforced, not merely assumed: {@link call}
  * rejects a second request while one is still in flight rather than letting two
- * replies race the id map. A worker crash / early exit surfaces through `onError`
- * as a terminal rejection rather than a hang, and marks the engine terminal so
- * every later call fails fast with the crash cause instead of posting to a dead
- * worker; {@link dispose} rejects anything pending and terminates the worker so a
- * ref'd worker handle can never hold the process open at teardown.
+ * replies race the id map. A worker crash / early exit is reported through
+ * `onError` as a terminal rejection rather than a hang, and marks the engine
+ * terminal so every later call fails fast with the crash cause instead of
+ * posting to a dead worker; {@link dispose} rejects anything pending and
+ * terminates the worker so a ref'd worker handle can never hold the process
+ * open at teardown.
  */
 export class WorkerPsiEngine implements PsiEngine {
   private readonly handle: PsiWorkerHandle;
@@ -230,15 +231,13 @@ export function servePsiWorker(
       .then(
         (result) => {
           post({ id: request.id, ok: true, result });
-          // Relieve the per-element JS<->native marshalling churn this op created,
-          // now that its result has been handed back to the host. That churn -- the
-          // dominant term in the single-pass receiver's peak, per frameSize.ts --
-          // now lives on this worker's heap rather than the main thread's, so the
-          // host-side relieveTransientMemory (link.ts) can no longer reach it; this
-          // is its worker-side counterpart. A no-op unless the worker was launched
-          // with --expose-gc (the CLI does); the collection pause is negligible
-          // beside the curve masking each op performs, and the dispatch is coarse
-          // (a handful of ops per exchange), never per element.
+          // Relieves the per-element JS<->native marshalling churn this op left
+          // on the worker's heap (the dominant term in the single-pass
+          // receiver's peak, per frameSize.ts) -- the worker-side counterpart
+          // to relieveTransientMemory (link.ts), since that churn no longer
+          // reaches the host. A no-op unless the worker was launched with
+          // --expose-gc (the CLI does); called once per op here, never per
+          // element.
           relievePsiWorkerMemory();
         },
         (error: unknown) =>

@@ -11,7 +11,7 @@ import type { LinkageTerms } from "./config/linkageTerms.js";
  * @internal
  *
  * Inviter-crafted characters neither a terminal nor JSX escaping neutralizes,
- * built from their code points so this source carries no raw control or bidi
+ * built from their code points so this source holds no raw control or bidi
  * byte: an ESC that drives ANSI, a right-to-left override, and a BEL.
  */
 export const ESC = String.fromCodePoint(0x1b);
@@ -31,10 +31,11 @@ export const PRINTABLE_ASCII = /^[\x20-\x7e]*$/;
 /**
  * @internal
  *
- * Linkage terms in which EVERY partner-controlled string carries one of the
+ * Linkage terms in which EVERY partner-controlled string holds one of the
  * hostile code points above, so a summary or a rendered screen built from them
- * reaches each field with something to escape -- and a field that reaches either
- * without escaping is caught wherever it lands, with nothing to enumerate.
+ * reaches each field with something to escape -- and a field that reaches
+ * either without escaping is caught wherever it lands, with nothing to
+ * enumerate.
  *
  * The exceptions are the values a summary position is KEYED ON rather than filled
  * from: the `replace_regex` function name and its `pattern` / `replacement`
@@ -46,19 +47,19 @@ export const PRINTABLE_ASCII = /^[\x20-\x7e]*$/;
  * them is what the walk needs; the hostile bytes sit in the partner text beside
  * them (the pattern's value, the field and key names).
  *
- * Deliberately beyond what the schema admits, on two counts. `version`, `date`,
- * `expirationDate`, and the two rule-set `version` strings are
- * format-constrained (semver, `z.iso.date`). `identity` and the constraint
+ * By design, this goes beyond what the schema admits, on two counts.
+ * `version`, `date`, `expirationDate`, and the two rule-set `version` strings
+ * are format-constrained (semver, `z.iso.date`). `identity` and the constraint
  * `exclude` value are free text held to the control-character rule
- * (`TEXT_CONTROL_CHAR_PATTERN`, config/linkageTerms.ts), which refuses the
- * ESC and BEL they carry here; the bidi override in `purpose` and in the payload
+ * (`TEXT_CONTROL_CHAR_PATTERN`, config/linkageTerms.ts), which refuses the ESC
+ * and BEL they hold here; the bidi override in `purpose` and in the payload
  * `description` is not a control character, so those two stay within what a
  * decoded token can hold -- a real parse of this fixture's own values accepts
- * both -- and it is exactly what the display-escaping assertions over those two
- * fields exercise. They carry one here because
- * the display boundary's contract is uniform and does not depend on that
- * validation staying in place -- the same reason `summarizeInvitation` routes
- * the dates through the sanitizer.
+ * both -- and it is exactly what the display-escaping assertions over those
+ * two fields exercise. They hold one here because the display boundary's
+ * contract is uniform and does not depend on that validation staying in place
+ * -- the same reason `summarizeInvitation` routes the dates through the
+ * sanitizer.
  */
 /**
  * @internal
@@ -108,7 +109,7 @@ export const hostileTerms: LinkageTerms = {
               params: { [`pat${RLO}tern`]: `${ESC}[31m` },
             },
             // A recognized function declaring `replacement` as null, so the
-            // step carries both a glossary description and the runtime-coercion
+            // step holds both a glossary description and the runtime-coercion
             // note describeTransformCoercions derives from that null.
             {
               function: "replace_regex",
@@ -143,7 +144,7 @@ export const hostileTerms: LinkageTerms = {
  * @internal
  *
  * {@link hostileTerms} with a swap whose transforms sit on ONE side only. The
- * swap in those terms carries a transform on both of its elements, which
+ * swap in those terms holds a transform on both of its elements, which
  * summarizes as the bidirectional interchange; a single transform-carrier
  * summarizes as the one-directional donor instead -- the other arm of the same
  * branch, so one terms document cannot reach both and a second one is what

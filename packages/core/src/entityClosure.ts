@@ -93,10 +93,10 @@ class RowForest {
  * each cluster's halves ascending, rather than the order the clusters are listed
  * in.
  *
- * @param table - A matched table read as pairs: entry `i` pairs `table[0][i]` with
- *   `table[1][i]`. A repeated pair would be one edge counted twice, which changes
- *   no component; the seam that consumes a table refuses one
- *   (`assertMatchedPairsWellFormed`, exchange.ts).
+ * @param table - A matched table read as pairs: entry `i` pairs `table[0][i]`
+ *   with `table[1][i]`. A repeated pair would be one edge counted twice, which
+ *   changes no component; `assertMatchedPairsWellFormed` (exchange.ts) refuses
+ *   one.
  */
 export function entityClusters(table: AssociationTable): Array<EntityCluster> {
   const [localRows, partnerRows] = table;
@@ -143,31 +143,33 @@ export function entityClusters(table: AssociationTable): Array<EntityCluster> {
  * the cascade is the only strategy that pairs it and no fan-out reaches the
  * cascade (docs/spec/PROTOCOL.md, The `many-to-many` entity closure).
  *
- * The claim is that the table is a disjoint union of complete `m x n` blocks, one
- * per matched value of one round, so a cluster's members all share one linkage-key
- * value under one key. It is what makes the closure safe to run without a
- * disclosure of its own: no two of a party's records are grouped through a partner
- * record that no rule links them through. Three conditions carry it, and this
- * refuses each -- a cluster spanning two blocks, a cluster that is not the whole
- * `m x n` product, and one block split across two clusters.
+ * The claim is that the table is a disjoint union of complete `m x n` blocks,
+ * one per matched value of one round, so a cluster's members all share one
+ * linkage-key value under one key. It is what makes the closure safe to run
+ * without a disclosure of its own: no two of a party's records are grouped
+ * through a partner record that no rule links them through. Three conditions
+ * hold it, and this refuses each -- a cluster spanning two blocks, a cluster
+ * that is not the whole `m x n` product, and one block split across two
+ * clusters.
  *
- * The labels are read per PAIR rather than per record so that a producer labelling
- * one record's pairs apart -- one record in two of a round's blocks, as a cascade
- * fan-out would put it, refused today where a record's value is read -- is held to
- * the same block shape here, instead of its two blocks arriving flattened into one
- * label per record that this could not see past. The sole producer today
- * (`blockLabels`, link.ts) derives one label per matched record and replicates it
- * across that record's pairs, over a map holding at most one (round, position) per
- * record, so it excludes that shape structurally; the per-pair signature is what
- * keeps this a backstop for a changed derivation rather than a restatement of the
- * current one.
+ * The labels are read per PAIR rather than per record, so a producer that
+ * labels one record's pairs apart -- one record in two of a round's blocks, as
+ * a cascade fan-out would, though refused today where a record's value is read
+ * -- is still held to the same block shape, rather than having its two blocks
+ * flattened into one label per record this could not see past. The sole
+ * producer today (`blockLabels`, link.ts) derives one label per matched record
+ * and replicates it across that record's pairs, over a map holding at most one
+ * (round, position) per record, so it excludes that shape structurally; the
+ * per-pair signature is what keeps this a safety check against a changed
+ * derivation, not a restatement of the current one.
  *
- * The returned-list checks (`assertPartnerIndices`, utils/partnerIndices.ts) imply
- * this on the built path: they hold the runs answering one position identical and
- * the runs answering different positions disjoint, which is these conditions read
- * on the frame rather than on the table. That is why a violation is an internal
- * inconsistency rather than a partner fault, and why the claim is pinned here on
- * the artifact every consumer reads instead of resting on that argument.
+ * The returned-list checks (`assertPartnerIndices`, utils/partnerIndices.ts)
+ * already imply this on the built path: they hold the runs answering one
+ * position identical and the runs answering different positions disjoint,
+ * which are these same conditions read on the frame rather than on the table.
+ * That is why a violation here is an internal inconsistency rather than a
+ * partner fault, and why the claim is pinned on the artifact every consumer
+ * reads rather than left to rest on that argument alone.
  *
  * @param id - The participant id the message is attributed to.
  * @param table - The matched table, read as pairs.
