@@ -326,12 +326,12 @@ export default tseslint.config(
       // no-restricted-properties (a property-access ban, not a CallExpression
       // selector) so the ban catches not just a direct `JSON.parse(...)` call
       // but also an alias `const p = JSON.parse`, a computed `JSON['parse']`,
-      // and a destructured `const { parse } = JSON`. It does NOT catch a renamed
-      // JSON object (`const J = JSON; J.parse(...)`) or `globalThis.JSON.parse`:
-      // those need value-flow analysis, not a syntactic shape, and are left to
-      // review (the cli sensitive-parse ban, a CallExpression selector, catches
-      // strictly less). The runtime is clean -- the chokepoint owns the package's
-      // only JSON.parse -- so this ban is regression-prevention, not a live hole.
+      // and a destructured `const { parse } = JSON`. It does NOT catch
+      // a renamed JSON object (`const J = JSON; J.parse(...)`) or
+      // `globalThis.JSON.parse`: those need value-flow analysis, not a
+      // syntactic shape, and are left to review. The runtime is clean --
+      // the chokepoint owns the package's only JSON.parse -- so this ban is
+      // regression-prevention, not a live hole.
       "no-restricted-properties": [
         "error",
         {
