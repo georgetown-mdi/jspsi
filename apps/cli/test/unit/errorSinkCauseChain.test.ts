@@ -14,6 +14,7 @@ import { EVENT_STREAM_FD, type ErrorEvent } from "../../src/eventStream";
 import { openEventStreamWithFdWired } from "../eventStreamTestSupport";
 import { exitWithError, runOrExit } from "../../src/util/exit";
 import { parseOrExit } from "../../src/util/flags";
+import { captureProcessExit } from "../exitCapture";
 
 // src/index.ts is a module-top-level side effect -- buildCli(...).parseAsync()
 // with the last-resort catch attached to it -- so its own catch runs only when
@@ -85,9 +86,7 @@ test("the driven error carries its recovery step only on a cause link", () => {
 
 /** Replace `process.exit` with a throw, so the exit is observable and the test keeps control. */
 function exitThrows(): void {
-  vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  captureProcessExit();
 }
 
 /** Collect what a sink writes to `console.error`, and keep it off the suite's output. */

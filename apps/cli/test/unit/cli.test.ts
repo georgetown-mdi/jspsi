@@ -42,6 +42,7 @@ import {
   ttyStream,
   withStdin,
 } from "../stdinStream";
+import { captureProcessExit } from "../exitCapture";
 
 function argv(extra: Record<string, unknown>): Arguments {
   return { _: [], $0: "psilink", ...extra } as unknown as Arguments;
@@ -407,11 +408,7 @@ test("parseOrExit: a UsageError is reported on stderr and exits 64", () => {
   // repeated flag or an unrecognized log-level is a UsageError, reported on
   // stderr (the logger does not exist yet) and mapped to exit 64.
   const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   try {
     expect(() =>
       parseOrExit(() => {
@@ -539,11 +536,7 @@ test("exitWithError: logs the sanitized error and exits with the given code", ()
       messages.push(message);
     },
   };
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   try {
     expect(() => exitWithError(log, new UsageError("nope"), 64)).toThrow(
       "exit:64",
