@@ -197,9 +197,9 @@ export default [
     // console server's own job API), which stay unbounded and are left to review.
     files: ["src/**/*.{ts,tsx}", "server/**/*.ts"],
     // Fail CI on a stray or rule-silencing disable so an untrusted parse cannot
-    // be quietly exempted (a bare `eslint .` only warns). Carried by this block
-    // rather than left to the sibling above it: a block's linterOptions apply to
-    // the files that block matches, so the ban's own scope has to state it.
+    // be quietly exempted (a bare `eslint .` only warns). The sibling block above
+    // already sets this for the same files; restated so the ban keeps it if that
+    // block's file list ever narrows.
     linterOptions: { reportUnusedDisableDirectives: "error" },
     rules: {
       "no-restricted-properties": [
