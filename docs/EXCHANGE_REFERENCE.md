@@ -690,7 +690,7 @@ connection:
 
 TURN servers for the case where a direct peer-to-peer connection cannot be established. Credential type `hmac-sha1` indicates how a deployment MINTS a time-limited credential rather than how a client presents one -- the minted value is still sent as the password -- so both types take the same shape here. Mutually exclusive with `ice_provision`; if `ice_provision` is present, `turn` is invalid.
 
-The CLI passes these entries to its peer connection (the browser client does not -- see [`connection.stun`](#connectionstun)), but **no exchange has been driven through a real relay**: the path is configured and unproven. Do not build a deployment that depends on relayed connectivity until it has been verified in your environment.
+The CLI passes these entries to its peer connection (the browser client does not -- see [`connection.stun`](#connectionstun)), and **a relayed exchange has been verified against the project's standing relay**: a CLI party with UDP blocked outright completed an authenticated exchange the relay carried over TURN-over-TLS on 443. werift verifies the TURN server's certificate, so a relay whose certificate the CLI host does not trust yields no relay candidate at all. Verify relayed connectivity in your own environment before depending on it; a run that allocates against a relay also lingers after it finishes ([CLI.md](CLI.md#turn)).
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
