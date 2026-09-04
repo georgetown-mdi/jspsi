@@ -10,9 +10,9 @@ It is deployment guidance and stands on its own: it narrows what the SSH layer w
 
 ## Scope: the command-line application
 
-SFTP exchanges are conducted by the CLI. The web application conducts WebRTC exchanges in the browser and, for an SFTP exchange, saves an exchange file for the command-line tool to run rather than conducting it itself (see [DEPLOYMENT.md](DEPLOYMENT.md#server-job-api)). A browser has no equivalent of the settings below, so this profile is CLI guidance and not guidance for the web application.
+SFTP exchanges are conducted by the CLI. The web application conducts WebRTC exchanges in the browser and, for an SFTP exchange, saves an exchange file for the command-line tool to run rather than conducting it itself (see [CONSOLE.md](CONSOLE.md)). A browser has no equivalent of the settings below, so this profile is CLI guidance and not guidance for the web application.
 
-It applies to a `psilink.yaml`-configured CLI run. The console appliance is not a place to apply it: the SFTP connection an operator authors there admits a strict, fixed set of server fields and no transport-tuning block ([SERVER_JOB_API.md](spec/SERVER_JOB_API.md#authoring-the-sftp-connection)). That fits the console's role -- it is a prototyping tool an exchange graduates from to a plain scheduled CLI run ([DEPLOYMENT.md](DEPLOYMENT.md#server-job-api)) -- so apply this profile to the configuration you graduate to.
+It applies to a `psilink.yaml`-configured CLI run. The console appliance is not a place to apply it: the SFTP connection an operator authors there admits a strict, fixed set of server fields and no transport-tuning block ([SERVER_JOB_API.md](spec/SERVER_JOB_API.md#authoring-the-sftp-connection)). That fits the console's role -- it is a prototyping tool an exchange graduates from to a plain scheduled CLI run ([CONSOLE.md](CONSOLE.md)) -- so apply this profile to the configuration you graduate to.
 
 ## What you can constrain, and what you cannot
 
