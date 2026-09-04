@@ -34,7 +34,7 @@ This is the deployment supported for production use.
 - **No agency data is transmitted to, stored on, or accessible from project-operated infrastructure** -- the exchange touches none. The project receives no data, no metadata, and no record that an exchange took place.
 - **Even the registry the image comes from is not project-operated.** It is a public one, and what it can observe is one row of [Third-party supporting services](#third-party-supporting-services).
 
-The local console is part of this deployment rather than a hosted one: it rides in the same container, served over loopback to the operator's own machine and reachable from nowhere else ([DEPLOYMENT.md](DEPLOYMENT.md#server-job-api)).
+The local console is part of this deployment rather than a hosted one: it rides in the same container, served over loopback to the operator's own machine and reachable from nowhere else ([CONSOLE.md](CONSOLE.md)).
 
 ### Hosted web application
 
@@ -60,7 +60,7 @@ An agency that deploys the web application on its own infrastructure takes every
 | Incident response | Coordinated vulnerability disclosure on the timeline in [SECURITY.md](../SECURITY.md#reporting-a-vulnerability), with advisories and CVE assignment where applicable, and a documented compromise response for a leaked shared secret ([SECURITY_DESIGN.md](SECURITY_DESIGN.md#compromise-response)). | Detection and response in its own environment, executing the compromise response with the partner, any breach notification it owes, and applying patched releases. |
 | Patching and supply chain | Signed release tags, Cosign-signed images carrying a SLSA build provenance attestation, a CycloneDX SBOM per release ([COMPLIANCE.md](COMPLIANCE.md#release-integrity)), and security patches for the current and previous major release ([SECURITY.md](../SECURITY.md#supported-versions)). | Verifying those signatures before deploying, tracking releases, and scheduling the upgrade ([RELEASES.md](RELEASES.md#verifying-a-release)). |
 
-**The local console adds one operator-side control.** Its job API carries no authentication by design, because it assumes the single operator at the host. What it is reachable from is decided by the container's publish binding and the host firewall, both the agency's ([DEPLOYMENT.md](DEPLOYMENT.md#server-job-api)); the trust invariant and what violates it are in [SECURITY_DESIGN.md](SECURITY_DESIGN.md#single-party-appliance-trust-boundary).
+**The local console adds one operator-side control.** Its job API carries no authentication by design, because it assumes the single operator at the host. What it is reachable from is decided by the container's publish binding and the host firewall, both the agency's ([CONSOLE.md](CONSOLE.md)); the trust invariant and what violates it are in [SECURITY_DESIGN.md](SECURITY_DESIGN.md#single-party-appliance-trust-boundary).
 
 ## Responsibility split: hosted web application
 
