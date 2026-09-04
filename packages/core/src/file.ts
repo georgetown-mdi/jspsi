@@ -51,7 +51,7 @@ export class CsvLineByteCeilingError extends Error {
 function singleLineCeilingError(byteCeiling: number): CsvLineByteCeilingError {
   return new CsvLineByteCeilingError(
     `CSV input exceeded the ${byteCeiling}-byte single-line limit before a ` +
-      "line terminator; the file may be malformed (no newline) or carry an " +
+      "line terminator; the file may be malformed (no newline) or hold an " +
       "oversized header or field",
   );
 }

@@ -439,7 +439,7 @@ describe("verify receipt bench", () => {
       .element(page.getByText("Verification failed"))
       .toBeInTheDocument();
     await expect
-      .element(page.getByText("carries empty cells", { exact: false }).first())
+      .element(page.getByText("has empty cells", { exact: false }).first())
       .toBeInTheDocument();
     await expect
       .element(

@@ -1412,13 +1412,13 @@ export const COUNT_ONLY_SHAPE_REFUSALS: Readonly<
   payload:
     'count-only ("psi-c") linkage terms must declare no payload columns in ' +
     "either direction: a count-only exchange reveals the size of the " +
-    "intersection and nothing else, so it carries no data column whichever " +
+    "intersection and nothing else, so it sends no data column whichever " +
     "party the terms entitle to the count. Remove the payload send and " +
     'receive columns, or set the algorithm to "psi".',
   transmittedColumns:
     'a count-only ("psi-c") exchange transmits no data columns, but this ' +
     "input's metadata marks one or more columns to send to the partner. The " +
-    "algorithm carries no payload in either direction, so the exchange is " +
+    "algorithm sends no payload in either direction, so the exchange is " +
     "refused rather than run over a disclosure it cannot make. Clear the " +
     'payload marking on those columns, or set the algorithm to "psi".',
 };
@@ -2176,7 +2176,7 @@ export function deriveAcceptedLinkageTerms(
   if (TEXT_CONTROL_CHAR_PATTERN.test(acceptorIdentity))
     throw new UsageError(
       "the identity supplied for this party cannot be used: " +
-        `${TEXT_CONTROL_CHAR_MESSAGE}. Supply one that carries none.`,
+        `${TEXT_CONTROL_CHAR_MESSAGE}. Supply one that has none.`,
     );
   if (acceptorIdentity.length === 0)
     throw new UsageError(

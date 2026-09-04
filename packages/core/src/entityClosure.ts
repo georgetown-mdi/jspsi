@@ -216,10 +216,10 @@ export function assertBlockDiagonalClosure(
     if (pairsInCluster[index] !== localRows.length * partnerRows.length)
       throw notBlockDiagonal(
         id,
-        `the cluster holding this party's record ${localRows[0]} carries ` +
+        `the cluster holding this party's record ${localRows[0]} holds ` +
           `${pairsInCluster[index]} pair(s) over ${localRows.length} record(s) ` +
           `of this party and ${partnerRows.length} of the partner's, where a ` +
-          "block of one matched value carries every pair between them",
+          "block of one matched value holds every pair between them",
       );
     const block = blockOfCluster[index]!;
     const first = clusterOfBlock.get(block);

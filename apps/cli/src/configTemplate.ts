@@ -37,7 +37,9 @@ const HEADER_LINES = [
   "linkage terms before running an exchange. The shared secret is NOT stored",
   "here -- it lives in the key file (.psilink.key), written by invite/accept.",
   "",
-  "Field reference: docs/EXCHANGE_REFERENCE.md. CLI usage: docs/CLI.md.",
+  "Field reference:",
+  "  https://github.com/georgetown-mdi/jspsi/blob/main/docs/EXCHANGE_REFERENCE.md",
+  "CLI usage: https://github.com/georgetown-mdi/jspsi/blob/main/docs/CLI.md",
   "snake_case keys; a value beginning with @ is read from the file at that path",
   "(use it for credentials so secrets stay out of this file).",
 ];
@@ -61,7 +63,8 @@ export const FIELD_DOCS: Array<{ path: Array<string>; lines: Array<string> }> =
       lines: [
         "How to reach your exchange partner. channel is sftp here (the primary CLI",
         "transport); filedrop (a shared mounted directory) and webrtc are also",
-        "supported -- see docs/COMMUNICATION.md to switch.",
+        "supported. To switch, see",
+        "https://github.com/georgetown-mdi/jspsi/blob/main/docs/COMMUNICATION.md",
       ],
     },
     {
@@ -160,7 +163,7 @@ export const FIELD_DOCS: Array<{ path: Array<string>; lines: Array<string> }> =
       path: ["linkage_terms", "algorithm"],
       lines: [
         "psi reveals matched ids; psi-c reveals only the match count. psi-c runs",
-        "one key in one round under cascade and carries no payload columns.",
+        "one key in one round under cascade and sends no payload columns.",
       ],
     },
     {

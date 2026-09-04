@@ -704,7 +704,7 @@ for (const party of ["starter", "joiner"] as const) {
     // refused before its entries are read.
     await expectProtocolRefusal(
       onMappedElementList(2, (list) => list.slice(0, -1)),
-      /the returned mapped-element list carries 4 entries, expected 5/,
+      /the returned mapped-element list has 4 entries, expected 5/,
     );
   });
 
@@ -716,7 +716,7 @@ for (const party of ["starter", "joiner"] as const) {
     // changes, and the repeat stays inside the partner's counted rows.
     await expectProtocolRefusal(
       onMappedElementList(1, (list) => [...list, list[list.length - 1]]),
-      /the returned mapped-element list carries 5 entries, expected 6/,
+      /the returned mapped-element list has 5 entries, expected 6/,
     );
   });
 }

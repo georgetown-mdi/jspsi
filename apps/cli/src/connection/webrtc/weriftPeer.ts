@@ -5,6 +5,7 @@ import {
   getLogger,
 } from "@psilink/core";
 
+import { REPORT_LIBRARY_INCOMPATIBILITY } from "../libraryIncompatibility";
 import { BROKER_MESSAGE, connectToBroker } from "./brokerClient";
 import { PEERJS_SERIALIZATION } from "./peerjsWire";
 
@@ -217,11 +218,15 @@ function sctpQueues(
  */
 export function assertSctpDrainSupported(peer: RTCPeerConnection): void {
   if (sctpQueues(peer) !== undefined) return;
+  log.debug(
+    "the installed werift does not expose sctp.sctp.outboundQueue / " +
+      "sentQueue, which the flushing close waits on",
+  );
   throw new ConnectionError(
-    "the installed werift does not expose the SCTP send queues the WebRTC " +
-      "transport's flushing close depends on (sctp.sctp.outboundQueue / " +
-      "sentQueue); without them a final frame can be lost on close. " +
-      "Re-verify against the installed werift version.",
+    "the installed WebRTC library does not support the clean close this " +
+      "exchange needs, so a final message could be lost when the connection " +
+      "closes. This build of psilink is not compatible with that library; " +
+      `${REPORT_LIBRARY_INCOMPATIBILITY}.`,
     "usage",
   );
 }
@@ -302,13 +307,13 @@ export const DEFAULT_BROKER_KEY = "peerjs";
  */
 export const WEBRTC_BROKER_HOST_REFUSED =
   "this webrtc connection's server `host` could move the signaling socket to " +
-  "another server: it must carry none of @ / ? # \\ or whitespace. Set `host` " +
+  "another server: it must include none of @ / ? # \\ or whitespace. Set `host` " +
   "to the hostname alone, with the port in `port` and the mount point in `path`.";
 
 /** The refusal a `server.path` whose shape could move the signaling socket gets. */
 export const WEBRTC_BROKER_PATH_REFUSED =
   "this webrtc connection's server `path` could move the signaling socket to " +
-  'another server: it must start with "/" and carry none of @ ? # \\ or ' +
+  'another server: it must start with "/" and include none of @ ? # \\ or ' +
   "whitespace. Set `path` to the broker's mount point, such as `/` or `/psi`.";
 
 /**

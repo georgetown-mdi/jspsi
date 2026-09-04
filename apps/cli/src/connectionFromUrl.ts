@@ -62,7 +62,7 @@ export const WEBRTC_URL_REFUSED =
  */
 export const WEBRTC_URL_EXTRAS_REFUSED =
   "a ws:// or wss:// URL names only the coordination server's host, port, and " +
-  "path; it cannot carry a user, an API key, or any other query. For a " +
+  "path; it cannot include a user, an API key, or any other query. For a " +
   "coordination server that needs a key, author `channel: webrtc` (with " +
   "`server.key`) in psilink.yaml and run 'psilink exchange'.";
 

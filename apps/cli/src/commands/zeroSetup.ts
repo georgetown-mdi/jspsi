@@ -152,9 +152,10 @@ export function builder(cmd: Argv): Argv {
         "cascade runs one dependent PSI round per key; single-pass batches " +
         "every key into one exchange for a constant round-trip count, at the " +
         "cost of disclosing your full per-key value structure to the receiver " +
-        "-- a consented disclosure tradeoff, not a free speed-up (see " +
-        "docs/EXCHANGE_REFERENCE.md, linkage_terms.linkage_strategy). Both " +
-        "parties must select the same value or the exchange aborts.",
+        "-- a consented disclosure tradeoff, not a free speed-up. Both " +
+        "parties must select the same value or the exchange aborts. See " +
+        "https://github.com/georgetown-mdi/jspsi/blob/main/docs/" +
+        "EXCHANGE_REFERENCE.md (linkage_terms.linkage_strategy).",
     })
     .demand(1);
 }

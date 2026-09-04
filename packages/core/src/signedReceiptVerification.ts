@@ -830,7 +830,7 @@ function refuseAnchorOutsideTheUnion(party: SignedReceiptPartyReport): void {
   )
     throw new Error(
       `a dual-signed record reports the ${party.role}'s certificate anchor ` +
-        `as ${party.certificateAnchor}: the verdict would carry a status no ` +
+        `as ${party.certificateAnchor}: the verdict would have a status no ` +
         "surface has words for",
     );
 }

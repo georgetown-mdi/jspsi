@@ -4280,7 +4280,7 @@ test("a reordered cascade under the built-in citation warns, naming linkage_keys
   );
   expect(warnings[0]).toContain("its linkage_keys are not drawn from");
   expect(warnings[0]).not.toContain("linkage_fields");
-  expect(warnings[0]).toContain("Omit linkage_rule_set");
+  expect(warnings[0]).toContain("Remove linkage_rule_set");
 });
 
 test("an added linkage field under the built-in citation warns, naming linkage_fields", () => {
@@ -4485,7 +4485,7 @@ test("a mint from accepted terms is offered the remedy a mint has", () => {
     "author-fresh-terms",
   );
   expect(warnings).toHaveLength(1);
-  expect(warnings[0]).toContain("Settle the citation with that party");
+  expect(warnings[0]).toContain("Agree the citation with that party");
   expect(warnings[0]).toContain("author fresh terms for this invitation");
   expect(warnings[0]).not.toContain("accept again");
   expect(warnings[0]).not.toContain("decline to reuse these terms");
@@ -4515,7 +4515,7 @@ test("a drifted citation is reported under either standing", () => {
       "psilink.yaml: linkage_terms.linkage_rule_set cites",
     );
     expect(warnings[0]).toContain(
-      "claims a provenance these rules do not have",
+      "credits a source these rules did not come from",
     );
   }
 });
@@ -4621,7 +4621,7 @@ test("no token of the reconcile refusal's or the drift warning's copy is bare-sh
   expect(messages[0]).toContain("(unset)");
   expect(messages[1]).toContain("read alike");
   expect(messages[2]).toContain("too wide for the room");
-  expect(messages[3]).toContain("Omit linkage_rule_set");
+  expect(messages[3]).toContain("Remove linkage_rule_set");
   expect(messages[4]).toContain("author fresh terms");
   expect(messages[5]).toContain("decline");
 

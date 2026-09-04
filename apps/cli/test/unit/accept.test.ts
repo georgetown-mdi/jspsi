@@ -2046,7 +2046,7 @@ test("validateAccept: a kept configuration carrying no identity refuses the acce
         identity: "Agency B",
         loggerName: "accept-kept-identity-absent",
       }),
-    ).rejects.toThrow("carries no linkage_terms.identity");
+    ).rejects.toThrow("has no linkage_terms.identity");
 });
 
 test("validateAccept: a kept configuration still carrying the placeholder refuses", async () => {
@@ -6184,7 +6184,7 @@ test("handler: online accept forwards the invitation's declared deduplicate to r
 // The distinctive clause of the removal warning, kept apart from the column list
 // and the remedy the assertions check separately.
 const DROPPED_LOCK_IN_CLAUSE =
-  "removes the received-payload lock-in recorded in";
+  "clears the list of columns you previously agreed to receive";
 
 /**
  * Every warning a reuse acceptance emits over a config recording `recorded` as

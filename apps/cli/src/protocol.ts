@@ -218,7 +218,7 @@ export const TERMINATED_RECORD_UNBUILT_WARNING =
  * actually being written. See docs/COMPLIANCE.md (HIPAA considerations).
  */
 export const UNNAMED_PARTNER_ACCOUNTING_NOTE =
-  "-- this exchange's record will carry no partner name, so an accounting of " +
+  "-- this exchange's record will hold no partner name, so an accounting of " +
   "disclosures drawn from it must take the recipient from your own records of " +
   "who this exchange was with.";
 
@@ -1021,7 +1021,7 @@ export async function runProtocol(
           `${count === 1 ? "cycle" : "cycles"} during this exchange (not a ` +
           `dropped session): another session transition on this connection ` +
           `did not complete within the re-dial's wait, so ` +
-          `${count === 1 ? "that cycle" : "those cycles"} carried no session`,
+          `${count === 1 ? "that cycle" : "those cycles"} had no session`,
       },
       {
         // The stretch sub-count is what tells one operation holding twenty
@@ -1302,9 +1302,9 @@ export async function runProtocol(
     // connected first. Describing the send/wait behavior is accurate under both
     // rendezvous modes and is the operationally useful fact (which side acts next).
     if (role === "responder") {
-      log.info("waiting for my partner's first message");
+      log.info("waiting for your partner's first message");
     } else {
-      log.info("sending my partner the first message");
+      log.info("sending your partner the first message");
     }
 
     // Set by the prepare block on the file-sync channels and by the rendezvous

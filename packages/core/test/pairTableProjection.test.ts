@@ -203,9 +203,7 @@ test("names no result file of this party's where the terms give it none", () => 
   const heldByUs = describeResolvedRunShape(
     shape("one-to-many", 10, 10),
   ).cardinalityNotice!;
-  expect(heldByUs).toContain(
-    "Your result file carries one row per matched pair",
-  );
+  expect(heldByUs).toContain("Your result file has one row per matched pair");
   expect(heldByUs).not.toContain("you receive no result");
 });
 
@@ -224,9 +222,7 @@ test("attributes a both-sided run's pairs to whichever party the terms entitle",
   const heldByUs = describeResolvedRunShape(
     shape("many-to-many", 10, 10),
   ).cardinalityNotice!;
-  expect(heldByUs).toContain(
-    "Your result file carries one row per matched pair",
-  );
+  expect(heldByUs).toContain("Your result file has one row per matched pair");
 });
 
 test("claims no partner disclosure where the run withholds the partner's half", () => {

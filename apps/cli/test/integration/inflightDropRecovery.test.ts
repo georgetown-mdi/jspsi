@@ -228,7 +228,18 @@ inProcessOnly(
       // A recovered drop is never reported as zero drops.
       expect(
         logs.filter((entry) =>
-          entry.message.includes("Upgrading the SFTP Stack"),
+          entry.message.includes(
+            "not compatible with the installed SFTP library",
+          ),
+        ),
+      ).toEqual([]);
+      // The whole family ends on the report destination, so this catches the
+      // hedged and latency-only wordings too.
+      expect(
+        logs.filter((entry) =>
+          entry.message.includes(
+            "https://github.com/georgetown-mdi/jspsi/issues",
+          ),
         ),
       ).toEqual([]);
     } finally {

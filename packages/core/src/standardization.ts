@@ -1927,8 +1927,8 @@ function elementValueTooLongRefusal(
     `a linkage key element reads a ${length}-character value from row ` +
       `${rowIndex} of this party's data (the column bound at ` +
       `${keyElementPath(keyIndex, elementIndex)}), longer than the ` +
-      `${MAX_TRANSFORMED_VALUE_LENGTH}-character value an element carries ` +
-      "into a key string. Every element's value is carried into every key " +
+      `${MAX_TRANSFORMED_VALUE_LENGTH}-character value an element may put ` +
+      "into a key string. Every element's value goes into every key " +
       "string the row builds, and an element transform is free to multiply " +
       "the value it is handed, so the limit binds what the element reads as " +
       "well as what each of its steps produces. Neither can be shortened " +
@@ -1953,7 +1953,7 @@ function transformStepValueTooLongRefusal(
       `${length}-character value from row ${rowIndex} ` +
       `(${keyElementPath(keyIndex, elementIndex)}.transform[${stepIndex}], ` +
       `${transformFunctionLabel(functionName)}), longer than the ` +
-      `${MAX_TRANSFORMED_VALUE_LENGTH}-character value an element carries ` +
+      `${MAX_TRANSFORMED_VALUE_LENGTH}-character value an element may put ` +
       "into a key string. A step can multiply what it is handed many times " +
       "over -- a replacement that re-inserts the matched context at every " +
       "match position, or a chain of steps each feeding the next -- so every " +
@@ -2200,7 +2200,7 @@ function keyStringLengthCapRefusal(
   return new UsageError(
     `${key} assembles ${projected} characters of key strings for one row, ` +
       `above the ${MAX_ASSEMBLED_KEY_LENGTH_PER_ROW} this exchange builds ` +
-      "per row. Every combination of the key's elements carries each " +
+      "per row. Every combination of the key's elements includes each " +
       "element's whole value, so a key whose elements expand -- through " +
       "fuzzy comparisons, or a step that turns one value into several " +
       "candidates -- replicates those values across the whole cross-product " +
@@ -4229,6 +4229,11 @@ export function summarizeLinkageShortfall(
  * cannot fully satisfy the agreed linkage terms -- the run-boundary enforcement of
  * {@link decideLinkageTermsVerdict}, called from {@link prepareForExchange}.
  *
+ * Terms declaring no linkage key at all are refused here too: the run would
+ * have nothing to match on and would produce a result indistinguishable from an
+ * empty intersection, so it is refused before any credential, terms, or data
+ * are sent.
+ *
  * The terms name the keys both parties consented to match on. A run that
  * contributes nothing for one of them matches on fewer keys than were agreed while
  * its exchange record still names every field the terms declare, so the shortfall
@@ -4266,11 +4271,10 @@ export function assertLinkageTermsSatisfiable(
   if (verdict.keys.length === 0)
     throw new LinkageTermsUnsatisfiableError(
       "the agreed linkage terms declare no linkage key, so this exchange has " +
-        "nothing to match on and would produce a result indistinguishable " +
-        "from an empty intersection. It is refused before any credential, " +
-        "terms, or data are sent. Run it with an input whose columns can " +
-        "supply at least one linkage key, or agree terms declaring one with " +
-        "your partner and run the exchange under those.",
+        "nothing to match on and is refused before any credential, terms, or " +
+        "data are sent. Run it with an input whose columns can supply at " +
+        "least one linkage key, or agree terms declaring one with your " +
+        "partner and run the exchange under those.",
     );
 
   const details: string[] = [];

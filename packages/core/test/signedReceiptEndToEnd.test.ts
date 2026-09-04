@@ -263,14 +263,14 @@ test("an unnamed party refuses at terms agreement rather than signing", async ()
         ? ((initiatorOutcome as PromiseRejectedResult).reason as Error).message
         : "",
     ),
-  ).toContain("the partner's agreed terms carry none");
+  ).toContain("the partner's agreed terms name none");
   expect(
     String(
       (responderOutcome as PromiseRejectedResult).reason instanceof Error
         ? ((responderOutcome as PromiseRejectedResult).reason as Error).message
         : "",
     ),
-  ).toContain("this party's agreed terms carry none");
+  ).toContain("this party's agreed terms name none");
   await connInitiator.close();
   await connResponder.close();
 });
@@ -365,7 +365,7 @@ describe("a signing party refuses an unnamed partner before its own data moves",
       const raised = await refusal;
       expect(raised).toBeInstanceOf(ReceiptVerificationError);
       expect((raised as Error).message).toContain(
-        "the partner's agreed terms carry none",
+        "the partner's agreed terms name none",
       );
 
       // The whole point of the timing, read off the wire: the terms exchange's
@@ -677,7 +677,7 @@ describe("the receipt bindings held at the signature swap", () => {
         decision: "abort",
         abortReasons: [
           "a signed receipt names both parties and one side's agreed terms " +
-            "carry no identity",
+            "name no identity",
         ],
       },
     ]);
@@ -779,7 +779,7 @@ function heldByInitiator(
     localIdentity: { fingerprint: fingerprintA, source: "named" },
     // Both parties named themselves in this suite's terms, which is what a run
     // producing a receipt requires -- runExchange refuses the receipt step when
-    // either side's agreed terms carry no identity.
+    // either side's agreed terms name no identity.
     expectedIdentities: [
       record.localIdentity ?? "",
       record.partnerIdentity ?? "",

@@ -73,10 +73,10 @@ function padSkipped(checks: DoctorCheckRecord[]): DoctorCheckRecord[] {
   return [
     ...checks,
     ...MOUNT_CHECK_IDS.filter((id) => !seen.has(id)).map((id) =>
-      skipped(id, "not run: an earlier check stopped the battery.", {
+      skipped(id, "not run: an earlier check did not pass.", {
         meaning:
-          "an earlier check failed and stopped the battery before " +
-          "this one, so nothing was established about it.",
+          "an earlier check failed and the remaining checks did not run, " +
+          "so nothing was established about this one.",
       }),
     ),
   ];

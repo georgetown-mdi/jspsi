@@ -21,6 +21,7 @@ import {
 } from "@psilink/core";
 
 import { createCappedSink } from "./frameSizeGuard";
+import { REPORT_LIBRARY_INCOMPATIBILITY } from "./libraryIncompatibility";
 import { SftpAdapterLedger } from "./sftpAdapterLedger";
 import type {
   IdleBoundaryOutcome,
@@ -939,7 +940,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     if (!("abandoned" in transition))
       throw new Error(
         `the ${transition.kind} session transition's stated abandon disposition ` +
-          `returns its own value, but the transition carries none`,
+          `returns its own value, but the transition has none`,
       );
     return transition.abandoned();
   }
@@ -1241,6 +1242,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     if (this.transportLifecycleUnreadableWarned) return;
     this.transportLifecycleUnreadableWarned = true;
     this.log.warn(unreadableTransportLifecycleWarning(FORCED_CLOSE_TIMEOUT_MS));
+    this.log.debug(
+      `whether a connection still owes ssh2 its 'close' is watched through ` +
+        `ssh2's client.on(), which is not available after connect(), so this ` +
+        `side closes the connection itself rather than reading that state`,
+    );
   }
 
   // A terminal error built from a previously captured fatal SFTP-protocol error,
@@ -1557,39 +1563,45 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     const seams = resolveEndedTransportCloseSeams(internals);
     if ("missing" in seams) {
       this.log.warn(
-        `The partner's SFTP server dropped the SFTP session mid-exchange, and ` +
-          `re-dialing it means closing the connection beneath it from this ` +
-          `side, which drives ssh2's ${seams.missing} -- not available after ` +
-          `connect(), so the dropped session cannot be re-dialed and the ` +
-          `operation fails. The installed ssh2 / ssh2-sftp-client version may ` +
-          `have renamed, relocated, or removed it - re-verify the internal ` +
-          `premises per the "Upgrading the SFTP Stack" checklist in ` +
-          `docs/spec/DEPENDENCY_PINS.md`,
+        `The partner's SFTP server dropped the SFTP session mid-exchange and ` +
+          `it could not be re-opened, so this operation failed. This build ` +
+          `of psilink is not compatible with the installed SFTP library; ` +
+          `${REPORT_LIBRARY_INCOMPATIBILITY}.`,
+      );
+      this.log.debug(
+        `re-dialing drives ssh2's ${seams.missing}, which is not available ` +
+          `after connect(); the installed ssh2 / ssh2-sftp-client version ` +
+          `may have renamed, relocated, or removed it`,
       );
       return unretired();
     }
     try {
       if (!(await this.forceCloseEndedTransport(held, internals, seams))) {
         this.log.warn(
-          `The SFTP session did not clear within ${FORCED_CLOSE_TIMEOUT_MS} ms ` +
-            `of this side closing the transport the partner's server left ` +
-            `ended, so the mid-exchange re-dial cannot run and the operation ` +
-            `fails; the installed ssh2 may no longer emit the client 'close' ` +
-            `that clears it - re-verify the internal premises per the ` +
-            `"Upgrading the SFTP Stack" checklist in ` +
-            `docs/spec/DEPENDENCY_PINS.md`,
+          `The SFTP session the partner's server dropped did not close ` +
+            `within ${FORCED_CLOSE_TIMEOUT_MS} ms, so it could not be ` +
+            `re-opened and this operation failed. This build of psilink may ` +
+            `not be compatible with the installed SFTP library; ` +
+            `${REPORT_LIBRARY_INCOMPATIBILITY}.`,
+        );
+        this.log.debug(
+          `the installed ssh2 may no longer emit the client 'close' that ` +
+            `clears the session`,
         );
         return "deadSessionHeld";
       }
     } catch (error: unknown) {
       this.log.warn(
-        `Closing the SFTP connection from this side, to re-dial a session the ` +
+        `Closing the SFTP connection from this side, to re-open a session the ` +
           `partner's server dropped mid-exchange, failed: ` +
-          `${sanitizeErrorForDisplay(error)}. The dropped session cannot be ` +
-          `re-dialed, so the operation fails; the installed ssh2's transport ` +
-          `may no longer accept the destroy that drives the client 'close' - ` +
-          `re-verify the internal premises per the "Upgrading the SFTP Stack" ` +
-          `checklist in docs/spec/DEPENDENCY_PINS.md`,
+          `${sanitizeErrorForDisplay(error)}. The dropped session could not ` +
+          `be re-opened, so this operation failed. This build of psilink may ` +
+          `not be compatible with the installed SFTP library; ` +
+          `${REPORT_LIBRARY_INCOMPATIBILITY}.`,
+      );
+      this.log.debug(
+        `the installed ssh2's transport may no longer accept the destroy ` +
+          `that drives the client 'close'`,
       );
       return unretired();
     }
@@ -1597,13 +1609,15 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       this.log.warn(
         `The SFTP connection the partner's server dropped mid-exchange did ` +
           `not close within ${FORCED_CLOSE_TIMEOUT_MS} ms of this side ` +
-          `closing it, so a re-dial would be issued while ssh2 still owes that ` +
-          `connection its 'close' -- which fails the dial and leaves the ` +
-          `session it opened abandoned. The re-dial is refused and the ` +
-          `operation fails with the drop it already had; the installed ssh2 ` +
-          `may no longer emit the client 'close' that retires a destroyed ` +
-          `transport - re-verify the internal premises per the "Upgrading the ` +
-          `SFTP Stack" checklist in docs/spec/DEPENDENCY_PINS.md`,
+          `closing it, so the session was not re-opened and this operation ` +
+          `failed with the drop it already had. This build of psilink may not ` +
+          `be compatible with the installed SFTP library; ` +
+          `${REPORT_LIBRARY_INCOMPATIBILITY}.`,
+      );
+      this.log.debug(
+        `a re-dial issued while ssh2 still owes that connection its 'close' ` +
+          `fails and abandons the session it opens; the installed ssh2 may no ` +
+          `longer emit the client 'close' that retires a destroyed transport`,
       );
       return "unretiredTransport";
     }
@@ -1864,7 +1878,15 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // degrades to a warning, so it is not held to them at dial time.
     if (this.ephemeralSessions) {
       const seams = resolveTransportCloseSeams(internals);
-      if ("missing" in seams) throw transportCloseSeamError(seams.missing);
+      if ("missing" in seams) {
+        this.log.debug(
+          `closing an SFTP connection from this side drives ssh2's ` +
+            `${seams.missing}, which is not available after connect(); the ` +
+            `installed ssh2 / ssh2-sftp-client version may have renamed, ` +
+            `relocated, or removed it`,
+        );
+        throw transportCloseSeamError();
+      }
     }
     // Attach the guarded fatal-'error' listener to the raw wrapper now, while it
     // is known present and callable, so a malformed server reply can never crash
@@ -2027,9 +2049,9 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // handle, would otherwise keep a completed run alive indefinitely).
   //
   // Nothing here throws, and every degraded branch is a warning that names what
-  // broke and where to re-verify it: core treats end() as best-effort and logs a
-  // rejection at debug, so a throw would be invisible and would accomplish
-  // nothing.
+  // broke, with the ssh2 reading behind it logged at debug: core treats end() as
+  // best-effort and logs a rejection at debug, so a throw would be invisible and
+  // would accomplish nothing.
   private async forceCloseTerminalTransport(
     held: HeldSessionTransition,
     ending: Promise<unknown>,
@@ -2045,13 +2067,16 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     if ("missing" in seam) {
       this.log.warn(
         `The SFTP connection was not closed by the partner's SFTP server at ` +
-          `teardown, and closing it from this side drives ssh2's ` +
-          `${seam.missing}, which is not available after connect(): the ` +
-          `connection is left to the operating system, may stay half-open, and ` +
-          `a half-open connection can keep this process from exiting. The ` +
-          `installed ssh2 / ssh2-sftp-client version may have renamed, ` +
-          `relocated, or removed it - re-verify the internal premises per the ` +
-          `"Upgrading the SFTP Stack" checklist in docs/spec/DEPENDENCY_PINS.md`,
+          `teardown, and this build could not close it from this side: the ` +
+          `connection is left to the operating system, may stay half-open, ` +
+          `and a half-open connection can keep this process from exiting. ` +
+          `This build of psilink is not compatible with the installed SFTP ` +
+          `library; ${REPORT_LIBRARY_INCOMPATIBILITY}.`,
+      );
+      this.log.debug(
+        `closing from this side drives ssh2's ${seam.missing}, which is not ` +
+          `available after connect(); the installed ssh2 / ssh2-sftp-client ` +
+          `version may have renamed, relocated, or removed it`,
       );
       return;
     }
@@ -2078,11 +2103,13 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     if (seam.socket.destroyed !== true) {
       this.log.warn(
         `The SFTP connection's transport did not close after this side ` +
-          `destroyed it at teardown, so the connection may stay half-open, and ` +
-          `a half-open connection can keep this process from exiting; the ` +
-          `installed ssh2 may no longer expose the socket beneath its client. ` +
-          `Re-verify the internal premises per the "Upgrading the SFTP Stack" ` +
-          `checklist in docs/spec/DEPENDENCY_PINS.md`,
+          `destroyed it at teardown, so the connection may stay half-open, ` +
+          `and a half-open connection can keep this process from exiting. ` +
+          `This build of psilink may not be compatible with the installed ` +
+          `SFTP library; ${REPORT_LIBRARY_INCOMPATIBILITY}.`,
+      );
+      this.log.debug(
+        `the installed ssh2 may no longer expose the socket beneath its client`,
       );
       return;
     }
@@ -2145,14 +2172,17 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     if ("missing" in seam) {
       this.log.warn(
         `An SFTP session transition did not complete within the ` +
-          `${TRANSITION_ACQUIRE_TIMEOUT_MS} ms teardown wait, and closing the ` +
-          `connection from this side drives ssh2's ${seam.missing}, which is ` +
-          `not available after connect(): the connection is left to the ` +
-          `operating system, may stay half-open, and a half-open connection can ` +
-          `keep this process from exiting. The installed ssh2 / ` +
-          `ssh2-sftp-client version may have renamed, relocated, or removed it ` +
-          `- re-verify the internal premises per the "Upgrading the SFTP Stack" ` +
-          `checklist in docs/spec/DEPENDENCY_PINS.md`,
+          `${TRANSITION_ACQUIRE_TIMEOUT_MS} ms teardown wait, and this build ` +
+          `could not close the connection from this side: the connection is ` +
+          `left to the operating system, may stay half-open, and a half-open ` +
+          `connection can keep this process from exiting. This build of ` +
+          `psilink is not compatible with the installed SFTP library; ` +
+          `${REPORT_LIBRARY_INCOMPATIBILITY}.`,
+      );
+      this.log.debug(
+        `closing from this side drives ssh2's ${seam.missing}, which is not ` +
+          `available after connect(); the installed ssh2 / ssh2-sftp-client ` +
+          `version may have renamed, relocated, or removed it`,
       );
       return;
     }
@@ -2174,11 +2204,13 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     if (seam.socket.destroyed !== true) {
       this.log.warn(
         `The SFTP connection's transport did not close after this side ` +
-          `destroyed it at teardown, so the connection may stay half-open, and ` +
-          `a half-open connection can keep this process from exiting; the ` +
-          `installed ssh2 may no longer expose the socket beneath its client. ` +
-          `Re-verify the internal premises per the "Upgrading the SFTP Stack" ` +
-          `checklist in docs/spec/DEPENDENCY_PINS.md`,
+          `destroyed it at teardown, so the connection may stay half-open, ` +
+          `and a half-open connection can keep this process from exiting. ` +
+          `This build of psilink may not be compatible with the installed ` +
+          `SFTP library; ${REPORT_LIBRARY_INCOMPATIBILITY}.`,
+      );
+      this.log.debug(
+        `the installed ssh2 may no longer expose the socket beneath its client`,
       );
       return;
     }
@@ -2326,7 +2358,15 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       return;
     }
     const seams = resolveTransportCloseSeams(internals);
-    if ("missing" in seams) throw transportCloseSeamError(seams.missing);
+    if ("missing" in seams) {
+      this.log.debug(
+        `closing an SFTP connection from this side drives ssh2's ` +
+          `${seams.missing}, which is not available after connect(); the ` +
+          `installed ssh2 / ssh2-sftp-client version may have renamed, ` +
+          `relocated, or removed it`,
+      );
+      throw transportCloseSeamError();
+    }
     const { end, once, removeListener, socket } = seams;
     // WHO ended this transport is the entry classification, recorded BEFORE the
     // close is driven so an operation that close tears reads the boundary. How
@@ -2375,13 +2415,16 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       // release took the session may only stand where a session was in fact ended,
       // and this one did not end.
       this.recordIdleBoundaryOutcome("destroyDidNotClear", held);
+      this.log.debug(
+        `the installed ssh2 may no longer emit the client 'close' that ` +
+          `clears the session`,
+      );
       throw new Error(
-        `the connection-per-poll idle release destroyed the SFTP session's ` +
+        `the connection-per-poll idle release closed the SFTP session's ` +
           `transport and the session did not clear within ` +
-          `${FORCED_CLOSE_TIMEOUT_MS} ms; the installed ssh2 may no ` +
-          `longer emit the client 'close' that clears it - re-verify the ` +
-          `internal premises per the "Upgrading the SFTP Stack" checklist in ` +
-          `docs/spec/DEPENDENCY_PINS.md`,
+          `${FORCED_CLOSE_TIMEOUT_MS} ms, so the exchange cannot continue. ` +
+          `This build of psilink may not be compatible with the installed ` +
+          `SFTP library; ${REPORT_LIBRARY_INCOMPATIBILITY}`,
       );
     }
     // The partner did not answer the close within the bound and this side

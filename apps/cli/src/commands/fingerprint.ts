@@ -53,10 +53,10 @@ import {
  * The guidance carries the whole remedy because a bare "name a path" invites a
  * throwaway location: this file is the only thing that keeps a pinned
  * fingerprint valid, and losing it costs a re-key coordinated with every
- * partner. So it states why psilink picks no location, both spellings of the
- * path, an example under a mount of the identity's own, what the directory has
- * to be (writable for this run, read-only afterwards, durable, and never
- * partner-synced), and the reuse case that must not turn into a second identity.
+ * partner. So it states both spellings of the path, an example under a mount of
+ * the identity's own, what the directory has to be (writable for this run,
+ * read-only afterwards, durable, and never partner-synced), and the reuse case
+ * that must not turn into a second identity.
  *
  * A single line, and one that ends in the message rather than in a probe: it
  * renders through the display-boundary sanitizer, which escapes a newline and
@@ -65,13 +65,12 @@ import {
  * is the behavior this refusal removes.
  */
 const NO_IDENTITY_PATH_REFUSAL =
-  "no signing identity path is configured, and psilink chooses none: this is a " +
-  "long-lived credential reused across every exchange and every partner, so " +
-  "where it is kept is yours to decide. Name the path and re-run -- 'psilink " +
-  "fingerprint --identity-file /run/signing/psilink-signing-identity.json', or " +
-  "signing.identity_file in the configuration. Its directory must be writable " +
-  "for this creating run; every run after it only reads the file, so a " +
-  "read-only mount of its own is right from then on. Choose somewhere " +
+  "no signing identity path is configured. Name the path and re-run -- " +
+  "'psilink fingerprint --identity-file " +
+  "/run/signing/psilink-signing-identity.json', or signing.identity_file in " +
+  "the configuration. Its directory must be writable for this creating run; " +
+  "every run after it only reads the file, so a read-only mount of its own " +
+  "is right from then on. Choose somewhere " +
   "durable, and never a directory your partner syncs into -- that would put " +
   "your private signing key in their hands. If you already hold an identity " +
   "from an earlier release, name THAT file rather than creating a second one: " +
@@ -93,8 +92,8 @@ export function builder(cmd: Argv): Argv {
       describe:
         "path to the signing identity file, created there if absent; " +
         "overrides signing.identity_file in the config. Required unless the " +
-        "config sets that field -- psilink chooses no location for a " +
-        "credential (example: /run/signing/psilink-signing-identity.json)",
+        "config sets that field (example: " +
+        "/run/signing/psilink-signing-identity.json)",
     })
     .option("config-file", {
       type: "string",
@@ -202,7 +201,7 @@ function assertBindableIdentity(identity: string): void {
   if (TEXT_CONTROL_CHAR_PATTERN.test(identity))
     throw new UsageError(
       "the identity to bind into the signing certificate cannot be used: " +
-        `${TEXT_CONTROL_CHAR_MESSAGE}. Supply one that carries none, through ` +
+        `${TEXT_CONTROL_CHAR_MESSAGE}. Supply one that has none, through ` +
         "--identity or linkage_terms.identity.",
     );
   if (identity.length > MAX_TEXT_LENGTH)

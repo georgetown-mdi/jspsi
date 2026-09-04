@@ -535,7 +535,7 @@ export function logDecisionFacts(
   if (countOnly && (ownOutboundSend?.length ?? 0) > 0)
     throw new Error(
       "count-only exchange resolved a non-empty outbound column set: a psi-c " +
-        "run carries no payload in either direction",
+        "run sends no payload in either direction",
     );
   // The mirror of that check on what the INVITATION declares, which this prompt
   // prints below as the received and requested column blocks: a psi-c document

@@ -40,8 +40,8 @@ function isPlaceholderIdentity(identity: string): boolean {
 export const IDENTITY_STILL_PLACEHOLDER =
   `"${PLACEHOLDER_IDENTITY}" is the placeholder psilink init writes where a ` +
   "name belongs, so it is refused exactly as no identity at all. " +
-  `${PARTNER_READS_IT}, the invitation, and the disclosure record, so it is ` +
-  `yours to choose: pass ${IDENTITY_FLAG_HELP} naming this party.`;
+  `Pass ${IDENTITY_FLAG_HELP} naming this party. ` +
+  `${PARTNER_READS_IT}, the invitation, and the disclosure record.`;
 
 /**
  * Why a label typed at one invocation cannot stand in for a configured one --
@@ -59,9 +59,8 @@ const FLAG_CANNOT_STAND_IN =
  * authors its own linkage terms.
  */
 export const IDENTITY_REQUIRED =
-  "no identity for this party: psilink was given none and invents none. " +
-  `${PARTNER_READS_IT}, the invitation, and the disclosure record, so it is ` +
-  `yours to choose: pass ${IDENTITY_FLAG_HELP}.`;
+  `no identity for this party: pass ${IDENTITY_FLAG_HELP}. ` +
+  `${PARTNER_READS_IT}, the invitation, and the disclosure record.`;
 
 /**
  * The refusal {@link resolveInvitationIdentity} raises, naming the configuration
@@ -77,7 +76,7 @@ export const IDENTITY_REQUIRED =
  */
 export function configuredIdentityRequired(configPath: string): string {
   return (
-    `no identity for this party: ${configPath} carries no ` +
+    `no identity for this party: ${configPath} has no ` +
     `linkage_terms.identity, and it is the source of this invitation's terms. ` +
     `${PARTNER_READS_IT}, so set it there -- ${FLAG_CANNOT_STAND_IN}`
   );
@@ -93,7 +92,7 @@ export function configuredIdentityRequired(configPath: string): string {
  */
 export function keptConfigurationIdentityRequired(configPath: string): string {
   return (
-    `no identity for this party: ${configPath} carries no ` +
+    `no identity for this party: ${configPath} has no ` +
     "linkage_terms.identity, and this acceptance keeps that configuration " +
     `rather than writing one. ${PARTNER_READS_IT}, so set it there -- ` +
     FLAG_CANNOT_STAND_IN
@@ -170,14 +169,11 @@ export function optionalIdentity(
 }
 
 /**
- * The line shown above either identity question, stating why psilink asks
- * instead of supplying a label of its own. It is the sentence both refusals
- * above carry, so the operator who is asked and the operator who is refused read
- * the same account of what the label is for.
+ * The line shown above either identity question, stating what the label is for.
+ * It is the sentence both refusals above end on, so the operator who is asked
+ * and the operator who is refused read the same account of it.
  */
-export const IDENTITY_PROMPT_PREAMBLE =
-  `${PARTNER_READS_IT}, the invitation, and the disclosure record, so it is ` +
-  "yours to choose.";
+export const IDENTITY_PROMPT_PREAMBLE = `${PARTNER_READS_IT}, the invitation, and the disclosure record.`;
 
 /**
  * The question `psilink init` asks. It states what a blank answer does, because

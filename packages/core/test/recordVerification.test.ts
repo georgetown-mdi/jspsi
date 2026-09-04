@@ -767,7 +767,7 @@ describe("reproductionMismatchCauses", () => {
     expect(report.commitments.partnerPayloadReceived).toBe("mismatch");
     const causes = reproductionMismatchCauses(report, data);
     expect(causes).toHaveLength(1);
-    expect(causes[0]).toContain("the re-supplied received payload carries");
+    expect(causes[0]).toContain("the re-supplied received payload has");
   });
 
   test("an empty string in that cell opens the commitment and earns no note", async () => {

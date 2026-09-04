@@ -35,6 +35,6 @@ export function warnOnValueConstraints(
       `value constraint warning: ${summary.count} cleaned ` +
         `value${summary.count === 1 ? "" : "s"} of linkage field ` +
         `"${redactAndSanitizeForDisplay(summary.field)}" flagged "${summary.label}" ` +
-        "(warn-not-enforce; the exchange still proceeds).",
+        "(a warning only; the exchange still proceeds).",
     );
 }

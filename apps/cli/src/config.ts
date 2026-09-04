@@ -2410,20 +2410,21 @@ export function warnOnLinkageRuleSetCitationDrift(
 
   const consequence =
     standing === "accepted-with-partner"
-      ? "The citation is recorded in both parties' exchange records, where it " +
-        "claims a provenance these rules do not have. An acceptance stands " +
+      ? "The citation is recorded in both parties' exchange records, so it " +
+        "credits a source these rules did not come from. An acceptance stands " +
         "behind these terms, so they are not yours alone to correct: editing " +
         "the rules to match the citation would take them out of agreement " +
         "with the inviting party, and the exchange would refuse them. " +
         (alternative === "author-fresh-terms"
-          ? "Settle the citation with that party, or author fresh terms for " +
+          ? "Agree the citation with that party, or author fresh terms for " +
             "this invitation."
-          : "Settle the citation with that party and accept again, or decline " +
+          : "Agree the citation with that party and accept again, or decline " +
             "to reuse these terms.")
-      : "The citation travels onto the invitation, the accepting party's " +
-        "terms review, and both parties' exchange records, where it claims a " +
-        "provenance these rules do not have. Omit linkage_rule_set for rules " +
-        "you author yourself, or restore the rules the cited set declares.";
+      : "This citation is copied into the invitation, into the terms your " +
+        "partner reviews, and into both parties' exchange records, so it " +
+        "credits a source these rules did not come from. Remove " +
+        "linkage_rule_set if you wrote these rules yourself, or restore the " +
+        "rules the cited set defines.";
 
   log.warn(
     `${configPath}: linkage_terms.linkage_rule_set cites ` +

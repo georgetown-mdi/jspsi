@@ -178,7 +178,10 @@ test("the refusal names both spellings, a mounted example, and the unsigned exit
     (err: unknown) => sanitizeErrorForDisplay(err),
   );
   expect(rendered).toContain("signing.mode: certificate");
-  expect(rendered).toContain("psilink chooses no location");
+  expect(rendered).toContain("The run reads it and writes nothing to it");
+  // Why psilink leaves the location to the operator is contributor-tier, kept in
+  // the constant's JSDoc rather than spent on the terminal.
+  expect(rendered).not.toContain("yours to decide");
   expect(rendered).toContain("signing.identity_file");
   expect(rendered).toContain("--identity-file");
   expect(rendered).toContain("/run/signing/psilink-signing-identity.json");

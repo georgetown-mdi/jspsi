@@ -209,7 +209,7 @@ function describeCardinality(shape: ResolvedRunShape): string | undefined {
         "its within-dataset duplicate values, so several of its records can " +
         "match one of yours. " +
         (shape.localExpectsOutput
-          ? "Your result file carries one row per matched pair, so one of " +
+          ? "Your result file has one row per matched pair, so one of " +
             "your records can appear on several rows."
           : "By the agreed terms you receive no result from this run, so " +
             "those pairs land in your partner's result file, where one of " +
@@ -222,10 +222,10 @@ function describeCardinality(shape: ResolvedRunShape): string | undefined {
         "every one of your records holding it with every one of your " +
         "partner's. " +
         (shape.localExpectsOutput
-          ? "Your result file carries one row per matched pair, so it can " +
+          ? "Your result file has one row per matched pair, so it can " +
             "hold far more rows than either party has records."
           : "By the agreed terms you receive no result from this run, so " +
-            "those pairs land in your partner's result file, which carries " +
+            "those pairs land in your partner's result file, which has " +
             "one row per pair and can hold far more rows than either party " +
             "has records.")
       );
@@ -250,7 +250,7 @@ function describePairTableProjection(projection: PairTableProjection): string {
       : "") +
     "That is above the advisory bound of " +
     `${formatCount(PAIR_TABLE_ADVISORY_MAX_PAIRS)} pairs. Nothing refuses on ` +
-    "the projection and the exchange continues, but the result carries one " +
+    "the projection and the exchange continues, but the result has one " +
     "row per pair, so expect a large result and a long run. To bring it down, " +
     "reduce either side's record count or agree terms that do not keep both " +
     "sides' duplicates."

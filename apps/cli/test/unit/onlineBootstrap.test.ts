@@ -4261,7 +4261,11 @@ test("buildDataSpec: a supplied terms object (accept's path) ignores the selecti
 
 test("singlePassDisclosureNotice: names the disclosure tradeoff and the operator-facing doc", () => {
   const note = singlePassDisclosureNotice();
-  expect(note).toContain("discloses");
+  // The same plain words the web acceptance surface states the disclosure in.
+  expect(note).toContain(
+    "sends the other everything it prepared for every linkage key at once",
+  );
+  expect(note).toContain("how much your partner can observe while it runs");
   expect(note).toContain("consented disclosure tradeoff");
   // Links the operator-facing reference, not the internal design note.
   expect(note).toContain("docs/EXCHANGE_REFERENCE.md");
