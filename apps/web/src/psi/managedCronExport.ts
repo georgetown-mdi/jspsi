@@ -12,22 +12,22 @@
  *   two derivations ({@link serializeExchangeDocument},
  *   {@link keyFileFieldsFromRecord}), which are the CLI's own file shapes
  *   (docs/spec/MANAGED_EXCHANGE_RECORD.md, "Export artifact"). This adds only
- *   the two files' framing and the two fields the artifact does not carry.
+ *   the two files' framing and the two fields the artifact does not hold.
  * - It INJECTS `connection.role` from the record's local `side`, at export
- *   time only: the stored document carries none (the spec's "Role: a local
+ *   time only: the stored document holds none (the spec's "Role: a local
  *   `side` field, not the document"), while the CLI derives its rendezvous
  *   peer id from `role` (`apps/cli/src/protocol.ts`). Nothing here writes
  *   back.
- * - It CARRIES the max-age policy into the document as
+ * - It INCLUDES the max-age policy in the document as
  *   `authentication.token_max_age_days`: the CLI stamps a rotated token's
- *   `expires` only from that config key. The EXPORTED document may carry an
+ *   `expires` only from that config key. The EXPORTED document may hold an
  *   `authentication` block while the STORED document must not (the read-path
  *   refine in {@link ./managedExchangeRecord.ts}); the spelling is the
  *   block's operator-authored, secret-free one, and the block is a strict
  *   object, so a typo fails closed.
  * - It REFUSES any stored document the app could not have composed: a
  *   connection on another channel (as the re-run dispatch gate refuses one,
- *   {@link ./managedRendezvous.ts}), a webrtc connection carrying a field
+ *   {@link ./managedRendezvous.ts}), a webrtc connection holding a field
  *   outside the credential-free locator subset, a stored `authentication`
  *   block, or a top-level document field outside the record composer's own
  *   input. Each is reachable only by importing a hand-crafted artifact, whose
@@ -42,7 +42,7 @@
  * The key file is a plaintext credential under the CLI key file's own trust
  * model: custody and storage permissions, never a passphrase (the spec's
  * "Plaintext, custody-protected"; docs/SECURITY_DESIGN.md, "Key file
- * security"). The configuration half carries no secret -- the shared secret
+ * security"). The configuration half holds no secret -- the shared secret
  * and any `expires` ride the key file alone.
  */
 
@@ -119,7 +119,7 @@ export interface ManagedCronExportFile {
  */
 export interface ManagedCronExport {
   /** The `psilink.yaml` half: the exchange-file document, with `role` injected
-   * and any max-age policy carried, and no secret. */
+   * and any max-age policy held, and no secret. */
   config: ManagedCronExportFile;
   /** The `.psilink.key` half: the shared secret and any `expires`. A plaintext
    * credential -- this is the file the handover's custody rules are about. */
@@ -130,7 +130,7 @@ export interface ManagedCronExport {
 
 /**
  * The locator both composition probes below are driven with: a webrtc locator
- * carrying every optional field, so what each probe measures is the widest shape
+ * holding every optional field, so what each probe measures is the widest shape
  * the app can compose rather than the narrowest.
  */
 const WIDEST_PROBE_LOCATOR: WebRTCExchangeLocator = {
@@ -226,7 +226,7 @@ function webrtcLocatorConnectionOrRefuse(
 }
 
 /**
- * Refuse a stored document carrying an `authentication` block: the composed
+ * Refuse a stored document holding an `authentication` block: the composed
  * document's block is injected from the record's local max-age policy alone,
  * so a stored one would ride the document spread into the configuration half
  * -- `shared_secret` and all. The record read path refines such a document
@@ -247,7 +247,7 @@ function assertNoStoredAuthentication(exchangeFile: ExchangeSpec): void {
  * The top-level document fields the app can put in a stored document, measured
  * by composing one. Typed `Required<ManagedExchangeFileComposition>`, so a
  * field added to the record composer's input fails this module's compile
- * until the probe carries it. Read off {@link composeManagedExchangeFile}'s
+ * until the probe holds it. Read off {@link composeManagedExchangeFile}'s
  * OUTPUT, not its input: the probe measures which KEYS survive composition,
  * never what they hold.
  */
@@ -266,7 +266,7 @@ function composableDocumentFields(): ReadonlySet<string> {
 }
 
 /**
- * The top-level fields the exported document may carry: what the app can compose
+ * The top-level fields the exported document may hold: what the app can compose
  * (above), plus the `authentication` block this module injects from the local
  * max-age policy, plus the `retentionDisposition` the record spec sanctions on a
  * stored document as operator-authored free text
@@ -296,7 +296,7 @@ function fieldsOutsideComposableDocument(
 }
 
 /**
- * Refuse a document carrying a top-level field the app could not have
+ * Refuse a document holding a top-level field the app could not have
  * composed: the exchange-file schema is broader than the record composer --
  * it admits a `signing` block -- and it is what an imported artifact's
  * embedded document validates against, so this gate keeps the document
@@ -319,17 +319,17 @@ function assertComposableDocumentFields(document: ExchangeSpec): void {
 }
 
 /**
- * Compose the exchange-file document the export carries: the stored document
- * with `role` set from the record's `side` and, when the record carries a
- * max-age policy, an `authentication` block carrying it. Returns the schema's
+ * Compose the exchange-file document the export holds: the stored document
+ * with `role` set from the record's `side` and, when the record holds a
+ * max-age policy, an `authentication` block holding it. Returns the schema's
  * parse result rather than the assembled input, matching
  * `assembleExchangeSpec`'s discipline, so a value the exchange-file schema
  * would not accept fails here rather than at the operator's first scheduled
  * run.
  *
  * @throws {Error} if the stored connection is not a credential-free webrtc
- *   locator, the stored document carries an `authentication` block, or it
- *   carries a top-level field the app does not compose.
+ *   locator, the stored document holds an `authentication` block, or it
+ *   holds a top-level field the app does not compose.
  * @throws {ZodError} if the composed document fails exchange-file validation.
  */
 function composeCronExportDocument(
@@ -368,7 +368,7 @@ function serializeKeyFile(fields: ManagedExchangeArtifactKey): string {
  * defaults (`apps/cli/src/commands/exchange.ts`).
  *
  * @throws {Error} if the record's stored connection is not a credential-free
- *   webrtc locator, or its stored document carries an `authentication` block
+ *   webrtc locator, or its stored document holds an `authentication` block
  *   or a top-level field the app does not compose.
  * @throws {ZodError} if the composed document fails exchange-file validation.
  */

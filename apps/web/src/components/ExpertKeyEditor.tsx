@@ -131,9 +131,9 @@ export function ExpertKeyEditor({
   // Stable React keys for keys and elements, tracked by object identity so a
   // reorder follows the logical row and a text edit keeps the same input mounted
   // (no focus loss mid-typing). The pure edit helpers replace the edited key /
-  // element object, so editKey / editElement carry its id across the replacement
+  // element object, so editKey / editElement keep its id across the replacement
   // -- the same idiom StepListEditor uses for a step. Reorder and the sibling
-  // map() preserve object references, so those ids carry automatically.
+  // map() preserve object references, so those ids persist automatically.
   const keyIds = useRef(new WeakMap<LinkageKey, string>());
   const elementIds = useRef(new WeakMap<LinkageKeyElement, string>());
   const nextId = useRef(0);
@@ -226,7 +226,7 @@ export function ExpertKeyEditor({
   // replaces the containing key object; carry the key's id so its card stays
   // mounted across the edit (otherwise the whole card -- and every element row,
   // and the "Add an element" button focus lands on -- remounts). Surviving element
-  // objects keep their identity through the helpers, so their ids carry on their
+  // objects keep their identity through the helpers, so their ids persist on their
   // own; only the replaced key object needs the carry.
   const applyKeyStructureEdit = (
     keyIndex: number,
@@ -647,7 +647,7 @@ export function ExpertKeyEditor({
             const next = addKey(draft, firstField);
             // Expand the freshly added key (appended last) so the operator lands in
             // its editor rather than a collapsed header. idFor mints its stable id
-            // here; the same key object carries that id into the next render, so it
+            // here; the same key object holds that id into the next render, so it
             // displays as expanded.
             const newKey = next.keys[next.keys.length - 1].key;
             setExpandedKeys((prev) =>

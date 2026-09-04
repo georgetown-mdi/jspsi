@@ -15,11 +15,11 @@ import type { Standardization } from "@psilink/core";
  * same-origin fetch to a `gateJobRoute`-protected endpoint; off the console
  * those endpoints answer 404, so a hosted build never reaches a configured
  * directory. Responses are validated defensively -- the console is trusted, but
- * a malformed body degrades to an honest error state rather than a crash.
+ * a malformed body degrades to an accurate error state rather than a crash.
  */
 
 /** A committed mounted file: the opaque name the coverage sweep and the job intent
- * carry. The CLI reads the file in place, so no size/mtime snapshot travels. */
+ * hold. The CLI reads the file in place, so no size/mtime snapshot travels. */
 export interface WorkInputReference {
   name: string;
 }
@@ -27,8 +27,8 @@ export interface WorkInputReference {
 /** The `GET /api/jobs/inputs` outcome: the listing, a stable `disabled` state (the
  * job API is off -- `JOB_DATA_ROOT` unset -- so the gate 404s), or a transient
  * `error` (another non-2xx, a network fault, or a malformed body). The picker
- * renders these as three distinct states so an off-console signal reads as
- * configuration, not a fault to retry. */
+ * renders these as three distinct states so an off-console signal is treated
+ * as configuration, not a fault to retry. */
 export type JobInputsResult =
   | { kind: "listing"; listing: JobInputListing }
   | { kind: "disabled" }
@@ -46,7 +46,7 @@ export type ProfiledJobInput = Omit<JobInputProfile, "columnSamples"> & {
  * is the 404 (the file is gone -- removed or replaced since the listing); the three
  * fault codes are the profile route's ({@link JobInputProfileErrorCode}); `unknown`
  * is the catch-all for a network error, an off-console 404, or a malformed body -- it
- * carries no free text, keeping the set closed. */
+ * holds no free text, keeping the set closed. */
 export type JobInputProfileUnavailableReason =
   "not_found" | JobInputProfileErrorCode | "unknown";
 
@@ -56,7 +56,7 @@ export type JobInputProfileResult =
   | { kind: "profile"; profile: ProfiledJobInput }
   | { kind: "unavailable"; reason: JobInputProfileUnavailableReason };
 
-/** The closed profile-fault codes the route may carry in a 400 body, so a body whose
+/** The closed profile-fault codes the route may include in a 400 body, so a body whose
  * `error` is anything else degrades to `unknown` rather than passing free text
  * through. */
 const PROFILE_ERROR_CODES: ReadonlyArray<JobInputProfileErrorCode> = [
@@ -90,17 +90,17 @@ function profileErrorReasonOf(body: unknown): JobInputProfileUnavailableReason {
  *
  * `sharesDataRoot` reports the single-mount layout: a rendezvous folder that
  * holds the mounted working directory, so what the partner syncs into is also
- * where this party's signing key lives. Absent reads as the shared layout, the
- * fail-safe direction for the surfaces that warn about the key's location.
+ * where this party's signing key lives. Absent is treated as the shared layout,
+ * the fail-safe direction for the surfaces that warn about the key's location.
  *
  * `sharesDataRootUncertain` reports whether that layout was positively
  * established -- a lexical or filesystem match -- rather than defaulted to;
  * meaningful only alongside `sharesDataRoot: true`, where an unconfirmed body
- * reads as uncertain, the same fail-safe direction.
+ * is treated as uncertain, the same fail-safe direction.
  *
  * `problem` is why the console cannot run a filedrop exchange as provisioned,
  * in the operator's own terms; it accompanies `configured: false`, so the
- * unavailable state carries its own remedy. */
+ * unavailable state holds its own remedy. */
 export interface JobRendezvousConfig {
   configured: boolean;
   split?: boolean;
@@ -125,8 +125,8 @@ function jobInputListingOf(body: unknown): JobInputListing | null {
   if (!isRecord(body)) return null;
   const { configured, readable, files } = body;
   if (typeof configured !== "boolean") return null;
-  // Absent `readable` reads as readable: true -- the non-alarming direction, so an
-  // older/partial body shows its files rather than a false "unreadable mount".
+  // Absent `readable` is treated as readable: true -- the non-alarming direction,
+  // so an older/partial body shows its files rather than a false "unreadable mount".
   if (readable !== undefined && typeof readable !== "boolean") return null;
   if (!Array.isArray(files)) return null;
   const parsed: JobInputListing["files"] = [];
@@ -204,7 +204,7 @@ export async function fetchJobInputs(
 }
 
 /** Profile one mounted input file by its admissible name. A 404 is `not_found` (the
- * file is gone since the listing); a 400 carries a closed profile-fault code the
+ * file is gone since the listing); a 400 holds a closed profile-fault code the
  * picker names; anything else (another non-2xx, a malformed body, a network error) is
  * `unknown`. */
 export async function fetchJobInputProfile(
@@ -255,17 +255,17 @@ async function probeJobRendezvous(
     if (!isRecord(body) || typeof body.configured !== "boolean") return null;
     if (!body.configured) {
       const problem = body.problem;
-      // An unavailable mount the console gave a reason for carries it through, so
-      // the seat that reports the state names the variable to set rather than the
-      // generic "nothing is mounted".
+      // An unavailable mount the console gave a reason for keeps it, so the seat
+      // that reports the state names the variable to set rather than the generic
+      // "nothing is mounted".
       return typeof problem === "string" && problem.length > 0
         ? { configured: false, problem }
         : { configured: false };
     }
     const locator = body.locator;
     // A configured mount the body names no locator for cannot mint an invitation,
-    // so it reads as unavailable rather than as a filedrop card that refuses at
-    // create time.
+    // so it is treated as unavailable rather than as a filedrop card that refuses
+    // at create time.
     if (typeof locator !== "string" || locator.length === 0)
       return { configured: false };
     const folderName = body.folderName;
@@ -280,7 +280,7 @@ async function probeJobRendezvous(
     // offering a card that fails there.
     if (split && outboundLocator === undefined) return { configured: false };
     const outboundFolderName = body.outboundFolderName;
-    // Anything but an explicit `false` reads as the shared layout: a body that
+    // Anything but an explicit `false` is treated as the shared layout: a body that
     // does not answer leaves the identity-location warning raised rather than
     // silently withheld, which is the direction that warning is safe to fail in.
     const sharesDataRoot = body.sharesDataRoot !== false;
@@ -288,7 +288,7 @@ async function probeJobRendezvous(
       configured: true,
       locator,
       sharesDataRoot,
-      // Meaningful only alongside a shared layout, so carried only there.
+      // Meaningful only alongside a shared layout, so held only there.
       // Uncertain unless the body positively confirms both that the layout is
       // shared AND that the walk established it rather than defaulted to it:
       // the same fail-safe direction as sharesDataRoot itself, so a malformed
@@ -352,7 +352,7 @@ export async function fetchJobRendezvous(
 /** Validate a coverage response body's `rates` into the coverage array, or null
  * on any malformed shape. A malformed numeric field must not flow into the
  * silent-empty create-gate and fail it OPEN, so a bad body degrades to the
- * honest error state rather than reporting a false coverage. `unavailable` is
+ * accurate error state rather than reporting a false coverage. `unavailable` is
  * accepted when absent -- reading as available, the same direction the alarm
  * fails toward. */
 function coverageRatesOf(body: unknown): Array<FieldValueCoverage> | null {
@@ -383,7 +383,7 @@ function coverageRatesOf(body: unknown): Array<FieldValueCoverage> | null {
 }
 
 /**
- * The outcome of a coverage sweep, split so the caller settles a deterministic
+ * The outcome of a coverage sweep, split so the caller finalizes a deterministic
  * failure but holds a transient one:
  * - `rates`: a clean sweep.
  * - `unavailable`: a deterministic failure (a `4xx` other than `429`, or a malformed

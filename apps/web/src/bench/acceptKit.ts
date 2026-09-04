@@ -11,7 +11,7 @@
  *
  * The sheet is a DISCLOSURE SURFACE: whatever it interpolates is written to
  * disk and handed to the partner. Two kinds of dynamic value are representable
- * here: the rendezvous locator the invitation already carries (free text held
+ * here: the rendezvous locator the invitation already holds (free text held
  * to the sheet's ASCII contract by {@link printable}), and this build's public
  * release version (interpolated only in the shape {@link RELEASE_VERSION}
  * admits). Everything else is fixed text: {@link AcceptKitInput} declares only
@@ -38,7 +38,7 @@
  * Every filedrop name is optional: where the rendezvous mount point was
  * chosen by a launcher rather than by the operator, the mount point is not
  * the folder's name, and the sheet omits the name rather than telling the
- * partner to match one that is not. `split` carries the SHAPE independently
+ * partner to match one that is not. `split` states the SHAPE independently
  * of the names: a split rendezvous the console cannot name is still
  * described as two folders.
  */
@@ -63,7 +63,7 @@ export type AcceptKitEndpoint =
 
 /**
  * The minted exchange the sheet describes, as the mint fixed it: where the two
- * parties meet, and which bilateral file-handling settings the run carries. Held
+ * parties meet, and which bilateral file-handling settings the run contains. Held
  * together so a caller composing the sheet cannot pair one exchange's locator
  * with another's settings.
  */
@@ -72,7 +72,7 @@ export interface AcceptKitExchange {
   endpoint: AcceptKitEndpoint;
   /**
    * Whether the inviter turned retain mode on. Bilateral and non-negotiated:
-   * the partner's own run must carry it or the two sides stop at rendezvous,
+   * the partner's own run must hold it or the two sides stop at rendezvous,
    * and it leaves every protocol file in place afterwards. Selects fixed
    * text and contributes no value of its own.
    */
@@ -97,7 +97,7 @@ type BilateralSettings = Pick<
 
 /** The inputs the sheet is built from. */
 export interface AcceptKitInput extends AcceptKitExchange {
-  /** The release version this build carries, which decides both the image tag
+  /** The release version this build holds, which decides both the image tag
    * the sheet's commands name and the release page it links; see
    * {@link releaseVersion}. Absent, or in any shape but a release version, the
    * sheet names {@link DEFAULT_PSILINK_IMAGE_TAG} and the releases index. */
@@ -110,7 +110,7 @@ export interface AcceptKitInput extends AcceptKitExchange {
 const PSILINK_IMAGE_REPOSITORY = "docker.io/vdorie/psi-link";
 
 /**
- * The image tag the sheet names when the build carries no release version -- a
+ * The image tag the sheet names when the build holds no release version -- a
  * development or hosted build, neither of which is a published image. It is the
  * floating tag the release publishes alongside `X.Y.Z` (`docs/RELEASES.md`),
  * the same floating tag the setup script's own `docker run` commands name.
@@ -121,7 +121,7 @@ const DEFAULT_PSILINK_IMAGE_TAG = "latest";
  * The shape a release version has: `X.Y.Z` with semver's optional prerelease
  * and build suffixes (`docs/RELEASES.md`). The build's value is interpolated
  * only when it matches, so an absent, partial, or malformed one names the
- * floating tag; `0.0.0`, the marker for manifests that carry no release
+ * floating tag; `0.0.0`, the marker for manifests that hold no release
  * version, is excluded with it. The image build reads the CLI manifest,
  * which never holds `0.0.0`; the carve-out guards a build mis-wired to the
  * unversioned web or root manifest, not a value the production build path
@@ -131,7 +131,7 @@ const RELEASE_VERSION =
   /^(?!0\.0\.0(?:[-+]|$))\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 /** The release page the launcher files are downloaded from; the same URL the
- * launchers themselves carry. */
+ * launchers themselves hold. */
 const PSILINK_RELEASES_URL = "https://github.com/georgetown-mdi/jspsi/releases";
 
 /** The command-line reference the sheet closes on. */
@@ -139,7 +139,7 @@ const PSILINK_CLI_DOC_URL =
   "https://github.com/georgetown-mdi/jspsi/blob/main/docs/CLI.md";
 
 /** The placeholder the partner replaces with the invitation string. The sheet
- * carries this and never a token: the invitation travels separately, so a
+ * holds this and never a token: the invitation travels separately, so a
  * mislaid sheet discloses nothing. */
 export const INVITATION_PLACEHOLDER = "PASTE_YOUR_INVITATION";
 
@@ -169,11 +169,11 @@ function heading(title: string): Array<string> {
 /**
  * The rendezvous locator, as the sheet prints it back for the partner to
  * check. Interpolating it is not a disclosure: it is exactly the
- * credential-free locator the invitation already carries, and on filedrop it
+ * credential-free locator the invitation already holds, and on filedrop it
  * is the shared folder's name rather than any path on the inviter's machine.
  *
  * The filedrop cross-check is a check, not a promise of equality: the same
- * shared folder can carry a different name on each side (a share root mapped
+ * shared folder can have a different name on each side (a share root mapped
  * to a drive letter is the ordinary case), so the sheet asks the partner to
  * check the name rather than match it.
  */
@@ -239,7 +239,7 @@ function rendezvousLines(endpoint: AcceptKitEndpoint): Array<string> {
   ];
 }
 
-/** This build's release version, or undefined when it carries none. The one
+/** This build's release version, or undefined when it holds none. The one
  * gate on the value: everything below interpolates the result, so nothing the
  * build supplies reaches the sheet without matching {@link RELEASE_VERSION}. */
 function releaseVersion(version: string | undefined): string | undefined {
@@ -257,7 +257,7 @@ function imageReference(version: string | undefined): string {
 }
 
 /** The release page the launcher files are downloaded from: this build's own
- * release when it carries a version, so the partner takes the launchers from
+ * release when it holds a version, so the partner takes the launchers from
  * the release that mints their invitation, else the index whose newest entry is
  * what the floating tag resolves to. Release tags are `vX.Y.Z`
  * (`docs/RELEASES.md`). */
@@ -279,12 +279,12 @@ function acceptCommand(version: string | undefined): string {
 }
 
 /**
- * What the partner's `exchange` command carries beyond the run itself: the
+ * What the partner's `exchange` command holds beyond the run itself: the
  * one flag standing for the bilateral settings their side must match.
  *
  * Retain mode travels as the single flag whose implications the CLI resolves
  * for them (`withRetainModeImplications`); the lockless rendezvous flag
- * travels only where retain mode is not already carrying it. Fixed strings
+ * travels only where retain mode is not already holding it. Fixed strings
  * chosen by booleans, so nothing new is representable on the sheet.
  */
 function bilateralFlag(settings: BilateralSettings): string {
@@ -369,7 +369,7 @@ function consoleControlLines(settings: BilateralSettings): Array<string> {
  *
  * The message bodies stay ciphertext (`docs/spec/CHANNEL_SECURITY.md`); the
  * control files the two sides meet through do not -- the hello bodies are
- * plaintext, and the filenames carry each party's name, timestamps, sequence
+ * plaintext, and the filenames include each party's name, timestamps, sequence
  * numbers, and byte counts.
  */
 function retainLines(endpoint: AcceptKitEndpoint): Array<string> {

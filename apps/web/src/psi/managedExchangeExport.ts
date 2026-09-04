@@ -23,12 +23,12 @@
  *
  * Both spending intents' confirm step re-reads the record by id, and spends
  * only while no run of it is in flight and the downloaded artifact still
- * carries the record's current secret
+ * has the record's current secret
  * ({@link ManagedHandoffRefusedError} otherwise). A run in flight is
  * excluded on the run's own lock rather than checked directly (see
  * {@link ./managedExchangeStore.ts}, `spendManagedExchangeIfCurrent`).
  *
- * The seams (read-and-mark, the non-marking read by id, the download, the
+ * The boundaries (read-and-mark, the non-marking read by id, the download, the
  * currency-checked spend) are injected so the intents are testable without
  * a real download or database.
  */
@@ -48,7 +48,7 @@ import type { ManagedExchangeRecord } from "./managedExchangeRecord";
 
 /** The download filename `psilink-managed-backup-<date>.json`, the date the local
  * calendar day of `at`, mirroring the exchange-file filename discipline so repeated
- * exports carry distinct dates. */
+ * exports have distinct dates. */
 export function managedBackupFileName(at: Date): string {
   const year = at.getFullYear();
   const month = String(at.getMonth() + 1).padStart(2, "0");
@@ -56,8 +56,8 @@ export function managedBackupFileName(at: Date): string {
   return `psilink-managed-backup-${year}-${month}-${day}.json`;
 }
 
-/** The platform seams a backup export drives, injected so the intent stays pure and
- * testable. */
+/** The platform boundaries a backup export drives, injected so the intent stays
+ * pure and testable. */
 export interface ManagedExportDeps {
   /** Read the current stored record for `id`, run `composeExport` on it, and stamp
    * its backup marker as of `backedUpAt` in one atomic step, returning the record
@@ -74,11 +74,12 @@ export interface ManagedExportDeps {
   now: () => Date;
 }
 
-/** The platform seams a migration export drives: the backup seams, and the
- * currency-checked spend that transitions the source to its visible spent state. */
+/** The platform boundaries a migration export drives: the backup boundaries, and
+ * the currency-checked spend that transitions the source to its visible spent
+ * state. */
 export interface ManagedMigrationDeps extends ManagedExportDeps {
   /** Spend the record for `id` as of `spentAt` (the handoff date), but only while no
-   * run of it is in flight and the stored record still carries
+   * run of it is in flight and the stored record still has
    * `expectedSharedSecret` -- the exclusion, the check, and the write are one
    * store step, writing nothing and naming the refusal when either fails. Run at
    * confirm time, never at dispatch, against the record the store holds then. */
@@ -110,7 +111,7 @@ const HANDOFF_REFUSAL_FOR_OUTCOME: Record<
 };
 
 /**
- * Raised when a hand-off confirmation is refused, carrying which refusal it
+ * Raised when a hand-off confirmation is refused, stating which refusal it
  * was: `"run-in-flight"` excludes the spend on the run+rotate lock rather
  * than checking it and clears once the run ends; `"superseded"` means the
  * stored secret no longer matches the downloaded artifact; `"record-gone"`
@@ -274,16 +275,16 @@ export async function dispatchManagedMigration(
   };
 }
 
-/** The platform seams the command-line export drives: a NON-STAMPING read of the
- * record by id (this export marks no backup marker -- see the module header), a
- * download that carries each composed file's own media type -- the two files land as
- * the YAML and JSON documents the CLI opens, not as one artifact blob -- and a spend
- * that records which hand-off spent the copy, so the durable spent state does not
- * read as a migration's. */
+/** The platform boundaries the command-line export drives: a NON-STAMPING read of
+ * the record by id (this export marks no backup marker -- see the module header),
+ * a download that takes each composed file's own media type -- the two files land
+ * as the YAML and JSON documents the CLI opens, not as one artifact blob -- and a
+ * spend that records which hand-off spent the copy, so the durable spent state
+ * does not read as a migration's. */
 export interface ManagedCronExportDeps {
   /** Read the current stored record for `id`, or `undefined` when none is stored.
    * Read at dispatch and never from a caller-held record, so a stale tab composes the
-   * files the store's record carries or none at all. */
+   * files the store's record has or none at all. */
   readRecord: (id: string) => Promise<ManagedExchangeRecord | undefined>;
   /** Trigger a client-side download of one composed file. */
   download: (fileName: string, content: string, mimeType: string) => void;
@@ -304,7 +305,7 @@ export interface ManagedCronExportDeps {
 export interface ManagedCronExportDispatch {
   /** The record the export composed from (the fresh store read). */
   record: ManagedExchangeRecord;
-  /** What the two downloads carried, and the invocation that runs them. */
+  /** What the two downloads held, and the invocation that runs them. */
   composed: ManagedCronExport;
   /** Spend the source as of `spentAt` (the operator's confirmation instant), under
    * the command-line hand-off. Called only after the operator confirms both files

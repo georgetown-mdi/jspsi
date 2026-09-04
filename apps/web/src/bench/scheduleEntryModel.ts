@@ -62,14 +62,14 @@ export interface ScheduleEntryFields {
    * clock. */
   firstWindowTime: string;
   /** How often a window opens, in whole days; the string a cleared or partial
-   * number input reports is carried as typed. */
+   * number input reports is held as typed. */
   intervalDays: number | string;
-  /** How long each window stays open, in whole hours; likewise carried as
+  /** How long each window stays open, in whole hours; likewise held as
    * typed. */
   windowHours: number | string;
 }
 
-/** The field errors an entry carries, keyed by the field that shows each one.
+/** The field errors an entry has, keyed by the field that shows each one.
  * Empty when every field is usable. */
 export interface ScheduleEntryErrors {
   firstWindowDate?: string;
@@ -154,11 +154,11 @@ function anchorEntryFields(anchor: string): {
 
 /**
  * The stored width, when the width field still shows exactly it -- so a save
- * that edited another field carries the stored seconds through rather than
+ * that edited another field holds the stored seconds through rather than
  * re-deriving them from the display value in hours. A stored width finer than
  * the field's unit would otherwise be rewritten to the hours it displays as.
  *
- * Also the exception {@link scheduleEntryErrors} reads: a carried value is
+ * Also the exception {@link scheduleEntryErrors} reads: a held value is
  * inherited rather than entered, so entry's bounds do not apply to it.
  */
 function carriedWindowSeconds(
@@ -173,7 +173,7 @@ function carriedWindowSeconds(
 
 /**
  * The stored anchor, when the date and time fields still show exactly the wall
- * clock it reads back as -- carried through so an edit to another field does not
+ * clock it reads back as -- held through so an edit to another field does not
  * re-resolve a wall clock the operator's zone skips or repeats, which does not
  * round-trip (see {@link scheduleEntryUnchanged}).
  *
@@ -199,7 +199,7 @@ function carriedAnchor(
  * a date the calendar does not have fails here rather than at the write.
  *
  * `stored` is the schedule the form opened on, where there is one. A width it
- * carries stands untouched while the operator leaves it alone, including one
+ * holds stands untouched while the operator leaves it alone, including one
  * below entry's floor; a width the operator CHANGES takes entry's bounds and the
  * whole-hour rule like any other entry.
  */
@@ -257,13 +257,13 @@ export function scheduleEntryUsable(
  * a new lattice.
  *
  * `stored` is the schedule the form opened on, where there is one; its anchor
- * and width are carried VERBATIM while the display fields are untouched (see
+ * and width are held VERBATIM while the display fields are untouched (see
  * {@link carriedAnchor} and {@link carriedWindowSeconds}).
  *
  * @throws {RangeError} if any field is unusable (see
  *   {@link scheduleEntryErrors}), if the width does not resolve to the whole
  *   number of seconds the record stores, or if the resolved anchor falls outside
- *   the range a stored UTC instant carries.
+ *   the range a stored UTC instant allows.
  */
 export function buildScheduleFromEntry(
   fields: ScheduleEntryFields,
@@ -313,11 +313,11 @@ export function buildScheduleFromEntry(
  *
  * A width the schema admits but entry does not reads back as the EXACT hours it
  * is, fractional where its seconds are not a whole hour ({@link
- * scheduleEntryErrors}), and the save carries its seconds through untouched
+ * scheduleEntryErrors}), and the save holds its seconds untouched
  * ({@link buildScheduleFromEntry}).
  *
  * The anchor is read back only to the minute; a stored anchor finer than that is
- * carried through rather than re-resolved.
+ * held rather than re-resolved.
  *
  * @throws {RangeError} if the stored anchor is not a usable UTC instant.
  */
@@ -401,7 +401,7 @@ export function resolvedFirstWindowLabel(
  *
  * A successful run restamps the bound to `tokenMaxAgeDays` past the run; a
  * cadence at or past the bound therefore lapses the stored secret before the
- * next window could refresh it, and recovery is a re-invite. Surfaced rather
+ * next window could refresh it, and recovery is a re-invite. Raised rather
  * than refused: an operator who renews by hand is entitled to that cadence.
  */
 export function cadenceAgainstTokenBound(

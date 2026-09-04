@@ -66,7 +66,7 @@ export interface DisclosureFact {
 export interface DisclosureEntryView {
   /** The run's own instant, verbatim from the record's `createdAt`: the ISO-8601
    * value, not the minute-resolution {@link when} the screen shows and the export's
-   * first column carries. Not the entry's identity either -- {@link bindingNonce}
+   * first column holds. Not the entry's identity either -- {@link bindingNonce}
    * is, since two runs can share a millisecond instant. */
   at: string;
   /** The record's own per-run identity (see `appendDisclosureRecord` in
@@ -111,7 +111,7 @@ export const DISCLOSURE_FACT_LABELS: ReadonlyArray<string> = [
   "Where the result was filed",
 ];
 
-/** The named empty state for a field the record does not carry. */
+/** The named empty state for a field the record does not have. */
 const NOT_RECORDED = "Not recorded";
 
 /** The named empty state for a direction that disclosed no payload columns -- none
@@ -119,14 +119,14 @@ const NOT_RECORDED = "Not recorded";
  * rather than by omission, and so does this. */
 const NO_COLUMNS = "No columns";
 
-/** The named empty state for a result size the record does not carry: it is
+/** The named empty state for a result size the record does not have: it is
  * recorded only when both parties' agreed terms had them both receive output (see
  * docs/spec/EXCHANGE_RECORD.md), so its absence is a statement about entitlement,
  * not a missing number. */
 const RESULT_SIZE_ABSENT = "Not recorded - only one party received the result";
 
 /** The label of the rule-set citation, named because both branches of the fact
- * below carry it. It is held to {@link DISCLOSURE_FACT_LABELS} by the same unit
+ * below have it. It is held to {@link DISCLOSURE_FACT_LABELS} by the same unit
  * test that pins every other fact's label against the export's columns. */
 const RULE_SET_LABEL = "Rule set cited";
 
@@ -154,12 +154,12 @@ const ALGORITHM_DISCLOSURE: Record<Algorithm, Displayable> = {
   "psi-c": displayText`How many records you both hold - a count only, no identifiers`,
 };
 
-/** A fact carrying exactly one value the record always has. */
+/** A fact holding exactly one value the record always has. */
 function fact(label: string, value: Displayable): DisclosureFact {
   return { label, values: [value], muted: NOT_RECORDED };
 }
 
-/** A fact carrying a list of values, with its own named empty state. */
+/** A fact holding a list of values, with its own named empty state. */
 function listFact(
   label: string,
   values: ReadonlyArray<Displayable>,
@@ -168,7 +168,7 @@ function listFact(
   return { label, values, muted };
 }
 
-/** A fact carrying a value the record may omit, with its own named empty state. */
+/** A fact holding a value the record may omit, with its own named empty state. */
 function optionalFact(
   label: string,
   value: Displayable | undefined,
@@ -192,9 +192,9 @@ function categoryLabel(column: {
 
 /**
  * One cited half of a rule set -- the set name beside that half's content
- * version -- composed through core's terms-value seam ({@link ruleSetCitation}).
+ * version -- composed through core's terms-value boundary ({@link ruleSetCitation}).
  *
- * The seam brands delimiting and control-character treatment, not escaping, so
+ * The boundary brands delimiting and control-character treatment, not escaping, so
  * its result is not a {@link Displayable} on its own; the cast below holds only
  * because this function escapes both values itself and takes the raw pair to do
  * it, so no value reaches a fact unescaped.
@@ -212,7 +212,7 @@ function citedSetIdentity(setIdentity: {
 /**
  * The rule-set citation as its two cited halves, keys before fields -- the order
  * core's own mismatch message and the acceptance surfaces use -- each rendered
- * through core's terms-value seam ({@link ruleSetCitation}).
+ * through core's terms-value boundary ({@link ruleSetCitation}).
  *
  * The record stores both values raw, so unlike the consent surfaces (escaped
  * from `summarizeInvitation`), this is where they cross the display boundary:
@@ -329,7 +329,7 @@ export function disclosureEntries(
     .reverse();
 }
 
-/** The characters a spreadsheet reads as the start of a formula rather than as
+/** The characters a spreadsheet treats as the start of a formula rather than as
  * text. A cell beginning with one is prefixed with an apostrophe below, so an
  * exported accounting cannot execute in the reader's spreadsheet on values the
  * partner chose. The display boundary escapes every non-printable-ASCII code
@@ -366,7 +366,7 @@ function factCell(entry: DisclosureFact): string {
  * The accounting as CSV -- the form a compliance reader is handed: a header row,
  * then one row per filed run in run order (oldest first, as a disclosure log
  * reads), each row the run instant followed by that run's facts. The values are
- * the display forms, so what the file carries is what the screen showed.
+ * the display forms, so what the file holds is what the screen showed.
  *
  * An accounting with no entries still exports its header row: "this copy of the
  * accounting holds nothing" is a meaningful answer, and a zero-byte file is not.

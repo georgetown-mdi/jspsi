@@ -133,12 +133,12 @@ export interface ManagedExchangeDocumentParts {
  * Compose this party's persisted exchange-file document from its own document
  * parts and the credential-free webrtc locator. The payload-column commitments
  * (`disclosedPayloadColumns`, `expectedPayloadColumns`, and
- * `expectedPartnerDeduplicate`) are caller-supplied and carried verbatim, never
+ * `expectedPartnerDeduplicate`) are caller-supplied and held verbatim, never
  * re-derived, so the persisted commitment cannot disagree with the token's. An
  * empty array is a strict commitment and is preserved; only an absent field is
  * omitted.
  *
- * The one field this composer DERIVES rather than carries is the acceptor's
+ * The one field this composer DERIVES rather than holds is the acceptor's
  * `outboundPayloadConsent`: nobody authors it directly, so core's
  * `deriveOutboundPayloadConsent` resolves it from the very `metadata` this
  * document persists, keeping the two from disagreeing. An inviter records none:
@@ -197,7 +197,7 @@ export interface ManageOfferChoices {
  * invitation's secret, an optional input-file handle where the platform yielded
  * one, and the operator's choices. */
 export interface ManagedDepositInputs {
-  /** This party's document parts, carrying the deposit's one statement of its
+  /** This party's document parts, holding the deposit's one statement of its
    * `side` (see {@link ManagedExchangeDocumentParts}). */
   documentParts: ManagedExchangeDocumentParts;
   /** The credential-free webrtc locator the document's connection block is
@@ -220,10 +220,10 @@ export interface ManagedDepositInputs {
  * pre-composed one, so the record's `side` and the document's side-dependent
  * content (the acceptor's `outboundPayloadConsent`) are read from a single
  * stated side and cannot diverge. A record reconstructed from an imported
- * artifact (`managedExchangeImport`) is a separate path, carrying the
+ * artifact (`managedExchangeImport`) is a separate path, holding the
  * artifact's own side and document verbatim.
  *
- * The label is carried verbatim -- its cap is enforced by the record schema at
+ * The label is held verbatim -- its cap is enforced by the record schema at
  * the store write ({@link buildManagedExchangeRecord}), with
  * {@link labelWithinCap} as the UI gate.
  *

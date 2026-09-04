@@ -13,7 +13,7 @@
  * policy is set) is durably persisted and the write awaited; only then does the
  * data exchange begin, and only on its completion is the run recorded succeeded.
  * {@link runRotationCriticalSection} is the locked window (handshake through
- * persist); it resolves a gate whose carried value the data exchange needs, so the
+ * persist); it resolves a gate holding the value the data exchange needs, so the
  * data exchange is unreachable until the persist resolves even though the caller
  * runs it after releasing the lock -- the ordering is a property of the control
  * flow, not the caller's discipline.
@@ -31,9 +31,9 @@ const MS_PER_DAY = 86_400_000;
 /**
  * The rotation write-back: the fields a successful handshake advances on the
  * stored record, and nothing else. Structurally scoped to the rotation fields so
- * a whole-record write cannot ride along and carry a stale secret or a stale
- * document back over a concurrent write -- the field-scoped write the store
- * applies inside one transaction consumes exactly this shape.
+ * a whole-record write cannot ride along and overwrite a concurrent write with a
+ * stale secret or a stale document -- the field-scoped write the store applies
+ * inside one transaction consumes exactly this shape.
  *
  * `expires` is a three-way decision, not an optional: `{ expires: string }`
  * restamps a bound when a max-age policy is set, `{ expires: null }` clears any
@@ -97,7 +97,7 @@ export function succeededRun(at: number): ManagedExchangeLastRun {
 
 /**
  * Record a run whose partner never arrived: no handshake ran and no payload left
- * this party. Carries no `failureKind` -- unlike every other kind, which names a
+ * this party. Has no `failureKind` -- unlike every other kind, which names a
  * failure of something that did happen, a no-show is the absence of a run, and
  * the failure tiering and the "nothing was disclosed" line both key off the
  * `"missed"` outcome alone.
@@ -137,7 +137,7 @@ export function failedRun(
   return { at: new Date(at).toISOString(), outcome, failureKind };
 }
 
-/** Raised when the rotation write-back fails to persist, carrying the `lastRun`
+/** Raised when the rotation write-back fails to persist, stating the `lastRun`
  * bookkeeping the caller records. Distinct from a handshake or data-exchange
  * failure so the runner can route it to the `storage` failure tier and know the
  * data exchange never began. */
@@ -178,14 +178,14 @@ export interface ManagedRotationCriticalSection<THandshake> {
 }
 
 /**
- * The result of the locked critical section: the handshake's carried value,
+ * The result of the locked critical section: the handshake's held value,
  * obtainable only once the rotated secret is durably persisted. A caller
  * structurally cannot begin the data exchange before the persist resolves, even
  * though the caller runs it AFTER releasing the lock (the lock covers only
  * through persist, per the spec's window).
  */
 export interface ManagedRotationGate<THandshake> {
-  /** The handshake's carried value, to hand to the data-exchange phase. */
+  /** The handshake's held value, to hand to the data-exchange phase. */
   handshake: THandshake;
 }
 
@@ -195,7 +195,7 @@ export interface ManagedRotationGate<THandshake> {
  *
  * 1. `handshake()` yields the `AuthResult`'s rotated secret.
  * 2. The rotation write-back is computed and `persist()`ed, awaited to
- *    completion. A persist failure raises {@link RotationPersistError} carrying
+ *    completion. A persist failure raises {@link RotationPersistError} stating
  *    the `storage`-kind `lastRun`.
  *
  * Returns the {@link ManagedRotationGate} only after the persist commits, so the
