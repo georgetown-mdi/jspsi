@@ -320,7 +320,7 @@ describe("the canonical-encode gate (the byte form both parties hash)", () => {
     const result = validateAdvancedInvite(authored, seed, now);
     expect(result.canGenerate).toBe(false);
     expect(result.terms).toBeUndefined();
-    expect(result.errors.keys).toMatch(/transform carries a parameter/);
+    expect(result.errors.keys).toMatch(/transform has a parameter/);
     expect(result.errors.keys).toMatch(/correct that transform's parameters/);
     // The remedy it must not be: discarding everything the operator authored.
     expect(result.errors.keys).not.toMatch(/reset to defaults/);
@@ -340,7 +340,7 @@ describe("the canonical-encode gate (the byte form both parties hash)", () => {
     );
     const result = validateAdvancedInvite(infinite, seed, now);
     expect(result.canGenerate).toBe(false);
-    expect(result.errors.keys).toMatch(/transform carries a parameter/);
+    expect(result.errors.keys).toMatch(/transform has a parameter/);
     expect(result.errors.keys).not.toMatch(/Enable at least one linkage key/);
   });
 

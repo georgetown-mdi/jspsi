@@ -28,11 +28,11 @@ const ROOT_LABEL = "secrets";
 function secretsLiveMessage(listing: SecretsEntriesResult | "loading"): string {
   if (listing === "loading") return "";
   if (listing.kind === "disabled")
-    return "The job API is disabled on this appliance.";
+    return "The job API is disabled on this console.";
   if (listing.kind === "error")
     return "The secrets directory could not be read.";
   if (!listing.configured)
-    return "No secrets directory is configured on this appliance.";
+    return "No secrets directory is configured on this console.";
   if (!listing.readable) return "This directory could not be read.";
   if (listing.entries.length === 0) return "This directory is empty.";
   return `Loaded ${listing.entries.length} ${listing.entries.length === 1 ? "entry" : "entries"}.`;
@@ -135,12 +135,12 @@ function renderListing(
     return (
       <MountStateNotice
         color="blue"
-        title="The job API is disabled on this appliance"
+        title="The job API is disabled on this console"
         action={refresh}
       >
-        The job API is off because JOB_DATA_ROOT is not set, so this appliance
+        The job API is off because JOB_DATA_ROOT is not set, so this console
         cannot browse credential files. Set it to the mounted data root and
-        restart the appliance -- see the{" "}
+        restart the console -- see the{" "}
         <Anchor
           inherit
           href="https://github.com/georgetown-mdi/jspsi/blob/main/docs/DEPLOYMENT.md"
@@ -160,7 +160,7 @@ function renderListing(
         title="Could not read the secrets directory"
         action={refresh}
       >
-        The appliance did not return a listing. Check that the job API is
+        The console did not return a listing. Check that the job API is
         reachable, then try again.
       </MountStateNotice>
     );
@@ -176,11 +176,11 @@ function renderListing(
         title="No separate secrets directory"
         action={refresh}
       >
-        This appliance has no separate secrets directory to browse, so type a
-        file reference below to a credential file (a password file or an SSH
-        private key) in your mounted folder. For better isolation, mount a
-        separate read-only directory as JOB_SECRETS_DIR and reference the file
-        there instead, then restart the appliance.
+        This console has no separate secrets directory to browse, so type a file
+        reference below to a credential file (a password file or an SSH private
+        key) in your mounted folder. For better isolation, mount a separate
+        read-only directory as JOB_SECRETS_DIR and reference the file there
+        instead, then restart the console.
       </MountStateNotice>
     );
 

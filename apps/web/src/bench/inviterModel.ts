@@ -265,14 +265,14 @@ function capabilityNoteFor(
   const cli = transportNounsByRunMode(available, "save-file");
   const parts: Array<string> = [];
   if (here.length > 0)
-    parts.push(`This appliance runs ${joinNouns(here)} exchanges here`);
+    parts.push(`This console runs ${joinNouns(here)} exchanges here`);
   if (cli.length > 0)
     parts.push(
       here.length > 0
         ? `${joinNouns(cli)} exchanges save a file for the command-line tool`
-        : `This appliance saves a file for the command-line tool to run ${joinNouns(cli)} exchanges`,
+        : `This console saves a file for the command-line tool to run ${joinNouns(cli)} exchanges`,
     );
-  parts.push("in-tab browser exchanges are out of scope on this appliance");
+  parts.push("in-tab browser exchanges are out of scope on this console");
   return `${parts.join("; ")}.`;
 }
 
@@ -337,15 +337,15 @@ export function transportChooserCopy(
   return {
     browserLabel: "Live, in this browser",
     browserDescription: consoleBuild
-      ? "In-tab browser exchanges are out of scope on this appliance -- they are the public psilink web app's domain. Run the exchange over SFTP or a shared directory instead."
+      ? "In-tab browser exchanges are out of scope on this console -- they are the public psilink web app's domain. Run the exchange over SFTP or a shared directory instead."
       : "Your browsers connect directly. You get an invitation link and code to share; keep this tab open while your partner accepts.",
     filedropLabel: filedropRunsHere
       ? "Over a shared directory, run here"
       : "Over a shared directory, run by the command-line tool",
     filedropDescription: filedropRunsHere
       ? rendezvousShape.split === true
-        ? 'Runs the exchange here against the two shared folders mounted on this appliance: it reads your partner\'s files out of one and writes yours into the other. That needs retain mode -- turn on "Keep every exchange file" below. Your file is read on this appliance, not uploaded from your browser. Your partner accepts with the same invitation code and runs their half against the same two folders.'
-        : "Runs the exchange here against the shared directory mounted on this appliance. Your file is read on this appliance, not uploaded from your browser. Your partner accepts with the same invitation code and runs their half against the same synced folder."
+        ? 'Runs the exchange here against the two shared folders mounted on this console: it reads your partner\'s files out of one and writes yours into the other. That needs retain mode -- turn on "Keep every exchange file" below. Your file is read on this console, not uploaded from your browser. Your partner accepts with the same invitation code and runs their half against the same two folders.'
+        : "Runs the exchange here against the shared folder mounted on this console. Your file is read on this console, not uploaded from your browser. Your partner accepts with the same invitation code and runs their half against the same synced folder."
       : consoleBuild
         ? // The appliance's own reason wins where it has one: an incoherent pair
           // reports itself unconfigured, and the generic mount-a-directory
@@ -359,8 +359,8 @@ export function transportChooserCopy(
       : "Over SFTP, run by the psilink command-line tool",
     sftpDescription: sftpRunsHere
       ? sftpAuthoringRequired
-        ? "Runs the exchange here over an SFTP connection you set up below. Your file is read on this appliance, not uploaded from your browser. Your partner accepts with the same invitation code."
-        : "Runs the exchange here through the SFTP connection set up on this machine. Your file is read on this appliance, not uploaded from your browser. Your partner accepts with the same invitation code."
+        ? "Runs the exchange here over an SFTP connection you set up below. Your file is read on this console, not uploaded from your browser. Your partner accepts with the same invitation code."
+        : "Runs the exchange here through the SFTP connection set up on this machine. Your file is read on this console, not uploaded from your browser. Your partner accepts with the same invitation code."
       : "Saves an exchange file that runs the command-line tool over your SFTP server. Your partner accepts with the same invitation code.",
     capabilityNote: capabilityNoteFor(consoleBuild, available),
   };

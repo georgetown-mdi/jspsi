@@ -92,7 +92,7 @@ export const SWEEP_UNCONFIRMED_PROBLEM =
 export const DIAGNOSTIC_LOG_NOTICE =
   "A detailed log records what the exchange did step by step, including your " +
   "partner's identity, the linkage keys in play, and the columns involved. " +
-  "It stays with this run's files on the appliance until you discard the " +
+  "It stays with this run's files on the console until you discard the " +
   "run; treat a copy you download like the results themselves.";
 
 /**

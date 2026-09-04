@@ -494,7 +494,7 @@ function materializeRawCredential(
 ): ResolvedAuthoredCredential {
   if (scratchDir === undefined)
     throw new JobApiConfigError(
-      "connection.credential is a pasted value, which this appliance is not " +
+      "connection.credential is a pasted value, which this console is not " +
         "configured to accept",
     );
   let filePath: string;
@@ -502,7 +502,7 @@ function materializeRawCredential(
     filePath = materializeSftpCredential(scratchDir, credential.value);
   } catch {
     throw new JobApiConfigError(
-      "connection.credential could not be written to the appliance",
+      "connection.credential could not be written to the console",
     );
   }
   return {
@@ -530,7 +530,7 @@ function resolveMountRefCredential(
   if (secretsDir === undefined)
     throw new JobApiConfigError(
       "connection.credential names the secrets mount, which is not " +
-        "configured on this appliance",
+        "configured on this console",
     );
   const resolved = resolveMountFile(secretsDir, credential.subPath);
   if (resolved === null)

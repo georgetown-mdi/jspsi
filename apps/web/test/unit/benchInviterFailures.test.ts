@@ -152,7 +152,7 @@ describe("failureFor", () => {
       WORK_FILE,
       "filedrop",
     );
-    expect(failure.title).toBe("The appliance could not start this exchange");
+    expect(failure.title).toBe("The console could not start this exchange");
     expect(failure.message).not.toContain("status 400");
     expect(failure.message).toContain("file");
     expect(failure.message).not.toContain("SFTP");
@@ -167,7 +167,7 @@ describe("failureFor", () => {
       WORK_FILE,
       "sftp",
     );
-    expect(failure.title).toBe("The appliance could not start this exchange");
+    expect(failure.title).toBe("The console could not start this exchange");
     expect(failure.message).not.toContain("status 400");
     expect(failure.message).toContain("SFTP");
   });
@@ -183,7 +183,7 @@ describe("failureFor", () => {
       "filedrop",
       "acceptor",
     );
-    expect(failure.title).toBe("The appliance could not start this exchange");
+    expect(failure.title).toBe("The console could not start this exchange");
     expect(failure.message).toContain("columns");
     expect(failure.message).toContain("choose a different file");
     expect(failure.message).not.toContain("Start over");

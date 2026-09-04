@@ -130,7 +130,7 @@ describe("copy is transport-specific", () => {
 
   test("the filedrop credential alert is untouched: no credentials at all", () => {
     expect(credentialAlertCopy("filedrop")).toBe(
-      "A shared-directory exchange carries no credentials at all. The file " +
+      "A shared-directory exchange has no credentials at all. The file " +
         "names only the directory both parties can reach.",
     );
   });

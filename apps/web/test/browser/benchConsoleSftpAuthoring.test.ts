@@ -629,7 +629,7 @@ describe("console SFTP connection authoring", () => {
       .click();
     await expect
       .element(
-        page.getByText("written to a file on this appliance", { exact: false }),
+        page.getByText("written to a file on this console", { exact: false }),
       )
       .toBeInTheDocument();
   });

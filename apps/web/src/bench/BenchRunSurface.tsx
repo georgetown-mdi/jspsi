@@ -22,8 +22,8 @@ import type { RunFailure } from "./useInviterExchange";
  * two cannot drift.
  */
 export const SERVER_JOB_KEEP_OPEN_BODY =
-  "This appliance is running the exchange. If you leave this page the run " +
-  "continues here; return to this console to pick it up or discard it.";
+  "This console is running the exchange. If you leave this page the run " +
+  "keeps going; come back here to pick it up or discard it.";
 
 /**
  * Format a peer-timeout duration as the human phrase the copy embeds ("an hour"
@@ -53,7 +53,7 @@ export function peerWindowDurationPhrase(ms: number): string {
  */
 export const SERVER_JOB_PEER_WINDOW_BODY =
   "Your partner's console must run its half while yours is running. This " +
-  `appliance waits about ${peerWindowDurationPhrase(DEFAULT_PEER_TIMEOUT_MS)} ` +
+  `console waits about ${peerWindowDurationPhrase(DEFAULT_PEER_TIMEOUT_MS)} ` +
   "for the partner before the exchange stops; if it stops, coordinate a time " +
   "and run it again.";
 
@@ -446,7 +446,7 @@ export const UNTAKEN_RECORD_CONFIRM_TITLE = "Leave the exchange record behind?";
  * the download standing on the same screen.
  */
 export const UNTAKEN_RECORD_CONFIRM_BODY =
-  "This run exchanged data before it stopped, and this appliance holds its " +
+  "This run exchanged data before it stopped, and this console holds its " +
   "record of that disclosure. Going on removes the run and the record with it, " +
   "and neither party can recreate it. Download it from the exchange-record " +
   "panel on this page first if you need the accounting entry.";
@@ -464,11 +464,11 @@ export const UNDESCRIBABLE_RECORD_CONFIRM_TITLE =
  * not what the record states, since that is precisely what could not be read.
  */
 export const UNDESCRIBABLE_RECORD_CONFIRM_BODY =
-  "This appliance holds a file for this run that it cannot read as an exchange " +
-  "record, so this page can neither say what it records nor offer it for " +
-  "download. Going on removes the run and that file with it, and neither party " +
-  "can recreate it. Copy it out of this run's folder in this console's working " +
-  "directory first if you need the accounting entry.";
+  "This console holds a file for this run that it cannot read as an exchange " +
+  "record, so this page cannot say what it records or offer it for download. " +
+  "Going on removes the run and that file, and neither party can recreate it. " +
+  "Copy it out of this run's folder in the console's working directory first " +
+  "if you need the accounting entry.";
 
 /** The title the confirm heads with when the ask never answered. It asks about a
  * record it cannot say is there, because that is all an unanswered ask
@@ -485,11 +485,9 @@ export const UNKNOWN_RECORD_CONFIRM_TITLE =
  * ({@link ./RecordDownload}).
  */
 export const UNKNOWN_RECORD_CONFIRM_BODY =
-  "This appliance stopped answering whether this run wrote a record of a " +
-  "disclosure, so this page cannot say whether one is standing here. Going on " +
-  "removes the run and anything it wrote with it, and neither party can " +
-  "recreate it. Reload this page to ask again first if you need the accounting " +
-  "entry.";
+  "psilink cannot tell whether this run wrote a disclosure record. Continuing " +
+  "removes the run and anything it wrote, and neither party can recreate it. " +
+  "Reload this page to check first if you need the accounting entry.";
 
 /**
  * What that confirm says while the ask is still running. Same unknown, different
@@ -498,10 +496,9 @@ export const UNKNOWN_RECORD_CONFIRM_BODY =
  * than at a reload that would start the asking over.
  */
 export const PENDING_RECORD_CONFIRM_BODY =
-  "This page is still asking whether this run wrote a record of a disclosure, " +
-  "so it cannot yet say whether one is standing here. Going on removes the run " +
-  "and anything it wrote with it, and neither party can recreate it. Wait for " +
-  "the answer first if you need the accounting entry.";
+  "psilink is still checking whether this run wrote a disclosure record. " +
+  "Continuing removes the run and anything it wrote, and neither party can " +
+  "recreate it. Wait for the answer first if you need the accounting entry.";
 
 /** The title the confirm heads with once the ask has landed on the appliance's own
  * denial while the dialog is open. The record is settled and there is none, so the
@@ -515,9 +512,9 @@ export const NO_RECORD_CONFIRM_TITLE = "Go on and remove this run?";
  * named for what it is.
  */
 export const NO_RECORD_CONFIRM_BODY =
-  "This appliance has answered: it holds no exchange record for this run, so " +
-  "there is none to leave behind. Going on removes the run and its files from " +
-  "this appliance, which cannot be undone.";
+  "This console holds no exchange record for this run, so there is none to " +
+  "leave behind. Going on removes the run and its files from this console, " +
+  "which cannot be undone.";
 
 /** The heading and body of one untaken-record confirm. */
 export interface UntakenRecordConfirm {
@@ -757,7 +754,7 @@ export function ReattachedRunNotice({ state }: { state: ReattachedRunState }) {
   return (
     <div className={styles.callout} role="status">
       <p className={styles.calloutLead}>
-        You are back on an exchange this appliance already holds.
+        You are back on an exchange this console already holds.
       </p>
       <p className={styles.small}>
         {state === "finished"
@@ -794,11 +791,11 @@ export function ReattachingNotice() {
   return (
     <div className={styles.callout} role="status">
       <p className={styles.calloutLead}>
-        Reconnecting to the exchange this appliance already holds...
+        Reconnecting to the exchange this console already holds...
       </p>
       <p className={styles.small}>
-        This appliance already holds an exchange. Reconnecting so you can watch
-        it here.
+        This console already holds an exchange. Reconnecting so you can watch it
+        here.
       </p>
     </div>
   );
@@ -846,7 +843,7 @@ export function AnotherExchangeFoot({
       >
         <p>
           Starting another exchange removes this one&apos;s results from this
-          appliance -- download anything you need first.
+          console -- download anything you need first.
         </p>
         <Group mt="md">
           <Button variant="default" onClick={() => setConfirming(false)}>

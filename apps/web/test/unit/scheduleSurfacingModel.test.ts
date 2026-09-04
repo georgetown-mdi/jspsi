@@ -210,8 +210,9 @@ describe("repeated-miss coordination", () => {
     // Surface-only, no auto-pause: the copy must not read as the app having
     // stopped attempting on the operator's behalf.
     const { prompt } = repeatedMissCoordination(withMisses(2)) ?? {};
-    expect(prompt).toMatch(/the agreed cadence stands/i);
-    expect(prompt).not.toMatch(/has been paused|stopped attempting|paused it/i);
+    expect(prompt).toMatch(/nothing has been paused/i);
+    expect(prompt).toMatch(/the schedule stands/i);
+    expect(prompt).not.toMatch(/stopped attempting|paused it|is paused/i);
   });
 
   test("the count a success leaves behind clears the escalation", () => {

@@ -130,8 +130,8 @@ export function YourFileSection({
               >
                 download the CSVs
               </Anchor>
-              , then place one in this appliance&apos;s mounted work directory
-              -- see the{" "}
+              , then place one in this console&apos;s mounted work directory --
+              see the{" "}
               <Anchor
                 inherit
                 href="https://github.com/georgetown-mdi/jspsi/blob/main/docs/DEPLOYMENT.md"

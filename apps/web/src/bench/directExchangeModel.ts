@@ -137,7 +137,7 @@ export function directServerBlockedReason(
   if (!gates.transportReady)
     return gates.transport === "sftp"
       ? "Set up the SFTP connection above to continue."
-      : "Mount a shared directory on this appliance, or choose SFTP, to continue.";
+      : "Mount a shared directory on this console, or choose SFTP, to continue.";
   if (gates.exchangeFilesBlocked)
     return "Resolve the file-handling settings above to continue.";
   if (gates.connectionTuningBlocked)

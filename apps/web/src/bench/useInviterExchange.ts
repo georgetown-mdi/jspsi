@@ -124,11 +124,11 @@ export function failureFor(
   if (error instanceof JobApiRequestError && error.status === 409) {
     return {
       category: "exchange",
-      title: "This appliance is already running an exchange",
+      title: "This console is already running an exchange",
       message:
-        "This appliance is already holding an exchange. Return to the page " +
+        "This console is already holding an exchange. Return to the page " +
         "where you started it, or discard it from the recovery panel; " +
-        "restarting the appliance also clears it.",
+        "restarting the console also clears it.",
     };
   }
   // A console job create rejected the mounted file: a 400 the driver categorized
@@ -146,14 +146,14 @@ export function failureFor(
     error.status === 400
   ) {
     const fileGone =
-      "The appliance could not use this file. It may have been removed " +
+      "The console could not use this file. It may have been removed " +
       "since you selected it. ";
     return {
       category,
-      title: "The appliance could not start this exchange",
+      title: "The console could not start this exchange",
       message:
         channel === "sftp"
-          ? "The appliance could not use this file, or the selected SFTP " +
+          ? "The console could not use this file, or the selected SFTP " +
             "destination is no longer available. Start over and check the file " +
             "and destination."
           : seat === "acceptor"

@@ -21,7 +21,7 @@ export const BROWSER_ONLY_FILE_ASSURANCE =
  * rather than inheriting it.
  */
 export const APPLIANCE_FILE_ASSURANCE =
-  "Files are read from this appliance's mounted work directory; your browser " +
+  "Files are read from this console's mounted work directory; your browser " +
   "does not upload them.";
 
 /**

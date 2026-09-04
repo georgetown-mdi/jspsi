@@ -142,13 +142,13 @@ describe("KeysTab: the dropped-citation notice", () => {
     // user is not read the whole body twice -- once live, once in reading order.
     await expect
       .element(page.getByRole("note"))
-      .toHaveTextContent("The imported rule-set citation will not be carried");
+      .toHaveTextContent("The imported rule-set citation will not be included");
     await expect
       .element(page.getByRole("note"))
       .toHaveTextContent("the citation cannot be verified");
     await expect
       .element(page.getByRole("status"))
-      .toHaveTextContent("The imported rule-set citation will not be carried");
+      .toHaveTextContent("The imported rule-set citation will not be included");
     await expect
       .element(page.getByRole("status"))
       .not.toHaveTextContent("the citation cannot be verified");
@@ -161,7 +161,7 @@ describe("KeysTab: the dropped-citation notice", () => {
       .element(page.getByRole("heading", { name: "Matching keys" }))
       .toBeInTheDocument();
     expect(document.body.textContent).not.toContain(
-      "The imported rule-set citation will not be carried",
+      "The imported rule-set citation will not be included",
     );
     // The live region stays mounted and empty: a region added only when the notice
     // appears is missed by screen readers that watch only what is already there.
@@ -221,9 +221,9 @@ describe("KeysTab: the keys offered outside the default set", () => {
     expect(body).toContain("offered only inside a compound key");
     expect(body).toContain("over-matches");
     expect(body).toContain("whether its holder is in the other file");
-    expect(body).toContain("often a shared one");
+    expect(body).toContain("often shared");
     // All three named, so none is offered on quieter terms than the others.
-    expect(body).toContain("phone number, email address, or ZIP code");
+    expect(body).toContain("Phone number, email address and ZIP code");
     // And that the cleaning goes with the key: an operator who edited an offered
     // type's steps loses them to a column edit that drops its key, and gets the
     // recommended steps back rather than their own.
@@ -239,7 +239,7 @@ describe("KeysTab: the keys offered outside the default set", () => {
       .toBeInTheDocument();
     const body = document.body.textContent;
     expect(body).not.toContain("outside the default set");
-    expect(body).not.toContain("phone number, email address, or ZIP code");
+    expect(body).not.toContain("Phone number, email address and ZIP code");
   });
 });
 

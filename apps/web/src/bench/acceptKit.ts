@@ -245,7 +245,7 @@ function rendezvousLines(endpoint: AcceptKitEndpoint): Array<string> {
           `  You read from:  ${printable(endpoint.outboundPath)}`,
         ]),
     "",
-    "The invitation carries the same locator. Check it against what you were",
+    "The invitation states the same locator. Check it against what you were",
     "told to expect before you accept.",
   ];
 }
@@ -446,7 +446,7 @@ function retainLines(endpoint: AcceptKitEndpoint): Array<string> {
     "",
     "Retain mode is an agreement, not a negotiation: your side must run it",
     "too, or the two of you stop with an error when you meet. The commands",
-    "below already carry it.",
+    "below already include it.",
     "",
   ];
 }

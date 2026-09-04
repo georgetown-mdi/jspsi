@@ -22,7 +22,7 @@ import type { AcquiredCsv, InviterEditor } from "@bench/inviterModel";
 import type { AdvancedInviteDraft } from "@psi/advancedInvite";
 
 const CITATION_DROP_NOTICE_NAME =
-  "The imported rule-set citation will not be carried";
+  "The imported rule-set citation will not be included";
 const INERT_COALESCE_NOTICE_NAME = "A default value will not be substituted";
 
 // The review step's own notice: an imported document's rule-set citation the terms

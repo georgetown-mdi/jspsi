@@ -377,7 +377,7 @@ const HEADLINES: Record<RecordVerificationReport["outcome"], VerdictHeadline> =
       detail:
         "The record is internally consistent: every commitment opened against " +
         "the files you supplied, the recorded result size recounts from the " +
-        "opened pairing where the record carries one, and the agreed-terms " +
+        "opened pairing where the record holds one, and the agreed-terms " +
         "hash re-derives.",
     },
     incomplete: {
@@ -477,7 +477,7 @@ const RESULT_SIZE_ROWS: Record<
       "No matched pairs stand behind the recorded number, so there is nothing " +
       "to recount it from. Where the record commits to a table that did not " +
       "open, its own row above names the cause; a table that opened but is not " +
-      "shaped as a pairing carries no count to recount; a count-only exchange " +
+      "shaped as a pairing has no count to recount; a count-only exchange " +
       "records no such table at all.",
   },
 };
@@ -775,7 +775,7 @@ const CERTIFICATE_BINDING_COPY: Record<CertificateBindingStatus, RowCopy> = {
     status: "Self-signature does not verify",
     explanation:
       "The certificate does not bind this identity to this key, so nothing it " +
-      "carries can be attributed to that identity.",
+      "states can be attributed to that identity.",
   },
 };
 
@@ -837,7 +837,7 @@ const RUN_BINDING_COPY: Record<RunBindingStatus, RowCopy> = {
   verified: {
     status: "This receipt and this record are the same run",
     explanation:
-      "Both carry one run's binder, which is what tells one run of a " +
+      "Both hold one run's binder, which is what tells one run of a " +
       "partnership from the next.",
   },
   mismatch: {
@@ -847,7 +847,7 @@ const RUN_BINDING_COPY: Record<RunBindingStatus, RowCopy> = {
       "one exchange.",
   },
   unpaired: {
-    status: "The record carries no run binder",
+    status: "The record holds no run binder",
     explanation:
       "The record you loaded is of an exchange that produced no signed receipt, " +
       "so this receipt is not that run's. Load the record written alongside " +

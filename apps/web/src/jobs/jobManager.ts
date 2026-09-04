@@ -1156,7 +1156,7 @@ export class JobManager {
           category: "output",
           message:
             "the run reported a lost local write and its event stream broke " +
-            "before naming which one, so this appliance cannot confirm which " +
+            "before naming which one, so this console cannot confirm which " +
             "files reached disk; look in the folder it writes its exchange " +
             "files to",
         });

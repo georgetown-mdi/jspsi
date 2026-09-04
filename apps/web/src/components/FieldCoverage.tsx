@@ -15,7 +15,7 @@ export const COVERAGE_PENDING_LABEL =
  * scale -- so the copy says so rather than reading as instant-local (the register of
  * the picker's profile-loading copy). */
 export const CONSOLE_COVERAGE_PENDING_LABEL =
-  "Checking how many of your rows produce a value. The appliance reads the " +
+  "Checking how many of your rows produce a value. The console reads the " +
   "whole file, so this can take a while on a large file.";
 
 /** The explicit "coverage unavailable" copy: a deterministic coverage failure (or a

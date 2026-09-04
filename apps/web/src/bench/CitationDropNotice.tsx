@@ -6,7 +6,7 @@ import { IconAlertCircle } from "@tabler/icons-react";
  * full body twice (once as a live update, once in reading order next to the
  * Alert). */
 export const CITATION_DROP_TITLE =
-  "The imported rule-set citation will not be carried";
+  "The imported rule-set citation will not be included";
 
 /**
  * The notice that an imported document's rule-set citation is left out of the

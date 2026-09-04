@@ -240,7 +240,7 @@ export function ManagedCronExportPanel({
                 {failed && dispatch === undefined && (
                   <Alert
                     color="red"
-                    title="That export could not be completed"
+                    title="Could not export the command-line files"
                     mb="sm"
                   >
                     This export did not finish, so one or both files may be
@@ -345,7 +345,7 @@ export function ManagedCronExportPanel({
                 {failed && (
                   <Alert
                     color="red"
-                    title="That could not be completed"
+                    title="Could not hand off this exchange"
                     mb="sm"
                   >
                     This browser&apos;s copy could not be handed off. It is

@@ -4,6 +4,7 @@ import {
   ActionIcon,
   Alert,
   Checkbox,
+  List,
   NativeSelect,
   Radio,
   Switch,
@@ -72,39 +73,45 @@ const KEY_VERDICT_BADGES: Record<
   },
 };
 
-/** The heading of {@link OPT_IN_KEYS_GUIDANCE}, and the marker on each guided-list
+/** The heading of {@link OPT_IN_KEYS_GUIDANCE_LEAD}, and the marker on each guided-list
  * entry the guidance is about, so the two read as one statement. */
 const OPT_IN_BADGE_LABEL = "outside the default set";
 
 /**
  * What turning on an offered key the built-in set does not declare costs the
  * operator, stated where the offer is. Rendered whenever the list holds one, so
- * the three types it names are surfaced on identical terms -- none is offered
+ * the three types it names are offered on identical terms -- none is offered
  * with a caveat the others are spared, and none is offered silently.
- *
- * The shape of the offer needs stating as much as the departure does: each type
- * is offered only inside a compound key, and an operator who reads the list as a
- * menu of single identifiers would not see why. The last two sentences are about
- * the badge, which a metadata edit can leave on an offer the file no longer
- * supplies a column for, and about the cleaning that follows the key -- an
- * operator who edited an offered type's steps and then lost the key to a column
- * edit gets the recommended steps back, not their own, and is told so here rather
- * than discovering it in the workbench.
  */
-const OPT_IN_KEYS_GUIDANCE =
-  "The default keys use none of phone number, email address, or ZIP code, so " +
-  "what those keys were validated against says nothing about how these match: " +
-  "turning one on means this exchange no longer matches on the default set " +
-  "alone. Each is offered only inside a compound key, never on its own, " +
-  "because a single identifier both over-matches and tells anyone holding a " +
-  "value whether its holder is in the other file -- and a phone number or an " +
-  "email address is often a shared one, covering a household or the " +
-  "organization that helped with an application. Offers " +
-  "appear for the keys your file can supply; one marked not satisfiable lost " +
-  "its column to a later edit. Cleaning follows the key: turning an offer off, " +
-  "or losing a column its key needs, withdraws the cleaning that came with it, " +
-  "and turning it back on restores the recommended steps rather than any you " +
-  "had changed.";
+const OPT_IN_KEYS_GUIDANCE_LEAD =
+  "Phone number, email address and ZIP code are not part of the default set, " +
+  "so the testing behind the defaults says nothing about how well these " +
+  "match. Turning one on means this exchange no longer matches on the default " +
+  "set alone.";
+
+/**
+ * The points under {@link OPT_IN_KEYS_GUIDANCE_LEAD}. The shape of the offer
+ * needs stating as much as the departure does: each type is offered only inside
+ * a compound key, and an operator who reads the list as a menu of single
+ * identifiers would not see why. The last two points are about the badge, which
+ * a metadata edit can leave on an offer the file no longer supplies a column
+ * for, and about the cleaning that follows the key -- an operator who edited an
+ * offered type's steps and then lost the key to a column edit gets the
+ * recommended steps back, not their own, and is told so here rather than
+ * discovering it in the workbench.
+ */
+const OPT_IN_KEYS_GUIDANCE_POINTS = [
+  "Each is offered only inside a compound key, never on its own: a single " +
+    "identifier both over-matches and tells anyone holding a value whether its " +
+    "holder is in the other file.",
+  "A phone number or an email address is often shared, covering a household " +
+    "or the organization that helped with an application.",
+  "Offers appear for the keys your file can supply; one marked not satisfiable " +
+    "lost its column to a later edit.",
+  "Cleaning follows the key: turning an offer off, or losing a column its key " +
+    "needs, withdraws the cleaning that came with it, and turning it back on " +
+    "restores the recommended steps rather than any you had changed.",
+];
 
 /**
  * The Matching keys tab: the guided ordered key list (enable + reorder, with
@@ -119,7 +126,7 @@ const OPT_IN_KEYS_GUIDANCE =
  * keys. Both are the same control -- a checkbox and the reorder pair -- so an
  * addition is made the way a default key is turned off; what tells them apart is
  * a marker on the entry and the guidance below the list
- * ({@link OPT_IN_KEYS_GUIDANCE}), which states what the addition costs rather
+ * ({@link OPT_IN_KEYS_GUIDANCE_LEAD}), which states what the addition costs rather
  * than a shape of control that hides the choice.
  *
  * It also carries the notice about the terms the editor will emit that refuses
@@ -252,7 +259,12 @@ export function KeysTab({
           title={`Some keys are ${OPT_IN_BADGE_LABEL}`}
           my="md"
         >
-          {OPT_IN_KEYS_GUIDANCE}
+          {OPT_IN_KEYS_GUIDANCE_LEAD}
+          <List size="sm" mt="xs">
+            {OPT_IN_KEYS_GUIDANCE_POINTS.map((point) => (
+              <List.Item key={point}>{point}</List.Item>
+            ))}
+          </List>
         </Alert>
       )}
       {keysError !== undefined && (
@@ -360,7 +372,7 @@ export function KeysTab({
         <>
           <h2>Import or export</h2>
           <p className={`${styles.small} ${styles.sub}`}>
-            Carry these terms between exchanges, or keep them under version
+            Reuse these terms between exchanges, or keep them under version
             control.
           </p>
           <TermsImportExport

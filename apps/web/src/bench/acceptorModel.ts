@@ -445,8 +445,7 @@ type AcceptEndpoint = AcceptableInvitation["endpoint"];
 
 /** The honest title for a console accept whose endpoint the appliance cannot run,
  * pointing the operator at where it CAN run. */
-export const ACCEPT_UNSUPPORTED_TITLE =
-  "This appliance cannot run this exchange";
+export const ACCEPT_UNSUPPORTED_TITLE = "This console cannot run this exchange";
 
 /** The honest unsupported-accept copy for a console build, deciding runnability by
  * the endpoint's SHAPE rather than a channel kill-switch: a WebRTC accept has no
@@ -524,7 +523,7 @@ export function acceptUnsupported(
       title: ACCEPT_UNSUPPORTED_TITLE,
       message:
         "This invitation runs an in-browser (WebRTC) exchange, which is out of " +
-        "scope on this appliance. Accept it from a standard psilink web app in " +
+        "scope on this console. Accept it from a standard psilink web app in " +
         "your browser instead.",
     };
   // An SFTP accept connects to the partner-named server (no rendezvous mount), so
@@ -537,7 +536,7 @@ export function acceptUnsupported(
         title: ACCEPT_UNSUPPORTED_TITLE,
         message:
           "This invitation uses separate inbound and outbound directories, which " +
-          "this appliance does not run. Accept it with the psilink command-line " +
+          "this console does not run. Accept it with the psilink command-line " +
           "tool instead.",
       };
     // The partner authored the host; the accept form shows it read-only, so a host
@@ -566,10 +565,10 @@ export function acceptUnsupported(
         rendezvous.problem ??
         (split
           ? "This invitation runs over separate inbound and outbound folders, but " +
-            "this appliance has no rendezvous directories configured. Set " +
+            "this console has no rendezvous directories configured. Set " +
             "JOB_RENDEZVOUS_DIR to the folder your partner writes into and " +
             "JOB_RENDEZVOUS_OUTBOUND_DIR to the one you write into, then reload."
-          : "This invitation runs over a shared directory, but this appliance has no " +
+          : "This invitation runs over a shared directory, but this console has no " +
             "rendezvous directory configured. Set JOB_RENDEZVOUS_DIR to a directory " +
             "both parties can reach and reload."),
     };
@@ -578,7 +577,7 @@ export function acceptUnsupported(
       title: ACCEPT_UNSUPPORTED_TITLE,
       message:
         "This invitation runs over separate inbound and outbound folders, but this " +
-        "appliance is mounted with a single shared directory. Mount the second " +
+        "console is mounted with a single shared directory. Mount the second " +
         "folder and set JOB_RENDEZVOUS_OUTBOUND_DIR to it, then reload -- or ask " +
         "your partner for an invitation over one shared directory instead.",
     };
@@ -586,7 +585,7 @@ export function acceptUnsupported(
     return {
       title: ACCEPT_UNSUPPORTED_TITLE,
       message:
-        "This invitation runs over one shared directory, but this appliance is " +
+        "This invitation runs over one shared directory, but this console is " +
         "mounted with separate inbound and outbound folders and has no single " +
         "folder to meet in. Ask your partner for an invitation over separate " +
         "inbound and outbound folders instead.",

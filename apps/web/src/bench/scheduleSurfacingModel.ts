@@ -182,7 +182,7 @@ export function repeatedMissCoordination(
   return {
     misses,
     line: `${misses} agreed run windows in a row passed with no run; check with your partner, and check this device's clock.`,
-    prompt: `${misses} agreed run windows in a row have passed with no run, which is what a partnership that has stopped meeting looks like. Check with your partner that they are still running this exchange, and check this device's own clock: a clock that has drifted puts your window where theirs never is, which produces exactly this pattern. Settle it where you agreed the schedule. Nothing here is paused or changed -- the agreed cadence stands, and the count clears the next time a run succeeds.`,
+    prompt: `${misses} scheduled runs in a row have not happened. Ask your partner whether they are still running this exchange, and check this device's clock -- if it is wrong, your run window and theirs never overlap. Nothing has been paused: the schedule stands, and the count resets after a successful run.`,
   };
 }
 

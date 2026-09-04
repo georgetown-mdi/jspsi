@@ -22,7 +22,7 @@ export const RECEIPT_MISSING_LEAD = "This run has no signed receipt.";
  * running the exchange again produces a receipt for that run, not this one.
  */
 export const RECEIPT_MISSING_NOTICE =
-  "This exchange asked for a signed receipt and this appliance holds none for " +
+  "This exchange asked for a signed receipt and this console holds none for " +
   "it, so there is nothing to download here. A receipt is written once both " +
   "parties have exchanged signatures, so a run that stopped before that point " +
   "produced none at all. Running the exchange again produces a receipt for " +
@@ -35,7 +35,7 @@ export const RECEIPT_MISSING_NOTICE =
  * unanswered ask never said whether this run has one.
  */
 export const RECEIPT_UNANSWERED_LEAD =
-  "This appliance stopped answering about this run's receipt.";
+  "This console stopped answering about this run's receipt.";
 
 /**
  * What the seat says under that lead. It names the one thing the operator can do
@@ -46,7 +46,7 @@ export const RECEIPT_UNANSWERED_LEAD =
 export const RECEIPT_UNANSWERED_NOTICE =
   "This page asked several times whether this run has a signed receipt and got " +
   "no answer back, so it has stopped asking. If this exchange signed one it may " +
-  "still be with the run's files on this appliance -- reload this page to ask " +
+  "still be with the run's files on this console -- reload this page to ask " +
   "again, and keep the run until you have the file, because discarding the run " +
   "removes the receipt along with the results.";
 
