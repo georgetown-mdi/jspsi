@@ -6,16 +6,10 @@ import type { PsiBackendOptions, PsiBackendSelection } from "@psilink/core";
 
 /**
  * Loads the native N-API PSI addon when a prebuild is available for this
- * platform, or resolves `null` so the CLI falls back to the WASM engine.
- *
- * The `@openmined/psi.js/psi_native_node.js` entry loads the prebuilt `.node`
- * addon (via node-gyp-build, resolving prebuilds/<platform>-<arch>/) and wraps
- * it in the same PSILibrary shape as the WASM build. It rejects when no prebuild
- * exists for the running platform -- or the entry is absent from an older
- * vendored package -- and we resolve `null` so the selector falls back to WASM.
- * The addon is a performance accelerator; correctness never depends on it, and
- * its wire output matches the psi-engine-wire-vectors.json interop fixture in
- * @psilink/core byte-for-byte.
+ * platform, or resolves `null` so the CLI falls back to WASM. The addon is a
+ * performance accelerator only -- correctness never depends on it. Prebuild
+ * resolution and the WASM-fallback contract: docs/spec/DEPENDENCY_PINS.md,
+ * "The vendored @openmined/psi.js addon".
  */
 async function loadNativePsiAddon(): Promise<PSILibrary | null> {
   try {
@@ -23,12 +17,9 @@ async function loadNativePsiAddon(): Promise<PSILibrary | null> {
       await import("@openmined/psi.js/psi_native_node.js");
     return await loadNativeLibrary();
   } catch (error) {
-    // Expected when no prebuild ships for this platform (node-gyp-build) or the
-    // native entry is absent from an older vendored package (module not found):
-    // fall back to WASM quietly. Anything else -- a corrupt or ABI-mismatched
-    // .node -- is a genuine failure, so re-throw and let the selector surface it
-    // through onNativeUnavailable rather than mislabel it as "no prebuild". The
-    // selector falls back to WASM either way, so correctness is unaffected.
+    // isNativeUnavailable separates the expected no-prebuild / module-not-found
+    // cases (fall back to WASM) from a corrupt or ABI-mismatched .node, which is
+    // re-thrown so onNativeUnavailable can report it instead.
     if (isNativeUnavailable(error)) {
       return null;
     }
@@ -38,8 +29,8 @@ async function loadNativePsiAddon(): Promise<PSILibrary | null> {
 
 /**
  * Whether a native-addon load error is the ordinary "no native build for this
- * platform / package" case (quiet fallback) rather than a genuinely broken load
- * worth surfacing. Exported so the classification the WASM fallback depends on is
+ * platform / package" case (quiet fallback) rather than a broken load worth
+ * reporting. Exported so the classification the WASM fallback depends on is
  * pinned by unit tests -- misclassifying a broken addon as "unavailable" would
  * hide a real regression behind a silent fallback (see psiBackend.test.ts).
  */

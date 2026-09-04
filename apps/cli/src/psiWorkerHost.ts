@@ -20,13 +20,10 @@ import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 // the liveness timers. Wired through RunExchangeOptions.psiEngineFactory in
 // protocol.ts.
 
-// The bundled worker entry (dist/psiWorker.worker.js) sits beside this module in the
-// built CJS bundle, so __dirname resolves it there. When running from src under the
-// test runner -- where no compiled .js sits beside the source -- or wherever it
-// cannot be found, this yields undefined and the caller falls back to the in-process
-// engine, so behavior is unchanged in dev and tests while the shipped CLI (which
-// always emits the bundle) always off-threads. The try/catch also covers a context
-// where __dirname is not defined at all.
+// dist/psiWorker.worker.js sits beside this module only in the built CJS bundle,
+// so __dirname resolves it there; running from src (the test runner, where no
+// compiled .js sits beside the source) or wherever __dirname is undefined yields
+// undefined here, and the caller falls back to the in-process engine.
 function resolveWorkerEntry(): string | undefined {
   try {
     const entry = path.join(__dirname, "psiWorker.worker.js");
@@ -68,22 +65,21 @@ interface WorkerThreadLike {
 
 /**
  * Wrap a worker_threads Worker as the runtime-agnostic {@link PsiWorkerHandle} the
- * {@link WorkerPsiEngine} drives. This is the SINGLE definition of the host-side event
- * wiring -- message-reply routing plus the error / messageerror / exit failure paths:
- * the real-worker integration test wraps an actual Worker through it and a unit test
- * wraps a fake, so neither re-implements a mirror that can drift from production (the
- * drift that once let a broken exit handler ship untested).
+ * {@link WorkerPsiEngine} drives. This is the single definition of the host-side
+ * event wiring -- message-reply routing plus the error / messageerror / exit
+ * failure paths: the real-worker integration test wraps an actual Worker through
+ * it and a unit test wraps a fake, so neither re-implements a mirror that can
+ * drift from production.
  */
 export function createWorkerThreadHandle(
   worker: WorkerThreadLike,
 ): PsiWorkerHandle {
   // Set when dispose() drives the teardown, so the worker's own 'exit' event is
-  // recognized as the expected stop rather than a crash. terminate() reports a
-  // NONZERO exit code (1) for a worker that had started serving -- indistinguishable
-  // by code from the startup process.exit(1) in psiWorker.worker.ts -- so the exit
-  // code cannot tell a clean disposal from a fault; whether WE asked it to stop can.
-  // dispose() has already failed every pending call before terminating, so an
-  // expected exit must NOT re-enter onError.
+  // recognized as the expected stop rather than a crash. terminate() reports the
+  // same nonzero code (1) that psiWorker.worker.ts's startup failure exits with,
+  // so the code alone cannot tell a clean disposal from a fault -- only whether
+  // dispose() initiated it can. dispose() has already failed every pending call
+  // before terminating, so an expected exit must not re-enter onError.
   let terminating = false;
   return {
     postMessage: (request: PsiWorkerRequest) => worker.postMessage(request),
@@ -127,9 +123,9 @@ function spawnWorkerPsiEngine(
   // (see psiWorker.worker.ts): --expose-gc cannot be passed through a worker's
   // execArgv (Node rejects it), so nothing gc-related is set here.
   const worker = new Worker(entry, { workerData: init });
-  // The worker is deliberately NOT unref'd: while crypto is in flight the process
-  // must stay alive, exactly as the synchronous masking kept it. dispose() (driven by
-  // the exchange's teardown finally) calls terminate(), which is what releases the
-  // process at the end -- so a ref'd worker handle never outlives the exchange.
+  // The worker is not unref'd: while crypto is in flight the process must stay
+  // alive, exactly as the synchronous masking kept it. dispose() (driven by the
+  // exchange's teardown finally) calls terminate(), which releases the process
+  // at the end, so a ref'd worker handle never outlives the exchange.
   return new WorkerPsiEngine(createWorkerThreadHandle(worker));
 }
