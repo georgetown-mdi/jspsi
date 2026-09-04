@@ -24,16 +24,11 @@
 // main-worktree refusal is path-scoped: it fires whoever writes and from
 // wherever, since no session writes that content. The sibling refusal cannot be,
 // because pointing a spawn at a tree by absolute path from the primary checkout
-// is the dispatch shape the by-ref model is built on -- a session whose own
-// directory is the main checkout writes into a branch's worktree as its normal
-// work. So the sibling rule binds only a session already working inside a linked
-// worktree, where a write into a DIFFERENT linked worktree has no legitimate
-// reading. A session directory that cannot be placed in a worktree at all leaves
-// the sibling rule silent, like every other unanswerable state here.
-//
-// A linked worktree sits UNDER the main root's path prefix (.claude/worktrees/ is
-// inside it), so the worktree owning a path is the longest matching entry of
-// `git worktree list --porcelain` rather than a prefix test against the first.
+// is the dispatch shape the by-ref model is built on. So the sibling rule binds
+// only a session already working inside a linked worktree, where a write into a
+// DIFFERENT linked worktree has no legitimate reading. A session directory that
+// cannot be placed in a worktree at all leaves the sibling rule silent, like
+// every other unanswerable state here.
 //
 // WHAT PASSES, and why the test is IGNORED-ness rather than tracked-ness. Under
 // the by-ref model the main session writes no branch content at all, so the only

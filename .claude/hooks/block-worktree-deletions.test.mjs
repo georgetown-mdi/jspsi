@@ -255,6 +255,33 @@ describe("block-worktree-deletions hook", () => {
     ]);
   });
 
+  // The shapes the header records as unread, pinned so the record is a check
+  // rather than a claim. Each one destroys the sibling tree if it runs; each is
+  // allowed here because closing it means a shell-syntax-aware parser, which is
+  // a larger and more fragile thing than the accident this hook guards against.
+  // A row that starts failing means the hook grew to see that shape, and the
+  // header's stated limit has to go with it.
+  it("records the command shapes it does not read", () => {
+    expectAllowed([
+      // Composition is not unwrapped: a subshell, a brace group and a command
+      // substitution keep their brackets inside the stage that carries them, and
+      // a command inside `bash -c` is a quoted string rather than a stage.
+      `(cd ${ROOT} && rm -rf agent-other)`,
+      `{ rm -rf ${SIBLING}; }`,
+      `echo $(rm -rf ${SIBLING})`,
+      `bash -c "rm -rf ${SIBLING}"`,
+      // A lone `&` is not a separator, because the same byte sits inside
+      // redirect words and a backgrounded `cd` never moves the parent shell.
+      `sleep 0 & rm -rf ${SIBLING}`,
+      // A wrapper outside the peeled set stands where the command word belongs,
+      // `timeout` deliberately: peeling it means skipping a positional duration.
+      `timeout 5 rm -rf ${SIBLING}`,
+      // A target that only exists at runtime stands nowhere on the line.
+      `TREE=${SIBLING}; rm -rf "$TREE"`,
+      `rm -rf $(cat /tmp/tree-path)`,
+    ]);
+  });
+
   it("catches a quoted command word its deletion pre-filter would skip", () => {
     // The pre-filter strips quotes the same way the tokenizer does, so a quote
     // buried in the command word no longer hides the deletion from the gate.

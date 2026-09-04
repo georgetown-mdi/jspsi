@@ -21,10 +21,8 @@
 //     reaches a doubled `-ff` plus -d in a directory that merely holds worktrees
 //   - a single-force `git clean` with -d in a directory that merely holds
 //     worktrees while any directory under the guarded root no longer resolves as
-//     a repository: git skips a repository, not a path, so an ORPHANED tree --
-//     one whose `.git/worktrees/<name>` admin dir was removed, or whose gitlink
-//     points at a gitdir that is gone -- is taken by that single force along with
-//     the uncommitted work in it
+//     a repository: git skips a repository, not a path, so an ORPHANED tree is
+//     taken by that single force along with the uncommitted work in it
 //   - `git worktree remove --force`, which takes a tree git's own refusal would
 //     have held on to
 //
@@ -49,19 +47,15 @@
 //
 // WHAT STANDING IN A TREE DOES NOT SETTLE is whether the session belongs there,
 // and nothing readable settles it. The harness records a worktree path only for a
-// spawn it GAVE a tree to, and records nothing about a tree a spawn was merely
+// spawn it GAVE a tree to and records nothing about a tree a spawn was merely
 // pointed at -- re-verify by reading its per-spawn metadata, the
 // `agent-<id>.meta.json` beside the session transcript, where the path is present
-// for an isolated spawn and absent for every other. The spawning call carries no
-// identity for the session it creates, so a record keyed to that session cannot be
-// written from there either, and the one thing naming a handed tree is prose in
-// that session's own brief. So a session handed a tree, a session that walked into
-// one, and a session that cd'ed into a sibling on this very line are one event
-// here, and each may clear that tree's CONTENTS. What that costs is the
-// `cd <sibling> && rm -rf src` shape, which this hook no longer refuses; what it
-// buys is the fix-round shape -- a spawn pointed at an existing branch worktree --
-// cleaning up after itself. Every tree the session is not standing in, and every
-// tree taken whole, are guarded from all of them alike.
+// for an isolated spawn and absent for every other. So a session handed a tree,
+// one that walked into it, and one that cd'ed into a sibling on this very line
+// are a single event here, and each may clear that tree's CONTENTS. What that
+// buys is the fix-round shape -- a spawn pointed at an existing branch worktree
+// -- cleaning up after itself. Every tree the session is not standing in, and
+// every tree taken whole, are guarded from all of them alike.
 //
 // A TREE NOBODY IS STANDING IN IS CLEARED WITHOUT A DELETION. An untracked
 // leftover in a stranded tree -- a probe, a build artifact, a file a finished or
@@ -85,24 +79,20 @@
 //     that refusal is blocked. That plain spelling is how a finished tree is
 //     retired, so it stays open to every session, owner or not
 //   - `git clean -fdx` in a directory that merely HOLDS worktrees, which real git
-//     answers with "Skipping repository" for each nested one, while every one of
-//     them still resolves as a repository; only a doubled force plus -d takes
-//     those. Reaching INTO a tree is the other case and needs no doubling -- a
-//     single -f deletes that tree's untracked files, -fd its untracked
-//     directories. The test beside this file drives real git against a real
-//     linked worktree for every spelling rather than modelling the rule
+//     answers with "Skipping repository" for each nested one; only a doubled
+//     force plus -d takes those, while reaching INTO a tree needs no doubling.
+//     The test beside this file drives real git against a real linked worktree
+//     for every spelling rather than modelling the rule
 //   - any `git clean` dry run (-n, --dry-run), which deletes nothing
 //
 // The commands read as deletions are rm, rmdir, unlink, shred, mv, find with a
 // deleting action, and those same commands reached through xargs in a pipeline,
-// plus the two git spellings above. Of the words on such a line, only the ones
-// that command REMOVES are read as targets -- an mv destination, a find
-// expression's pattern or -exec command word, and every operand of a stage that
-// deletes nothing all name paths the line does not take away. A find primary
-// that runs a command of its own is read twice over, because find hands that
-// command its arguments unchanged: the tree find walks by the start-point rule,
-// and the paths standing in the -exec by the rules of the command they are
-// handed to.
+// plus the two git spellings above. Of the words on such a line only the ones
+// that command REMOVES are read as targets, and a find primary that runs a
+// command of its own is read twice over -- the tree find walks by the
+// start-point rule, and the paths standing in the -exec by the rules of the
+// command they are handed to. Which words those are for each spelling is driven
+// in the test beside this file.
 //
 // TWO QUESTIONS ARE PUT TO REAL GIT rather than modelled from its on-disk layout
 // or its configuration precedence: whether a directory under the guarded root
@@ -113,8 +103,7 @@
 // directory treated as unresolved, so the tree stays guarded; a config probe that
 // cannot answer leaves git's default in place, which is the requirement of a
 // force this hook assumed before it asked. The config probe runs under the
-// environment assignments this hook collects off the command -- a leading `VAR=`
-// on the git stage, or an `export` stage before it -- so an inline
+// environment assignments this hook collects off the command, so an inline
 // `GIT_CONFIG_GLOBAL=`, `HOME=` or other `GIT_CONFIG_*` spelling moves the files
 // the probe reads exactly as it moves the ones the guarded command reads. A
 // collected PATH is the one assignment held back: the probe is answered by the
@@ -127,86 +116,52 @@
 // warrants. What this hook binds is the accident -- a session deleting a tree it
 // can see by path -- and not a determined bypass; a command it allows is not
 // thereby endorsed.
-//   - COMPOSITION IS NOT UNWRAPPED. Stages are split on &&, ||, ;, a newline
-//     and the pipe, and nothing else: a subshell, a brace group, or a command
-//     substitution keeps its brackets inside the stage that carries it, so
-//     `(cd ../agent-other && rm -rf .)` reads as a `(cd` and an `rm` whose
-//     target is `.)`, neither of which names a worktree. Nor is a command inside
-//     `bash -c "..."` read, or one behind an alias or a shell function. A lone
-//     `&` is not a separator either -- the same byte sits inside redirect words
-//     (`2>&1`, `&>`), where a split severs a command from operands that follow
-//     the redirect, and a backgrounded `cd` never moves the parent shell's
-//     directory, so splitting there opens worse holes than it closes (both
-//     measured against real bash) -- which leaves `cmd & rm -rf <tree>` reading
-//     as one stage whose command is `cmd`, the deletion behind the `&` unseen.
-//   - THE COMMAND WORD IS MATCHED LITERALLY, by basename after quotes are
-//     stripped -- from the whole command line before the deletion pre-filter and
-//     from each token before the match -- and after backslashes are dropped, the
-//     shell removing each one outside quotes. So the quoted spellings (`r"m"`,
-//     `m"v"`) and the backslashed spellings (`\rm`, `r\m`) are all caught; a
-//     backslash that was inside quotes names a genuinely different program to
-//     the shell and is still read as the deleting command here, an over-refusal
-//     in the guarded direction.
+//   - COMPOSITION IS NOT UNWRAPPED. A subshell, a brace group, a command
+//     substitution, a `bash -c "..."`, an alias and a shell function all keep
+//     what they hold, and a lone `&` is not a separator.
+//   - THE COMMAND WORD IS MATCHED LITERALLY, by basename with quotes and
+//     backslashes stripped, so a quoted or backslashed spelling of a deleting
+//     command is caught. A backslash that was inside quotes names a genuinely
+//     different program to the shell and is read as the deleting command anyway,
+//     an over-refusal in the guarded direction.
 //   - ONLY sudo, command, env, nice, time, nohup, setsid, doas AND stdbuf ARE
-//     PEELED as prefix words, along with their flags and the values those flags
-//     take (`sudo -u NAME`, `nice -n 10`). Another wrapper stands where the
-//     command word belongs and the stage reads as the wrapper -- `timeout 5 rm
-//     ...` among them, deliberately: peeling it means skipping a positional
-//     duration, which is modelling that tool's grammar rather than reading a
-//     prefix word.
+//     PEELED as prefix words, along with their flags and the values those take.
+//     Another wrapper stands where the command word belongs and the stage reads
+//     as the wrapper -- `timeout 5 rm ...` among them, deliberately: peeling it
+//     means skipping a positional duration, which is modelling that tool's
+//     grammar rather than reading a prefix word.
 //   - TARGETS THAT ONLY EXIST AT RUNTIME are not seen: a path read from a file,
-//     built up in a variable, or produced by a glob whose literal prefix names
-//     no worktree.
+//     built up in a variable, or produced by a glob.
 //   - A `cd` MOVES THE DIRECTORY paths resolve against only when it stands as
 //     its own command, and a symlink pointing into a worktree is not resolved
 //     (removing the link does not follow it anyway).
 //   - ONLY THE OPERANDS A DELETING COMMAND REMOVES ARE READ, so a worktree path
-//     that merely appears elsewhere on the line is not a deletion of it: an `mv`
-//     destination, a `find` expression's `-name` pattern or `-exec` command word
-//     (the paths that command is handed are read as its own), and every operand
-//     of a stage that deletes nothing all pass unread. An `mv`
-//     or a redirect that OVERWRITES a file inside a tree passes with them, as
-//     `cp` always has -- what this hook guards is a tree taken away, not a file
-//     rewritten. `xargs` is the one exception: its targets arrive from an earlier
-//     stage at runtime, so in a pipeline feeding one, every operand is a
-//     candidate.
+//     standing elsewhere on the line is not a deletion of it, and an `mv` or a
+//     redirect that OVERWRITES a file inside a tree passes as `cp` always has:
+//     what this hook guards is a tree taken away, not a file rewritten. `xargs`
+//     is the one exception, its targets arriving from an earlier stage at
+//     runtime, so in a pipeline feeding one every operand is a candidate.
 //   - STANDING IN A TREE IS TAKEN FOR WORKING IN IT, so `cd <sibling> && rm -rf
 //     src` is allowed where the same deletion aimed at that path from outside is
 //     refused. That is the model above rather than an oversight, and it is
 //     bounded: no `cd` reaches the tree itself, the root they all live under, or
 //     any tree other than the one the shell ends up in.
 //   - WHICH TREE THE SHELL IS STANDING IN COMES FROM THE WORKING DIRECTORY THE
-//     CALL ITSELF CARRIES, and not from a `cd` this line spells. That directory
-//     persists between calls, so a session whose directory was left inside a tree
-//     by some earlier call stands in that tree here, and every deletion of that
-//     tree's CONTENTS is allowed on a line carrying no `cd` at all -- standing is
-//     a place the session is in, not a step it takes on the guarded line. A `cd`
-//     on the line moves it from wherever it already stood, for the pipelines
-//     after that `cd`. Whether the harness reports a drifted shell cwd or a stale
-//     session cwd was not driven at this ref (the test supplies cwd rather than
-//     observing what the harness sends), so a session whose cwd has drifted into
-//     a tree may read as standing outside it -- which refuses a cleanup rather
-//     than allowing a loss.
-//   - A GIT DIRECTORY REDIRECT IS READ ONLY IN THE LITERAL FORMS MEASURED HERE:
-//     `-C` (composed left to right against the one before it, as real git
-//     composes it), `--work-tree`, and `GIT_WORK_TREE` set either as a leading
-//     assignment or by an `export` stage before the git command. Those move the
-//     directory a git subcommand works in -- the one `clean` walks, and the one a
-//     relative `worktree remove` operand resolves against -- while `--git-dir`,
-//     `GIT_DIR` and `-c core.worktree=` do not, each put to real git in the test
-//     beside this file. A redirect spelling outside that measured set would pass
-//     unread.
+//     CALL ITSELF CARRIES, which persists between calls, and not from a `cd`
+//     this line spells; a `cd` moves it from there for the pipelines after it.
+//     Whether the harness reports a drifted shell cwd or a stale session cwd was
+//     not driven at this ref, so a session whose cwd has drifted into a tree may
+//     read as standing outside it -- which refuses a cleanup rather than
+//     allowing a loss.
+//   - A GIT DIRECTORY REDIRECT IS READ ONLY IN THE LITERAL FORMS MEASURED IN THE
+//     TEST beside this file: `-C`, `--work-tree`, and `GIT_WORK_TREE` set as a
+//     leading assignment or by an `export` stage. A spelling outside that
+//     measured set passes unread.
 //   - clean.requireForce IS READ FROM THE COMMAND LINE AND FROM THE CONFIG FILES
-//     GIT ITSELF RESOLVES, AND FROM NOTHING ELSE. On the command line it is a
-//     `-c clean.requireForce=<off>`, `<off>` one of git's boolean-false spellings
-//     (false, no, off, 0, empty), the last such `-c` winning and any `-c` setting
-//     of the key winning over the files, as real git resolves it; the persisted
-//     value is asked of `git config` in the directory being cleaned rather than
-//     resolved here, under the assignments described above. What stays unread is
-//     what the plain command line does not carry: a `--config-env` names an
-//     environment variable whose value stands nowhere on the line, so it sets the
-//     key from a value the probe cannot see, as does any assignment reaching git
-//     by a route the stage splitting above does not surface.
+//     GIT ITSELF RESOLVES, AND FROM NOTHING ELSE, the resolution asked of git
+//     rather than reimplemented. So a `--config-env`, which names a variable
+//     whose value stands nowhere on the line, stays unread, as does any
+//     assignment reaching git by a route the stage splitting does not surface.
 //
 // Exit 0 allows the call; exit 2 blocks it and feeds stderr back to Claude. Any
 // unexpected failure here falls through to exit 0 (fail open) so a bug in this
