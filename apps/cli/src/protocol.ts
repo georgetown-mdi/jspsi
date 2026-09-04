@@ -425,6 +425,1273 @@ export interface RunProtocolResult {
 }
 
 /**
+ * Per-stage wall-clock timing for the machine-interface stream. `open` marks the
+ * START of a stage; a stage COMPLETES when the next one opens or when the
+ * exchange finishes, at which point its duration is emitted as a stageEnd
+ * event. Only completed stages are reported, so a stageEnd is always a whole
+ * stage's time -- a run that aborts mid-stage emits none for the in-flight one.
+ */
+function createStageTimer(
+  emit: (fn: (e: EventStreamEmitter) => void) => void,
+): {
+  open: (id: string) => void;
+  close: () => void;
+} {
+  let current: { id: string; startedAt: number } | undefined;
+  return {
+    open: (id) => {
+      current = { id, startedAt: Date.now() };
+    },
+    close: () => {
+      if (current === undefined) return;
+      const { id, startedAt } = current;
+      // Clamp against a wall-clock adjustment so a duration is never negative.
+      const durationMs = Math.max(0, Date.now() - startedAt);
+      emit((e) => e.stageEnd(id, durationMs));
+      current = undefined;
+    },
+  };
+}
+
+/**
+ * The run's exchange stage: announce the PSI stages, then run the two-party
+ * exchange over the negotiated transport, reporting each stage transition,
+ * warning and confirmation as it arrives. Returns what the exchange produced,
+ * which the output stage then writes.
+ *
+ * `onRunPhase` fires once the stage list is out and the exchange proper is
+ * about to begin, so the caller can classify every failure from that point on
+ * as a run fault rather than a preparation one.
+ */
+async function runExchangeStage(params: {
+  build: PreparedTransport;
+  run: RunLifecycle;
+  mc: MessageConnection;
+  role: HandshakeRole;
+  prepared: PreparedExchange;
+  psiLibrary: Awaited<ReturnType<typeof loadCliPsiBackend>>["library"];
+  verbosity: number;
+  saveIntent: boolean | undefined;
+  signing: SigningPersist | null;
+  recordOutput: RecordOutput | undefined;
+  stageTimer: { open: (id: string) => void; close: () => void };
+  onRunPhase: () => void;
+  log: ReturnType<typeof getLogger>;
+  emit: (fn: (e: EventStreamEmitter) => void) => void;
+}): Promise<ExchangeOutcome> {
+  const {
+    build,
+    run,
+    mc,
+    role,
+    prepared,
+    psiLibrary,
+    verbosity,
+    saveIntent,
+    signing,
+    recordOutput,
+    stageTimer,
+    onRunPhase,
+    log,
+    emit,
+  } = params;
+  const stageDefinitions = describeExchangeStages(prepared);
+  const stageLabels = Object.fromEntries(
+    stageDefinitions.map(({ id, label }) => [id, label]),
+  );
+  // Emit the full stage list once, before the first transition, mirroring the
+  // web's onStages. The PSI exchange proper is about to begin, so any failure
+  // from here on is a "run" fault (until output, marked below).
+  emit((e) => e.stages(stageDefinitions));
+  onRunPhase();
+  return runExchange(
+    // Encrypted path: `secure` is the AEAD decorator over mc (the
+    // handshake negotiated applyEncryption), so PSI frames are encrypted
+    // on the wire. Otherwise secure is undefined and the exchange runs
+    // over the unencrypted mc (transport security only): the no-auth
+    // zero-setup path (which runs the --save bootstrap), and the
+    // authenticated path where applyEncryption negotiated false.
+    run.secure ?? mc,
+    role,
+    prepared,
+    {
+      psiLibrary,
+      // Run the PSI masking in a worker thread so a long round keeps the
+      // event-loop-owning thread responsive for the SFTP heartbeat and the
+      // liveness timers. Falls back to in-process when
+      // the bundled worker is absent (dev / tests); see createPsiEngine.
+      psiEngineFactory: (role, id, mode) =>
+        createPsiEngine(psiLibrary, role, id, mode),
+      verbosity,
+      saveIntent,
+      // Signed-receipt inputs, threaded only when a signing config was
+      // passed (the exchange command resolves it from the `signing`
+      // block). The step is gated inside runExchange on both the
+      // identity and the session key being present; sessionKeyForReceipt
+      // is set only on the authenticated path, and a signing config on
+      // the no-auth path was already rejected above, so these three
+      // travel together. Signing null leaves all three undefined and the
+      // step skipped.
+      signingIdentity: signing?.identity,
+      partnerFingerprint: signing?.partnerFingerprint,
+      sessionKey: signing !== null ? run.sessionKeyForReceipt : undefined,
+      // Advertise the observed SFTP host key for cross-party
+      // reconciliation only when the exchange runs over the
+      // authenticated, AEAD-wrapped channel (`secure` set): the value is
+      // unforgeable only because it rides that channel, so advertising
+      // it on the unencrypted no-auth path -- where an active MITM could
+      // rewrite it to suppress the divergence -- would defeat the check.
+      // observedHostKey is itself undefined for a file-drop or the
+      // no-pin path, and there is no file-sync connection at all on
+      // webrtc, so this is also a no-op there.
+      observedHostKey:
+        run.secure !== undefined ? build.fileSync?.observedHostKey : undefined,
+      onStage: (id: string) => {
+        const label = stageLabels[id] ?? id;
+        // The label derives from linkage-key names the partner may have
+        // authored, so it goes through the display-boundary escape before
+        // reaching the terminal, like this file's other stderr sites. The
+        // emitter applies the same escape before the pair reaches fd 3.
+        log.info(
+          redactAndSanitizeForDisplay(
+            label.charAt(0).toLowerCase() + label.slice(1),
+          ),
+        );
+        // Close the previous stage's timing before entering this one, then
+        // start the clock for the new stage. The emitter sanitizes the id.
+        stageTimer.close();
+        stageTimer.open(id);
+        emit((e) => e.stage(id, label));
+      },
+      onWarning: (msg: string) => {
+        // Terms-exchange warnings can embed partner-authored column
+        // names, so the text goes through the display-boundary escape
+        // here and inside the emitter alike. Redaction leads the escape:
+        // escaping first can truncate a whole key block into a dangling
+        // marker at the display cap, which the prefixer's pass then
+        // fails closed on for the rest of the argument. A warning is a
+        // COMPOSITION, so the cap is the composed-warning budget the
+        // fd-3 event applies rather than the per-value default: both
+        // sinks show the same text, and stderr must not show less of it
+        // than the machine channel relays.
+        log.warn(
+          "terms exchange:",
+          redactAndSanitizeForDisplay(msg, {
+            maxLength: WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
+          }),
+        );
+        emit((e) => e.warning(msg));
+      },
+      // A host-key divergence is a security signal, not a terms warning,
+      // so it gets its own un-prefixed warn line; the message is
+      // complete and display-safe (reconcileHostKeyFingerprints
+      // sanitizes both parties' server-controlled values). It also rides
+      // the machine-interface warning event: a supervisor that discards
+      // stderr on success (an unattended CLI run under cron, say) must
+      // still see the one control that catches a one-sided SFTP
+      // interception. Non-fatal: the exchange still completes and the
+      // operator disambiguates a rekey from an interception out-of-band.
+      onHostKeyDivergence: (msg: string) => {
+        log.warn(msg);
+        emit((e) => e.warning(msg));
+      },
+      // A present-but-malformed partner host-key advertisement is
+      // dropped by the fail-soft parse, so reconciliation is silently
+      // skipped for it. Log that drop at debug -- low enough that a
+      // benign version-skew does not warn on every exchange -- so an
+      // operator can tell a non-conforming partner from one that simply
+      // observed no host key (which logs nothing here). The dropped
+      // value is not included: it is unusable and partner-controlled, so
+      // echoing it into a log would be an injection risk.
+      onPartnerHostKeyMalformed: () =>
+        log.debug(
+          "partner advertised a malformed SFTP host key in the terms " +
+            "exchange; it was dropped per the fail-soft contract and " +
+            "cross-party host-key reconciliation was skipped for it",
+        ),
+      onProtocolConfirmed: (partnerTerms, resolvedRole, runShape) => {
+        // identity is partner-controlled free text with no consistency
+        // check (a mutually-distrusting party sets it), so escape it
+        // before it reaches the operator's terminal/logs. A partner that
+        // supplied none is reported as unnamed rather than as an empty
+        // line.
+        //
+        // On a run that files a record, that absence has a consequence
+        // the marker alone does not: the record this exchange writes
+        // will hold no partnerIdentity, so an accounting of disclosures
+        // that cites it has to take the recipient from the operator's
+        // own notes. Warn rather than inform for that one case, and
+        // state the consequence in the same line. It also rides the
+        // machine-interface warning event, for the same
+        // unattended-supervisor reason as SIGNING_WITHOUT_RECORD_WARNING.
+        const line = [
+          "terms agreed, partner identity:",
+          redactAndDisplayPartyIdentity(partnerTerms.identity),
+        ] as const;
+        if (recordOutput !== undefined && partnerTerms.identity === undefined) {
+          log.warn(...line, UNNAMED_PARTNER_ACCOUNTING_NOTE);
+          emit((e) => e.warning(UNNAMED_PARTNER_ACCOUNTING_NOTE));
+        } else log.info(...line);
+        log.info("role:", resolvedRole);
+
+        // What the agreed terms actually resolved to, named here because
+        // nothing earlier states it: the consent surfaces show each
+        // party's DECLARED deduplicate, and the cardinality the pair
+        // resolves to -- which decides whose duplicates match and how
+        // many rows the result holds -- is decided only now. Both
+        // notices take the warning channel rather than the info line
+        // beside the role, since the machine-interface warning event is
+        // the only sink a supervisor that discards stderr (or a console
+        // seat watching the run) reads at all. Composed by core so the
+        // CLI and browser seats cannot drift; both strings are
+        // first-party prose over integers core formats itself, so
+        // neither includes partner-authored text in the sinks.
+        const { cardinalityNotice, pairTableAdvisory } =
+          describeResolvedRunShape(runShape);
+        for (const notice of [cardinalityNotice, pairTableAdvisory]) {
+          if (notice === undefined) continue;
+          log.warn(notice);
+          emit((e) => e.warning(notice));
+        }
+      },
+    },
+  );
+}
+
+/**
+ * The run's transport-open stage: dial the webrtc rendezvous, or open, sync and
+ * start the file-sync connection, and report the handshake role the rendezvous
+ * settled. Marks the lifecycle as it goes so the cleanup knows what to close.
+ *
+ * A signal arriving mid-open is checked for after every await: the handler's
+ * cleanup found nothing to close at the time, so this closes what has since
+ * opened and throws rather than exchanging over it.
+ */
+async function openRunTransport(params: {
+  build: PreparedTransport;
+  run: RunLifecycle;
+  connection: ProtocolConnectionConfig;
+  interrupted: AbortController;
+  log: ReturnType<typeof getLogger>;
+}): Promise<HandshakeRole> {
+  const { build, run, connection, interrupted, log } = params;
+  let role: HandshakeRole;
+  if (connection.channel === "webrtc") {
+    // Resolved by the prepare block for exactly this channel; the check is
+    // what licenses treating the dial as present.
+    if (build.webRtcDial === undefined)
+      throw new Error("the webrtc rendezvous was not resolved");
+    log.info(
+      "rendezvousing through the signaling server at",
+      // dialedBrokerAuthority (see its doc) is what the socket actually
+      // dials, not the configured `host` text.
+      //
+      // The broker host is partner-controlled on an endpoint-seeded config, so
+      // escape it before it reaches the operator's terminal, as the file-sync
+      // locators below are. The rendezvous ids are NOT logged: they are derived
+      // from the shared secret, and anything that reaches the terminal reaches
+      // a --log-file too.
+      redactAndSanitizeForDisplay(
+        dialedBrokerAuthority(build.webRtcDial.options.location),
+      ),
+    );
+    // The rendezvous is this channel's open: it registers with the broker,
+    // negotiates, and resolves only once the data channel is up. Its own
+    // budgets bound it (rendezvous, channel-open), so a partner that never
+    // arrives fails here rather than hanging. The interrupt signal ends it
+    // early: the transport fails the negotiation and tears down the broker
+    // socket and peer connection on an abort, so Ctrl-C during a
+    // rendezvous does not wait out that budget. The post-dial guard below
+    // still stands, for the window between the dial settling and the
+    // transport being assigned.
+    const dialed = await openWebRtcMessageConnection({
+      ...build.webRtcDial.options,
+      signal: interrupted.signal,
+    });
+    build.transport = dialed;
+    run.opened = true;
+
+    // A signal that arrived while the rendezvous was in flight already
+    // ran doCleanup, which found no transport to close because there was
+    // none yet. Close the one that has just opened and short-circuit, so
+    // the channel and broker socket are not left standing -- the twin of
+    // the post-open guard on the file-sync side.
+    if (run.signalReceived !== undefined) {
+      try {
+        await dialed.close();
+      } catch (err) {
+        log.debug(
+          "post-rendezvous signal close failed:",
+          sanitizeErrorForDisplay(err),
+        );
+      }
+      throw new Error(`interrupted by ${run.signalReceived} during rendezvous`);
+    }
+    // Fixed by the connection's role rather than negotiated at the transport:
+    // the two parties already had to disagree about which end they are to find
+    // each other at all, so the handshake inherits that instead of running a
+    // second tiebreaker.
+    role = build.webRtcDial.handshakeRole;
+  } else {
+    if (connection.channel === "filedrop") {
+      log.info(
+        "opening local path",
+        // The filedrop path is partner-seeded on an offline-accept config (it
+        // comes from the invitation's filedrop endpoint, charset-unconstrained),
+        // so escape it before it reaches the operator's terminal -- the filedrop
+        // twin of the SFTP host below. A split config has no single `path`; show
+        // the inbound directory it reads the peer's files from instead.
+        redactAndSanitizeForDisplay(
+          connection.path ?? connection.inboundPath ?? "",
+        ),
+      );
+    } else if (connection.channel === "sftp") {
+      log.info(
+        "opening connection to",
+        // The SFTP host is partner-controlled on an offline-accept-seeded config
+        // (it comes from the invitation endpoint, charset-unconstrained), so
+        // escape it before it reaches the operator's terminal.
+        redactAndSanitizeForDisplay(connection.server.host),
+        "with options",
+        connection.options,
+      );
+    }
+    // The prepare block builds the connection and its bridge together on
+    // every file-sync channel; the check is what licenses the rest of the
+    // block treating them as present.
+    if (build.fileSync === undefined || build.transport === undefined)
+      throw new Error("the file-sync transport was not constructed");
+    const fileSyncConn = build.fileSync;
+    await fileSyncConn.open(connection);
+    run.opened = true;
+
+    // If a signal fired while `conn.open()` was awaiting, the signal
+    // handler already ran doCleanup, including a conn.close() that
+    // no-op'd because `connected` was still false at that moment. Now
+    // that open() has resolved, close the freshly-opened connection
+    // explicitly and short-circuit so the catch's signalReceived branch
+    // resolves runProtocol cleanly -- otherwise the connection stays open
+    // until process termination, harmless in production but a state leak
+    // in tests that mock process.exit.
+    if (run.signalReceived !== undefined) {
+      try {
+        await fileSyncConn.close();
+      } catch (err) {
+        log.debug(
+          "post-open signal close failed:",
+          sanitizeErrorForDisplay(err),
+        );
+      }
+      throw new Error(
+        `interrupted by ${run.signalReceived} during connection open`,
+      );
+    }
+
+    log.info("synchronizing");
+    await fileSyncConn.synchronize();
+
+    // If a signal fired during the synchronize() round-trip, doCleanup
+    // already ran (closing the connection and removing our hello/lock
+    // files). Bail out before start() so the poller is not launched
+    // against a closed transport -- otherwise conn.start() would
+    // schedule polls that fail against the closed client, producing
+    // spurious error logs while the signal handler is already exiting.
+    // The corresponding check after open() handles the open/synchronize
+    // window; this one handles synchronize/start.
+    if (run.signalReceived !== undefined) {
+      throw new Error(
+        `interrupted by ${run.signalReceived} during synchronization`,
+      );
+    }
+
+    const rendezvousRole = fileSyncConn.handshakeRole;
+    // Invariant: synchronize() throws on all failure paths, so role is always
+    // defined when synchronize() returns normally.
+    if (rendezvousRole === undefined)
+      throw new Error(
+        "connection did not establish a handshake role after synchronization",
+      );
+    role = rendezvousRole;
+
+    log.info("starting polling");
+    // conn.start() must precede authenticateConnection: the key exchange
+    // awaits mc.receive(), which is fed by the bridge's data listener; that
+    // listener only sees inbound frames once the polling loop is running.
+    fileSyncConn.start();
+    run.started = true;
+  }
+
+  // Report the negotiated handshake role by what this party does next, not
+  // as "arrived first/second": under lockless rendezvous (retain mode,
+  // and so a split inbound/outbound directory) the role is a
+  // deterministic lexicographic tiebreaker on the two hello filenames,
+  // not wall-clock arrival order -- the party whose peer id sorts lower is
+  // always the responder regardless of who connected first. Describing
+  // send/wait behavior is accurate under both rendezvous modes and is the
+  // operationally useful fact (which side acts next).
+  if (role === "responder") {
+    log.info("waiting for your partner's first message");
+  } else {
+    log.info("sending your partner the first message");
+  }
+  return role;
+}
+
+/**
+ * The run's authentication stage: run the key exchange, persist the rotated
+ * token, fire the caller's post-handshake hook, wrap the transport in the
+ * negotiated AEAD layer, and arm the cross-party abort marker. Runs only on the
+ * authenticated path; the unauthenticated one has no acceptance step at all.
+ *
+ * The rotated-token save and the flag recording it are one synchronous step, so
+ * a signal handler reading the lifecycle sees both the pre-save state or both
+ * the post-save state, never one of each.
+ */
+async function authenticateRun(params: {
+  build: PreparedTransport;
+  run: RunLifecycle;
+  mc: MessageConnection;
+  auth: AuthPersist;
+  connection: ProtocolConnectionConfig;
+  role: HandshakeRole;
+  onAuthenticated: (() => void | Promise<void>) | undefined;
+  log: ReturnType<typeof getLogger>;
+  eventStream: EventStreamEmitter | undefined;
+}): Promise<void> {
+  const {
+    build,
+    run,
+    mc,
+    auth,
+    connection,
+    role,
+    onAuthenticated,
+    log,
+    eventStream,
+  } = params;
+  log.info("authenticating");
+  // Discard the (possibly whitespace-padded) keyFilePath from auth;
+  // saveKeyFile below uses trimmedKeyFilePath, which was captured and
+  // trimmed during pre-flight without mutating the caller-supplied
+  // auth object.
+  const { keyFilePath: _ignored, ...authParams } = auth;
+  // trimmedKeyFilePath is set whenever auth is set; they are populated
+  // together in the pre-flight branch above.
+  const keyFilePath = build.trimmedKeyFilePath!;
+  // Set synchronously before the await so a signal arriving during the
+  // key-exchange round-trip or before saveKeyFile runs can distinguish the
+  // "handshake may have completed on the partner side" case from the
+  // "handshake never started" case.
+  run.authStarted = true;
+  // sessionKey (32 bytes, both parties derive the same value) keys the
+  // per-direction AEAD encryption set up below, so every PSI frame
+  // after this point is opaque on the wire to an SFTP/file-drop admin.
+  // rotatedSecret is the new shared secret persisted to disk.
+  // requestEncryption is what this party asks for; applyEncryption is
+  // the negotiated OR both parties agree on, gating the
+  // EncryptedMessageConnection wrap below.
+  //
+  // A file-sync channel asks for it unconditionally, since its
+  // filesystem admin can read every frame. A webrtc data channel does
+  // not: it is already end-to-end confidential under DTLS, so the wrap
+  // would buy nothing, and a browser peer declines and refuses a
+  // partner that asks. See docs/spec/CHANNEL_SECURITY.md.
+  const requestEncryption = connection.channel !== "webrtc";
+  const { rotatedSecret, sessionKey, applyEncryption } =
+    await authenticateConnection(mc, authParams, role, requestEncryption);
+  // Capture the session key for the signed-receipt step (it derives the replay
+  // binder from it); only the authenticated path reaches here, so the no-auth
+  // path leaves it undefined and runExchange's signing step stays skipped.
+  run.sessionKeyForReceipt = sessionKey;
+  // buildRotatedKeyFile stamps `expires` = now + tokenMaxAgeDays days
+  // when the operator set a max-age policy, computed here at the
+  // moment of rotation rather than at config-parse time. Built before
+  // the try/catch below so its input-validation guard (a non-positive
+  // or non-integer tokenMaxAgeDays, reachable only by a caller
+  // bypassing the config schema) propagates as the UsageError it is
+  // (exit 64) rather than being caught and re-wrapped as a
+  // "could not be saved" transport-style failure (exit 69).
+  const rotatedKeyFile = buildRotatedKeyFile(
+    rotatedSecret,
+    auth.tokenMaxAgeDays,
+    Date.now(),
+  );
+  try {
+    // saveKeyFile is synchronous; the assignment below runs in the same
+    // microtask tick, so no signal can interleave between them. A
+    // signal handler that reads tokenRotated sees either both pre-save
+    // state (false) or both post-save state (true). Maintain this: do
+    // not insert an await between saveKeyFile and the assignment.
+    saveKeyFile(keyFilePath, rotatedKeyFile);
+    run.tokenRotated = true;
+  } catch (err) {
+    // "may already hold": both parties independently derive
+    // rotatedSecret from the session key, but either party's disk
+    // write can fail, and we cannot know whether the partner's save
+    // succeeded, so "may" is intentionally conservative.
+    //
+    // The wrapped error already holds the full recovery hint specific
+    // to this failure mode. Tag it with the same
+    // `psilinkRecoveryHintEmitted` convention authenticateConnection
+    // uses on its own validation errors (see auth.ts), so the
+    // runProtocol catch below skips its generic authStarted advisory
+    // and the user sees one coherent recovery message.
+    throw Object.assign(
+      new Error(
+        `authentication succeeded and the shared token was rotated, but ` +
+          `the updated token could not be saved to ${keyFilePath}: ` +
+          (err instanceof Error ? err.message : String(err)) +
+          ` Your partner may already hold the rotated token. ` +
+          `To recover, both parties must re-invite to establish a new ` +
+          `shared secret.`,
+      ),
+      { psilinkRecoveryHintEmitted: true },
+    );
+  }
+
+  // The handshake has succeeded and the rotated token is now persisted
+  // to the key file. Fire the optional post-handshake hook here --
+  // exactly at acceptance, after the key save and before encryption
+  // setup and the data exchange -- so a caller (online invite/accept)
+  // can persist its configuration at this point. Runs only on the
+  // authenticated path, exactly once, and is awaited.
+  //
+  // Unlike the other interruptible awaits, this one has no preceding
+  // `signalReceived` guard: the gap since the last guarded await
+  // (authenticateConnection) is synchronous, so no signal can have
+  // arrived yet. A signal firing during an async hook lets that write
+  // finish by design; the check after
+  // EncryptedMessageConnection.create then bails before the exchange.
+  //
+  // A hook failure is non-fatal: logged at error level and the
+  // exchange proceeds, since the data exchange must not be aborted by
+  // a failure to persist recoverable config.
+  if (onAuthenticated !== undefined) {
+    try {
+      await onAuthenticated();
+    } catch (hookErr) {
+      // The caller distinguishes a hook failure from success by the
+      // presence of this value, so it must be truthy even when the hook
+      // threw a falsy value (`undefined`, `null`, `0`, `""`, `false`,
+      // `NaN`) -- `undefined` is the success sentinel, so coerce any
+      // falsy throw to an Error: a failure can never masquerade as a
+      // clean write.
+      run.onAuthenticatedError = hookErr
+        ? hookErr
+        : new Error(
+            "the post-authentication hook threw a falsy value: " +
+              String(hookErr),
+          );
+      log.error(
+        "the post-authentication hook failed after the handshake " +
+          "succeeded and the rotated key was saved; the exchange will " +
+          "continue, but any persistence the hook performs (e.g. writing " +
+          "the configuration) did not complete: " +
+          sanitizeErrorForDisplay(hookErr),
+      );
+      // A supervisor that discards stderr on a run that completes would
+      // otherwise have nothing to tell it the setup is half
+      // provisioned -- the exchange runs and its result is written, but
+      // what the hook persists is not on disk. Reported on both machine
+      // channels at the loss itself. The message holds the same hedge
+      // as the line above rather than naming the caller's own artifact.
+      reportPersistenceLoss(
+        "the post-authentication persistence step (writing the " +
+          "configuration) did not complete; the exchange continued and " +
+          "the rotated key is saved",
+        eventStream,
+      );
+    }
+  }
+
+  // Wrap mc in the AEAD decorator when the handshake negotiated it, and
+  // run the PSI exchange through `secure` so every frame is encrypted
+  // on the wire. Gated on applyEncryption -- the transcript-bound OR of
+  // both parties' requests -- rather than bare authentication state:
+  // file-sync requests it unconditionally, so behavior here is
+  // unchanged today, while the gate readies the path for a future
+  // caller on an already-confidential transport that declines the
+  // extra layer.
+  //
+  // create() derives the two per-direction keys via HKDF and registers
+  // no listeners on mc, so a signal arriving before it resolves needs
+  // no listener juggling: doCleanup closes mc/conn directly, latches
+  // cleaned, and leaves the decorator create() later assigns to
+  // `secure` unclosed but harmless (mc is already closed, and the
+  // decorator holds only CryptoKey objects). The signalReceived check
+  // below mirrors the post-open and post-synchronize guards, bailing
+  // before runExchange so the encrypted stream never starts against an
+  // already-closed mc; it runs whether or not the wrap was applied,
+  // since a signal may also have arrived during the onAuthenticated
+  // hook above.
+  if (applyEncryption) {
+    run.secure = await EncryptedMessageConnection.create(mc, sessionKey, role);
+  }
+  if (run.signalReceived !== undefined) {
+    throw new Error(
+      `interrupted by ${run.signalReceived} during channel encryption setup`,
+    );
+  }
+
+  // Arm the authenticated cross-party abort marker now that the session
+  // key is in hand (the only path that holds one): derive this party's
+  // token -- written into <myId>-abort.json on a terminal organic fault
+  // so a waiting peer fails fast instead of waiting out its full
+  // peer-timeout -- and the peer's, verified against an incoming
+  // <peerId>-abort.json. Placed after the signal guard so an interrupt
+  // during setup bails before arming.
+  //
+  // Armed unconditionally, including retain mode: the fast-fail
+  // benefits a waiting peer either way, and the marker doubles as an
+  // audit record. A retain-mode fault leaves the marker on disk (the
+  // entry-time sweep is delete-mode only), but a retain fault already
+  // leaves a non-clean directory, so this adds no incremental cleanup
+  // burden.
+  //
+  // File-sync only, with no webrtc counterpart: the fast-fail it buys
+  // is what a live channel already gives for free, since a dying party
+  // drops the data channel and the peer learns of it from connection
+  // state rather than an absence.
+  if (build.fileSync !== undefined) {
+    const peerRole = role === "initiator" ? "responder" : "initiator";
+    const [selfAbortToken, peerAbortToken] = await Promise.all([
+      deriveAbortToken(sessionKey, role),
+      deriveAbortToken(sessionKey, peerRole),
+    ]);
+    build.fileSync.armAbort(selfAbortToken, peerAbortToken);
+  }
+}
+
+/**
+ * How far one run got: the flags its stages set as they advance, which the
+ * cleanup and the error path both read to decide what to close, what to warn
+ * about, and how to classify a failure. Held in one object so a stage that
+ * sets a flag and the teardown that reads it are looking at the same value.
+ */
+interface RunLifecycle {
+  /** The transport is open, so cleanup has a connection to close. */
+  opened: boolean;
+  /** The file-sync poller is running, so cleanup has polling to stop. */
+  started: boolean;
+  /**
+   * The AEAD decorator over the transport, present only when the handshake
+   * negotiated encryption. Its close() delegates to the transport's.
+   */
+  secure: EncryptedMessageConnection | undefined;
+  /**
+   * The session key from the authenticated key exchange, which the
+   * signed-receipt step derives its replay binder from.
+   */
+  sessionKeyForReceipt: Uint8Array<ArrayBuffer> | undefined;
+  /**
+   * Set immediately before the key exchange is awaited. The partner may have
+   * completed and persisted a rotated token even where this side did not, so
+   * this is the weaker of the two rotation signals.
+   */
+  authStarted: boolean;
+  /** Set only after this side's own rotated-token save succeeded. */
+  tokenRotated: boolean;
+  /**
+   * Set once the two-party exchange returned, so a failure in the local
+   * output stage that follows writes no cross-party abort marker.
+   */
+  exchangeComplete: boolean;
+  /**
+   * Set synchronously at the top of a signal handler, before any await, so an
+   * in-flight failure caused by signal-driven cleanup is told apart from an
+   * organic one and the exit code is left to the handler.
+   */
+  signalReceived: NodeJS.Signals | undefined;
+  /**
+   * A failure from the optional post-handshake hook. Non-fatal, so it does not
+   * stop the exchange; it is reported on the resolved result instead.
+   */
+  onAuthenticatedError: unknown;
+}
+
+/**
+ * The run's cleanup stage: seal the abort decision, then close every transport
+ * layer this run opened, innermost first. Each close is idempotent and its
+ * failure is caught, so cleanup runs to completion whether the exchange
+ * finished, failed, or was interrupted mid-open.
+ */
+async function closeRunLayers(params: {
+  build: PreparedTransport;
+  secure: EncryptedMessageConnection | undefined;
+  opened: boolean;
+  started: boolean;
+  log: ReturnType<typeof getLogger>;
+}): Promise<void> {
+  const { build, secure, opened, started, log } = params;
+  // Seal the abort decision before the first layer-close drives the real
+  // conn.close() cascade (secure.close() -> mc.close() -> conn.close()):
+  // on the clean-completion, signal, and echo paths no writeAbortMarker()
+  // ran, so without this seal conn.close() would wait out its fallback
+  // grace and block teardown for the full window. A catch-path
+  // writeAbortMarker() (if it ran) already pre-empted this. Synchronous
+  // and side-effect free, so hoisting it here is safe, and a no-op on the
+  // unauthenticated path and on webrtc, neither of which has a marker.
+  build.fileSync?.sealAbort();
+  if (started) log.info("stopping polling");
+  if (opened) log.info("closing connection");
+  // When the AEAD decorator was built (encryption negotiated), close it:
+  // its close() delegates to mc.close(), detaching the bridge's
+  // data/error listeners and closing the underlying FileSyncConnection.
+  // `secure` is undefined on the no-auth path, when applyEncryption was
+  // negotiated false, and in the window where a signal arrived between
+  // authenticateConnection returning and create resolving -- in each case
+  // mc.close() below closes the transport directly. All idempotent.
+  if (secure !== undefined) {
+    await secure.close().catch((err: unknown) => {
+      log.debug("secure.close() during cleanup:", sanitizeErrorForDisplay(err));
+    });
+  }
+  // Closing the transport detaches the file-sync bridge's data/error
+  // listeners and closes the underlying FileSyncConnection -- stopping
+  // the poller, sweeping the responsible files, and ending the client --
+  // or, on webrtc, flushes the outbound queue and tears the data channel,
+  // peer connection and broker socket down. All idempotent, so this is
+  // safe even when open() never ran. Undefined only when the webrtc
+  // rendezvous never produced a connection.
+  await build.transport?.close().catch((err: unknown) => {
+    log.debug("transport close during cleanup:", sanitizeErrorForDisplay(err));
+  });
+  // If an earlier transport failure already terminated the bridge, its
+  // close() returns immediately without re-closing fileSync (that earlier
+  // close was fire-and-forget, hence unawaited). Close fileSync directly
+  // to guarantee the poller is stopped, the responsible files are swept,
+  // and the client is ended before doCleanup returns. Idempotent, so in
+  // the normal path this is a near no-op after the bridge already closed
+  // it.
+  await build.fileSync?.close().catch((err: unknown) => {
+    // When the connection was open, a close failure is user-visible: the
+    // transport may not have terminated cleanly (e.g. SSH session timeout).
+    // close() is idempotent and does not throw on an unopened instance, so
+    // the else branch is only a defensive fallback for an unexpected error.
+    if (opened) {
+      log.warn(
+        "failed to close connection during cleanup:",
+        sanitizeErrorForDisplay(err),
+      );
+    } else {
+      log.debug(
+        "fileSync.close() during cleanup:",
+        sanitizeErrorForDisplay(err),
+      );
+    }
+  });
+}
+
+/**
+ * The end-of-run transport counters, one line each and only when non-zero: how
+ * often the connection was re-established, and the connection-per-poll
+ * boundaries where the session was released, forced closed, held, or skipped.
+ * All are this party's own integers, never partner-controlled.
+ */
+function logTransportCounters(
+  client: LocalFSClient | SSH2SFTPClientAdapter | undefined,
+  log: ReturnType<typeof getLogger>,
+): void {
+  // Show the reconnect counts at normal verbosity so the operator sees a
+  // server that repeatedly dropped and was re-dialed even without
+  // --event-stream (which reports the total as a machine metric). The
+  // per-drop WARN in the SFTP adapter already flags each recovery burst;
+  // this is the one end-of-run summary. The total counts connect-time
+  // retries plus mid-exchange session losses (SFTP only), reported apart
+  // so the operator can tell benign startup retries from chronic
+  // mid-exchange drops. Zero on a clean run, so the guard stays quiet.
+  const reconnects = client?.reconnectCount ?? 0;
+  const midExchangeLosses = client?.midExchangeReconnectCount ?? 0;
+  if (reconnects > 0) {
+    const summary =
+      `the connection was re-established ${reconnects} ` +
+      `time${reconnects === 1 ? "" : "s"} during this exchange`;
+    log.info(
+      midExchangeLosses > 0
+        ? `${summary}, of which ${midExchangeLosses} ` +
+            `${
+              midExchangeLosses === 1
+                ? "was a session lost mid-exchange"
+                : "were sessions lost mid-exchange"
+            }`
+        : summary,
+    );
+  }
+  // Connection-per-poll's per-cycle outcomes, each its own line on its own
+  // count: their inline WARNs are paced or absent, so this is the only
+  // place the true totals are stated for an unattended run. Not folded
+  // into the reconnect line above: that line counts SESSIONS LOST, these
+  // count BOUNDARIES, and the two overlap without either containing the
+  // other, so folding any of them in would double-count. See
+  // docs/notes/connection-per-poll-sftp.md for the full boundary model.
+  // All are 0 outside connection-per-poll, so the guards stay quiet.
+  const heldBoundaries = client?.heldBoundaryCount ?? 0;
+  const heldStretches = client?.heldBoundaryStretchCount ?? 0;
+  const perCycleOutcomes: {
+    count: number;
+    line: (count: number) => string;
+  }[] = [
+    {
+      count: client?.releasedBoundaryCount ?? 0,
+      line: (count) =>
+        `the connection-per-poll release closed the SFTP session at ` +
+        `${count} idle ${count === 1 ? "boundary" : "boundaries"} during ` +
+        `this exchange, each re-dialed at the start of the next poll cycle`,
+    },
+    {
+      count: client?.forcedReleaseCount ?? 0,
+      line: (count) =>
+        `the connection did not close when released at ${count} idle ` +
+        `${count === 1 ? "boundary" : "boundaries"} during this exchange, ` +
+        `so it was closed from this side`,
+    },
+    {
+      count: client?.declinedReleaseCount ?? 0,
+      line: (count) =>
+        `the connection-per-poll release did not close the session at ` +
+        `${count} idle ${count === 1 ? "boundary" : "boundaries"} during ` +
+        `this exchange (not a dropped session): another session transition ` +
+        `on this connection did not complete within the release's wait, so ` +
+        `the session stayed live across ` +
+        `${count === 1 ? "that idle gap" : "those idle gaps"}`,
+    },
+    {
+      count: client?.declinedCycleRedialCount ?? 0,
+      line: (count) =>
+        `the connection-per-poll re-dial skipped ${count} poll ` +
+        `${count === 1 ? "cycle" : "cycles"} during this exchange (not a ` +
+        `dropped session): another session transition on this connection ` +
+        `did not complete within the re-dial's wait, so ` +
+        `${count === 1 ? "that cycle" : "those cycles"} had no session`,
+    },
+    {
+      // The stretch sub-count tells one operation holding twenty
+      // boundaries apart from twenty operations each holding one -- a mode
+      // that has stopped delivering per-cycle sessions vs. one that is
+      // working -- so it is stated only when it says something the
+      // boundary count does not.
+      count: heldBoundaries,
+      line: (count) => {
+        const summary =
+          `the connection-per-poll release held the SFTP session at ` +
+          `${count} idle ${count === 1 ? "boundary" : "boundaries"} during ` +
+          `this exchange (not a dropped session): an operation this side ` +
+          `had issued was still unsettled, so the session stayed live ` +
+          `across ${count === 1 ? "that idle gap" : "those idle gaps"}`;
+        return heldStretches < count
+          ? `${summary}, in ${heldStretches} unbroken ` +
+              `${heldStretches === 1 ? "stretch" : "stretches"}`
+          : summary;
+      },
+    },
+  ];
+  for (const { count, line } of perCycleOutcomes)
+    if (count > 0) log.info(line(count));
+}
+
+/**
+ * What the preparation stage builds: the transport pieces the run then opens
+ * and exchanges over, plus the validated key-file path. Filled in place rather
+ * than returned, so a throw partway through still leaves the caller holding
+ * whatever was already constructed -- the terminal metrics event reads the
+ * client's counters, which a failure after its construction must not lose.
+ */
+interface PreparedTransport {
+  trimmedKeyFilePath?: string;
+  webRtcDial?: WebRtcDial;
+  client?: LocalFSClient | SSH2SFTPClientAdapter;
+  fileSync?: FileSyncConnection;
+  transport?: MessageConnection;
+}
+
+/**
+ * The run's preparation stage: check the channel and the caller's contract,
+ * confirm the shared secret and its key-file path, then construct the
+ * transport for this channel. Everything here runs before the exchange's own
+ * try block, so a throw is a "prepare"-phase fault and no connection has been
+ * opened.
+ */
+function prepareTransport(
+  build: PreparedTransport,
+  params: {
+    connection: ProtocolConnectionConfig;
+    auth: AuthPersist | null;
+    saveIntent: boolean | undefined;
+    onAuthenticated: (() => void | Promise<void>) | undefined;
+    signing: SigningPersist | null;
+    recordOutput: RecordOutput | undefined;
+    verbosity: number;
+    fileSyncRuntime: FileSyncRuntimeOptions;
+    log: ReturnType<typeof getLogger>;
+    emit: (fn: (e: EventStreamEmitter) => void) => void;
+  },
+): void {
+  const {
+    connection,
+    auth,
+    saveIntent,
+    onAuthenticated,
+    signing,
+    recordOutput,
+    verbosity,
+    fileSyncRuntime,
+    log,
+    emit,
+  } = params;
+  if (
+    connection.channel !== "filedrop" &&
+    connection.channel !== "sftp" &&
+    connection.channel !== "webrtc"
+  ) {
+    // Only reachable via an unsafe cast past ProtocolConnectionConfig. The
+    // `never` binding holds the other half at build time: it compiles only
+    // while the dispatch below covers every channel the type admits.
+    const unsupported: never = connection;
+    throw new Error(
+      `unsupported channel: ` +
+        (unsupported as unknown as { channel: string }).channel,
+    );
+  }
+
+  // saveIntent drives the zero-setup `--save` bootstrap, which exists only
+  // on the unauthenticated path: an authenticated exchange has a
+  // persistent key already and no provisioning step to consume a bootstrap
+  // result, so a stray saveIntent here would advertise a save field inside
+  // the authenticated channel with nothing reading it back. Reject the
+  // combination rather than leave the mistake open to a future caller.
+  if (auth && saveIntent !== undefined)
+    throw new Error(
+      "saveIntent is only valid on an unauthenticated (zero-setup) exchange; " +
+        "an authenticated exchange must not pass it",
+    );
+  // The mirror constraint: onAuthenticated hooks the moment of acceptance,
+  // which exists only on the authenticated path -- its invocation below is
+  // nested in `if (auth)`. Reject a hook supplied with `auth: null` up
+  // front, so a future caller wiring a hook to a zero-setup exchange gets
+  // a clear error instead of a persistence step that never runs.
+  if (!auth && onAuthenticated !== undefined)
+    throw new Error(
+      "onAuthenticated is only valid on an authenticated exchange; an " +
+        "unauthenticated (zero-setup) exchange has no acceptance step to hook",
+    );
+  // The signed-receipt step binds the receipt to the session key, which
+  // only the authenticated key exchange produces. Reject a signing config
+  // on the unauthenticated (`auth: null`) path up front: there is no
+  // session key to derive the replay binder from, so a caller that wired
+  // it would get a receipt-less exchange with no signal why.
+  if (!auth && signing !== null)
+    throw new Error(
+      "a signing identity is only valid on an authenticated exchange; an " +
+        "unauthenticated (zero-setup) exchange has no session key to bind the " +
+        "signed receipt to",
+    );
+  // Signing with records off produces a receipt no verifier can ever pair
+  // to its run, and nothing after the exchange can repair it. Raise it here
+  // -- before any credential, terms, or data are sent, while both choices
+  // are still the operator's to change -- on both the machine-interface
+  // warning event and stderr, since an unattended supervisor that discards
+  // stderr on success would otherwise collect unpairable receipts run
+  // after run. First-party prose with no interpolated value, so it takes
+  // its one escape from the emitter.
+  if (signing !== null && recordOutput === undefined) {
+    log.warn(SIGNING_WITHOUT_RECORD_WARNING);
+    emit((e) => e.warning(SIGNING_WITHOUT_RECORD_WARNING));
+  }
+  if (auth) {
+    // Fail fast on the locally-knowable secret preconditions -- a malformed
+    // or already-expired shared secret -- before any credential is
+    // presented, rather than letting a dead credential drive the file-sync
+    // rendezvous first, whose losing side would then get a misleading
+    // "peer abandoned the handshake" hint for what is really an expired or
+    // malformed secret. authenticateConnection still runs the same check
+    // as the authoritative boundary for library consumers that bypass
+    // runProtocol. The shared check sets psilinkRecoveryHintEmitted, so the
+    // catch block below suppresses its generic advisory.
+    assertSharedSecretReadyForHandshake(auth);
+    // Validate and trim the key-file path before any credential is
+    // presented, so a misconfiguration fails here rather than at
+    // saveKeyFile post-handshake, before the partner could be left holding
+    // a rotated token this side cannot persist. Returns the trimmed path,
+    // reused by the saveKeyFile call below.
+    build.trimmedKeyFilePath = preflightKeyFilePath(auth.keyFilePath, log);
+  }
+  if (connection.channel === "webrtc") {
+    // Resolve the rendezvous -- broker location, ICE servers, role, and the
+    // secret both ids derive from -- here rather than at the dial, so a
+    // misconfigured connection fails with no socket opened and no id
+    // registered. The file-sync construction below has no webrtc
+    // counterpart: on this channel there is no client to build.
+    build.webRtcDial = webRtcDialFrom(connection, auth?.sharedSecret);
+  } else {
+    const client =
+      connection.channel === "filedrop"
+        ? new LocalFSClient()
+        : new SSH2SFTPClientAdapter({
+            verbosity,
+            // connection_per_poll (SFTP-only) turns on the adapter's
+            // ephemeral-session mode: a fresh session per poll cycle, released
+            // before the idle gap. Resolved from the merged config; undefined
+            // (unset) leaves the adapter's held-session default.
+            ephemeralSessions: connection.options?.connectionPerPoll,
+          });
+    build.client = client;
+    // CLI-only sweep controls are passed straight to the constructor (the
+    // verbose/joinerRecoveryMs precedent), never through config.options, so they
+    // cannot be persisted to psilink.yaml. Spread conditionally so an unset value
+    // does not clobber the constructor default.
+    const fileSyncConn = new FileSyncConnection(client, {
+      verbose: verbosity,
+      ...(fileSyncRuntime.sweepExchangeFiles !== undefined && {
+        sweepExchangeFiles: fileSyncRuntime.sweepExchangeFiles,
+      }),
+      ...(fileSyncRuntime.forceRetainSweep !== undefined && {
+        forceRetainSweep: fileSyncRuntime.forceRetainSweep,
+      }),
+    });
+    build.fileSync = fileSyncConn;
+
+    // The PSI protocol layer (authenticateConnection / runExchange)
+    // consumes the pull-based MessageConnection interface. Bridge the
+    // event-based FileSyncConnection through fromEventConnection so its
+    // data/error events reach awaited receive() calls with no per-phase
+    // listener gap. The bridge bounds a parked receive() by the
+    // peer-inactivity budget, so a silent peer fails as a transport error
+    // rather than hanging; peerTimeoutMs (when configured) overrides the
+    // default and also bounds the file-sync rendezvous TTL in conn.open().
+    const peerBudgetMs =
+      connection.options?.peerTimeoutMs ?? DEFAULT_PEER_TIMEOUT_MS;
+    // inactivityHint enriches the generic peer-silence error with
+    // file-sync operator guidance: the receiver names its own cause
+    // locally, but the sender only sees the inactivity timeout, so this
+    // points at the likely receiver-side causes (PEER_SILENCE_GUIDANCE).
+    // Supplied as a function because which guidance applies depends on the
+    // rendezvous outcome, known only after this bridge is built and read
+    // from the connection when the deadline fires.
+    build.transport = fromEventConnection(fileSyncConn, {
+      inactivityTimeoutMs: peerBudgetMs,
+      inactivityHint: () => {
+        const leftover = fileSyncConn.unconfirmedEntryPeerHello;
+        return leftover === undefined
+          ? PEER_SILENCE_GUIDANCE
+          : entryHelloResidueGuidance(leftover);
+      },
+    });
+  }
+}
+
+/** What {@link runExchange} resolves with, threaded into the output stage. */
+type ExchangeOutcome = Awaited<ReturnType<typeof runExchange>>;
+
+/**
+ * The run's local output stage: report the outcome, write the result CSV, then
+ * the audit record, the dual-signed record, and finally the caller's own
+ * post-exchange persistence. Runs only after the two-party exchange completed,
+ * so every failure here is local and none of it may be re-run.
+ *
+ * Each artifact after the result CSV is non-fatal and reports its own loss:
+ * a missing one is a persistence-loss warning rather than a failed exchange.
+ * The result CSV is the exception -- a write that does not reach disk throws,
+ * carrying `PERSISTENCE_LOSS_EXIT_CODE` so a command boundary reports the loss
+ * rather than the exit code a transport fault gets.
+ */
+async function writeExchangeOutputs(params: {
+  outcome: ExchangeOutcome;
+  prepared: PreparedExchange;
+  output: string | undefined;
+  recordOutput: RecordOutput | undefined;
+  signing: SigningPersist | null;
+  loggerName: string;
+  log: ReturnType<typeof getLogger>;
+  eventStream: EventStreamEmitter | undefined;
+  onOutputComplete: FileSyncRuntimeOptions["onOutputComplete"];
+}): Promise<void> {
+  const {
+    outcome,
+    prepared,
+    output,
+    recordOutput,
+    signing,
+    loggerName,
+    log,
+    eventStream,
+    onOutputComplete,
+  } = params;
+  const {
+    associationTable,
+    intersectionCount,
+    resolvedRole,
+    partnerPayload,
+    audit,
+    bootstrap,
+    signedReceipt,
+  } = outcome;
+
+  // A count-only exchange produces no matched pairing for either party,
+  // so there is no result file to write and nothing was withheld from
+  // this party: its whole result is the count, reported here. Checked
+  // first, since a count-only receiver holds no association table
+  // either and would otherwise be told it receives nothing.
+  //
+  // The sender seat's copy adds the trust-contingent caveat at the
+  // moment the number is read: its count arrived over the partner's
+  // count-report leg rather than from a round it ran, and psi-c is the
+  // instrument parties reach for before an agreement, so the reminder
+  // belongs here too, not only at consent time. The receiver seat
+  // computed its own count under an enforced mode, so the same caveat
+  // there would be false.
+  if (intersectionCount !== undefined) {
+    log.info(
+      countIsPartnerReported({ intersectionCount, resolvedRole })
+        ? `exchange complete: your partner reported ${intersectionCount} ` +
+            "record(s) in common. Only your partner computed the count; " +
+            "psilink does not check a count it is sent against a run of its " +
+            "own. The agreed terms asked for a count only, so no result file " +
+            "was written."
+        : `exchange complete: ${intersectionCount} record(s) in common. The ` +
+            "agreed terms asked for a count only, so no result file was written.",
+    );
+  }
+  // The result table is withheld (associationTable undefined) when this
+  // party's agreed terms give it no output -- a one-sided exchange
+  // where it is the PSI sender/helper. It contributed its records to
+  // find the match but is not entitled to the result, so report that
+  // plainly rather than writing an empty CSV that could be mistaken for
+  // a zero-match run. The audit record below is still written (the
+  // helper's record does not bind the table).
+  else if (associationTable === undefined) {
+    log.info(
+      "exchange complete: your records contributed to the match, but by the " +
+        "agreed terms you receive no result, so no result file was written.",
+    );
+  } else {
+    // buildOutputTable is outside the stamp below on purpose: its
+    // integrity throws (duplicate partner row indices, rows missing for
+    // association indices, a length mismatch) are partner-shaped
+    // faults, and 73's published meaning is that what failed is a local
+    // write on this machine. They stay 69, distinguished by the
+    // terminal event's `output` category, which covers the whole stage.
+    const { headers, rows } = buildOutputTable(
+      associationTable,
+      prepared.rawRows,
+      prepared.metadata,
+      partnerPayload,
+    );
+    try {
+      await writeOutput(output, headers, rows, log);
+    } catch (err) {
+      // The result file did not reach disk -- the terminal form of the
+      // same loss the persistence-loss reports share: the exchange
+      // completed, only local generation failed, and re-running would
+      // re-send this party's data for an exchange that already
+      // happened. Set the persistence-loss code on the error so a
+      // command boundary reports it instead of the 69 a transport
+      // fault gets; exitCodeForError (util/exit.ts) prefers an error's
+      // own code, measured (not asserted) by exchange.test.ts and
+      // zeroSetup.test.ts driving each handler to a trapped
+      // process.exit. An error that already holds a code keeps it.
+      if (
+        typeof err === "object" &&
+        err !== null &&
+        (err as { exitCode?: number }).exitCode === undefined
+      )
+        Object.assign(err, { exitCode: PERSISTENCE_LOSS_EXIT_CODE });
+      throw err;
+    }
+  }
+
+  // Every audit artifact this run was asked for and could not produce,
+  // as the messages the machine-interface stream states below.
+  const missingArtifacts: string[] = [];
+
+  // Persist the self-attested record after the results: a secondary
+  // audit artifact, written last, whose failure is non-fatal (see
+  // writeExchangeRecord). Skipped when records are disabled, and not
+  // reached if the result-CSV write above failed (that await throws to
+  // the catch), which also avoids orphaning the private
+  // verification-keys file on a disk that just failed mid-write. A
+  // withheld result writes no CSV but still records the exchange. An
+  // audit runExchange did not return is a record that could not be
+  // built (warned there, with the cause), so it reports as a missing
+  // artifact exactly as a failed write does.
+  if (recordOutput !== undefined) {
+    const failure =
+      audit === undefined
+        ? "no audit record could be built for this exchange, so none was " +
+          "written; the exchange and its results succeeded and need not be " +
+          "re-run"
+        : writeExchangeRecord(
+            recordOutput,
+            audit.record,
+            audit.keys,
+            loggerName,
+          );
+    if (failure !== undefined) missingArtifacts.push(failure);
+  }
+
+  // Persist the dual-signed record after the self-attested record.
+  // Written only when the signing step ran and the signature exchange
+  // completed (runExchange returns signedReceipt undefined otherwise,
+  // and throws to the catch on a verification failure, so no partial
+  // artifact is written for a terminated swap). Independent of the
+  // self-attested record: core signs the receipt from the
+  // mutually-verifiable facts regardless of whether this party's local
+  // record built, so a record-build failure must not discard it. Its
+  // timestamp is the record's createdAt when there is one, so the
+  // record and receipt files for one exchange share a stamp. Non-fatal,
+  // like the record write.
+  if (signing !== null && signedReceipt !== undefined) {
+    const failure = writeDualSignedRecord(
+      signing.receiptOutput,
+      signedReceipt,
+      audit?.record.createdAt ?? new Date().toISOString(),
+      loggerName,
+    );
+    if (failure !== undefined) missingArtifacts.push(failure);
+  }
+
+  // A lost audit artifact is not a failed exchange -- the result is written and
+  // must not be re-run -- so the terminal event below stays `result`. But it is
+  // not a success either: an unattended supervisor that discards stderr, or an
+  // operator running at --log-level error, would otherwise read a clean exit 0
+  // for a run that produced no record. Each failure therefore takes the same
+  // persistence-loss report every other completed-run loss takes: a warning on
+  // the machine stream and the exit code that separates "do not re-run this"
+  // from a transport failure. The caller's own remaining work (a bootstrap's
+  // config write) still runs and still reports what it loses.
+  for (const missing of missingArtifacts)
+    reportPersistenceLoss(missing, eventStream);
+
+  // The caller's own last persistence, run here rather than after this function
+  // returns so that whatever it loses is reported BEFORE the terminal event
+  // below -- the stream's terminal-is-last guarantee, and the only ordering a
+  // supervisor that stops reading at the terminal event can observe.
+  if (onOutputComplete !== undefined) {
+    try {
+      await onOutputComplete({
+        observedReceivedPayloadColumns: partnerPayload.columns,
+        bootstrap,
+      });
+    } catch (hookErr) {
+      // The hook reports its own losses; reaching here means one escaped it.
+      // The exchange is already complete and cannot be undone by a local
+      // write, so this is non-fatal -- but a run that silently swallowed it
+      // would read as a clean success to the supervisor the stream exists for.
+      log.error(
+        "the post-exchange persistence step failed after the exchange and " +
+          "its results completed; what that step writes did not reach disk: " +
+          sanitizeErrorForDisplay(hookErr),
+      );
+      reportPersistenceLoss(
+        "a post-exchange persistence step did not complete; the exchange " +
+          "and its results succeeded and must not be re-run, and the error " +
+          "logged beside this notice names the step",
+        eventStream,
+      );
+    }
+  }
+}
+
+/**
  * The one argument {@link runProtocol} takes. Every field it needs is named
  * here rather than passed by position, so a caller supplying only some of the
  * optional inputs states which ones it means.
@@ -569,40 +1836,15 @@ export async function runProtocol(
   // boundaries below.
   let terminalPhase: ErrorPhase = "prepare";
 
-  // Captured in the outer scope so the post-handshake saveKeyFile call below
-  // can reuse the trimmed value without re-reading auth.keyFilePath.
-  let trimmedKeyFilePath: string | undefined;
-  // The file-transport client, hoisted so the terminal metrics event can read
-  // its retry/reconnect counters after the run. Undefined until the prepare
-  // block constructs it (and on the earliest prepare failures that fail before
-  // construction), which the metrics helper treats as zero counts.
-  let client: LocalFSClient | SSH2SFTPClientAdapter | undefined;
-  // The file-sync connection, and so the rendezvous, abort marker and observed
-  // host key only it has. Undefined on the webrtc channel, whose transport has
-  // none of them: there are no files to sweep, no marker to write, and no server
-  // whose host key this party could pin.
-  let fileSync: FileSyncConnection | undefined;
-  // The exchange pipeline's transport, whichever channel produced it. Undefined
-  // until it exists: the file-sync bridge is built below, while the webrtc
-  // channel's rendezvous IS its open and runs in the main try.
-  let transport: MessageConnection | undefined;
-  // The resolved webrtc rendezvous, and the discriminant for the dispatch below.
-  let webRtcDial: WebRtcDial | undefined;
+  // What the preparation stage builds, held in one object rather than five
+  // hoisted bindings so that stage can fill it in place: a throw partway
+  // through still leaves the terminal metrics event the client's counters, and
+  // the cleanup below closes whatever was constructed. Each field stays
+  // undefined until its stage assigns it, and the webrtc channel has no client
+  // or file-sync connection to assign at all.
+  const build: PreparedTransport = {};
 
-  // Per-stage wall-clock timing for the machine-interface stream. onStage marks
-  // the START of each stage; a stage COMPLETES when the next one starts or when
-  // the exchange finishes, at which point its duration is emitted as a stageEnd
-  // event. Only completed stages are reported, so a stageEnd is always a whole
-  // stage's time -- a run that aborts mid-stage emits none for the in-flight one.
-  let currentStage: { id: string; startedAt: number } | undefined;
-  const closeCurrentStage = (): void => {
-    if (currentStage === undefined) return;
-    const { id, startedAt } = currentStage;
-    // Clamp against a wall-clock adjustment so a duration is never negative.
-    const durationMs = Math.max(0, Date.now() - startedAt);
-    emit((e) => e.stageEnd(id, durationMs));
-    currentStage = undefined;
-  };
+  const stageTimer = createStageTimer(emit);
 
   // The one operational-counter summary, emitted immediately before each
   // terminal event so the terminal event stays last on the stream. recordsProcessed
@@ -613,8 +1855,8 @@ export async function runProtocol(
     emit((e) =>
       e.metrics(
         prepared.rowCount,
-        client?.transportRetryCount ?? 0,
-        client?.reconnectCount ?? 0,
+        build.client?.transportRetryCount ?? 0,
+        build.client?.reconnectCount ?? 0,
       ),
     );
   };
@@ -625,144 +1867,18 @@ export async function runProtocol(
   // terminal-error-emission sites (phase "prepare" here), so exactly one
   // terminal event fires per run.
   try {
-    if (
-      connection.channel !== "filedrop" &&
-      connection.channel !== "sftp" &&
-      connection.channel !== "webrtc"
-    ) {
-      // Only reachable via an unsafe cast past ProtocolConnectionConfig. The
-      // `never` binding holds the other half at build time: it compiles only
-      // while the dispatch below covers every channel the type admits.
-      const unsupported: never = connection;
-      throw new Error(
-        `unsupported channel: ` +
-          (unsupported as unknown as { channel: string }).channel,
-      );
-    }
-
-    // saveIntent drives the zero-setup `--save` bootstrap, which exists only
-    // on the unauthenticated path: an authenticated exchange has a
-    // persistent key already and no provisioning step to consume a bootstrap
-    // result, so a stray saveIntent here would advertise a save field inside
-    // the authenticated channel with nothing reading it back. Reject the
-    // combination rather than leave the mistake open to a future caller.
-    if (auth && saveIntent !== undefined)
-      throw new Error(
-        "saveIntent is only valid on an unauthenticated (zero-setup) exchange; " +
-          "an authenticated exchange must not pass it",
-      );
-    // The mirror constraint: onAuthenticated hooks the moment of acceptance,
-    // which exists only on the authenticated path -- its invocation below is
-    // nested in `if (auth)`. Reject a hook supplied with `auth: null` up
-    // front, so a future caller wiring a hook to a zero-setup exchange gets
-    // a clear error instead of a persistence step that never runs.
-    if (!auth && onAuthenticated !== undefined)
-      throw new Error(
-        "onAuthenticated is only valid on an authenticated exchange; an " +
-          "unauthenticated (zero-setup) exchange has no acceptance step to hook",
-      );
-    // The signed-receipt step binds the receipt to the session key, which
-    // only the authenticated key exchange produces. Reject a signing config
-    // on the unauthenticated (`auth: null`) path up front: there is no
-    // session key to derive the replay binder from, so a caller that wired
-    // it would get a receipt-less exchange with no signal why.
-    if (!auth && signing !== null)
-      throw new Error(
-        "a signing identity is only valid on an authenticated exchange; an " +
-          "unauthenticated (zero-setup) exchange has no session key to bind the " +
-          "signed receipt to",
-      );
-    // Signing with records off produces a receipt no verifier can ever pair
-    // to its run, and nothing after the exchange can repair it. Raise it here
-    // -- before any credential, terms, or data are sent, while both choices
-    // are still the operator's to change -- on both the machine-interface
-    // warning event and stderr, since an unattended supervisor that discards
-    // stderr on success would otherwise collect unpairable receipts run
-    // after run. First-party prose with no interpolated value, so it takes
-    // its one escape from the emitter.
-    if (signing !== null && recordOutput === undefined) {
-      log.warn(SIGNING_WITHOUT_RECORD_WARNING);
-      emit((e) => e.warning(SIGNING_WITHOUT_RECORD_WARNING));
-    }
-    if (auth) {
-      // Fail fast on the locally-knowable secret preconditions -- a malformed
-      // or already-expired shared secret -- before any credential is
-      // presented, rather than letting a dead credential drive the file-sync
-      // rendezvous first, whose losing side would then get a misleading
-      // "peer abandoned the handshake" hint for what is really an expired or
-      // malformed secret. authenticateConnection still runs the same check
-      // as the authoritative boundary for library consumers that bypass
-      // runProtocol. The shared check sets psilinkRecoveryHintEmitted, so the
-      // catch block below suppresses its generic advisory.
-      assertSharedSecretReadyForHandshake(auth);
-      // Validate and trim the key-file path before any credential is
-      // presented, so a misconfiguration fails here rather than at
-      // saveKeyFile post-handshake, before the partner could be left holding
-      // a rotated token this side cannot persist. Returns the trimmed path,
-      // reused by the saveKeyFile call below.
-      trimmedKeyFilePath = preflightKeyFilePath(auth.keyFilePath, log);
-    }
-    if (connection.channel === "webrtc") {
-      // Resolve the rendezvous -- broker location, ICE servers, role, and the
-      // secret both ids derive from -- here rather than at the dial, so a
-      // misconfigured connection fails with no socket opened and no id
-      // registered. The file-sync construction below has no webrtc
-      // counterpart: on this channel there is no client to build.
-      webRtcDial = webRtcDialFrom(connection, auth?.sharedSecret);
-    } else {
-      client =
-        connection.channel === "filedrop"
-          ? new LocalFSClient()
-          : new SSH2SFTPClientAdapter({
-              verbosity,
-              // connection_per_poll (SFTP-only) turns on the adapter's
-              // ephemeral-session mode: a fresh session per poll cycle, released
-              // before the idle gap. Resolved from the merged config; undefined
-              // (unset) leaves the adapter's held-session default.
-              ephemeralSessions: connection.options?.connectionPerPoll,
-            });
-      // CLI-only sweep controls are passed straight to the constructor (the
-      // verbose/joinerRecoveryMs precedent), never through config.options, so they
-      // cannot be persisted to psilink.yaml. Spread conditionally so an unset value
-      // does not clobber the constructor default.
-      const fileSyncConn = new FileSyncConnection(client, {
-        verbose: verbosity,
-        ...(fileSyncRuntime.sweepExchangeFiles !== undefined && {
-          sweepExchangeFiles: fileSyncRuntime.sweepExchangeFiles,
-        }),
-        ...(fileSyncRuntime.forceRetainSweep !== undefined && {
-          forceRetainSweep: fileSyncRuntime.forceRetainSweep,
-        }),
-      });
-      fileSync = fileSyncConn;
-
-      // The PSI protocol layer (authenticateConnection / runExchange)
-      // consumes the pull-based MessageConnection interface. Bridge the
-      // event-based FileSyncConnection through fromEventConnection so its
-      // data/error events reach awaited receive() calls with no per-phase
-      // listener gap. The bridge bounds a parked receive() by the
-      // peer-inactivity budget, so a silent peer fails as a transport error
-      // rather than hanging; peerTimeoutMs (when configured) overrides the
-      // default and also bounds the file-sync rendezvous TTL in conn.open().
-      const peerBudgetMs =
-        connection.options?.peerTimeoutMs ?? DEFAULT_PEER_TIMEOUT_MS;
-      // inactivityHint enriches the generic peer-silence error with
-      // file-sync operator guidance: the receiver names its own cause
-      // locally, but the sender only sees the inactivity timeout, so this
-      // points at the likely receiver-side causes (PEER_SILENCE_GUIDANCE).
-      // Supplied as a function because which guidance applies depends on the
-      // rendezvous outcome, known only after this bridge is built and read
-      // from the connection when the deadline fires.
-      transport = fromEventConnection(fileSyncConn, {
-        inactivityTimeoutMs: peerBudgetMs,
-        inactivityHint: () => {
-          const leftover = fileSyncConn.unconfirmedEntryPeerHello;
-          return leftover === undefined
-            ? PEER_SILENCE_GUIDANCE
-            : entryHelloResidueGuidance(leftover);
-        },
-      });
-    }
+    prepareTransport(build, {
+      connection,
+      auth,
+      saveIntent,
+      onAuthenticated,
+      signing,
+      recordOutput,
+      verbosity,
+      fileSyncRuntime,
+      log,
+      emit,
+    });
   } catch (err) {
     emitMetrics();
     emit((e) => e.error(err, "prepare"));
@@ -782,38 +1898,17 @@ export async function runProtocol(
   // fromEventConnection bridge attaches for the connection's whole lifetime,
   // appearing at the protocol layer's awaited receive() calls.
   let cleaned = false;
-  let opened = false;
-  let started = false;
-  // The AEAD decorator that wraps `mc` when the handshake negotiates
-  // encryption. Declared in the outer scope so doCleanup can close it; left
-  // undefined on the no-auth path and whenever the negotiated
-  // applyEncryption is false, so the exchange runs over the unencrypted
-  // `mc`. secure.close() delegates to mc.close(), which closes the
-  // FileSyncConnection and sweeps its responsible files.
-  let secure: EncryptedMessageConnection | undefined;
-  // The session key from the authenticated key exchange, captured in the
-  // outer scope so runExchange below can thread it into the signed-receipt
-  // step (the receipt binder derives from it). Undefined on the no-auth
-  // path, where the signing step is already rejected.
-  let sessionKeyForReceipt: Uint8Array<ArrayBuffer> | undefined;
-  // Set synchronously immediately before `await authenticateConnection`. The
-  // partner can complete its own handshake and persist the rotated token
-  // before our await resolves, so a failure arriving after this flag is set
-  // may leave us out of sync with the partner even if our own `saveKeyFile`
-  // never ran. `tokenRotated` is the stricter signal: true only after our
-  // own save succeeds.
-  let authStarted = false;
-  let tokenRotated = false;
-  // Set once runExchange returns: the two-party protocol is then complete, so a
-  // failure in the purely-local output stage that follows must not write the
-  // cross-party abort marker (the catch gates the marker on this being false).
-  let exchangeComplete = false;
-  // Set synchronously at the top of a signal handler before any await, so the
-  // catch block below can detect that an in-flight failure was caused by the
-  // signal-driven cleanup (rather than an organic protocol error) and yield
-  // the exit code to the signal handler -- preventing the CLI handler's
-  // process.exit(69) from racing the signal handler's process.exit(130/143).
-  let signalReceived: NodeJS.Signals | undefined;
+  const run: RunLifecycle = {
+    opened: false,
+    started: false,
+    secure: undefined,
+    sessionKeyForReceipt: undefined,
+    authStarted: false,
+    tokenRotated: false,
+    exchangeComplete: false,
+    signalReceived: undefined,
+    onAuthenticatedError: undefined,
+  };
   // Cancels work still in flight when a signal arrives, which doCleanup
   // cannot reach: it closes what the run already holds, and a webrtc
   // rendezvous holds its broker socket and half-negotiated peer connection
@@ -825,164 +1920,14 @@ export async function runProtocol(
   async function doCleanup() {
     if (cleaned) return;
     cleaned = true;
-    // Seal the abort decision before the first layer-close drives the real
-    // conn.close() cascade (secure.close() -> mc.close() -> conn.close()):
-    // on the clean-completion, signal, and echo paths no writeAbortMarker()
-    // ran, so without this seal conn.close() would wait out its fallback
-    // grace and block teardown for the full window. A catch-path
-    // writeAbortMarker() (if it ran) already pre-empted this. Synchronous
-    // and side-effect free, so hoisting it here is safe, and a no-op on the
-    // unauthenticated path and on webrtc, neither of which has a marker.
-    fileSync?.sealAbort();
-    if (started) log.info("stopping polling");
-    if (opened) log.info("closing connection");
-    // When the AEAD decorator was built (encryption negotiated), close it:
-    // its close() delegates to mc.close(), detaching the bridge's
-    // data/error listeners and closing the underlying FileSyncConnection.
-    // `secure` is undefined on the no-auth path, when applyEncryption was
-    // negotiated false, and in the window where a signal arrived between
-    // authenticateConnection returning and create resolving -- in each case
-    // mc.close() below closes the transport directly. All idempotent.
-    if (secure !== undefined) {
-      await secure.close().catch((err: unknown) => {
-        log.debug(
-          "secure.close() during cleanup:",
-          sanitizeErrorForDisplay(err),
-        );
-      });
-    }
-    // Closing the transport detaches the file-sync bridge's data/error
-    // listeners and closes the underlying FileSyncConnection -- stopping
-    // the poller, sweeping the responsible files, and ending the client --
-    // or, on webrtc, flushes the outbound queue and tears the data channel,
-    // peer connection and broker socket down. All idempotent, so this is
-    // safe even when open() never ran. Undefined only when the webrtc
-    // rendezvous never produced a connection.
-    await transport?.close().catch((err: unknown) => {
-      log.debug(
-        "transport close during cleanup:",
-        sanitizeErrorForDisplay(err),
-      );
+    await closeRunLayers({
+      build,
+      secure: run.secure,
+      opened: run.opened,
+      started: run.started,
+      log,
     });
-    // If an earlier transport failure already terminated the bridge, its
-    // close() returns immediately without re-closing fileSync (that earlier
-    // close was fire-and-forget, hence unawaited). Close fileSync directly
-    // to guarantee the poller is stopped, the responsible files are swept,
-    // and the client is ended before doCleanup returns. Idempotent, so in
-    // the normal path this is a near no-op after the bridge already closed
-    // it.
-    await fileSync?.close().catch((err: unknown) => {
-      // When the connection was open, a close failure is user-visible: the
-      // transport may not have terminated cleanly (e.g. SSH session timeout).
-      // close() is idempotent and does not throw on an unopened instance, so
-      // the else branch is only a defensive fallback for an unexpected error.
-      if (opened) {
-        log.warn(
-          "failed to close connection during cleanup:",
-          sanitizeErrorForDisplay(err),
-        );
-      } else {
-        log.debug(
-          "fileSync.close() during cleanup:",
-          sanitizeErrorForDisplay(err),
-        );
-      }
-    });
-    // Show the reconnect counts at normal verbosity so the operator sees a
-    // server that repeatedly dropped and was re-dialed even without
-    // --event-stream (which reports the total as a machine metric). The
-    // per-drop WARN in the SFTP adapter already flags each recovery burst;
-    // this is the one end-of-run summary. The total counts connect-time
-    // retries plus mid-exchange session losses (SFTP only), reported apart
-    // so the operator can tell benign startup retries from chronic
-    // mid-exchange drops. Zero on a clean run, so the guard stays quiet.
-    const reconnects = client?.reconnectCount ?? 0;
-    const midExchangeLosses = client?.midExchangeReconnectCount ?? 0;
-    if (reconnects > 0) {
-      const summary =
-        `the connection was re-established ${reconnects} ` +
-        `time${reconnects === 1 ? "" : "s"} during this exchange`;
-      log.info(
-        midExchangeLosses > 0
-          ? `${summary}, of which ${midExchangeLosses} ` +
-              `${
-                midExchangeLosses === 1
-                  ? "was a session lost mid-exchange"
-                  : "were sessions lost mid-exchange"
-              }`
-          : summary,
-      );
-    }
-    // Connection-per-poll's per-cycle outcomes, each its own line on its own
-    // count: their inline WARNs are paced or absent, so this is the only
-    // place the true totals are stated for an unattended run. Not folded
-    // into the reconnect line above: that line counts SESSIONS LOST, these
-    // count BOUNDARIES, and the two overlap without either containing the
-    // other, so folding any of them in would double-count. See
-    // docs/notes/connection-per-poll-sftp.md for the full boundary model.
-    // All are 0 outside connection-per-poll, so the guards stay quiet.
-    const heldBoundaries = client?.heldBoundaryCount ?? 0;
-    const heldStretches = client?.heldBoundaryStretchCount ?? 0;
-    const perCycleOutcomes: {
-      count: number;
-      line: (count: number) => string;
-    }[] = [
-      {
-        count: client?.releasedBoundaryCount ?? 0,
-        line: (count) =>
-          `the connection-per-poll release closed the SFTP session at ` +
-          `${count} idle ${count === 1 ? "boundary" : "boundaries"} during ` +
-          `this exchange, each re-dialed at the start of the next poll cycle`,
-      },
-      {
-        count: client?.forcedReleaseCount ?? 0,
-        line: (count) =>
-          `the connection did not close when released at ${count} idle ` +
-          `${count === 1 ? "boundary" : "boundaries"} during this exchange, ` +
-          `so it was closed from this side`,
-      },
-      {
-        count: client?.declinedReleaseCount ?? 0,
-        line: (count) =>
-          `the connection-per-poll release did not close the session at ` +
-          `${count} idle ${count === 1 ? "boundary" : "boundaries"} during ` +
-          `this exchange (not a dropped session): another session transition ` +
-          `on this connection did not complete within the release's wait, so ` +
-          `the session stayed live across ` +
-          `${count === 1 ? "that idle gap" : "those idle gaps"}`,
-      },
-      {
-        count: client?.declinedCycleRedialCount ?? 0,
-        line: (count) =>
-          `the connection-per-poll re-dial skipped ${count} poll ` +
-          `${count === 1 ? "cycle" : "cycles"} during this exchange (not a ` +
-          `dropped session): another session transition on this connection ` +
-          `did not complete within the re-dial's wait, so ` +
-          `${count === 1 ? "that cycle" : "those cycles"} had no session`,
-      },
-      {
-        // The stretch sub-count tells one operation holding twenty
-        // boundaries apart from twenty operations each holding one -- a mode
-        // that has stopped delivering per-cycle sessions vs. one that is
-        // working -- so it is stated only when it says something the
-        // boundary count does not.
-        count: heldBoundaries,
-        line: (count) => {
-          const summary =
-            `the connection-per-poll release held the SFTP session at ` +
-            `${count} idle ${count === 1 ? "boundary" : "boundaries"} during ` +
-            `this exchange (not a dropped session): an operation this side ` +
-            `had issued was still unsettled, so the session stayed live ` +
-            `across ${count === 1 ? "that idle gap" : "those idle gaps"}`;
-          return heldStretches < count
-            ? `${summary}, in ${heldStretches} unbroken ` +
-                `${heldStretches === 1 ? "stretch" : "stretches"}`
-            : summary;
-        },
-      },
-    ];
-    for (const { count, line } of perCycleOutcomes)
-      if (count > 0) log.info(line(count));
+    logTransportCounters(build.client, log);
     process.off("SIGINT", onSigint);
     process.off("SIGTERM", onSigterm);
     // Undo our own contribution to the max-listeners threshold rather than
@@ -1005,13 +1950,13 @@ export async function runProtocol(
   //   the partner may have persisted a rotated token even though we did not.
   // - !authStarted: handshake never began; the existing token is still valid.
   function logRotationStateOnInterrupt(reason: string): void {
-    if (tokenRotated) {
+    if (run.tokenRotated) {
       log.warn(
         `The shared secret was already rotated and saved before ${reason}. ` +
           "Retry without re-inviting; if authentication fails on retry, " +
           "both parties must re-invite.",
       );
-    } else if (authStarted) {
+    } else if (run.authStarted) {
       log.warn(
         `The key exchange was in progress when ${reason}. Depending on ` +
           "how far the handshake had progressed, the partner may have " +
@@ -1025,7 +1970,7 @@ export async function runProtocol(
   async function onSigint(): Promise<void> {
     // Must be set synchronously, before the first await, so the runProtocol
     // catch block sees it as soon as the cleanup-induced failure propagates.
-    signalReceived = "SIGINT";
+    run.signalReceived = "SIGINT";
     // Synchronous too, and before the cleanup it cannot substitute for: an
     // in-flight rendezvous tears itself down on this rather than on doCleanup.
     interrupted.abort();
@@ -1044,7 +1989,7 @@ export async function runProtocol(
   async function onSigterm(): Promise<void> {
     // Must be set synchronously, before the first await, so the runProtocol
     // catch block sees it as soon as the cleanup-induced failure propagates.
-    signalReceived = "SIGTERM";
+    run.signalReceived = "SIGTERM";
     interrupted.abort();
     try {
       log.info("caught SIGTERM, exiting");
@@ -1074,371 +2019,33 @@ export async function runProtocol(
   process.on("SIGINT", onSigint);
   process.on("SIGTERM", onSigterm);
 
-  // Captures a failure from the optional post-handshake hook (onAuthenticated).
-  // The hook is non-fatal, so a failure here does not stop the exchange; it is
-  // reported in the resolved result (onAuthenticatedError) so the caller can
-  // correct its own messaging rather than report a config that was never saved.
-  let onAuthenticatedError: unknown;
-
   try {
-    let role: HandshakeRole;
-    if (connection.channel === "webrtc") {
-      // Resolved by the prepare block for exactly this channel; the check is
-      // what licenses treating the dial as present.
-      if (webRtcDial === undefined)
-        throw new Error("the webrtc rendezvous was not resolved");
-      log.info(
-        "rendezvousing through the signaling server at",
-        // dialedBrokerAuthority (see its doc) is what the socket actually
-        // dials, not the configured `host` text.
-        //
-        // The broker host is partner-controlled on an endpoint-seeded config, so
-        // escape it before it reaches the operator's terminal, as the file-sync
-        // locators below are. The rendezvous ids are NOT logged: they are derived
-        // from the shared secret, and anything that reaches the terminal reaches
-        // a --log-file too.
-        redactAndSanitizeForDisplay(
-          dialedBrokerAuthority(webRtcDial.options.location),
-        ),
-      );
-      // The rendezvous is this channel's open: it registers with the broker,
-      // negotiates, and resolves only once the data channel is up. Its own
-      // budgets bound it (rendezvous, channel-open), so a partner that never
-      // arrives fails here rather than hanging. The interrupt signal ends it
-      // early: the transport fails the negotiation and tears down the broker
-      // socket and peer connection on an abort, so Ctrl-C during a
-      // rendezvous does not wait out that budget. The post-dial guard below
-      // still stands, for the window between the dial settling and the
-      // transport being assigned.
-      const dialed = await openWebRtcMessageConnection({
-        ...webRtcDial.options,
-        signal: interrupted.signal,
-      });
-      transport = dialed;
-      opened = true;
-
-      // A signal that arrived while the rendezvous was in flight already
-      // ran doCleanup, which found no transport to close because there was
-      // none yet. Close the one that has just opened and short-circuit, so
-      // the channel and broker socket are not left standing -- the twin of
-      // the post-open guard on the file-sync side.
-      if (signalReceived !== undefined) {
-        try {
-          await dialed.close();
-        } catch (err) {
-          log.debug(
-            "post-rendezvous signal close failed:",
-            sanitizeErrorForDisplay(err),
-          );
-        }
-        throw new Error(`interrupted by ${signalReceived} during rendezvous`);
-      }
-      // Fixed by the connection's role rather than negotiated at the transport:
-      // the two parties already had to disagree about which end they are to find
-      // each other at all, so the handshake inherits that instead of running a
-      // second tiebreaker.
-      role = webRtcDial.handshakeRole;
-    } else {
-      if (connection.channel === "filedrop") {
-        log.info(
-          "opening local path",
-          // The filedrop path is partner-seeded on an offline-accept config (it
-          // comes from the invitation's filedrop endpoint, charset-unconstrained),
-          // so escape it before it reaches the operator's terminal -- the filedrop
-          // twin of the SFTP host below. A split config has no single `path`; show
-          // the inbound directory it reads the peer's files from instead.
-          redactAndSanitizeForDisplay(
-            connection.path ?? connection.inboundPath ?? "",
-          ),
-        );
-      } else if (connection.channel === "sftp") {
-        log.info(
-          "opening connection to",
-          // The SFTP host is partner-controlled on an offline-accept-seeded config
-          // (it comes from the invitation endpoint, charset-unconstrained), so
-          // escape it before it reaches the operator's terminal.
-          redactAndSanitizeForDisplay(connection.server.host),
-          "with options",
-          connection.options,
-        );
-      }
-      // The prepare block builds the connection and its bridge together on
-      // every file-sync channel; the check is what licenses the rest of the
-      // block treating them as present.
-      if (fileSync === undefined || transport === undefined)
-        throw new Error("the file-sync transport was not constructed");
-      const fileSyncConn = fileSync;
-      await fileSyncConn.open(connection);
-      opened = true;
-
-      // If a signal fired while `conn.open()` was awaiting, the signal
-      // handler already ran doCleanup, including a conn.close() that
-      // no-op'd because `connected` was still false at that moment. Now
-      // that open() has resolved, close the freshly-opened connection
-      // explicitly and short-circuit so the catch's signalReceived branch
-      // resolves runProtocol cleanly -- otherwise the connection stays open
-      // until process termination, harmless in production but a state leak
-      // in tests that mock process.exit.
-      if (signalReceived !== undefined) {
-        try {
-          await fileSyncConn.close();
-        } catch (err) {
-          log.debug(
-            "post-open signal close failed:",
-            sanitizeErrorForDisplay(err),
-          );
-        }
-        throw new Error(
-          `interrupted by ${signalReceived} during connection open`,
-        );
-      }
-
-      log.info("synchronizing");
-      await fileSyncConn.synchronize();
-
-      // If a signal fired during the synchronize() round-trip, doCleanup
-      // already ran (closing the connection and removing our hello/lock
-      // files). Bail out before start() so the poller is not launched
-      // against a closed transport -- otherwise conn.start() would
-      // schedule polls that fail against the closed client, producing
-      // spurious error logs while the signal handler is already exiting.
-      // The corresponding check after open() handles the open/synchronize
-      // window; this one handles synchronize/start.
-      if (signalReceived !== undefined) {
-        throw new Error(
-          `interrupted by ${signalReceived} during synchronization`,
-        );
-      }
-
-      const rendezvousRole = fileSyncConn.handshakeRole;
-      // Invariant: synchronize() throws on all failure paths, so role is always
-      // defined when synchronize() returns normally.
-      if (rendezvousRole === undefined)
-        throw new Error(
-          "connection did not establish a handshake role after synchronization",
-        );
-      role = rendezvousRole;
-
-      log.info("starting polling");
-      // conn.start() must precede authenticateConnection: the key exchange
-      // awaits mc.receive(), which is fed by the bridge's data listener; that
-      // listener only sees inbound frames once the polling loop is running.
-      fileSyncConn.start();
-      started = true;
-    }
-
-    // Report the negotiated handshake role by what this party does next, not
-    // as "arrived first/second": under lockless rendezvous (retain mode,
-    // and so a split inbound/outbound directory) the role is a
-    // deterministic lexicographic tiebreaker on the two hello filenames,
-    // not wall-clock arrival order -- the party whose peer id sorts lower is
-    // always the responder regardless of who connected first. Describing
-    // send/wait behavior is accurate under both rendezvous modes and is the
-    // operationally useful fact (which side acts next).
-    if (role === "responder") {
-      log.info("waiting for your partner's first message");
-    } else {
-      log.info("sending your partner the first message");
-    }
+    const role = await openRunTransport({
+      build,
+      run,
+      connection,
+      interrupted,
+      log,
+    });
 
     // Set by the prepare block on the file-sync channels and by the rendezvous
     // above on webrtc; either way the exchange has a transport to run over.
-    if (transport === undefined)
+    if (build.transport === undefined)
       throw new Error("no transport was established for this exchange");
-    const mc = transport;
+    const mc = build.transport;
 
     if (auth) {
-      log.info("authenticating");
-      // Discard the (possibly whitespace-padded) keyFilePath from auth;
-      // saveKeyFile below uses trimmedKeyFilePath, which was captured and
-      // trimmed during pre-flight without mutating the caller-supplied
-      // auth object.
-      const { keyFilePath: _ignored, ...authParams } = auth;
-      // trimmedKeyFilePath is set whenever auth is set; they are populated
-      // together in the pre-flight branch above.
-      const keyFilePath = trimmedKeyFilePath!;
-      // Set synchronously before the await so a signal arriving during the
-      // key-exchange round-trip or before saveKeyFile runs can distinguish the
-      // "handshake may have completed on the partner side" case from the
-      // "handshake never started" case.
-      authStarted = true;
-      // sessionKey (32 bytes, both parties derive the same value) keys the
-      // per-direction AEAD encryption set up below, so every PSI frame
-      // after this point is opaque on the wire to an SFTP/file-drop admin.
-      // rotatedSecret is the new shared secret persisted to disk.
-      // requestEncryption is what this party asks for; applyEncryption is
-      // the negotiated OR both parties agree on, gating the
-      // EncryptedMessageConnection wrap below.
-      //
-      // A file-sync channel asks for it unconditionally, since its
-      // filesystem admin can read every frame. A webrtc data channel does
-      // not: it is already end-to-end confidential under DTLS, so the wrap
-      // would buy nothing, and a browser peer declines and refuses a
-      // partner that asks. See docs/spec/CHANNEL_SECURITY.md.
-      const requestEncryption = connection.channel !== "webrtc";
-      const { rotatedSecret, sessionKey, applyEncryption } =
-        await authenticateConnection(mc, authParams, role, requestEncryption);
-      // Capture the session key for the signed-receipt step (it derives the replay
-      // binder from it); only the authenticated path reaches here, so the no-auth
-      // path leaves it undefined and runExchange's signing step stays skipped.
-      sessionKeyForReceipt = sessionKey;
-      // buildRotatedKeyFile stamps `expires` = now + tokenMaxAgeDays days
-      // when the operator set a max-age policy, computed here at the
-      // moment of rotation rather than at config-parse time. Built before
-      // the try/catch below so its input-validation guard (a non-positive
-      // or non-integer tokenMaxAgeDays, reachable only by a caller
-      // bypassing the config schema) propagates as the UsageError it is
-      // (exit 64) rather than being caught and re-wrapped as a
-      // "could not be saved" transport-style failure (exit 69).
-      const rotatedKeyFile = buildRotatedKeyFile(
-        rotatedSecret,
-        auth.tokenMaxAgeDays,
-        Date.now(),
-      );
-      try {
-        // saveKeyFile is synchronous; the assignment below runs in the same
-        // microtask tick, so no signal can interleave between them. A
-        // signal handler that reads tokenRotated sees either both pre-save
-        // state (false) or both post-save state (true). Maintain this: do
-        // not insert an await between saveKeyFile and the assignment.
-        saveKeyFile(keyFilePath, rotatedKeyFile);
-        tokenRotated = true;
-      } catch (err) {
-        // "may already hold": both parties independently derive
-        // rotatedSecret from the session key, but either party's disk
-        // write can fail, and we cannot know whether the partner's save
-        // succeeded, so "may" is intentionally conservative.
-        //
-        // The wrapped error already holds the full recovery hint specific
-        // to this failure mode. Tag it with the same
-        // `psilinkRecoveryHintEmitted` convention authenticateConnection
-        // uses on its own validation errors (see auth.ts), so the
-        // runProtocol catch below skips its generic authStarted advisory
-        // and the user sees one coherent recovery message.
-        throw Object.assign(
-          new Error(
-            `authentication succeeded and the shared token was rotated, but ` +
-              `the updated token could not be saved to ${keyFilePath}: ` +
-              (err instanceof Error ? err.message : String(err)) +
-              ` Your partner may already hold the rotated token. ` +
-              `To recover, both parties must re-invite to establish a new ` +
-              `shared secret.`,
-          ),
-          { psilinkRecoveryHintEmitted: true },
-        );
-      }
-
-      // The handshake has succeeded and the rotated token is now persisted
-      // to the key file. Fire the optional post-handshake hook here --
-      // exactly at acceptance, after the key save and before encryption
-      // setup and the data exchange -- so a caller (online invite/accept)
-      // can persist its configuration at this point. Runs only on the
-      // authenticated path, exactly once, and is awaited.
-      //
-      // Unlike the other interruptible awaits, this one has no preceding
-      // `signalReceived` guard: the gap since the last guarded await
-      // (authenticateConnection) is synchronous, so no signal can have
-      // arrived yet. A signal firing during an async hook lets that write
-      // finish by design; the check after
-      // EncryptedMessageConnection.create then bails before the exchange.
-      //
-      // A hook failure is non-fatal: logged at error level and the
-      // exchange proceeds, since the data exchange must not be aborted by
-      // a failure to persist recoverable config.
-      if (onAuthenticated !== undefined) {
-        try {
-          await onAuthenticated();
-        } catch (hookErr) {
-          // The caller distinguishes a hook failure from success by the
-          // presence of this value, so it must be truthy even when the hook
-          // threw a falsy value (`undefined`, `null`, `0`, `""`, `false`,
-          // `NaN`) -- `undefined` is the success sentinel, so coerce any
-          // falsy throw to an Error: a failure can never masquerade as a
-          // clean write.
-          onAuthenticatedError = hookErr
-            ? hookErr
-            : new Error(
-                "the post-authentication hook threw a falsy value: " +
-                  String(hookErr),
-              );
-          log.error(
-            "the post-authentication hook failed after the handshake " +
-              "succeeded and the rotated key was saved; the exchange will " +
-              "continue, but any persistence the hook performs (e.g. writing " +
-              "the configuration) did not complete: " +
-              sanitizeErrorForDisplay(hookErr),
-          );
-          // A supervisor that discards stderr on a run that completes would
-          // otherwise have nothing to tell it the setup is half
-          // provisioned -- the exchange runs and its result is written, but
-          // what the hook persists is not on disk. Reported on both machine
-          // channels at the loss itself. The message holds the same hedge
-          // as the line above rather than naming the caller's own artifact.
-          reportPersistenceLoss(
-            "the post-authentication persistence step (writing the " +
-              "configuration) did not complete; the exchange continued and " +
-              "the rotated key is saved",
-            eventStream,
-          );
-        }
-      }
-
-      // Wrap mc in the AEAD decorator when the handshake negotiated it, and
-      // run the PSI exchange through `secure` so every frame is encrypted
-      // on the wire. Gated on applyEncryption -- the transcript-bound OR of
-      // both parties' requests -- rather than bare authentication state:
-      // file-sync requests it unconditionally, so behavior here is
-      // unchanged today, while the gate readies the path for a future
-      // caller on an already-confidential transport that declines the
-      // extra layer.
-      //
-      // create() derives the two per-direction keys via HKDF and registers
-      // no listeners on mc, so a signal arriving before it resolves needs
-      // no listener juggling: doCleanup closes mc/conn directly, latches
-      // cleaned, and leaves the decorator create() later assigns to
-      // `secure` unclosed but harmless (mc is already closed, and the
-      // decorator holds only CryptoKey objects). The signalReceived check
-      // below mirrors the post-open and post-synchronize guards, bailing
-      // before runExchange so the encrypted stream never starts against an
-      // already-closed mc; it runs whether or not the wrap was applied,
-      // since a signal may also have arrived during the onAuthenticated
-      // hook above.
-      if (applyEncryption) {
-        secure = await EncryptedMessageConnection.create(mc, sessionKey, role);
-      }
-      if (signalReceived !== undefined) {
-        throw new Error(
-          `interrupted by ${signalReceived} during channel encryption setup`,
-        );
-      }
-
-      // Arm the authenticated cross-party abort marker now that the session
-      // key is in hand (the only path that holds one): derive this party's
-      // token -- written into <myId>-abort.json on a terminal organic fault
-      // so a waiting peer fails fast instead of waiting out its full
-      // peer-timeout -- and the peer's, verified against an incoming
-      // <peerId>-abort.json. Placed after the signal guard so an interrupt
-      // during setup bails before arming.
-      //
-      // Armed unconditionally, including retain mode: the fast-fail
-      // benefits a waiting peer either way, and the marker doubles as an
-      // audit record. A retain-mode fault leaves the marker on disk (the
-      // entry-time sweep is delete-mode only), but a retain fault already
-      // leaves a non-clean directory, so this adds no incremental cleanup
-      // burden.
-      //
-      // File-sync only, with no webrtc counterpart: the fast-fail it buys
-      // is what a live channel already gives for free, since a dying party
-      // drops the data channel and the peer learns of it from connection
-      // state rather than an absence.
-      if (fileSync !== undefined) {
-        const peerRole = role === "initiator" ? "responder" : "initiator";
-        const [selfAbortToken, peerAbortToken] = await Promise.all([
-          deriveAbortToken(sessionKey, role),
-          deriveAbortToken(sessionKey, peerRole),
-        ]);
-        fileSync.armAbort(selfAbortToken, peerAbortToken);
-      }
+      await authenticateRun({
+        build,
+        run,
+        mc,
+        auth,
+        connection,
+        role,
+        onAuthenticated,
+        log,
+        eventStream,
+      });
     }
 
     // Select the PSI crypto backend: the CLI runs under Node, so it prefers the
@@ -1466,178 +2073,24 @@ export async function runProtocol(
       });
     log.debug(`PSI crypto backend: ${psiBackend}`);
 
-    const stageDefinitions = describeExchangeStages(prepared);
-    const stageLabels = Object.fromEntries(
-      stageDefinitions.map(({ id, label }) => [id, label]),
-    );
-    // Emit the full stage list once, before the first transition, mirroring the
-    // web's onStages. The PSI exchange proper is about to begin, so any failure
-    // from here on is a "run" fault (until output, marked below).
-    emit((e) => e.stages(stageDefinitions));
-    terminalPhase = "run";
-    const {
-      associationTable,
-      intersectionCount,
-      resolvedRole,
-      partnerPayload,
-      audit,
-      bootstrap,
-      signedReceipt,
-    } = await runExchange(
-      // Encrypted path: `secure` is the AEAD decorator over mc (the
-      // handshake negotiated applyEncryption), so PSI frames are encrypted
-      // on the wire. Otherwise secure is undefined and the exchange runs
-      // over the unencrypted mc (transport security only): the no-auth
-      // zero-setup path (which runs the --save bootstrap), and the
-      // authenticated path where applyEncryption negotiated false.
-      secure ?? mc,
+    const outcome = await runExchangeStage({
+      build,
+      run,
+      mc,
       role,
       prepared,
-      {
-        psiLibrary,
-        // Run the PSI masking in a worker thread so a long round keeps the
-        // event-loop-owning thread responsive for the SFTP heartbeat and the
-        // liveness timers. Falls back to in-process when
-        // the bundled worker is absent (dev / tests); see createPsiEngine.
-        psiEngineFactory: (role, id, mode) =>
-          createPsiEngine(psiLibrary, role, id, mode),
-        verbosity,
-        saveIntent,
-        // Signed-receipt inputs, threaded only when a signing config was
-        // passed (the exchange command resolves it from the `signing`
-        // block). The step is gated inside runExchange on both the
-        // identity and the session key being present; sessionKeyForReceipt
-        // is set only on the authenticated path, and a signing config on
-        // the no-auth path was already rejected above, so these three
-        // travel together. Signing null leaves all three undefined and the
-        // step skipped.
-        signingIdentity: signing?.identity,
-        partnerFingerprint: signing?.partnerFingerprint,
-        sessionKey: signing !== null ? sessionKeyForReceipt : undefined,
-        // Advertise the observed SFTP host key for cross-party
-        // reconciliation only when the exchange runs over the
-        // authenticated, AEAD-wrapped channel (`secure` set): the value is
-        // unforgeable only because it rides that channel, so advertising
-        // it on the unencrypted no-auth path -- where an active MITM could
-        // rewrite it to suppress the divergence -- would defeat the check.
-        // observedHostKey is itself undefined for a file-drop or the
-        // no-pin path, and there is no file-sync connection at all on
-        // webrtc, so this is also a no-op there.
-        observedHostKey:
-          secure !== undefined ? fileSync?.observedHostKey : undefined,
-        onStage: (id: string) => {
-          const label = stageLabels[id] ?? id;
-          // The label derives from linkage-key names the partner may have
-          // authored, so it goes through the display-boundary escape before
-          // reaching the terminal, like this file's other stderr sites. The
-          // emitter applies the same escape before the pair reaches fd 3.
-          log.info(
-            redactAndSanitizeForDisplay(
-              label.charAt(0).toLowerCase() + label.slice(1),
-            ),
-          );
-          // Close the previous stage's timing before entering this one, then
-          // start the clock for the new stage. The emitter sanitizes the id.
-          closeCurrentStage();
-          currentStage = { id, startedAt: Date.now() };
-          emit((e) => e.stage(id, label));
-        },
-        onWarning: (msg: string) => {
-          // Terms-exchange warnings can embed partner-authored column
-          // names, so the text goes through the display-boundary escape
-          // here and inside the emitter alike. Redaction leads the escape:
-          // escaping first can truncate a whole key block into a dangling
-          // marker at the display cap, which the prefixer's pass then
-          // fails closed on for the rest of the argument. A warning is a
-          // COMPOSITION, so the cap is the composed-warning budget the
-          // fd-3 event applies rather than the per-value default: both
-          // sinks show the same text, and stderr must not show less of it
-          // than the machine channel relays.
-          log.warn(
-            "terms exchange:",
-            redactAndSanitizeForDisplay(msg, {
-              maxLength: WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
-            }),
-          );
-          emit((e) => e.warning(msg));
-        },
-        // A host-key divergence is a security signal, not a terms warning,
-        // so it gets its own un-prefixed warn line; the message is
-        // complete and display-safe (reconcileHostKeyFingerprints
-        // sanitizes both parties' server-controlled values). It also rides
-        // the machine-interface warning event: a supervisor that discards
-        // stderr on success (an unattended CLI run under cron, say) must
-        // still see the one control that catches a one-sided SFTP
-        // interception. Non-fatal: the exchange still completes and the
-        // operator disambiguates a rekey from an interception out-of-band.
-        onHostKeyDivergence: (msg: string) => {
-          log.warn(msg);
-          emit((e) => e.warning(msg));
-        },
-        // A present-but-malformed partner host-key advertisement is
-        // dropped by the fail-soft parse, so reconciliation is silently
-        // skipped for it. Log that drop at debug -- low enough that a
-        // benign version-skew does not warn on every exchange -- so an
-        // operator can tell a non-conforming partner from one that simply
-        // observed no host key (which logs nothing here). The dropped
-        // value is not included: it is unusable and partner-controlled, so
-        // echoing it into a log would be an injection risk.
-        onPartnerHostKeyMalformed: () =>
-          log.debug(
-            "partner advertised a malformed SFTP host key in the terms " +
-              "exchange; it was dropped per the fail-soft contract and " +
-              "cross-party host-key reconciliation was skipped for it",
-          ),
-        onProtocolConfirmed: (partnerTerms, resolvedRole, runShape) => {
-          // identity is partner-controlled free text with no consistency
-          // check (a mutually-distrusting party sets it), so escape it
-          // before it reaches the operator's terminal/logs. A partner that
-          // supplied none is reported as unnamed rather than as an empty
-          // line.
-          //
-          // On a run that files a record, that absence has a consequence
-          // the marker alone does not: the record this exchange writes
-          // will hold no partnerIdentity, so an accounting of disclosures
-          // that cites it has to take the recipient from the operator's
-          // own notes. Warn rather than inform for that one case, and
-          // state the consequence in the same line. It also rides the
-          // machine-interface warning event, for the same
-          // unattended-supervisor reason as SIGNING_WITHOUT_RECORD_WARNING.
-          const line = [
-            "terms agreed, partner identity:",
-            redactAndDisplayPartyIdentity(partnerTerms.identity),
-          ] as const;
-          if (
-            recordOutput !== undefined &&
-            partnerTerms.identity === undefined
-          ) {
-            log.warn(...line, UNNAMED_PARTNER_ACCOUNTING_NOTE);
-            emit((e) => e.warning(UNNAMED_PARTNER_ACCOUNTING_NOTE));
-          } else log.info(...line);
-          log.info("role:", resolvedRole);
-
-          // What the agreed terms actually resolved to, named here because
-          // nothing earlier states it: the consent surfaces show each
-          // party's DECLARED deduplicate, and the cardinality the pair
-          // resolves to -- which decides whose duplicates match and how
-          // many rows the result holds -- is decided only now. Both
-          // notices take the warning channel rather than the info line
-          // beside the role, since the machine-interface warning event is
-          // the only sink a supervisor that discards stderr (or a console
-          // seat watching the run) reads at all. Composed by core so the
-          // CLI and browser seats cannot drift; both strings are
-          // first-party prose over integers core formats itself, so
-          // neither includes partner-authored text in the sinks.
-          const { cardinalityNotice, pairTableAdvisory } =
-            describeResolvedRunShape(runShape);
-          for (const notice of [cardinalityNotice, pairTableAdvisory]) {
-            if (notice === undefined) continue;
-            log.warn(notice);
-            emit((e) => e.warning(notice));
-          }
-        },
+      psiLibrary,
+      verbosity,
+      saveIntent,
+      signing,
+      recordOutput,
+      stageTimer,
+      onRunPhase: () => {
+        terminalPhase = "run";
       },
-    );
+      log,
+      emit,
+    });
 
     // The two-party exchange is complete: runExchange has returned, so this
     // side has received everything and already sent the peer its terminal
@@ -1649,179 +2102,28 @@ export async function runProtocol(
     // disk. (sealAbort does not help here: it resolves the decision for
     // close(), but writeAbortMarker writes regardless, and the gate keys
     // on abortArmed, still true.)
-    exchangeComplete = true;
+    run.exchangeComplete = true;
     // The last PSI stage completed when runExchange returned; emit its duration
     // before the terminal event. The output stage below is local I/O, not a named
     // protocol stage, so it is not timed here.
-    closeCurrentStage();
+    stageTimer.close();
     // From here on any failure is a purely-local "output"-stage fault (result CSV
     // or audit record), never a run fault: the exchange already succeeded and the
     // operator must not re-run it, so the catch classifies it as "output".
     terminalPhase = "output";
 
-    // A count-only exchange produces no matched pairing for either party,
-    // so there is no result file to write and nothing was withheld from
-    // this party: its whole result is the count, reported here. Checked
-    // first, since a count-only receiver holds no association table
-    // either and would otherwise be told it receives nothing.
-    //
-    // The sender seat's copy adds the trust-contingent caveat at the
-    // moment the number is read: its count arrived over the partner's
-    // count-report leg rather than from a round it ran, and psi-c is the
-    // instrument parties reach for before an agreement, so the reminder
-    // belongs here too, not only at consent time. The receiver seat
-    // computed its own count under an enforced mode, so the same caveat
-    // there would be false.
-    if (intersectionCount !== undefined) {
-      log.info(
-        countIsPartnerReported({ intersectionCount, resolvedRole })
-          ? `exchange complete: your partner reported ${intersectionCount} ` +
-              "record(s) in common. Only your partner computed the count; " +
-              "psilink does not check a count it is sent against a run of its " +
-              "own. The agreed terms asked for a count only, so no result file " +
-              "was written."
-          : `exchange complete: ${intersectionCount} record(s) in common. The ` +
-              "agreed terms asked for a count only, so no result file was written.",
-      );
-    }
-    // The result table is withheld (associationTable undefined) when this
-    // party's agreed terms give it no output -- a one-sided exchange
-    // where it is the PSI sender/helper. It contributed its records to
-    // find the match but is not entitled to the result, so report that
-    // plainly rather than writing an empty CSV that could be mistaken for
-    // a zero-match run. The audit record below is still written (the
-    // helper's record does not bind the table).
-    else if (associationTable === undefined) {
-      log.info(
-        "exchange complete: your records contributed to the match, but by the " +
-          "agreed terms you receive no result, so no result file was written.",
-      );
-    } else {
-      // buildOutputTable is outside the stamp below on purpose: its
-      // integrity throws (duplicate partner row indices, rows missing for
-      // association indices, a length mismatch) are partner-shaped
-      // faults, and 73's published meaning is that what failed is a local
-      // write on this machine. They stay 69, distinguished by the
-      // terminal event's `output` category, which covers the whole stage.
-      const { headers, rows } = buildOutputTable(
-        associationTable,
-        prepared.rawRows,
-        prepared.metadata,
-        partnerPayload,
-      );
-      try {
-        await writeOutput(output, headers, rows, log);
-      } catch (err) {
-        // The result file did not reach disk -- the terminal form of the
-        // same loss the persistence-loss reports share: the exchange
-        // completed, only local generation failed, and re-running would
-        // re-send this party's data for an exchange that already
-        // happened. Set the persistence-loss code on the error so a
-        // command boundary reports it instead of the 69 a transport
-        // fault gets; exitCodeForError (util/exit.ts) prefers an error's
-        // own code, measured (not asserted) by exchange.test.ts and
-        // zeroSetup.test.ts driving each handler to a trapped
-        // process.exit. An error that already holds a code keeps it.
-        if (
-          typeof err === "object" &&
-          err !== null &&
-          (err as { exitCode?: number }).exitCode === undefined
-        )
-          Object.assign(err, { exitCode: PERSISTENCE_LOSS_EXIT_CODE });
-        throw err;
-      }
-    }
-
-    // Every audit artifact this run was asked for and could not produce,
-    // as the messages the machine-interface stream states below.
-    const missingArtifacts: string[] = [];
-
-    // Persist the self-attested record after the results: a secondary
-    // audit artifact, written last, whose failure is non-fatal (see
-    // writeExchangeRecord). Skipped when records are disabled, and not
-    // reached if the result-CSV write above failed (that await throws to
-    // the catch), which also avoids orphaning the private
-    // verification-keys file on a disk that just failed mid-write. A
-    // withheld result writes no CSV but still records the exchange. An
-    // audit runExchange did not return is a record that could not be
-    // built (warned there, with the cause), so it reports as a missing
-    // artifact exactly as a failed write does.
-    if (recordOutput !== undefined) {
-      const failure =
-        audit === undefined
-          ? "no audit record could be built for this exchange, so none was " +
-            "written; the exchange and its results succeeded and need not be " +
-            "re-run"
-          : writeExchangeRecord(
-              recordOutput,
-              audit.record,
-              audit.keys,
-              loggerName,
-            );
-      if (failure !== undefined) missingArtifacts.push(failure);
-    }
-
-    // Persist the dual-signed record after the self-attested record.
-    // Written only when the signing step ran and the signature exchange
-    // completed (runExchange returns signedReceipt undefined otherwise,
-    // and throws to the catch on a verification failure, so no partial
-    // artifact is written for a terminated swap). Independent of the
-    // self-attested record: core signs the receipt from the
-    // mutually-verifiable facts regardless of whether this party's local
-    // record built, so a record-build failure must not discard it. Its
-    // timestamp is the record's createdAt when there is one, so the
-    // record and receipt files for one exchange share a stamp. Non-fatal,
-    // like the record write.
-    if (signing !== null && signedReceipt !== undefined) {
-      const failure = writeDualSignedRecord(
-        signing.receiptOutput,
-        signedReceipt,
-        audit?.record.createdAt ?? new Date().toISOString(),
-        loggerName,
-      );
-      if (failure !== undefined) missingArtifacts.push(failure);
-    }
-
-    // A lost audit artifact is not a failed exchange -- the result is written and
-    // must not be re-run -- so the terminal event below stays `result`. But it is
-    // not a success either: an unattended supervisor that discards stderr, or an
-    // operator running at --log-level error, would otherwise read a clean exit 0
-    // for a run that produced no record. Each failure therefore takes the same
-    // persistence-loss report every other completed-run loss takes: a warning on
-    // the machine stream and the exit code that separates "do not re-run this"
-    // from a transport failure. The caller's own remaining work (a bootstrap's
-    // config write) still runs and still reports what it loses.
-    for (const missing of missingArtifacts)
-      reportPersistenceLoss(missing, eventStream);
-
-    // The caller's own last persistence, run here rather than after this function
-    // returns so that whatever it loses is reported BEFORE the terminal event
-    // below -- the stream's terminal-is-last guarantee, and the only ordering a
-    // supervisor that stops reading at the terminal event can observe.
-    if (fileSyncRuntime.onOutputComplete !== undefined) {
-      try {
-        await fileSyncRuntime.onOutputComplete({
-          observedReceivedPayloadColumns: partnerPayload.columns,
-          bootstrap,
-        });
-      } catch (hookErr) {
-        // The hook reports its own losses; reaching here means one escaped it.
-        // The exchange is already complete and cannot be undone by a local
-        // write, so this is non-fatal -- but a run that silently swallowed it
-        // would read as a clean success to the supervisor the stream exists for.
-        log.error(
-          "the post-exchange persistence step failed after the exchange and " +
-            "its results completed; what that step writes did not reach disk: " +
-            sanitizeErrorForDisplay(hookErr),
-        );
-        reportPersistenceLoss(
-          "a post-exchange persistence step did not complete; the exchange " +
-            "and its results succeeded and must not be re-run, and the error " +
-            "logged beside this notice names the step",
-          eventStream,
-        );
-      }
-    }
+    const { associationTable, intersectionCount, resolvedRole } = outcome;
+    await writeExchangeOutputs({
+      outcome,
+      prepared,
+      output,
+      recordOutput,
+      signing,
+      loggerName,
+      log,
+      eventStream,
+      onOutputComplete: fileSyncRuntime.onOutputComplete,
+    });
 
     // onAuthenticatedError is set only when a post-handshake hook failed
     // but the exchange above still succeeded (a hook failure followed by
@@ -1851,7 +2153,7 @@ export async function runProtocol(
             },
       ),
     );
-    return { onAuthenticatedError };
+    return { onAuthenticatedError: run.onAuthenticatedError };
   } catch (err) {
     // tokenRotated=true means this party's saveKeyFile succeeded; the
     // partner independently derived the same new token from the session
@@ -1922,7 +2224,7 @@ export async function runProtocol(
       causeChainSome(e, (link) => link.constructor === OperatorConfigError);
     if (
       signing !== null &&
-      !exchangeComplete &&
+      !run.exchangeComplete &&
       !isReceiptVerificationFailure(err) &&
       !isLocalConfigRefusal(err)
     )
@@ -1994,13 +2296,13 @@ export async function runProtocol(
 
     const hintAlreadyEmitted = isHintTagged(err);
     if (!hintAlreadyEmitted) {
-      if (tokenRotated && onAuthenticatedError === undefined) {
+      if (run.tokenRotated && run.onAuthenticatedError === undefined) {
         log.error(
           "The shared secret was already rotated and saved before this error. " +
             "Retry the exchange without re-inviting; if authentication " +
             "fails on retry, both parties must re-invite.",
         );
-      } else if (tokenRotated) {
+      } else if (run.tokenRotated) {
         // The rotated key is on disk, but the post-handshake persistence hook
         // failed (onAuthenticatedError is set), so whatever it would have
         // written -- e.g. the online invite/accept config -- is not on disk. A
@@ -2014,7 +2316,7 @@ export async function runProtocol(
             "persistence step failed earlier (logged above); resolve that " +
             "before retrying, as the retry may have nothing to run against.",
         );
-      } else if (authStarted) {
+      } else if (run.authStarted) {
         log.error(
           "The key exchange was in progress when this error occurred. " +
             "Depending on how far the handshake had progressed, the " +
@@ -2071,19 +2373,19 @@ export async function runProtocol(
     // principled: only post-arm does a session key (to authenticate the
     // marker) and a waiting post-handshake peer both exist.
     if (
-      fileSync?.abortArmed === true &&
-      !exchangeComplete &&
-      signalReceived === undefined &&
+      build.fileSync?.abortArmed === true &&
+      !run.exchangeComplete &&
+      run.signalReceived === undefined &&
       !errIsPeerAbort(err)
     ) {
-      await fileSync.writeAbortMarker().catch(() => {
+      await build.fileSync.writeAbortMarker().catch(() => {
         /* best-effort; teardown proceeds regardless of write outcome */
       });
     }
 
-    if (signalReceived !== undefined) {
+    if (run.signalReceived !== undefined) {
       log.error(
-        `error in flight when ${signalReceived} arrived: ` +
+        `error in flight when ${run.signalReceived} arrived: ` +
           sanitizeErrorForDisplay(err),
       );
       // The run was cut short by a signal and the process is exiting.
@@ -2100,7 +2402,7 @@ export async function runProtocol(
       // test/unit/protocolInterruptEvents.test.ts drives a real interrupt
       // against a live fd-3 capture, holding that as a check rather than
       // prose.
-      return { onAuthenticatedError };
+      return { onAuthenticatedError: run.onAuthenticatedError };
     }
     // The single failure terminal event for an organic (non-signal) fault,
     // classified against the phase the run reached: "output" once the exchange
