@@ -19,6 +19,7 @@ import {
   declaredRanges,
   installedVersions,
 } from "./check-brace-expansion-override.mjs";
+import { CHECKS } from "./run-checks.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
@@ -457,13 +458,13 @@ describe("the real repository", () => {
     }
   });
 
-  it("is wired as a check script and a CI step", () => {
+  it("is wired as a check script and on the gate's list", () => {
     expect(readRootJson("package.json").scripts).toHaveProperty(
       "check:brace-expansion-override",
       "node scripts/check-brace-expansion-override.mjs",
     );
-    expect(readRoot(".github/workflows/static_checks.yaml")).toContain(
-      "run: npm run check:brace-expansion-override",
+    expect(CHECKS.map((check) => check.script)).toContain(
+      "check:brace-expansion-override",
     );
   });
 

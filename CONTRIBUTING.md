@@ -180,13 +180,17 @@ not add one. Rationale and what the report covers: [docs/TESTING.md](docs/TESTIN
 
 - **Markdown**: soft line wrapping, single space after periods, ASCII punctuation (`-` not em-dash, `->` not arrow character).
 
-Linting and formatting are enforced by CI. Run locally before pushing:
+Linting, formatting, and the repository's guard checks are enforced by CI. Run them locally before pushing:
 
 ```sh
 npm run typecheck
 npm run lint
 npm run format
+npm run check:all            # every repo-wide guard the merge gate runs
+npm run check:all -- --list  # what each holds, and what it does not run
 ```
+
+`check:all` drives its checks from one list in [`scripts/run-checks.mjs`](scripts/run-checks.mjs), which also states which checks it does not run and why -- the production dependency audit needs the npm registry, and the rest need a token, a release tag, CI's own install, or minutes the merge path does not have. It runs past a failing check, so one red result does not hide the rest.
 
 ## Documentation
 

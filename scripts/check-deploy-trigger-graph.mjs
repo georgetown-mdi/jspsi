@@ -1,5 +1,7 @@
 #!/usr/bin/env node
-// Deploy-trigger coverage check, run by eb_build_and_test.yaml.
+// Deploy-trigger coverage check, run through `npm run check:all` in
+// static_checks.yaml, which no path filter narrows, and again by
+// eb_build_and_test.yaml on the paths that one covers.
 //
 // .github/workflows/eb_deploy.yaml redeploys the Elastic Beanstalk environment
 // on a push whose changed paths match a hand-written filter. That filter is

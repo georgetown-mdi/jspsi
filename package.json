@@ -16,6 +16,7 @@
     "format": "prettier --write .",
     "formatcheck": "prettier --list-different .",
     "linkcheck": "node scripts/check-doc-links.mjs",
+    "check:all": "node scripts/run-checks.mjs",
     "check:contributing": "node scripts/check-contributing-scope.mjs",
     "check:claudemd-budget": "node scripts/check-claudemd-budget.mjs",
     "check:pr-checklist": "node scripts/check-pr-checklist.mjs",
