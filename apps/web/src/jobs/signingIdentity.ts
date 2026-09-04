@@ -229,7 +229,7 @@ export function runSigningFingerprint(args: {
   try {
     fs.mkdirSync(childCwd, { recursive: true, mode: WORKDIR_MODE });
   } catch {
-    // A mount path occupied by a regular file settles as a result kind rather
+    // A mount path occupied by a regular file returns a result kind rather
     // than rejecting: the endpoint reconciles kinds, and the one rejection this
     // driver raises is the export-path caller bug above.
     return Promise.resolve({ kind: "error" });

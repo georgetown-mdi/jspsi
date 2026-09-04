@@ -20,11 +20,11 @@ import type { ManagedLocalState } from "./managedLocalStateShape";
 
 /**
  * The failure tier a record's bookkeeping resolves to. Each benign tier names a
- * specific recovery; only `"unexplained"` carries the out-of-band confirmation.
+ * specific recovery; only `"unexplained"` has the out-of-band confirmation.
  *
  * - `"expired"` -- the stored secret's age bound has lapsed (its own benign state;
  *   recovery: re-invite). Detected before any connection, so a live launch reaches it
- *   through the pre-connection check; carried here for a next-visit read of a record
+ *   through the pre-connection check; kept here for a next-visit read of a record
  *   whose bound lapsed while dormant.
  * - `"input"` -- a benign pre-run input problem the last run recorded: the file was
  *   missing, unreadable, or gone from under its handle (recovery: put the file back

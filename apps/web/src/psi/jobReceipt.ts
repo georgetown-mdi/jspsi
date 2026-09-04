@@ -150,7 +150,7 @@ export const RECEIPT_AVAILABILITY_UNANSWERED_LIMIT = 5;
  * Ask the console where this job's receipt stands, re-asking while the ask
  * itself holds no answer.
  *
- * One ask settles every answer the console actually gives: the seat asks a run
+ * One ask determines every answer the console actually gives: the seat asks a run
  * that has already settled, so `available`, `missing`, and `none` cannot change
  * and asking again would tell it the same thing. Only the answer that comes
  * back with nothing gets re-asked -- a hiccup at the moment the run settles

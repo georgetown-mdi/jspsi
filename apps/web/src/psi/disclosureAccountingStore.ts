@@ -101,7 +101,7 @@ export type DisclosureAccountingRead =
   /** The stored accounting, validated through {@link parseDisclosureAccounting}. */
   | { kind: "accounting"; accounting: DisclosureAccounting }
   /** A stored value the validating parse refused -- the corrupted or
-   * app-upgrade-invalidated accounting. `stored` carries the entries exactly as
+   * app-upgrade-invalidated accounting. `stored` holds the entries exactly as
    * they sit at rest when the ENVELOPE still parses (the record-version-bump
    * case, which is what makes the export arm possible), and is `undefined` when
    * the envelope is gone too and there is nothing to hand back. */

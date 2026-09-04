@@ -13,7 +13,7 @@
  */
 
 /** The folder placeholder the POSIX schedule line changes into. The exported or
- * copied files carry no path of their own -- the command reads its config and key
+ * copied files hold no path of their own -- the command reads its config and key
  * from the working directory -- so the one machine-specific value is where the
  * operator put them. */
 const POSIX_FOLDER_PLACEHOLDER = "/path/to/your/exchange-folder";

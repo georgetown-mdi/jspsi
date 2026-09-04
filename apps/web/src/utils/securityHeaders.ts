@@ -10,7 +10,7 @@
  * to older clients and to any future surface that is not the fragment, and the
  * app never needs to send a referrer of its own. `X-Frame-Options: DENY` and the
  * CSP `frame-ancestors 'none'` both deny framing (clickjacking): the CSP form for
- * modern clients, the legacy header for older ones. The CSP carries only the
+ * modern clients, the legacy header for older ones. The CSP holds only the
  * framing directive, so it imposes no other content policy; if a fuller CSP is
  * ever added, `frame-ancestors 'none'` subsumes `X-Frame-Options: DENY`. Extend
  * this one value to add such a policy rather than setting a second

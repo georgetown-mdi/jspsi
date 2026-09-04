@@ -57,7 +57,7 @@ export interface JobHandoff {
    * True for a `certificate`-mode exchange, false otherwise (every
    * zero-setup run signs nothing).
    *
-   * The panel shows the carry-the-identity caveat when true: the recurring
+   * The panel shows the reuse-the-identity caveat when true: the recurring
    * run must load the SAME signing key file, since a fresh `psilink
    * fingerprint` on the scheduling machine mints a different key the
    * partner's pin would reject.

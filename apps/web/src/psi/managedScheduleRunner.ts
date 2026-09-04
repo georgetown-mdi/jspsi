@@ -126,7 +126,7 @@ export interface ManagedScheduleAttempt {
   onDataExchangeStart: () => void;
 }
 
-/** The platform seams the tick runs on: the clock, the two store reads, the
+/** The platform boundaries the tick runs on: the clock, the two store reads, the
  * conditioned schedule write, the run, the pacing delay, and the runtime's own
  * stop. Every one is injected, so the tick's decisions are testable without a
  * database, a broker, or a real clock. */

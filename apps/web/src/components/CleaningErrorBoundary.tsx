@@ -94,7 +94,7 @@ class Boundary extends Component<BoundaryProps, { errored: boolean }> {
  *
  * {@link resetKey} is the field input binding signature: changing it auto-clears
  * the boundary, and the reset button also resets directly. The dev-gated
- * `onCatch` log mirrors DefaultCatchBoundary so an unforeseen error carrying
+ * `onCatch` log mirrors DefaultCatchBoundary so an unforeseen error holding
  * partner bytes never reaches a production console.
  */
 export function CleaningErrorBoundary({

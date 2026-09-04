@@ -34,7 +34,7 @@ const ASKING: JobExchangeRecordOfferState = { kind: "asking" };
  * `jobId` undefined means no console job, and nothing is asked. `enabled` gates
  * the ask: false while the run has not settled (the CLI writes the pair near the
  * end of a run, so an earlier ask would race the write), and false again once
- * the run's completion downloads already carry the pair.
+ * the run's completion downloads already hold the pair.
  *
  * The answer is keyed to the job it was asked for, so a retry's new job id asks
  * again rather than showing the previous run's answer.

@@ -23,7 +23,7 @@ import type { SavedExchangeRow } from "./savedExchangesModel";
 
 /** The outcome of loading the home list. `"unavailable"` means the store could not
  * be opened at all (degrade to the quick path); `"failed"` means it opened but the
- * read failed; `"ready"` carries the derived rows (possibly empty). */
+ * read failed; `"ready"` holds the derived rows (possibly empty). */
 export type SavedExchangesLoad =
   | { kind: "unavailable" }
   | { kind: "failed" }

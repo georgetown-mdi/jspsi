@@ -6,7 +6,7 @@ import type Peer from "peerjs";
  * up. Shared by both roles' browsers: the inviter's inbound wait
  * ({@link waitForIncomingConnection}) and the acceptor's dial-retry budget (the
  * `dialAsAcceptor` rendezvous), so neither side hangs the page waiting on the
- * other. It exists so an abandoned wait surfaces an error instead of hanging.
+ * other. It exists so an abandoned wait reports an error instead of hanging.
  *
  * It is distinct from the 30s channel-open bound in `waitForOpen.ts`, which times
  * the WebRTC handshake once both peers are already dialing.

@@ -20,7 +20,7 @@
  * What to DO about it differs per hand-off, since a refusal is only useful where
  * the operator is standing: the command-line panel's own download button sits
  * beside its confirmation, while the migration's confirmation is a whole screen
- * that replaces the one carrying "Move to another device". The remedy is per
+ * that replaces the one stating "Move to another device". The remedy is per
  * hand-off ({@link supersededHandoffReason}), naming a control on the screen
  * showing it. A record that is gone from this browser has no remedy of that shape
  * at either hand-off -- there is nothing left here to download -- so that refusal

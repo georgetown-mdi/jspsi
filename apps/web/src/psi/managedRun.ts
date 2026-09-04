@@ -235,8 +235,8 @@ export async function runManagedRerun<TInput, THandshake, TExchange>(
  * malformed-secret error (which cannot arise here: a stored secret is
  * regex-validated on every read).
  *
- * {@link InternalConsistencyError} is excluded by type: the single-pass
- * reply-cap backstop also raises it mid-data-exchange, coinciding with a bound
+ * {@link InternalConsistencyError} is excluded by type: the single-pass reply-
+ * cap safety check also raises it mid-data-exchange, coinciding with a bound
  * lapsing during a long run as readily as with a real expiry, and re-mapping it
  * would report a defect in psilink as a benign expiry that a fresh invitation
  * cannot fix.

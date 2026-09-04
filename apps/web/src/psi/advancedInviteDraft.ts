@@ -193,7 +193,7 @@ export function seedAdvancedInvite(
       // The default is the symmetric both-receive exchange, matching the quick
       // path and getDefaultLinkageTerms' output.
       outputDirection: "both",
-      // Carried from the recommended terms (psi / no-dedup), so a fresh draft opens
+      // Taken from the recommended terms (psi / no-dedup), so a fresh draft opens
       // on the identifier-revealing algorithm and one-to-one matching; a
       // deduplicating exchange is chosen at the control rather than defaulted to.
       algorithm: terms.algorithm,

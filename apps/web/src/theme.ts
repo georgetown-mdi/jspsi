@@ -218,7 +218,7 @@ const MUTED_TEXT = {
  * Mantine's default `--mantine-color-{c}-light-color` (shade 9 on shade-1
  * tint) fails WCAG 2.1 AA 1.4.3 for normal-weight text in all three hues.
  *
- * Darkened in-hue rather than to plain black so each title still reads as
+ * Darkened in-hue rather than to plain black so each title still displays as
  * amber/caution, red/error, and green/success; the meaning does not rest
  * on the title color alone, since the Alerts also hold a severity icon
  * (WCAG 1.4.1). Ratios against the real shade-1 tints:

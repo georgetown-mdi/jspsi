@@ -17,8 +17,8 @@ import type { CSVRow, Standardization } from "@psilink/core";
  *
  * An empty string `""` counts as PRODUCED: a real, participating key element,
  * distinct from a dropped `null` (convertible to one with `null_if`), matching
- * the per-row preview and not misreporting a deliberately-blank field as a
- * coverage failure. A field whose keys all collapse to one constant
+ * the per-row preview and not misreporting a field that is blank by design as
+ * a coverage failure. A field whose keys all collapse to one constant
  * (including `""`) is NOT flagged: `removeDuplicatesAndUndefineds` (core's
  * `link.ts`) already drops any key value duplicated within a dataset before
  * the PSI round, so a low-cardinality or constant key is benign rather than a

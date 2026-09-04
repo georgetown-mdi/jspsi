@@ -28,7 +28,7 @@ import type {
  * opt-in badge on the console and the built terms' rule-set citation.
  *
  * The prune closes that by making the difference unrepresentable at the compare.
- * No draft-editing helper and no import builds terms carrying an explicit
+ * No draft-editing helper and no import builds terms holding an explicit
  * `undefined` (`advancedInviteTerms.test.ts`), which keeps the Generate gate's
  * canonical-encode dry run clear; that sweep does not reach the expert editor's
  * own key, alias, transform, and fuzzy callbacks, which the encode gate covers

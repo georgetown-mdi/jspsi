@@ -35,7 +35,7 @@ export function DisclosureSection({
   toggleTestId,
 }: {
   /** The section label; becomes the toggle button's accessible name. Keep it
-   * operator- or app-authored: it is rendered as-is, so it must never carry a
+   * operator- or app-authored: it is rendered as-is, so it must never contain a
    * partner-controlled value. */
   label: ReactNode;
   /** Whether the panel is expanded (controlled by the host). */
@@ -107,7 +107,7 @@ export function DisclosureSection({
       {headingOrder !== undefined
         ? createElement(`h${headingOrder}`, { style: { margin: 0 } }, toggle)
         : toggle}
-      {/* The always-mounted wrapper carries the aria-controls id; this node persists
+      {/* The always-mounted wrapper has the aria-controls id; this node persists
           however Mantine mounts or hides the closed Collapse panel. */}
       <div id={panelId} ref={panelRef}>
         <Collapse expanded={open}>{children}</Collapse>

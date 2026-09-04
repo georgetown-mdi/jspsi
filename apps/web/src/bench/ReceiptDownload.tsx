@@ -67,7 +67,7 @@ export const RECEIPT_UNANSWERED_NOTICE =
  * Gated on the run being SETTLED, a different claim: the file appears at the
  * signature swap, so an ask before the terminal would read a not-yet-written
  * receipt as one the run does not have. By the time a run has settled the file
- * is written or it never will be, so one answered ask settles it for good.
+ * is written or it never will be, so one answered ask decides it for good.
  *
  * A receipt the console says it does not hold is stated rather than omitted, so
  * an operator who authored a certificate-mode exchange never reads an absent

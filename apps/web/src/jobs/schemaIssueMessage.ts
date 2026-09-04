@@ -21,7 +21,7 @@ export interface JobSchemaIssue {
 }
 
 /**
- * The reason an unrecognized-key rejection carries. It is the one issue whose
+ * The reason an unrecognized-key rejection has. It is the one issue whose
  * own message quotes a CLIENT-chosen string (`Unrecognized keys: "..."`), and
  * a key name is as much the submitter's bytes as a value, so this fixed
  * reason replaces it. The bodies are strict objects, so the caller only needs

@@ -374,7 +374,7 @@ export const RETENTION_NOTE_NOTICE =
  * The weight the card shows one advisory at. Both are warn-and-guide and
  * neither blocks the run: a `warning` is what this run costs the operator
  * if started as authored; an `info` states where a file lands and how to
- * look after it. Carried here, not the card, since it follows from what the
+ * look after it. Held here, not the card, since it follows from what the
  * advisory says.
  */
 export type ReceiptsAdvisorySeverity = "warning" | "info";

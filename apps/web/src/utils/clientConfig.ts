@@ -59,7 +59,7 @@ const schema: JSONSchemaType<Env> = {
       // deployed hosted build and in any web build outside the image build,
       // which pass no value. A docker build of the repo bakes whatever version
       // the manifest holds -- on a non-release tree, the last published
-      // release -- so a value here names the release the manifest carried at
+      // release -- so a value here names the release the manifest held at
       // build time, not a promise that this build is that release.
       type: "string",
       default: "",
@@ -102,7 +102,7 @@ export function isConsoleBuild(): boolean {
 }
 
 /** The release version of the image this build ships in, or undefined when it
- * carries none. A released console image is the one build that carries one; it
+ * has none. A released console image is the one build that has one; it
  * is what the partner accept kit names its `docker run` image by, so the
  * partner runs the version that minted their invitation. */
 export function psilinkVersion(): string | undefined {

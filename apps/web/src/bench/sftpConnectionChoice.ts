@@ -6,7 +6,7 @@ import type { SftpConnectionProjection } from "@jobs/jobManager";
 /**
  * The pure model behind the console SFTP card: on a console build, the operator
  * authors the connection in-console, and the invitation's sftp endpoint is
- * derived from its locator fields at the same mint seam the save surface's
+ * derived from its locator fields at the same mint boundary the save surface's
  * authored fields feed (generateInvitation's `connectionEndpoint`). No React,
  * no I/O -- the tested boundary for "the code points where the console will
  * actually connect".
@@ -17,7 +17,7 @@ import type { SftpConnectionProjection } from "@jobs/jobManager";
  * save surface's `endpointRequestFor` maps the same fields. No credential can
  * appear: {@link SFTPEndpoint} admits none.
  *
- * The split pair is carried as this party authored it, NOT mirrored -- the
+ * The split pair is kept as this party authored it, NOT mirrored -- the
  * inviter/acceptor swap belongs to the single consumer that builds a
  * connection from an endpoint; mirroring here would apply it twice.
  */

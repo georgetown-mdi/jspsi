@@ -120,7 +120,7 @@ export type JobDiagnosticLogWatchOutcome =
  *   exchange to be told the same thing.
  * - `pending` is re-asked while the run is unsettled, because the file is still
  *   expected to appear. Once `settled` says the run reached a terminal, one ask
- *   settles it: a log that has not been opened by then never will be.
+ *   determines it: a log that has not been opened by then never will be.
  * - `unanswered` is re-asked up to {@link LOG_AVAILABILITY_UNANSWERED_LIMIT}
  *   times in a row, so a transient failure costs a couple of seconds while a
  *   persistent one ends the watch instead of hiding behind it. Any answered ask

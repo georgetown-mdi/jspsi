@@ -1,5 +1,5 @@
 /**
- * Maximum size, in bytes, of a file the bench intake dropzones accept -- 100 MB.
+ * Maximum size, in bytes, of a file the console intake dropzones accept -- 100 MB.
  *
  * This is a browser-memory bound, not a parser bound: core's `loadCSVFile`
  * accumulates across PapaParse chunks, so the cap is set against what a browser

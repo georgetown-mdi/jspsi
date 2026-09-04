@@ -50,7 +50,7 @@ export interface ExchangeDriverEvents<
   onWarning?: (message: string) => void;
 }
 
-/** A per-channel exchange driver: a `run` that carries out one exchange and
+/** A per-channel exchange driver: a `run` that conducts one exchange and
  * emits the typed lifecycle events, cancellable through the run's signal. The
  * consumer constructs a driver from its channel-specific inputs, then calls
  * `run` once per attempt (a retry constructs a fresh signal and calls `run`

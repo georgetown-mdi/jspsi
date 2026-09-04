@@ -203,7 +203,7 @@ export function setColumnDisclosure(
 }
 
 /**
- * Set one column's semantic type, carrying the disclosure choice across the
+ * Set one column's semantic type, keeping the disclosure choice across the
  * change ({@link chooseDisclosureForType}), then enforcing the
  * single-identifier rule as in {@link setColumnDisclosure} -- a retype to the
  * identifier type can newly land a column on that role. Returns the new
