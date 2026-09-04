@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import { OutgoingMessage } from "node:http";
 import { Socket } from "node:net";
 
+import { parseBoundedJson } from "@psilink/core";
 import { WebSocketServer as Server } from "ws";
 
 import { Errors, MessageType } from "../../enums.ts";
@@ -465,9 +466,15 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
       // to a null or a primitive. Everything past this point is this server's own
       // code, whose faults are attributed as such below rather than charged to
       // the peer.
+      //
+      // The parse is core's bounded chokepoint rather than a raw JSON.parse: it
+      // refuses a structurally pathological body before the parser can reach an
+      // uncatchable engine abort, which on a broker every peer shares would end
+      // rendezvous for all of them. The `ws` maxPayload cap above is the byte
+      // half of the same bound (docs/spec/CHANNEL_SECURITY.md).
       let message: Writable<IMessage>;
       try {
-        message = JSON.parse(data.toString()) as Writable<IMessage>;
+        message = parseBoundedJson(data.toString()) as Writable<IMessage>;
         message.src = client.getId();
       } catch (e) {
         this._onSocketError(e, "client-frame");

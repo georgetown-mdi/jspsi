@@ -44,6 +44,10 @@ async function banHits(filePath, source) {
 
 const CORE_FILE = resolve(repoRoot, "packages/core/src/banFixture.ts");
 const CLI_FILE = resolve(repoRoot, "apps/cli/src/banFixture.ts");
+const BROKER_FILE = resolve(
+  repoRoot,
+  "packages/peerjs-broker/src/banFixture.ts",
+);
 
 // Loading the flat config and the typescript-eslint parser for the first time
 // is the expensive part of a lintText call, independent of which file or how
@@ -168,9 +172,16 @@ describe("the display-sink raw-error ban", () => {
     });
   }
 
-  it("guards apps/cli/src as well as packages/core/src", async () => {
-    expect(
-      await banHits(CLI_FILE, fixture("log.warn(err.message);")),
-    ).not.toHaveLength(0);
-  });
+  // The broker's diagnostics sink writes a peer's own error text to the
+  // operator's log, so it is guarded alongside the two first-party trees.
+  for (const [tree, filePath] of [
+    ["apps/cli/src", CLI_FILE],
+    ["packages/peerjs-broker/src", BROKER_FILE],
+  ]) {
+    it(`guards ${tree} as well as packages/core/src`, async () => {
+      expect(
+        await banHits(filePath, fixture("log.warn(err.message);")),
+      ).not.toHaveLength(0);
+    });
+  }
 });

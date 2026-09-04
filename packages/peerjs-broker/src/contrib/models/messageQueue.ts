@@ -1,4 +1,7 @@
 import { Buffer } from "node:buffer";
+
+import { parseBoundedJson } from "@psilink/core";
+
 import type { IMessage } from "./message.ts";
 
 /**
@@ -109,7 +112,9 @@ export function serializeFrame(message: IMessage): SerializedFrame {
  * structure the receive path did not already accept. A payload held verbatim
  * because it arrived as a string is returned as it is, unparsed. `IMessage`
  * types `payload` as a string, which a structured signaling payload has never
- * been.
+ * been. It runs through core's bounded chokepoint regardless, so the bound
+ * covers a frame enqueued through this package's exports by a caller outside
+ * this repository as well.
  *
  * The parse is nonetheless allowed to throw rather than being swallowed here:
  * the drain site absorbs it, drops that one frame down the `frame-dispatch`
@@ -124,7 +129,7 @@ function reconstituteFrame({
 
   return {
     ...message,
-    payload: JSON.parse(message.payload) as IMessage["payload"],
+    payload: parseBoundedJson(message.payload) as IMessage["payload"],
   };
 }
 
