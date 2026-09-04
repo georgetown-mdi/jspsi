@@ -57,7 +57,7 @@ import { githubToken } from "./lib/projectItems.mjs";
 export const DEFAULT_RUN_SAMPLE = 300;
 
 const USAGE =
-  "Usage: node measure-pr-checks.mjs [runs] [--base BRANCH] [--repo OWNER/REPO] [--json] [--cache DIR] [--offline]\n" +
+  "Usage: npm run measure:pr-checks -- [runs] [--base BRANCH] [--repo OWNER/REPO] [--json] [--cache DIR] [--offline]\n" +
   `       (samples the newest [runs] pull-request workflow runs against --base; default ${DEFAULT_RUN_SAMPLE}, default base staging)\n`;
 
 /**

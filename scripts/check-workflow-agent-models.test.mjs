@@ -57,8 +57,11 @@ describe("workflow agent model check", () => {
 
   it("reads a Workflow script whole, with no fence to open a block", () => {
     const source = "const a = 1\nagent(prompt, { label: 'x' })\n";
-    expect(agentCallCount("scripts/x-workflow.mjs", source)).toBe(1);
-    const violations = modelViolations("scripts/x-workflow.mjs", source);
+    expect(agentCallCount(".claude/scripts/x-workflow.mjs", source)).toBe(1);
+    const violations = modelViolations(
+      ".claude/scripts/x-workflow.mjs",
+      source,
+    );
     expect(violations).toHaveLength(1);
     expect(violations[0].line).toBe(2);
     expect(violations[0].problem).toContain("no literal `model:`");

@@ -180,10 +180,13 @@ describe("workflow args resolve check", () => {
 
   it("reads a Workflow script whole, with no fence to open a block", () => {
     const source = "const a = 1;\nconst role = args.role;\n";
-    const violations = resolveViolations("scripts/x-workflow.mjs", source);
+    const violations = resolveViolations(
+      ".claude/scripts/x-workflow.mjs",
+      source,
+    );
     expect(violations).toHaveLength(1);
     expect(violations[0].line).toBe(2);
-    expect(resolveCount("scripts/x-workflow.mjs", CANONICAL)).toBe(1);
+    expect(resolveCount(".claude/scripts/x-workflow.mjs", CANONICAL)).toBe(1);
   });
 
   it("ignores an identifier that merely ends in args", () => {

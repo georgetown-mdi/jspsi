@@ -7,7 +7,7 @@ import { defineConfig } from "vitest/config";
 // apps/*); the root vitest config registers this as a project so `npx vitest`
 // (and `npm run test:scripts`) discovers them. The tests are deterministic and
 // offline: the board tooling is driven with synthetic GraphQL pages rather than a
-// live board, and where a suite drives a real tool (git, tsc, npm) it does so
+// live board, and where a suite drives a real tool (git, npm) it does so
 // over a fixture it builds in a temp directory. They need no network and no gh
 // auth.
 export default defineConfig({

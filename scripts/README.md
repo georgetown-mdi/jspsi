@@ -5,8 +5,8 @@ Executables CI and contributors run against this repository. Most are the
 [`run-checks.mjs`](run-checks.mjs), which also states what keeps each excluded
 check off it. Beside them: the doc-link checker, the `npm run dev` launcher, the
 mutation run, the release and provenance verifiers, the dependency-drift check
-`.github/actions/setup` runs after a cache restore, and the modules more than one
-of them shares, in [`lib/`](lib).
+`.github/actions/setup` runs after a cache restore, and the helper
+modules the checks import, in [`lib/`](lib).
 
 A check's test sits beside it; a guard that asserts a workflow, Dockerfile or
 config directly is the test alone. Both run in the vitest project
