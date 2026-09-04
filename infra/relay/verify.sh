@@ -86,6 +86,25 @@ printf 'psilink relay verification: %s\n' "$REALM"
 [ "$CONNECT" = "$REALM" ] || printf '(connecting via %s)\n' "$CONNECT"
 printf '\n'
 
+# --- wait for the listener ----------------------------------------------------
+# install.sh restarts the relay's supervised service and calls this script
+# within about a second, but the listener takes a few seconds longer to come
+# up. Measured 2026-09-03: a probe at t+0.3s after restart got
+# connection-refused, and the listener was accepting by t+1.3s. Retry a bare
+# TCP connect against the same target/port the probes below use, once per
+# second, before running the first probe -- an install-time run should not
+# fail a relay that is merely still starting.
+WAIT="${PSILINK_RELAY_VERIFY_WAIT:-30}"
+waited=0
+until timeout 1 bash -c "exec 3<>\"/dev/tcp/$CONNECT/443\"" 2>/dev/null; do
+  waited=$((waited + 1))
+  if [ "$waited" -ge "$WAIT" ]; then
+    report fail "no TCP listener at $CONNECT:443 after ${WAIT}s" "PSILINK_RELAY_VERIFY_WAIT to allow longer"
+    break
+  fi
+  sleep 1
+done
+
 # --- handshake ---------------------------------------------------------------
 # Which certificate the relay serves, read out of an s_client transcript that
 # carries it.
@@ -167,10 +186,14 @@ if [ -n "$TURN_USER" ] && [ -n "$TURN_CRED" ]; then
     fi
   else
     OUT="$(uclient 203.0.113.9)"
-    if printf '%s' "$OUT" | grep -qi 'allocate.*success\|relay address\|allocated'; then
+    # Measured 2026-09-03 against coturn 4.17.2: a successful run through this
+    # image's turnutils_uclient emits none of 'allocate success', 'relay
+    # address', or 'allocated' -- it ends with "Total transmit time is N" and a
+    # clean close (data sent to the black-hole peer, 0 received, as expected).
+    if printf '%s' "$OUT" | grep -qi 'allocate.*success\|relay address\|allocated\|total transmit time'; then
       report pass "the relay allocated (no PSILINK_RELAY_VERIFY_PEER set, so no data leg was exercised)"
     else
-      report fail "the relay did not allocate" "$(printf '%s' "$OUT" | tr '\n' ' ' | cut -c1-200)"
+      report fail "no allocation success or transmit-time close was observed" "$(printf '%s' "$OUT" | tr '\n' ' ' | cut -c1-200)"
     fi
   fi
 
