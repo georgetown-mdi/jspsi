@@ -230,9 +230,11 @@ export type JobRequestBodyResult =
  * adds to a running total, and the read aborts the moment the total EXCEEDS
  * `maxBytes` -- the whole body is never buffered first. On abort the reader is
  * cancelled to free the connection. The accumulated BYTES go to the bounded
- * parse (the stream is consumed, so `request.json()` is no longer available),
- * which decodes them UTF-8-fatal: a body carrying an invalid byte is `invalid`
- * rather than a value parsed with U+FFFD substituted for it.
+ * parse undecoded (the stream is consumed, so `request.json()` is no longer
+ * available), and it decodes bytes UTF-8-fatal: a body holding an invalid byte
+ * is `invalid` here rather than a value parsed with U+FFFD substituted for it.
+ * That holds for the bytes this read passes, not for a caller handing it an
+ * already-decoded string.
  *
  * Pure over its arguments (no global fetch), so a test can drive it with any
  * `Request` and a small `maxBytes` to exercise the boundary.

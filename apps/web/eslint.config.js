@@ -178,23 +178,25 @@ export default [
     },
   },
   {
-    // The raw-JSON.parse ban for the web app, over every tree it ships. src/ is
-    // not only the browser bundle: the console server's own code lives there too
-    // (src/jobs, and the API route handlers under src/routes/api), and a request
-    // body is the untrusted input the ban exists for. server/ is the Nitro entry
-    // and its upgrade hardening, which reach the socket earlier still. The test
-    // tree is outside the ban, parsing fixtures it wrote itself. Raw `JSON.parse`
-    // is banned in the no-restricted-properties form packages/core/src and
-    // apps/cli/src already use, which also catches an alias, a computed access,
-    // and a destructure. A request body, a relayed CLI line, and a persisted
-    // record are input this app did not produce, so each is parsed through
-    // `@psilink/core`'s parseBoundedJson; its bound and the rationale for it are
-    // in packages/core/src/utils/boundedJson.ts and docs/spec/CHANNEL_SECURITY.md.
+    // The raw-JSON.parse ban for the web app, over the two trees its files list
+    // names: src/ and server/. src/ is not only the browser bundle -- the
+    // console server's own code lives there too (src/jobs, and the API route
+    // handlers under src/routes/api), and a request body is the untrusted input
+    // the ban exists for. server/ is the Nitro entry and its upgrade hardening,
+    // which reach the socket earlier still. The test tree is outside the ban,
+    // parsing fixtures it wrote itself. Raw `JSON.parse` is banned in the
+    // no-restricted-properties form packages/core/src and apps/cli/src already
+    // use, which also catches an alias, a computed access, and a destructure. A
+    // request body, a relayed CLI line, and a persisted record are input this
+    // app did not produce, so each is parsed through `@psilink/core`'s
+    // parseBoundedJson; its bound and the rationale for it are in
+    // packages/core/src/utils/boundedJson.ts and docs/spec/CHANNEL_SECURITY.md.
     // A parse of a value this process serialized itself opts out with an
     // eslint-disable-next-line carrying a one-line why. The ban is a
     // property-access ban on JSON.parse only, so a body read through
     // Response.json() is outside it; apps/web/src has such sites (fetches of the
-    // console server's own job API), which stay unbounded and are left to review.
+    // console server's own job API), which stay unbounded and are left to
+    // review.
     files: ["src/**/*.{ts,tsx}", "server/**/*.ts"],
     // Fail CI on a stray or rule-silencing disable so an untrusted parse cannot
     // be quietly exempted (a bare `eslint .` only warns). The sibling block above

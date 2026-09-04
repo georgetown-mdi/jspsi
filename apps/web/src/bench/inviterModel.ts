@@ -941,11 +941,10 @@ export function expiryLabel(lifetimeSeconds: number, now: Date): string {
 
 /** Whether a minted invitation's ISO `expires` moment is still ahead of `now`
  * -- past it, no partner can pass the credential, so a retry is pointless and
- * the link must stop being offered. An `expires` the shared comparison cannot
- * read stops the offer too, as does an absent one: a credential whose bound is
- * unreadable or missing is not one to keep handing out. A caller holding a
- * `string | undefined` gets a type error and decides what an unbounded
- * invitation means on its own surface. */
+ * the link must stop being offered. False for a non-string `expiresIso`, and
+ * false when the expiry or the clock cannot be read: a credential whose bound is
+ * unreadable is not one to keep handing out. Otherwise the shared comparison's
+ * verdict. */
 export function invitationUsable(expiresIso: string, now: Date): boolean {
   // The runtime half of the `string` parameter type, for an untyped or cast
   // caller: the shared comparison reads an absent bound as none in force, which
