@@ -38,7 +38,7 @@ The documentation is organized in three tiers: this **overview** tier (`docs/`) 
 - [RELEASES.md](RELEASES.md) - versioning policy, release checklist, and artifact publication
 - [PREBUILD_REVENDOR.md](PREBUILD_REVENDOR.md) - replacing the vendored native PSI prebuild: the two integrity controls, the ordered procedure, and the chain-of-custody steps a reviewer performs
 - [INCIDENT_RESPONSE.md](INCIDENT_RESPONSE.md) - the responder's runbook behind [SECURITY.md](../SECURITY.md): triage and severity, affected versions, the private fix and hotfix release, advisory and CVE publication, reporter communication, the maintainer-unavailable path, and the tabletop exercise record
-- [TESTING.md](TESTING.md) - test-suite reference: integration backends and profiles, the console sentinel, the browser suite, and the coverage rationale
+- [TESTING.md](TESTING.md) - test-suite reference: where a test goes, integration backends and profiles, the console sentinel, the browser suite, and the coverage rationale
 - [ROADMAP.md](ROADMAP.md) - roadmap of planned functionality
 
 ### Technical specifications ([`docs/spec/`](spec/README.md))
