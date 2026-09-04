@@ -6,25 +6,19 @@ import { UsageError } from "./errors.js";
 
 /**
  * Per-logical-line byte ceiling for the streamed CSV reads ({@link loadCSVFile}
- * and {@link loadCSVColumnSample}). PapaParse must buffer one whole logical line
- * -- a data row, or the entire header -- before it can yield a chunk, so an input
- * whose first row terminator is far from the start (one giant line with no
- * newline, one enormous field, or a multi-megabyte header) would drive the
- * accumulated partial line, and the repeated re-splitting of it,
- * linearly-to-quadratically with that span no matter how the read is otherwise
- * bounded -- loadCSVColumnSample's row cap, or nothing in loadCSVFile, which reads
- * every row. This ceiling bounds the bytes pulled from the source between row
- * terminators, so those shapes fail fast with a clear error rather than consuming
- * memory and CPU proportional to the span.
+ * and {@link loadCSVColumnSample}). PapaParse must buffer one whole logical
+ * line -- a data row, or the entire header -- before it can yield a chunk, so
+ * an input whose first row terminator is far from the start (no newline, an
+ * enormous field, or a multi-megabyte header) would otherwise drive memory and
+ * CPU linearly-to-quadratically with that span. This ceiling bounds the bytes
+ * pulled from the source between row terminators, so those shapes fail fast
+ * with a clear error instead.
  *
- * 8 MiB sits comfortably above any realistic operator CSV's single line -- even a
- * pathologically wide file of tens of thousands of columns is a header of low
- * single-digit MiB and a data row far smaller -- and well below the
- * hundred-MiB-plus spans that drove the gigabyte-scale memory growth this guards
- * against. The input is the operator's own local file, so this is a robustness
- * backstop, not a partner- or transport-reachable bound. Its classification --
- * what the bound does not cover and why it is operator-local rather than a
- * threat-model control -- lives in `docs/spec/CHANNEL_SECURITY.md` (CSV-read
+ * 8 MiB sits comfortably above any realistic operator CSV's single line and
+ * well below the hundred-MiB-plus spans that drove the gigabyte-scale memory
+ * growth this guards against. The input is the operator's own local file, so
+ * this is a robustness safety check, not a partner- or transport-reachable
+ * bound. Classification: `docs/spec/CHANNEL_SECURITY.md` (CSV-read
  * single-line byte ceiling).
  */
 export const CSV_LINE_BYTE_CEILING = 8 * 1024 * 1024;
@@ -33,8 +27,8 @@ export const CSV_LINE_BYTE_CEILING = 8 * 1024 * 1024;
  * The error every {@link CSV_LINE_BYTE_CEILING} trip raises. A named subclass so a
  * caller can classify the ceiling trip by `instanceof` -- distinguishing an
  * oversized/unterminated line from an ordinary parse fault -- rather than matching
- * the message string. The message stays operator-readable and carries only the byte
- * ceiling, never file content or a path.
+ * the message string. The message stays operator-readable and holds only the
+ * byte ceiling, never file content or a path.
  */
 export class CsvLineByteCeilingError extends Error {
   constructor(message: string) {
@@ -58,12 +52,12 @@ function singleLineCeilingError(byteCeiling: number): CsvLineByteCeilingError {
 
 /**
  * The error a row-level parse fault raises: PapaParse read the file without a
- * stream error, but at least one row it produced does not correspond to the row
- * in the file. A {@link UsageError} subclass, so the CLI's error boundaries
- * classify a malformed input file as bad input (exit 64) rather than a transport
- * failure, and a front end can tell it from a ceiling trip by `instanceof`. The
- * message carries PapaParse's own fault description and the row number, never a
- * cell value or a path.
+ * stream error, but at least one row it produced does not correspond to the
+ * row in the file. A {@link UsageError} subclass, so the CLI's error
+ * boundaries classify a malformed input file as bad input (exit 64) rather
+ * than a transport failure, and a front end can tell it from a ceiling trip by
+ * `instanceof`. The message holds PapaParse's own fault description and the
+ * row number, never a cell value or a path.
  */
 export class CsvRowParseError extends UsageError {
   constructor(message: string) {
@@ -109,31 +103,28 @@ function rowParseFaultError(error: Papa.ParseError): CsvRowParseError {
 }
 
 /**
- * Reject if the LEADING logical line of a materialized (non-stream) CSV exceeds
- * `byteCeiling` -- the bound {@link loadCSVFile}'s stream guard cannot enforce on a
- * source it does not stream. The web caller passes a browser `File`, which
- * PapaParse reads whole through FileReader (no `data` events to scan), so the
- * stream guard is inert there; this pre-read covers the no-newline and
- * oversized-header shapes for that path before parsing, by scanning forward from
- * the start for the first line terminator (LF or CR). Finding none within
- * `byteCeiling` bytes of a larger input means the header -- or the whole file,
- * when it carries no terminator at all -- is a single line past the ceiling, so it
- * rejects with the same {@link singleLineCeilingError} the stream path raises.
+ * Reject if the LEADING logical line of a materialized (non-stream) CSV
+ * exceeds `byteCeiling` -- the bound {@link loadCSVFile}'s stream guard
+ * cannot enforce on a source it does not stream. The web caller passes a
+ * browser `File`, read whole through FileReader with no `data` events to
+ * scan, so this pre-read scans forward from the start for the first line
+ * terminator (LF or CR) before parsing. Finding none within `byteCeiling`
+ * bytes means the header -- or the whole file, if it holds no terminator at
+ * all -- is a single line past the ceiling, and it rejects with the same
+ * {@link singleLineCeilingError} the stream path raises.
  *
- * Scoped to the leading line by design: it reads only up to the first terminator
- * (one short window for a well-formed header) and never the whole file, so a
- * normal file pays a single small read -- and skips even that when it is no larger
- * than the ceiling, which cannot then hold an over-ceiling line. A giant field
- * buried in a *later* row on this path is therefore not caught here; it stays
- * bounded by the web app's intake cap (apps/web's `MAX_CSV_FILE_BYTES`), which a
- * whole-file re-scan here would only duplicate at the cost of a second full read.
- * Inert for any input without the Blob read surface -- a Node stream (the guard
- * bounds it) or a string (parsed whole in one pass, no cross-chunk growth) returns
- * at once.
+ * Scoped to the leading line: it reads only up to the first terminator, so a
+ * normal file pays one small read, skipped entirely when the file is no
+ * larger than the ceiling. A giant field buried in a LATER row is therefore
+ * not caught here; that stays bounded by the web app's intake cap
+ * (`MAX_CSV_FILE_BYTES`). Inert for any input without the Blob read surface
+ * -- a Node stream (bounded by the stream guard) or a string (parsed whole
+ * in one pass) returns at once.
  *
- * @internal exported only so the unit tests can drive its resolve cases directly:
- * loadCSVFile cannot reach them in Node, where a File hits PapaParse's FileReader
- * path (absent there). Not re-exported from the package entry point.
+ * @internal exported only so the unit tests can drive its resolve cases
+ * directly: loadCSVFile cannot reach them in Node, where a File hits
+ * PapaParse's FileReader path (absent there). Not re-exported from the
+ * package entry point.
  */
 export async function assertLeadingLineWithinByteCeiling(
   file: LocalFile,
@@ -196,26 +187,25 @@ type StreamSource = {
 };
 
 /**
- * Bound a single logical line on a Node stream `source`: across its `data` events
- * it counts bytes since the last terminator (LF or CR) and, when one unterminated
- * run exceeds `byteCeiling`, destroys the source with
- * {@link singleLineCeilingError}. PapaParse, reading the same source, reports that
- * as a read error through its documented `error` callback -- so the bound rests
- * only on the stream's public `on`/`destroy` surface and PapaParse's public error
- * contract, never on its `chunk`/`cursor` behavior. Returns a detach function the
- * caller runs once the parse settles. Inert (a no-op detach) for a source without
- * `on` -- a browser File, bounded by {@link assertLeadingLineWithinByteCeiling}.
+ * Bound a single logical line on a Node stream `source`: across its `data`
+ * events it counts bytes since the last terminator (LF or CR) and, when one
+ * unterminated run exceeds `byteCeiling`, destroys the source with
+ * {@link singleLineCeilingError}. PapaParse, reading the same source, reports
+ * that as a read error through its documented `error` callback, so the bound
+ * rests only on the stream's public `on`/`destroy` surface and PapaParse's
+ * public error contract. Returns a detach function the caller runs once the
+ * parse settles. Inert (a no-op detach) for a source without `on` -- a
+ * browser File, bounded instead by {@link assertLeadingLineWithinByteCeiling}.
  *
- * The byte scan deliberately ignores RFC 4180 quoting, so it never wrongly rejects
- * a valid file (a newline inside a quoted field just resets the run -- the safe,
- * false-negative direction). The cost is one shape this ceiling does NOT bound: a
- * single quoted field carrying embedded newlines, which PapaParse buffers whole as
- * one logical row while the run keeps resetting, so its memory and (quadratic)
- * re-split CPU scale with the field, not the ceiling. That shape stays bounded only
- * by the input being operator-local -- the CLI sets no size cap -- or, on the web,
- * by MAX_CSV_FILE_BYTES; it is not a regression, the read was unbounded for it
- * before this ceiling too. Byte-wise is safe for UTF-8 (0x0a/0x0d are below 0x80,
- * so neither occurs as a continuation byte of a multi-byte character).
+ * The byte scan ignores RFC 4180 quoting by design, so it never wrongly
+ * rejects a valid file (a newline inside a quoted field just resets the run).
+ * The cost is one shape this ceiling does NOT bound: a single quoted field
+ * holding embedded newlines, which PapaParse buffers whole as one logical row
+ * while the run keeps resetting, so memory and CPU scale with the field, not
+ * the ceiling -- bounded only by the input being operator-local, or by
+ * MAX_CSV_FILE_BYTES on the web; the read was unbounded for this shape before
+ * this ceiling too. Byte-wise is safe for UTF-8 (0x0a/0x0d are below 0x80, so
+ * neither occurs as a continuation byte of a multi-byte character).
  *
  * @internal exported only for the unit tests, which drive its scan and trip
  * directly against a fake stream source -- isolating the run accounting from
@@ -274,16 +264,16 @@ function releaseSource(detachGuard: () => void, source: StreamSource): void {
 /**
  * A parsed CSV row as {@link loadCSVFile} returns it under PapaParse's
  * `header: true`: an object keyed by column name. PapaParse gives no per-cell
- * string guarantee -- a row shorter than the header omits its trailing columns (a
- * by-name read is then `undefined`), and a row with fields beyond the header
- * carries a non-string `__parsed_extra` array. {@link loadCSVFile} normalizes that
- * away -- keeping only the string-valued cells (see {@link normalizeCSVRow}) -- so
- * a present column is a `string` and a missing one reads as `undefined`, which this
- * type states honestly: the `| undefined` holds even with `noUncheckedIndexedAccess`
- * off, and no cell is ever a non-string a generic value iteration could trip over.
- * Every row consumer -- the exchange pipeline, standardization, payload extraction
- * -- threads this type rather than the `Record<string, string>` the raw cast once
- * asserted but could not back.
+ * string guarantee -- a row shorter than the header omits its trailing columns
+ * (a by-name read is then `undefined`), and a row with fields beyond the
+ * header holds a non-string `__parsed_extra` array. {@link loadCSVFile}
+ * normalizes that away, keeping only the string-valued cells (see
+ * {@link normalizeCSVRow}), so a present column is a `string` and a missing
+ * one is `undefined`, which this type states accurately: the `| undefined`
+ * holds even with `noUncheckedIndexedAccess` off, and no cell is ever a
+ * non-string a generic value iteration could trip over. Every row consumer --
+ * the exchange pipeline, standardization, payload extraction -- threads this
+ * type rather than an unsound `Record<string, string>` cast.
  */
 export type CSVRow = Record<string, string | undefined>;
 
@@ -292,15 +282,15 @@ export type CSVRow = Record<string, string | undefined>;
  * `undefined` when the row omits that column.
  *
  * A parsed row is a plain object, so `row[column]` for a column the row lacks
- * walks the prototype chain: a column named exactly an `Object.prototype` member
- * (`toString`, `valueOf`, `constructor`, `hasOwnProperty`, ...) would read the
- * INHERITED function rather than `undefined`, and that non-string value slips
- * past a nullish/undefined guard into standardization, the transmitted payload,
- * and the on-disk table. A short row omitting such a column is the realistic
- * trigger (a malformed but operator-local CSV). An own-property check
- * ({@link Object.hasOwn}) reads a missing column as absent regardless of the
- * prototype chain, so every by-name row read must go through here rather than
- * index `row[column]` directly.
+ * walks the prototype chain: a column named exactly an `Object.prototype`
+ * member (`toString`, `valueOf`, `constructor`, `hasOwnProperty`, ...) would
+ * read the INHERITED function rather than `undefined`, and that non-string
+ * value slips past a nullish/undefined guard into standardization, the
+ * transmitted payload, and the on-disk table -- the realistic trigger is a
+ * short row (a malformed but operator-local CSV) omitting such a column. An
+ * own-property check ({@link Object.hasOwn}) treats a missing column as
+ * absent regardless of the prototype chain, so every by-name row read must go
+ * through here rather than index `row[column]` directly.
  *
  * @internal used across the core row consumers (standardization, payload
  * extraction, date inference); not a supported public entry point.
@@ -314,7 +304,7 @@ export function readRowColumn(row: CSVRow, column: string): string | undefined {
  * cell -- the `__parsed_extra` array PapaParse attaches to a row longer than the
  * header -- so every retained value is a genuine string. A row that is already
  * all-string (the common well-formed row) is returned by reference; only a row
- * carrying a non-string cell is rebuilt without it.
+ * holding a non-string cell is rebuilt without it.
  *
  * The fault gate in {@link runSharedCSVParse} refuses an over-long row upstream of
  * this (PapaParse reports `TooManyFields` for the same rows it attaches
@@ -337,31 +327,23 @@ function normalizeCSVRow(row: unknown): CSVRow {
 
 /**
  * The PapaParse configuration every CSV read in this module shares -- the ONE
- * config object behind both the whole-file loader ({@link loadCSVFile}) and the
- * streaming row-consumer ({@link streamCSVRows}). Config identity is what makes
- * the two drivers parse-equivalent: the web browser worker wraps loadCSVFile and
- * the server streams over the same header/skip-empty/inline semantics, so a row
- * one driver produces is byte-identical to the other's, and neither can silently
- * drift from the browser's parse.
+ * config object behind both the whole-file loader ({@link loadCSVFile}) and
+ * the streaming row-consumer ({@link streamCSVRows}). Config identity is what
+ * makes the two drivers parse-equivalent: a row one produces is
+ * byte-identical to the other's, and neither can silently drift from the
+ * browser's parse.
  *
- * Parse INLINE, never in a Web Worker. PapaParse's `worker: true` spawns its
- * worker from its own bundled source by reading the running script's URL -- a
- * self-location trick that survives a dev server (the module is a real,
- * URL-addressable file) but breaks once Vite bundles and minifies PapaParse into a
- * chunk: the spawned worker runs a broken bootstrap that mis-applies `header:
- * true`, so the header row AND the first data row both land in `meta.fields` while
- * `data` comes back empty. The malformed header then crashes the first consumer
- * that treats a field as a string (inferMetadata's `name.toLowerCase()`), so the
- * production web inviter could not generate an invitation of any kind. Dev and the
- * real-Chromium browser tests pass because the worker resolves there -- the failure
- * is specific to the bundled build, so no unit/browser test catches it; the header
- * guard in {@link runSharedCSVParse} is the executable backstop. Inline parsing
- * blocks the main thread for the parse, acceptable for the once-per-exchange
- * invite/accept file; an off-main-thread parse, if ever wanted for very large
- * files, must go through a Vite-native worker in the web app, not PapaParse's
- * self-hosted one. Under Node (the CLI and the web server) PapaParse never honored
- * the worker anyway (`WORKERS_SUPPORTED` is `!!global.Worker`, false there), so
- * this changes only the web build.
+ * Parse INLINE, never in a Web Worker: PapaParse's `worker: true` spawns its
+ * worker by reading the running script's URL, which breaks once Vite bundles
+ * and minifies PapaParse -- the spawned worker mis-applies `header: true`,
+ * landing the header row AND the first data row in `meta.fields` while `data`
+ * comes back empty, which crashed the production web inviter outright. No
+ * unit/browser test catches it, since dev and real-Chromium tests resolve the
+ * worker; the header guard in {@link runSharedCSVParse} is the executable
+ * safety check. Inline parsing blocks the main thread, acceptable for the
+ * once-per-exchange invite/accept file. Under Node, PapaParse never honored
+ * the worker anyway (`WORKERS_SUPPORTED` is `!!global.Worker`, false there),
+ * so this changes only the web build.
  */
 const SHARED_CSV_PARSE_CONFIG = {
   worker: false,
@@ -378,27 +360,23 @@ const SHARED_CSV_PARSE_CONFIG = {
  * {@link Papa.ParseMeta} once the parse settles; rejects on a read/parse error or
  * a ceiling trip.
  *
- * `byteCeiling` bounds a single logical line -- the partial line PapaParse must
- * buffer whole before it yields a chunk -- so a no-newline file, an oversized
- * header, or one enormous field fails fast with a clear, operator-readable error
- * rather than driving memory and CPU with that span; see {@link CSV_LINE_BYTE_CEILING}.
- * Two complementary mechanisms enforce it, both on public API only. For the Node
- * stream a CLI or server caller passes, {@link guardStreamLineByteCeiling} scans
- * the source's own `data` events and destroys it past the ceiling, which PapaParse
- * surfaces through its `error` callback -- bounding every line (header or any data
- * row). For the browser `File` the web caller passes -- read whole through
- * FileReader, with no `data` events to scan -- the bounded pre-read
- * ({@link assertLeadingLineWithinByteCeiling}) instead rejects an oversized LEADING
- * line before parsing; a giant field in a LATER row on that path stays bounded by
- * the web app's intake cap (`MAX_CSV_FILE_BYTES`).
+ * `byteCeiling` bounds a single logical line -- the partial line PapaParse
+ * must buffer whole before it yields a chunk -- so a no-newline file, an
+ * oversized header, or one enormous field fails fast instead of driving
+ * memory and CPU with that span (see {@link CSV_LINE_BYTE_CEILING}). Enforced
+ * by two complementary, public-API-only mechanisms: {@link
+ * guardStreamLineByteCeiling} for the Node stream a CLI or server caller
+ * passes, and {@link assertLeadingLineWithinByteCeiling} for the browser
+ * `File` the web caller passes, which exposes no `data` events to scan.
  *
- * PapaParse's per-chunk `chunk` callback is the only place every row is seen: in
- * BOTH inline and worker mode `complete`'s argument is the FINAL chunk (worker) or
- * `undefined` (inline once a `chunk` callback is present), never the whole file, so
- * a driver that read `complete` alone would silently truncate a >1-chunk file.
- * Rows are normalized to {@link CSVRow} at this single boundary -- dropping the
- * non-string `__parsed_extra` PapaParse attaches to an over-long row -- so both
- * drivers see the honest row type without a per-site cast.
+ * PapaParse's per-chunk `chunk` callback is the only place every row is seen:
+ * in both inline and worker mode, `complete`'s argument is the FINAL chunk
+ * (worker) or `undefined` (inline, once a `chunk` callback is present), never
+ * the whole file, so a driver reading `complete` alone would silently
+ * truncate a multi-chunk file. Rows are normalized to {@link CSVRow} at this
+ * single boundary, dropping the non-string `__parsed_extra` PapaParse
+ * attaches to an over-long row, so both drivers see the accurate row type
+ * without a per-site cast.
  *
  * Caveat on `meta`: only `meta.fields` (the header) is whole-file-stable; the rest
  * (`cursor`, `truncated`, `aborted`, ...) is the FINAL chunk's, so a consumer must
@@ -436,12 +414,11 @@ async function runSharedCSVParse(
         // Refuse the whole read on the first row-level fault, BEFORE the chunk
         // reaches the consumer. PapaParse reports an unterminated quote or a
         // field-count mismatch here and parses on, having dropped, merged, or
-        // shifted the values of the rows around it, so a driver that read only
-        // `data` would return a dataset that silently differs from the file --
-        // a stray quote in an upstream export collapsing a whole file to a few
-        // rows. Aborting rather than reading to the end also stops the read at
-        // the fault. The refusal is at this shared runner rather than at each
-        // caller so no read site can forget it.
+        // shifted values around the fault, so a driver reading only `data`
+        // would silently return a dataset differing from the file. Aborting
+        // rather than reading to the end also stops the read at the fault.
+        // The refusal is at this shared runner rather than at each caller so
+        // no read site can forget it.
         const fault = results.errors.find(
           (error) => !BENIGN_CSV_PARSE_ERROR_CODES.has(error.code),
         );
@@ -459,7 +436,7 @@ async function runSharedCSVParse(
         const rows: Array<CSVRow> = [];
         for (const row of results.data) rows.push(normalizeCSVRow(row));
         consumeChunk(rows, results.errors, results.meta);
-        // Every chunk's meta carries the header field list (the parser's fields
+        // Every chunk's meta holds the header field list (the parser's fields
         // persist across chunks), so keep the latest for `complete`, whose own
         // argument is only the final chunk (worker) or undefined (inline).
         meta = results.meta;
@@ -515,14 +492,14 @@ async function runSharedCSVParse(
  * truncated to its final chunk. Rejects on a read/stream error, and -- through the
  * shared runner's fault gate -- on a row-level parse fault with a
  * {@link CsvRowParseError}, so the resolved `data` is the file's own rows or
- * nothing. The resolved `errors` therefore carries only the codes the gate
+ * nothing. The resolved `errors` therefore holds only the codes the gate
  * classifies as benign; a caller needs no check of its own.
  *
  * The single-line `byteCeiling` and the parse semantics are the shared runner's
  * ({@link runSharedCSVParse}); this driver's whole contribution is to accumulate
  * every chunk's rows on this thread. Unlike loadCSVColumnSample (whose row cap
  * also removes real waste), this read genuinely consumes every row of the
- * operator's own file, so the ceiling is a robustness backstop on a single
+ * operator's own file, so the ceiling is a robustness safety check on a single
  * pathological line, not a memory saving for well-formed input. The whole-file
  * streaming counterpart that retains NOTHING is {@link streamCSVRows}.
  *
@@ -556,18 +533,17 @@ export async function loadCSVFile(
  * the header column list (`meta.fields`, stable across chunks) so a consumer can
  * key per-column state without a separate read.
  *
- * The SAME shared runner ({@link runSharedCSVParse}), config, single-line byte
- * ceiling, row normalization, and row-level fault gate as {@link loadCSVFile} --
- * one config, two drivers -- so a streaming server pass and a browser worker
- * wrapping loadCSVFile parse identically. Resolves with the header column list once
- * the parse settles; rejects on a read/parse error or a ceiling trip, the same
- * contract as loadCSVFile. A ceiling trip rejects with a
- * {@link CsvLineByteCeilingError} and a row-level fault with a
- * {@link CsvRowParseError}, so a caller can tell an oversized/unterminated line
- * from a malformed row. The fault gate refuses the read before the faulting chunk
- * reaches `consumeChunk`, so a consumer never accumulates rows the file does not
- * contain -- but chunks BEFORE the fault have already been handed over, so a
- * consumer with side effects must discard its own state on a rejection.
+ * Shares {@link runSharedCSVParse}'s config, single-line byte ceiling, row
+ * normalization, and row-level fault gate with {@link loadCSVFile} -- one
+ * config, two drivers -- so a streaming server pass and a browser worker
+ * wrapping loadCSVFile parse identically. Resolves with the header column
+ * list once the parse settles; rejects the same way as loadCSVFile: a
+ * ceiling trip with {@link CsvLineByteCeilingError}, a row-level fault with
+ * {@link CsvRowParseError}. The fault gate refuses the read before the
+ * faulting chunk reaches `consumeChunk`, so a consumer never accumulates rows
+ * the file does not contain -- but chunks BEFORE the fault have already been
+ * handed over, so a consumer with side effects must discard its own state on
+ * a rejection.
  */
 export async function streamCSVRows(
   file: LocalFile,
@@ -591,26 +567,18 @@ export async function streamCSVRows(
  * from the header and the date-input format from the date-of-birth column, neither
  * of which needs every row.
  *
- * For a well-formed CSV this holds peak memory to the header plus one parse chunk
- * rather than the whole input. Two bounds enforce that: `sampleLimit` caps the
- * retained rows, and `byteCeiling` bounds a single logical line. Without the line
- * bound an input whose first terminator is far from the start -- one giant line
- * with no newline, one enormous field, or a multi-megabyte header -- would drive
- * memory (and CPU, via repeated re-splitting of that partial line) with the span,
- * since PapaParse must buffer one whole logical line before it can yield a chunk.
- * The line bound is enforced by {@link guardStreamLineByteCeiling} on the source's
- * own `data` events (it destroys the stream past the ceiling, surfaced through
- * PapaParse's `error` callback), so those shapes reject fast with a clear error;
- * see {@link CSV_LINE_BYTE_CEILING}.
+ * For a well-formed CSV this holds peak memory to the header plus one parse
+ * chunk. Two bounds enforce that: `sampleLimit` caps the retained rows, and
+ * `byteCeiling` bounds a single logical line, enforced by
+ * {@link guardStreamLineByteCeiling}; see {@link CSV_LINE_BYTE_CEILING}.
  *
- * `selectColumn` is invoked with the header field list and returns the name of
- * the column to sample (the DOB column, for date-format inference) or `undefined`
- * to collect no sample. It is called once the header lands -- which, for a header
- * longer than the source stream's read buffer, is a later chunk than the first
- * (the same whole-header read `loadCSVFile` performs), so the returned columns are
- * never the truncated prefix a first-chunk-only read would yield. Resolving the
- * column from the header inside the single pass -- rather than the caller
- * re-opening the source -- is what lets the same read serve a non-rewindable
+ * `selectColumn` is invoked with the header field list and returns the name
+ * of the column to sample (the DOB column, for date-format inference) or
+ * `undefined` to collect no sample. Called once the header lands -- for a
+ * header longer than the source stream's read buffer, a later chunk than the
+ * first -- so the returned columns are never a truncated prefix. Resolving
+ * the column from the header inside the single pass, rather than the caller
+ * re-opening the source, is what lets the same read serve a non-rewindable
  * stdin stream.
  *
  * The sample holds only non-empty (after-trim) values, capped at `sampleLimit`.
@@ -640,15 +608,12 @@ export function loadCSVColumnSample(
     let target: string | undefined;
     const sample: Array<string> = [];
 
-    // Bound a single logical line on the streamed read (init reads a file path or
-    // stdin): the guard scans the source's own `data` events and destroys it past
-    // the ceiling, which PapaParse -- reading the same source -- reports through the
-    // `error` callback below. This bounds the no-terminator / giant-field /
-    // giant-header span using only the stream's public `on`/`destroy` and
-    // PapaParse's public `error` contract, not its `chunk`/`cursor` internals. The
-    // `sampleLimit` / no-column `parser.abort()` below is a separate, public-API
-    // early stop. Inert for a non-stream LocalFile (a browser File has no `data`
-    // events) -- no current caller passes one.
+    // Bound a single logical line on the streamed read (init reads a file
+    // path or stdin), using only the stream's public `on`/`destroy` surface
+    // and PapaParse's public `error` contract (see
+    // {@link guardStreamLineByteCeiling}). The `sampleLimit` / no-column
+    // `parser.abort()` below is a separate, public-API early stop. Inert for
+    // a non-stream LocalFile -- no current caller passes one.
     const source = file as StreamSource;
     const detachGuard = guardStreamLineByteCeiling(source, byteCeiling);
 
@@ -661,13 +626,13 @@ export function loadCSVColumnSample(
       skipEmptyLines: true,
       chunk: (results, parser) => {
         if (target === undefined) {
-          // Settle the header and the column to sample as soon as a non-empty
-          // header is available -- not unconditionally on the first chunk. A
-          // header longer than the source stream's read buffer arrives split
-          // across the first chunks, so `meta.fields` is `[]` until a later chunk
-          // completes the header row (loadCSVFile likewise reads the latest
-          // fields, not the first chunk's). Keep the latest and wait: until the
-          // header lands there are no data rows to sample anyway.
+          // Fix the header and the column to sample as soon as a non-empty
+          // header is available -- not unconditionally on the first chunk,
+          // since a header longer than the source stream's read buffer
+          // arrives split across the first chunks (`meta.fields` is `[]`
+          // until a later chunk completes it, as loadCSVFile also accounts
+          // for). Until the header lands there are no data rows to sample
+          // anyway.
           columns = results.meta.fields ?? [];
           if (columns.length === 0) return;
           target = selectColumn(columns);

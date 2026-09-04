@@ -30,21 +30,23 @@ const statusCompletedMessage = z.object({
   status: z.literal("completed"),
 });
 
-// A single flat array parsed as the whole received message (the root). With no
-// enclosing array/record/tuple frame above the root, it cannot drive the ~130k
-// STACK overflow {@link associationTableMessage} faces -- but a far larger count
-// (~millions of invalid elements, within MAX_FRAME_SIZE_BYTES) makes Zod throw a
-// DIFFERENT RangeError ("Invalid string length", ~3.5M on Zod 4.4.3) building its
-// error string from one issue per element. The single-issue validator caps issue
-// accumulation at one regardless of count (see utils/singleIssueArray.ts), so a
-// pathological-count frame fails as a clean bounded rejection. A count `.max()`
-// is not an option: the legitimate count is the partner's original-index list,
-// in the millions, bounded only by MAX_FRAME_SIZE_BYTES. Number.isFinite mirrors
-// `z.number()` exactly (accepts every finite number, rejects NaN/Infinity and
-// non-numbers). This frame is read by a direct `.parse()` (send-before-parse,
-// below), wrapped via parseOrProtocolError so even a validator throw surfaces a
-// clean ConnectionError("protocol") rather than escaping bare.
-/** @internal exported for the pathological-count wire-message test. */
+// A single flat array parsed as the whole received message (the root). With
+// no enclosing array/record/tuple frame above the root, it cannot drive the
+// ~130k STACK overflow {@link associationTableMessage} faces -- but a far
+// larger count (~millions of invalid elements, within
+// MAX_FRAME_SIZE_BYTES) makes Zod throw a DIFFERENT RangeError ("Invalid
+// string length", ~3.5M on Zod 4.4.3) building its error string from one
+// issue per element. The single-issue validator caps issue accumulation at
+// one regardless of count (see utils/singleIssueArray.ts), so a
+// pathological-count frame fails as a clean bounded rejection. A count
+// `.max()` is not an option: the legitimate count is the partner's
+// original-index list, in the millions, bounded only by
+// MAX_FRAME_SIZE_BYTES. Number.isFinite mirrors `z.number()` exactly
+// (accepts every finite number, rejects NaN/Infinity and non-numbers). This
+// frame is read by a direct `.parse()` (send-before-parse, below), wrapped
+// via parseOrProtocolError so even a validator throw produces a clean
+// ConnectionError("protocol") rather than escaping bare.
+/** @internal */
 export const numberArrayMessage = singleIssueArray<number>(
   Number.isFinite,
   "must be an array of finite numbers",
@@ -62,7 +64,7 @@ export const numberArrayMessage = singleIssueArray<number>(
 // validator mirrors `z.number()` exactly via Number.isFinite (which, like
 // z.number(), accepts every finite number and rejects NaN/Infinity and
 // non-numbers). See utils/singleIssueArray.ts.
-/** @internal exported for the pathological-count wire-message test. */
+/** @internal */
 export const associationTableMessage = z.tuple([
   singleIssueArray<number>(
     Number.isFinite,
@@ -99,18 +101,20 @@ export class PSIParticipant {
     id: string,
     library: PSILibrary,
     config: Config,
-    // Per-message caps on the encrypted-element count each inbound PSI frame may
-    // declare, derived from authenticated session state (the agreed key count and
-    // the two exchanged record counts; see psiElementBounds in frameSize.ts) and
-    // enforced at every deserializeBinary seam below. Required, not defaulted: a
-    // fail-open default would silently drop the amplification guard on a caller
-    // that forgot it.
+    // Per-message caps on the encrypted-element count each inbound PSI
+    // frame may declare, derived from authenticated session state (the
+    // agreed key count and the two exchanged record counts; see
+    // psiElementBounds in frameSize.ts) and enforced at every
+    // deserializeBinary call site below. Required, not defaulted: a
+    // fail-open default would silently drop the amplification guard on a
+    // caller that forgot it.
     elementBounds: PsiElementBounds,
-    // The crypto engine backing this participant. Defaults to an in-process engine
-    // built from `library` -- today's behavior, with the masking running on the
-    // calling thread. The CLI injects a worker-backed engine so the masking runs
-    // off the event-loop-owning thread; that engine holds the key objects in its
-    // worker, so `library` is used only to build the default.
+    // The crypto engine backing this participant. Defaults to an
+    // in-process engine built from `library`, with the masking running on
+    // the calling thread. The CLI injects a worker-backed engine so the
+    // masking runs off the event-loop-owning thread; that engine holds the
+    // key objects in its worker, so `library` is used only to build the
+    // default.
     engine?: PsiEngine,
   ) {
     this.id = id;
@@ -142,21 +146,22 @@ export class PSIParticipant {
     this.engine.dispose();
   }
 
-  // Reject a partner-supplied PSI frame that DECLARES more encrypted elements than
-  // allowed, by scanning the protobuf wire format BEFORE handing the bytes to
-  // deserializeBinary -- which allocates one heap object (~211 bytes, measured) per
-  // declared repeated entry. Without a pre-scan a malicious partner could pack a
-  // setup / request / response with many minimal (~2-byte) repeated entries --
-  // within the frame byte cap, yet declaring up to ~frameBytes/2 elements -- and
-  // exhaust memory (tens of GiB) inside deserializeBinary itself, before any
-  // post-deserialize count could read it. The ceiling is the tighter of the
-  // authenticated `keyCount * recordCount` bound (which reads only authenticated
-  // session state, so both parties compute it identically) and the absolute
-  // {@link MAX_PSI_DECODE_ELEMENTS} -- the latter binds a cascade frame whose
-  // partner over-declares its record count, since the authenticated bound alone can
-  // be inflated there. The scan stops as soon as the count exceeds the ceiling, so
-  // an over-declared frame costs O(ceiling), not O(frame). A malformed frame is a
-  // clean protocol abort too. See connection/psiElementScan.ts.
+  // Reject a partner-supplied PSI frame that DECLARES more encrypted
+  // elements than allowed, by scanning the protobuf wire format before
+  // handing the bytes to deserializeBinary -- which allocates one heap
+  // object (~211 bytes, measured) per declared repeated entry. Without a
+  // pre-scan, a malicious partner could pack many minimal (~2-byte)
+  // repeated entries within the frame byte cap -- declaring up to
+  // ~frameBytes/2 elements -- and exhaust memory (tens of GiB) inside
+  // deserializeBinary itself, before any post-deserialize count could read
+  // it. The ceiling is the tighter of the authenticated
+  // `keyCount * recordCount` bound (both parties compute it identically
+  // from authenticated session state) and the absolute
+  // {@link MAX_PSI_DECODE_ELEMENTS}, which binds a cascade frame whose
+  // partner over-declares its record count. The scan stops as soon as the
+  // count exceeds the ceiling, so an over-declared frame costs O(ceiling),
+  // not O(frame); a malformed frame is a clean protocol abort too. See
+  // connection/psiElementScan.ts.
   private assertInboundElementBound(
     kind: PsiMessageKind,
     bytes: Uint8Array,
@@ -244,11 +249,12 @@ export class PSIParticipant {
   }
 
   // Host-side element-count guard, then hand the setup to the engine to
-  // deserialize, Raw-check, and hold. Split from the match (below) so the cascade
-  // joiner can validate the setup the instant it arrives -- a fail-fast before it
-  // sends its own request -- while the response it matches against arrives a round
-  // trip later. The guard runs here, above the engine seam, so the engine only ever
-  // deserializes an already-bounded frame.
+  // deserialize, Raw-check, and hold. Split from the match (below) so the
+  // cascade joiner can validate the setup the instant it arrives -- a
+  // fail-fast before it sends its own request -- while the response it
+  // matches against arrives a round trip later. The guard runs here, above
+  // the engine boundary, so the engine only ever deserializes an
+  // already-bounded frame.
   private receiveServerSetup(setupBytes: Uint8Array): Promise<void> {
     this.assertInboundElementBound(
       "serverSetup",
@@ -377,7 +383,8 @@ export class PSIParticipant {
 
       await conn.send(serverResponse);
 
-      // The partner sends [theirIndices, ourIndices]; the swapped names restore our-first order.
+      // The partner sends [theirIndices, ourIndices]; the swapped names
+      // restore our-first order.
       const [partnerIndices, localIndices] = await receiveParsed(
         conn,
         associationTableMessage,
