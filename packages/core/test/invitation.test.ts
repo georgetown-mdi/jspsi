@@ -152,6 +152,33 @@ test("hasExpiryInstantPassed: fail-open treats an unparseable expires as not pas
   }
 });
 
+test("hasExpiryInstantPassed: an unreadable now takes the verdict, not a silent not-passed", () => {
+  const unreadableNow = new Date("not-a-date");
+  const expires = "2025-12-31T23:59:59Z";
+  expect(
+    hasExpiryInstantPassed(expires, unreadableNow, {
+      onUnparseable: "fail-closed",
+    }),
+  ).toBe(true);
+  expect(
+    hasExpiryInstantPassed(expires, unreadableNow, {
+      onUnparseable: "fail-open",
+    }),
+  ).toBe(false);
+  // An absent bound is no bound in force, whatever the clock reads.
+  expect(
+    hasExpiryInstantPassed(undefined, unreadableNow, {
+      onUnparseable: "fail-closed",
+    }),
+  ).toBe(false);
+});
+
+test("isInvitationExpired: an unreadable now is expired, not usable", () => {
+  expect(
+    isInvitationExpired("2099-01-01T00:00:00Z", new Date("not-a-date")),
+  ).toBe(true);
+});
+
 // --- Round-trip --------------------------------------------------------------
 
 test("round-trips a token without expires", async () => {

@@ -214,8 +214,8 @@ export const MAX_SIGNING_FINGERPRINT_BODY_BYTES = 4 * 1024;
 /**
  * The outcome of reading a job request body under a byte cap:
  * - `too-large`: the body exceeded the cap (mapped to 413).
- * - `invalid`: the body was absent, was not valid JSON, or exceeded the
- *   structural bound parseBoundedJson enforces (mapped to 400).
+ * - `invalid`: the body was absent, was not valid UTF-8, was not valid JSON, or
+ *   exceeded the structural bound parseBoundedJson enforces (mapped to 400).
  * - `parsed`: the decoded JSON value.
  */
 export type JobRequestBodyResult =
@@ -229,8 +229,10 @@ export type JobRequestBodyResult =
  * streamed through {@link ReadableStream.getReader}; each chunk's `byteLength`
  * adds to a running total, and the read aborts the moment the total EXCEEDS
  * `maxBytes` -- the whole body is never buffered first. On abort the reader is
- * cancelled to free the connection. The accumulated bytes are decoded and parsed
- * here (the stream is consumed, so `request.json()` is no longer available).
+ * cancelled to free the connection. The accumulated BYTES go to the bounded
+ * parse (the stream is consumed, so `request.json()` is no longer available),
+ * which decodes them UTF-8-fatal: a body carrying an invalid byte is `invalid`
+ * rather than a value parsed with U+FFFD substituted for it.
  *
  * Pure over its arguments (no global fetch), so a test can drive it with any
  * `Request` and a small `maxBytes` to exercise the boundary.
@@ -266,7 +268,7 @@ export async function readJobRequestBody(
   }
   let value: unknown;
   try {
-    value = parseBoundedJson(new TextDecoder().decode(merged));
+    value = parseBoundedJson(merged);
   } catch {
     return { kind: "invalid" };
   }
