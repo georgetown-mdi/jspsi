@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { z } from "zod";
 
-import { EXCHANGE_RECORD_OUTCOMES } from "@psilink/core";
+import { EXCHANGE_RECORD_OUTCOMES, parseBoundedJson } from "@psilink/core";
 
 import { isPathWithin } from "./pathContainment";
 
@@ -174,7 +174,7 @@ const recordSummarySchema = z.object({
 export function readRecordSummary(recordPath: string): JobRecordSummary | null {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(fs.readFileSync(recordPath, "utf8"));
+    parsed = parseBoundedJson(fs.readFileSync(recordPath, "utf8"));
   } catch {
     return null;
   }

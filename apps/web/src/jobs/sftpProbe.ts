@@ -1,4 +1,8 @@
-import { HOST_KEY_FINGERPRINT_REGEX, sanitizeForDisplay } from "@psilink/core";
+import {
+  HOST_KEY_FINGERPRINT_REGEX,
+  parseBoundedJson,
+  sanitizeForDisplay,
+} from "@psilink/core";
 
 import { runCapturedCliChild } from "./capturedCliChild";
 
@@ -212,7 +216,7 @@ export function parseProbeDiagnosis(
   if (line.length === 0) return undefined;
   let parsed: unknown;
   try {
-    parsed = JSON.parse(line);
+    parsed = parseBoundedJson(line);
   } catch {
     return undefined;
   }
@@ -250,7 +254,7 @@ export function parseProbeStdout(stdout: string): SftpProbeResult {
   if (line.length === 0) return { kind: "error" };
   let parsed: unknown;
   try {
-    parsed = JSON.parse(line);
+    parsed = parseBoundedJson(line);
   } catch {
     return { kind: "error" };
   }

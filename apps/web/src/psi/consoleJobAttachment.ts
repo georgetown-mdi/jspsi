@@ -1,4 +1,4 @@
-import { getLogger } from "@psilink/core";
+import { getLogger, parseBoundedJson } from "@psilink/core";
 
 import { whenDiagnostic } from "@utils/diagnostics";
 
@@ -78,7 +78,7 @@ export function readAttachment(): ConsoleJobAttachment | null {
   if (raw === null) return null;
   let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
+    parsed = parseBoundedJson(raw);
   } catch {
     clearAttachment();
     return null;

@@ -152,10 +152,7 @@ export default [
     // secret by mistake -- so raw `yaml` parsers are banned here: route YAML/JSON
     // parsing through the shared chokepoint now promoted to packages/core
     // (`@psilink/core`'s parseSensitiveYaml / parseSensitiveJson), which reports
-    // path-only. `stringify` carries no such channel and is allowed. JSON.parse is
-    // not banned yet: the web app's existing JSON.parse is non-secret peer/wire
-    // data; the JSON half lands with the browser secret-store work (tracked on the
-    // board).
+    // path-only. `stringify` carries no such channel and is allowed.
     files: ["src/**/*.{ts,tsx}", "server/**/*.ts"],
     // Fail CI on a stray or rule-silencing disable so the tripwire cannot be
     // quietly turned off on a sensitive parse (a bare `eslint .` only warns).
@@ -176,6 +173,33 @@ export default [
           // Re-carried from the boundary block above, which this block would
           // otherwise replace for src/ (flat config replaces a rule's options).
           patterns: crossWorkspaceImportBans.web,
+        },
+      ],
+    },
+  },
+  {
+    // The raw-JSON.parse ban for the web app, scoped to the browser bundle
+    // (src/) only. Raw `JSON.parse` is banned here in the no-restricted-properties
+    // form packages/core/src and apps/cli/src already use, which also catches an
+    // alias, a computed access, and a destructure. A request body, a relayed CLI
+    // line, and a persisted record are input this app did not produce, so each is
+    // parsed through `@psilink/core`'s parseBoundedJson; its bound and the
+    // rationale for it are in packages/core/src/utils/boundedJson.ts and
+    // docs/spec/CHANNEL_SECURITY.md. A parse of a value this process serialized
+    // itself opts out with an eslint-disable-next-line carrying a one-line why.
+    // The ban is a property-access ban on JSON.parse only, so a body read
+    // through Response.json() is outside it; apps/web/src has such sites
+    // (fetches of the console server's own job API), which stay unbounded and
+    // are left to review.
+    files: ["src/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-properties": [
+        "error",
+        {
+          object: "JSON",
+          property: "parse",
+          message:
+            "Parse JSON this app did not produce -- a request body, a relayed CLI line, a persisted record -- through @psilink/core's parseBoundedJson (a secret-bearing document through parseSensitiveJson); a raw JSON.parse is unbounded and can echo a leading span of the source. A value this process serialized itself: eslint-disable-next-line with a one-line justification.",
         },
       ],
     },

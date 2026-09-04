@@ -85,7 +85,7 @@ function warnIfWindowsAclOverPermissive(
       const currentSid = out.slice(0, sep);
       // Non-sensitive: PowerShell ACL-listing output, not a credential file, so
       // there is no secret for a parse error to leak.
-      // eslint-disable-next-line no-restricted-syntax -- non-credential parse, see above
+      // eslint-disable-next-line no-restricted-properties -- non-credential parse, see above
       const aces = JSON.parse(out.slice(sep + 1)) as Array<{
         s: string;
         r: number;
