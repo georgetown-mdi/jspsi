@@ -23,6 +23,7 @@ import {
   UsageError,
 } from "@psilink/core";
 
+import { REPORT_LIBRARY_INCOMPATIBILITY } from "./libraryIncompatibility";
 import { transportOperationStalledError } from "./sftpLivenessGuard";
 import type { SessionTransitionKind } from "./ssh2SftpAdapter";
 
@@ -241,9 +242,9 @@ export function unreadableTransportLifecycleWarning(
     `Every mid-exchange re-dial on this SFTP connection closes it from this ` +
     `side first and waits up to ${forcedCloseTimeoutMs} ms for that close, ` +
     `even on a connection that had already closed, so re-dialing is slower ` +
-    `than it needs to be. This build of psilink is not compatible with the ` +
-    `installed SFTP library; report it with the version from ` +
-    `'psilink --version'.`
+    `than it needs to be. The exchange still completes. This build of ` +
+    `psilink does not fully support the installed SFTP library; ` +
+    `${REPORT_LIBRARY_INCOMPATIBILITY}.`
   );
 }
 

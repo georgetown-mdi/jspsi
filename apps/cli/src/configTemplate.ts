@@ -37,8 +37,8 @@ const HEADER_LINES = [
   "linkage terms before running an exchange. The shared secret is NOT stored",
   "here -- it lives in the key file (.psilink.key), written by invite/accept.",
   "",
-  "Field reference: https://github.com/georgetown-mdi/jspsi/blob/main/docs/" +
-    "EXCHANGE_REFERENCE.md",
+  "Field reference:",
+  "  https://github.com/georgetown-mdi/jspsi/blob/main/docs/EXCHANGE_REFERENCE.md",
   "CLI usage: https://github.com/georgetown-mdi/jspsi/blob/main/docs/CLI.md",
   "snake_case keys; a value beginning with @ is read from the file at that path",
   "(use it for credentials so secrets stay out of this file).",

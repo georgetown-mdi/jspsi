@@ -7960,8 +7960,11 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     expect(adapter.midExchangeReconnectCount).toBe(1);
     const lostReading = unreadableLifecycleWarnings(warn);
     expect(lostReading).toHaveLength(1);
+    // A latency cost only, so it says the exchange still completes rather than
+    // borrowing the terminal failures' "not compatible".
+    expect(lostReading[0]).toContain("The exchange still completes.");
     expect(lostReading[0]).toContain(
-      "not compatible with the installed SFTP library",
+      "does not fully support the installed SFTP library",
     );
   });
 
@@ -8078,11 +8081,19 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       expect(unreadableLifecycleWarnings(warn)).toHaveLength(1);
       expect(messages).toHaveLength(2);
       expect(messages[1]).toContain("could not be re-opened");
+      // The lost reading costs latency and the refused re-dial costs the
+      // operation, so only the second claims an incompatible library.
+      expect(messages[0]).toContain(
+        "does not fully support the installed SFTP library",
+      );
+      expect(messages[1]).toContain(
+        "not compatible with the installed SFTP library",
+      );
       for (const message of messages) {
-        expect(message).toContain(
-          "not compatible with the installed SFTP library",
-        );
         expect(message).toContain("'psilink --version'");
+        expect(message).toContain(
+          "https://github.com/georgetown-mdi/jspsi/issues",
+        );
       }
     } finally {
       vi.useRealTimers();

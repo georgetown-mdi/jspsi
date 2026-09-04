@@ -493,12 +493,14 @@ export function parseLinkageStrategyFlag(
  */
 export function singlePassDisclosureNotice(): string {
   return (
-    "single-pass linkage discloses the sender's full per-key value structure " +
-    "to the receiver: the receiver observes matches on less precise keys that " +
-    "cascade would have filtered out before exchanging them. The matched " +
-    "result is unchanged -- this is a consented disclosure tradeoff for a " +
-    "round-trip count that stays constant as keys are added, not a free " +
-    "speed-up. See https://github.com/georgetown-mdi/jspsi/blob/main/docs/" +
+    "single-pass linkage means one of you sends the other everything it " +
+    "prepared for every linkage key at once, so that party also sees matches " +
+    "on the weaker keys, not only the strongest. Which of you sends is " +
+    "decided when the exchange runs, so it may be you. The matched result is " +
+    "the same either way; what differs is how much your partner can observe " +
+    "while it runs -- a consented disclosure tradeoff for a round-trip count " +
+    "that stays constant as keys are added, not a free speed-up. See " +
+    "https://github.com/georgetown-mdi/jspsi/blob/main/docs/" +
     "EXCHANGE_REFERENCE.md (linkage_terms.linkage_strategy)."
   );
 }

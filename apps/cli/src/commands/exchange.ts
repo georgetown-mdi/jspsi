@@ -809,10 +809,9 @@ const SIGNING_IDENTITY_FILE_UNSET_REFUSAL =
   "identity lives -- a mount of its own is the usual home, for example " +
   "/run/signing/psilink-signing-identity.json -- and create the file there " +
   "with 'psilink fingerprint --identity-file " +
-  "/run/signing/psilink-signing-identity.json'. The identity is a long-lived " +
-  "credential reused across every exchange and every partner, so where it " +
-  "lives is yours to decide. The run reads it and writes nothing to it, so a " +
-  'read-only mount is enough. Or set signing.mode to "none" to run unsigned.';
+  "/run/signing/psilink-signing-identity.json'. The run reads it and writes " +
+  "nothing to it, so a read-only mount is enough. Or set signing.mode to " +
+  '"none" to run unsigned.';
 
 /**
  * The tilde-expanded path a `certificate`-mode signing block names, refusing the

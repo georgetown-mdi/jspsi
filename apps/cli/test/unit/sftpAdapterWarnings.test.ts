@@ -301,8 +301,11 @@ describe("the unreadable transport lifecycle", () => {
       "closes it from this side first and waits up to 1000 ms for that " +
         "close, even on a connection that had already closed",
     );
-    expect(message).toContain("not compatible with the installed SFTP library");
-    expect(message).toContain("'psilink --version'");
+    expect(message).toContain(
+      "does not fully support the installed SFTP library",
+    );
+    expect(message).toContain("The exchange still completes.");
+    expect(message).toContain("https://github.com/georgetown-mdi/jspsi/issues");
     // The ssh2 reading behind it is contributor-tier detail, logged at debug by
     // the adapter rather than put on the operator's terminal.
     expect(message).not.toContain("ssh2's client.on()");

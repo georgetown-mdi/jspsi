@@ -233,6 +233,15 @@ inProcessOnly(
           ),
         ),
       ).toEqual([]);
+      // The whole family ends on the report destination, so this catches the
+      // hedged and latency-only wordings too.
+      expect(
+        logs.filter((entry) =>
+          entry.message.includes(
+            "https://github.com/georgetown-mdi/jspsi/issues",
+          ),
+        ),
+      ).toEqual([]);
     } finally {
       await party.stop();
     }

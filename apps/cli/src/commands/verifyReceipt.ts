@@ -351,7 +351,7 @@ const RESULT_SIZE_WORD: Record<ResultSizeStatus, string> = {
   verified: "matches the matched-pairs table it counts",
   mismatch:
     "DOES NOT MATCH the matched-pairs table it counts, which opened and " +
-    "has a different number of pairs -- the recorded figure is what " +
+    "holds a different number of pairs -- the recorded figure is what " +
     "disagrees, not the data",
   "not-supplied":
     "not checked (re-supply the result file so its matched pairs can be " +
@@ -576,8 +576,8 @@ const RUN_BINDING_WORD: Record<RunBindingStatus, string> = {
     "DOES NOT MATCH the exchange record's run binder: the receipt and the " +
     "record are from different runs, not from one exchange",
   unpaired:
-    "the exchange record has no run binder, so it records an exchange that " +
-    "produced no signed receipt -- this receipt is not that run's",
+    "the exchange record holds no run binder, so it records an exchange " +
+    "that produced no signed receipt -- this receipt is not that run's",
   "not-checked":
     "not checked (name this exchange's record as the positional and pass this " +
     "file with --signed-record); the signed values that can be checked here " +

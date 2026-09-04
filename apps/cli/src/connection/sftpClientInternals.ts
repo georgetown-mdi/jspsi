@@ -17,6 +17,8 @@
 // ssh2-sftp-client bump per docs/spec/DEPENDENCY_PINS.md ("Upgrading the SFTP
 // Stack").
 
+import { REPORT_LIBRARY_INCOMPATIBILITY } from "./libraryIncompatibility";
+
 /**
  * A single entry as ssh2's SFTPWrapper.readdir reports it. Only the fields the
  * transport consumes are typed; ssh2 supplies more (longname, the rest of
@@ -300,6 +302,6 @@ export function transportCloseSeamError(): Error {
     `this exchange closes the SFTP connection from this side at every poll ` +
       `boundary, which the installed SFTP library does not support, so the ` +
       `exchange cannot run. This build of psilink is not compatible with ` +
-      `that library; report it with the version from 'psilink --version'`,
+      `that library; ${REPORT_LIBRARY_INCOMPATIBILITY}`,
   );
 }

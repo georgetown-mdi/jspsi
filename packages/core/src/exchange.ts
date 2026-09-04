@@ -476,8 +476,9 @@ export function assertSigningModeImplemented(
   throw new OperatorConfigError(
     'this receipt signing mode is not yet implemented: only "certificate" ' +
       'signing produces a receipt, and a "session-derived" MAC or any other ' +
-      'non-certificate mode is refused. Set signing.mode to "certificate" to ' +
-      'sign receipts, or to "none" to run unsigned.',
+      "non-certificate mode is refused before the exchange runs. Set " +
+      'signing.mode to "certificate" to sign receipts, or to "none" to run ' +
+      "unsigned.",
   );
 }
 

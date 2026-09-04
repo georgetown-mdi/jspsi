@@ -131,9 +131,11 @@ export function addCommonBootstrapOptions(
       type: "string",
       describe:
         "who this party is (name, organization, contact). Your partner sees " +
-        "this label in the agreed linkage terms. Required by 'invite' and " +
-        "'accept'; elsewhere the label comes from linkage_terms.identity in " +
-        "the configuration file and this flag is ignored",
+        "this label in the agreed linkage terms. 'invite' and 'accept' " +
+        "require it, except where they take linkage_terms.identity from a " +
+        "configuration file instead; 'exchange' takes that field too, and " +
+        "this flag replaces it for one run; a quick exchange takes the label " +
+        "from this flag alone",
     })
     .option("server-port", {
       type: "number",
@@ -215,7 +217,9 @@ export function addCommonBootstrapOptions(
       type: "number",
       describe:
         "how many times to retry a failed connection; default: 3. It also " +
-        "caps mid-exchange reconnections in the default held-session mode.",
+        "caps mid-exchange reconnections in the default held-session mode: " +
+        "past that many session drops the exchange fails, and " +
+        "--connection-per-poll is not charged against it.",
     })
     .option("log-level", {
       type: "string",
@@ -246,8 +250,10 @@ export function addCommonBootstrapOptions(
       type: "boolean",
       describe:
         "emit a machine-readable NDJSON event stream on file descriptor 3 for " +
-        "a supervising process. Exits 64 if fd 3 is not wired. stdout and " +
-        "stderr are unchanged",
+        "a supervising process. Exits 64 if fd 3 is not wired. No effect on " +
+        "an offline invite or accept, which runs no exchange. stdout and " +
+        "stderr are unchanged. Format: https://github.com/georgetown-mdi/" +
+        "jspsi/blob/main/docs/spec/CLI_EVENTS.md",
     })
     .option("lockless-rendezvous", {
       type: "boolean",
@@ -289,7 +295,9 @@ export function addCommonBootstrapOptions(
       describe:
         "open a fresh SFTP session for each poll cycle instead of holding one " +
         "for the whole exchange. Use it when the partner's SFTP server caps " +
-        "session lifetime, and pair it with a long --polling-frequency",
+        "session lifetime, and pair it with a long --polling-frequency. It " +
+        "applies to the sftp channel only and each party sets it " +
+        "independently",
     })
     .option("outbound-path", {
       type: "string",

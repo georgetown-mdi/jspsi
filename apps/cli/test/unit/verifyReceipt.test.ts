@@ -597,7 +597,7 @@ describe("formatSignedRecordReport", () => {
     );
     const out = lines.join("\n");
     expect(out).toContain(
-      "receipt-record pairing: the exchange record has no run binder",
+      "receipt-record pairing: the exchange record holds no run binder",
     );
     expect(out).toContain("produced no signed receipt");
     expect(exitCode).toBe(1);
@@ -1476,7 +1476,7 @@ describe("handler", () => {
     });
     expect(exits).toEqual([]);
     expect(stdout).toContain(
-      "receipt-record pairing: the exchange record has no run binder",
+      "receipt-record pairing: the exchange record holds no run binder",
     );
     expect(exitCode).toBe(1);
   });

@@ -53,10 +53,10 @@ import {
  * The guidance carries the whole remedy because a bare "name a path" invites a
  * throwaway location: this file is the only thing that keeps a pinned
  * fingerprint valid, and losing it costs a re-key coordinated with every
- * partner. So it states why psilink picks no location, both spellings of the
- * path, an example under a mount of the identity's own, what the directory has
- * to be (writable for this run, read-only afterwards, durable, and never
- * partner-synced), and the reuse case that must not turn into a second identity.
+ * partner. So it states both spellings of the path, an example under a mount of
+ * the identity's own, what the directory has to be (writable for this run,
+ * read-only afterwards, durable, and never partner-synced), and the reuse case
+ * that must not turn into a second identity.
  *
  * A single line, and one that ends in the message rather than in a probe: it
  * renders through the display-boundary sanitizer, which escapes a newline and
@@ -68,11 +68,9 @@ const NO_IDENTITY_PATH_REFUSAL =
   "no signing identity path is configured. Name the path and re-run -- " +
   "'psilink fingerprint --identity-file " +
   "/run/signing/psilink-signing-identity.json', or signing.identity_file in " +
-  "the configuration. This is a long-lived credential reused across every " +
-  "exchange and every partner, so where it is kept is yours to decide. Its " +
-  "directory must be writable " +
-  "for this creating run; every run after it only reads the file, so a " +
-  "read-only mount of its own is right from then on. Choose somewhere " +
+  "the configuration. Its directory must be writable for this creating run; " +
+  "every run after it only reads the file, so a read-only mount of its own " +
+  "is right from then on. Choose somewhere " +
   "durable, and never a directory your partner syncs into -- that would put " +
   "your private signing key in their hands. If you already hold an identity " +
   "from an earlier release, name THAT file rather than creating a second one: " +

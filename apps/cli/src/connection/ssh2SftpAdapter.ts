@@ -21,6 +21,7 @@ import {
 } from "@psilink/core";
 
 import { createCappedSink } from "./frameSizeGuard";
+import { REPORT_LIBRARY_INCOMPATIBILITY } from "./libraryIncompatibility";
 import { SftpAdapterLedger } from "./sftpAdapterLedger";
 import type {
   IdleBoundaryOutcome,
@@ -1565,7 +1566,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         `The partner's SFTP server dropped the SFTP session mid-exchange and ` +
           `it could not be re-opened, so this operation failed. This build ` +
           `of psilink is not compatible with the installed SFTP library; ` +
-          `report it with the version from 'psilink --version'.`,
+          `${REPORT_LIBRARY_INCOMPATIBILITY}.`,
       );
       this.log.debug(
         `re-dialing drives ssh2's ${seams.missing}, which is not available ` +
@@ -1580,8 +1581,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
           `The SFTP session the partner's server dropped did not close ` +
             `within ${FORCED_CLOSE_TIMEOUT_MS} ms, so it could not be ` +
             `re-opened and this operation failed. This build of psilink may ` +
-            `not be compatible with the installed SFTP library; report it ` +
-            `with the version from 'psilink --version'.`,
+            `not be compatible with the installed SFTP library; ` +
+            `${REPORT_LIBRARY_INCOMPATIBILITY}.`,
         );
         this.log.debug(
           `the installed ssh2 may no longer emit the client 'close' that ` +
@@ -1595,8 +1596,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
           `partner's server dropped mid-exchange, failed: ` +
           `${sanitizeErrorForDisplay(error)}. The dropped session could not ` +
           `be re-opened, so this operation failed. This build of psilink may ` +
-          `not be compatible with the installed SFTP library; report it with ` +
-          `the version from 'psilink --version'.`,
+          `not be compatible with the installed SFTP library; ` +
+          `${REPORT_LIBRARY_INCOMPATIBILITY}.`,
       );
       this.log.debug(
         `the installed ssh2's transport may no longer accept the destroy ` +
@@ -1610,8 +1611,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
           `not close within ${FORCED_CLOSE_TIMEOUT_MS} ms of this side ` +
           `closing it, so the session was not re-opened and this operation ` +
           `failed with the drop it already had. This build of psilink may not ` +
-          `be compatible with the installed SFTP library; report it with the ` +
-          `version from 'psilink --version'.`,
+          `be compatible with the installed SFTP library; ` +
+          `${REPORT_LIBRARY_INCOMPATIBILITY}.`,
       );
       this.log.debug(
         `a re-dial issued while ssh2 still owes that connection its 'close' ` +
@@ -2070,7 +2071,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
           `connection is left to the operating system, may stay half-open, ` +
           `and a half-open connection can keep this process from exiting. ` +
           `This build of psilink is not compatible with the installed SFTP ` +
-          `library; report it with the version from 'psilink --version'.`,
+          `library; ${REPORT_LIBRARY_INCOMPATIBILITY}.`,
       );
       this.log.debug(
         `closing from this side drives ssh2's ${seam.missing}, which is not ` +
@@ -2105,7 +2106,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
           `destroyed it at teardown, so the connection may stay half-open, ` +
           `and a half-open connection can keep this process from exiting. ` +
           `This build of psilink may not be compatible with the installed ` +
-          `SFTP library; report it with the version from 'psilink --version'.`,
+          `SFTP library; ${REPORT_LIBRARY_INCOMPATIBILITY}.`,
       );
       this.log.debug(
         `the installed ssh2 may no longer expose the socket beneath its client`,
@@ -2175,8 +2176,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
           `could not close the connection from this side: the connection is ` +
           `left to the operating system, may stay half-open, and a half-open ` +
           `connection can keep this process from exiting. This build of ` +
-          `psilink is not compatible with the installed SFTP library; report ` +
-          `it with the version from 'psilink --version'.`,
+          `psilink is not compatible with the installed SFTP library; ` +
+          `${REPORT_LIBRARY_INCOMPATIBILITY}.`,
       );
       this.log.debug(
         `closing from this side drives ssh2's ${seam.missing}, which is not ` +
@@ -2206,7 +2207,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
           `destroyed it at teardown, so the connection may stay half-open, ` +
           `and a half-open connection can keep this process from exiting. ` +
           `This build of psilink may not be compatible with the installed ` +
-          `SFTP library; report it with the version from 'psilink --version'.`,
+          `SFTP library; ${REPORT_LIBRARY_INCOMPATIBILITY}.`,
       );
       this.log.debug(
         `the installed ssh2 may no longer expose the socket beneath its client`,
@@ -2423,7 +2424,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
           `transport and the session did not clear within ` +
           `${FORCED_CLOSE_TIMEOUT_MS} ms, so the exchange cannot continue. ` +
           `This build of psilink may not be compatible with the installed ` +
-          `SFTP library; report it with the version from 'psilink --version'`,
+          `SFTP library; ${REPORT_LIBRARY_INCOMPATIBILITY}`,
       );
     }
     // The partner did not answer the close within the bound and this side

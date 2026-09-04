@@ -335,15 +335,16 @@ export const CONSENT_FACTS = {
       "divergence between a specification and the sentence an acceptor consents " +
       "on.",
     note:
-      "A linkage key here splits a value into parts and matches each part on " +
-      "its own, so a record matches when any single part does. That match can " +
-      "rest on as little as one part of a name, which is weaker evidence than " +
-      "a match on the whole value. A record matched this way is paired at most " +
-      "once and is then left out of the later, less precise keys, whether or " +
-      "not that pairing stands. Splitting runs under single-pass linkage, so " +
-      "the party that receives the other's key values also learns how many " +
-      "parts each of the other's records produced for each key and which of " +
-      "its values came from the same record.",
+      "A linkage key here splits a value into several candidates and matches " +
+      "each on its own, so a record matches when any single candidate does. " +
+      "That match can rest on one candidate out of a name rather than on the " +
+      "whole value, which is weaker evidence. A record matched this way is " +
+      "paired at most once and is then left out of the later, less precise " +
+      "keys, whether or not that pairing stands. Splitting runs under " +
+      "single-pass linkage, so the party that receives the other's key " +
+      "structure also learns how many candidates each of the other's records " +
+      "produced for each key and which of its values came from the same " +
+      "record.",
   },
   fanOutRefused: {
     basis: "enforced",

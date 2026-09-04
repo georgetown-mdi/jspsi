@@ -5,6 +5,7 @@ import {
   getLogger,
 } from "@psilink/core";
 
+import { REPORT_LIBRARY_INCOMPATIBILITY } from "../libraryIncompatibility";
 import { BROKER_MESSAGE, connectToBroker } from "./brokerClient";
 import { PEERJS_SERIALIZATION } from "./peerjsWire";
 
@@ -225,7 +226,7 @@ export function assertSctpDrainSupported(peer: RTCPeerConnection): void {
     "the installed WebRTC library does not support the clean close this " +
       "exchange needs, so a final message could be lost when the connection " +
       "closes. This build of psilink is not compatible with that library; " +
-      "report it with the version from 'psilink --version'.",
+      `${REPORT_LIBRARY_INCOMPATIBILITY}.`,
     "usage",
   );
 }

@@ -4271,8 +4271,9 @@ export function assertLinkageTermsSatisfiable(
   if (verdict.keys.length === 0)
     throw new LinkageTermsUnsatisfiableError(
       "the agreed linkage terms declare no linkage key, so this exchange has " +
-        "nothing to match on. Run it with an input whose columns can supply " +
-        "at least one linkage key, or agree terms declaring one with your " +
+        "nothing to match on and is refused before any credential, terms, or " +
+        "data are sent. Run it with an input whose columns can supply at " +
+        "least one linkage key, or agree terms declaring one with your " +
         "partner and run the exchange under those.",
     );
 
