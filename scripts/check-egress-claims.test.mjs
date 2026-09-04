@@ -31,7 +31,7 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // source in it a second time. Alone on an idle container the heaviest runs 3.8s
 // against vitest's 5s default -- and 11.4s with the rest of the suite competing
 // for the same cores, which is the contention that reddened it. Sized at roughly
-// five times that worst measurement, this stays a hang backstop -- an extractor
+// five times that worst measurement, this stays a hang safety check -- an extractor
 // that loops, or a walk that never terminates, still fails here -- rather than
 // an assertion about how fast the scan runs.
 const SCAN_TIMEOUT_MS = 60_000;
@@ -151,7 +151,7 @@ describe("URL literal matcher", () => {
   });
 
   it("names a rewritten literal's own line, not the line inside it", () => {
-    // The limit candidateOf carries: a literal the parser rewrote -- one
+    // The limit candidateOf has: a literal the parser rewrote -- one
     // holding any escape -- spells no offsets of its own, so a URL further
     // into the same multi-line template is reported at the line that literal
     // begins on. The hit and its host are unaffected, and a literal the file
@@ -205,7 +205,7 @@ describe("URL literal matcher", () => {
   });
 
   it("still flags a stun/turn host written behind slashes", () => {
-    // stun and turn URIs carry no `//` (RFC 7064, RFC 7065), so a slash before
+    // stun and turn URIs have no `//` (RFC 7064, RFC 7065), so a slash before
     // the host is stray punctuation around a real one.
     expect(
       urlsIn(
@@ -259,7 +259,7 @@ describe("URL literal matcher", () => {
     ).toEqual(["http://${format({ a: 1 })}.evil.example"]);
   });
 
-  it("still flags a literal host carrying an interpolated path", () => {
+  it("still flags a literal host with an interpolated path", () => {
     const source = "await fetch(`https://evil.example/${path}`);\n";
     expect(urlLiterals(source, FIXTURE).map((hit) => hit.host)).toEqual([
       "evil.example",
@@ -329,8 +329,8 @@ describe("URL literal matcher", () => {
 
   it("cannot read a literal past the node holding it", () => {
     // An unbalanced `${` inside a URL literal is where a scan of the file's
-    // characters loses its footing and runs to the end of the file, carrying
-    // every following line into the failure message. A literal ends where its
+    // characters loses its footing and runs to the end of the file, including
+    // every following line in the failure message. A literal ends where its
     // node does, so the message names that literal and nothing after it.
     const source =
       'const u = "https://evil.example/${";\n' +
@@ -439,7 +439,7 @@ describe("URL literal matcher", () => {
   });
 
   it("reads the authority through any slash count, as `new URL()` does", () => {
-    // The slash count carries nothing the matcher may lean on: the real parser
+    // The slash count has nothing the matcher may lean on: the real parser
     // resolves every spelling to the same host, and a real fetch() of the
     // http: forms against a loopback server reaches it in each one. Reading
     // any of them as a protocol comparison instead lets a shipped
@@ -625,7 +625,7 @@ describe("scanned files", () => {
 
   it("reports a URL in a text format whose comment syntax is not modeled", () => {
     // No parser is run for these, and guessing at their comment syntax is what
-    // would report a file clean: a `//` or `/*` in ordinary content read as a
+    // would report a file clean: a `//` or `/*` in ordinary content treated as a
     // comment opener takes the rest of the line, and the URL in it, out of the
     // scan. They are scanned raw for that reason.
     const cases = [
@@ -766,7 +766,7 @@ describe("scanned roots", { timeout: SCAN_TIMEOUT_MS }, () => {
   });
 
   it("reads a file whose name is not ASCII", () => {
-    // Real git decides the premise: under the default core.quotePath it prints
+    // Real git decides the assumption: under the default core.quotePath it prints
     // such a path quoted and C-escaped, a spelling that names no file on disk,
     // so a listing without `-z` reaches readFileSync with it and throws ENOENT
     // in place of any egress finding.
@@ -787,7 +787,7 @@ describe("scanned roots", { timeout: SCAN_TIMEOUT_MS }, () => {
 
   it("fails when a scanned root or file matches nothing", () => {
     // A renamed shipped tree would otherwise leave the check passing over a
-    // smaller scan than its success line claims. Real git decides the premise:
+    // smaller scan than its success line claims. Real git decides the assumption:
     // it reports an unmatched pathspec by printing nothing and exiting 0.
     withScannedRepo([], (dir) => {
       renameSync(
@@ -905,7 +905,7 @@ describe("literal extraction", () => {
     expect(fileViolations(path, source)).toEqual([]);
   });
 
-  it("reads a URL whose own path carries a comment opener", () => {
+  it("reads a URL whose own path has a comment opener", () => {
     expect(urlsIn('const u = "https://evil.example/a/*b*/c";\n')).toEqual([
       "https://evil.example/a/*b*/c",
     ]);
@@ -947,7 +947,7 @@ describe("literal extraction", () => {
     }
   });
 
-  it("reads a URL that JSX text itself carries", () => {
+  it("reads a URL that JSX text itself has", () => {
     expect(
       urlsIn(
         "export const A = () => <p>See https://evil.example/x for more</p>;\n",
@@ -959,9 +959,9 @@ describe("literal extraction", () => {
   it("scans a file the parser cannot read raw, comments included", () => {
     // A broken parse yields no literal to extract at all, which would report
     // the file clean -- the one direction this check cannot afford. Such a
-    // file is scanned raw instead, so its commented URL surfaces as a false
+    // file is scanned raw instead, so its commented URL is flagged as a false
     // positive the author resolves. The parser decides both halves of that
-    // premise here rather than a reading of it.
+    // assumption here rather than a reading of it.
     const source = "const a = ;\nfunction (\n// https://evil.example/x\n";
     expect(parseOf(source).parseErrors).toBeGreaterThan(0);
     expect(parseOf(source).literals).toEqual([]);
@@ -1062,7 +1062,7 @@ describe("the repository as it stands", { timeout: SCAN_TIMEOUT_MS }, () => {
 
   it("reports only allowlisted hits from the stylesheets it scans", () => {
     // Scanning a stylesheet raw costs nothing measurable here: the shipped
-    // stylesheets carry their URL literals in real declarations, not in
+    // stylesheets have their URL literals in real declarations, not in
     // comments, so the hits are the allowlisted SVG namespace and no others.
     const { files } = scanRepo(repoRoot);
     const stylesheets = files.filter((file) => file.endsWith(".css"));
@@ -1074,7 +1074,7 @@ describe("the repository as it stands", { timeout: SCAN_TIMEOUT_MS }, () => {
       expect([file, fileViolations(file, source)]).toEqual([file, []]);
       hits.push(...urlLiterals(source, file).map(({ url }) => url));
     }
-    // Not a vacuous pass: the stylesheets do carry a literal, and the raw scan
+    // Not a vacuous pass: the stylesheets do have a literal, and the raw scan
     // reaches it in the declaration it sits in.
     expect(hits).toContain("http://www.w3.org/2000/svg");
   });

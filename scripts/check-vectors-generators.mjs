@@ -50,7 +50,7 @@
 //        fact rather than an assumption. A `file` generator that leaves the
 //        mtime untouched, and a `stdout` generator that moves it, each fail --
 //        the declared shape and the observed one have to agree.
-//      - The EXCUSED-VALUE probe. Where a generator's output carries values it
+//      - The EXCUSED-VALUE probe. Where a generator's output has values it
 //        does not reproduce (below), those values are masked on both sides
 //        before the comparison. Each mask must fire the same non-zero number of
 //        times on both, counted per key so an entry excusing two of them cannot
@@ -69,7 +69,7 @@
 //     a known answer; it moves on every run, on one host or across hosts.
 //   - `signatureProducer`. Each generator records `openssl version` as the
 //     provenance of the signatures beside it, so the value is whatever the
-//     GENERATING host's openssl was. It reproduces only on a host carrying that
+//     GENERATING host's openssl was. It reproduces only on a host with that
 //     same build, which neither a contributor's machine nor the runner image
 //     owes the machine the files were last regenerated on.
 //
@@ -97,7 +97,7 @@
 //   - What another version of a dependency would produce. It compares against
 //     what the LOCALLY INSTALLED packages and the LOCALLY BUILT core dist
 //     produce, so it is only as good as the lockfile pin and the build -- the
-//     same limit `npm run check:routetree` carries.
+//     same limit `npm run check:routetree` has.
 //   - Formatting drift from a prettier upgrade. The committed files are
 //     prettier-formatted (the documented refresh is "run the generator, then
 //     `npm run format`"), so the generator's output is formatted through this
@@ -492,7 +492,7 @@ async function compareOne({
     const maskedCommitted = maskExcusedValues(committed, excusedKeys);
     const maskedProduced = maskExcusedValues(formatted, excusedKeys);
     // Per key rather than over their total: an entry excusing more than one key
-    // could otherwise carry a mask matching nothing behind another that matches
+    // could otherwise have a mask matching nothing behind another that matches
     // plenty, and the totals would still agree.
     const inert = maskedCommitted.byKey
       .map((excused, index) => ({
