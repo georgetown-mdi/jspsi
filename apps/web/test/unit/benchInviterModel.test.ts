@@ -7,6 +7,7 @@ import { buildAdvancedTerms } from "@psi/advancedInvite";
 import {
   answersRows,
   availableTransports,
+  byteSizeLabel,
   cleaningCoverageProblems,
   editorFromCsv,
   editorReprofiled,
@@ -283,6 +284,12 @@ describe("display helpers", () => {
       "12,408 rows - 8.4 MB",
     );
     expect(fileCardMeta(3, 2048)).toBe("3 rows - 2 KB");
+  });
+
+  test("byteSizeLabel runs to a GB rung at gigabyte scale", () => {
+    expect(byteSizeLabel(2 * 1024 ** 3)).toBe("2.0 GB");
+    expect(byteSizeLabel(Math.round(8.4 * 1024 ** 2))).toBe("8.4 MB");
+    expect(byteSizeLabel(2048)).toBe("2 KB");
   });
 
   test("invitationUsable is true only before the expiry moment", () => {
