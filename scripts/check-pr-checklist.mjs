@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 // PR-body checklist guard, run by pr_checklist.yaml on every PR (including a
 // body edit, so fixing the description re-runs the check without a new commit).
+// The body it judges is the one the API holds when the run reaches this script,
+// not the copy on the event payload -- see the CLI entry at the foot of the
+// file.
 //
 //   1. The `## Checklist` section must exist (the template ships one).
 //   2. No box may be left unchecked: `- [ ]` means unresolved.
@@ -239,10 +242,11 @@ export function attestationViolations(text, headSha) {
 }
 
 /**
- * The PR head sha this run checks against, from the `PR_HEAD_SHA` the workflow
- * sets, or null when there is none (a local run). An unset or blank value is a
- * head this script could not read, not a head that happens to match nothing,
- * which would leave the comparison silently skipped and the run green.
+ * The PR head sha a direct call supplies in `PR_HEAD_SHA`, or null when there is
+ * none (a local run; the workflow's own run reads the head from the pull request
+ * it fetches). An unset or blank value is a head this script could not read, not
+ * a head that happens to match nothing, which would leave the comparison
+ * silently skipped and the run green.
  */
 export function prHeadSha() {
   const value = process.env.PR_HEAD_SHA;
@@ -250,10 +254,11 @@ export function prHeadSha() {
 }
 
 /**
- * The PR title this run checks, from the `PR_TITLE` the workflow sets, or
- * null when there is none (a local run). An unset or blank value is a title
- * this script could not read, not a title that happens to be empty, which
- * would leave the title rule silently skipped and the run green.
+ * The PR title a direct call supplies in `PR_TITLE`, or null when there is none
+ * (a local run; the workflow's own run reads the title from the pull request it
+ * fetches). An unset or blank value is a title this script could not read, not a
+ * title that happens to be empty, which would leave the title rule silently
+ * skipped and the run green.
  */
 export function prTitle() {
   const value = process.env.PR_TITLE;
@@ -309,14 +314,74 @@ export function titleViolations(title, prNumber) {
   ];
 }
 
+/**
+ * The pull request fields this check reads, taken from the JSON body of the
+ * `repos/{owner}/{repo}/pulls/{number}` response that pr_checklist.yaml fetches
+ * at run time. Returns `{ pr }` or `{ error }`.
+ *
+ * Every field is required. A field this function cannot read is a response it
+ * could not use, not a field that happens to be absent: accepting one would
+ * skip a rule silently and leave the run green. The one exception is a body
+ * GitHub reports as null, which is a pull request opened with no description --
+ * a real state, and one the checklist rules fail on by themselves.
+ */
+export function prFromJson(text) {
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (error) {
+    return { error: `it is not JSON (${error.message})` };
+  }
+  if (data === null || typeof data !== "object" || Array.isArray(data)) {
+    return { error: "it is not a pull request object" };
+  }
+  const body = data.body === null || data.body === undefined ? "" : data.body;
+  if (typeof body !== "string") return { error: "its body is not text" };
+  if (typeof data.title !== "string") return { error: "it names no title" };
+  const headSha = data.head?.sha;
+  if (typeof headSha !== "string" || headSha.trim() === "") {
+    return { error: "it names no head sha" };
+  }
+  const number = data.number;
+  if (typeof number !== "number" && typeof number !== "string") {
+    return { error: "it names no pull request number" };
+  }
+  return { pr: { body, title: data.title, headSha, number: String(number) } };
+}
+
 // CLI entry: only runs when invoked directly, so the test can import the pure
-// functions without the process.exit. The body comes from the PR_BODY
-// environment variable (how pr_checklist.yaml passes the attacker-influenceable
-// text without shell interpolation) or, for local use, a file path argument.
+// functions without the process.exit. On the runner the pull request comes from
+// the JSON at PR_JSON, which pr_checklist.yaml fetches from the API rather than
+// reading off the event payload: a push and a body edit landing seconds apart
+// leave the push-triggered run holding a body that no longer exists, and a
+// re-run of it is handed the same stale payload again. For local use the body
+// comes from the PR_BODY environment variable or a file path argument.
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   let body;
   let source;
-  if (process.env.PR_BODY !== undefined) {
+  let live = null;
+  const prJsonPath = process.env.PR_JSON;
+  if (typeof prJsonPath === "string" && prJsonPath.trim() !== "") {
+    let text;
+    try {
+      text = readFileSync(prJsonPath, "utf8");
+    } catch (error) {
+      console.error(
+        `PR checklist check could not read the pull request the workflow fetched into ${prJsonPath}: ${error.message}`,
+      );
+      process.exit(2);
+    }
+    const read = prFromJson(text);
+    if (read.error !== undefined) {
+      console.error(
+        `PR checklist check could not use the pull request the workflow fetched into ${prJsonPath}: ${read.error}.`,
+      );
+      process.exit(2);
+    }
+    live = read.pr;
+    body = live.body;
+    source = "PR body";
+  } else if (process.env.PR_BODY !== undefined) {
     body = process.env.PR_BODY;
     source = "PR body";
   } else if (process.argv[2] !== undefined) {
@@ -333,10 +398,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   // On the runner the head must be readable, or the attestation degrades to a
   // presence check and a green result would mean nothing: say so and stop
   // instead of passing quietly.
-  const headSha = prHeadSha();
+  const headSha = live !== null ? live.headSha : prHeadSha();
   if (headSha === null && onRunner) {
     console.error(
-      "PR checklist check could not read the head sha the workflow passes in PR_HEAD_SHA, so the Security review line's attestation cannot be verified.",
+      "PR checklist check could not read the head sha of the pull request the workflow fetches, so the Security review line's attestation cannot be verified.",
     );
     process.exit(2);
   }
@@ -344,24 +409,24 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   // would leave the title rule silently skipped and the run green. Off the
   // runner there is no PR event to read a title from, so the rule is skipped
   // outright rather than treated as a failure to read one.
-  const title = prTitle();
+  const title = live !== null ? live.title : prTitle();
   if (title === null && onRunner) {
     console.error(
-      "PR checklist check could not read the PR title the workflow passes in PR_TITLE, so the title-length rule cannot be checked.",
+      "PR checklist check could not read the PR title of the pull request the workflow fetches, so the title-length rule cannot be checked.",
     );
     process.exit(2);
   }
   // Same reasoning again: on the runner an unreadable PR_NUMBER would leave
   // titleBudget() silently on its fallback figure, mismatched to the suffix
   // GitHub actually appends.
-  const rawPrNumber = process.env.PR_NUMBER;
+  const rawPrNumber = live !== null ? live.number : process.env.PR_NUMBER;
   const prNumber =
     typeof rawPrNumber === "string" && rawPrNumber.trim() !== ""
       ? rawPrNumber
       : null;
   if (prNumber === null && onRunner) {
     console.error(
-      "PR checklist check could not read the PR number the workflow passes in PR_NUMBER, so the title-length rule's budget cannot be derived.",
+      "PR checklist check could not read the PR number of the pull request the workflow fetches, so the title-length rule's budget cannot be derived.",
     );
     process.exit(2);
   }

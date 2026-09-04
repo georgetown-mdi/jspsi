@@ -353,7 +353,13 @@ jobs:
       # runtime dependencies ship inside the pre-bundled Nitro output rather
       # than through an install -- and the same command string CONTRIBUTING.md's
       # Dependency Policy and docs/RELEASES.md step 4 hand a maintainer, so the
-      # local run and the gate cannot diverge. It answers
+      # local run and the gate cannot diverge. The wrapper it runs through
+      # (scripts/npm-audit-retry.mjs) adds one thing to that command: a bounded
+      # retry of npm's audit endpoint failing, which is a registry outage rather
+      # than anything about the branch under test, and which reddened ten open
+      # pull requests at once when it last happened. An advisory finding is never
+      # retried -- see the script's header for how the two are told apart, and
+      # its test for the drive against the real npm that settles it. It answers
       # `found 0 vulnerabilities` against the committed lockfile, so it gates on
       # any finding at all: no `--audit-level`, because relaxing the threshold to
       # clear one accepted finding is a standing acceptance of every future
@@ -372,4 +378,4 @@ jobs:
       # Last, so an advisory standing open over the production tree does not mask
       # this job's other results.
       - name: Dependency audit (production scope)
-        run: npm audit --omit=dev -w packages/core -w apps/cli -w apps/web
+        run: npm run audit:production

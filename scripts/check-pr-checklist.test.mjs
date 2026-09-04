@@ -8,6 +8,7 @@ import {
   attestationViolations,
   bodyViolations,
   checklistViolations,
+  prFromJson,
   prHeadSha,
   stripHtmlComments,
   titleBudget,
@@ -344,9 +345,11 @@ const SCRIPT = fileURLToPath(
   new URL("./check-pr-checklist.mjs", import.meta.url),
 );
 
-// The script as the workflow runs it: a real subprocess with a controlled
+// The script as a direct call runs it: a real subprocess with a controlled
 // environment, so the exit codes and the runner's head resolution are exercised
-// rather than assumed.
+// rather than assumed. The head, title and number arrive in the environment
+// here; the fetched pull request the workflow itself hands the script is
+// exercised at the foot of this file.
 function runCli(bodyText, env) {
   const dir = mkdtempSync(join(tmpdir(), "pr-body-"));
   const file = join(dir, "body.md");
@@ -365,7 +368,7 @@ function runCli(bodyText, env) {
 // subprocess runs that are not themselves exercising the title-length rule.
 const SHORT_TITLE = "Fix key rotation after failed exchange";
 
-describe("the check as the workflow runs it", () => {
+describe("the check over a head given in the environment", () => {
   it("passes a resolved body attesting the head", () => {
     const r = runCli(passingBody, {
       GITHUB_ACTIONS: "true",
@@ -398,7 +401,7 @@ describe("the check as the workflow runs it", () => {
   });
 });
 
-describe("the title-length rule as the workflow runs it", () => {
+describe("the title-length rule over a title given in the environment", () => {
   it("refuses to pass on a runner whose title it cannot read", () => {
     const r = runCli(passingBody, {
       GITHUB_ACTIONS: "true",
@@ -437,5 +440,132 @@ describe("the title-length rule as the workflow runs it", () => {
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("PR title: PR title is 43 characters");
     expect(r.stderr).not.toContain("PR body: PR title is");
+  });
+});
+
+const STALE_SHA = "fedcba9876543210fedcba9876543210fedcba98";
+
+/** A pull request as the API returns it, with the fields this check reads. */
+const apiPullRequest = (overrides = {}) => ({
+  number: 1274,
+  title: SHORT_TITLE,
+  body: passingBody,
+  head: { sha: HEAD },
+  ...overrides,
+});
+
+describe("the pull request read from the API", () => {
+  it("takes the body, title, head sha and number from the response", () => {
+    expect(prFromJson(JSON.stringify(apiPullRequest())).pr).toEqual({
+      body: passingBody,
+      title: SHORT_TITLE,
+      headSha: HEAD,
+      number: "1274",
+    });
+  });
+
+  it("treats a pull request opened with no description as an empty body", () => {
+    expect(
+      prFromJson(JSON.stringify(apiPullRequest({ body: null }))).pr.body,
+    ).toBe("");
+  });
+
+  it("refuses a response naming no head sha", () => {
+    expect(prFromJson(JSON.stringify(apiPullRequest({ head: {} }))).error).toBe(
+      "it names no head sha",
+    );
+  });
+
+  it("refuses a response naming no title", () => {
+    expect(
+      prFromJson(JSON.stringify(apiPullRequest({ title: undefined }))).error,
+    ).toBe("it names no title");
+  });
+
+  it("refuses a response naming no number", () => {
+    expect(
+      prFromJson(JSON.stringify(apiPullRequest({ number: undefined }))).error,
+    ).toBe("it names no pull request number");
+  });
+
+  it("refuses text that is not a pull request object", () => {
+    expect(prFromJson("[]").error).toBe("it is not a pull request object");
+    expect(prFromJson("not json").error).toContain("it is not JSON");
+  });
+});
+
+// The script with a fetched pull request in hand, which is how the workflow runs
+// it: no body-file argument, and the head, title and number all read from the
+// same response as the body rather than from four separately-aged inputs.
+function runCliOnFetched(pullRequest, env = {}) {
+  const dir = mkdtempSync(join(tmpdir(), "pr-json-"));
+  const file = join(dir, "pull-request.json");
+  writeFileSync(
+    file,
+    typeof pullRequest === "string" ? pullRequest : JSON.stringify(pullRequest),
+  );
+  try {
+    execFileSync(process.execPath, [SCRIPT], {
+      encoding: "utf8",
+      env: { GITHUB_ACTIONS: "true", PR_JSON: file, ...env },
+    });
+    return { status: 0, stderr: "" };
+  } catch (error) {
+    return { status: error.status, stderr: error.stderr };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+describe("the check against the pull request as it stands now", () => {
+  it("judges the fetched body, not the one the event payload froze", () => {
+    const r = runCliOnFetched(apiPullRequest(), {
+      PR_BODY: passingBody.replace(HEAD, STALE_SHA),
+      PR_HEAD_SHA: STALE_SHA,
+      PR_TITLE: "x".repeat(100),
+      PR_NUMBER: "9999",
+    });
+    expect(r.status).toBe(0);
+  });
+
+  it("fails when the fetched body attests something other than the head", () => {
+    const r = runCliOnFetched(
+      apiPullRequest({ body: passingBody.replace(HEAD, STALE_SHA) }),
+      { PR_BODY: passingBody },
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(`attests ${STALE_SHA}`);
+  });
+
+  it("stops rather than passing on a response it cannot use", () => {
+    const r = runCliOnFetched("<html>502 Bad Gateway</html>");
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("could not use the pull request");
+  });
+
+  it("stops rather than passing when the fetch left no file", () => {
+    const r = runCli(passingBody, {
+      GITHUB_ACTIONS: "true",
+      PR_JSON: join(tmpdir(), "no-such-pull-request.json"),
+    });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("could not read the pull request");
+  });
+
+  it("is how the workflow supplies the body, title and head", () => {
+    const workflow = readFileSync(
+      new URL("../.github/workflows/pr_checklist.yaml", import.meta.url),
+      "utf8",
+    );
+    expect(workflow).toContain("gh api");
+    expect(workflow).toContain("PR_JSON:");
+    expect(workflow).toContain("pull-requests: read");
+    for (const payloadField of [
+      "github.event.pull_request.body",
+      "github.event.pull_request.title",
+      "github.event.pull_request.head",
+    ]) {
+      expect(workflow).not.toContain(payloadField);
+    }
   });
 });

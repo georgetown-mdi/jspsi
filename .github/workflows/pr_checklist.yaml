@@ -21,10 +21,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
-# Least privilege: the check reads the repo for the script; the PR body arrives
-# on the event payload.
+# Least privilege: the check reads the repo for the script, and the pull request
+# itself for the body, title and head it judges.
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   pr-checklist:
@@ -41,14 +42,28 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: "26"
-      - name: PR checklist
-        # The PR body is attacker-influenceable text. Passing it via an env
-        # assignment hands it to the process without any shell parsing; a ${{ }}
-        # interpolation into the `run:` line would let a crafted body inject
-        # shell commands into the runner.
+      # The pull request as the API holds it at this moment, rather than the copy
+      # on the event payload. A commit and the body edit that re-attests it land
+      # seconds apart: the push-triggered run carries a payload written before the
+      # edit, judges the body it froze, and fails on a sha the author has already
+      # updated -- and re-running it hands it that same frozen payload again. Only
+      # the fields that cannot change over a pull request's life are read from the
+      # payload above: its number, and whether its author is a bot. The path is
+      # set on each step rather than on the job, where the runner context is not
+      # available.
+      - name: Fetch the pull request
         env:
-          PR_BODY: ${{ github.event.pull_request.body }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_JSON: ${{ runner.temp }}/pull-request.json
+        run: gh api "repos/$GH_REPO/pulls/$PR_NUMBER" > "$PR_JSON"
+      # The body, title and head sha are read out of that file by the script. The
+      # PR body is attacker-influenceable text, and a file keeps it out of both
+      # the shell (a ${{ }} interpolation into a `run:` line would let a crafted
+      # body inject commands into the runner) and $GITHUB_ENV (whose delimiter a
+      # crafted body can close, setting any variable it likes).
+      - name: PR checklist
+        env:
+          PR_JSON: ${{ runner.temp }}/pull-request.json
         run: npm run check:pr-checklist
