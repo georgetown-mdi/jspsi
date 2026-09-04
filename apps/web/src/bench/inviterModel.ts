@@ -57,7 +57,7 @@ import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
 import type { RunOutputs } from "./runOutputs";
 
 /**
- * Where a step stands in the exchange's progression, rendered by the bench's
+ * Where a step stands in the exchange's progression, rendered by the console's
  * top-bar Stepper. `current` is announced to assistive tech via
  * `aria-current="step"`; the other two are conveyed by the Stepper's own
  * completed/inactive styling.
@@ -351,7 +351,7 @@ export function transportChooserCopy(
 }
 
 /**
- * The pure model behind the inviter bench's spine: seeding the draft from the
+ * The pure model behind the inviter console's spine: seeding the draft from the
  * read file, applying the column edits step 2 offers, and the view-model
  * builders the Customize facts and disclosure ledger render from. No React, no
  * I/O. The draft is the AdvancedInvite model's ({@link AdvancedInviteDraft});
@@ -440,7 +440,7 @@ export function editorFromCsv(
   );
 }
 
-/** Carry a later name edit into the draft without disturbing the derived
+/** Fold a later name edit into the draft without disturbing the derived
  * terms; the identity only labels the terms, it never changes which keys the
  * columns can produce. */
 export function editorWithIdentity(
@@ -1249,7 +1249,7 @@ export function inviterRailFacts(
   ];
 }
 
-/** A bench section a Problems entry or a Change link can navigate to: a spine
+/** A console section a Problems entry or a Change link can navigate to: a spine
  * step or a Customize tab. */
 export type SpineTarget =
   "file" | "columns" | "review" | "cleaning" | "keys" | "agreement";
@@ -1279,7 +1279,7 @@ export interface SpineProblem {
 }
 
 /** Validate the draft for the create gate -- the AdvancedInvite model's own
- * validation over the bench's session. */
+ * validation over the console's session. */
 export function reviewValidation(
   editor: InviterEditor,
   now: Date = new Date(),
@@ -1296,7 +1296,7 @@ export function reviewValidation(
  * the partner-controlled field name -- plus the input column when the draft
  * authors more than one field of that type. File-dependent (needs the
  * full-CSV coverage), so it lives beside {@link spineProblems} rather than
- * inside {@link validateAdvancedInvite}; the bench merges the two. Empty
+ * inside {@link validateAdvancedInvite}; the console merges the two. Empty
  * before a file is read, before the first sweep settles, or when nothing
  * collapses.
  */

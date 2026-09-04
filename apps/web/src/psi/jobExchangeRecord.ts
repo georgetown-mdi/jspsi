@@ -216,7 +216,7 @@ export const RECORD_AVAILABILITY_UNANSWERED_LIMIT = 5;
  * Ask the console where this job's record stands, re-asking while the ask
  * itself holds no answer.
  *
- * One ask settles every answer the console actually gives: the seat asks a
+ * One ask determines every answer the console actually gives: the seat asks a
  * run that has already settled, so `available` and `none` cannot change and
  * asking again would tell it the same thing. Only the ask that comes back
  * with nothing cannot be left alone -- a hiccup at the moment the run

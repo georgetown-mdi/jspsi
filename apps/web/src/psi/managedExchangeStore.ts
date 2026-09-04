@@ -144,7 +144,7 @@ export async function probeManagedStoreOpen(): Promise<boolean> {
 /**
  * Request that the browser make the origin's storage persistent, so the managed
  * store is not evicted under storage pressure. Best-effort: the grant is never
- * assumed durable, and is not surfaced as its own status line -- durability rests
+ * assumed durable, and is not shown as its own status line -- durability rests
  * on rotation, fast re-invite, and the opt-in age bound, not on this request.
  * Returns the browser's grant decision, or `false` where the API is unavailable.
  */
@@ -321,7 +321,7 @@ export async function listReadableManagedExchanges(): Promise<ManagedExchangeRea
  * without requiring a successful parse. Both also hold `backedUp`, derived from
  * the sibling local-state store, so the delete confirm's custody note shows on the
  * recovery path exactly as on the normal list. A boolean suffices: the marker's
- * timestamp is never surfaced here.
+ * timestamp is never shown here.
  */
 export type ManagedExchangeDiagnosticEntry =
   | {
@@ -388,7 +388,7 @@ export async function listManagedExchangesDiagnostic(): Promise<
               });
             } catch {
               // The parse failed, so the record's own `id` is untrusted; the store
-              // key is the delete target instead, and the only field surfaced.
+              // key is the delete target instead, and the only field shown.
               entries.push({ kind: "unreadable", id: key, backedUp });
             }
           }
@@ -407,7 +407,7 @@ export async function listManagedExchangesDiagnostic(): Promise<
  * the `backedUp` boolean the diagnostic entries hold. CONSERVATIVE on doubt: a
  * sibling entry that cannot be parsed is treated as backed up (a wrongly-shown
  * custody warning is harmless; a wrongly-suppressed one is not). The marker's
- * timestamp is never surfaced -- only its presence. */
+ * timestamp is never shown -- only its presence. */
 function backedUpMarkersByKey(
   keys: ReadonlyArray<IDBValidKey>,
   values: ReadonlyArray<unknown>,

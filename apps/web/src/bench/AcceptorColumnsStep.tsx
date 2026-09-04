@@ -57,7 +57,7 @@ import type { ReactNode } from "react";
  * The operator's OWN CSV headers as the declaration notice lists them: through the
  * same ColumnName every column-name surface on this screen uses, so a name here
  * reads exactly as it does in the grid row the operator has to change, and one per
- * line so a name carrying a list separator cannot read as two.
+ * line so a name containing a list separator cannot read as two.
  */
 function MarkedColumnList({ names }: { names: Array<string> }) {
   return (
@@ -132,7 +132,7 @@ export function AcceptorColumnsStep({
    * the launch gate exactly as {@link connectionBlocked} does, so an unusable
    * combination is a form problem here rather than a job that fails later. */
   exchangeFilesBlocked?: boolean;
-  /** Whether the connection-tuning choices carry a value the run would refuse.
+  /** Whether the connection-tuning choices hold a value the run would refuse.
    * Gates launch as {@link exchangeFilesBlocked} does, but separately: the two
    * are separate cards in {@link exchangeFilesSection}, and the blocked reason
    * names the one to open. */
@@ -202,7 +202,7 @@ export function AcceptorColumnsStep({
     editorState.metadata,
   );
   // Which remedies the declared-but-unsent half even has: a column this file does
-  // not carry cannot be marked at all, so only the columns it does carry get the
+  // not hold cannot be marked at all, so only the columns it does hold get the
   // offer to widen the disclosure, and only the ones it lacks get "choose another
   // file".
   const expectedInFile =
@@ -554,7 +554,7 @@ export function AcceptorColumnsStep({
           </Alert>
         )}
 
-        {/* A marked column whose name is too long to carry: the exchange refuses
+        {/* A marked column whose name is too long to include: the exchange refuses
             it before any data moves, so it is stated beside the marks that decide
             it and directly above the grid whose rows are the file's columns.
             Located by position rather than named -- an offending name is longer

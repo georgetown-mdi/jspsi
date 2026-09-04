@@ -65,7 +65,7 @@ export const rowsCoverageProvider: CoverageProviderFactory<
  * ({@link postJobInputCoverage}).
  *
  * The outcome decides the readout. A deterministic failure (a `4xx` other than `429`,
- * or a malformed body) REJECTS, so the hook settles to an explicit "coverage
+ * or a malformed body) REJECTS, so the hook reaches an explicit "coverage
  * unavailable" state rather than hanging -- the same input will not succeed on retry.
  * A transient failure (`429`, a `5xx`, or a network error) never settles, so the hook
  * does not overstate it and holds "Checking..." until the next debounced edit
@@ -104,13 +104,13 @@ export const consoleCoverageProvider: CoverageProviderFactory<
   };
 };
 
-/** The bench's coverage input, unifying the hosted browser rows and the console's
+/** The coverage input, unifying the hosted browser rows and the console's
  * mounted-file reference so one {@link useNonEmptyRates} call serves both builds. */
 export type BenchCoverageInput =
   | { kind: "rows"; rows: ReadonlyArray<CSVRow> }
   | { kind: "workFile"; reference: WorkInputReference };
 
-/** The unified bench coverage provider: dispatches a `rows` input to the hosted
+/** The unified coverage provider: dispatches a `rows` input to the hosted
  * worker-backed provider and a `workFile` input to the console fetch-backed sweep.
  * A stable module-level factory so the hook rebuilds the provider only when the
  * coverage input identity changes. */

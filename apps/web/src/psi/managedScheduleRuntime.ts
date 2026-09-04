@@ -1,11 +1,11 @@
 /**
- * The browser half of the unattended runner: it builds the platform seams the
+ * The browser half of the unattended runner: it builds the platform boundary the
  * pure tick in {@link ./managedScheduleRunner.ts} decides on -- the store reads
  * and the conditioned schedule write, the clock, an abort-aware delay, and the
  * run itself -- and wakes the tick on an interval for as long as the runtime
  * that started it lives.
  *
- * The run seam is {@link runManagedExchangeInBrowser}, the same entry the
+ * The run boundary is {@link runManagedExchangeInBrowser}, the same entry the
  * attended surface calls, so a scheduled run takes the identical single-writer
  * lock, input guard, and persist-before-success critical section. Two things
  * differ, and only these two: the input is read through the persisted handle
@@ -82,7 +82,7 @@ export function droppableUnattendedNotice(message: string): boolean {
   return DROPPED_UNATTENDED_NOTICES.has(message);
 }
 
-/** How the runtime is started. The seams and the tick are injectable so the
+/** How the runtime is started. The boundary and the tick are injectable so the
  * host's own behavior -- the interval, the re-entrancy guard, the stop -- is
  * testable without a store, a broker, or a real clock. */
 export interface ManagedScheduleRuntimeOptions {
@@ -96,7 +96,7 @@ export interface ManagedScheduleRuntimeOptions {
     seams: ManagedScheduleTickSeams,
     inFlight: Set<string>,
   ) => Promise<Array<ManagedScheduleTickEntry>>;
-  /** Overrides the platform seams. Defaults to the store, the clock, and the
+  /** Overrides the platform boundary. Defaults to the store, the clock, and the
    * browser run driver. */
   seams?: ManagedScheduleTickSeams;
 }
@@ -147,7 +147,7 @@ export function startManagedScheduleRuntime(
   void wake();
 }
 
-/** The platform seams: the store, the clock, an abort-aware delay, and the
+/** The platform boundary: the store, the clock, an abort-aware delay, and the
  * browser run driver. The record read is the store's per-entry one, never the
  * strict list the attended surfaces take: an unattended wake has nobody present
  * to meet the read-failed recovery surface a wholesale rejection routes to. */

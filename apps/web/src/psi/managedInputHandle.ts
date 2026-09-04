@@ -58,7 +58,7 @@ export function storedInputHandleUsable(
   return handle !== undefined && fileSystemAccessSupported();
 }
 
-/** A selected file that MAY carry a File System Access handle. The bench's file
+/** A selected file that MAY hold a File System Access handle. The console's file
  * intake (Mantine's Dropzone over `file-selector`) attaches a `handle` to a
  * dropped file in a secure context on Chromium; every other selection path (a
  * click-to-open input, a browser without the API) yields a plain `File` and no
@@ -74,7 +74,7 @@ interface FileWithOptionalHandle {
  * `file-selector` calls `DataTransferItem.getAsFileSystemHandle()` on a drop and
  * attaches the handle to the `File`; a click-to-open selection and a browser
  * without the API leave it absent. Also gated on
- * {@link fileSystemAccessSupported}, so a foreign object carrying a `handle`
+ * {@link fileSystemAccessSupported}, so a foreign object holding a `handle`
  * property on a runtime without the API is not mistaken for a real handle.
  */
 export function capturedInputHandle(
@@ -96,7 +96,7 @@ export function capturedInputHandle(
 export type HandleReadPermissionState = "granted" | "denied" | "prompt";
 
 /** The `queryPermission` / `requestPermission` extension a File System Access
- * handle MAY carry (a picker handle does; an origin-private-file-system handle does
+ * handle MAY hold (a picker handle does; an origin-private-file-system handle does
  * not). Declared locally because the DOM lib does not type these non-standard
  * methods; a handle is narrowed to it by {@link handleReadPermission} through a
  * runtime feature check rather than an unchecked cast. */
@@ -150,7 +150,7 @@ export const browserHandleReadPermission: HandleReadPermissionQuery = {
 
 /** Raised when a handle is held but its read permission cannot be secured for a
  * run: the unattended path found a non-`"granted"` state (it must not prompt), or
- * an attended request was denied. Carried as the `cause` of the benign
+ * an attended request was denied. Set as the `cause` of the benign
  * {@link ManagedInputError} `"acquire"` rejection, so a gone permission records the
  * same benign `"input"` failure as a missing file, never desync/attack framing. */
 export class HandleReadPermissionError extends Error {
@@ -235,7 +235,7 @@ export type ManagedInputSource =
  * permission, or an unreadable file. The `File` is read at THIS run start and
  * never retained across runs. On the handle path, permission is secured first.
  *
- * @throws {ManagedInputError} an `"acquire"` rejection carrying the underlying
+ * @throws {ManagedInputError} an `"acquire"` rejection holding the underlying
  *   error, so the runner records the benign `"input"` failure and knows no
  *   connection was attempted.
  */

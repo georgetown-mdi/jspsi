@@ -608,7 +608,7 @@ function CredentialField({
           description="Only for a server that refuses the direct password method but asks for it as a prompt. The same password, sent a different way -- it cannot answer a one-time code."
           checked={values.keyboardInteractive}
           // Checkbox takes the error as a node rather than through the
-          // `errorProps` the text inputs carry, so the live-region role that
+          // `errorProps` the text inputs have, so the live-region role that
           // announces every other blocking error is set on the node itself.
           error={
             keyboardInteractiveError !== undefined ? (
@@ -775,7 +775,7 @@ function HostKeyProbe({
 
   return (
     // The marker names the whole probe result as one region: the accessibility
-    // properties this surface carries -- the peer's bytes staying out of the
+    // properties this surface has -- the peer's bytes staying out of the
     // announced run and last in the result -- are properties of everything
     // below, so their tests anchor on it and fail by name if it goes.
     <Stack gap={4} data-testid="probe-result">
@@ -895,7 +895,7 @@ function HostKeyProbe({
                   would announce this a second time and interrupt, so the prop
                   displaces that default. The presentational role itself does
                   not apply -- ARIA's conflict resolution ignores it on an
-                  element carrying global aria-* attributes, which Mantine sets
+                  element holding global aria-* attributes, which Mantine sets
                   here -- leaving a generic element with no live role, which the
                   stable-region test measures. */}
               <Alert
@@ -979,7 +979,7 @@ interface ProbeErrorCopy {
  * check an address that is right.
  *
  * The excerpt is a fragment the peer chose, arriving bounded and escaped from
- * the console; it is carried through verbatim to {@link PeerBytesField} --
+ * the console; it is passed through verbatim to {@link PeerBytesField} --
  * escaping it again would double every backslash the console already wrote.
  *
  * @internal exported for the copy test

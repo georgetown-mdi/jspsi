@@ -1,6 +1,6 @@
 /**
- * The restore-clamp predicates for the two benches: given a step a history entry
- * names and the backing state the bench currently holds, the step that can
+ * The restore-clamp predicates for the two consoles: given a step a history entry
+ * names and the backing state the console currently holds, the step that can
  * render. A browser Back can land on an entry whose work column reads
  * state a later action cleared -- an inviter `share` entry a start-over emptied
  * of its invitation, an acceptor `launched` entry a back-to-columns recovery
@@ -10,12 +10,12 @@
  * step whose backing state the clearing action left intact.
  *
  * Pure and dependency-free so the clamp is the tested boundary, pinned without
- * mounting either bench.
+ * mounting either console.
  */
 
 import type { SpineTarget } from "./inviterModel";
 
-/** The inviter bench's work-column sections: the required spine, the Customize
+/** The inviter console's work-column sections: the required spine, the Customize
  * tabs, and the two terminal surfaces. */
 export type Section = SpineTarget | "share" | "save";
 

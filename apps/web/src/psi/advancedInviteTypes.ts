@@ -12,7 +12,7 @@ import type {
 } from "@psilink/core";
 
 /**
- * The shared data model of the inviter's authoring bench: the draft the editor
+ * The shared data model of the inviter's authoring console: the draft the editor
  * holds, the seed it opens from, and the direction/output mapping the two share.
  * No React, no I/O. The draft-editing operations, the terms mapping, and the
  * validation gate each build on these; keeping them here lets those three siblings
@@ -31,7 +31,7 @@ import type {
  * that turns one on is refused. `deduplicate` reads the same flag through the
  * same clamp. A fan-out transform step is gated against core's own list instead
  * of a flag: the step editor offers no fan-out family, and an imported document
- * carrying one -- in a cleaning step or a key-element transform -- is refused at
+ * holding one -- in a cleaning step or a key-element transform -- is refused at
  * the mint; this editor authors none at any strategy, wider than core's own
  * single-pass allowance.
  *
@@ -49,7 +49,7 @@ export type FuzzyComparison = NonNullable<
 
 /**
  * What an IMPORTED terms document said about the rule set its rules came from:
- * either the set it cited, carried with the rules it cited them over, or the
+ * either the set it cited, held with the rules it cited them over, or the
  * explicit statement that it cited none.
  *
  * The uncited case is its own state rather than an absent field: a document
@@ -110,7 +110,7 @@ export function outputForDirection(direction: OutputDirection): Output {
  * direction for an imported terms set. The "neither receives" pair
  * (`{ expectsOutput: false, shareWithPartner: false }`) is not rejected by
  * `safeParseLinkageTerms` -- that check runs later, in `validateCompatibility` --
- * so an imported set could carry it; the final branch maps it to the safe
+ * so an imported set could hold it; the final branch maps it to the safe
  * `"both"` default rather than loading a forbidden state silently. */
 export function directionForOutput(output: Output): OutputDirection {
   if (output.expectsOutput && output.shareWithPartner) return "both";
@@ -131,7 +131,7 @@ export interface DraftLegalAgreement {
 }
 
 /** The editor's in-progress state. `identity` and `lifetimeSeconds` and the
- * optional `legalAgreement` are author-controlled; `keys` carries the seed's
+ * optional `legalAgreement` are author-controlled; `keys` contains the seed's
  * linkage keys with their enabled flags, reorderable in place. */
 export interface AdvancedInviteDraft {
   identity: string;
@@ -184,20 +184,20 @@ export interface AdvancedInviteDraft {
   standardization: Standardization;
   keys: Array<DraftKey>;
   /**
-   * The `linkageFields` declaration of an IMPORTED terms document, carried verbatim
+   * The `linkageFields` declaration of an IMPORTED terms document, held verbatim
    * for round-trip fidelity. Set only by {@link draftFromTerms}; absent for the seed,
    * guided, and expert paths. When present, {@link buildAdvancedTerms} governs how
    * the rebuild reconciles it.
    */
   importedLinkageFields?: Array<LinkageField>;
   /**
-   * An IMPORTED terms document's rule-set citation state, carried so
+   * An IMPORTED terms document's rule-set citation state, held so
    * {@link buildAdvancedTerms} re-emits what the document claimed rather than
    * re-deciding it. Set by {@link draftFromTerms} on every import, cited or not;
    * absent for the seed, guided, and expert paths, which earn the built-in
    * citation on content.
    *
-   * A cited import carries the rules it cited: an import narrowed by disabling
+   * A cited import has the rules it cited: an import narrowed by disabling
    * keys still builds rules drawn from the imported document, while one whose
    * keys were edited, reordered, or added to does not.
    */

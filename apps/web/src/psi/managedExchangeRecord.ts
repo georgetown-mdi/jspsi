@@ -164,7 +164,7 @@ export interface ManagedExchangeRecord {
   label: string;
   /**
    * This party's exchange-file document, verbatim: the validated
-   * {@link ExchangeSpec} both applications share. Carries no `authentication`
+   * {@link ExchangeSpec} both applications share. Contains no `authentication`
    * block (the secret lives in {@link sharedSecret}) and its connection block is
    * composed from a credential-free locator, so no credential is representable
    * (see {@link composeManagedExchangeFile}).
@@ -446,7 +446,7 @@ export interface ManagedExchangeFileComposition {
    * no invitation, which has no declaration to bind. */
   expectedPartnerDeduplicate?: boolean;
   /** This party's consent to its own outbound payload set. Absent for a party
-   * that records none -- every side but the acceptor, whose record the bench's
+   * that records none -- every side but the acceptor, whose record the console's
    * deposit builder derives at composition. */
   outboundPayloadConsent?: OutboundPayloadConsent;
 }
@@ -495,7 +495,7 @@ export interface NewManagedExchange {
   expires?: string;
   /** The agreed run schedule, when saved as recurring. */
   schedule?: ManagedExchangeSchedule;
-  /** Prior run bookkeeping to carry forward. Set only by an import, which restores
+  /** Prior run bookkeeping to retain. Set only by an import, which restores
    * the artifact's snapshot of `lastRun` so the first wake after an import reads the
    * same catch-up state the source had; a freshly-created record has no run yet. */
   lastRun?: ManagedExchangeLastRun;
@@ -510,7 +510,7 @@ export interface NewManagedExchange {
  * `undefined`.
  *
  * @throws {ZodError} if the assembled record is invalid (an over-long label, a
- *   malformed secret, a document carrying an `authentication` block).
+ *   malformed secret, a document holding an `authentication` block).
  */
 export function buildManagedExchangeRecord(
   fields: NewManagedExchange,
@@ -552,7 +552,7 @@ export interface ManagedExchangeRotation {
 /**
  * Apply a rotation to a record, producing a validated new record with only the
  * rotated secret and the `expires` bound changed -- the document, the label, the
- * schedule, the handle, and the bookkeeping are carried through untouched. A
+ * schedule, the handle, and the bookkeeping remain untouched. A
  * string `expires` sets the bound; `null` clears it (a policy dropped between runs
  * must not leave a stale bound armed). The result is re-validated through the
  * schema, so a malformed rotated secret is rejected here. The input record is not
@@ -582,7 +582,7 @@ export function applyManagedExchangeRotation(
  * stale `auth` failure would re-derive as the attack tier. Clearing it in the
  * same field-scoped write makes the post-re-invite record treated as holding no
  * failure to tier (see {@link ./managedFailureTiers.ts}). The document, the
- * label, the schedule, and the handle are carried through untouched; the input
+ * label, the schedule, and the handle remain untouched; the input
  * record is not mutated.
  *
  * @throws {ZodError} if the rotated record is invalid (a malformed secret).
@@ -602,8 +602,8 @@ export function applyManagedExchangeReinviteRotation(
 }
 
 /** Apply a `lastRun` bookkeeping entry to a record, producing a validated new
- * record with only `lastRun` changed. The document and the secret are carried
- * through untouched. Separate from a rotation write so the run outcome is recorded
+ * record with only `lastRun` changed. The document and the secret remain
+ * untouched. Separate from a rotation write so the run outcome is recorded
  * without re-touching the rotated secret. The input record is not mutated.
  *
  * Monotonic on `at`: an entry older than the stored one leaves the record
@@ -662,7 +662,7 @@ export interface ManagedExchangeScheduleAdvance {
 
 /** Apply a scheduled window's bookkeeping to a record, producing a validated new
  * record with `schedule` and `lastRun` advanced together and everything else --
- * the document, the secret, the handle -- carried through untouched. The input
+ * the document, the secret, the handle -- stays untouched. The input
  * record is not mutated. This is the runner's write; the attended run path
  * records `lastRun` alone and never touches `schedule`.
  *
@@ -713,7 +713,7 @@ export function applyManagedExchangeScheduleAdvance(
 /**
  * Apply an input-file handle to a record, producing a validated new record with
  * only `inputFileHandle` changed -- the document, the secret, and the bookkeeping
- * are carried through untouched. A `FileSystemFileHandle` sets (or re-points) the
+ * remain untouched. A `FileSystemFileHandle` sets (or re-points) the
  * handle; `null` drops it. This is the field-scoped write the save flow uses to
  * persist a handle and the surfaces use to re-point one after a missing-file
  * failure; separate from a rotation or a local edit so persisting a handle cannot

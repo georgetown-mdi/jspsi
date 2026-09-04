@@ -165,7 +165,7 @@ export function acceptorServerJobConfig({
     // does (prepareAcceptorExchange -> prepared.expectedPartnerDeduplicate). The
     // console runs this config through `psilink exchange` at a separate
     // invocation, so a binding held only in the browser's memory would bind
-    // nothing there; carrying it makes the CLI refuse an inviter presenting a
+    // nothing there; including it makes the CLI refuse an inviter presenting a
     // value this acceptance did not consent to. Read off the token's own terms,
     // never the derived acceptor perspective above, whose `deduplicate` is this
     // party's own mirrored false.
@@ -441,7 +441,7 @@ export function useAcceptorExchange({
         ? { channel: "sftp" }
         : { channel: "filedrop" };
 
-    // The console carries out the server-job exchange: the driver POSTs the
+    // The console performs the server-job exchange: the driver POSTs the
     // acceptor's OWN-PERSPECTIVE terms, the shared secret, and the input source
     // to the job API and maps the server's event stream onto the same lifecycle
     // events. It owns no peer connection or PSI library, so `acquire`/`generateOutput`
@@ -640,7 +640,7 @@ export function useAcceptorExchange({
     start(retryLaunch);
   }
 
-  // Discard the current server-job accept when the operator deliberately leaves
+  // Discard the current server-job accept when the operator leaves
   // (the run column's fresh-invitation link, back-to-columns): cancel-if-running,
   // DELETE, clear the recovery record. Fire-and-forget, and a no-op on a browser
   // accept or before any job exists. Frees the console's single slot.

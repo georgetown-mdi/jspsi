@@ -21,7 +21,7 @@
  * `benchRouterHistory.test.ts`.
  */
 
-/** Marks a `history.state` entry as one the console wrote, carrying the step
+/** Marks a `history.state` entry as one the console wrote, containing the step
  * name (an opaque string -- the caller's step union), so a `popstate` into an
  * entry the console did not create (an unrelated app route, or the
  * pre-console entry Back from the first step lands on) is distinguishable
@@ -76,7 +76,7 @@ export function benchStepStateForPush(
   } as unknown as BenchStepState;
 }
 
-/** Read the console step a `popstate` event's `state` carries, or `undefined`
+/** Read the console step a `popstate` event's `state` contains, or `undefined`
  * when the entry is not a console entry -- the signal that Back/Forward left
  * the console (an unrelated route, or the entry preceding the console's
  * first step) and the caller must let ordinary browser navigation proceed. */

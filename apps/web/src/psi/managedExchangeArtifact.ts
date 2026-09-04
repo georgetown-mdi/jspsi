@@ -16,14 +16,14 @@
  *   the mint layer uses on its validated spec);
  * - `key` is the `.psilink.key` pair -- `sharedSecret` and, when a bound is in
  *   force, `expires` -- so the secret half maps onto a valid key file;
- * - `local` carries the browser-only fields the two CLI artifacts do not
+ * - `local` holds the browser-only fields the two CLI artifacts do not
  *   (`label`, `side`, `schedule`, `lastRun`, `tokenMaxAgeDays`), cleanly separable
  *   and ignorable by the CLI toolchain.
  *
  * The input-file handle is deliberately absent (a device- and profile-local
  * platform object with no file serialization), so the first run after an import
  * re-acquires one by selection. No secret-derived value and no rotation epoch is
- * written: the artifact snapshots the secret current at export and carries no
+ * written: the artifact snapshots the secret current at export and holds no
  * history (see the spec's "No anti-rollback").
  *
  * Import is a trust boundary: the artifact is untrusted structured input, so the
@@ -73,7 +73,7 @@ export const MANAGED_EXCHANGE_ARTIFACT_MIME = "application/json";
  * linkage-terms import's fixed pre-parse cap. */
 export const MAX_ARTIFACT_IMPORT_BYTES = 1_000_000;
 
-/** The `.psilink.key` pair the artifact carries: the current shared secret and,
+/** The `.psilink.key` pair the artifact holds: the current shared secret and,
  * when a bound is in force, the `expires` instant it lapses at. This is exactly the
  * key file's own shape, so the secret half of the artifact maps onto a valid
  * `.psilink.key`. */
@@ -84,7 +84,7 @@ export interface ManagedExchangeArtifactKey {
   expires?: string;
 }
 
-/** The browser-only fields the artifact carries alongside the two CLI halves --
+/** The browser-only fields the artifact holds alongside the two CLI halves --
  * the fields the CLI's config-plus-key pair does not have. Cleanly separable and
  * ignorable by the CLI toolchain. */
 export interface ManagedExchangeArtifactLocal {
@@ -94,7 +94,7 @@ export interface ManagedExchangeArtifactLocal {
   side: ManagedExchangeSide;
   /** The agreed run schedule, when saved as recurring. */
   schedule?: ManagedExchangeSchedule;
-  /** The run bookkeeping the imported record carries forward. */
+  /** The run bookkeeping retained from the imported record. */
   lastRun?: ManagedExchangeLastRun;
   /** The max-token-age policy, when the operator opted in. */
   tokenMaxAgeDays?: number;
@@ -151,7 +151,7 @@ export function keyFileFieldsFromRecord(
  * Encode a stored record as the export artifact (see
  * {@link serializeExchangeDocument} for the embedded document). The input-file
  * handle is dropped -- it does not serialize, so the first run after an import
- * re-acquires one -- and the record's `id` is not carried, since an import mints
+ * re-acquires one -- and the record's `id` is not included, since an import mints
  * a fresh local record rather than copying this one.
  */
 export function encodeManagedExchangeArtifact(
@@ -235,10 +235,10 @@ export function parseManagedExchangeArtifact(
  * Reconstruct a runnable record from a validated artifact: a take-over that
  * installs the one owner. The embedded document is parsed back through
  * {@link parseSensitiveYaml} and {@link parseExchangeSpec}, the secret and
- * `expires` come from the key pair, and the local fields carry forward. Built
- * through {@link buildManagedExchangeRecord} -- a fresh `id`, the v1
+ * `expires` come from the key pair, and the local fields pass through
+ * unchanged. Built through {@link buildManagedExchangeRecord} -- a fresh `id`, the v1
  * `schemaVersion`, re-validated through the record schema -- so a malformed
- * document or secret is rejected and nothing is installed. Carries no
+ * document or secret is rejected and nothing is installed. Holds no
  * input-file handle: the first run re-acquires one by selection.
  *
  * @throws {UsageError} if the embedded document is not parseable YAML.

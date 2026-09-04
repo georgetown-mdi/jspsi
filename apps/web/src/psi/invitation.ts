@@ -137,7 +137,7 @@ export interface GeneratedInvitation {
    * inviter's exchange feeds to `prepareForExchange`. Local-only. */
   columns: Array<string>;
   /**
-   * The inviter's edited per-party column metadata, from the bench's Matching
+   * The inviter's edited per-party column metadata, from the console's Matching
    * & sharing section. Threaded into the inviter's own `prepareForExchange`
    * (never encoded in the token), so its disclosure choices govern what the
    * inviter sends and its column->type bindings match the run the authored
@@ -146,7 +146,7 @@ export interface GeneratedInvitation {
    */
   metadata?: Metadata;
   /**
-   * The inviter's authored per-party standardization, from the bench's
+   * The inviter's authored per-party standardization, from the console's
    * Cleaning tab, RECONCILED to {@link linkageTerms}. Paired with
    * {@link metadata} and threaded into the inviter's own `prepareForExchange`
    * (never embedded in the token), so the cleaning -- including the per-field
@@ -346,14 +346,15 @@ function resolveConnectionEndpoint(
  * Fails closed BEFORE minting the secret (see the @throws below): no token is
  * ever produced for an unreadable or unlinkable file.
  *
- * @throws {InvitationFileError} when the file is unreadable, unlinkable, carries an
+ * @throws {InvitationFileError} when the file is unreadable, unlinkable, contains an
  *                               unnamed column, or sends one whose name is too long
- *                               to carry (all before any secret is minted).
+ *                               to hold (all before any secret is minted).
  * @throws {UsageError} (from core) when authored terms declare a `payload.send`
  *                      that does not match the edited metadata's disclosed set, so
  *                      the token and the partner's consent screen cannot misstate
- *                      what is sent. A mint-boundary backstop -- `prepareForExchange`'s
- *                      identical check runs too late for the consent surface.
+ *                      what is sent. A mint-boundary safety check --
+ *                      `prepareForExchange`'s identical check runs too late for the
+ *                      consent surface.
  * @throws {UsageError} (from core) when the terms' element transforms or the
  *                      authored standardization declare a step that expands one
  *                      value into several match candidates, which the run refuses
@@ -385,7 +386,7 @@ export async function generateInvitation(params: {
    * Invitation lifetime in seconds; defaults to
    * {@link INVITATION_LIFETIME_SECONDS} (one hour) and must be in the range
    * `(0, {@link MAX_INVITATION_LIFETIME_SECONDS}]` (up to one year). The quick
-   * path omits it and takes the default; the inviter bench passes the
+   * path omits it and takes the default; the inviter console passes the
    * inviter's chosen lifetime. The bounds are enforced here so this function
    * cannot mint an unbounded token.
    */
@@ -403,7 +404,7 @@ export async function generateInvitation(params: {
    */
   linkageTerms?: LinkageTerms;
   /**
-   * The inviter's edited column metadata from the bench's Matching & sharing
+   * The inviter's edited column metadata from the console's Matching & sharing
    * section, paired
    * with `linkageTerms`. Returned on {@link GeneratedInvitation} and threaded into
    * the inviter's own exchange (never embedded in the token); the fail-closed
@@ -412,7 +413,7 @@ export async function generateInvitation(params: {
    */
   metadata?: Metadata;
   /**
-   * The inviter's authored per-party standardization from the bench's
+   * The inviter's authored per-party standardization from the console's
    * Cleaning tab, paired with `metadata`/`linkageTerms`. Returned on
    * {@link GeneratedInvitation} -- reconciled to the emitted terms -- for the
    * inviter's own exchange, and threaded into the fail-closed satisfiability

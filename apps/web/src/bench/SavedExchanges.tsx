@@ -267,7 +267,7 @@ function StorageUnavailable() {
   );
 }
 
-/** The per-row schedule lines, for a row whose record carries an agreed
+/** The per-row schedule lines, for a row whose record holds an agreed
  * schedule: where the recurrence stands, quietly, and -- once the record's
  * consecutive-miss count reaches the escalation threshold -- the coordination
  * line, the one state here an operator acts on. A row with no schedule renders
@@ -322,7 +322,7 @@ function BackupLine({ row }: { row: SavedExchangeRow }) {
 }
 
 /** The always-available per-row delete: a primary action with one simple confirm.
- * The confirm names the exchange, and carries a custody note for each thing the
+ * The confirm names the exchange, and states a custody note for each thing the
  * delete leaves behind -- an exported backup file (the row's backed-up state),
  * and the files a hand-off saved elsewhere ({@link handoff}), which keep running
  * the exchange from the machine that holds them. Deletion removes everything the
@@ -344,7 +344,7 @@ export function DeleteExchangeButton({
   /** The hand-off that spent this copy, when the surface knows of one: its own
    * custody note then names what that hand-off left running elsewhere. Absent for a
    * live copy, for a migration spend (which records no hand-off), and on the
-   * read-failed listing, whose diagnostic read carries no spent state. */
+   * read-failed listing, whose diagnostic read holds no spent state. */
   handoff?: ManagedSpentHandoff;
   onDeleted: () => void;
 }) {
@@ -363,7 +363,7 @@ export function DeleteExchangeButton({
         setConfirming(false);
       } catch {
         // A rejected delete (transaction abort, quota, a blocked open) leaves the
-        // row standing: keep the modal open and surface the failure so the operator
+        // row standing: keep the modal open and report the failure so the operator
         // can retry rather than the row silently vanishing from confirm.
         setDeleteFailed(true);
       } finally {
@@ -443,7 +443,7 @@ export function DeleteExchangeButton({
 
 /** The first-run empty state: a designed surface, not a blank list. It explains what a
  * managed exchange is, offers creating one and accepting a recurring invitation into the
- * quick path, and carries the standing import affordance for post-eviction recovery. A
+ * quick path, and includes the standing import affordance for post-eviction recovery. A
  * wholesale eviction cannot be told from a first visit, so the import is offered here
  * standing rather than behind a detected loss. */
 function SavedExchangesEmpty() {

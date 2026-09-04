@@ -512,7 +512,7 @@ export function InvitationTerms({
   perspective?: "review" | "accepted" | "proposing";
   /** Semantic heading level (its visual size is fixed at the h2 scale), so the
    * heading nests correctly under its container -- h1 when this is the page's
-   * own heading (the bench review step), h2 below the acceptor page's h1, h3
+   * own heading (the console review step), h2 below the acceptor page's h1, h3
    * below the inviter section's h2. */
   headingOrder?: 1 | 2 | 3;
   // tabIndex + ref so a screen the terms lead can move focus here when they
@@ -562,7 +562,7 @@ export function InvitationTerms({
   // inbound partner data the acceptor receives. A count, not names: bounded at
   // decode (MAX_PAYLOAD_ENTRIES) and already sanitized, so no partner free text
   // enters the core. Lands in the acceptor's "what you receive" group. Absent under
-  // "proposing": the inviter's own send is surfaced as chips there instead.
+  // "proposing": the inviter's own send is shown as chips there instead.
   const sendCount = summary.payload?.send.length ?? 0;
   // Direction-first, and a DECLARATION (definite): summary.payload.send is the
   // disclosed set the exchange transmits for matched records, so the copy states
@@ -682,7 +682,7 @@ export function InvitationTerms({
   // frame, not a direction, so it has its own tier with a fixed "Legal
   // agreement" aria-label distinct from its lead heading.
 
-  // The fields with a partner-authored allowedCharacters class, surfaced
+  // The fields with a partner-authored allowedCharacters class stay
   // always-visible: a partner-defined character-class constraint applies to a
   // linkage field, so the acceptor must be on notice before consenting rather than
   // finding it dimmed inside the collapsed "Other details" disclosure. The class is
@@ -781,7 +781,7 @@ export function InvitationTerms({
           only when this viewer discloses something. */}
       {showsDiscloseGroup && (
         <TermsTier heading="What you disclose" headingOrder={tierHeadingOrder}>
-          {/* The inviter's own send, surfaced as chips. Only the "proposing" preview
+          {/* The inviter's own send, shown as chips. Only the "proposing" preview
               shows it here; the acceptor's send renders below. Driven by
               summary.payload.send (already sanitized). An eager, definite
               declaration under "proposing", so an empty set is treated as a positive
@@ -1051,7 +1051,7 @@ export function InvitationTerms({
           headingOrder={tierHeadingOrder}
         >
           {/* Single-pass is disclosure-affecting AND a mandatory-consistency term the
-            acceptor adopts, so it must be visible at the consent point. Surfaced only
+            acceptor adopts, so it must be visible at the consent point. Shown only
             for single-pass (cascade is the baseline that discloses less).
             Viewer-neutral, since which party becomes the disclosing sender is
             settled at exchange time. Mirrors the inviter's Alert and the CLI's
@@ -1279,7 +1279,7 @@ export function InvitationTerms({
           direction, so it has its own labelled group, placed last: it frames the
           decision rather than leading ahead of what the acceptor actually
           discloses. Its purpose is the field a 45 CFR 164.528 / FERPA exception
-          turns on (docs/COMPLIANCE.md), so it is surfaced whole -- reference,
+          turns on (docs/COMPLIANCE.md), so it is shown whole -- reference,
           purpose, and expiry -- with no "Other details" entry. Pre-sanitized by
           summarizeInvitation. */}
         {summary.legalAgreement !== undefined && (
@@ -1366,7 +1366,7 @@ export function InvitationTerms({
                         {/* Each constraint as its own item. These are fixed
                         plain-language phrases (validity, affix removal, a count
                         of excluded values) containing no partner free text; the
-                        partner-authored allowedCharacters class is surfaced apart,
+                        partner-authored allowedCharacters class is shown apart,
                         in the always-visible constraints group above. Keyed by
                         index -- order is fixed for a field. */}
                         <List size="xs" withPadding listStyleType="circle">
@@ -1398,7 +1398,7 @@ export function InvitationTerms({
                 <Term label="Additional data for matched records">
                   {/* Viewer-centric, like Result sharing: the acceptor reads the
                     inviter's send as the partner's ("Your partner will send"). The
-                    inviter's own send is surfaced as chips above "Other details"
+                    inviter's own send is shown as chips above "Other details"
                     instead, so it is suppressed here under "proposing". */}
                   {/* Shown whenever the send set is a definite declaration --
                     including the empty set, rendered "(none)" so the strict

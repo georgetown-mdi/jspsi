@@ -124,7 +124,7 @@ function reconcileImportedFields(
 }
 
 /** Drop every element's `generateFuzzyComparisons`, returning the key unchanged
- * when none carries one. The fuzzy half of the {@link buildAdvancedTerms} gating
+ * when none has one. The fuzzy half of the {@link buildAdvancedTerms} gating
  * clamp -- the built terms never propose a fuzzy expansion the run does not apply,
  * regardless of how an element acquired one. */
 function stripFuzzy(key: LinkageKey): LinkageKey {
@@ -223,7 +223,7 @@ function citationStands(
  * The cause `cited` is not re-emitted over `rules`, or `undefined` while it
  * stands ({@link citationStands}): the decision {@link buildAdvancedTerms}
  * applies and {@link importedCitationDropCause} reports, so the citation the
- * outgoing document carries and the notice the operator reads cannot disagree.
+ * outgoing document holds and the notice the operator reads cannot disagree.
  *
  * `honoredAtImport` decides between the two has-keys causes: a citation the
  * import's own narrowed rules honored can only have been dropped by a later edit
@@ -270,8 +270,8 @@ export function importedCitationDropCause(
 }
 
 /**
- * Build the {@link LinkageTerms} a draft represents. `version` and `date` are
- * carried from the seed unchanged (the editor exposes no control for them);
+ * Build the {@link LinkageTerms} a draft represents. `version` and `date`
+ * come from the seed unchanged (the editor exposes no control for them);
  * `algorithm` and `deduplicate` come from the draft but are clamped to the
  * applied behavior while gated (see below); `linkageStrategy`, `identity`, the
  * `output` direction, and the optional legal agreement come from the draft (free
@@ -280,7 +280,7 @@ export function importedCitationDropCause(
  * (mirroring `getDefaultLinkageTerms`).
  *
  * The rule-set citation is re-decided against the built terms rather than
- * carried from the seed: an edited draft cites nothing, an unedited one still
+ * taken from the seed: an edited draft cites nothing, an unedited one still
  * cites the built-in set, and an IMPORTED draft re-emits its source document's
  * citation state for as long as the built rules are still drawn from the set it
  * names.
@@ -291,12 +291,12 @@ export function importedCitationDropCause(
 export function buildAdvancedTerms(draft: AdvancedInviteDraft): LinkageTerms {
   // The recommended terms for the draft's CURRENT metadata, so a column type edit
   // re-derives the offerable fields/keys in lockstep with the grid. The base
-  // carries the non-authored shape (version/date/algorithm/deduplicate); the draft
+  // contains the non-authored shape (version/date/algorithm/deduplicate); the draft
   // overrides identity, the output direction, the enabled keys, and the legal
   // agreement.
   const baseTerms = getDefaultLinkageTerms(draft.identity, draft.metadata);
   // Clamp deduplication and per-element fuzzy expansion to the applied behavior
-  // while gated, so the built terms can never carry a setting the run does not yet
+  // while gated, so the built terms can never contain a setting the run does not yet
   // honor regardless of how the draft reached this state (a UI gap, an import) --
   // the structural half of the gate that holds even if the disabled controls or
   // import refusal are bypassed.
@@ -346,10 +346,10 @@ export function buildAdvancedTerms(draft: AdvancedInviteDraft): LinkageTerms {
 
   // The seed cites the built-in rule set; the draft may have edited its way out of
   // it (a key reordered, a field renamed). Re-decide the citation against what
-  // this draft actually built rather than carrying the seed's, so an edited draft
+  // this draft actually built rather than taking the seed's, so an edited draft
   // never claims a provenance it does not have.
   //
-  // An IMPORTED document's citation is carried rather than re-derived: a document
+  // An IMPORTED document's citation is held rather than re-derived: a document
   // may cite a set this build does not ship, or decline to cite one at all, and
   // re-deriving would relabel the first or stamp a provenance on the second. The
   // import re-emits its own citation while the built rules are still drawn from

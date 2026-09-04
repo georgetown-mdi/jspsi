@@ -78,7 +78,7 @@ export function newStep(functionName: string): EditableStep {
 
 /** A single typed parameter input, rendered as the widget kind the descriptor
  * declares (a number, a select, a tag list, or text) and validated against the
- * descriptor's own schema so an out-of-type value surfaces an inline error -- never
+ * descriptor's own schema so an out-of-type value shows an inline error -- never
  * a raw, untyped text box. */
 function ParamInput({
   descriptor,
@@ -145,7 +145,7 @@ function ParamInput({
       );
     case "boolean":
       // A boolean param (e.g. split_on's includeOriginal) always validates, so it
-      // carries no error; render the switch with its label rather than spreading
+      // has no error; render the switch with its label rather than spreading
       // `common`, whose error/errorProps a Switch does not use.
       return (
         <Switch
@@ -180,7 +180,7 @@ function StepRow({
   onRemove,
 }: {
   step: EditableStep;
-  /** The steps that run before this one in the same pipeline. Carried because a
+  /** The steps that run before this one in the same pipeline. Passed because a
    * `coalesce`'s effect is a property of its POSITION, not of the step alone (see
    * {@link inertCoalesceCause}), so the row cannot judge itself in isolation. */
   precedingSteps: ReadonlyArray<EditableStep>;
@@ -195,7 +195,7 @@ function StepRow({
 }) {
   const descriptor = descriptorFor(step.function);
   const { label } = functionDisplay(step.function);
-  // Advice, never a gate: a pipeline carrying one of these is valid, mints, and
+  // Advice, never a gate: a pipeline holding one of these is valid, mints, and
   // runs -- core runs the step as a pass-through. Re-derived on every render, so
   // adding an emptying rule ahead of the step or moving the step after one clears
   // it as the edit commits.
@@ -344,8 +344,8 @@ export function StepListEditor({
 }) {
   // A stable React key per step, tracked by object identity so a reorder follows
   // the logical step (rather than its array position) and a param edit keeps the
-  // same row mounted -- move/remove/setParam preserve or carry each step's
-  // identity across edits, so a controlled input never loses focus. A WeakMap so
+  // same row mounted -- move/remove/setParam keep each step's identity across
+  // edits, so a controlled input never loses focus. A WeakMap so
   // an id is released when its step is dropped; lazily assigning during render
   // is idempotent and safe under StrictMode.
   const stepIds = useRef(new WeakMap<EditableStep, string>());
@@ -453,7 +453,7 @@ export function StepListEditor({
           Object.keys(params).length > 0
             ? { ...step, params }
             : { function: step.function };
-        // Carry the row's identity across the immutable replacement so the edited
+        // Keep the row's identity across the immutable replacement so the edited
         // input stays mounted (keeps focus) rather than remounting on each change.
         const id = stepIds.current.get(step);
         if (id !== undefined) stepIds.current.set(next, id);
