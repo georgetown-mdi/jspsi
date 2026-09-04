@@ -6,17 +6,17 @@
 // Why this exists: reviewers diff `git diff origin/staging...<ref>`, which sees
 // only commits. An uncommitted change is invisible to that diff, so a review run
 // against a dirty tree returns a FALSE clean -- and a review's clean verdict is
-// what the orchestration process trusts, with no downstream backstop to catch the
-// miss.
+// what the orchestration process trusts, with no downstream safety check to catch
+// the miss.
 //
-// WHICH TREE IS INSPECTED. A round now names the ref it reviews in the Workflow's
+// WHICH TREE IS INSPECTED. A round names the ref it reviews in the Workflow's
 // own `args.targetRef`, and the orchestrating session stays in the primary
 // checkout while the branch under review lives in its own worktree, so statusing
 // the caller's cwd alone would be vacuous: a clean primary checkout says nothing
 // about the tree holding the ref. So both are inspected -- the caller's cwd tree
 // (which is the whole check for a Workflow that names no target, e.g. a panel)
 // and, for every named target, each worktree holding that ref. Checking the
-// caller's tree as well as the target's is deliberate: it is the floor that keeps
+// caller's tree as well as the target's is by design: it is the floor that keeps
 // a target-less call at the posture this hook has always had, and it never
 // weakens the target check.
 //
@@ -30,26 +30,27 @@
 // lock under the primary checkout's `scratch/review-rounds/`, written here when a
 // target passes and deleted by light-review's own bookkeeping when the round is
 // booked. A lock younger than ROUND_LOCK_TTL_MS refuses the target; an older one
-// is stale and ignored. The TTL is sized well above the longest observed round
-// deliberately: a crashed round that wedged its branch forever is the worse
-// failure, and a rare post-TTL double round is the accepted cost. The lock key
-// is derived from the target ref by the same transform light-review's Step 1
+// is stale and ignored. The TTL is sized well above the longest observed round: a
+// crashed round that wedged its branch forever is the worse failure, and a rare
+// post-TTL double round is the accepted cost. The lock key is derived from the
+// target ref by the same transform light-review's Step 1
 // applies to name the round's artifacts, so the key locked here is the key that
 // round's bookkeeping deletes -- for a target named by raw sha no less than one
 // named by branch.
 //
 // This is the OPPOSITE default from block-protected-push.mjs. That hook fails OPEN
-// because GitHub branch protection backstops a push it misses. Here nothing
-// backstops a false clean, so every state where a target cannot be CONFIRMED
-// clean must block: a non-git cwd, a git error, a missing cwd, an unreadable
-// `args`, a ref that does not resolve, a dirty status, and a lock that cannot be
-// written all exit 2. So does a payload that parses to a JSON value other than an
-// object -- null, an array, a primitive -- which names no tool and so leaves
-// nothing to rule the call out. Only an event stdin held nothing parseable for, or
-// one naming a tool other than Workflow, exits 0 -- a clean-tree precondition is
-// benign for any workflow, and committing is always available, so this applies to
-// every Workflow call rather than being scoped to review scripts (scoping by
-// script text would fail open on the scriptPath and resume forms).
+// because GitHub branch protection is a safety check for a push it misses.
+// Here nothing is a safety check for a false clean, so every state where a
+// target cannot be CONFIRMED clean must block: a non-git cwd, a git error, a
+// missing cwd, an unreadable `args`, a ref that does not resolve, a dirty
+// status, and a lock that cannot be written all exit 2. So does a payload that
+// parses to a JSON value other than an object -- null, an array, a primitive
+// -- which names no tool and so leaves nothing to rule the call out. Only an
+// event stdin held nothing parseable for, or one naming a tool other than
+// Workflow, exits 0 -- a clean-tree precondition is benign for any workflow,
+// and committing is always available, so this applies to every Workflow call
+// rather than being scoped to review scripts (scoping by script text would
+// fail open on the scriptPath and resume forms).
 //
 // Why the porcelain check is a clean signal: `scratch/` and the round artifacts
 // under it are gitignored, so a normal review round's own artifacts never appear
@@ -57,10 +58,10 @@
 //
 // STATED LIMITS.
 //   - The by-ref REQUIREMENT is keyed on the call naming the light-review script
-//     in any of the three fields that can carry it -- scriptPath, workflow, or
+//     in any of the three fields that can hold it -- scriptPath, workflow, or
 //     the `name` a saved workflow is invoked by -- which is the only Workflow
 //     whose rounds are branch-keyed. Reading all three widens where the gate
-//     applies, which is the fail-closed direction. A Workflow form carrying none
+//     applies, which is the fail-closed direction. A Workflow form holding none
 //     of them -- a resume, say -- falls back to the caller's-cwd check, which is
 //     this hook's original posture and not a new hole.
 //   - A target is matched to a worktree by branch name or by that worktree's
@@ -105,7 +106,7 @@ function block(reason) {
 }
 
 // The Workflow's named arguments, as an object; null when `args` was delivered
-// in a shape that carries no named field, which is a fail-closed case rather
+// in a shape that holds no named field, which is a fail-closed case rather
 // than an empty one -- a target named in an unreadable delivery would go
 // unchecked. Absent arguments are an empty set, not an unreadable one.
 function workflowArgs(toolInput) {
@@ -162,7 +163,7 @@ function treesHolding(records, ref, sha) {
   );
 }
 
-// A filename-safe key for a ref. Branch names carry no `/` by repo convention;
+// A filename-safe key for a ref. Branch names contain no `/` by repo convention;
 // this sanitizes anyway, and strips leading dots so no key can name a directory
 // component of its own.
 function refKey(ref) {
@@ -358,7 +359,7 @@ function main() {
 try {
   main();
 } catch {
-  // Structural fail-closed backstop: the two exit-0 cases (unparseable event,
+  // Structural fail-closed safety check: the two exit-0 cases (unparseable event,
   // non-Workflow tool) are decided before any throwing code, so any error that
   // reaches here is on a path that must block, not allow.
   block(UNCONFIRMED);

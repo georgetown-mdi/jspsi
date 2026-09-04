@@ -27,7 +27,7 @@
 //     have held on to
 //
 // WHICH TREE A SESSION MAY DELETE INSIDE is answered twice over, because neither
-// answer alone is right. The first is the agent id the event carries: the harness
+// answer alone is right. The first is the agent id the event holds: the harness
 // gives an isolated agent a worktree named after that id
 // (`.claude/worktrees/agent-<agent_id>`, recorded as `worktreePath` in the
 // harness's own subagent metadata), so that tree is its own wherever it is
@@ -45,8 +45,8 @@
 // stays guarded. When neither answer names a tree, the refusal says so rather than
 // leaving a fail-closed refusal unexplained.
 //
-// WHAT STANDING IN A TREE DOES NOT SETTLE is whether the session belongs there,
-// and nothing readable settles it. The harness records a worktree path only for a
+// WHAT STANDING IN A TREE DOES NOT DETERMINE is whether the session belongs there,
+// and nothing readable determines it. The harness records a worktree path only for a
 // spawn it GAVE a tree to and records nothing about a tree a spawn was merely
 // pointed at -- re-verify by reading its per-spawn metadata, the
 // `agent-<id>.meta.json` beside the session transcript, where the path is present
@@ -65,12 +65,12 @@
 // outlives the tree. That is the answer for a tree no session is working in: it
 // clears the untracked file that holds `require-clean-tree-for-review.mjs` back,
 // and it leaves the tree retirable by the plain `git worktree remove` this hook
-// allows, which git holds back while a tree carries modified or untracked files
+// allows, which git holds back while a tree has modified or untracked files
 // -- an ignored one does not hold it.
 // Every step of that is driven against real git in the test beside this file
 // rather than asserted here.
 //
-// What it deliberately allows:
+// What it allows by design:
 //   - anything strictly inside the tree this session is standing in or owns
 //     (`rm -rf node_modules`, `rm dist/bundle.js`, `rm probe.test.ts`) --
 //     ordinary work on the tree the work is happening in
@@ -127,7 +127,7 @@
 //   - ONLY sudo, command, env, nice, time, nohup, setsid, doas AND stdbuf ARE
 //     PEELED as prefix words, along with their flags and the values those take.
 //     Another wrapper stands where the command word belongs and the stage reads
-//     as the wrapper -- `timeout 5 rm ...` among them, deliberately: peeling it
+//     as the wrapper -- `timeout 5 rm ...` among them, by design: peeling it
 //     means skipping a positional duration, which is modelling that tool's
 //     grammar rather than reading a prefix word.
 //   - TARGETS THAT ONLY EXIST AT RUNTIME are not seen: a path read from a file,
@@ -147,7 +147,7 @@
 //     bounded: no `cd` reaches the tree itself, the root they all live under, or
 //     any tree other than the one the shell ends up in.
 //   - WHICH TREE THE SHELL IS STANDING IN COMES FROM THE WORKING DIRECTORY THE
-//     CALL ITSELF CARRIES, which persists between calls, and not from a `cd`
+//     CALL ITSELF HOLDS, which persists between calls, and not from a `cd`
 //     this line spells; a `cd` moves it from there for the pipelines after it.
 //     Whether the harness reports a drifted shell cwd or a stale session cwd was
 //     not driven at this ref, so a session whose cwd has drifted into a tree may
@@ -161,7 +161,7 @@
 //     GIT ITSELF RESOLVES, AND FROM NOTHING ELSE, the resolution asked of git
 //     rather than reimplemented. So a `--config-env`, which names a variable
 //     whose value stands nowhere on the line, stays unread, as does any
-//     assignment reaching git by a route the stage splitting does not surface.
+//     assignment reaching git by a route the stage splitting does not expose.
 //
 // Exit 0 allows the call; exit 2 blocks it and feeds stderr back to Claude. Any
 // unexpected failure here falls through to exit 0 (fail open) so a bug in this
@@ -195,10 +195,10 @@ function mentionsDeletion(command) {
 
 // Put a read-only question to real git and return its answer, or null when it
 // gave none: no git on PATH, a directory that is gone, a non-zero exit, or a run
-// that outlived the timeout. `environment` carries the assignments the guarded
+// that outlived the timeout. `environment` holds the assignments the guarded
 // command runs git under, so a probe whose answer depends on which files git
 // reads resolves them from where that command would; they are passed as an
-// object to the spawn rather than through a shell, so a value carrying quotes or
+// object to the spawn rather than through a shell, so a value containing quotes or
 // spaces reaches git as it stands. The three settings below are the probe's own
 // contract and are not the command's to move: which git answers it -- a spawn
 // resolves the program from the CHILD's PATH, so a collected PATH would have
@@ -274,7 +274,7 @@ function block(reason) {
 // Words that stand in front of the real command word without changing which
 // command runs. Each takes only option-shaped arguments of its own, so peeling it
 // needs no knowledge of its grammar -- which is why `timeout`, whose duration
-// stands as a bare positional, is deliberately absent.
+// stands as a bare positional, is absent by design.
 const COMMAND_PREFIX_WORDS = new Set([
   "sudo",
   "command",
@@ -435,7 +435,7 @@ function ownershipNote(ownTrees, standingTree) {
     : ` -- this session owns only '${owned}'`;
 }
 
-// The live worktree roots that deleting `target` would carry off with it.
+// The live worktree roots that deleting `target` would remove along with it.
 function rootsUnder(target, knownRoots) {
   const candidates = new Set(knownRoots);
   candidates.add(resolve(target, CLAUDE_DIR, WORKTREES_DIR));
@@ -451,7 +451,7 @@ function rootsUnder(target, knownRoots) {
 }
 
 // Why deleting `target` is refused, or null when it may proceed. A tree taken
-// whole and the root they all live under are settled before the standing tree is
+// whole and the root they all live under are decided before the standing tree is
 // consulted, so working in a tree never buys the tree itself.
 function deletionVerdict(target, ownTrees, knownRoots, standingTree) {
   const context = worktreeContext(target);
@@ -554,7 +554,7 @@ function execTargets(args) {
 }
 
 // Where a flag names the destination `mv` writes to: the index of the operand
-// holding it, or null when the flag carries it inside its own token. Undefined
+// holding it, or null when the flag contains it inside its own token. Undefined
 // when no flag names one at all, which leaves the destination the last operand.
 // A short `-t` is read the way getopt reads it whatever it is bundled with, so
 // `mv -vt DIR src` and `mv -fvtDIR src` name a destination exactly as `mv -t DIR
@@ -619,7 +619,7 @@ const VALUE_GLOBALS = new Set([
   "--config-env",
 ]);
 
-// Read a git invocation as the directory redirects it carries, its subcommand,
+// Read a git invocation as the directory redirects it holds, its subcommand,
 // and that subcommand's arguments. Repeated `-C` is kept in order rather than
 // overwritten: real git applies each one from where the last one left it, so
 // `-C a -C b` lands in `a/b` and a second `-C .` stays where the first went.
@@ -677,11 +677,11 @@ function commandLineRequireForce(configSettings) {
 }
 
 // Whether git's own requirement of a force is lifted for this clean. A `-c` on
-// the command line settles it, winning over the config files as real git resolves
+// the command line decides it, winning over the config files as real git resolves
 // it; otherwise the persisted value is asked of git in the directory being
 // cleaned rather than resolved here, under the environment assignments the
-// command carries, which are what decide the set of files git reads it from. A
-// doubled flag force has already carried the command past every threshold this
+// command holds, which are what decide the set of files git reads it from. A
+// doubled flag force has already pushed the command past every threshold this
 // config could move it to, so the probe is skipped there.
 function forceRequirementLifted(
   directory,
@@ -706,7 +706,7 @@ function forceRequirementLifted(
 // both `git clean` and `git worktree remove`, so `--f`, `--fo`, `--for`,
 // `--forc` and `--force` all mean force (measured against real git in the test
 // beside this file); `--f=` and `--forcex` do not, so the match is anchored and
-// carries no `=`.
+// includes no `=`.
 const FORCE_ABBREVIATION = /^--f(?:o(?:r(?:c(?:e)?)?)?)?$/;
 
 // How many times a force is asked for, counting a repeated short flag (`-ff`), a
@@ -730,7 +730,7 @@ function isDryRun(args) {
 // files and -d its untracked directories. A directory that merely HOLDS
 // worktrees loses the healthy ones only to a doubled force with -d, because git
 // skips a nested repository for every lesser spelling -- and loses an orphaned
-// one, which git no longer reads as a repository to skip, to a single force
+// one, which git no longer treats as a repository to skip, to a single force
 // with -d.
 function gitCleanVerdict(
   args,
@@ -771,7 +771,7 @@ function gitCleanVerdict(
   // force counter a real -f does. git >= 2.45 stopped feeding that counter from
   // the config, so there this shape only reaches the single-force threshold and
   // the guard, which blocks it either way, conservatively over-refuses it rather
-  // than model the git version. That boundary was settled by driving real git
+  // than model the git version. That boundary was fixed by driving real git
   // across it (the 2.44/2.45 versions), not by reading git.
   const force =
     flagForce +

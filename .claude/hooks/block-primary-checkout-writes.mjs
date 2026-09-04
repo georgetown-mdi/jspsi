@@ -10,7 +10,7 @@
 // pointed at that tree by absolute path. A write that lands in the primary
 // checkout instead is therefore always a mistake -- it puts the edit on whatever
 // branch the primary checkout happens to hold (staging, typically), off the
-// branch under review, where no round will ever see it and no PR will carry it.
+// branch under review, where no round will ever see it and no PR will include it.
 //
 // THE SIBLING CASE. The file tools take a literal absolute path and are not
 // rooted to the session's directory, so a session working in one worktree writes
@@ -40,11 +40,11 @@
 // an edit to a tracked one does, and `git check-ignore` is the one question that
 // answers for both. The same question decides the sibling case, asked of the
 // worktree that owns the path: an ignored file is not that branch's content
-// either. It also passes the gitignored locals a worktree may carry as symlinks
+// either. It also passes the gitignored locals a worktree may hold as symlinks
 // into another tree, which resolve to their target's checkout before either rule
 // looks at them.
 //
-// FAIL OPEN, deliberately, and opposite to require-clean-tree-for-review.mjs:
+// FAIL OPEN, by design, and opposite to require-clean-tree-for-review.mjs:
 // this guard shapes where work is written, and nothing about correctness or
 // disclosure rides on it, while a bug here that failed closed would wedge every
 // edit in every tree. So the refusal fires only where the path is positively
@@ -52,12 +52,12 @@
 // state (no git, a path git will not resolve, a check-ignore that errors rather
 // than answering, an unreadable event) allows.
 //
-// THE DELIBERATE OVERRIDE, the idiom block-model-drop-sendmessage.mjs sets with
+// THE BY-DESIGN OVERRIDE, the idiom block-model-drop-sendmessage.mjs sets with
 // its [accept-model-drop] marker: a maintainer-directed edit of a checkout the
 // session is not working in stays possible by creating the sentinel file named in
 // OVERRIDE_SENTINEL below IN THAT CHECKOUT, which lifts this hook for it until
-// the file is deleted. Edit and Write carry no free-text field a marker could
-// ride in, so the deliberate act is a file rather than a phrase. Like that marker
+// the file is deleted. Edit and Write have no free-text field a marker could
+// ride in, so the opt-in is a file rather than a phrase. Like that marker
 // it is self-applicable -- what it buys is that the override is named, visible in
 // the tree, and reversible, not that it cannot be forged.
 //
@@ -71,9 +71,9 @@
 //     the write is answered as git sees it now.
 //   - The session's tree is read from the event's cwd, which is where the harness
 //     says the session is working, not where any one command ran. A cwd that
-//     silently reverted out of an entered worktree therefore reads as the tree it
-//     reverted to, so the sibling rule follows the cwd rather than the intent;
-//     warn-worktree-revert.mjs is what surfaces that revert.
+//     silently reverted out of an entered worktree therefore is treated as the
+//     tree it reverted to, so the sibling rule follows the cwd rather than the
+//     intent; warn-worktree-revert.mjs is what reports that revert.
 //
 // Exit 0 allows the call; exit 2 blocks it and feeds stderr back to Claude.
 
@@ -169,7 +169,7 @@ function worktreePaths(directory) {
 }
 
 // The worktree the session itself is working in, or undefined when its directory
-// cannot be placed in one -- an event carrying no cwd, or one outside this
+// cannot be placed in one -- an event holding no cwd, or one outside this
 // repository. Undefined leaves the sibling rule silent.
 function sessionWorktree(cwd, paths) {
   if (cwd === null) return undefined;
