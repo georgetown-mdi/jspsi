@@ -10,6 +10,8 @@ import {
   checklistViolations,
   prHeadSha,
   stripHtmlComments,
+  titleBudget,
+  titleViolations,
 } from "./check-pr-checklist.mjs";
 
 const HEAD = "0123456789abcdef0123456789abcdef01234567";
@@ -245,6 +247,45 @@ describe("PR review attestation", () => {
   });
 });
 
+describe("PR title length", () => {
+  it("passes a title at exactly the budget", () => {
+    const { budget } = titleBudget("1274");
+    expect(titleViolations("x".repeat(budget), "1274")).toEqual([]);
+  });
+
+  it("fails a title one character over the budget", () => {
+    const { budget } = titleBudget("1274");
+    const v = titleViolations("x".repeat(budget + 1), "1274");
+    expect(v).toHaveLength(1);
+    expect(v[0]).toContain(`${budget + 1} characters`);
+    expect(v[0]).toContain(`${budget}-character budget`);
+  });
+
+  it("shrinks the budget by one for a five-digit PR number", () => {
+    const fourDigit = titleBudget("1274").budget;
+    const fiveDigit = titleBudget("12745").budget;
+    expect(fiveDigit).toBe(fourDigit - 1);
+    const title = "x".repeat(fourDigit);
+    expect(titleViolations(title, "1274")).toEqual([]);
+    expect(titleViolations(title, "12745")).not.toEqual([]);
+  });
+
+  it("falls back to the 42-character budget with no PR number", () => {
+    expect(titleBudget(undefined).budget).toBe(42);
+    expect(titleBudget(null).budget).toBe(42);
+    expect(titleViolations("x".repeat(42), undefined)).toEqual([]);
+    expect(titleViolations("x".repeat(43), undefined)).not.toEqual([]);
+  });
+
+  it("flags an empty or whitespace-only title with its own message", () => {
+    for (const title of ["", "   "]) {
+      const v = titleViolations(title, "1274");
+      expect(v).toHaveLength(1);
+      expect(v[0]).toContain("empty");
+    }
+  });
+});
+
 // The shipped template, not a fixture: a reword of a guarded line fails here
 // rather than passing silently in CI with the rule reading nothing.
 const template = readFileSync(
@@ -320,11 +361,17 @@ function runCli(bodyText, env) {
   }
 }
 
+// A title well within the fallback and the four-digit budgets alike, for
+// subprocess runs that are not themselves exercising the title-length rule.
+const SHORT_TITLE = "Fix key rotation after failed exchange";
+
 describe("the check as the workflow runs it", () => {
   it("passes a resolved body attesting the head", () => {
     const r = runCli(passingBody, {
       GITHUB_ACTIONS: "true",
       PR_HEAD_SHA: HEAD,
+      PR_TITLE: SHORT_TITLE,
+      PR_NUMBER: "1274",
     });
     expect(r.status).toBe(0);
   });
@@ -333,6 +380,8 @@ describe("the check as the workflow runs it", () => {
     const r = runCli(passingBody, {
       GITHUB_ACTIONS: "true",
       PR_HEAD_SHA: "fedcba9876543210fedcba9876543210fedcba98",
+      PR_TITLE: SHORT_TITLE,
+      PR_NUMBER: "1274",
     });
     expect(r.status).toBe(1);
   });
@@ -346,5 +395,47 @@ describe("the check as the workflow runs it", () => {
   it("checks presence only off the runner, where there is no head", () => {
     const r = runCli(passingBody.replace(HEAD, "fedcba98765"), {});
     expect(r.status).toBe(0);
+  });
+});
+
+describe("the title-length rule as the workflow runs it", () => {
+  it("refuses to pass on a runner whose title it cannot read", () => {
+    const r = runCli(passingBody, {
+      GITHUB_ACTIONS: "true",
+      PR_HEAD_SHA: HEAD,
+    });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("could not read the PR title");
+  });
+
+  it("does not fail a long title off the runner", () => {
+    const r = runCli(passingBody, {
+      PR_HEAD_SHA: HEAD,
+      PR_TITLE: "x".repeat(100),
+    });
+    expect(r.status).toBe(0);
+  });
+
+  it("refuses to pass on a runner whose PR number it cannot read", () => {
+    const r = runCli(passingBody, {
+      GITHUB_ACTIONS: "true",
+      PR_HEAD_SHA: HEAD,
+      PR_TITLE: SHORT_TITLE,
+    });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("could not read the PR number");
+  });
+
+  it("labels a title violation as the PR title, not the body source", () => {
+    const r = runCli(passingBody, {
+      GITHUB_ACTIONS: "true",
+      PR_BODY: passingBody,
+      PR_HEAD_SHA: HEAD,
+      PR_TITLE: "x".repeat(43),
+      PR_NUMBER: "1274",
+    });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("PR title: PR title is 43 characters");
+    expect(r.stderr).not.toContain("PR body: PR title is");
   });
 });
