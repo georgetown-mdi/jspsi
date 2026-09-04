@@ -33,23 +33,32 @@ managed option.
 ## Provenance
 
 Agent-authored, and a proposal rather than ratified infrastructure: read every
-claim here as something to check. **Nothing here has been run against a relay.**
-No instance has been launched, no image built, no certificate issued, and no
-allocation driven. `verify.sh` is the script that turns this from a proposal into
-a working relay, and it has itself never been run -- its probes key on coturn's
-documented exit statuses and message strings rather than measured ones. Fix what
-the first real run gets wrong rather than loosening a probe until it passes.
+claim here as something to check. **A relay has been stood up from it, on the
+docker path.** One instance -- the stock AL2023 arm64 AMI
+[`aws/provision.md`](aws/provision.md) prescribes -- was driven end to end on
+2026-09-03/04: the image built from the pinned digest, the container's uid was
+probed (65534), a real Let's Encrypt certificate was issued by DNS-01 through
+Cloudflare and deployed, the configuration rendered, TURNS bound on 443, an
+outside TLS handshake was verified from a third network against the public
+name, allocations were driven with `turnutils_uclient`, an allocation toward an
+internal address was confirmed refused, and `verify.sh` finished 6 pass / 0
+fail / 0 unclear from `install.sh`'s own end-of-install run.
 
-Three pieces were driven locally against a fixture, and only those three:
-`render-config.sh` renders the template, writes at mode 600, and refuses a
-leftover placeholder, a placeholder named in a comment, and a secret whose
-alphabet its substitution would not survive; `mint-credential.sh` produces a
-credential that matches an independent HMAC-SHA1 computation of the same
-username; `verify.sh`'s handshake probe was run against a local `openssl
-s_server` holding first a self-signed certificate and then a leaf under a locally
-trusted CA, which is a TLS endpoint and not a relay -- the allocation and refusal
-probes have still been asked of nothing. Whether coturn accepts that credential,
-and every other claim in this directory, is unverified.
+**The podman/Quadlet path remains undriven** -- everything measured above went
+through `psilink-relay-docker.service`, and nothing has exercised
+`psilink-relay.container` or its generator. The data leg to a responsive peer
+(`PSILINK_RELAY_VERIFY_PEER`) and a real relayed exchange between two parties
+have also not been exercised: the allocation and refusal probes were driven,
+not the exchange traffic itself. Fix what the next real run against those gets
+wrong rather than loosening a probe until it passes.
+
+`render-config.sh` and `mint-credential.sh` were also driven locally against a
+fixture before the live run: `render-config.sh` renders the template, writes
+at mode 600, and refuses a leftover placeholder, a placeholder named in a
+comment, and a secret whose alphabet its substitution would not survive;
+`mint-credential.sh` produces a credential that matches an independent
+HMAC-SHA1 computation of the same username, which the live run confirmed
+coturn itself accepts.
 
 The measurement this reference implements, and the shapes it rules out, are in
 [`docs/notes/webrtc-relay-deployment.md`](../../docs/notes/webrtc-relay-deployment.md);
@@ -71,10 +80,10 @@ a pull request.
    refuses to run without it; nothing defaults to a hostname.
 3. Put `/etc/psilink-relay/acme.env` from [`certs/env.example`](certs/env.example)
    at mode 600, with the DNS provider's credential.
-4. Run `install.sh` as root. It installs podman, mints the static authentication
-   secret if the host has none, builds the image, obtains a certificate, renders
-   the configuration, installs the unit and the two timers, starts the relay, and
-   runs `verify.sh`.
+4. Run `install.sh` as root. It installs a container runtime, mints the static
+   authentication secret if the host has none, builds the image, obtains a
+   certificate, renders the configuration, installs the unit and the two timers,
+   starts the relay, and runs `verify.sh`.
 5. Read `verify.sh`'s output. A relay that starts and cannot allocate looks
    identical from the console.
 6. Per exchange: `mint-credential.sh [name] [ttl]` prints a credential and the
@@ -92,36 +101,40 @@ or the Dockerfile and it converges.
 | `Dockerfile` | The base image pin, and nothing else. One line of instruction: `coturn/coturn` at a tag and its multi-arch index digest. The single home of that digest -- every other file names the locally built `localhost/psilink-relay:installed` tag, so a base move is exactly one edit. Its comment carries the fallback if the community image stops publishing |
 | `turnserver.conf.tmpl` | The hardened coturn configuration, with `__PLACEHOLDER__` values. Tracked; the rendered file is not |
 | `render-config.sh` | Substitutes the template at mode 600. Run at install and again on every start, because a stopped and started instance comes back on a different address and a stale `external-ip` advertises a candidate nobody can reach. The cloud seam is one variable: an executable printing `<public>/<private>` |
-| `psilink-relay.container` | The Quadlet unit, installed at `/etc/containers/systemd/`. systemd is the only supervisor; there is no container daemon under it |
+| `psilink-relay.container` | The Quadlet unit for a podman host, installed at `/etc/containers/systemd/`. systemd is the only supervisor; there is no container daemon under it |
+| `psilink-relay-docker.service` | The same container on a docker host: a plain systemd unit running `docker run` in the foreground, installed as `/etc/systemd/system/psilink-relay.service`. Same image, mounts, and flags as the Quadlet unit -- the two are edited together |
 | `psilink-relay-verify.service`, `.timer` | The daily verification. A standing relay is idle between exchanges, so nothing else notices it stopped carrying allocations until a partner is waiting on one |
 | `install.sh` | The whole install, idempotent |
-| `verify.sh` | Drives a real TURNS handshake, a real allocation, and a probe that an allocation toward an internal address is refused. Passes only on an observed refusal: a question that could not be asked reports UNCLEAR and fails |
+| `verify.sh` | Drives a real TURNS handshake, a real allocation, and a probe that an allocation toward an internal address is refused. Passes only on an observed refusal: a question that could not be asked reports UNCLEAR and fails. Connects to the realm's name by default; `PSILINK_RELAY_VERIFY_CONNECT` overrides the TCP connect target while the realm still names the SNI and TURN realm -- `install.sh` sets it to the instance's private address for the end-of-install run, because EC2 does not hairpin an instance's traffic back to its own Elastic IP, while the daily timer stays on the public name so it fails if that path breaks. `PSILINK_RELAY_VERIFY_WAIT` sets how many seconds it retries a bare TCP connect before its first probe, waiting for a just-(re)started listener to come up; 30 by default |
 | `mint-credential.sh` | One time-limited credential: `<expiry>:<name>` as the username, the base64 HMAC-SHA1 of it as the password |
 | `relay.env.example` | The host's one configuration file, copied to `/etc/psilink-relay/relay.env` |
 | `certs/` | ACME DNS-01 renewal: the timer and its unit, the client-neutral `renew.sh`, the deploy hook, and the provider credential's example |
 | `aws/` | The AWS-specific half: instance provisioning, the IMDSv2 external-address helper, and the demo box's stop/start scripts |
 
-## Supervision, and the `docker run` equivalent
+## Supervision and the container runtime
 
-The unit is podman + Quadlet: daemonless, with systemd as the only supervisor.
-A host that runs docker instead needs no different flags, because the flags are
-the same ones:
+One service name, `psilink-relay.service`, whichever runtime the host carries:
+the certificate deploy hook restarts it by that name and the verification timer
+requires it. Which file defines it is what `install.sh` decides, and it decides
+once per host -- the runtime is recorded in `relay.env` and read back on every
+later run, so a converge does not move a running relay from one supervisor to the
+other.
 
-```sh
-docker run -d --name psilink-relay \
-  --network host \
-  --restart unless-stopped \
-  --read-only --tmpfs /var/tmp \
-  --cap-drop ALL --cap-add NET_BIND_SERVICE \
-  --security-opt no-new-privileges \
-  -v /etc/psilink-relay/turnserver.conf:/etc/coturn/turnserver.conf:ro \
-  -v /etc/psilink-relay/certs:/etc/coturn/certs:ro \
-  localhost/psilink-relay:installed -c /etc/coturn/turnserver.conf
-```
+| The host has | The unit | The supervisor |
+| --- | --- | --- |
+| podman | `psilink-relay.container`, at `/etc/containers/systemd/` | podman's systemd generator: daemonless, and systemd is the only supervisor |
+| docker | `psilink-relay-docker.service`, installed as `/etc/systemd/system/psilink-relay.service` | systemd, over a foreground `docker run`; the unit `Requires=docker.service` |
 
-What the unit adds and this line does not is the `ExecStartPre` that re-renders
-the configuration: run `render-config.sh` before each `docker run`, or the relay
-advertises whatever address it was installed against.
+**Amazon Linux 2023 is a docker host.** It publishes no `podman` package and
+carries no EPEL, so `dnf install podman` fails there with no match, while `dnf
+install docker` installs Docker Engine. That is measured on the arm64 AMI
+[`aws/provision.md`](aws/provision.md) prescribes, and it is why the docker path
+is a tracked unit rather than a documented equivalence. `install.sh` still
+prefers podman wherever the distribution carries it.
+
+The two unit files carry the same image, the same read-only mounts, and the same
+container flags. `psilink-relay-docker.service`'s header holds the
+directive-to-flag mapping between them, and an edit to one is an edit to both.
 
 Host networking is a requirement of the protocol rather than a convenience. TURN
 hands out a relayed transport address, and bridge networking or published ports
@@ -130,10 +143,11 @@ enough that publishing it is not a port list.
 
 ## Certificates
 
-Let's Encrypt over DNS-01, on a systemd timer, driven through `lego` (default) or
-`acme.sh`. DNS-01 rather than HTTP-01 because the relay already terminates TLS on
-443 for TURNS -- an HTTP-01 challenge would need a second service on 80 whose
-only job is to answer it.
+Let's Encrypt over DNS-01, on a systemd timer, driven through `lego` (default,
+v5 or later -- `renew.sh` drives the v5 `run` flag shape, which a v4 binary
+rejects) or `acme.sh`. DNS-01 rather than HTTP-01 because the relay already
+terminates TLS on 443 for TURNS -- an HTTP-01 challenge would need a second
+service on 80 whose only job is to answer it.
 
 The provider is a variable, and the credential lives in `/etc/psilink-relay/acme.env`
 at mode 600. `certs/env.example` carries the Cloudflare shape (a token scoped to
@@ -167,9 +181,11 @@ provider, or on-prem changes two things and nothing else:
   `printf`.
 - **The DNS-01 provider.** Two variables in `acme.env`.
 
-The image, the configuration, the unit, the credential model, and the
-verification are the same everywhere. Neither `install.sh`'s `dnf` line nor the
-`aws/` directory is reached by anything else here.
+The image, the configuration, the units, the credential model, and the
+verification are the same everywhere. Neither `install.sh`'s `dnf` lines nor the
+`aws/` directory is reached by anything else here; on a distribution without
+`dnf`, install podman or docker with that distribution's own package manager and
+`install.sh` uses what it finds.
 
 ## What is not tracked
 

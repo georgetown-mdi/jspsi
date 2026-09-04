@@ -1,0 +1,56 @@
+# The relay's unit on a host that runs docker rather than podman. install.sh
+# puts this at /etc/systemd/system/psilink-relay.service -- the service name is
+# the same on both runtimes, because certs/deploy-hook.sh restarts
+# psilink-relay.service by name and psilink-relay-verify.service requires it.
+#
+# PAIRED WITH psilink-relay.container, the podman Quadlet unit. The two carry the
+# same image, the same mounts, and the same container flags; edit them together.
+# The mapping, directive to flag: ContainerName -> --name, Network=host ->
+# --network host, each Volume -> -v, ReadOnly=true -> --read-only, Tmpfs ->
+# --tmpfs, DropCapability/AddCapability -> --cap-drop/--cap-add, LogDriver=journald
+# -> --log-driver journald, Exec -> the arguments after the image.
+#
+# docker run in the foreground, not -d: systemd supervises the run itself, so
+# Restart=always is what brings the relay back and `journalctl -u
+# psilink-relay.service` is where its output goes. A detached run would exit
+# immediately and leave systemd supervising nothing.
+#
+# LIVE, driven 2026-09-03 on the relay box: image build, uid probe, certificate
+# deploy, config render, and the 443 bind were all exercised from this unit's
+# docker run. The Quadlet path (psilink-relay.container) remains undriven.
+
+[Unit]
+Description=psilink WebRTC relay (coturn, TURNS on 443/tcp)
+Documentation=https://github.com/georgetown-mdi/jspsi/blob/main/infra/relay/README.md
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+# Rendered on every start, not only at install: the instance's public address is
+# not a property of the installation, and a stale external-ip advertises a
+# relayed candidate nobody can reach.
+ExecStartPre=/opt/psilink-relay/render-config.sh
+# --rm removes the container when the run ends, so this clears only what an
+# ungraceful daemon exit left behind, and is not an error when there is nothing.
+ExecStartPre=-/usr/bin/docker rm -f psilink-relay
+# no-new-privileges is deliberately absent: the image's entrypoint acquires
+# cap_net_bind_service at exec, which that flag forbids -- measured on the live
+# relay 2026-09-03 (with the flag, an errno-13 bind loop on 443; without it, the
+# listener is up in seconds). --cap-drop ALL --cap-add NET_BIND_SERVICE remains
+# the control that bounds the acquisition.
+ExecStart=/usr/bin/docker run --rm --name psilink-relay \
+  --network host \
+  --read-only --tmpfs /var/tmp \
+  --cap-drop ALL --cap-add NET_BIND_SERVICE \
+  --log-driver journald \
+  -v /etc/psilink-relay/turnserver.conf:/etc/coturn/turnserver.conf:ro \
+  -v /etc/psilink-relay/certs:/etc/coturn/certs:ro \
+  localhost/psilink-relay:installed \
+  -c /etc/coturn/turnserver.conf
+ExecStop=-/usr/bin/docker stop psilink-relay
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

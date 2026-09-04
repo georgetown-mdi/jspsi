@@ -28,6 +28,14 @@ log() { printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*" >&2; }
 # shellcheck disable=SC1090
 . "$ENV_FILE"
 [ -f "$ACME_ENV" ] || die "no $ACME_ENV; copy certs/env.example there, chmod 600, and fill in the provider credential"
+# Plain (non-exporting) source for this script's own reads below (EMAIL,
+# PROVIDER, CLIENT): a `set +a` after an export-all source does not un-export
+# variables already exported, so the DNS provider credential would otherwise
+# stay in the environment of everything that runs after this point, including
+# deploy-hook.sh, which needs no credential. Measured 2026-09-03: a subshell
+# opened after `set -a; . "$ACME_ENV"; set +a` still sees the credential. The
+# export-all sourcing below is scoped to a subshell around only the ACME
+# client invocation instead, so the credential never outlives that command.
 # shellcheck disable=SC1090
 . "$ACME_ENV"
 
@@ -43,25 +51,42 @@ install -d -m 700 "$ACME_HOME"
 case "$CLIENT" in
   lego)
     command -v lego >/dev/null 2>&1 || die "lego is not installed; see Certificates in infra/relay/README.md"
-    # `lego renew` is a no-op outside the renewal window, so one call covers both
-    # the first issuance and every later one -- the timer needs no branch and no
-    # state of its own.
+    # lego v5's `run` covers both the first issuance and every later renewal:
+    # it reads the stored certificate and renews only when due (--renew-days),
+    # so the timer needs no branch and no state of its own. Measured against
+    # lego v5.4.1: the v4 top-level flags moved under `run`, and the v4
+    # `renew` command is gone.
     if [ -f "$ACME_HOME/certificates/$REALM.crt" ]; then
       log "renewing the certificate for $REALM through $PROVIDER (no-op outside the window)"
-      lego --accept-tos --email "$EMAIL" --dns "$PROVIDER" --domains "$REALM" \
-        --path "$ACME_HOME" renew --days 30
     else
       log "issuing a first certificate for $REALM through $PROVIDER"
-      lego --accept-tos --email "$EMAIL" --dns "$PROVIDER" --domains "$REALM" \
-        --path "$ACME_HOME" run
     fi
+    # The provider credential must reach lego's process environment: a plain
+    # `.` sets shell variables the client never sees, so export-all around a
+    # second sourcing -- scoped to this subshell, which is the client
+    # invocation and nothing else, so the export does not outlive it.
+    # Measured 2026-09-03 (lego saw no token without it).
+    (
+      set -a
+      # shellcheck disable=SC1090
+      . "$ACME_ENV"
+      set +a
+      lego run --accept-tos --email "$EMAIL" --dns "$PROVIDER" --domains "$REALM" \
+        --path "$ACME_HOME" --renew-days 30
+    )
     SRC_CRT="$ACME_HOME/certificates/$REALM.crt"
     SRC_KEY="$ACME_HOME/certificates/$REALM.key"
     ;;
   acme.sh)
     command -v acme.sh >/dev/null 2>&1 || die "acme.sh is not installed; see Certificates in infra/relay/README.md"
-    acme.sh --home "$ACME_HOME" --issue --dns "dns_$PROVIDER" -d "$REALM" \
-      --accountemail "$EMAIL" || [ $? -eq 2 ] # 2 is acme.sh for "not due for renewal"
+    (
+      set -a
+      # shellcheck disable=SC1090
+      . "$ACME_ENV"
+      set +a
+      acme.sh --home "$ACME_HOME" --issue --dns "dns_$PROVIDER" -d "$REALM" \
+        --accountemail "$EMAIL"
+    ) || [ $? -eq 2 ] # 2 is acme.sh for "not due for renewal"
     SRC_CRT="$ACME_HOME/$REALM/fullchain.cer"
     SRC_KEY="$ACME_HOME/$REALM/$REALM.key"
     ;;
