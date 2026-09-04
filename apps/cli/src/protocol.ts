@@ -425,9 +425,42 @@ export interface RunProtocolResult {
 }
 
 /**
+ * The one argument {@link runProtocol} takes. Every field it needs is named
+ * here rather than passed by position, so a caller supplying only some of the
+ * optional inputs states which ones it means.
+ */
+export interface RunProtocolOptions {
+  /** The transport this exchange runs over. */
+  connection: ProtocolConnectionConfig;
+  /**
+   * The shared secret and its key file, or `null` to run unauthenticated.
+   * There is no `undefined` state: every caller states which it means.
+   */
+  auth: AuthPersist | null;
+  /** This party's standardized dataset and the terms it was prepared under. */
+  prepared: PreparedExchange;
+  /** Where to write the result CSV; `undefined` writes it to stdout. */
+  output?: string;
+  /** The `-v` count, forwarded to the transport's own diagnostics. */
+  verbosity: number;
+  /** The name of the logger this run's diagnostics are written through. */
+  loggerName: string;
+  /** Where to write the exchange record; omit to skip recording. */
+  recordOutput?: RecordOutput;
+  /** This party's zero-setup `--save` intent. Meaningful only with `auth: null`. */
+  saveIntent?: boolean;
+  /** The post-handshake hook. Meaningful only on the authenticated path. */
+  onAuthenticated?: () => void | Promise<void>;
+  /** The file-sync entry-sweep controls, event stream, and output hook. */
+  fileSyncRuntime?: FileSyncRuntimeOptions;
+  /** The signed-receipt inputs; omit or pass `null` to skip signing. */
+  signing?: SigningPersist | null;
+}
+
+/**
  * Runs the PSI protocol over an SFTP or file-drop connection and writes
- * results to output. Authentication is supplied on the separate `auth`
- * parameter, not embedded in `connection`.
+ * results to output. Authentication is supplied on the separate
+ * {@link RunProtocolOptions.auth} field, not embedded in `connection`.
  *
  * When `auth` is an {@link AuthPersist}, `keyFilePath` must be a non-empty,
  * non-whitespace string, checked before any credential is presented so a
@@ -452,8 +485,8 @@ export interface RunProtocolResult {
  * transport failure.
  *
  * `saveIntent` holds this party's zero-setup `--save` intent for the
- * exchange's in-band bootstrap (see {@link runExchange}). Pass `undefined`
- * (the default) on every authenticated path; pass a boolean only from the
+ * exchange's in-band bootstrap (see {@link runExchange}). Omit it on every
+ * authenticated path; pass a boolean only from the
  * zero-setup command, whose `onOutputComplete` hook then reads
  * {@link OutputCompleteContext.bootstrap} to provision the saved
  * config/key. Meaningful only with `auth: null`.
@@ -470,7 +503,7 @@ export interface RunProtocolResult {
  * exchange must not be aborted by a failure to persist recoverable config --
  * and is logged at error level, reported as a persistence loss (`warning`
  * event and `PERSISTENCE_LOSS_EXIT_CODE`), and returned on
- * {@link RunProtocolResult.onAuthenticatedError}. Pass `undefined` on the
+ * {@link RunProtocolResult.onAuthenticatedError}. Omit it on the
  * no-auth path and from callers with no post-handshake step; passing a hook
  * with `auth: null` is rejected up front, since an unauthenticated exchange
  * has no acceptance step to hook.
@@ -493,18 +526,21 @@ export interface RunProtocolResult {
  * refused.
  */
 export async function runProtocol(
-  connection: ProtocolConnectionConfig,
-  auth: AuthPersist | null,
-  prepared: PreparedExchange,
-  output: string | undefined,
-  verbosity: number,
-  loggerName: string,
-  recordOutput?: RecordOutput,
-  saveIntent?: boolean,
-  onAuthenticated?: () => void | Promise<void>,
-  fileSyncRuntime: FileSyncRuntimeOptions = {},
-  signing: SigningPersist | null = null,
+  options: RunProtocolOptions,
 ): Promise<RunProtocolResult> {
+  const {
+    connection,
+    auth,
+    prepared,
+    output,
+    verbosity,
+    loggerName,
+    recordOutput,
+    saveIntent,
+    onAuthenticated,
+    fileSyncRuntime = {},
+    signing = null,
+  } = options;
   const log = getLogger(loggerName);
 
   // The opt-in machine-interface emitter (fd-3 NDJSON), constructed only under

@@ -173,28 +173,24 @@ async function runAttempt(options: AttemptOptions): Promise<AttemptOutcome> {
 
   const [parties, logs] = await withCapturedLogs(
     async () => {
-      const receiver = runProtocol(
-        serverBlock(srv.handle.usera),
-        { sharedSecret: secretR, keyFilePath: keyFiles.receiver },
-        preparedFor("Receiver", RECEIVER_ROWS),
-        outR,
-        -1,
-        `${tag}-receiver`,
-        undefined,
-        undefined,
+      const receiver = runProtocol({
+        connection: serverBlock(srv.handle.usera),
+        auth: { sharedSecret: secretR, keyFilePath: keyFiles.receiver },
+        prepared: preparedFor("Receiver", RECEIVER_ROWS),
+        output: outR,
+        verbosity: -1,
+        loggerName: `${tag}-receiver`,
         onAuthenticated,
-      );
-      const sender = runProtocol(
-        serverBlock(srv.handle.userb),
-        { sharedSecret: secretS, keyFilePath: keyFiles.sender },
-        preparedFor("Sender", SENDER_ROWS),
-        outS,
-        -1,
-        `${tag}-sender`,
-        undefined,
-        undefined,
+      });
+      const sender = runProtocol({
+        connection: serverBlock(srv.handle.userb),
+        auth: { sharedSecret: secretS, keyFilePath: keyFiles.sender },
+        prepared: preparedFor("Sender", SENDER_ROWS),
+        output: outS,
+        verbosity: -1,
+        loggerName: `${tag}-sender`,
         onAuthenticated,
-      );
+      });
       // Both settlements are attached before either is awaited, so a party that
       // rejects while the other is still running is never an unhandled rejection.
       const settled = [settle("receiver", receiver), settle("sender", sender)];

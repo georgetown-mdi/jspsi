@@ -36,6 +36,7 @@ import { resolveConnectionCredentials } from "../../src/util/atSignRefs";
 import { redactUrlCredentials } from "../../src/util/connectionUrl";
 import { PLACEHOLDER_IDENTITY } from "../../src/partyIdentity";
 import { runProtocol } from "../../src/protocol";
+import type { RunProtocolOptions } from "../../src/protocol";
 import { PERSISTENCE_LOSS_EXIT_CODE } from "../../src/eventStream";
 import { captureFd3 } from "../eventStreamTestSupport";
 import { establishHostKeyTrust } from "../../src/hostKeyTrust";
@@ -77,9 +78,12 @@ afterEach(() => {
   existsSyncSpy.mockRestore();
 });
 
-/** Locate the trailing FileSyncRuntimeOptions among runProtocol's call arguments
- *  by the key under test rather than by position, and assert it is the only
- *  argument carrying one. */
+/** The options object a mocked runProtocol call received. */
+function optionsArg(callArgs: unknown[]): RunProtocolOptions {
+  return callArgs[0] as RunProtocolOptions;
+}
+
+/** runProtocol's FileSyncRuntimeOptions, which zero-setup always supplies. */
 function runtimeOptionsArg(callArgs: unknown[]): {
   eventStream?: unknown;
   onOutputComplete?: (context: {
@@ -87,12 +91,15 @@ function runtimeOptionsArg(callArgs: unknown[]): {
     bootstrap?: ExchangeBootstrapResult;
   }) => void | Promise<void>;
 } {
-  const runtimeArgs = callArgs.filter(
-    (a): a is Record<string, unknown> =>
-      typeof a === "object" && a !== null && "eventStream" in a,
-  );
-  expect(runtimeArgs).toHaveLength(1);
-  return runtimeArgs[0];
+  const runtime = optionsArg(callArgs).fileSyncRuntime;
+  expect(runtime).toBeDefined();
+  return runtime as {
+    eventStream?: unknown;
+    onOutputComplete?: (context: {
+      observedReceivedPayloadColumns: string[];
+      bootstrap?: ExchangeBootstrapResult;
+    }) => void | Promise<void>;
+  };
 }
 
 /** Drive the completed-exchange half of runProtocol's contract from the mock:
@@ -452,7 +459,7 @@ async function termsFromZeroSetupRun(
   );
   let prepared: PreparedExchange | undefined;
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
-    prepared = callArgs[2] as PreparedExchange;
+    prepared = optionsArg(callArgs).prepared;
     return driveCompletedExchange(callArgs, { partnerSaveIntent: false });
   }) as never);
 
@@ -560,7 +567,8 @@ test("handler hands the resolved credential to the exchange while persisting not
     vi.mocked(runProtocol).mockImplementation((async (
       ...callArgs: unknown[]
     ) => {
-      connToRunProtocol = callArgs[0] as SFTPConnectionConfig;
+      connToRunProtocol = optionsArg(callArgs)
+        .connection as SFTPConnectionConfig;
       // bootstrap present but no secret and no partner intent: finalizeBootstrap
       // (save === false) only logs the recurring-exchange hint, writing nothing.
       return driveCompletedExchange(callArgs, { partnerSaveIntent: false });
@@ -889,7 +897,8 @@ test("handler: the first-use pin reaches the connection the exchange dials", asy
     vi.mocked(runProtocol).mockImplementationOnce((async (
       ...callArgs: unknown[]
     ) => {
-      connToRunProtocol = callArgs[0] as SFTPConnectionConfig;
+      connToRunProtocol = optionsArg(callArgs)
+        .connection as SFTPConnectionConfig;
       return driveCompletedExchange(callArgs, { partnerSaveIntent: false });
     }) as never);
 
@@ -1065,7 +1074,7 @@ test("handler: a zero-setup retain run states no consent fact about the retained
   getLogger("psilink").setLevel("info");
   let ran: FileDropConnectionConfig | undefined;
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
-    ran = callArgs[0] as FileDropConnectionConfig;
+    ran = optionsArg(callArgs).connection as FileDropConnectionConfig;
     return driveCompletedExchange(callArgs, { partnerSaveIntent: false });
   }) as never);
   try {

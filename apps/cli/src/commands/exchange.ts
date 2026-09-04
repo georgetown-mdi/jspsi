@@ -1085,22 +1085,17 @@ export async function handler(argv: Arguments): Promise<void> {
 
     let exchangeError: unknown;
     try {
-      await runProtocol(
+      await runProtocol({
         connection,
-        authentication,
+        auth: authentication,
         prepared,
         output,
         verbosity,
-        "exchange",
+        loggerName: "exchange",
         recordOutput,
-        // saveIntent and onAuthenticated are both undefined on the authenticated
-        // exchange path; the trailing object holds the CLI-only sweep controls
-        // and the --event-stream toggle, then the signed-receipt inputs.
-        undefined,
-        undefined,
-        { sweepExchangeFiles, forceRetainSweep, eventStream },
+        fileSyncRuntime: { sweepExchangeFiles, forceRetainSweep, eventStream },
         signing,
-      );
+      });
     } catch (err) {
       // Capture rather than exit here so the expiry advisory below can run on the
       // failure path too (the criterion is "expiring soon AND rotation did not

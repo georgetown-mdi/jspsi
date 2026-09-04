@@ -19,6 +19,7 @@ vi.mock("../../src/protocol", () => ({ runProtocol: vi.fn() }));
 
 import { handler as inviteHandler } from "../../src/commands/invite";
 import { runProtocol } from "../../src/protocol";
+import type { RunProtocolOptions } from "../../src/protocol";
 import { DEFAULT_ACCEPT_TIMEOUT_SECONDS } from "../../src/onlineBootstrap";
 import { captureStdio } from "../loggingTestSupport";
 
@@ -29,31 +30,30 @@ afterEach(() => {
     fs.rmSync(d, { recursive: true, force: true });
 });
 
-/** Locate runProtocol's onAuthenticated hook by type rather than position, so a
- *  later signature change fails loudly instead of invoking the wrong argument. */
-function soleFunctionArg(callArgs: unknown[]): () => void | Promise<void> {
-  const fnArgs = callArgs.filter((a) => typeof a === "function");
-  expect(fnArgs).toHaveLength(1);
-  return fnArgs[0] as () => void | Promise<void>;
+/** The options object a mocked runProtocol call received. */
+function optionsArg(callArgs: unknown[]): RunProtocolOptions {
+  return callArgs[0] as RunProtocolOptions;
 }
 
-/** The runtime object's onOutputComplete hook, located by shape for the same
- *  reason. It drives the bootstrap's SECOND config write -- the post-exchange
- *  rewrite that re-serializes the whole connection block -- which is where a
- *  mutation of the persisted connection would surface. */
+/** runProtocol's onAuthenticated hook, which the bootstrap always supplies. */
+function onAuthenticatedArg(callArgs: unknown[]): () => void | Promise<void> {
+  const hook = optionsArg(callArgs).onAuthenticated;
+  expect(hook).toBeTypeOf("function");
+  return hook as () => void | Promise<void>;
+}
+
+/** The runtime object's onOutputComplete hook. It drives the bootstrap's SECOND
+ *  config write -- the post-exchange rewrite that re-serializes the whole
+ *  connection block -- which is where a mutation of the persisted connection
+ *  would show. */
 function outputCompleteHook(
   callArgs: unknown[],
 ): (result: {
   observedReceivedPayloadColumns: string[];
 }) => void | Promise<void> {
-  const hooks = callArgs
-    .filter(
-      (a): a is Record<string, unknown> => typeof a === "object" && a !== null,
-    )
-    .map((a) => a["onOutputComplete"])
-    .filter((h) => typeof h === "function");
-  expect(hooks).toHaveLength(1);
-  return hooks[0] as (result: {
+  const hook = optionsArg(callArgs).fileSyncRuntime?.onOutputComplete;
+  expect(hook).toBeTypeOf("function");
+  return hook as (result: {
     observedReceivedPayloadColumns: string[];
   }) => void | Promise<void>;
 }
@@ -88,7 +88,7 @@ async function inviteOnline(
   );
   const configFile = path.join(dir, "psilink.yaml");
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
-    await soleFunctionArg(callArgs)();
+    await onAuthenticatedArg(callArgs)();
     await outputCompleteHook(callArgs)({
       observedReceivedPayloadColumns: OBSERVED_RECEIVED_COLUMNS,
     });
@@ -127,7 +127,8 @@ async function inviteOnline(
   expect(saved["expected_payload_columns"]).toEqual(OBSERVED_RECEIVED_COLUMNS);
   return {
     saved,
-    ran: vi.mocked(runProtocol).mock.lastCall?.[0] as ConnectionConfig,
+    ran: vi.mocked(runProtocol).mock.lastCall?.[0]
+      .connection as ConnectionConfig,
   };
 }
 

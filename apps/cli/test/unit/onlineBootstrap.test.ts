@@ -68,6 +68,7 @@ import { MAX_TIMEOUT_SECONDS } from "../../src/util/flags";
 import { openEventStream } from "../../src/eventStream";
 import { establishHostKeyTrust } from "../../src/hostKeyTrust";
 import { runProtocol } from "../../src/protocol";
+import type { RunProtocolOptions } from "../../src/protocol";
 import { captureFd3 } from "../eventStreamTestSupport";
 import { streamOf, ttyStream, withStdin } from "../stdinStream";
 
@@ -2059,32 +2060,33 @@ function onlineBootstrapParams(
   };
 }
 
-/** Locate the onAuthenticated hook among runProtocol's call arguments by type,
- *  not position. Asserting exactly one function argument makes the mock fail
- *  loudly if a second function-typed parameter is ever added to runProtocol (in
- *  any position) rather than silently selecting the wrong one.
- */
-function soleFunctionArg(callArgs: unknown[]): () => void | Promise<void> {
-  const fnArgs = callArgs.filter((a) => typeof a === "function");
-  expect(fnArgs).toHaveLength(1);
-  return fnArgs[0] as () => void | Promise<void>;
+/** The options object a mocked runProtocol call received. */
+function optionsArg(callArgs: unknown[]): RunProtocolOptions {
+  return callArgs[0] as RunProtocolOptions;
 }
 
-/** Locate the trailing FileSyncRuntimeOptions among runProtocol's call arguments
- *  by the key under test rather than by position, and assert it is the only
- *  argument carrying one. */
+/** runProtocol's onAuthenticated hook, which every caller here supplies. */
+function onAuthenticatedArg(callArgs: unknown[]): () => void | Promise<void> {
+  const hook = optionsArg(callArgs).onAuthenticated;
+  expect(hook).toBeTypeOf("function");
+  return hook as () => void | Promise<void>;
+}
+
+/** runProtocol's FileSyncRuntimeOptions, which every caller here supplies. */
 function runtimeOptionsArg(callArgs: unknown[]): {
   eventStream?: unknown;
   onOutputComplete?: (context: {
     observedReceivedPayloadColumns: string[];
   }) => void | Promise<void>;
 } {
-  const runtimeArgs = callArgs.filter(
-    (a): a is Record<string, unknown> =>
-      typeof a === "object" && a !== null && "eventStream" in a,
-  );
-  expect(runtimeArgs).toHaveLength(1);
-  return runtimeArgs[0];
+  const runtime = optionsArg(callArgs).fileSyncRuntime;
+  expect(runtime).toBeDefined();
+  return runtime as {
+    eventStream?: unknown;
+    onOutputComplete?: (context: {
+      observedReceivedPayloadColumns: string[];
+    }) => void | Promise<void>;
+  };
 }
 
 test("runOnlineBootstrap writes the config from the hook even when the exchange then fails", async () => {
@@ -2092,7 +2094,7 @@ test("runOnlineBootstrap writes the config from the hook even when the exchange 
   // the data exchange fails. The config must already be on disk so the
   // recurring-exchange setup is recoverable without re-inviting.
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
-    const onAuthenticated = soleFunctionArg(callArgs);
+    const onAuthenticated = onAuthenticatedArg(callArgs);
     await onAuthenticated();
     throw new Error("data exchange failed");
   }) as never);
@@ -2141,7 +2143,7 @@ test("runOnlineBootstrap carries a webrtc connection through to the exchange and
     options: { peerTimeoutMs: 900_000 },
   };
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
-    await soleFunctionArg(callArgs)();
+    await onAuthenticatedArg(callArgs)();
     return {};
   }) as never);
 
@@ -2152,7 +2154,9 @@ test("runOnlineBootstrap carries a webrtc connection through to the exchange and
       ...onlineBootstrapParams(configPath),
       connection,
     });
-    expect(vi.mocked(runProtocol).mock.lastCall?.[0]).toEqual(connection);
+    expect(vi.mocked(runProtocol).mock.lastCall?.[0].connection).toEqual(
+      connection,
+    );
     // Reloaded through the schema, which materializes its own option defaults,
     // so the assertion is on what this bootstrap wrote rather than on those.
     const saved = parseExchangeSpec(
@@ -2175,7 +2179,7 @@ test("runOnlineBootstrap spends a run-only peer budget on the run and writes non
   // `psilink exchange` reads, so carrying the budget into it would hand those
   // runs a peer timeout nobody chose for them.
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
-    await soleFunctionArg(callArgs)();
+    await onAuthenticatedArg(callArgs)();
     return {};
   }) as never);
 
@@ -2186,7 +2190,8 @@ test("runOnlineBootstrap spends a run-only peer budget on the run and writes non
       ...onlineBootstrapParams(configPath),
       runOnlyPeerTimeoutSeconds: 900,
     });
-    const ran = vi.mocked(runProtocol).mock.lastCall?.[0] as ConnectionConfig;
+    const ran = vi.mocked(runProtocol).mock.lastCall?.[0]
+      .connection as ConnectionConfig;
     expect(ran.options?.peerTimeoutMs).toBe(900_000);
     // Read raw rather than through parseExchangeSpec, which materializes the
     // schema's own defaults and so cannot tell an absent field from a written
@@ -2205,7 +2210,7 @@ test("runOnlineBootstrap leaves a connection's own peer budget on both the run a
   // theirs to keep, so it reaches the exchange and the saved config alike, and
   // the run-only value layered over it changes only what this run waits on.
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
-    await soleFunctionArg(callArgs)();
+    await onAuthenticatedArg(callArgs)();
     return {};
   }) as never);
 
@@ -2218,7 +2223,8 @@ test("runOnlineBootstrap leaves a connection's own peer budget on both the run a
       connection: { ...params.connection, options: { peerTimeoutMs: 60_000 } },
       runOnlyPeerTimeoutSeconds: 900,
     });
-    const ran = vi.mocked(runProtocol).mock.lastCall?.[0] as ConnectionConfig;
+    const ran = vi.mocked(runProtocol).mock.lastCall?.[0]
+      .connection as ConnectionConfig;
     expect(ran.options?.peerTimeoutMs).toBe(900_000);
     const saved = YAML.parse(fs.readFileSync(configPath, "utf8")) as {
       connection: { options?: Record<string, unknown> };
@@ -2316,7 +2322,7 @@ function mockSuccessfulExchange(
   betweenStages?: () => void,
 ): void {
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
-    const onAuthenticated = callArgs.find((a) => typeof a === "function") as
+    const onAuthenticated = optionsArg(callArgs).onAuthenticated as
       (() => void | Promise<void>) | undefined;
     await onAuthenticated?.();
     betweenStages?.();
@@ -2357,7 +2363,7 @@ test("runOnlineBootstrap crystallizes from the pre-terminal hook, not after runP
   // visible to: every other crystallization test drives the hook and would pass
   // just as well with the write back on the post-return path.
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
-    const onAuthenticated = callArgs.find((a) => typeof a === "function") as
+    const onAuthenticated = optionsArg(callArgs).onAuthenticated as
       (() => void | Promise<void>) | undefined;
     await onAuthenticated?.();
     return { observedReceivedPayloadColumns: ["dob", "zip"] };
@@ -3157,8 +3163,9 @@ test("runOnlineBootstrap persists an @path credential as the reference while con
 
   let connectionPassedToRunProtocol: SFTPConnectionConfig | undefined;
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
-    connectionPassedToRunProtocol = callArgs[0] as SFTPConnectionConfig;
-    const onAuthenticated = callArgs.find((a) => typeof a === "function") as
+    connectionPassedToRunProtocol = optionsArg(callArgs)
+      .connection as SFTPConnectionConfig;
+    const onAuthenticated = optionsArg(callArgs).onAuthenticated as
       (() => void | Promise<void>) | undefined;
     await onAuthenticated?.();
     return {};
@@ -3211,8 +3218,9 @@ test("runOnlineBootstrap persists an @path private-key passphrase as the referen
 
   let connectionPassedToRunProtocol: SFTPConnectionConfig | undefined;
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
-    connectionPassedToRunProtocol = callArgs[0] as SFTPConnectionConfig;
-    const onAuthenticated = callArgs.find((a) => typeof a === "function") as
+    connectionPassedToRunProtocol = optionsArg(callArgs)
+      .connection as SFTPConnectionConfig;
+    const onAuthenticated = optionsArg(callArgs).onAuthenticated as
       (() => void | Promise<void>) | undefined;
     await onAuthenticated?.();
     return {};
@@ -3312,8 +3320,9 @@ test("runOnlineBootstrap dials the connection the host-key step pinned", async (
   }) as never);
   let connectionPassedToRunProtocol: SFTPConnectionConfig | undefined;
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
-    connectionPassedToRunProtocol = callArgs[0] as SFTPConnectionConfig;
-    await soleFunctionArg(callArgs)();
+    connectionPassedToRunProtocol = optionsArg(callArgs)
+      .connection as SFTPConnectionConfig;
+    await onAuthenticatedArg(callArgs)();
     return {};
   }) as never);
 
@@ -3340,7 +3349,7 @@ test("runOnlineBootstrap notes the config is on disk when the exchange fails aft
   // must be told the config + key are on disk so they retry with
   // `psilink exchange` rather than re-inviting.
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
-    const onAuthenticated = soleFunctionArg(callArgs);
+    const onAuthenticated = onAuthenticatedArg(callArgs);
     await onAuthenticated();
     throw new Error("data exchange failed");
   }) as never);
@@ -3440,7 +3449,7 @@ test("runOnlineBootstrap with reuseExistingConfig logs the recovery note when th
   // the rotated key is saved) and the reused config is on disk, then the exchange
   // fails. Both files are present, so the note must point at `psilink exchange`.
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
-    const onAuthenticated = soleFunctionArg(callArgs);
+    const onAuthenticated = onAuthenticatedArg(callArgs);
     await onAuthenticated();
     throw new Error("data exchange failed");
   }) as never);
@@ -3543,7 +3552,7 @@ test("runOnlineBootstrap with reuseExistingConfig keeps the existing config and 
   // The hook is a no-op when reusing: the pre-existing config is left as-is and
   // only the rotated key (saved by runProtocol) lands.
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
-    const onAuthenticated = soleFunctionArg(callArgs);
+    const onAuthenticated = onAuthenticatedArg(callArgs);
     await onAuthenticated();
     return {};
   }) as never);
@@ -3570,7 +3579,7 @@ test("runOnlineBootstrap re-gates the config write: a config appearing after the
   // onAuthenticatedError (non-fatal), not propagated -- the same contract the
   // real runProtocol upholds.
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
-    const onAuthenticated = soleFunctionArg(callArgs);
+    const onAuthenticated = onAuthenticatedArg(callArgs);
     try {
       await onAuthenticated();
       return {};

@@ -246,14 +246,14 @@ function runParty(
 ): Promise<unknown> {
   const keyFilePath = path.join(tmpDir, `${role}.key`);
   saveKeyFile(keyFilePath, { sharedSecret: SECRET });
-  return runProtocol(
-    webrtcConnection(role, host),
-    { sharedSecret: SECRET, keyFilePath },
-    minimalPrepared,
-    path.join(tmpDir, `${role}.csv`),
-    -1,
-    "test",
-  );
+  return runProtocol({
+    connection: webrtcConnection(role, host),
+    auth: { sharedSecret: SECRET, keyFilePath },
+    prepared: minimalPrepared,
+    output: path.join(tmpDir, `${role}.csv`),
+    verbosity: -1,
+    loggerName: "test",
+  });
 }
 
 // --- the dispatch -----------------------------------------------------------
@@ -376,14 +376,14 @@ test("a signal during the rendezvous closes the channel it opened", async () => 
     .spyOn(process, "exit")
     .mockImplementation((() => undefined) as never);
   try {
-    await runProtocol(
-      webrtcConnection("inviter"),
-      { sharedSecret: SECRET, keyFilePath },
-      minimalPrepared,
-      path.join(tmpDir, "signal.csv"),
-      -1,
-      "test",
-    );
+    await runProtocol({
+      connection: webrtcConnection("inviter"),
+      auth: { sharedSecret: SECRET, keyFilePath },
+      prepared: minimalPrepared,
+      output: path.join(tmpDir, "signal.csv"),
+      verbosity: -1,
+      loggerName: "test",
+    });
   } finally {
     exit.mockRestore();
   }
@@ -433,14 +433,14 @@ test("a signal cancels a rendezvous that is still in flight", async () => {
     .spyOn(process, "exit")
     .mockImplementation((() => undefined) as never);
   try {
-    await runProtocol(
-      webrtcConnection("inviter"),
-      { sharedSecret: SECRET, keyFilePath },
-      minimalPrepared,
-      path.join(tmpDir, "cancel.csv"),
-      -1,
-      "test",
-    );
+    await runProtocol({
+      connection: webrtcConnection("inviter"),
+      auth: { sharedSecret: SECRET, keyFilePath },
+      prepared: minimalPrepared,
+      output: path.join(tmpDir, "cancel.csv"),
+      verbosity: -1,
+      loggerName: "test",
+    });
   } finally {
     exit.mockRestore();
   }
@@ -456,14 +456,14 @@ test("a webrtc run with no shared secret is refused, naming the rendezvous", asy
   // The zero-setup shape: `auth: null`. The refusal has to say why the channel
   // cannot work without a secret, not report the channel as unsupported.
   await expect(
-    runProtocol(
-      webrtcConnection("inviter"),
-      null,
-      minimalPrepared,
-      path.join(tmpDir, "out.csv"),
-      -1,
-      "test",
-    ),
+    runProtocol({
+      connection: webrtcConnection("inviter"),
+      auth: null,
+      prepared: minimalPrepared,
+      output: path.join(tmpDir, "out.csv"),
+      verbosity: -1,
+      loggerName: "test",
+    }),
   ).rejects.toThrow(UsageError);
   expect(WEBRTC_RENDEZVOUS_SECRET_REQUIRED).toContain("shared secret");
   expect(WEBRTC_RENDEZVOUS_SECRET_REQUIRED).toContain("psilink invite");
@@ -476,14 +476,14 @@ test("a webrtc connection with no role is refused before anything is dialed", as
   saveKeyFile(keyFilePath, { sharedSecret: SECRET });
   const { role: _dropped, ...roleless } = webrtcConnection("inviter");
   await expect(
-    runProtocol(
-      roleless,
-      { sharedSecret: SECRET, keyFilePath },
-      minimalPrepared,
-      path.join(tmpDir, "out.csv"),
-      -1,
-      "test",
-    ),
+    runProtocol({
+      connection: roleless,
+      auth: { sharedSecret: SECRET, keyFilePath },
+      prepared: minimalPrepared,
+      output: path.join(tmpDir, "out.csv"),
+      verbosity: -1,
+      loggerName: "test",
+    }),
   ).rejects.toThrow(WEBRTC_ROLE_REQUIRED);
   expect(mockState.dials).toHaveLength(0);
 });
@@ -647,8 +647,8 @@ test("an injected path fails the run before anything is dialed", async () => {
   const keyFilePath = path.join(tmpDir, "injected.key");
   saveKeyFile(keyFilePath, { sharedSecret: SECRET });
   await expect(
-    runProtocol(
-      {
+    runProtocol({
+      connection: {
         ...webrtcConnection("inviter"),
         server: {
           host: "peers.example.org",
@@ -657,12 +657,12 @@ test("an injected path fails the run before anything is dialed", async () => {
           path: "@attacker.example",
         },
       },
-      { sharedSecret: SECRET, keyFilePath },
-      minimalPrepared,
-      path.join(tmpDir, "injected.csv"),
-      -1,
-      "test",
-    ),
+      auth: { sharedSecret: SECRET, keyFilePath },
+      prepared: minimalPrepared,
+      output: path.join(tmpDir, "injected.csv"),
+      verbosity: -1,
+      loggerName: "test",
+    }),
   ).rejects.toThrow(UsageError);
   expect(mockState.dials).toHaveLength(0);
 });

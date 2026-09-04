@@ -102,22 +102,22 @@ async function runBaseline(
   const outR = path.join(work, "baseline-receiver-out.csv");
   const outS = path.join(work, "baseline-sender-out.csv");
   await Promise.all([
-    runProtocol(
-      makeConfig(),
-      null,
-      preparedFor("Receiver", RECEIVER_ROWS),
-      outR,
-      -1,
-      "baseline-receiver",
-    ),
-    runProtocol(
-      makeConfig(),
-      null,
-      preparedFor("Sender", SENDER_ROWS),
-      outS,
-      -1,
-      "baseline-sender",
-    ),
+    runProtocol({
+      connection: makeConfig(),
+      auth: null,
+      prepared: preparedFor("Receiver", RECEIVER_ROWS),
+      output: outR,
+      verbosity: -1,
+      loggerName: "baseline-receiver",
+    }),
+    runProtocol({
+      connection: makeConfig(),
+      auth: null,
+      prepared: preparedFor("Sender", SENDER_ROWS),
+      output: outS,
+      verbosity: -1,
+      loggerName: "baseline-sender",
+    }),
   ]);
   return readWhenReady(outR);
 }
@@ -146,22 +146,22 @@ async function runAuthenticatedPair(
   const outS = path.join(work, `${tag}-sender-out.csv`);
 
   await Promise.all([
-    runProtocol(
-      makeConfig(),
-      { sharedSecret: secret, keyFilePath: keyR },
-      preparedFor("Receiver", RECEIVER_ROWS),
-      outR,
-      -1,
-      `${tag}-receiver`,
-    ),
-    runProtocol(
-      makeConfig(),
-      { sharedSecret: secret, keyFilePath: keyS },
-      preparedFor("Sender", SENDER_ROWS),
-      outS,
-      -1,
-      `${tag}-sender`,
-    ),
+    runProtocol({
+      connection: makeConfig(),
+      auth: { sharedSecret: secret, keyFilePath: keyR },
+      prepared: preparedFor("Receiver", RECEIVER_ROWS),
+      output: outR,
+      verbosity: -1,
+      loggerName: `${tag}-receiver`,
+    }),
+    runProtocol({
+      connection: makeConfig(),
+      auth: { sharedSecret: secret, keyFilePath: keyS },
+      prepared: preparedFor("Sender", SENDER_ROWS),
+      output: outS,
+      verbosity: -1,
+      loggerName: `${tag}-sender`,
+    }),
   ]);
 
   const rotatedR = loadKeyFile(keyR)?.sharedSecret;
