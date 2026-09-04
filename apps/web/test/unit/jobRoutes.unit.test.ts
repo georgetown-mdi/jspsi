@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { JOB_FILE_NAMES, MAX_INPUT_CSV_LENGTH } from "@jobs/intent";
 import {
   MAX_JOB_BODY_BYTES,
+  MAX_SFTP_AUTHOR_BODY_BYTES,
   readJobRequestBody,
   validateJobIdParam,
 } from "@jobs/routeSupport";
@@ -2257,6 +2258,43 @@ describe("readJobRequestBody caps the read, not Content-Length", () => {
       duplex: "half",
     } as RequestInit & { duplex: "half" });
     const result = await readJobRequestBody(request, 1024);
+    expect(result.kind).toBe("invalid");
+  });
+
+  test("a body filling the authoring cap parses", async () => {
+    // A body filling the authoring route's byte cap exactly: the bounded parse
+    // bounds STRUCTURE (object width, array length, nesting), so a body the
+    // route's own byte cap accepts must still reach the caller parsed rather
+    // than turning into a 400.
+    const overhead = '{"field":""}'.length;
+    const filled = "a".repeat(MAX_SFTP_AUTHOR_BODY_BYTES - overhead);
+    const body = `{"field":"${filled}"}`;
+    expect(new TextEncoder().encode(body).byteLength).toBe(
+      MAX_SFTP_AUTHOR_BODY_BYTES,
+    );
+    const request = jobRequest("http://localhost/api/jobs", {
+      method: "POST",
+      body,
+      duplex: "half",
+    } as RequestInit & { duplex: "half" });
+    const result = await readJobRequestBody(
+      request,
+      MAX_SFTP_AUTHOR_BODY_BYTES,
+    );
+    expect(result).toEqual({ kind: "parsed", value: { field: filled } });
+  });
+
+  test("a body under the byte cap but past the structural bound is invalid", async () => {
+    // Nesting far deeper than any authored body, well inside the byte cap: the
+    // structural rejection reaches the caller as `invalid` (400), never as a
+    // thrown error escaping the route.
+    const depth = 100_000;
+    const request = jobRequest("http://localhost/api/jobs", {
+      method: "POST",
+      body: "[".repeat(depth) + "]".repeat(depth),
+      duplex: "half",
+    } as RequestInit & { duplex: "half" });
+    const result = await readJobRequestBody(request, MAX_JOB_BODY_BYTES);
     expect(result.kind).toBe("invalid");
   });
 

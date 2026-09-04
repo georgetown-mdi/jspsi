@@ -5,6 +5,7 @@ import { spawn } from "node:child_process";
 
 import {
   WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
+  parseBoundedJson,
   sanitizeErrorChainLinks,
   sanitizeForDisplay,
 } from "@psilink/core";
@@ -423,7 +424,7 @@ function handleFd3Line(line: string, handlers: CliDriverHandlers): void {
   if (trimmed.length === 0) return;
   let parsed: unknown;
   try {
-    parsed = JSON.parse(trimmed);
+    parsed = parseBoundedJson(trimmed);
   } catch {
     handlers.onDegraded("CLI emitted a non-JSON event line");
     return;

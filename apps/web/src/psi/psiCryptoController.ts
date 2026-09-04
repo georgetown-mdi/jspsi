@@ -67,6 +67,7 @@ export function encodePsiWorkerInit(init: PsiWorkerInit): string {
 /** Decode the role/id seed the worker reads from `self.name` (see
  * {@link encodePsiWorkerInit}). Runs in {@link ./psiCrypto.worker}. */
 export function decodePsiWorkerInit(name: string): PsiWorkerInit {
+  // eslint-disable-next-line no-restricted-properties -- decodes the seed encodePsiWorkerInit serialized into this worker's own name
   return JSON.parse(name) as PsiWorkerInit;
 }
 

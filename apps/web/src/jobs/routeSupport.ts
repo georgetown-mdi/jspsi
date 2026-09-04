@@ -1,4 +1,8 @@
-import { getLogger, redactAndSanitizeForDisplay } from "@psilink/core";
+import {
+  getLogger,
+  parseBoundedJson,
+  redactAndSanitizeForDisplay,
+} from "@psilink/core";
 
 import { MAX_INPUT_CSV_LENGTH } from "./intent";
 
@@ -210,7 +214,8 @@ export const MAX_SIGNING_FINGERPRINT_BODY_BYTES = 4 * 1024;
 /**
  * The outcome of reading a job request body under a byte cap:
  * - `too-large`: the body exceeded the cap (mapped to 413).
- * - `invalid`: the body was absent or was not valid JSON (mapped to 400).
+ * - `invalid`: the body was absent, was not valid JSON, or exceeded the
+ *   structural bound parseBoundedJson enforces (mapped to 400).
  * - `parsed`: the decoded JSON value.
  */
 export type JobRequestBodyResult =
@@ -261,7 +266,7 @@ export async function readJobRequestBody(
   }
   let value: unknown;
   try {
-    value = JSON.parse(new TextDecoder().decode(merged));
+    value = parseBoundedJson(new TextDecoder().decode(merged));
   } catch {
     return { kind: "invalid" };
   }

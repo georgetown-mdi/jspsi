@@ -1,4 +1,9 @@
-import { ProcessState, getLogger, joinErrorCauseChain } from "@psilink/core";
+import {
+  ProcessState,
+  getLogger,
+  joinErrorCauseChain,
+  parseBoundedJson,
+} from "@psilink/core";
 
 import { jobRecordDownloads } from "@psi/jobExchangeRecord";
 import { whenDiagnostic } from "@utils/diagnostics";
@@ -700,7 +705,7 @@ function parseSseFrame(frame: string): RelayEvent | null {
   if (dataLines.length === 0) return null;
   let parsed: unknown;
   try {
-    parsed = JSON.parse(dataLines.join("\n"));
+    parsed = parseBoundedJson(dataLines.join("\n"));
   } catch {
     return null;
   }
