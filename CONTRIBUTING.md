@@ -30,7 +30,7 @@ PSI-Link is organized as an npm workspaces monorepo. The workspaces and the supp
 | `lib/`           | The vendored `@openmined/psi.js` tarball and its checksum                                  |
 | `test_data/`     | Two synthetic CSVs with partial overlap, for practicing a complete exchange                |
 | `design/`        | Interface design records: [`design/web-redesign/`](design/web-redesign/README.md) is the linkage-bench mockup and rationale the web app implements. Not a build input |
-| `infra/`         | [Terraform](infra/aws_eb/README.md) for creating the web app's Elastic Beanstalk environment. A draft, and run by nothing here -- the deployment payload CI does use is `apps/web/deploy/aws_eb/`. Beside it, [the standing WebRTC relay's reference deployment](infra/relay/README.md) and [the relay spike's AWS guardrails and run tooling](infra/relay-spike-aws/README.md), also run by nothing here |
+| `infra/`         | [Terraform](infra/aws_eb/README.md) for creating the web app's Elastic Beanstalk environment. A draft, and run by nothing here -- the deployment payload CI does use is `apps/web/deploy/aws_eb/`. Beside it, [the standing WebRTC relay's reference deployment](infra/relay/README.md), also run by nothing here |
 
 ## Prerequisites
 

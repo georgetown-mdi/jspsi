@@ -203,8 +203,5 @@ given.
 | `/etc/psilink-relay/acme.env` | The ACME contact, client, provider, and the provider's credential. Copy [`certs/env.example`](certs/env.example) |
 | `aws/env` | The demo box's instance id, region, profile, and optional zone credential. Copy [`aws/env.example`](aws/env.example) |
 
-Not to be confused with
-[`relay-spike-aws/`](../relay-spike-aws/README.md), which provisions a
-throwaway account for a measurement and then destroys it, or with
-[`aws_eb/`](../aws_eb/README.md), the Terraform draft for the web application's
-Elastic Beanstalk environment.
+Not to be confused with [`aws_eb/`](../aws_eb/README.md), the Terraform draft
+for the web application's Elastic Beanstalk environment.
