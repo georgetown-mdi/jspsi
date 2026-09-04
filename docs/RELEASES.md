@@ -36,7 +36,7 @@ Each image contains both the CLI and the console; which role it runs is decided 
 
 The hosted web deployment (`apps/web`) is a separate deployment to its hosting environment as part of CI/CD; it is not this image and is not distributed as a versioned artifact.
 
-## Which image carries which posture
+## Which image has which posture
 
 The two tags differ in one thing: what serves the cryptography underneath `crypto.subtle`.
 
@@ -203,7 +203,7 @@ The `vX.Y.Z` tag push in step 7 triggers `.github/workflows/release.yaml`, which
 
 - **The version check**, comparing the pushed tag against the version step 2 set in `apps/cli/package.json` and failing the release when the two disagree: the image build bakes that version into the console's partner accept kit, so a tag pushed ahead of the bump would publish an image telling the partner to run the release before it.
 - **The vulnerability scans.** Each image is built single-arch, loaded, and scanned; neither is pushed if either scan fails (see [Image vulnerability scan](#image-vulnerability-scan)).
-- **The FIPS engagement probe.** The loaded variant candidate runs the engagement probe it ships -- the same one its entrypoint runs at every container start, described under [Which image carries which posture](#which-image-carries-which-posture) -- so the engagement [COMPLIANCE.md](COMPLIANCE.md#fips-140) frames as measured rather than assumed is measured against the candidate this release publishes rather than against a pre-merge build. It reads the amd64 candidate; both published architectures resolve the same base pin, the same certified provider package, and the same committed lockfile.
+- **The FIPS engagement probe.** The loaded variant candidate runs the engagement probe it ships -- the same one its entrypoint runs at every container start, described under [Which image has which posture](#which-image-has-which-posture) -- so the engagement [COMPLIANCE.md](COMPLIANCE.md#fips-140) frames as measured rather than assumed is measured against the candidate this release publishes rather than against a pre-merge build. It reads the amd64 candidate; both published architectures resolve the same base pin, the same certified provider package, and the same committed lockfile.
 
 The publish sequence signs each image immediately after its own push, verifies that signature with the same command and the same two `--certificate-` arguments this document publishes under [Verifying a Release](#verifying-a-release), and attests its build provenance -- all before the next image is built. A signature the published command cannot verify stops the release there, rather than reaching a partner as an image whose published check calls it untrusted. A failure between the two pushes -- and the variant's multi-arch build is exercised at release time only, the pre-merge smoke building it single-arch -- leaves the default tags moved while the `-fips` tags sit at the previous release, or are absent on the first: everything published is scanned, signed, and attested, but the floating tag pair diverges until the run is repaired. Recover by re-running the failed publish job once the cause is fixed; it rebuilds both images from the same commit and re-pushes the same tags, converging the pair.
 

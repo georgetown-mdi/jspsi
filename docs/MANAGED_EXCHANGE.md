@@ -424,8 +424,8 @@ already defines:
   pre-connection disclosure refusal on an unattended run -- the input file this
   period discloses a different set of columns than the exchange recorded agreeing
   to send -- likewise blocks every later window, and for the same reason is never
-  offered as retryable (see [What the setup consent carries across
-  runs](#what-the-setup-consent-carries-across-runs)).
+  offered as retryable (see [What the setup consent covers across
+  runs](#what-the-setup-consent-covers-across-runs)).
 - **This needs you: a run failed with no benign explanation.** A handshake that
   ran and failed closed with no recorded benign cause (the Tier-2 case; see
   [Telling a desync from an attack](#telling-a-desync-from-an-attack)) is the
@@ -591,7 +591,7 @@ neither side can know whether the other's save succeeded -- the CLI states the
 same one-sided limit when its key-file write fails after rotation. That residual
 is what the desync recovery below exists for.
 
-### The honest durability limit
+### The durability limit
 
 The browser cannot match the CLI's on-disk durability, and the contract says so
 plainly rather than implying parity:
@@ -1066,7 +1066,7 @@ partner-side failure rather than rubber-stamp the benign reading. This trade --
 cheap recovery against repeated secret-in-transit exposure -- is accepted by
 design.
 
-## What the setup consent carries across runs
+## What the setup consent covers across runs
 
 A managed exchange runs again on an agreement made once. The linkage terms and
 the columns each side discloses are decided at setup and then **fixed for the

@@ -83,7 +83,7 @@ Private set intersection (PSI) is the primitive the privacy guarantee rests on. 
 
 The intuition is a layered, order-independent ("commutative") encryption. Each party holds an ephemeral key, generated for the exchange and never shared. Each side encrypts its own linkage keys under its own key, and the protocol applies the other party's key as a second layer, so a record is only ever seen by the other party in a form that party cannot decrypt. Because the scheme is commutative, two values that started equal stay equal once both keys are applied, which lets the parties recognize shared records by comparing encrypted forms alone. Neither side can strip the other's key to recover a plaintext value, and records outside the intersection are never revealed.
 
-psilink uses a lightly modified build of OpenMined's [PSI](https://github.com/OpenMined/PSI), which layers over Google's Private Join and Compute. The base function runs repeatedly over a sequence of linkage keys to build the association map between matched records. A cardinality-only variant, PSI-C, reports the size of the overlap and no identifier; what that claim covers is scoped under [Count-only exchanges and the pre-agreement premise](#count-only-exchanges-and-the-pre-agreement-premise) below.
+psilink uses a lightly modified build of OpenMined's [PSI](https://github.com/OpenMined/PSI), which layers over Google's Private Join and Compute. The base function runs repeatedly over a sequence of linkage keys to build the association map between matched records. A cardinality-only variant, PSI-C, reports the size of the overlap and no identifier; what that claim covers is scoped under [Count-only exchanges and the pre-agreement assumption](#count-only-exchanges-and-the-pre-agreement-assumption) below.
 
 Two properties of the primitive are not hidden, and both matter for the threat model that follows:
 
@@ -108,7 +108,7 @@ Its effect is bounded. Single-pass is a strategy both parties agree to before an
 
 When public services facilitate scheduled exchanges, some metadata is leaked, such as who is conducting the exchange and when. Parties are encouraged to stand up their own services where necessary.
 
-### Count-only exchanges and the pre-agreement premise
+### Count-only exchanges and the pre-agreement assumption
 
 The count-only algorithm (PSI-C) reports the size of the overlap and no identifier. Two qualifications belong in the threat model rather than in the algorithm's description.
 

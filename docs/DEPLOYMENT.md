@@ -184,7 +184,7 @@ For local development and integration testing, the project's test suite stands u
 
 The published image `vdorie/psi-link` runs in either of two roles depending on its first argument; there is no separate console image.
 
-`vdorie/psi-link` publishes two variants of that one image, differing only in what serves the cryptography beneath them. The unsuffixed tags (`X.Y.Z`, `X.Y`, `latest`) are the default artifact and the one every command in this document names. The `-fips` tags (`X.Y.Z-fips`, `X.Y-fips`, `latest-fips`) include a CMVP-validated OpenSSL FIPS provider instead, at roughly 1.8x the size and with the SFTP restrictions in [FIPS_SFTP_PROFILE.md](FIPS_SFTP_PROFILE.md); take one only under a FIPS obligation. Which artifact has which posture is in [RELEASES.md](RELEASES.md#which-image-carries-which-posture), and what may be claimed of the variant is in [COMPLIANCE.md](COMPLIANCE.md#fips-140). Everything below holds for both.
+`vdorie/psi-link` publishes two variants of that one image, differing only in what serves the cryptography beneath them. The unsuffixed tags (`X.Y.Z`, `X.Y`, `latest`) are the default artifact and the one every command in this document names. The `-fips` tags (`X.Y.Z-fips`, `X.Y-fips`, `latest-fips`) include a CMVP-validated OpenSSL FIPS provider instead, at roughly 1.8x the size and with the SFTP restrictions in [FIPS_SFTP_PROFILE.md](FIPS_SFTP_PROFILE.md); take one only under a FIPS obligation. Which artifact has which posture is in [RELEASES.md](RELEASES.md#which-image-has-which-posture), and what may be claimed of the variant is in [COMPLIANCE.md](COMPLIANCE.md#fips-140). Everything below holds for both.
 
 ### The user the image runs as
 
