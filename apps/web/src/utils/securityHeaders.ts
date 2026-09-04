@@ -39,14 +39,11 @@ export const securityResponseHeaders: Readonly<Record<string, string>> = {
 /**
  * Applies {@link securityResponseHeaders} to `response`, returning a new response
  * with the original's status, statusText, body, and headers plus the security
- * headers. It rebuilds rather than setting the headers on the original in place
- * so it works even when those headers are immutable (a redirect or
- * `fetch`-derived response), and in doing so consumes the original's body stream
- * -- do not reuse the argument after calling. A response whose status is outside
- * the 200-599 range the Response constructor accepts (a status-0
- * `Response.error()`, or a 1xx) cannot be rebuilt and carries no framing- or
- * referrer-relevant document, so it is returned unchanged rather than allowed to
- * throw on this per-response chokepoint.
+ * headers. It rebuilds rather than mutating the original in place, since a
+ * redirect or `fetch`-derived response has immutable headers; this consumes the
+ * original's body stream, so do not reuse `response` after calling. A status
+ * outside the 200-599 range the Response constructor accepts (a status-0
+ * `Response.error()`, or a 1xx) is returned unchanged rather than thrown on.
  */
 export function withSecurityHeaders(response: Response): Response {
   if (response.status < 200 || response.status > 599) return response;

@@ -28,17 +28,13 @@ import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
 /**
  * The STUN server the exported invocation falls back to, disclosed on the panel
  * because a managed connection configures no ICE server of its own: every
- * scheduled run tells this server the scheduling host's public address.
- *
- * It is werift's built-in default, and the CLI is where that fact is owned and
- * measured against the real library
- * (`WERIFT_BUILT_IN_STUN_URI` in apps/cli/src/connection/webrtc/weriftPeer.ts,
- * driven in the CLI's WebRTC integration suite). An app may not import from
- * another app, so this copy is held to that one by
- * `npm run check:stun-default-claims` rather than derived from it.
- *
- * Not the web app's own ICE list (`@psi/rendezvous`), which is a different list
- * for exchanges this browser runs itself.
+ * scheduled run tells this server the scheduling host's public address. It is
+ * werift's built-in default (`WERIFT_BUILT_IN_STUN_URI` in
+ * apps/cli/src/connection/webrtc/weriftPeer.ts);
+ * `npm run check:stun-default-claims` holds this copy to that one, since an app
+ * may not import from another app. Not the web app's own ICE list
+ * (`@psi/rendezvous`), which is a different list for exchanges this browser runs
+ * itself.
  */
 export const CLI_BUILT_IN_STUN_URI = "stun:stun.l.google.com:19302";
 
@@ -66,7 +62,7 @@ export type ManagedCronExportPanelState =
 
 /**
  * Derive the panel's state for `record`. A record the composer refuses -- a stored
- * connection on another channel, or a document carrying anything the app could not
+ * connection on another channel, or a document holding anything the app could not
  * have composed -- yields the refusal and its reason; anything else yields the
  * composed export and the two schedule lines.
  */

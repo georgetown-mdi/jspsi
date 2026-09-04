@@ -11,14 +11,14 @@ import type {
 /** The typed lifecycle events a driver emits over a single run, plus the run's
  * {@link AbortSignal}. This is the whole surface a consumer sees: a driver runs
  * an exchange and reports progress, the result, or a categorized failure, and
- * the consumer cancels through the existing signal. Deliberately transport-blind
+ * the consumer cancels through the existing signal. Transport-blind by design
  * -- it names no peer connection, PSI library, or exchange result, only the
  * event vocabulary the lifecycle already speaks -- so a driver that POSTs a
  * server intent and maps a server event stream satisfies it exactly as the
  * in-browser WebRTC driver does.
  *
  * `TOutputs` is the owner-widened {@link ExchangeOutputs} the consumer receives
- * back in `onResult` (the bench passes its `RunOutputs`), matching how the
+ * back in `onResult` (the console passes its `RunOutputs`), matching how the
  * lifecycle already threads the type through. */
 export interface ExchangeDriverEvents<
   TOutputs extends ExchangeOutputs = ExchangeOutputs,
@@ -39,17 +39,14 @@ export interface ExchangeDriverEvents<
     category: ExchangeErrorCategory;
     error: unknown;
   }) => void;
-  /** A non-fatal, operator-relevant notice raised mid-run -- the server-job
-   * driver forwards each relay `warning` event's message here (e.g. the CLI's
-   * cross-party host-key divergence notice, which the operator must be able to
-   * see), and the in-browser driver raises what {@link runExchangeLifecycle}
-   * does: the resolved-cardinality and pair-table notices at the post-terms,
-   * pre-round seam, and the transport's own clean-close notice ending on the
-   * ceiling rather than on the peer's delivery signal. Optional: a consumer
-   * with no warning surface omits it and a driver then drops the message.
-   * Never a terminal -- the run continues to exactly one
-   * `onResult`/`onError`, though a notice raised while tearing down arrives
-   * after it. */
+  /** A non-fatal, operator-relevant notice raised mid-run: the server-job
+   * driver forwards each relay `warning` event's message (e.g. the CLI's
+   * cross-party host-key divergence notice), and the in-browser driver raises
+   * the resolved-cardinality, pair-table, and clean-close notices
+   * {@link runExchangeLifecycle} raises at the post-terms, pre-round boundary.
+   * Optional -- a consumer with no warning surface omits it -- and never
+   * terminal: the run still ends in exactly one `onResult`/`onError`, though a
+   * teardown notice can arrive after it. */
   onWarning?: (message: string) => void;
 }
 
@@ -70,8 +67,8 @@ export interface ExchangeDriver<
  * construction: everything the underlying {@link runExchangeLifecycle} needs
  * that is NOT a run-time event or the run's signal. These are browser-driver
  * internals -- `acquire` draws in the peer and loads the PSI library,
- * `generateOutput` builds the local result files -- and are deliberately absent
- * from {@link ExchangeDriver} so the contract holds for a driver that has
+ * `generateOutput` builds the local result files -- and are absent from
+ * {@link ExchangeDriver} by design, so the contract holds for a driver that has
  * neither. */
 export interface BrowserExchangeDriverConfig<
   TOutputs extends ExchangeOutputs = ExchangeOutputs,

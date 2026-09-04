@@ -12,8 +12,8 @@
  * scope, so the export itself is not built here: the surface takes an INJECTABLE
  * backup hook. When an exporter is wired, the surface offers the refreshed backup;
  * until one exists, the affordance is deferred (named as such, not silently
- * absent), so the completion surface stays honest without inventing an export
- * format. This is the seam the exporter item plugs into.
+ * absent), so the completion surface stays accurate without inventing an export
+ * format. This is the boundary the exporter item plugs into.
  *
  * Pure and platform-free: no IndexedDB, no download machinery. The host component
  * renders what {@link managedRerunCompletion} decides and calls the hook when the
@@ -26,21 +26,14 @@
 export interface ManagedBackupExportHook {
   /** Produce and hand the operator the refreshed backup for this record (the
    * export snapshots the just-rotated secret). Rejects if the export fails; the
-   * host surfaces that without claiming the backup was taken. */
+   * host reports that without claiming the backup was taken. */
   downloadUpdatedBackup: () => Promise<void>;
 }
 
-/** The completion surface's backup affordance, derived from whether an exporter is
- * wired:
- *
- * - `"offer-refresh"` -- an exporter is wired: the run rotated the secret, so the
- *   previous backup is stale and the surface offers "download updated backup" as
- *   the final step. Taking it returns the exchange to green and quiet.
- * - `"deferred"` -- no exporter is wired yet (the export artifact item has not
- *   landed): the surface names the refresh as not-yet-available rather than
- *   pretending it can be taken, so the operator is not misled into thinking a
- *   backup exists.
- */
+/** The completion surface's backup affordance, derived from whether an exporter
+ * is wired: `"offer-refresh"` once one exists, so the surface offers "download
+ * updated backup"; `"deferred"` while none does, so the surface names the
+ * refresh as not-yet-available rather than implying it can be taken. */
 export type ManagedBackupAffordance = "offer-refresh" | "deferred";
 
 /** What the completion surface renders after a successful re-run: the backup
@@ -55,15 +48,11 @@ export interface ManagedRerunCompletion {
 }
 
 /**
- * Decide the completion surface for a successful re-run. When a backup export hook
- * is supplied, the surface offers the refreshed backup (the moment the previous
- * one went stale); when it is absent -- the export artifact is a later item -- the
- * affordance is `"deferred"`, so the surface names it as not-yet-available rather
- * than inventing an export.
- *
- * The presence of the hook is the only input: a completed run always just rotated
- * (the persist-before-success write advanced the secret), so the backup is always
- * stale at completion -- there is no "already backed up" case to distinguish here.
+ * Decide the completion surface for a successful re-run: `"offer-refresh"` when
+ * a backup export hook is supplied, else `"deferred"`. The hook's presence is
+ * the only input -- a completed run always just rotated the secret, so the
+ * backup is always stale at completion; there is no "already backed up" case
+ * to distinguish here.
  */
 export function managedRerunCompletion(
   backupHook?: ManagedBackupExportHook,
