@@ -3,6 +3,7 @@ import {
   authoredLinkageFields,
   disclosedColumnNames,
   getDefaultLinkageTerms,
+  hasExpiryInstantPassed,
   sanitizeForDisplay,
 } from "@psilink/core";
 
@@ -939,9 +940,13 @@ export function expiryLabel(lifetimeSeconds: number, now: Date): string {
 
 /** Whether a minted invitation's ISO `expires` moment is still ahead of `now`
  * -- past it, no partner can pass the credential, so a retry is pointless and
- * the link must stop being offered. */
+ * the link must stop being offered. An `expires` the shared comparison cannot
+ * read stops the offer too: a credential whose bound is unreadable is not one
+ * to keep handing out. */
 export function invitationUsable(expiresIso: string, now: Date): boolean {
-  return new Date(expiresIso).getTime() > now.getTime();
+  return !hasExpiryInstantPassed(expiresIso, now, {
+    onUnparseable: "fail-closed",
+  });
 }
 
 /** Ledger phrasing for who receives the matched results. */

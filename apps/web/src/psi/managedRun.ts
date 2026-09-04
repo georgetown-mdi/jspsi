@@ -195,7 +195,7 @@ export async function runManagedRerun<TInput, THandshake, TExchange>(
   // written -- no run happened, and the record already carries the lapse.
   if (managedExchangeLapsed(record, now())) {
     // record.expires is defined here: managedExchangeLapsed returns true only when
-    // it is set and in the past.
+    // it is set.
     throw new ManagedExchangeExpiredError(record.expires as string);
   }
 
@@ -292,7 +292,7 @@ export function remapLapsedRunFailure(
   if (!hasRecoveryHint(error)) return undefined;
   if (!managedExchangeLapsed(record, now)) return undefined;
   // expires is defined here: managedExchangeLapsed returns true only when it is
-  // set and in the past.
+  // set.
   return new ManagedExchangeExpiredError(record.expires as string);
 }
 

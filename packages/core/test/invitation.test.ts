@@ -4,6 +4,7 @@ import { expect, test } from "vitest";
 import {
   encodeInvitation,
   decodeInvitation,
+  hasExpiryInstantPassed,
   isInvitationExpired,
   INVITATION_LIFETIME_SECONDS,
   MAX_INVITATION_LIFETIME_SECONDS,
@@ -118,6 +119,36 @@ test("isInvitationExpired: an unparseable expires fails closed (rejected)", () =
   const now = new Date("2026-01-01T00:00:00Z");
   for (const bad of ["not-a-date", "", "2026-13-99T99:99:99Z"]) {
     expect(isInvitationExpired(bad, now)).toBe(true);
+  }
+});
+
+test("hasExpiryInstantPassed: the verdict decides only the unparseable case", () => {
+  const now = new Date("2026-01-01T00:00:00Z");
+  for (const onUnparseable of ["fail-closed", "fail-open"] as const) {
+    const passed = (expires: string | undefined) =>
+      hasExpiryInstantPassed(expires, now, { onUnparseable });
+    expect(passed(undefined)).toBe(false);
+    expect(passed("2025-12-31T23:59:59Z")).toBe(true);
+    expect(passed("2026-01-01T00:00:00Z")).toBe(true);
+    expect(passed("2026-01-01T01:00:00Z")).toBe(false);
+  }
+});
+
+test("hasExpiryInstantPassed: fail-closed treats an unparseable expires as passed", () => {
+  const now = new Date("2026-01-01T00:00:00Z");
+  for (const bad of ["not-a-date", "", "2026-13-99T99:99:99Z"]) {
+    expect(
+      hasExpiryInstantPassed(bad, now, { onUnparseable: "fail-closed" }),
+    ).toBe(true);
+  }
+});
+
+test("hasExpiryInstantPassed: fail-open treats an unparseable expires as not passed", () => {
+  const now = new Date("2026-01-01T00:00:00Z");
+  for (const bad of ["not-a-date", "", "2026-13-99T99:99:99Z"]) {
+    expect(
+      hasExpiryInstantPassed(bad, now, { onUnparseable: "fail-open" }),
+    ).toBe(false);
   }
 });
 
