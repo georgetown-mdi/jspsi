@@ -7,15 +7,9 @@ import type { DualSignedRecord } from "@psilink/core";
 
 import { writeFileOwnerOnly } from "./fileUtils";
 
-// File custody for the dual-signed exchange record produced by the signed-receipt
-// step. Mirrors recordFile.ts (the self-attested record): a timestamped default
-// path so repeated exchanges accumulate an audit trail, atomic owner-only writes.
-// Unlike the record it holds NO secret material -- only public certificates and
-// signatures over mutually-verifiable facts -- so it is safe to hand a partner or
-// an auditor; it is still written owner-only by default (the operator shares it by
-// copying, not by loosening permissions), matching the record's conservative
-// default. The write is atomic (temp file + rename) so a mid-write abort leaves it
-// complete or absent, never a partial artifact on disk.
+// File custody for the dual-signed exchange record (the signed-receipt step's
+// output). Mirrors recordFile.ts: a timestamped default path, atomic owner-only
+// writes. See docs/spec/EXCHANGE_RECORD.md, Dual-signed record file.
 
 /** Basename stem for the default dual-signed record file. */
 export const DEFAULT_RECEIPT_BASENAME = "psilink-receipt";
@@ -69,19 +63,12 @@ export function receiptPathFor(
 }
 
 /**
- * Write the dual-signed record to disk atomically and owner-only (temp file +
- * rename, like {@link writeFileOwnerOnly}), so a mid-write abort leaves the file
- * complete or absent -- no partial artifact.
- *
- * Non-fatal by design, like the self-attested record: the privacy-sensitive
- * exchange and the signature swap have already succeeded by the time this runs, so
- * a write failure is logged as a warning rather than thrown -- the operator is
- * never told to re-run a successful exchange because an audit artifact could not
- * be saved. The failure is returned as a message for the caller to put on the
- * machine-readable event stream and to leave a non-zero exit behind, so an
- * unattended run whose stderr is discarded still reports the lost receipt; it
- * names the destination but not the cause, and is composed RAW for that stream's
- * own escape.
+ * Write the dual-signed record to disk atomically and owner-only via
+ * {@link writeFileOwnerOnly}, so a mid-write abort leaves it complete or
+ * absent. Non-fatal by design, like the self-attested record
+ * (`recordFile.ts`): a write failure is logged as a warning and returned as
+ * a message, composed RAW for the caller's own event-stream escaping
+ * (docs/spec/CLI_EVENTS.md, `warning`).
  */
 export function writeDualSignedRecord(
   output: ReceiptOutput,

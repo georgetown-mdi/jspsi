@@ -15,10 +15,7 @@ export const DEFAULT_RECORD_BASENAME = "psilink-record";
  * Default path for the self-attested record: `./psilink-record-<stamp>.json` in
  * the working directory, where `<stamp>` is the record's own `createdAt`
  * timestamp made filesystem-safe (colons and the fractional-second dot replaced
- * with hyphens). Deriving the stamp from `createdAt` -- rather than a fresh clock
- * read taken before the exchange finished -- makes the filename match the
- * timestamp recorded inside the file, and still gives each exchange a distinct
- * file so repeated exchanges accumulate an audit trail rather than overwriting.
+ * with hyphens).
  */
 export function defaultRecordPath(createdAt: string): string {
   const stamp = createdAt.replace(/[:.]/g, "-");
@@ -81,10 +78,8 @@ export interface RecordPaths {
 /**
  * Resolve the concrete record and keys paths from the output choice and the
  * record being written. An explicit `--record-file` is used verbatim; otherwise
- * the default path's timestamp is the record's `createdAt`, so the filename
- * reflects when the record was produced rather than a clock read from before the
- * exchange completed. The keys path is always derived from the record path so
- * the two stay visibly paired.
+ * the default path is derived from the record's `createdAt`. The keys path is
+ * always derived from the record path so the two stay visibly paired.
  */
 export function recordPathsFor(
   output: RecordOutput,
@@ -95,48 +90,15 @@ export function recordPathsFor(
 }
 
 /**
- * Write the record (shareable) and its verification keys (private) to disk, each
- * atomically and owner-only (temp file + rename, like {@link writeFileOwnerOnly}
- * / `saveKeyFile`), so a mid-write abort leaves each file complete or absent.
- *
- * Both files are owner-only (0600) by design. Neither holds the matched data: the
- * record holds commitments and a non-secret summary, and the verification keys
- * hold only per-commitment salts (the matched data lives solely in the results
- * file). "Shareable" means the record may be handed to an auditor -- not that it
- * is world-readable on disk; it still discloses, in cleartext, that an exchange
- * occurred, with whom, under which agreement, over what categories of data, and
- * its size, so the conservative default keeps it private to the owner. The keys
- * are not shareable at all: a salt plus the record's commitment can open (and
- * brute-force a low-entropy) committed value, so they stay private.
- *
- * Non-fatal by design: the privacy-sensitive exchange has already disclosed by
- * the time this runs, so a record-write failure is logged as a warning rather
- * than thrown -- the user is never told to re-run an exchange that already
- * happened because an audit artifact could not be saved. It is not silent,
- * though: the failure is returned as a message for the caller to put on the
- * machine-readable event stream, so an unattended run whose stderr is discarded
- * (or whose `--log-level` suppresses a warning) still reports that the exchange
- * produced no audit artifact. The returned message names the destination but not
- * the cause, and is composed RAW for that stream's own escape; the logged line
- * below carries the cause and is escaped where it composes.
- *
- * Called on two paths, and the record's own `outcome` is what tells them apart in
- * the prose it writes: a completed run's record, and the record of a run that
- * disclosed and then terminated (docs/spec/PROTOCOL.md, Self-attested record).
- * The files, paths, and permissions are identical either way -- what a terminated
- * run wrote is a disclosure-log entry like any other, and it is the record that
- * states it was one, not its filename.
- *
- * The verification keys are written first (they are the material verification
- * needs; if the process dies between the two writes, the salts are preserved and
- * only the summary record is missing on the next run). On Linux this ordering
- * survives a power loss, not just a process death: {@link writeFileOwnerOnly}
- * fsyncs each file's data and its parent directory entry before returning, so a
- * durable record rename implies a durable keys rename. On macOS Node's
- * `fsync` does not force the drive's write cache to media, so there the ordering
- * holds against process death but not necessarily a power loss (recoverable by
- * re-running); on Windows the directory flush is unreachable from Node's fs. See
- * `writeFileOwnerOnly` and SECURITY_DESIGN.md.
+ * Write the record (shareable) and its verification keys (private) to disk,
+ * each atomically and owner-only via {@link writeFileOwnerOnly} -- keys
+ * first, so a mid-write death leaves the salts recoverable even when the
+ * record is not (crash-ordering scope: docs/spec/CREDENTIAL_STORAGE.md).
+ * Non-fatal by design: a write failure is logged as a warning and returned
+ * as a message, composed RAW for the caller's own event-stream escaping
+ * (docs/spec/CLI_EVENTS.md, `warning`), and handles a completed run's
+ * record and a terminated one identically (docs/spec/EXCHANGE_RECORD.md,
+ * When a record is owed).
  */
 export function writeExchangeRecord(
   output: RecordOutput,
@@ -145,8 +107,6 @@ export function writeExchangeRecord(
   loggerName: string,
 ): string | undefined {
   const log = getLogger(loggerName);
-  // Resolve the concrete paths now: the default path's timestamp is the record's
-  // own createdAt, so the filename matches the timestamp inside the file.
   const { recordFilePath, keysFilePath } = recordPathsFor(
     output,
     record.createdAt,
@@ -154,14 +114,8 @@ export function writeExchangeRecord(
   // Track the keys write so a partial failure (keys written, record write
   // throws) can tell the user about the orphaned private file below.
   let keysWritten = false;
-  // What this record says became of its run, which is what the operator prose
-  // below turns on: "the exchange succeeded, do not re-run it" is the wrong
-  // instruction for the record of a run that disclosed and then failed. Read off
-  // the record rather than passed in beside it, so the file and the words about
-  // it can never disagree. One outcome covers every way the post-disclosure
-  // region can end -- the received-payload refusal as much as the receipt swap
-  // -- so the prose names no step: naming one would tell an operator a step
-  // failed that the run may never have reached (docs/spec/EXCHANGE_RECORD.md,
+  // Read off the record's own outcome rather than passed in beside it, so the
+  // file and the prose about it can never disagree (docs/spec/EXCHANGE_RECORD.md,
   // When a record is owed).
   const terminated = record.outcome === "receipt-swap-terminated";
   try {

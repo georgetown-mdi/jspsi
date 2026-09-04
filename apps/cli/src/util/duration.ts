@@ -1,6 +1,6 @@
 import { UsageError } from "@psilink/core";
 
-// Milliseconds per supported unit suffix. The set is deliberately small (no
+// Milliseconds per supported unit suffix. The set is small by design (no
 // weeks/months/years): a CLI duration is a coordination window, and ambiguous
 // or calendar-dependent units (a "month" has no fixed length) would invite the
 // very confusion the required-suffix rule exists to prevent.
@@ -26,12 +26,10 @@ const FINE_DURATION_RE = /^(\d+)(ms|s|m|h|d)$/;
 /**
  * Shared grammar core for both duration parsers: a positive integer magnitude
  * followed by a REQUIRED unit suffix drawn from `units`, returned as a positive
- * millisecond offset. {@link parseDuration} (coarse) and {@link parseFineDuration}
- * (sub-second) are this parser bound to a different unit table and regex, so the
- * required-suffix, positive-magnitude, and safe-integer invariants are enforced
- * one way and cannot drift between the two grammars; only the accepted units --
- * and the units/examples named in the error -- differ. `unitList` and `examples`
- * fill the "expected ..." message so each grammar reports exactly its own units.
+ * millisecond offset. {@link parseDuration} and {@link parseFineDuration} are
+ * this parser bound to a different unit table and regex, so the enforcement
+ * cannot drift between the two grammars. `unitList` and `examples` fill the
+ * "expected ..." message so each grammar reports its own units.
  */
 function parseUnitDuration(
   input: string,
@@ -62,19 +60,14 @@ function parseUnitDuration(
 
 /**
  * Parse a human-readable command-line duration into a positive millisecond
- * offset. This is the canonical duration parser for psilink CLI flags: every
- * flag whose value is a duration should accept this syntax.
- *
- * The syntax is a positive integer magnitude followed by a REQUIRED
- * single-character unit suffix -- `s` (seconds), `m` (minutes), `h` (hours), or
- * `d` (days). Examples: `45s`, `30m`, `2h`, `1d`. The suffix is mandatory by
- * design: a bare integer is never silently assigned a unit. (Some older flags
- * read a bare integer as seconds; forcing the suffix here keeps a value written
- * for one convention from being misread under the other.) Sub-second values are
- * rejected -- a flag that needs millisecond resolution uses {@link parseFineDuration}.
+ * offset -- the canonical duration parser for psilink CLI flags. Syntax: a
+ * positive integer magnitude plus a REQUIRED unit suffix (`s`, `m`, `h`, `d`),
+ * e.g. `45s`, `30m`. Sub-second values are rejected; use
+ * {@link parseFineDuration} for millisecond resolution. Full syntax and
+ * rationale: docs/CLI.md, Configuration.
  *
  * @throws {UsageError} if the input is empty, lacks a recognized unit suffix,
- * carries a non-integer or non-positive magnitude, or is large enough to
+ * has a non-integer or non-positive magnitude, or is large enough to
  * overflow a safe integer.
  */
 export function parseDuration(input: string): number {
@@ -88,17 +81,13 @@ export function parseDuration(input: string): number {
 }
 
 /**
- * Parse a duration into a positive millisecond offset, additionally accepting a
- * millisecond unit (`ms`) so a sub-second value such as `100ms` is expressible.
- * The sole caller is `--polling-frequency`, whose poll interval is
- * millisecond-scaled and whose demo use legitimately wants a fast (sub-second)
- * poll against a controlled server; every other duration flag stays on the
- * coarse {@link parseDuration}, so extending the grammar here does NOT loosen
- * `--peer-timeout` / `--expires-in` / the timeout flags to accept `ms`.
- *
- * Otherwise identical to {@link parseDuration}: the coarser `s`/`m`/`h`/`d`
- * suffixes are still accepted, a unit suffix is still REQUIRED (a bare integer is
- * rejected), and the magnitude must be a positive, safe-integer-bounded value.
+ * Parse a duration into a positive millisecond offset, additionally accepting
+ * a millisecond unit (`ms`) so a sub-second value such as `100ms` is
+ * expressible. The sole caller is `--polling-frequency`; every other duration
+ * flag stays on the coarse {@link parseDuration}, so extending the grammar
+ * here does not loosen the others to accept `ms`. Otherwise identical to
+ * {@link parseDuration} (docs/CLI.md, Configuration, for the full syntax and
+ * rationale).
  *
  * @throws {UsageError} on the same conditions as {@link parseDuration}.
  */
@@ -133,15 +122,13 @@ export const FINE_DURATION_VALUE_HELP =
   "A duration with a required unit suffix: ms, s, m, h, or d, e.g. 100ms, 5s, or 2m";
 
 /**
- * Parse a duration-valued CLI flag's value through {@link parseDuration}, naming
- * the flag in any error. A bare positive integer -- the pre-migration
- * seconds-only form of the flags this replaces -- is rejected with the exact
- * suffixed value to use (`30` -> use `30s`), so migrating an old invocation is
- * mechanical; every other malformed value yields parseDuration's message
- * prefixed with the flag name.
+ * Parse a duration-valued CLI flag's value through {@link parseDuration},
+ * naming the flag in any error. A bare positive integer is rejected with the
+ * exact suffixed value to use (`30` -> use `30s`); every other malformed
+ * value yields parseDuration's message prefixed with the flag name.
  *
- * Returns the same positive millisecond offset {@link parseDuration} does; the
- * caller converts to the unit its downstream consumer expects.
+ * Returns the same positive millisecond offset {@link parseDuration} does;
+ * the caller converts to the unit its downstream consumer expects.
  *
  * @param flag the flag name as written on the command line, e.g. `--peer-timeout`.
  * @throws {UsageError} for a bare integer, or any input parseDuration rejects.
@@ -151,12 +138,11 @@ export function parseDurationFlag(flag: string, value: string): number {
 }
 
 /**
- * Sub-second sibling of {@link parseDurationFlag}: parse a duration-valued CLI
- * flag through {@link parseFineDuration}, so a millisecond value (`100ms`) is
- * accepted, while keeping the identical bare-integer migration hint (a bare
- * positive integer is rejected with the exact suffixed value to use). The sole
- * caller is `--polling-frequency`; every other duration flag uses
- * {@link parseDurationFlag}, so their grammar is unchanged.
+ * Sub-second sibling of {@link parseDurationFlag}: parses through
+ * {@link parseFineDuration} instead, so a millisecond value (`100ms`) is
+ * accepted, with the same bare-integer rejection message. The sole caller is
+ * `--polling-frequency`; every other duration flag uses
+ * {@link parseDurationFlag} and is unaffected.
  *
  * @param flag the flag name as written on the command line, e.g. `--polling-frequency`.
  * @throws {UsageError} for a bare integer, or any input parseFineDuration rejects.
@@ -165,29 +151,30 @@ export function parseFineDurationFlag(flag: string, value: string): number {
   return parseDurationFlagWith(flag, value, parseFineDuration);
 }
 
-// Shared flag wrapper: apply the bare-integer migration hint, then delegate the
-// well-formed value to `parse` (the coarse parseDuration or the sub-second
-// parseFineDuration), prefixing the flag name onto any UsageError it raises. The
-// hint is identical across both grammars -- a bare integer is rejected the same
-// way regardless of which units the underlying parser accepts.
+// Shared flag wrapper: reject a bare integer with a suffixed-value hint, then
+// delegate a well-formed value to `parse` (the coarse parseDuration or the
+// sub-second parseFineDuration), prefixing the flag name onto any UsageError it
+// raises. The hint is identical across both grammars -- a bare integer is
+// rejected the same way regardless of which units the underlying parser
+// accepts.
 function parseDurationFlagWith(
   flag: string,
   value: string,
   parse: (input: string) => number,
 ): number {
   const trimmed = value.trim();
-  // A bare positive integer used to mean "that many seconds"; point straight at
-  // the suffixed equivalent rather than the generic "needs a unit" message, since
-  // that is the one malformed form a user migrating from the old syntax will hit.
-  // A bare 0 falls through to the parser: "0s" is itself rejected as a zero
+  // A bare positive integer gets a specific hint -- the exact suffixed
+  // equivalent -- rather than the parser's generic "needs a unit" message,
+  // since it is the malformed form most likely to appear. A bare 0 falls
+  // through to the parser instead: "0s" is itself rejected as a zero
   // duration, so suggesting it would be wrong.
   if (/^\d+$/.test(trimmed) && Number(trimmed) > 0) {
     // Canonicalize the suggested value with a string op, never Number(): stripping
-    // leading zeros keeps the hint honest (007 -> use 7s, since parseDuration reads
-    // 007s as 7s) while avoiding the rounding (or Infinity) a Number() round-trip
-    // would inflict on a digit string past 2^53. The (?=\d) lookahead keeps a
-    // final digit, so an all-zeros string would be untouched -- but it never
-    // reaches here, having failed the Number(trimmed) > 0 guard above.
+    // leading zeros keeps the hint accurate (007 -> use 7s, since parseDuration
+    // reads 007s as 7s) while avoiding the rounding (or Infinity) a Number()
+    // round-trip would inflict on a digit string past 2^53. The (?=\d) lookahead
+    // keeps a final digit, so an all-zeros string would be untouched -- but it
+    // never reaches here, having failed the Number(trimmed) > 0 guard above.
     const canonical = trimmed.replace(/^0+(?=\d)/, "");
     throw new UsageError(
       `${flag} no longer accepts a bare number of seconds; durations need a ` +
