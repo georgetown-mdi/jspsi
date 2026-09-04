@@ -36,7 +36,20 @@ ${groups}
           - "*"
 `;
 
-const group = (name, patterns, excludePatterns = []) => ({
+const twoNpmBlocks = (first, second) => `version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    groups:
+${first}
+  - package-ecosystem: npm
+    directory: "/apps/web"
+    groups:
+${second}
+`;
+
+const group = (name, patterns, excludePatterns = [], block = 0) => ({
+  block,
   name,
   patterns,
   excludePatterns,
@@ -190,6 +203,24 @@ updates:
 `),
     ).toEqual([]);
   });
+
+  it("numbers the block each group came from, so a rule can scope to one", () => {
+    expect(
+      npmGroups(
+        twoNpmBlocks(
+          `      cryptographic:
+        patterns:
+          - "ssh2"`,
+          `      web-non-critical:
+        patterns:
+          - "*"`,
+        ),
+      ),
+    ).toEqual([
+      group("cryptographic", ["ssh2"], [], 0),
+      group("web-non-critical", ["*"], [], 1),
+    ]);
+  });
 });
 
 describe("a checklist package a group would swallow", () => {
@@ -331,6 +362,40 @@ describe("a group-named package another group would swallow", () => {
         group("also-everything", ["*"]),
       ]),
     ).toEqual([]);
+  });
+
+  it("leaves a catch-all in another update block alone, batching separately", () => {
+    expect(
+      groupExclusionViolations(
+        npmGroups(
+          twoNpmBlocks(
+            `      cryptographic:
+        patterns:
+          - "ssh2"`,
+            `      web-non-critical:
+        patterns:
+          - "*"`,
+          ),
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  it("fails that same pair of groups when one update block declares both", () => {
+    const violations = groupExclusionViolations(
+      npmGroups(
+        config(`      cryptographic:
+        patterns:
+          - "ssh2"
+      web-non-critical:
+        patterns:
+          - "*"`),
+      ),
+    );
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toContain("ssh2");
+    expect(violations[0]).toContain('npm group "cryptographic"');
+    expect(violations[0]).toContain('npm group "web-non-critical"');
   });
 
   it("throws on a group pattern carrying a glob beyond the bare * default", () => {
