@@ -36,7 +36,7 @@
     "dist"
   ],
   "dependencies": {
-    "@noble/curves": "^2.3.0",
+    "@noble/curves": "^2.4.0",
     "@openmined/psi.js": "file:../../lib/openmined-psi.js-2.0.6-seclink.3.tgz",
     "canonicalize": "^3.0.0",
     "eventemitter3": "^5.0.1",
