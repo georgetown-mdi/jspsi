@@ -2,49 +2,45 @@
  * The partner's accept kit: one plaintext, printable, ASCII instruction sheet
  * the inviter downloads at mint time and sends alongside the invitation, for a
  * partner who accepts through the command-line tool (the `sftp` and `filedrop`
- * channels). It assumes the partner has Docker -- Desktop or Engine -- or can
- * get it, and nothing else.
+ * channels). Assumes the partner has Docker -- Desktop or Engine -- or can get
+ * it, and nothing else.
  *
- * Pure: explicit inputs in, one string out -- no React, no I/O, no clock -- so
- * the sheet's whole contract is pinned by unit tests. Its partner-facing
- * invariants are specified in `docs/spec/SERVER_JOB_API.md` ("The partner
- * accept kit").
+ * Pure: explicit inputs in, one string out -- no React, no I/O, no clock. Its
+ * partner-facing invariants are specified in `docs/spec/SERVER_JOB_API.md`
+ * ("The partner accept kit").
  *
  * The sheet is a DISCLOSURE SURFACE: whatever it interpolates is written to
- * disk and handed to the partner. Exactly two KINDS of dynamic value are
- * representable here, each justified where it is interpolated -- the rendezvous
- * locator the invitation already carries (its host and directory fields, or a split
- * rendezvous's two folder names), which is free text held to the sheet's ASCII
- * contract by {@link printable}, and this build's public release version, which
- * is interpolated only in the release shape {@link RELEASE_VERSION} admits.
- * Everything else is fixed text: {@link AcceptKitInput} declares only those two
- * kinds and two selector booleans, so no secret, no invitation token, and no path
- * from the inviter's machine or container has a field to arrive in.
+ * disk and handed to the partner. Two kinds of dynamic value are representable
+ * here: the rendezvous locator the invitation already carries (free text held
+ * to the sheet's ASCII contract by {@link printable}), and this build's public
+ * release version (interpolated only in the shape {@link RELEASE_VERSION}
+ * admits). Everything else is fixed text: {@link AcceptKitInput} declares only
+ * those two kinds and two selector booleans, so no secret, no invitation
+ * token, and no path from the inviter's machine or container has a field to
+ * arrive in.
  *
- * What the exchange's own settings contribute is therefore a SELECTOR and never
- * a value: {@link AcceptKitInput.retainFiles} and
+ * The exchange's own settings contribute only a SELECTOR, never a value:
+ * {@link AcceptKitInput.retainFiles} and
  * {@link AcceptKitInput.locklessRendezvous} pick between fixed paragraphs and
- * fixed command flags, exactly as the channel discriminant already picks between
- * fixed bodies. Rendering an option block would make a third value representable
- * and void the property above, so a future setting the partner must be told about
- * is disclosed the same way.
+ * fixed command flags, as the channel discriminant already picks between
+ * fixed bodies. A future setting the partner must be told about is disclosed
+ * the same way.
  */
 
 /**
  * The rendezvous locator the sheet prints back, in the shapes the console
  * mints: an sftp locator (host, optional port, and either the single shared
  * remote directory or the split inbound/outbound pair) or a filedrop locator
- * (the shared folder's NAME, or the split pair's two names, never the appliance's
- * absolute path). Credential-free by construction, as the invitation endpoint it is
- * copied from is.
+ * (the shared folder's NAME, or the split pair's two names, never the
+ * console's absolute path). Credential-free by construction, as the
+ * invitation endpoint it is copied from is.
  *
- * Every filedrop name is optional because the console cannot always name the
- * shared folder: where the rendezvous mount point was chosen by a launcher
- * rather than by the operator, the mount point is not the folder's name, and the
- * sheet omits the name rather than telling the partner to match one that is not.
- * `split` therefore carries the SHAPE independently of the names: a split
- * rendezvous the console cannot name still has to be described as two folders, or
- * the sheet would send the partner to set up a single shared one.
+ * Every filedrop name is optional: where the rendezvous mount point was
+ * chosen by a launcher rather than by the operator, the mount point is not
+ * the folder's name, and the sheet omits the name rather than telling the
+ * partner to match one that is not. `split` carries the SHAPE independently
+ * of the names: a split rendezvous the console cannot name is still
+ * described as two folders.
  */
 import { PLACEHOLDER_SSH_USERNAME } from "@psilink/core";
 
@@ -75,20 +71,17 @@ export interface AcceptKitExchange {
   /** The rendezvous locator minted into the invitation. */
   endpoint: AcceptKitEndpoint;
   /**
-   * Whether the inviter turned retain mode on. Retain mode is bilateral and
-   * non-negotiated, so the partner's own run must carry it or the two sides stop
-   * at rendezvous, and it leaves every protocol file in place afterwards. Both
-   * halves are the partner's to know, which is why the sheet takes this at all;
-   * it selects fixed text and contributes no value of its own.
+   * Whether the inviter turned retain mode on. Bilateral and non-negotiated:
+   * the partner's own run must carry it or the two sides stop at rendezvous,
+   * and it leaves every protocol file in place afterwards. Selects fixed
+   * text and contributes no value of its own.
    */
   retainFiles: boolean;
   /**
-   * Whether the run resolved the lockless rendezvous on -- the setting as the
-   * run carries it, with retain mode's implication of it already folded in.
-   * Bilateral and non-negotiated like retain mode, and unlike it, it leaves
-   * nothing behind: the partner's half of the agreement is the whole of what
-   * the sheet has to state, and it too selects fixed text and contributes no
-   * value of its own.
+   * Whether the run resolved the lockless rendezvous on, with retain mode's
+   * implication of it already folded in. Bilateral and non-negotiated like
+   * retain mode; unlike it, leaves nothing behind. Selects fixed text and
+   * contributes no value of its own.
    */
   locklessRendezvous: boolean;
 }
@@ -128,11 +121,11 @@ const DEFAULT_PSILINK_IMAGE_TAG = "latest";
  * The shape a release version has: `X.Y.Z` with semver's optional prerelease
  * and build suffixes (`docs/RELEASES.md`). The build's value is interpolated
  * only when it matches, so an absent, partial, or malformed one names the
- * floating tag rather than reaching the sheet -- and `0.0.0`, the marker the
- * manifests that carry no release version hold, is excluded with it. The
- * image build reads the CLI manifest, which never holds `0.0.0`; the carve-out
- * guards a build mis-wired to the unversioned web or root manifest, not a
- * value the production build path delivers.
+ * floating tag; `0.0.0`, the marker for manifests that carry no release
+ * version, is excluded with it. The image build reads the CLI manifest,
+ * which never holds `0.0.0`; the carve-out guards a build mis-wired to the
+ * unversioned web or root manifest, not a value the production build path
+ * delivers.
  */
 const RELEASE_VERSION =
   /^(?!0\.0\.0(?:[-+]|$))\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
@@ -174,25 +167,22 @@ function heading(title: string): Array<string> {
 }
 
 /**
- * The rendezvous locator, as the sheet prints it back for the partner to check.
- * Interpolating it is not a disclosure: it is exactly the credential-free
- * locator the invitation the partner already holds carries, and on the filedrop
- * channel it is the shared folder's name rather than any path on the inviter's
- * machine.
+ * The rendezvous locator, as the sheet prints it back for the partner to
+ * check. Interpolating it is not a disclosure: it is exactly the
+ * credential-free locator the invitation already carries, and on filedrop it
+ * is the shared folder's name rather than any path on the inviter's machine.
  *
  * The filedrop cross-check is a check, not a promise of equality: the same
- * shared folder can carry a different name on each side -- a share root mapped
- * to a drive letter is the ordinary case -- so the sheet asks the partner to
- * check the name against what they were told rather than to match it.
+ * shared folder can carry a different name on each side (a share root mapped
+ * to a drive letter is the ordinary case), so the sheet asks the partner to
+ * check the name rather than match it.
  */
 function rendezvousLines(endpoint: AcceptKitEndpoint): Array<string> {
   if (endpoint.channel === "filedrop") {
-    // A split rendezvous names both folders from the INVITER's side, which is the
-    // direction the partner's own tool mirrors: the inviter's inbound is where the
-    // partner writes, and the inviter's outbound is where the partner reads.
-    // Labelling them by what the READER does with them, rather than by
-    // "inbound"/"outbound", is what keeps the sheet from stating the pair
-    // backwards for its reader.
+    // A split rendezvous names both folders from the INVITER's side, which
+    // the partner's own tool mirrors: the inviter's inbound is where the
+    // partner writes, the inviter's outbound is where the partner reads.
+    // Labelled by what the READER does with them, not "inbound"/"outbound".
     if (endpoint.split === true)
       return endpoint.inboundPath === undefined ||
         endpoint.outboundPath === undefined
@@ -230,11 +220,10 @@ function rendezvousLines(endpoint: AcceptKitEndpoint): Array<string> {
   const port = endpoint.port === undefined ? "" : `:${endpoint.port}`;
   return [
     `  SFTP server:    ${printable(endpoint.host)}${port}`,
-    // A split-directory invitation names both folders from the INVITER's side,
-    // which is the direction the partner's own command-line tool mirrors: the
-    // inviter's outbound is where the partner reads, and vice versa. Labelling
-    // them by whose they are, rather than by "inbound"/"outbound", is what keeps
-    // the sheet from stating the pair backwards for its reader.
+    // A split-directory invitation names both folders from the INVITER's
+    // side, which the partner's own command-line tool mirrors: the inviter's
+    // outbound is where the partner reads, and vice versa. Labelled by
+    // whose they are, not "inbound"/"outbound".
     ...(endpoint.inboundPath === undefined ||
     endpoint.outboundPath === undefined
       ? endpoint.path === undefined
@@ -290,17 +279,13 @@ function acceptCommand(version: string | undefined): string {
 }
 
 /**
- * What the partner's `exchange` command carries beyond the run itself: the one
- * flag standing for the bilateral settings their side must match.
+ * What the partner's `exchange` command carries beyond the run itself: the
+ * one flag standing for the bilateral settings their side must match.
  *
  * Retain mode travels as the single flag whose implications the CLI resolves
- * for them (`withRetainModeImplications` gives it the timestamped filenames and
- * lockless rendezvous it requires), so the sheet states the operator-visible
- * choice rather than re-deriving the trio here and risking drift from the CLI.
- * That is also why the lockless rendezvous travels only where retain mode is
- * not already carrying it: naming it alongside `--retain-files` would state a
- * rule the CLI does not enforce. Fixed strings chosen by booleans, so nothing
- * new is representable on the sheet.
+ * for them (`withRetainModeImplications`); the lockless rendezvous flag
+ * travels only where retain mode is not already carrying it. Fixed strings
+ * chosen by booleans, so nothing new is representable on the sheet.
  */
 function bilateralFlag(settings: BilateralSettings): string {
   return chooseBilateral(
@@ -351,9 +336,8 @@ function bilateralFlagLines(settings: BilateralSettings): Array<string> {
 
 /**
  * The same agreement, named as the console control that sets it, for the
- * filedrop launcher route: that route hands the partner to the console's accept
- * flow and never runs the commands below, so naming the control is what keeps it
- * from rendezvousing into a mismatch.
+ * filedrop launcher route: that route hands the partner to the console's
+ * accept flow and never runs the commands below.
  */
 function consoleControlLines(settings: BilateralSettings): Array<string> {
   return chooseBilateral(
@@ -378,19 +362,15 @@ function consoleControlLines(settings: BilateralSettings): Array<string> {
 }
 
 /**
- * What retain mode leaves behind, and what the partner must do about it. Retain
- * mode is bilateral and non-negotiated, so a partner told only how to accept
- * would meet a mismatch at rendezvous; and it leaves every protocol file in the
- * rendezvous location as a permanent transcript, which is the partner's to know
- * before they join rather than after. Fixed paragraphs per channel, selected by
- * the boolean.
+ * What retain mode leaves behind, and what the partner must do about it:
+ * every protocol file stays in the rendezvous location as a permanent
+ * transcript, which is the partner's to know before they join. Fixed
+ * paragraphs per channel, selected by the boolean.
  *
- * The message bodies stay ciphertext in the transcript (see
- * `docs/spec/CHANNEL_SECURITY.md`), but the control files the two sides meet
- * through do not: the hello bodies are plaintext and the filenames carry each
- * party's name, timestamps, sequence numbers, and byte counts, so the disclosure
- * names what an eventual reader of that location learns rather than leaving the
- * partner to infer it from "keeps every file".
+ * The message bodies stay ciphertext (`docs/spec/CHANNEL_SECURITY.md`); the
+ * control files the two sides meet through do not -- the hello bodies are
+ * plaintext, and the filenames carry each party's name, timestamps, sequence
+ * numbers, and byte counts.
  */
 function retainLines(endpoint: AcceptKitEndpoint): Array<string> {
   const split =
@@ -500,16 +480,11 @@ function opening(
     "Every command below is a single line, even where it wraps on screen.",
     "On Windows, run the commands from PowerShell, not Command Prompt.",
     "",
-    // Ahead of the engine question, because it qualifies every reader: psilink
-    // names a party only from what the operator gives it, so an acceptance
-    // carrying no name stops. The engine section below is one a whole reader
-    // class is told to skip, which is why this cannot live there. Scoped to the
-    // accept command, the one place on this sheet that chooses the label:
-    // accepting writes it into psilink.yaml and the exchange steps read it from
-    // there. The flag SHAPE is shown and the value is shouted rather than
-    // plausible: an unreplaced placeholder would otherwise reach the partner as
-    // this party's name, and no command on this sheet carries it pre-filled for
-    // that reason.
+    // Scoped to the accept command, the one place on this sheet that chooses
+    // the label: accepting writes it into psilink.yaml and the exchange
+    // steps read it from there. The flag SHAPE is shown and the value is
+    // shouted rather than plausible, since an unreplaced placeholder would
+    // otherwise reach the partner as this party's name.
     ...heading("THE NAME YOUR PARTNER SEES"),
     "psilink records a name for your side -- what your partner reads as who",
     "they exchanged with, in the agreed terms and in the record each of you",
@@ -595,10 +570,9 @@ function opening(
 
 /**
  * The opening of the step that repoints psilink at the partner's own copy of
- * the shared folder, which turns on whether the sheet could name that folder.
+ * the shared folder, keyed on whether the sheet could name that folder.
  * Named, accepting wrote the inviter's name for it. Unnamed, what accepting
- * wrote is the console's own mount point -- the token always carries a locator
- * -- so the step calls it a placeholder rather than a name either side chose,
+ * wrote is the console's own mount point, so the step calls it a placeholder
  * and directs the same replacement.
  */
 function repointStepOpening(named: boolean): Array<string> {
@@ -663,14 +637,12 @@ function filedropAcceptStep(version: string | undefined): Array<string> {
 }
 
 /**
- * The split filedrop body: the same two commands as the single-folder route, over
- * two mounts instead of one.
+ * The split filedrop body: the same two commands as the single-folder route,
+ * over two mounts instead of one.
  *
  * Its situation A differs from the single-folder route's in the one way that
- * matters: the PowerShell launchers provision a single rendezvous folder, so they
- * cannot start this exchange. Saying so plainly, with the two ways forward, is what
- * keeps a Windows network-drive partner from following a route that ends in a
- * console the exchange cannot run.
+ * matters: the PowerShell launchers provision a single rendezvous folder, so
+ * they cannot start this exchange.
  */
 function filedropSplitBody(
   version: string | undefined,

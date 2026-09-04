@@ -96,26 +96,22 @@ export function succeededRun(at: number): ManagedExchangeLastRun {
 }
 
 /**
- * Record a run whose partner never arrived: the wait for the other party's runner
- * spent its whole budget with nobody there, so no handshake ran and no payload
- * left this party. It carries no `failureKind` -- the outcome is the whole account,
- * and every kind in that enum names a failure of something that did happen, while
- * a no-show is the absence of a run rather than a run that went wrong. The read
- * side depends on that: the failure tiering and the "nothing was disclosed" line
- * both key off the `"missed"` outcome alone.
+ * Record a run whose partner never arrived: no handshake ran and no payload left
+ * this party. Carries no `failureKind` -- unlike every other kind, which names a
+ * failure of something that did happen, a no-show is the absence of a run, and
+ * the failure tiering and the "nothing was disclosed" line both key off the
+ * `"missed"` outcome alone.
  */
 export function missedRun(at: number): ManagedExchangeLastRun {
   return { at: new Date(at).toISOString(), outcome: "missed" };
 }
 
 /**
- * Record a run whose rotation could not be persisted. This is structured
- * `failureKind: "storage"` bookkeeping precisely so the next handshake failure
- * surfaces through the benign Tier-1 framing (a recorded persist failure explains
- * a desync) rather than the attack framing -- see docs/MANAGED_EXCHANGE.md,
- * "Telling a desync from an attack". It is the one-sided persist and nothing else:
- * a custody reading the locked window could not complete rotated no secret and so
- * explains no desync, and records `"custody-unreadable"` instead
+ * Record a run whose rotation could not be persisted: `failureKind: "storage"`,
+ * so the next handshake failure surfaces through the benign Tier-1 framing
+ * rather than the attack framing (docs/MANAGED_EXCHANGE.md, "Telling a desync
+ * from an attack"). Distinct from a custody read that could not complete before
+ * any secret rotated, which records `"custody-unreadable"` instead
  * ({@link ./managedExchangeRun.ts}).
  */
 export function storageFailureRun(at: number): ManagedExchangeLastRun {
@@ -155,10 +151,10 @@ export class RotationPersistError extends Error {
   }
 }
 
-/** The locked half of a run: the handshake and the durable persist, plus the
- * seams the platform half injects. This is exactly the window the single-writer
+/** The locked half of a run: the handshake and the durable persist, injected by
+ * the platform half as callbacks. This is exactly the window the single-writer
  * lock covers -- "begin this run" through "rotated secret durably persisted" --
- * and it is testable in Node with the persist seam faked. */
+ * and it is testable in Node with the persist call faked. */
 export interface ManagedRotationCriticalSection<THandshake> {
   /**
    * Run the authenticated handshake and yield the rotated secret (from the
@@ -182,11 +178,11 @@ export interface ManagedRotationCriticalSection<THandshake> {
 }
 
 /**
- * The result of the locked critical section: the handshake's carried value and a
- * `proceed` gate. `proceed` -- the data exchange -- is only obtainable once the
- * rotated secret is durably persisted, so a caller structurally cannot begin the
- * data exchange before the persist resolves, even though the caller runs it AFTER
- * releasing the lock (the lock covers only through persist, per the spec's window).
+ * The result of the locked critical section: the handshake's carried value,
+ * obtainable only once the rotated secret is durably persisted. A caller
+ * structurally cannot begin the data exchange before the persist resolves, even
+ * though the caller runs it AFTER releasing the lock (the lock covers only
+ * through persist, per the spec's window).
  */
 export interface ManagedRotationGate<THandshake> {
   /** The handshake's carried value, to hand to the data-exchange phase. */
@@ -194,20 +190,18 @@ export interface ManagedRotationGate<THandshake> {
 }
 
 /**
- * Run the locked half of one run's persist-before-success sequence: the window the
- * single-writer lock holds.
+ * Run the locked half of one run's persist-before-success sequence: the window
+ * the single-writer lock holds.
  *
  * 1. `handshake()` yields the `AuthResult`'s rotated secret.
- * 2. The rotation write-back (the rotated secret, `expires` restamped from the
- *    policy) is computed and `persist()`ed, awaited to completion. A persist
- *    failure raises a {@link RotationPersistError} carrying the `storage`-kind
- *    `lastRun`.
+ * 2. The rotation write-back is computed and `persist()`ed, awaited to
+ *    completion. A persist failure raises {@link RotationPersistError} carrying
+ *    the `storage`-kind `lastRun`.
  *
- * It resolves only after the persist commits, and returns the {@link ManagedRotationGate}
- * whose carried handshake value the data exchange consumes -- so the data exchange
- * (which the caller runs after releasing the lock) is unreachable until the persist
- * has resolved. The lock window is exactly this function: begin-run through rotated-
- * secret-durably-persisted, no wider (the data exchange does not hold the lock).
+ * Returns the {@link ManagedRotationGate} only after the persist commits, so the
+ * data exchange it gates is unreachable before the persist resolves even though
+ * the caller runs it after releasing the lock -- the lock window is exactly this
+ * function, no wider.
  *
  * @throws {RotationPersistError} if the rotation write-back fails to persist.
  */

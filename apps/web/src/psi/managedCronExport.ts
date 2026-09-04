@@ -1,68 +1,49 @@
 /**
- * The command-line export of a managed (recurring) exchange: the record composed
- * into the two files `psilink exchange` actually opens -- a `psilink.yaml` and a
- * `.psilink.key` -- plus the command line that runs them, so an operator with a
- * host scheduler can move a managed exchange onto the CLI (see
- * docs/MANAGED_EXCHANGE.md, "Who this is for": the installed-app automation is
- * first-class for the no-IT persona, and the CLI plus host cron is the graduation
- * path for an organization that can vet and operate installed software).
+ * The command-line export of a managed (recurring) exchange: the record
+ * composed into the two files `psilink exchange` opens -- `psilink.yaml` and
+ * `.psilink.key` -- plus the command that runs them, letting an operator with
+ * a host scheduler move a managed exchange onto the CLI
+ * (docs/MANAGED_EXCHANGE.md, "Who this is for").
  *
- * This module is the pure half -- no download, no store write, no spend -- so the
- * composition rules below are unit-testable without a database or a save dialog:
+ * This module is the pure half -- no download, no store write, no spend.
  *
- * - It SPLITS the export artifact rather than serializing a second format. The
- *   config text and the key fields come from the artifact module's own two
- *   derivations ({@link serializeExchangeDocument},
- *   {@link keyFileFieldsFromRecord}), whose halves are already committed to the
- *   CLI's file shapes (docs/spec/MANAGED_EXCHANGE_RECORD.md, "Export artifact"),
- *   so the browser holds one exchange-document encoder and one key-pair
- *   derivation rather than two that could drift. What this adds is the two files'
- *   framing and the two fields the artifact deliberately does not carry.
- * - It INJECTS `connection.role` from the record's local `side`, at export time
- *   only. The stored document deliberately carries none and no browser path reads
- *   one (the spec's "Role: a local `side` field, not the document"), while the CLI
- *   derives its rendezvous peer id from `role` and refuses a webrtc run that
- *   carries none (`apps/cli/src/protocol.ts`). The composed document is a derived
- *   value: nothing here writes back, so an export leaves the record untouched.
+ * - It SPLITS the export artifact rather than serializing a second format.
+ *   The config text and the key fields come from the artifact module's own
+ *   two derivations ({@link serializeExchangeDocument},
+ *   {@link keyFileFieldsFromRecord}), which are the CLI's own file shapes
+ *   (docs/spec/MANAGED_EXCHANGE_RECORD.md, "Export artifact"). This adds only
+ *   the two files' framing and the two fields the artifact does not carry.
+ * - It INJECTS `connection.role` from the record's local `side`, at export
+ *   time only: the stored document carries none (the spec's "Role: a local
+ *   `side` field, not the document"), while the CLI derives its rendezvous
+ *   peer id from `role` (`apps/cli/src/protocol.ts`). Nothing here writes
+ *   back.
  * - It CARRIES the max-age policy into the document as
- *   `authentication.token_max_age_days`. The policy is a browser-local record
- *   field the CLI cannot see, and the CLI stamps a rotated token's `expires` only
- *   from that config key, so an export without it hands over a bound that lapses
- *   silently at the first CLI rotation. This is the one asymmetry to hold in mind:
- *   the EXPORTED document may carry an `authentication` block while the STORED
- *   document must not (the read-path refine in {@link ./managedExchangeRecord.ts}).
- *   The spelling is the block's operator-authored, secret-free one -- the CLI's
- *   loader warn-and-strips the key-file-injected `shared_secret`/`expires`, and
- *   the block is a strict object, so a typo fails closed rather than silently
- *   disabling max-age enforcement.
- * - It REFUSES any stored document the app could not have composed: a connection
- *   on another channel (the way the re-run dispatch gate refuses one,
- *   {@link ./managedRendezvous.ts}), a webrtc connection carrying a field outside
- *   the credential-free locator subset, an `authentication` block on the stored
- *   document, and any top-level document field outside the record composer's own
- *   input. None of the four is composable through the app -- a managed connection
- *   is a credential-free webrtc locator by composition, the record read path
- *   refines an `authentication` block away, and the composition input carries no
- *   other field -- so each is reachable only by importing a hand-crafted artifact,
- *   whose embedded document is validated against the full exchange schema. That
- *   schema CAN represent a TURN `credential`, an opaque `provider_options` map, an
- *   `ice_provision` auth block, a PeerJS `server.key`/`server.username`, a shared
- *   secret, and a `signing` block, and the CLI resolves an `@path` in the file it
- *   loads (`apps/cli/src/util/atSignRefs.ts`), so republishing one would aim the
- *   operator's own scheduled run at another party's credential file. The `signing`
- *   block is live on that run in three ways: `identity_file` is opened as this
- *   party's private signing identity (`resolveSigningPersist`,
- *   `apps/cli/src/commands/exchange.ts`), `receipt_output` is written verbatim
- *   (`resolveReceiptOutput`, `apps/cli/src/receiptFile.ts`), and
- *   `partner_fingerprint` is the pin a presented partner certificate is trusted
- *   against.
+ *   `authentication.token_max_age_days`: the CLI stamps a rotated token's
+ *   `expires` only from that config key. The EXPORTED document may carry an
+ *   `authentication` block while the STORED document must not (the read-path
+ *   refine in {@link ./managedExchangeRecord.ts}); the spelling is the
+ *   block's operator-authored, secret-free one, and the block is a strict
+ *   object, so a typo fails closed.
+ * - It REFUSES any stored document the app could not have composed: a
+ *   connection on another channel (as the re-run dispatch gate refuses one,
+ *   {@link ./managedRendezvous.ts}), a webrtc connection carrying a field
+ *   outside the credential-free locator subset, a stored `authentication`
+ *   block, or a top-level document field outside the record composer's own
+ *   input. Each is reachable only by importing a hand-crafted artifact, whose
+ *   embedded document validates against the full exchange schema -- which can
+ *   represent a TURN `credential`, a `provider_options` map, an
+ *   `ice_provision` auth block, a PeerJS `server.key`/`server.username`, a
+ *   shared secret, and a `signing` block (`identity_file`, `receipt_output`,
+ *   `partner_fingerprint`), and the CLI resolves an `@path` in the file it
+ *   loads (`apps/cli/src/util/atSignRefs.ts`). Republishing one would aim the
+ *   operator's scheduled run at another party's credential file.
  *
- * The key file is a plaintext credential handed over under the CLI key file's own
- * trust model: custody and storage permissions, never a passphrase (the spec's
- * "Plaintext, custody-protected"; docs/SECURITY_DESIGN.md, "Key file security").
- * The configuration half carries no secret at all -- the shared secret and any
- * `expires` ride the key file alone -- which is what lets the two files be handled
- * differently once they land.
+ * The key file is a plaintext credential under the CLI key file's own trust
+ * model: custody and storage permissions, never a passphrase (the spec's
+ * "Plaintext, custody-protected"; docs/SECURITY_DESIGN.md, "Key file
+ * security"). The configuration half carries no secret -- the shared secret
+ * and any `expires` ride the key file alone.
  */
 
 import {
@@ -160,14 +141,11 @@ const WIDEST_PROBE_LOCATOR: WebRTCExchangeLocator = {
 };
 
 /**
- * The field names a credential-free webrtc locator expands to, at the connection
- * and at its nested `server`. Read off {@link connectionFromLocator}'s own webrtc
- * arm rather than restated, so the allowlist IS the composition rule the stored
- * document's credential-freedom rests on (docs/spec/MANAGED_EXCHANGE_RECORD.md,
- * "The connection block: credential-free by composition") and cannot drift from
- * it: a locator field that expansion starts writing is admitted here with no
- * second list to update, and every other field the shared webrtc connection
- * schema can represent is outside the subset by construction.
+ * The field names a credential-free webrtc locator expands to, at the
+ * connection and its nested `server`. Read off {@link connectionFromLocator}'s
+ * own webrtc arm rather than restated, so the allowlist cannot drift from the
+ * composition rule (docs/spec/MANAGED_EXCHANGE_RECORD.md, "The connection
+ * block: credential-free by composition").
  */
 function credentialFreeLocatorFields(): {
   connection: ReadonlySet<string>;
@@ -216,19 +194,12 @@ function fieldsOutsideLocatorSubset(
 }
 
 /**
- * Narrow a record's stored connection to the credential-free webrtc locator the
- * app composes, refusing any other channel and any field outside that locator's
- * expansion. The channel arm mirrors the re-run dispatch gate
- * (`assertManagedRerunDispatchable`, ./managedRendezvous.ts): an allowlist on the
- * `channel` discriminant, read before anything is composed. The field arm holds
- * an imported document to the composition rule the exchange-file schema alone
- * does not enforce -- that schema admits the credential-bearing webrtc fields, so
- * an artifact carrying them imports cleanly and would otherwise be republished
- * verbatim into the emitted `psilink.yaml`.
- *
- * A hard refusal rather than a warning: this is remote content the operator
- * cannot inspect (the partner's or a third party's hand-crafted artifact), not
- * the operator's own choice about their own machine.
+ * Narrow a record's stored connection to the credential-free webrtc locator
+ * the app composes, refusing any other channel (mirroring the re-run dispatch
+ * gate, `assertManagedRerunDispatchable`, ./managedRendezvous.ts) and any
+ * field outside that locator's expansion -- the exchange-file schema alone
+ * admits the credential-bearing webrtc fields. A hard refusal, not a warning:
+ * this is remote content the operator cannot inspect.
  */
 function webrtcLocatorConnectionOrRefuse(
   exchangeFile: ExchangeSpec,
@@ -255,13 +226,12 @@ function webrtcLocatorConnectionOrRefuse(
 }
 
 /**
- * Refuse a stored document carrying an `authentication` block. The composed
- * document's block is injected from the record's local max-age policy alone, so
- * a stored one would ride the document spread into the configuration half --
- * `shared_secret` and all -- beside or instead of the policy. The record read
- * path refines such a document away ({@link ./managedExchangeRecord.ts}), so this
- * is that invariant as a check on the shape the composer is actually handed
- * rather than a comment asserting the read path already ran.
+ * Refuse a stored document carrying an `authentication` block: the composed
+ * document's block is injected from the record's local max-age policy alone,
+ * so a stored one would ride the document spread into the configuration half
+ * -- `shared_secret` and all. The record read path refines such a document
+ * away ({@link ./managedExchangeRecord.ts}); this is that invariant enforced
+ * as a check on the shape the composer is actually handed.
  */
 function assertNoStoredAuthentication(exchangeFile: ExchangeSpec): void {
   if (exchangeFile.authentication !== undefined)
@@ -274,14 +244,12 @@ function assertNoStoredAuthentication(exchangeFile: ExchangeSpec): void {
 }
 
 /**
- * The top-level document fields the app can put in a stored document, measured by
- * composing one. The probe composition is typed
- * `Required<ManagedExchangeFileComposition>`, so a field added to the record
- * composer's input fails this module's compile until the probe carries it, and the
- * set is read off {@link composeManagedExchangeFile}'s OUTPUT rather than its
- * input, so the allowlist IS what the app can compose rather than a second list
- * beside it. Every optional block is present, and each is a minimal valid value:
- * the probe measures which KEYS survive composition, never what they hold.
+ * The top-level document fields the app can put in a stored document, measured
+ * by composing one. Typed `Required<ManagedExchangeFileComposition>`, so a
+ * field added to the record composer's input fails this module's compile
+ * until the probe carries it. Read off {@link composeManagedExchangeFile}'s
+ * OUTPUT, not its input: the probe measures which KEYS survive composition,
+ * never what they hold.
  */
 function composableDocumentFields(): ReadonlySet<string> {
   const widestComposition: Required<ManagedExchangeFileComposition> = {
@@ -328,16 +296,13 @@ function fieldsOutsideComposableDocument(
 }
 
 /**
- * Refuse a document carrying a top-level field the app could not have composed.
- * The exchange-file schema is broader than the record composer -- it admits a
- * `signing` block, and it is what an imported artifact's embedded document is
- * validated against -- so this gate is what keeps the document spread from
- * republishing a hand-crafted field into the emitted psilink.yaml, where the CLI
- * would act on it at the operator's next scheduled run.
- *
- * A hard refusal rather than a warning, for the reason the connection gate is one:
- * this is remote content the operator cannot inspect, not a choice they made about
- * their own machine.
+ * Refuse a document carrying a top-level field the app could not have
+ * composed: the exchange-file schema is broader than the record composer --
+ * it admits a `signing` block -- and it is what an imported artifact's
+ * embedded document validates against, so this gate keeps the document
+ * spread from republishing a hand-crafted field into the emitted
+ * psilink.yaml. A hard refusal, not a warning: this is remote content the
+ * operator cannot inspect.
  */
 function assertComposableDocumentFields(document: ExchangeSpec): void {
   const outside = fieldsOutsideComposableDocument(document);
@@ -354,17 +319,17 @@ function assertComposableDocumentFields(document: ExchangeSpec): void {
 }
 
 /**
- * Compose the exchange-file document the export carries: the stored document with
- * `role` set from the record's `side` and, when the record carries a max-age
- * policy, an `authentication` block carrying it. Returns the schema's parse result
- * rather than the assembled input -- the same "use what the schema returns"
- * discipline `assembleExchangeSpec` follows -- so an injected value that the
- * exchange-file schema would not accept fails here, on the composing side, rather
- * than at the operator's first scheduled run.
+ * Compose the exchange-file document the export carries: the stored document
+ * with `role` set from the record's `side` and, when the record carries a
+ * max-age policy, an `authentication` block carrying it. Returns the schema's
+ * parse result rather than the assembled input, matching
+ * `assembleExchangeSpec`'s discipline, so a value the exchange-file schema
+ * would not accept fails here rather than at the operator's first scheduled
+ * run.
  *
  * @throws {Error} if the stored connection is not a credential-free webrtc
- *   locator, the stored document carries an `authentication` block, or it carries
- *   a top-level field the app does not compose.
+ *   locator, the stored document carries an `authentication` block, or it
+ *   carries a top-level field the app does not compose.
  * @throws {ZodError} if the composed document fails exchange-file validation.
  */
 function composeCronExportDocument(
@@ -396,17 +361,15 @@ function serializeKeyFile(fields: ManagedExchangeArtifactKey): string {
 /**
  * Compose a managed record into the CLI's two files and the command that runs
  * them. Pure: the record is read, never written, and no marker, spend, or
- * download is involved -- an export's effect on the source record is the caller's
- * to dispatch.
+ * download is involved.
  *
- * The emitted command is `psilink exchange`'s real invocation -- `[options]
- * INPUT_FILE [OUTPUT_FILE]`, with the config and key read at their defaults
- * (`apps/cli/src/commands/exchange.ts`) -- so it carries no flag the CLI does not
- * have and no path from any machine.
+ * The emitted command is `psilink exchange`'s real invocation --
+ * `[options] INPUT_FILE [OUTPUT_FILE]`, with the config and key read at their
+ * defaults (`apps/cli/src/commands/exchange.ts`).
  *
  * @throws {Error} if the record's stored connection is not a credential-free
- *   webrtc locator, or its stored document carries an `authentication` block or a
- *   top-level field the app does not compose.
+ *   webrtc locator, or its stored document carries an `authentication` block
+ *   or a top-level field the app does not compose.
  * @throws {ZodError} if the composed document fails exchange-file validation.
  */
 export function composeManagedCronExport(

@@ -201,15 +201,12 @@ function StepRow({
   // it as the edit commits.
   const inertCoalesce = inertCoalesceCause(step, precedingSteps);
   const isRegexTier = descriptor?.tier === "regex";
-  // The raw-pattern family (`tier: "regex"`) is editable only when the host enables it
-  // via `allowRawPatterns`; without it -- and for any unrecognized function -- the step
-  // renders read-only. The per-party cleaning editors enable it (a raw pattern changes
-  // only THIS party's own match rate); the cross-party element-transform editor does
-  // NOT (a token-embedded regex runs on the partner's data, a distinct trust surface).
-  // An existing pipeline's regex steps always render and stay reorderable/removable;
-  // only editing their pattern needs the opt-in. `editableDescriptor` narrows to the
-  // descriptor whose params this row authors (standard tier always, regex tier under
-  // `allowRawPatterns`), so the typed param branch passes a non-optional one.
+  // Editable only when the host enables `allowRawPatterns`; otherwise -- and for
+  // any unrecognized function -- the step renders read-only. Per-party cleaning
+  // editors enable it (a raw pattern changes only this party's own match rate);
+  // the cross-party element-transform editor does not (a token-embedded regex
+  // runs on the partner's data, a distinct trust surface). Existing regex steps
+  // stay reorderable/removable regardless; only editing the pattern needs opt-in.
   const editableDescriptor =
     descriptor !== undefined &&
     (descriptor.tier === "standard" || (allowRawPatterns && isRegexTier))
@@ -347,11 +344,10 @@ export function StepListEditor({
 }) {
   // A stable React key per step, tracked by object identity so a reorder follows
   // the logical step (rather than its array position) and a param edit keeps the
-  // same row mounted -- the move/remove handlers preserve each step's object
-  // reference, and setParam carries the id across its immutable replacement, so a
-  // controlled input never loses focus or a transient value on an edit. A
-  // WeakMap so an id is released when its step is dropped; lazily assigning during
-  // render is idempotent (same object -> same id) and safe under StrictMode.
+  // same row mounted -- move/remove/setParam preserve or carry each step's
+  // identity across edits, so a controlled input never loses focus. A WeakMap so
+  // an id is released when its step is dropped; lazily assigning during render
+  // is idempotent and safe under StrictMode.
   const stepIds = useRef(new WeakMap<EditableStep, string>());
   const nextStepId = useRef(0);
   const keyFor = (step: EditableStep): string => {
@@ -401,13 +397,12 @@ export function StepListEditor({
     onStepsChange(next);
   };
 
-  // Apply the pending focus once the new list is in the DOM. A layout effect (not a
-  // passive one) so focus lands synchronously before paint -- otherwise a removed or
-  // moved control leaves focus on <body> for a frame, a visible flicker. Keyed on the
-  // step array, so it also fires on a param edit (which produces a new array); that is
-  // a no-op because only the move/remove handlers set pendingFocusRef -- the null
-  // guard below exits at once when no structural edit queued a target. (Isomorphic so
-  // it degrades to a passive effect under SSR rather than warning.)
+  // Apply the pending focus once the new list is in the DOM. A layout effect (not
+  // a passive one) so focus lands synchronously before paint -- otherwise a
+  // removed or moved control leaves focus on <body> for a frame, a visible
+  // flicker. Also fires on a param edit (a new array too), which is a no-op
+  // since only move/remove set pendingFocusRef. Isomorphic so it degrades to a
+  // passive effect under SSR rather than warning.
   useIsomorphicEffect(() => {
     const pending = pendingFocusRef.current;
     if (pending === null) return;

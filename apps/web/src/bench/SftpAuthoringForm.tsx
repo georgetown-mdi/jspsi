@@ -58,17 +58,12 @@ export type ProbeCeremony = "exchange" | "direct";
  * The console's SFTP connection authoring form, shared by both the invite side
  * ({@link SftpConnectionCard}) and the accept side
  * ({@link AcceptorSftpConnectionCard}). It drives `PUT /api/jobs/sftp` from a
- * credential source: recognizable fields first (address, username, remote
- * directory), then the prominent required host-key fingerprint, then the
- * credential method and file reference, with the port under Advanced.
+ * credential source.
  *
  * When `reviewLocator` is supplied (the accept side), the host, port, and remote
- * directory are PARTNER-SUPPLIED: the partner named them in the invitation
- * endpoint, so they render as a read-only review block and the operator authors
- * only the username, host-key fingerprint, and credential. The submitted request
- * still carries those locator fields (from the seeded values), but no invitation
- * field can ever flow into the username, credential, or fingerprint -- the review
- * block is display-only and the operator's fields start empty.
+ * directory are PARTNER-SUPPLIED: they render as a read-only review block, and
+ * no invitation field can ever flow into the username, credential, or
+ * fingerprint -- the operator's fields start empty regardless.
  */
 export function SftpAuthoringForm({
   initial,
@@ -106,8 +101,8 @@ export function SftpAuthoringForm({
 
   // Revealing the form leaves keyboard focus on document.body; send it to the
   // first editable field so a keyboard or screen-reader user lands in the form,
-  // matching the bench's heading-focus discipline. On the accept side the host is
-  // read-only, so the username field is first.
+  // matching the console's heading-focus discipline. On the accept side the host
+  // is read-only, so the username field is first.
   const firstFieldRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     firstFieldRef.current?.focus();
@@ -344,12 +339,11 @@ function PartnerLocatorReview({ locator }: { locator: SftpEndpointLocator }) {
  * The optional outbound-directory field, behind a disclosure so the ordinary
  * single-directory connection stays a one-field decision. Opening it splits the
  * remote directory into the inbound (peer-written) half above and the outbound
- * (self-written) half here -- the layout a managed share or an SFTP server with
- * distinct drop and pickup folders needs.
+ * (self-written) half here.
  *
- * Closing it CLEARS the value: the disclosure is the mode switch, so a collapsed
- * control never holds a directory the operator can no longer see, and the
- * blocking errors that attach to this field are only reachable while it is open.
+ * Closing it CLEARS the value: a collapsed control never holds a directory the
+ * operator can no longer see, and this field's blocking errors are only
+ * reachable while it is open.
  */
 function SplitDirectoryField({
   value,
@@ -394,7 +388,7 @@ function SplitDirectoryField({
 
 /** The credential sub-section: the method radio (at-most-one primary at the
  * control level), the picked file (or the secrets picker), and the typed `@path`
- * escape hatch plus each method's companion -- the optional passphrase reference
+ * alternative plus each method's companion -- the optional passphrase reference
  * for a private key, the keyboard-interactive toggle for a password. */
 function CredentialField({
   values,
@@ -430,7 +424,7 @@ function CredentialField({
   const [pasteOpen, setPasteOpen] = useState(source?.kind === "raw");
 
   // Opening the paste fallback with nothing else chosen makes it the active source
-  // (an empty raw value), so an empty Save surfaces the paste-specific message on
+  // (an empty raw value), so an empty Save shows the paste-specific message on
   // the paste field. Collapsing an empty paste clears it, so a hidden control never
   // holds an armed value or a stranded error.
   const togglePaste = (): void => {
@@ -445,8 +439,8 @@ function CredentialField({
   };
 
   // Opening the picker leaves focus on the trigger, which then unmounts; move it
-  // into the revealed picker. SecretsFilePicker deliberately skips focus on its
-  // own mount, so the open action is what moves focus here.
+  // into the revealed picker. SecretsFilePicker skips focus on its own mount by
+  // design, so the open action is what moves focus here.
   const pickerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (pickerOpen) pickerRef.current?.focus();
@@ -697,11 +691,9 @@ function focusAnchorLost(anchor: HTMLElement | null): boolean {
 /**
  * The probe-to-fill control BESIDE the fingerprint field: it reads the server's
  * presented host key and offers it for a COMPARISON against the value the server
- * operator published -- never as a trust judgement, and never replacing the paste
- * field. It only ever fills the same field a paste would (through the caller's
- * `onUse`), so no new submit path exists. The confirm is framed as matching, and
- * the copy states the console observed the value over the same untrusted network
- * the exchange will use, so it cannot vouch for it. The Direct ceremony is
+ * operator published -- never as a trust judgement, and never replacing the
+ * paste field. It only ever fills the same field a paste would (through the
+ * caller's `onUse`), so no new submit path exists. The Direct ceremony is
  * heavier: an alert-weight interstitial and an out-of-band-checked affirmation
  * gate the fill.
  */
@@ -901,12 +893,11 @@ function HostKeyProbe({
             <>
               {/* Visible only: Mantine's Alert defaults to role="alert", which
                   would announce this a second time and interrupt, so the prop
-                  is here to displace that default. The presentational role it
-                  names does not itself apply -- ARIA's conflict resolution
-                  ignores it on an element carrying global aria-* attributes,
-                  which Mantine sets on this root -- leaving a generic element
-                  whose lack of any live role is what the stable-region test
-                  measures. */}
+                  displaces that default. The presentational role itself does
+                  not apply -- ARIA's conflict resolution ignores it on an
+                  element carrying global aria-* attributes, which Mantine sets
+                  here -- leaving a generic element with no live role, which the
+                  stable-region test measures. */}
               <Alert
                 color="red"
                 role="presentation"
@@ -928,27 +919,14 @@ function HostKeyProbe({
 
 /**
  * The peer's own first bytes, rendered OUTSIDE the probe's announcing region and
- * last in the probe result, as a read-only field the console names. Three
- * properties carry the attribution, none of them resting on what the bytes say:
+ * last in the probe result, as a read-only field the console names -- a sibling
+ * of the polite status region (never a descendant), named by a fixed label the
+ * peer cannot write, and with no first-party text of the result following it.
  *
- * - Containment: the field is a sibling of the polite status region, never a
- *   descendant, and that region interpolates nothing (see
- *   {@link PROBE_ANNOUNCEMENT}), so the run an assistive technology announces on
- *   the failure holds only the console's own sentences.
- * - A name the peer cannot write: the field is named by this fixed label, so
- *   what an assistive technology says before reading the bytes is first-party
- *   whatever the bytes are.
- * - Terminality within the probe result: no first-party text of the result
- *   follows it -- which is why the recovery step sits back in the alert -- so an
- *   assistive technology that flattens the result to one run ends on the peer's
- *   bytes rather than returning to the console's voice inside it. The form's own
- *   next sections do follow at document level, where what attributes the bytes
- *   is the fixed name above, announced before them.
- *
- * The value is the appliance's escaped excerpt verbatim: escaping it again would
- * double every backslash the appliance wrote, and the client boundary that
- * admits it ({@link ../psi/sftpAuthoringClient}) keeps it printable ASCII, so
- * the bytes cannot open a line of their own inside the field.
+ * The value is the console's escaped excerpt verbatim: escaping it again would
+ * double every backslash the console wrote, and the client boundary that admits
+ * it ({@link ../psi/sftpAuthoringClient}) keeps it printable ASCII, so the bytes
+ * cannot open a line of their own inside the field.
  */
 function PeerBytesField({ excerpt }: { excerpt: string }) {
   return (
@@ -962,7 +940,7 @@ function PeerBytesField({ excerpt }: { excerpt: string }) {
   );
 }
 
-/** What the appliance says about a peer that answered the port with something
+/** What the console says about a peer that answered the port with something
  * other than an SSH identification string, one sentence per recognized shape.
  * Worded as what the first bytes were rather than as a verdict on what the peer
  * is: the read is bounded, and a real SSH server whose banner outruns that bound
@@ -983,13 +961,11 @@ const PROBE_PEER_ANSWER_SHAPE_COPY: Record<ProbePeerAnswerShape, string> = {
 
 /**
  * The alert's copy for a probe that did not yield a fingerprint: the console's
- * own sentences, and separately the peer's own first bytes when the appliance
- * diagnosed what answered. `peerExcerpt` is handed over as a fragment of its own
- * rather than composed into `message`, because it is rendered outside the alert
- * entirely ({@link PeerBytesField}) -- an excerpt of plain printable ASCII
- * ("Verified. Paste this fingerprint: ...") has nothing escaping can touch and
- * would otherwise read as the console's own guidance, beside the very field it
- * tells the operator to paste into.
+ * own sentences, and separately the peer's own first bytes when the console
+ * diagnosed what answered. `peerExcerpt` is a fragment of its own rather than
+ * composed into `message`, because it is rendered outside the alert entirely
+ * ({@link PeerBytesField}) -- inside the alert it would read as the console's
+ * own guidance, beside the very field it tells the operator to paste into.
  */
 interface ProbeErrorCopy {
   message: string;
@@ -998,15 +974,13 @@ interface ProbeErrorCopy {
 
 /**
  * The operator-facing account of what answered the port, for an unreachable
- * probe the appliance diagnosed. This is the console's half of the CLI's own
- * diagnosis: the guided operator is the likeliest to sit behind an intercepting
- * middlebox, and "unreachable" alone sends them to check an address that is
- * right.
+ * probe the console diagnosed: the guided operator is the likeliest to sit
+ * behind an intercepting middlebox, and "unreachable" alone would send them to
+ * check an address that is right.
  *
- * The excerpt is a fragment the peer chose. It arrives bounded and escaped from
- * the appliance, so it is carried through verbatim to {@link PeerBytesField} --
- * escaping it again would double every backslash the appliance already wrote,
- * and shortening it again would drop bytes the operator is being shown to judge.
+ * The excerpt is a fragment the peer chose, arriving bounded and escaped from
+ * the console; it is carried through verbatim to {@link PeerBytesField} --
+ * escaping it again would double every backslash the console already wrote.
  *
  * @internal exported for the copy test
  */
@@ -1044,7 +1018,7 @@ function probeErrorCopy(result: ProbeSftpHostKeyResult): ProbeErrorCopy {
           "Another read is already running; wait a moment and try again.",
       };
     case "unreachable":
-      // A probe the appliance diagnosed says what answered instead; without one
+      // A probe the console diagnosed says what answered instead; without one
       // the address really is all there is to check.
       return result.peerAnswer !== undefined
         ? probePeerAnswerCopy(result.peerAnswer)

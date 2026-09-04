@@ -68,12 +68,9 @@ import type { ZodType } from "zod";
 /** The MIME type the artifact downloads as; it is a JSON document. */
 export const MANAGED_EXCHANGE_ARTIFACT_MIME = "application/json";
 
-/** Upper bound, in bytes, on an artifact file the web import path will read. The
- * artifact is a small JSON document (an exchange-file document, a 43-char secret,
- * and a handful of local fields), so a generous fixed cap comfortably above any real
- * artifact rejects a pathological file before {@link parseSensitiveJson} runs -- the
- * length cap that module's header notes the web import applies before the bounded
- * parse. Mirrors the linkage-terms import's own fixed pre-parse cap. */
+/** Upper bound, in bytes, on an artifact file the web import path will read,
+ * applied before {@link parseSensitiveJson}'s own bounded parse. Mirrors the
+ * linkage-terms import's fixed pre-parse cap. */
 export const MAX_ARTIFACT_IMPORT_BYTES = 1_000_000;
 
 /** The `.psilink.key` pair the artifact carries: the current shared secret and,
@@ -151,14 +148,11 @@ export function keyFileFieldsFromRecord(
 }
 
 /**
- * Encode a stored record as the export artifact. The exchange-file document is
- * serialized to the snake_case YAML the CLI loads (see
- * {@link serializeExchangeDocument}), so the embedded half is a valid
- * `psilink.yaml`; the secret and any `expires` become the key pair; and the
- * browser-only fields become the local block. The input-file handle is dropped --
- * it does not serialize and the first run after an import re-acquires one. The
- * record's `id` is not carried: an import is a take-over that mints a fresh local
- * record, not a copy of this one.
+ * Encode a stored record as the export artifact (see
+ * {@link serializeExchangeDocument} for the embedded document). The input-file
+ * handle is dropped -- it does not serialize, so the first run after an import
+ * re-acquires one -- and the record's `id` is not carried, since an import mints
+ * a fresh local record rather than copying this one.
  */
 export function encodeManagedExchangeArtifact(
   record: ManagedExchangeRecord,
@@ -238,17 +232,14 @@ export function parseManagedExchangeArtifact(
 }
 
 /**
- * Reconstruct a runnable record from a validated artifact: a take-over that installs
- * the one owner. The embedded document is parsed back through
- * {@link parseSensitiveYaml} and {@link parseExchangeSpec} (rejecting a tampered or
- * non-conforming document, and confirming the CLI-separable half is a valid
- * exchange file), the secret and `expires` come from the key pair, and the local
- * fields are carried forward. The record is built through
- * {@link buildManagedExchangeRecord} -- a fresh `id` and the v1 `schemaVersion`,
- * re-validated through the record schema -- so a document carrying an
- * `authentication` block, an over-long label, or a malformed secret is rejected
- * here and nothing is installed. The imported record carries NO input-file handle:
- * the first run re-acquires one by selection.
+ * Reconstruct a runnable record from a validated artifact: a take-over that
+ * installs the one owner. The embedded document is parsed back through
+ * {@link parseSensitiveYaml} and {@link parseExchangeSpec}, the secret and
+ * `expires` come from the key pair, and the local fields carry forward. Built
+ * through {@link buildManagedExchangeRecord} -- a fresh `id`, the v1
+ * `schemaVersion`, re-validated through the record schema -- so a malformed
+ * document or secret is rejected and nothing is installed. Carries no
+ * input-file handle: the first run re-acquires one by selection.
  *
  * @throws {UsageError} if the embedded document is not parseable YAML.
  * @throws {ZodError} if the embedded document or the reconstructed record is invalid.

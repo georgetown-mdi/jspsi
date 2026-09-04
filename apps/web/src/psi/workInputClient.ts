@@ -9,14 +9,13 @@ import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
 import type { Standardization } from "@psilink/core";
 
 /**
- * The browser-side client for the console appliance's work-input API
+ * The browser-side client for the console's work-input API
  * ({@link ../jobs/workInputs}): the operator-mounted directory listing, the
  * per-file streaming profile, and the per-field coverage sweep. Every call is a
  * same-origin fetch to a `gateJobRoute`-protected endpoint; off the console
- * appliance those endpoints answer 404, so a hosted build never reaches a
- * configured directory. Responses are validated defensively -- the appliance is
- * trusted, but a malformed body degrades to an honest error state rather than a
- * crash.
+ * those endpoints answer 404, so a hosted build never reaches a configured
+ * directory. Responses are validated defensively -- the console is trusted, but
+ * a malformed body degrades to an honest error state rather than a crash.
  */
 
 /** A committed mounted file: the opaque name the coverage sweep and the job intent
@@ -28,7 +27,7 @@ export interface WorkInputReference {
 /** The `GET /api/jobs/inputs` outcome: the listing, a stable `disabled` state (the
  * job API is off -- `JOB_DATA_ROOT` unset -- so the gate 404s), or a transient
  * `error` (another non-2xx, a network fault, or a malformed body). The picker
- * renders these as three distinct states so an off-appliance signal reads as
+ * renders these as three distinct states so an off-console signal reads as
  * configuration, not a fault to retry. */
 export type JobInputsResult =
   | { kind: "listing"; listing: JobInputListing }
@@ -76,33 +75,32 @@ function profileErrorReasonOf(body: unknown): JobInputProfileUnavailableReason {
 
 /** The console's rendezvous configuration read off `GET /api/jobs/rendezvous`: the
  * mounted directory (or directories) a filedrop exchange runs against.
- * `configured: false` (no mount is resolved, the request failed, or the body named no
- * locator) leaves the filedrop transport unavailable; `locator` is the advisory
- * locator the inviter mints into the invitation, and `folderName` the shared folder's
- * own name -- present only where the console can name it, and the only one of the two
- * that may be shown as that name.
+ * `configured: false` (no mount resolved, the request failed, or the body named
+ * no locator) leaves the filedrop transport unavailable; `locator` is the
+ * advisory locator the inviter mints into the invitation, and `folderName` the
+ * shared folder's own name -- present only where the console can name it, and
+ * the only one of the two safe to show as that name.
  *
- * `split` reports an appliance provisioned with a separate outbound mount: every
+ * `split` reports a console provisioned with a separate outbound mount: every
  * filedrop exchange it runs reads the peer's files from the inbound folder
  * (`locator`/`folderName`) and writes its own into the outbound one
- * (`outboundLocator`/`outboundFolderName`), and requires retain mode. Both locators
- * are present whenever `split` is, since an invitation needs a name for each leg.
+ * (`outboundLocator`/`outboundFolderName`), and requires retain mode. Both
+ * locators are present whenever `split` is, since an invitation needs a name
+ * for each leg.
  *
- * `sharesDataRoot` reports the single-mount layout: a rendezvous folder that holds
- * the mounted working directory, so what the partner syncs into is also where this
- * party's signing key lives. Absent only where the appliance has not said, which the
- * surfaces that warn about the key's location read as the shared layout -- the
- * direction an unanswered probe is safe to fail in.
+ * `sharesDataRoot` reports the single-mount layout: a rendezvous folder that
+ * holds the mounted working directory, so what the partner syncs into is also
+ * where this party's signing key lives. Absent reads as the shared layout, the
+ * fail-safe direction for the surfaces that warn about the key's location.
  *
- * `sharesDataRootUncertain` reports whether that layout was positively established
- * -- a lexical or filesystem match -- rather than a default the appliance's walk
- * could not rule out. Meaningful only alongside `sharesDataRoot: true`; a body that
- * does not positively confirm it reads as uncertain, the same fail-safe direction
- * `sharesDataRoot` itself takes.
+ * `sharesDataRootUncertain` reports whether that layout was positively
+ * established -- a lexical or filesystem match -- rather than defaulted to;
+ * meaningful only alongside `sharesDataRoot: true`, where an unconfirmed body
+ * reads as uncertain, the same fail-safe direction.
  *
- * `problem` is why the appliance cannot run a filedrop exchange as provisioned, in
- * the operator's own terms; it accompanies `configured: false`, so a surface that
- * shows the unavailable state has the remedy to show with it. */
+ * `problem` is why the console cannot run a filedrop exchange as provisioned,
+ * in the operator's own terms; it accompanies `configured: false`, so the
+ * unavailable state carries its own remedy. */
 export interface JobRendezvousConfig {
   configured: boolean;
   split?: boolean;
@@ -149,7 +147,7 @@ function jobInputListingOf(body: unknown): JobInputListing | null {
  * malformed. `columnSamples` arrives as an ordered array of `{ column, values }`
  * pairs and is validated into a `Map`, so a prototype-member column name stays plain
  * data (a `{ [column]: values }` object would drive the prototype setter on write and
- * resolve inherited members on read). A blank column name is admitted -- the bench
+ * resolve inherited members on read). A blank column name is admitted -- the console
  * raises its own unnamed-column alert -- and a repeated name keeps the last pair. */
 function jobInputProfileOf(body: unknown): ProfiledJobInput | null {
   if (!isRecord(body)) return null;
@@ -257,7 +255,7 @@ async function probeJobRendezvous(
     if (!isRecord(body) || typeof body.configured !== "boolean") return null;
     if (!body.configured) {
       const problem = body.problem;
-      // An unavailable mount the appliance gave a reason for carries it through, so
+      // An unavailable mount the console gave a reason for carries it through, so
       // the seat that reports the state names the variable to set rather than the
       // generic "nothing is mounted".
       return typeof problem === "string" && problem.length > 0
@@ -277,7 +275,7 @@ async function probeJobRendezvous(
       body.outboundLocator.length > 0
         ? body.outboundLocator
         : undefined;
-    // A split appliance whose body names no outbound locator could mint only half
+    // A split console whose body names no outbound locator could mint only half
     // a pair, which core refuses at the mint; degrade to unavailable rather than
     // offering a card that fails there.
     if (split && outboundLocator === undefined) return { configured: false };
@@ -331,7 +329,7 @@ async function probeJobRendezvous(
  * page reload rather than silently disabling the filedrop transport for the session.
  *
  * Fail-safe toward "unavailable": once the attempts are spent the result is
- * `{ configured: false }`, so filedrop is offered only when the appliance confirms a
+ * `{ configured: false }`, so filedrop is offered only when the console confirms a
  * mount. A definitive `200` (configured or not) returns at once without retrying.
  *
  * `attempts` and `delay` are injectable so a test drives the retry deterministically
@@ -351,14 +349,12 @@ export async function fetchJobRendezvous(
   return { configured: false };
 }
 
-/** Validate a coverage response body's `rates` into the coverage array, or null on
- * any malformed shape. Every {@link FieldValueCoverage} field is checked: a
- * malformed numeric field that slipped through as `NaN`/`undefined` would flow into
- * the silent-empty create-gate and fail it OPEN for that field, so a bad body
- * degrades to the honest error state (the caller holds its pending "Checking..."
- * until the next edit supersedes it) rather than reporting a false coverage.
- * `unavailable` is accepted when absent -- an absent flag reads as "available", the
- * same direction the alarm fails toward. */
+/** Validate a coverage response body's `rates` into the coverage array, or null
+ * on any malformed shape. A malformed numeric field must not flow into the
+ * silent-empty create-gate and fail it OPEN, so a bad body degrades to the
+ * honest error state rather than reporting a false coverage. `unavailable` is
+ * accepted when absent -- reading as available, the same direction the alarm
+ * fails toward. */
 function coverageRatesOf(body: unknown): Array<FieldValueCoverage> | null {
   if (!isRecord(body)) return null;
   const rates = body.rates;
