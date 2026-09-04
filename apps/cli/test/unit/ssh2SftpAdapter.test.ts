@@ -3522,7 +3522,7 @@ describe("session recovery", () => {
     await redialStarted;
     // Teardown begins mid-re-dial, then the handshake completes.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (adapter as any).closing = true;
+    (adapter as any).session.beginClose();
     releaseRedial();
 
     const err = await listing;
@@ -4831,7 +4831,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
     await adapter.releaseForIdle();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect((adapter as any).closing).toBe(false);
+    expect((adapter as any).session.isClosing).toBe(false);
     await adapter.ensureConnected();
     expect(connect).toHaveBeenCalledTimes(2);
 
@@ -9497,7 +9497,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     );
     expect(socket.destroy).not.toHaveBeenCalled();
 
-    internals.closing = true;
+    internals.session.beginClose();
     internals.forceCloseAbandonedTeardown();
     expect(socket.destroy).toHaveBeenCalledOnce();
   });
@@ -9519,7 +9519,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
       // An ssh2 that relocated the socket's destroy, the one seam this path drives.
       delete (rawClient._sock as { destroy?: unknown }).destroy;
-      internals.closing = true;
+      internals.session.beginClose();
       internals.forceCloseAbandonedTeardown();
 
       expect(adapterLog(adapter).warn).toHaveBeenCalledWith(
@@ -10381,7 +10381,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
         attempts += 1;
         // What an abandoning teardown leaves behind: the latch set, and the socket
         // beneath this very attempt destroyed under it.
-        internals.closing = true;
+        internals.session.beginClose();
         throw new Error("getConnection: Unexpected close event");
       });
       const latched = adapter.ensureConnected();

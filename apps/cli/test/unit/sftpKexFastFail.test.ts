@@ -405,7 +405,7 @@ describe("a cycle-start re-dial into a key exchange this process cannot perform"
       // not turn the teardown's own doing into a reported failure.
       const fixture: CyclingAdapter = cyclingAdapter(() => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (fixture.adapter as any).closing = true;
+        (fixture.adapter as any).session.beginClose();
         return new Error("Connection closed");
       });
       const outcome = await redialAfterRelease(fixture, 0);

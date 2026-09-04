@@ -60,7 +60,7 @@ a reading over those.
 | `Releasing(g)` | the idle release holds the lock | `transitionInProgress.kind` is `releaseForIdle` |
 | `Released` | no session, and a release of this side's took it | `SESSION_BOUNDARY_READINGS` reports `releaseTookTheSession` |
 | `Lost` | no session, and the partner or a fault ended it | no session, with the boundary reading `notReleased` |
-| `TearingDown` / `Closed` | terminal, single-use | `closing`, `terminalClose` |
+| `TearingDown` / `Closed` | terminal, single-use | `SftpSessionState.isClosing`, `terminalClose` |
 
 The generation is the accounting's unit, and it is not the session property:
 `liveGeneration` says a generation is outstanding and uncharged, not that a
