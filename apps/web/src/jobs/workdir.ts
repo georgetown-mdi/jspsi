@@ -7,6 +7,8 @@ import { z } from "zod";
 
 import { EXCHANGE_RECORD_OUTCOMES } from "@psilink/core";
 
+import { isPathWithin } from "./pathContainment";
+
 import type { ExchangeRecordOutcome } from "@psilink/core";
 
 /**
@@ -47,8 +49,7 @@ export function resolveWorkdir(dataRoot: string, jobId: string): string | null {
   if (!isValidJobId(jobId)) return null;
   const root = path.resolve(dataRoot);
   const workdir = path.resolve(root, jobId);
-  const rootWithSep = root.endsWith(path.sep) ? root : root + path.sep;
-  if (!workdir.startsWith(rootWithSep)) return null;
+  if (!isPathWithin(root, workdir, "strictly-under")) return null;
   return workdir;
 }
 
@@ -101,8 +102,7 @@ export function resolveWorkdirFile(
 ): string | null {
   const root = path.resolve(directory);
   const filePath = path.resolve(root, name);
-  const rootWithSep = root.endsWith(path.sep) ? root : root + path.sep;
-  if (!filePath.startsWith(rootWithSep)) return null;
+  if (!isPathWithin(root, filePath, "strictly-under")) return null;
   return filePath;
 }
 

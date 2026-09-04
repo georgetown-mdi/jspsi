@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { JOB_FILE_MODE, WORKDIR_MODE } from "./workdir";
 import { JobApiConfigError } from "./gate";
+import { isPathWithin } from "./pathContainment";
 
 /**
  * The fixed, container-internal directory a PASTED SFTP credential is
@@ -180,28 +181,14 @@ function assertScratchOutside(
   exclusions: Array<ScratchExclusion>,
 ): void {
   for (const { dir, label } of exclusions)
-    if (isWithin(dir, scratch) || isWithin(scratch, dir))
+    if (
+      isPathWithin(dir, scratch, "at-or-under") ||
+      isPathWithin(scratch, dir, "at-or-under")
+    )
       throw new JobApiConfigError(
         "the pasted-credential scratch directory must resolve strictly " +
           `outside ${label}`,
       );
-}
-
-/**
- * Whether `child` is `parent` itself or nested under it, over resolved absolute
- * paths. Segment-aware in both directions: a sibling whose basename merely starts
- * with `..` (`/x/..data` under `/x`, relative `"..data"`) is correctly within,
- * while a genuine `../` escape (`/x/../y`) is not.
- *
- * @internal exported for unit tests; production code calls it through {@link setupSftpCredentialScratchDir}.
- */
-export function isWithin(parent: string, child: string): boolean {
-  const relative = path.relative(parent, child);
-  return !(
-    relative === ".." ||
-    relative.startsWith(`..${path.sep}`) ||
-    path.isAbsolute(relative)
-  );
 }
 
 /**

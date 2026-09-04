@@ -7,7 +7,6 @@ import { JOB_FILE_MODE, WORKDIR_MODE } from "@jobs/workdir";
 import {
   JOB_SFTP_CREDENTIAL_DIR_ENV,
   SFTP_CREDENTIAL_SCRATCH_DIR,
-  isWithin,
   materializeSftpCredential,
   removeSftpCredentialFile,
   resolveSftpCredentialScratchDir,
@@ -288,20 +287,6 @@ describe("setupSftpCredentialScratchDir refusal", () => {
     expect(message).toContain(JOB_SFTP_CREDENTIAL_DIR_ENV);
     expect(message).toContain(path.resolve(scratchDir));
     expect(message).toContain("EACCES");
-  });
-});
-
-describe("isWithin", () => {
-  test("a child whose basename starts with .. is within", () => {
-    expect(isWithin("/x", "/x/..data")).toBe(true);
-  });
-
-  test("a ../ escape is outside", () => {
-    expect(isWithin("/x", "/x/../y")).toBe(false);
-  });
-
-  test("the parent itself is within", () => {
-    expect(isWithin("/x", "/x")).toBe(true);
   });
 });
 

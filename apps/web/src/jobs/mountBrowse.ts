@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { browseSegment } from "./workInputName";
+import { isPathWithin } from "./pathContainment";
 
 /**
  * One entry in a mount listing: an admissible segment name and whether it is a
@@ -33,12 +34,11 @@ export interface MountListing {
  *
  * Every segment must pass {@link browseSegment} (single-segment shape, so no
  * `..`, separator, or control character composes a traversal). The candidate is
- * then confined twice: first lexically (`resolve` + the `startsWith(root + sep)`
- * idiom from {@link ./workdir}), then -- hardened -- by `realpathSync`, so a
- * symlink anywhere in the chain that lexically looks contained but resolves
- * outside the mount is refused. The realpath of the mount root is the anchor, so
- * a symlinked mount is handled too. Returns the confined realpath; the caller
- * never reads bytes through it.
+ * then confined twice: first lexically (`resolve` + {@link isPathWithin}), then
+ * -- hardened -- by `realpathSync`, so a symlink anywhere in the chain that
+ * lexically looks contained but resolves outside the mount is refused. The
+ * realpath of the mount root is the anchor, so a symlinked mount is handled too.
+ * Returns the confined realpath; the caller never reads bytes through it.
  */
 function resolveConfinedRealpath(
   mountRoot: string,
@@ -48,7 +48,7 @@ function resolveConfinedRealpath(
 
   const resolvedRoot = path.resolve(mountRoot);
   const candidate = path.resolve(resolvedRoot, ...subPath);
-  if (!isContained(resolvedRoot, candidate)) return null;
+  if (!isPathWithin(resolvedRoot, candidate, "at-or-under")) return null;
 
   let realRoot: string;
   let realCandidate: string;
@@ -58,16 +58,8 @@ function resolveConfinedRealpath(
   } catch {
     return null;
   }
-  if (!isContained(realRoot, realCandidate)) return null;
+  if (!isPathWithin(realRoot, realCandidate, "at-or-under")) return null;
   return realCandidate;
-}
-
-/** Whether `candidate` is `root` itself or strictly nested under it, over
- * already-resolved absolute paths (the `startsWith(root + sep)` idiom). */
-function isContained(root: string, candidate: string): boolean {
-  if (candidate === root) return true;
-  const rootWithSep = root.endsWith(path.sep) ? root : root + path.sep;
-  return candidate.startsWith(rootWithSep);
 }
 
 /**
