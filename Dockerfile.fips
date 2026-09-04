@@ -125,7 +125,16 @@ COPY apps/web/server apps/web/server/
 COPY apps/web/public apps/web/public/
 ARG VITE_DEPLOYMENT_PROFILE
 ENV VITE_DEPLOYMENT_PROFILE=${VITE_DEPLOYMENT_PROFILE}
-RUN npm run build -w apps/web
+# The release version reaches this image's client bundle the same way it does
+# the default image's (Dockerfile): read from the apps/cli manifest copied
+# above, gated by `set -e`/`test -n` in the same RUN as the build so a failed
+# read or an empty manifest value fails the layer rather than shipping a kit
+# that quietly names the floating tag (apps/web/src/bench/acceptKit.ts).
+RUN set -eu; \
+  VITE_PSILINK_VERSION="$(node -p "require('/build/apps/cli/package.json').version ?? ''")"; \
+  test -n "$VITE_PSILINK_VERSION"; \
+  export VITE_PSILINK_VERSION; \
+  npm run build -w apps/web
 
 # The tree the runtime stage ships: the same lockfile-exact resolution as above
 # with the build's own dependencies left out. The explicit wipe is what makes it
@@ -255,7 +264,7 @@ EXPOSE 3000
 
 # Two scripts: the FIPS preamble reports the provider and the host's FIPS-mode
 # state and then hands off to the same dispatch script the default image runs,
-# so both images serve the CLI and `serve` roles identically.
+# so both images accept the same CLI and `serve` invocations.
 COPY docker-entrypoint.sh docker-entrypoint-fips.sh /app/
 RUN chmod +x /app/docker-entrypoint.sh /app/docker-entrypoint-fips.sh
 

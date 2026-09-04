@@ -1,7 +1,7 @@
 #!/bin/sh
 # The FIPS variant image's entrypoint preamble. It reports two runtime facts and
 # then hands off to the dispatch script the default image runs, unchanged, so
-# both images serve the CLI and `serve` roles identically.
+# both images accept the same CLI and `serve` invocations.
 #
 # What it reports, and how each is established:
 #
