@@ -6,7 +6,7 @@
 // they hand a container a psilink subcommand, or they pipe one of their helper
 // scripts into a shell inside it and depend on the tools that shell can resolve.
 // Nothing in the repository connects the two, so a script can ask for a
-// capability the image does not carry and the mismatch surfaces only on an
+// capability the image does not have and the mismatch shows only on an
 // operator's PC. scripts/assert-image-capabilities.mjs exercises the set this
 // module derives against a real image; the derivation lives apart from it so a
 // new call site can be noticed on every pull request, without a Docker daemon.
@@ -215,7 +215,7 @@ export function namesImage(token) {
   );
 }
 
-/** Whether a token is the name of a parameter carrying an argument vector. */
+/** Whether a token is the name of a parameter holding an argument vector. */
 export function namesArgumentVector(token) {
   return /(^|[_-])[A-Za-z]*(Args|ARGUMENTS)$/.test(token);
 }
@@ -278,7 +278,7 @@ export function argvOnLine(text, commands) {
  *
  * Returns `[{ argv, sites }]` sorted by vector, where a site is
  * `<filename>:<line>`. The same vector reached from several call sites is one
- * entry carrying all of them.
+ * entry holding all of them.
  */
 export function deriveCliCapabilities(sources, commands) {
   const byArgv = new Map();
@@ -326,7 +326,7 @@ export function deriveHelperInvocations(cmdSource) {
 /**
  * The `--json` verdict version the shipped launchers read.
  *
- * Both declare it, and a launcher stops rather than reads a verdict carrying any
+ * Both declare it, and a launcher stops rather than reads a verdict holding any
  * other version, so they must agree with each other before either is compared
  * against an image.
  */
@@ -369,7 +369,7 @@ export function readSources(root) {
 }
 
 /**
- * The whole derived dependency set, with the tripwires that keep it honest.
+ * The whole derived dependency set, with the tripwires that keep it accurate.
  *
  * Returns the argument vectors, the helper invocations, the verdict version and
  * the support-script sources, which a caller pipes into a container as the `.cmd`

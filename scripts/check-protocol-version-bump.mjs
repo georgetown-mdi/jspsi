@@ -39,10 +39,10 @@
 //      the tree to it.
 //
 // Once armed the ledger is append-only, and that shape is the review surface: a
-// bump ADDS an entry, so an honest bump and an in-place rewrite of a published
+// bump ADDS an entry, so a legitimate bump and an in-place rewrite of a published
 // version's pin are different diffs. This check cannot tell a legitimate re-pin
 // from a rewrite that dodges the bump -- the same limit the pull-request
-// checklist's security-review sha carries -- so an edit to an already-recorded
+// checklist's security-review sha has -- so an edit to an already-recorded
 // entry is a reviewer's call, not this check's.
 //
 // What this check cannot see:
@@ -68,7 +68,7 @@
 //     but re-ordering keys or editing a vector's hand-authored name does. Such a
 //     change fails toward taking the version decision rather than away from it.
 //   - Whether the version decision taken was the RIGHT one. It fails a moved pin
-//     that carries no bump; it cannot judge a bump that was not needed.
+//     that has no bump; it cannot judge a bump that was not needed.
 //   - A PROTOCOL_VERSION that is not a literal. It reads the `export const`
 //     initializer out of the source rather than importing the built package, and
 //     fails rather than guessing when that line does not read as an integer.
@@ -211,7 +211,7 @@ export function protocolVersionFrom(source) {
 }
 
 /**
- * The pin a vectors file's source carries: sha256 over its parsed-and-
+ * The pin a vectors file's source holds: sha256 over its parsed-and-
  * reserialized JSON, so whitespace and the repo's formatter do not move it while
  * every value, key, and ordering does.
  */
@@ -242,11 +242,11 @@ export function suggestedLedger(pins, version, digests) {
   return `${JSON.stringify({ pins: { ...pins, [version]: digests } }, null, 2)}\n`;
 }
 
-// The shape a ledger key carries: the PROTOCOL_VERSION integer written out, and
+// The shape a ledger key has: the PROTOCOL_VERSION integer written out, and
 // nothing else. JSON object keys are text, so every lookup here is by exactly
 // `String(protocolVersion)` -- a key in any other shape ("abc", "1.0", "01") is
 // one this check never looks up and never compares, so it fails rather than
-// sitting in the ledger carrying a pin nothing is held to.
+// sitting in the ledger holding a pin nothing is held to.
 const LEDGER_VERSION_KEY = /^[1-9][0-9]*$/;
 
 /**
@@ -334,8 +334,8 @@ export function pinViolations({ published, protocolVersion, digests, pins }) {
  * Read the tree at `root` and report what the rule holds there, as
  * `{published, releaseVersion, protocolVersion, digests, pins, coverage,
  * violations, blocked}`. `violations` are `{kind, message}`, `kind` also
- * carrying `coverage` for a vectors file neither manifest classifies. `blocked`
- * carries the reasons the check could not read an input at all, which fail
+ * holding `coverage` for a vectors file neither manifest classifies. `blocked`
+ * holds the reasons the check could not read an input at all, which fail
  * rather than passing as inert.
  */
 export function inspect(root) {

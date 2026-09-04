@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// The two obligations EXCHANGE_RECORD_VERSION carries, run by
+// The two obligations EXCHANGE_RECORD_VERSION holds, run by
 // static_checks.yaml on every PR. Both read the same literal out of
 // packages/core/src/exchangeRecord.ts, and both fall due long after the
 // sentence stating them was written, which is the shape that rots: nothing
@@ -36,7 +36,7 @@
 //
 // RULE 2, THE RESET. EXCHANGE_RECORD_VERSION is an internal development counter.
 // It has cycled freely -- through psilink-exchange-record/v1 and on up -- because
-// no published artifact carries any of its literals: packages/core/src/exchangeRecord.ts
+// no published artifact contains any of its literals: packages/core/src/exchangeRecord.ts
 // does not exist at v0.1.0, the only release this project has tagged. First
 // publication ships the counter reset to psilink-exchange-record/v1, and the
 // reset is taken AT that release rather than earlier: re-using a
@@ -74,14 +74,14 @@
 //     whose remedy is a reload that cannot help and which withholds the
 //     export-then-reset arms (docs/spec/MANAGED_EXCHANGE_RECORD.md, "What an
 //     exchange-record version bump does to a stored accounting"). That
-//     confirm-or-wipe obligation is carried by the Release Checklist step this
+//     confirm-or-wipe obligation is held by the Release Checklist step this
 //     check's failures name.
 //   - Whether the record vectors were regenerated. That is held by `npm run
 //     check:vectors`, which fails on its own once the literal moves.
 //   - Whether a recorded discharge -- either one -- was recorded after the
 //     decision was taken or instead of taking it. Moving a constant is a
-//     one-line edit this check cannot tell from an honest one -- the same limit
-//     the pull-request checklist's security-review sha carries -- so it is a
+//     one-line edit this check cannot tell from a correct one -- the same limit
+//     the pull-request checklist's security-review sha has -- so it is a
 //     reviewer's call.
 //   - The CLI's record files. The CLI writes a standalone record file per run and
 //     accumulates no accounting store, so it holds nothing a bump could strand: a
@@ -137,7 +137,7 @@ export const RECOVERY_ENTRY_POINTS = {
 /** The record format literal first publication ships. */
 export const RESET_RECORD_VERSION = "psilink-exchange-record/v1";
 
-/** The Release Checklist heading carrying the obligations this check cannot
+/** The Release Checklist heading holding the obligations this check cannot
  * read: the artifacts to clear, and the order the reset is taken in. */
 export const CHECKLIST_HEADING =
   "Reset the exchange-record format at first publication";
@@ -164,7 +164,7 @@ export function declaredRecordVersion(source) {
 
 /**
  * The recovery entry points a source does not declare, as `{file, name}` pairs;
- * empty when every one of them is exported from the file that should carry it.
+ * empty when every one of them is exported from the file that should hold it.
  */
 export function missingRecoveryEntryPoints(sources) {
   const missing = [];
@@ -215,7 +215,7 @@ export function bumpViolations(declared, sources) {
 /**
  * The reasons there is nothing left for rule 1 to defer to, as
  * `{kind, message}`; empty when every entry point is exported from the file
- * that should carry it. It reads the recovery sources and nothing else, so an
+ * that should hold it. It reads the recovery sources and nothing else, so an
  * input the other rules cannot read does not withhold it: a tree that lost both
  * reports both.
  */
@@ -308,14 +308,14 @@ export function resetViolations({
 /**
  * Read the tree at `root` and report what both rules hold there, as
  * `{published, releaseVersion, declared, takenAtRelease, violations, blocked}`.
- * `blocked` carries the reasons an input could not be read at all, which fail
+ * `blocked` holds the reasons an input could not be read at all, which fail
  * rather than passing as inert. A blocked run still reports the recovery
  * violations, which rest on no input it is blocked on.
  */
 export function inspect(root) {
   const read = (relative) => readFileSync(resolve(root, relative), "utf8");
   // A recovery source that is gone entirely is the loudest form of the failure
-  // rule 1 reports, so it reads as no declarations rather than as an ENOENT: the
+  // rule 1 reports, so it is treated as no declarations rather than as an ENOENT: the
   // throw would exit non-zero with the diagnostic lost, which is exactly the
   // tree where naming the missing entry point matters most.
   const readIfPresent = (relative) => {

@@ -19,7 +19,7 @@
 // This check is the pull-request half.
 //
 // The build-provenance attestation the same document publishes a command for
-// carries the coupling a second time: `gh attestation verify --signer-workflow`
+// holds the coupling a second time: `gh attestation verify --signer-workflow`
 // names the workflow file whose run produced the attestation, so a rename
 // leaves that command reporting no matching attestation for an image every
 // release attests. Nothing measures that at release time -- GitHub holds the
@@ -41,7 +41,7 @@
 //      image's push sitting between the first one's push and its signing leaves
 //      the first published under `latest` and unsigned for as long as that
 //      build runs, and permanently if the build fails.
-//   5. Every one of those verify steps carries both `--certificate-` arguments
+//   5. Every one of those verify steps includes both `--certificate-` arguments
 //      in its own run text, with the values the document publishes. Rule 1
 //      reads the whole file at once and rule 4 credits a step by the digest it
 //      names, so one step's copy of the pair satisfies rule 1 for every other
@@ -60,15 +60,15 @@
 //     driven rather than inferred, and is recorded in
 //     docs/notes/cosign-keyless-signing.md.
 //   - The `<owner>/<repo>` segment of either published command, which nothing
-//     in the tree derives. A fork publishing this document unchanged reads as
-//     agreeing, and the two commands' copies of that segment are not compared
+//     in the tree derives. A fork publishing this document unchanged is treated
+//     as agreeing, and the two commands' copies of that segment are not compared
 //     against each other.
 //   - Rule 3 compares text under a stated correspondence rather than modelling
 //     GitHub's filter-pattern semantics: over the character class it accepts
 //     (letters, digits, `_`, `-`, `/`, `.`, `+`, `[`, `]`), a filter and a
 //     regular expression agree character for character except that `.` is
 //     literal in a filter and must be escaped in a regular expression. A filter
-//     carrying anything else -- `*` and `?` above all, whose glob meanings a
+//     containing anything else -- `*` and `?` above all, whose glob meanings a
 //     regular expression does not share -- fails the rule rather than being
 //     translated on a guess.
 //   - Whether any of it verifies. Only a release run signs anything; the
@@ -106,7 +106,7 @@ const COSIGN_VERIFY = /\bcosign\s+verify(?![-\w])/;
 
 const DIGEST_REFERENCE = /steps\.([A-Za-z_][\w-]*)\.outputs\.digest/g;
 
-// Single-quoted because the pattern carries backslashes and `$`, which a shell
+// Single-quoted because the pattern contains backslashes and `$`, which a shell
 // would otherwise eat; the workflow and the document both write it that way.
 const IDENTITY_FLAG = /--certificate-identity-regexp\s+'([^']*)'/g;
 const ISSUER_FLAG = /--certificate-oidc-issuer\s+(\S+)/g;
@@ -120,11 +120,11 @@ const SIGNER_WORKFLOW_FLAG = /--signer-workflow\s+(\S+)/g;
 // github.com, with the ref segment split off at `@refs/tags/`.
 const IDENTITY_SHAPE = /^\^https:\/\/github\\\.com\/(.+?)@refs\/tags\/(.+)\$$/;
 
-// The characters a signer path may carry unescaped -- everything else in a
+// The characters a signer path may contain unescaped -- everything else in a
 // regular expression is either a metacharacter or an escape.
 const LITERAL_CHARACTER = /[\w/-]/;
 
-// The characters a tag filter may carry for rule 3's correspondence to hold.
+// The characters a tag filter may contain for rule 3's correspondence to hold.
 const FILTER_CHARACTER = /[\w./+[\]-]/;
 
 const SIGNING_ROLES = ["sign", "verify", "attest"];
@@ -139,7 +139,7 @@ const list = (values) => values.map((value) => `\`${value}\``).join(", ");
 
 /**
  * Every `--certificate-identity-regexp` and `--certificate-oidc-issuer` value a
- * source carries, in order. Markdown and YAML alike: both hold the flags as
+ * source holds, in order. Markdown and YAML alike: both hold the flags as
  * shell command text, so one scan reads either.
  */
 export function certificateFlags(source) {
@@ -149,7 +149,7 @@ export function certificateFlags(source) {
 }
 
 /**
- * Every `--signer-workflow` value a source carries, in order.
+ * Every `--signer-workflow` value a source holds, in order.
  */
 export function signerWorkflows(source) {
   return [...source.matchAll(SIGNER_WORKFLOW_FLAG)].map((match) => match[1]);
@@ -237,7 +237,7 @@ export function parseSignerIdentity(pattern) {
 
 /**
  * A tag filter as the regular-expression fragment matching the same refs, or a
- * problem when the filter carries a character outside the class over which that
+ * problem when the filter contains a character outside the class over which that
  * correspondence holds. The header states the correspondence and its limit.
  */
 export function refPatternForTagFilter(filter) {
@@ -274,7 +274,7 @@ const digestReferences = (text) => [
 
 /**
  * A step's part in the publish sequence, the step digests it names, and -- for
- * a verify step -- the certificate arguments its own command carries.
+ * a verify step -- the certificate arguments its own command holds.
  */
 export function classifyStep(step) {
   const uses = typeof step?.uses === "string" ? step.uses : "";
@@ -314,7 +314,7 @@ function pushState(value) {
 
 /**
  * The `--certificate-` pair docs/RELEASES.md publishes, each value present only
- * when the document publishes exactly one of it. A document carrying several
+ * when the document publishes exactly one of it. A document holding several
  * names no single value a verify step could be held to, and the agreement rule
  * is what reports that.
  */
@@ -335,7 +335,7 @@ const CERTIFICATE_ARGUMENTS = [
 /**
  * Every way a verify step credited with covering a pushed image fails to run
  * the published command itself: a missing `--certificate-` argument, or one
- * carrying a value the document does not publish. A step whose command builds
+ * holding a value the document does not publish. A step whose command builds
  * either argument somewhere this scan cannot read it fails as a missing one,
  * which is the direction that reports rather than passes.
  */
@@ -369,7 +369,7 @@ function verifyArgumentViolations({ step, where, file, published }) {
  * verified against the published `--certificate-` pair, and attested before any
  * later build starts. `published` is that pair, from
  * `publishedCertificatePair`; a value it leaves absent is one the document does
- * not publish, so a step is held only to carrying the argument at all.
+ * not publish, so a step is held only to holding the argument at all.
  */
 export function publishSequenceViolations(source, file, published = {}) {
   const jobs = parseWorkflow(file, source)?.jobs;
