@@ -918,52 +918,55 @@ for (const { file, modeChangesOutside, image } of IMAGES) {
 // (docs/spec/SERVER_JOB_API.md). Its two halves fail differently and both fail
 // quietly: a step that stops setting the variable ships a kit naming the
 // floating tag, and a read that yields nothing does the same while the build
-// still exits 0. Scoped to the default image, the one release.yaml publishes;
-// the FIPS variant builds apps/web without a release version at all, which is a
-// property of that artifact rather than a drop from this one.
-describe("the release version the default image bakes into the accept kit", () => {
-  const image = IMAGES.find(({ file }) => file === "Dockerfile").image;
-  const versionRuns = image.builderRuns.filter((run) =>
-    run.includes("VITE_PSILINK_VERSION"),
-  );
+// still exits 0. Both images publish this kit -- release.yaml builds and ships
+// both -- so both are held to the same step.
+describe.each(IMAGES)(
+  "the release version $file bakes into the accept kit",
+  ({ image }) => {
+    const versionRuns = image.builderRuns.filter((run) =>
+      run.includes("VITE_PSILINK_VERSION"),
+    );
 
-  it("sets the version in exactly one builder step, which is the web build", () => {
-    // Same instruction, because the value is this build's process environment
-    // and nothing else carries it across a RUN boundary: a version set in one
-    // step and a web build in another is a bundle with no version in it.
-    expect(versionRuns).toHaveLength(1);
-    expect(normalize(versionRuns[0])).toContain("npm run build -w apps/web");
-    expect(
-      image.builderRuns.filter((run) => run.includes("build -w apps/web")),
-    ).toEqual(versionRuns);
-  });
+    it("sets the version in exactly one builder step, which is the web build", () => {
+      // Same instruction, because the value is this build's process
+      // environment and nothing else carries it across a RUN boundary: a
+      // version set in one step and a web build in another is a bundle with
+      // no version in it.
+      expect(versionRuns).toHaveLength(1);
+      expect(normalize(versionRuns[0])).toContain("npm run build -w apps/web");
+      expect(
+        image.builderRuns.filter((run) => run.includes("build -w apps/web")),
+      ).toEqual(versionRuns);
+    });
 
-  it("reads it from the CLI manifest rather than taking it as a build argument", () => {
-    // apps/cli/package.json is the canonical release version (docs/RELEASES.md);
-    // an ARG would let `docker build --build-arg` name a version the image is
-    // not, which is the disagreement the release check exists to refuse.
-    expect(normalize(versionRuns[0])).toContain("apps/cli/package.json");
-    expect(
-      image.instructions.filter(
-        ({ inst, rest }) =>
-          (inst === "ARG" || inst === "ENV") &&
-          rest.includes("VITE_PSILINK_VERSION"),
-      ),
-    ).toEqual([]);
-  });
+    it("reads it from the CLI manifest rather than taking it as a build argument", () => {
+      // apps/cli/package.json is the canonical release version
+      // (docs/RELEASES.md); an ARG would let `docker build --build-arg` name a
+      // version the image is not, which is the disagreement the release check
+      // exists to refuse.
+      expect(normalize(versionRuns[0])).toContain("apps/cli/package.json");
+      expect(
+        image.instructions.filter(
+          ({ inst, rest }) =>
+            (inst === "ARG" || inst === "ENV") &&
+            rest.includes("VITE_PSILINK_VERSION"),
+        ),
+      ).toEqual([]);
+    });
 
-  it("fails the build on an empty read rather than baking one", () => {
-    // Both halves, since either alone is defeated by an edit that touches
-    // neither the reader nor the build: without the gate an empty value bakes,
-    // and without `set -e` the gate's non-zero exit is discarded and the build
-    // walks on into the web build regardless.
-    const commands = normalize(versionRuns[0])
-      .split(";")
-      .map((command) => command.trim());
-    expect(commands[0]).toMatch(/^set -e[ux]*$/);
-    expect(commands).toContain('test -n "$VITE_PSILINK_VERSION"');
-  });
-});
+    it("fails the build on an empty read rather than baking one", () => {
+      // Both halves, since either alone is defeated by an edit that touches
+      // neither the reader nor the build: without the gate an empty value
+      // bakes, and without `set -e` the gate's non-zero exit is discarded and
+      // the build walks on into the web build regardless.
+      const commands = normalize(versionRuns[0])
+        .split(";")
+        .map((command) => command.trim());
+      expect(commands[0]).toMatch(/^set -e[ux]*$/);
+      expect(commands).toContain('test -n "$VITE_PSILINK_VERSION"');
+    });
+  },
+);
 
 // The committed root .npmrc, byte for byte. Equality with this literal is what
 // holds the file to configuration and nothing else, in place of a reader that
