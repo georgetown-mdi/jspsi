@@ -4,6 +4,8 @@
     { "path": "apps/web" },
     { "path": "apps/cli" },
     { "path": "packages/core" },
+    { "path": "packages/peerjs-broker" },
+    { "path": "packages/testkit" },
   ],
   "settings": {
     "js/ts.tsdk.path": "node_modules/typescript/lib",

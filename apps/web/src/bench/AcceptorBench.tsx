@@ -88,7 +88,7 @@ import {
   buildManagedDeposit,
   webrtcLocatorFromEndpoint,
 } from "./manageOfferModel";
-import { ledgerOutcomeOf, seedRows } from "./inviterModel";
+import { byteSizeLabel, ledgerOutcomeOf, seedRows } from "./inviterModel";
 import { useBeforeUnloadPrompt, useUnloadGuard } from "./useUnloadGuard";
 import { AcceptorCleaningStep } from "./AcceptorCleaningStep";
 import { AcceptorColumnsStep } from "./AcceptorColumnsStep";
@@ -202,15 +202,6 @@ type DecodeState =
 interface FieldErrors {
   name?: string;
   file?: boolean;
-}
-
-/** Human file size for the consent filecard, e.g. `8.4 MB` / `12 KB`. The
- * acceptor's file is held unparsed here, so the card shows its size, not a row
- * count (parsing stays behind the consent gate). */
-function fileSizeLabel(sizeBytes: number): string {
-  return sizeBytes >= 1024 ** 2
-    ? `${(sizeBytes / 1024 ** 2).toFixed(1)} MB`
-    : `${Math.max(1, Math.round(sizeBytes / 1024))} KB`;
 }
 
 /**
@@ -1292,7 +1283,7 @@ export function AcceptorBench() {
                         {file.name}
                       </div>
                       <div className={`${styles.fileMeta} ${styles.mono}`}>
-                        {fileSizeLabel(file.size)}
+                        {byteSizeLabel(file.size)}
                       </div>
                     </div>
                     <Button

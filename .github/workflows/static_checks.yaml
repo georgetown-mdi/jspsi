@@ -230,6 +230,16 @@ jobs:
       # than passing it silently.
       - name: Web config native load
         run: npm run check:web-config-native-load
+      # apps/web/server/custom-entry.ts wires exactly one production upgrade
+      # listener onto the shared HTTP server: PeerJS's path-routed signaling
+      # route. Nitro's own WebSocket support, gated behind
+      # experimental.websocket in apps/web/nitro.config.ts, would attach a
+      # second, independent upgrade listener with no path check of its own,
+      # and two such listeners on one server mis-route. This loads the real
+      # Nitro config and fails if experimental.websocket is ever turned on;
+      # see scripts/check-nitro-websocket-unset.mjs for the full reasoning.
+      - name: Nitro websocket unset
+        run: npm run check:nitro-websocket-unset
       # The known-answer vectors under packages/core/test/vectors/ are asserted
       # by the suites in one direction only -- that the code reproduces the
       # checked-in JSON -- so a failing conformance assertion could be silenced
