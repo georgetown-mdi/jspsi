@@ -20,7 +20,7 @@
  *   (`label`, `side`, `schedule`, `lastRun`, `tokenMaxAgeDays`), cleanly separable
  *   and ignorable by the CLI toolchain.
  *
- * The input-file handle is deliberately absent (a device- and profile-local
+ * The input-file handle is absent by design (a device- and profile-local
  * platform object with no file serialization), so the first run after an import
  * re-acquires one by selection. No secret-derived value and no rotation epoch is
  * written: the artifact snapshots the secret current at export and holds no
