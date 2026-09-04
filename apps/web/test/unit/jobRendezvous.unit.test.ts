@@ -495,6 +495,18 @@ describe("the split rendezvous a second mount provisions", () => {
     ).toContain("one is inside the other");
   });
 
+  test("an outbound leg whose basename starts with .. is refused", () => {
+    // The containment test is segment-aware, so a folder the operator named
+    // "..outgoing" is read as the child of the inbound leg it is, not as a
+    // sibling the prefix makes it look like.
+    expect(
+      resolveJobRendezvousProvisioning({
+        JOB_RENDEZVOUS_DIR: "/mnt/share",
+        JOB_RENDEZVOUS_OUTBOUND_DIR: "/mnt/share/..outgoing",
+      }).problem,
+    ).toContain("one is inside the other");
+  });
+
   test("an outbound leg symlinked ONTO the inbound one meets the same refusal", () => {
     // The refusal exists because the inbound leg is partner-written, and a symlink
     // reorients the partner's folder onto the operator's just as an authored path

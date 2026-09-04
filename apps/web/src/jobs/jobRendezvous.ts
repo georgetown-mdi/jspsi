@@ -9,6 +9,7 @@ import {
 
 import { JOB_DATA_ROOT_ENV } from "./gate";
 import { browseSegment } from "./workInputName";
+import { isPathWithin } from "./pathContainment";
 
 /**
  * The environment variable naming the operator-mounted rendezvous directory a
@@ -273,16 +274,6 @@ function resolveJobRendezvousLocator(
   return segment.length > 0 ? segment : undefined;
 }
 
-/** Whether `child` is `parent` or nested under it (a lexical containment test over
- * resolved absolute paths). */
-function containsOrEqual(parent: string, child: string): boolean {
-  const relative = path.relative(parent, child);
-  return (
-    relative === "" ||
-    (!relative.startsWith("..") && !path.isAbsolute(relative))
-  );
-}
-
 /**
  * A directory in every form the containment comparisons here compare it in: the
  * configured path, lexically resolved, plus the real path symlinks resolve it to
@@ -359,7 +350,7 @@ function pathFormsContain(
 ): boolean {
   return container.forms.some((containerForm) =>
     contained.forms.some((containedForm) =>
-      containsOrEqual(containerForm, containedForm),
+      isPathWithin(containerForm, containedForm, "at-or-under"),
     ),
   );
 }

@@ -17,6 +17,7 @@ import {
 } from "./sftpScratch";
 import { JobApiConfigError } from "./gate";
 import { formatIssues } from "./schemaIssueMessage";
+import { isPathWithin } from "./pathContainment";
 import { resolveMountFile } from "./mountBrowse";
 
 /**
@@ -660,14 +661,8 @@ function matchedExclusion(
   candidate: string,
   exclusions: Array<CredentialRefExclusion>,
 ): CredentialRefExclusion | undefined {
-  for (const exclusion of exclusions) {
-    const relative = path.relative(exclusion.dir, candidate);
-    const outside =
-      relative === ".." ||
-      relative.startsWith(`..${path.sep}`) ||
-      path.isAbsolute(relative);
-    if (!outside) return exclusion;
-  }
+  for (const exclusion of exclusions)
+    if (isPathWithin(exclusion.dir, candidate, "at-or-under")) return exclusion;
   return undefined;
 }
 
