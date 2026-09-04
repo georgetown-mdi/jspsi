@@ -189,7 +189,6 @@ export {
 export { APPLIED_SETTINGS } from "./appliedSettings.js";
 export {
   loadCSVFile,
-  loadCSVColumns,
   loadCSVColumnSample,
   streamCSVRows,
   readRowColumn,
