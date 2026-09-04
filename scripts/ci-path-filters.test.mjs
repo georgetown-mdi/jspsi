@@ -28,7 +28,7 @@ import { describe, expect, it } from "vitest";
 // filter is fully in sync"; review workflow edits on their own merits. See the
 // paths: comments in both workflows for the divergence rationale.
 
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 const PR_WORKFLOW = ".github/workflows/eb_build_and_test.yaml";
 const DEPLOY_WORKFLOW = ".github/workflows/eb_deploy.yaml";

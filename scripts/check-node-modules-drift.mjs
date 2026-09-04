@@ -3,8 +3,8 @@
 // beside it. worktree-init.sh runs it on the tree it just provisioned; it also
 // stands alone in any tree:
 //
-//   node .claude/scripts/check-node-modules-drift.mjs [dir] [--all]
-//                                                    [--shared-from <dir>]
+//   node scripts/check-node-modules-drift.mjs [dir] [--all]
+//                                             [--shared-from <dir>]
 //
 // It exits 0 when the tree matches its lockfile, 1 when it drifted from it, and 2
 // when it could not be verified either way.

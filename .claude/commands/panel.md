@@ -40,14 +40,14 @@ than read is out of this command's scope -- measure it yourself first instead.
 ## Step 2 -- Run the panel Workflow
 
 Invoke the Workflow tool with `scriptPath` set to the ABSOLUTE path of
-`scripts/panel-workflow.mjs` in this repository (`git rev-parse --show-toplevel`
+`.claude/scripts/panel-workflow.mjs` in this repository (`git rev-parse --show-toplevel`
 gives the root) -- the bare relative spelling fails the call with "script file
 not found" -- and `args` set to
 `{"question": "<the question>", "docs": [<DOCS, possibly empty>]}`.
 
 The script is checked in and passed by path: do not paste its text into the call
 and do not copy it out to edit it -- it spawns the three panelists on the tiers
-`scripts/panel-script.test.mjs` pins. It returns the panelists that answered,
+`.claude/scripts/panel-script.test.mjs` pins. It returns the panelists that answered,
 each `{position, rationale, keyRisk}`.
 
 ## Step 3 -- Read the verdicts and close

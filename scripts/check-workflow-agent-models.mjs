@@ -11,14 +11,15 @@
 // inside a script string, not a top-level tool input. So the pin is encoded as a
 // check over the committed scripts. Those come in two shapes, both scanned here:
 // a fenced js block under .claude/commands/, .claude/agents/, or .claude/skills/,
-// and a checked-in Workflow script a command invokes by path (scripts/*-workflow.mjs,
-// whose whole file is the block -- it is a script body, not a module, so it is not
-// linted and cannot be imported). Every `agent(` call in either must pass a literal
-// `model:` from the tier set in its own options object, and Fable (which requires
-// the owner's per-spawn approval and is never inherited) may not be pinned in a
-// committed script at all. That options object is spelled out in the call: a
-// spread into it can carry a `model` of its own and settle the tier at run time,
-// so the spread is itself a violation whether or not a literal sits beside it.
+// and a checked-in Workflow script a command invokes by path
+// (.claude/scripts/*-workflow.mjs, whose whole file is the block -- it is a script
+// body, not a module, so it is not linted and cannot be imported). Every `agent(`
+// call in either must pass a literal `model:` from the tier set in its own options
+// object, and Fable (which requires the owner's per-spawn approval and is never
+// inherited) may not be pinned in a committed script at all. That options object
+// is spelled out in the call: a spread into it can carry a `model` of its own and
+// settle the tier at run time, so the spread is itself a violation whether or not
+// a literal sits beside it.
 //
 // The block reader and the lexer below are the shared half:
 // check-workflow-args-resolve.mjs imports them to scan the same two script
@@ -44,7 +45,7 @@
 //     the block, so js nested in a markdown block -- documentation whose examples
 //     are themselves Workflow scripts -- is not scanned at all.
 //   - a script that is neither shape: an ad-hoc inline Workflow script, or a file
-//     passed by scriptPath from outside scripts/*-workflow.mjs. The
+//     passed by scriptPath from outside .claude/scripts/*-workflow.mjs. The
 //     require-workflow-fable-approval.mjs hook covers the inline form for Fable.
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
@@ -52,7 +53,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SOURCE_DIRS = [".claude/commands", ".claude/agents", ".claude/skills"];
-const SCRIPT_DIR = "scripts";
+const SCRIPT_DIR = ".claude/scripts";
 const SCRIPT_SUFFIX = "-workflow.mjs";
 const ALLOWED_TIERS = ["opus", "sonnet", "haiku"];
 const JS_LANGUAGES = new Set(["js", "javascript", "mjs"]);

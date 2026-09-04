@@ -50,8 +50,8 @@ describe("workflow agent model check", () => {
 
   it("scans the checked-in Workflow scripts the commands invoke by path", () => {
     const files = workflowScriptFiles(root);
-    expect(files).toContain("scripts/light-review-workflow.mjs");
-    expect(files).toContain("scripts/panel-workflow.mjs");
+    expect(files).toContain(".claude/scripts/light-review-workflow.mjs");
+    expect(files).toContain(".claude/scripts/panel-workflow.mjs");
     expect(files.every((f) => f.endsWith("-workflow.mjs"))).toBe(true);
   });
 

@@ -1,11 +1,11 @@
 // Workflow script for /light-review, invoked as
-// Workflow({scriptPath: 'scripts/light-review-workflow.mjs', args: {...}}).
+// Workflow({scriptPath: '.claude/scripts/light-review-workflow.mjs', args: {...}}).
 //
 // It is a Workflow script BODY, not a module: the harness injects `args`,
 // `agent`, and `parallel`, and takes the top-level `return` as the run's result.
 // No ES module parser accepts a top-level return, which is why eslint.config.mjs
-// excludes this file; scripts/light-review-script.test.mjs compiles it as a
-// function body and drives both modes.
+// excludes this file; .claude/scripts/light-review-script.test.mjs compiles it as
+// a function body and drives both modes.
 
 export const meta = {
   name: "light-review",

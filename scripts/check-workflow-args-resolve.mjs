@@ -16,7 +16,7 @@
 // check-workflow-agent-models.mjs scans, whose block reader and lexer this
 // imports: a fenced js block under .claude/commands/, .claude/agents/, or
 // .claude/skills/, and a checked-in Workflow script a command invokes by path
-// (scripts/*-workflow.mjs, whose whole file is the block).
+// (.claude/scripts/*-workflow.mjs, whose whole file is the block).
 //
 // Reading the block through that lexer is what makes the rule exact: an `args`
 // inside a string, a template, a comment, or a prose sentence outside every fence
@@ -25,10 +25,10 @@
 // What the scan cannot see, exactly:
 //   - what `resolveWorkflowArgs` itself does. This check holds every read of
 //     `args` to that call and nothing more; the guard's own behavior is pinned by
-//     scripts/light-review-script.test.mjs and scripts/panel-script.test.mjs,
-//     which compile and run the real script files. A new Workflow script that
-//     defined a lax resolver under that name would pass this check with no test
-//     behind it.
+//     .claude/scripts/light-review-script.test.mjs and
+//     .claude/scripts/panel-script.test.mjs, which compile and run the real script
+//     files. A new Workflow script that defined a lax resolver under that name
+//     would pass this check with no test behind it.
 //   - `args` reached under another name. Taking the alias is itself a read and is
 //     reported (`const a = args`), so the alias cannot be introduced quietly; but
 //     a binding taken off a property (`const a = deps.args`) is a member access,
@@ -36,7 +36,7 @@
 //   - a js fence nested inside another fence. The outer fence's info string
 //     decides the block, so js nested in a markdown block is not scanned at all.
 //   - a script that is neither shape: an ad-hoc inline Workflow script, or a file
-//     passed by scriptPath from outside scripts/*-workflow.mjs.
+//     passed by scriptPath from outside .claude/scripts/*-workflow.mjs.
 
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
