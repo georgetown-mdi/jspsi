@@ -7,8 +7,8 @@ title: "Testing Reference"
 The commands to run each suite are in
 [CONTRIBUTING.md](../CONTRIBUTING.md#testing). This document is the reference
 behind them: the integration-test backends and profiles, the console sentinel,
-the browser-suite plumbing, where shared test material lives, and the coverage
-and mutation-testing rationale.
+the browser-suite plumbing, where a test goes, where shared test material
+lives, and the coverage and mutation-testing rationale.
 
 ## Integration tests
 
@@ -475,6 +475,72 @@ platform is `linux` or `darwin` -- the hosts the suites are actually run on, CI
 being `ubuntu-latest` throughout -- and reports a gate it cannot evaluate rather
 than passing it over. Its reach and what it deliberately leaves standing are in
 its own header.
+
+## Where a test goes
+
+Four rules cover how a test file is named, how it is grouped internally, when
+it splits, and where its helpers live.
+
+### Naming
+
+One test file per source module, named for that module: `fileSyncConnection.ts`
+tests live in `fileSyncConnection.test.ts`. A test that is not about one
+module -- a cross-cutting property, an end-to-end scenario -- is named for the
+property or scenario, states that scope in a one-line file header, and sits
+beside the module it exercises rather than in a naming bucket of its own.
+
+A `.unit` / `.integration` / `.browser` suffix is never required to route a
+file: the directory it sits in already does. `packages/core/vitest.config.ts`
+(its `unit` project, around lines 26-35) and `apps/cli/vitest.config.mts`
+route every project by directory alone and define no suffix glob at all.
+`apps/web/vite.config.ts` (around lines 195-249) accepts a `*.unit.test.ts` /
+`*.integration.test.ts` / `*.browser.test.ts` suffix as an alternate match
+alongside its `test/unit/**`, `test/integration/**`, `test/browser/**` globs,
+but a file already under one of those directories matches by directory
+regardless of the suffix -- `apps/web/test/unit/` carries the suffix on 26 of
+its 160 files and omits it on the other 134, and both route identically. Name
+a file for its module or scenario, not for its project.
+
+### Grouping
+
+Group related tests with vitest's own `describe`, never with a title prefix
+written into a string. `packages/core/test/fileSyncConnection.test.ts` carries
+240 test titles that open `"synchronize(): ..."` where a `describe` block was
+meant: a title is a `describe` spelled as a string, so it does not nest, does
+not collapse in a reporter, and does not survive a rename. A `describe` title
+does not repeat the file's own name -- the path already says which module is
+under test.
+
+### Size, and when a file splits
+
+A file crossing roughly 1,500 lines is due for a look, not a stop. Nothing
+checks the number, so it is a prompt to open the file and ask whether it still
+tracks one module, not a gate.
+
+The harder rule: a test file splits when its source module splits.
+`apps/cli/test/unit/ssh2SftpAdapter.test.ts` (11,006 lines) covers several
+modules' subjects, and `packages/core/test/fileSyncConnection.test.ts` (10,442
+lines) is in the same state -- both are cases where the source was split and
+the test file was not, so it kept asserting behavior that now lives in several
+modules. Left unsplit, a module's tests become unfindable without grep.
+
+### Where helpers live
+
+A helper used by one group of tests moves with that group when the file
+splits. A helper used across a workspace's own test tree lives in that
+workspace's test tree -- `packages/core/test/utils/`, `apps/cli/test/`,
+`apps/web/test/utils/` are the three today. A helper more than one workspace
+needs takes one of the two channels documented in
+[Shared test material](#shared-test-material) below -- `@psilink/core/testing`
+or `@psilink/testkit` -- whose admission rule lives there, not here; see also
+[cross-workspace-test-material.md](notes/cross-workspace-test-material.md).
+
+### Directory layout
+
+Test directories mirror the source directories they cover. The vitest project
+globs (`test/unit/**` and its equivalents in the other projects) are already
+recursive, so grouping a workspace's tests to match its `src/` tree needs no
+config change to adopt.
 
 ## Shared test material
 
