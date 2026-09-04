@@ -14,9 +14,9 @@ import {
   type InProcessSftpServer,
   MAX_DELIVERED_SFTP_PAYLOAD_BYTES,
   READDIR_BATCH_BUDGET_BYTES,
-  selectedBackend,
   startInProcessSftpServer,
 } from "../sftpServer";
+import { inProcessOnly } from "../sftpBackendGate";
 
 // Premises about the pinned ssh2 / ssh2-sftp-client stack that psilink's own code
 // is built on, driven at the layer each is asserted about: the raw
@@ -30,7 +30,6 @@ import {
 // Only the in-process backend can be made to stall a handshake or drop a session,
 // so these run there and stand up their own server to reach the session controls
 // -- the shared globalSetup server hands the workers only its connection details.
-const inProcessOnly = test.skipIf(selectedBackend() !== "in-process");
 
 // Far past every assertion window below, so a dial parked against the stalling
 // server settles only when a case settles it, never on its own deadline.

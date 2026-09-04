@@ -15,8 +15,8 @@ import {
   SSH2SFTPClientAdapter,
 } from "../../src/connection/ssh2SftpAdapter";
 import { MAX_DEFERRED_CLEANUP_DELETES } from "../../src/connection/sftpDeferredCleanup";
-import { selectedBackend } from "../sftpServer";
 import { serverAuth, sftpServer } from "../sftpServer/testContext";
+import { inProcessOnly } from "../sftpBackendGate";
 
 // ssh2-sftp-client brackets every operation it issues with one 'end', one
 // 'close' and one 'error' listener on the ONE ssh2 Client the adapter holds for
@@ -52,7 +52,6 @@ import { serverAuth, sftpServer } from "../sftpServer/testContext";
 //
 // Only the in-process backend can be reached this way (see
 // test/sftpServer/types.ts), so these run there.
-const inProcessOnly = test.skipIf(selectedBackend() !== "in-process");
 
 const TEST_TIMEOUT_MS = 240_000;
 

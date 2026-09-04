@@ -3,7 +3,7 @@ import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { expect, test } from "vitest";
+import { expect } from "vitest";
 import {
   DISPLAY_TRUNCATION_MARKER,
   TransportPublishIndeterminateError,
@@ -17,9 +17,10 @@ import { withCapturedLogs } from "@psilink/core/testing";
 
 import { runProtocol, type ProtocolConnectionConfig } from "../../src/protocol";
 import { loadKeyFile, saveKeyFile } from "../../src/keyFile";
-import { selectedBackend, startInProcessSftpServer } from "../sftpServer";
+import { startInProcessSftpServer } from "../sftpServer";
 import { serverAuth } from "../sftpServer/testContext";
 import type { InProcessSftpServer } from "../sftpServer/types";
+import { inProcessOnly } from "../sftpBackendGate";
 
 // What an operator is told after a mid-exchange message publish the transport
 // could not settle, and whether what they are told works.
@@ -36,7 +37,6 @@ import type { InProcessSftpServer } from "../sftpServer/types";
 // Only the in-process backend can tear a RENAME at a named point inside its
 // handler (see test/sftpServer/types.ts), so this runs there against its own
 // server instance.
-const inProcessOnly = test.skipIf(selectedBackend() !== "in-process");
 
 const TEST_TIMEOUT_MS = 120_000;
 

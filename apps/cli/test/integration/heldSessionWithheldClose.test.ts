@@ -1,13 +1,14 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
 
-import { expect, test } from "vitest";
+import { expect } from "vitest";
 import { FileSyncConnection } from "@psilink/core";
 import { withCapturedLogs } from "@psilink/core/testing";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
-import { selectedBackend, startInProcessSftpServer } from "../sftpServer";
+import { startInProcessSftpServer } from "../sftpServer";
 import { serverAuth } from "../sftpServer/testContext";
+import { inProcessOnly } from "../sftpBackendGate";
 
 // End-to-end proof for the DEFAULT held-session mode against the partner server it
 // is hardest on: one that drops the SFTP session mid-exchange and then withholds
@@ -24,7 +25,6 @@ import { serverAuth } from "../sftpServer/testContext";
 // connection details. The connection-per-poll counterpart is
 // ephemeralSessionExchange.test.ts; the socket-state census over the dials this
 // path issues is dialDeferral.test.ts.
-const inProcessOnly = test.skipIf(selectedBackend() !== "in-process");
 
 // The per-operation liveness deadline, lowered through the adapter's @internal
 // test seam. The torn operation is never answered, so that deadline is what ends

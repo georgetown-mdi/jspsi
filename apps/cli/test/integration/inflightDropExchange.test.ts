@@ -1,7 +1,7 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
 
-import { expect, test } from "vitest";
+import { expect } from "vitest";
 import {
   DISPLAY_TRUNCATION_MARKER,
   FileSyncConnection,
@@ -12,9 +12,10 @@ import {
 import { withCapturedLogs } from "@psilink/core/testing";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
-import { selectedBackend, startInProcessSftpServer } from "../sftpServer";
+import { startInProcessSftpServer } from "../sftpServer";
 import { serverAuth } from "../sftpServer/testContext";
 import type { InProcessSftpServer } from "../sftpServer/types";
+import { inProcessOnly } from "../sftpBackendGate";
 
 // The two-party statement of what inflightDropRecovery.test.ts pins one adapter at
 // a time: a clean partner-side drop landing while a message is in flight between
@@ -45,7 +46,6 @@ import type { InProcessSftpServer } from "../sftpServer/types";
 // Only the in-process backend can be told to cut a session this way (a native sshd
 // cannot; see test/sftpServer/types.ts), so this runs there and stands up its own
 // server to reach the session controls.
-const inProcessOnly = test.skipIf(selectedBackend() !== "in-process");
 
 const TEST_TIMEOUT_MS = 120_000;
 

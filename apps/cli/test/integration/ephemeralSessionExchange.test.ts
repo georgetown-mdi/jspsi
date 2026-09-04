@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 
-import { expect, test } from "vitest";
+import { expect } from "vitest";
 import {
   DEFAULT_MAX_RECONNECT_ATTEMPTS,
   FileSyncConnection,
@@ -19,8 +19,9 @@ import {
   MAX_DEFERRED_CLEANUP_REISSUES,
 } from "../../src/connection/sftpDeferredCleanup";
 import { SftpAdapterLedger } from "../../src/connection/sftpAdapterLedger";
-import { selectedBackend, startInProcessSftpServer } from "../sftpServer";
+import { startInProcessSftpServer } from "../sftpServer";
 import { serverAuth } from "../sftpServer/testContext";
+import { inProcessOnly } from "../sftpBackendGate";
 
 // End-to-end proof for connection-per-poll (ephemeral-session) SFTP mode against
 // the partner servers it is hardest on: one that accepts the client's disconnect
@@ -34,7 +35,6 @@ import { serverAuth } from "../sftpServer/testContext";
 // session, or stall its handshake), so this runs there and stands up its own
 // server to reach the session controls -- the shared globalSetup server hands the
 // workers only its connection details.
-const inProcessOnly = test.skipIf(selectedBackend() !== "in-process");
 
 // Each idle boundary costs the release's own close bound (5 s) before the forced
 // close lands, and the assertions want several of them.

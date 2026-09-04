@@ -275,6 +275,18 @@ case costing milliseconds saves milliseconds five times over and still leaves a
 split file to keep in step. Several leg-agnostic cases are left in
 `integration` on that measurement.
 
+### Gating a case to the in-process backend
+
+A case in `integration` that only the in-process server can be driven to -- a
+withheld close, a vanished session, a key exchange narrowed mid-run, a listener
+ceiling -- declares itself with the shared `inProcessOnly` gate
+(`apps/cli/test/sftpBackendGate.ts`) instead of `test`, and the file states
+above it what the native backend cannot do. The gate reads
+`PSILINK_SFTP_BACKEND` once at module load, so every case in a file sees the
+same answer. Reach for it only where a real `sshd` exposes no control for the
+state under test: a behavior both backends show belongs in the
+backend-agnostic project above.
+
 A standing console sentinel guards all three CLI integration projects:
 it wraps `console` directly and fails a test file at `afterAll` on any
 `console.log`/`warn`/`error` that no allowlist matcher accepts (the inverse

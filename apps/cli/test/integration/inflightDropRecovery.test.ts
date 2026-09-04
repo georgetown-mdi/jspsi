@@ -1,7 +1,7 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
 
-import { expect, test } from "vitest";
+import { expect } from "vitest";
 import {
   FileSyncConnection,
   TransportPublishIndeterminateError,
@@ -11,9 +11,10 @@ import {
 import { withCapturedLogs } from "@psilink/core/testing";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
-import { selectedBackend, startInProcessSftpServer } from "../sftpServer";
+import { startInProcessSftpServer } from "../sftpServer";
 import { serverAuth } from "../sftpServer/testContext";
 import type { InProcessSftpServer } from "../sftpServer/types";
+import { inProcessOnly } from "../sftpBackendGate";
 
 // A partner server that drops the SFTP session cleanly while a HIGH-LEVEL
 // ssh2-sftp-client operation (get, the put family, delete, rename, exists) is in
@@ -41,7 +42,6 @@ import type { InProcessSftpServer } from "../sftpServer/types";
 // server to reach the session controls. The socket-state census over the dials this
 // path issues is dialDeferral.test.ts; the withheld-close partner, which leaves the
 // session property SET instead, is heldSessionWithheldClose.test.ts.
-const inProcessOnly = test.skipIf(selectedBackend() !== "in-process");
 
 const TEST_TIMEOUT_MS = 120_000;
 

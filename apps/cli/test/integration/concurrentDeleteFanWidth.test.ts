@@ -2,15 +2,16 @@ import { randomUUID } from "node:crypto";
 import fsp from "node:fs/promises";
 import path from "node:path";
 
-import { expect, test } from "vitest";
+import { expect } from "vitest";
 import { FileSyncConnection } from "@psilink/core";
 import { withCapturedLogs } from "@psilink/core/testing";
 
 import { MAX_DIRECTORY_ENTRIES } from "../../src/connection/listingGuard";
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
-import { selectedBackend, startInProcessSftpServer } from "../sftpServer";
+import { startInProcessSftpServer } from "../sftpServer";
 import { serverAuth } from "../sftpServer/testContext";
 import type { InProcessSftpServer } from "../sftpServer/types";
+import { inProcessOnly } from "../sftpBackendGate";
 
 // Core issues its rendezvous and cleanup deletes as concurrent fans on the ONE
 // SFTP channel a party holds, and none of them carries a width cap of its own.
@@ -44,7 +45,6 @@ import type { InProcessSftpServer } from "../sftpServer/types";
 //
 // Only the in-process backend exposes the session controls this reads (see
 // test/sftpServer/types.ts), so these run there.
-const inProcessOnly = test.skipIf(selectedBackend() !== "in-process");
 
 const TEST_TIMEOUT_MS = 300_000;
 

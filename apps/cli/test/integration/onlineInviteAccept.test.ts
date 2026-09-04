@@ -41,8 +41,8 @@ import type { CommonBootstrapOptions } from "../../src/optionDefinitions";
 import { loadKeyFile } from "../../src/keyFile";
 import { keysPathFor, resolveRecordOutput } from "../../src/recordFile";
 import { promptConfirm } from "../../src/util/prompt";
-import { selectedBackend } from "../sftpServer";
 import { localPath, remotePath, sftpServer } from "../sftpServer/testContext";
+import { inProcessOnly } from "../sftpBackendGate";
 
 // Stub only promptConfirm so the first-use host-key prompt can be answered in a
 // non-interactive test run; every other prompt export stays real, as does
@@ -743,7 +743,6 @@ describe("sftp", () => {
   // which the password-authenticating in-process backend supports; the native
   // sshd backend authenticates by public key (a URL cannot carry a key), so it
   // runs in-process only.
-  const inProcessOnly = test.skipIf(selectedBackend() !== "in-process");
 
   // Both parties are SFTP clients of the same served path -- the realistic
   // recurring-exchange topology. The `onlineinvite` namespace keeps this root

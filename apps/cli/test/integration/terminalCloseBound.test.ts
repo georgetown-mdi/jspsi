@@ -2,15 +2,16 @@ import { spawn } from "node:child_process";
 import fsp from "node:fs/promises";
 import path from "node:path";
 
-import { expect, test } from "vitest";
+import { expect } from "vitest";
 import { FileSyncConnection } from "@psilink/core";
 import { withCapturedLogs } from "@psilink/core/testing";
 import type { LogEntry } from "@psilink/core/testing";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
-import { selectedBackend, startInProcessSftpServer } from "../sftpServer";
+import { startInProcessSftpServer } from "../sftpServer";
 import type { SftpTestServer } from "../sftpServer";
 import { serverAuth } from "../sftpServer/testContext";
+import { inProcessOnly } from "../sftpBackendGate";
 
 // The terminal close against the partner server this defect lives on: one that
 // accepts the client's disconnect and then goes quiet, consuming the FIN and
@@ -23,7 +24,6 @@ import { serverAuth } from "../sftpServer/testContext";
 // cannot), so this runs there and stands up its own server to reach the session
 // controls -- the shared globalSetup server hands the workers only its connection
 // details.
-const inProcessOnly = test.skipIf(selectedBackend() !== "in-process");
 
 // Generous headroom over the adapter's own teardown bounds (5 s for the
 // partner's close, then 1 s for the forced one). The assertion is that teardown
