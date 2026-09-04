@@ -18,9 +18,8 @@
 // in this hook can never wedge every Bash command -- branch protection backstops a
 // push this hook misses.
 
-import { execFileSync } from "node:child_process";
-
 import { commandOf, eventCwd, eventForTools } from "./lib/event.mjs";
+import { git, splitSegments, tokenize } from "./lib/shell.mjs";
 
 const PROTECTED = new Set(["staging", "main"]);
 
@@ -30,24 +29,6 @@ function block(reason) {
       "staging and main are protected; open a PR from a feature branch instead.\n",
   );
   process.exit(2);
-}
-
-// Split a command line into shell segments so a push hidden in a compound command
-// (`a && git push ...`, `b; git push ...`, `c | git push ...`) is still inspected.
-// Pragmatic, not a full shell parser; branch protection backstops exotic quoting.
-function splitSegments(command) {
-  return command.split(/\s*(?:&&|\|\||[;|\n])\s*/);
-}
-
-// Whitespace tokenizer that keeps quoted spans intact, then strips quotes. Good
-// enough to read remote/refspec arguments; not POSIX-complete.
-function tokenize(segment) {
-  const tokens = segment.match(/(?:[^\s'"]+|'[^']*'|"[^"]*")+/g) || [];
-  // Strip ALL quote characters, not just the outermost pair: a quoted ref like
-  // HEAD:'staging' must normalize to HEAD:staging (branch/remote names never
-  // contain quotes). A first/last-char-only strip left an inner quote, so the
-  // destination read back as 'staging and slipped past the protected-branch check.
-  return tokens.map((t) => t.replace(/['"]/g, ""));
 }
 
 // git global options that consume a following token as their value, so the
@@ -123,30 +104,16 @@ function explicitDestinations(args) {
   });
 }
 
-function gitRef(cwd, gitArgs) {
-  try {
-    return execFileSync("git", gitArgs, {
-      cwd,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-  } catch {
-    return null;
-  }
-}
-
 // Decide whether a bare `git push` (no refspec) would land on a protected branch.
 function barePushVerdict(cwd) {
-  const current = gitRef(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
+  const current = git(["symbolic-ref", "--quiet", "--short", "HEAD"], { cwd });
   if (current && PROTECTED.has(current)) {
     return `bare 'git push' while on protected branch '${current}'`;
   }
-  const pushRef = gitRef(cwd, [
-    "rev-parse",
-    "--abbrev-ref",
-    "--symbolic-full-name",
-    "@{push}",
-  ]);
+  const pushRef = git(
+    ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{push}"],
+    { cwd },
+  );
   if (pushRef) {
     const dst = pushRef.replace(/^[^/]+\//, ""); // strip the "origin/" remote
     if (PROTECTED.has(dst)) {

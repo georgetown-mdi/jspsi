@@ -71,7 +71,6 @@
 //
 // Exit 0 allows the call; exit 2 blocks it and feeds stderr back to Claude.
 
-import { execFileSync } from "node:child_process";
 import {
   mkdirSync,
   readFileSync,
@@ -82,6 +81,7 @@ import {
 import { dirname, join } from "node:path";
 
 import { eventCwd, eventForTools } from "./lib/event.mjs";
+import { git } from "./lib/shell.mjs";
 
 const DIRTY_ENTRIES_SHOWN = 10;
 const ROUNDS_DIR = join("scratch", "review-rounds");
@@ -98,20 +98,6 @@ function block(reason) {
     `Blocked by require-clean-tree-for-review hook: ${reason}${suffix}`,
   );
   process.exit(2);
-}
-
-// Run git with the given args, returning trimmed stdout, or null on any failure
-// (non-zero exit, missing binary, non-git directory). The caller decides what a
-// null means -- here every null is a fail-closed block.
-function git(args) {
-  try {
-    return execFileSync("git", args, {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-  } catch {
-    return null;
-  }
 }
 
 // The Workflow's named arguments, as an object; null when `args` was delivered

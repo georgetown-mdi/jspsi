@@ -87,6 +87,7 @@ import { existsSync, realpathSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 
 import { eventCwd, eventForTools } from "./lib/event.mjs";
+import { git } from "./lib/shell.mjs";
 
 const GUARDED_TOOLS = new Set(["Edit", "Write", "NotebookEdit"]);
 const PATH_KEYS = ["file_path", "notebook_path"];
@@ -121,19 +122,6 @@ function blockSiblingWorktreeWrite(target, path, owner, sessionTree) {
       `worktree, create '${OVERRIDE_SENTINEL}' in it and delete it when you are done.\n`,
   );
   process.exit(2);
-}
-
-// Run git, returning trimmed stdout, or null on any failure. Every null here
-// allows the call: this hook fails open.
-function git(args) {
-  try {
-    return execFileSync("git", args, {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-  } catch {
-    return null;
-  }
 }
 
 function targetPath(toolInput, cwd) {

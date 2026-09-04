@@ -217,6 +217,7 @@ import { readdirSync } from "node:fs";
 import { basename, resolve } from "node:path";
 
 import { commandOf, eventCwd, eventForTools } from "./lib/event.mjs";
+import { splitPipelines, splitStages, tokenize } from "./lib/shell.mjs";
 
 const CLAUDE_DIR = ".claude";
 const WORKTREES_DIR = "worktrees";
@@ -312,29 +313,6 @@ function block(reason) {
       "around this refusal defeats it and destroys the tree anyway.\n",
   );
   process.exit(2);
-}
-
-// Split a command line into pipelines, then each pipeline into its stages, so a
-// deletion hidden in a compound command or fed from an earlier stage is still
-// inspected. Pragmatic, not a full shell parser. A lone `&` is deliberately not
-// a separator: the same byte sits inside redirect words (`2>&1`, `&>`), where a
-// split severs the command from operands that follow the redirect, and a
-// backgrounded `cd X &` runs in a subshell that never moves the parent shell's
-// directory -- both measured against real bash. Backgrounded composition stays
-// a stated limit in the header.
-function splitPipelines(command) {
-  return command.split(/\s*(?:&&|\|\||[;\n])\s*/);
-}
-
-function splitStages(pipeline) {
-  return pipeline.split(/\s*\|\s*/);
-}
-
-// Whitespace tokenizer that keeps quoted spans intact, then strips quotes, so a
-// quoted path reads the same as a bare one. Not POSIX-complete.
-function tokenize(stage) {
-  const tokens = stage.match(/(?:[^\s'"]+|'[^']*'|"[^"]*")+/g) || [];
-  return tokens.map((token) => token.replace(/['"]/g, ""));
 }
 
 // Words that stand in front of the real command word without changing which
