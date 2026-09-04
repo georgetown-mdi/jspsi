@@ -10,7 +10,7 @@
  */
 
 /**
- * Upper bound on the `identity` label a zero-setup intent may carry (the CLI's
+ * Upper bound on the `identity` label a zero-setup intent may hold (the CLI's
  * `--identity` value: the party's name/org/contact string). Generous for a real
  * label yet refuses an unbounded string; a non-secret operator value, never a path
  * or credential.
@@ -18,7 +18,7 @@
 export const MAX_IDENTITY_LENGTH = 1024;
 
 /**
- * The control characters a label may not carry: C0 (NUL among them), DEL, and
+ * The control characters a label may not contain: C0 (NUL among them), DEL, and
  * the C1 range, with NO exception for tab, line feed, or carriage return --
  * unlike the retention note's rule ({@link ./retentionNoteShape}), whose field
  * is a multi-line textarea. This label rides to the CLI as one
@@ -39,7 +39,7 @@ export const IDENTITY_CONTROL_CHAR_PATTERN =
   /[\u0000-\u001f\u007f-\u009f]/;
 
 /**
- * The reason every boundary reports for a label carrying one, so the surfaces
+ * The reason every boundary reports for a label containing one, so the surfaces
  * enforcing the rule say the same thing about the same value. A field path and a
  * shape reason, never the submitted bytes: the label is the submitter's own text,
  * and echoing it back is what the job API's error discipline exists to prevent.

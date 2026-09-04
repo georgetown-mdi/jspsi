@@ -48,7 +48,7 @@ import type {
 import type { JobSftpServerEntry } from "./sftpServer";
 
 /**
- * The tuning knobs a client may set on a job: the numeric, boolean,
+ * The tuning settings a client may set on a job: the numeric, boolean,
  * closed-enum, and bounded-label subset of the CLI's file-sync options. None
  * can hold a path, host, credential, or command. The path and directory
  * fields of {@link FileSyncOptions} are not exposed -- the server owns every
@@ -502,7 +502,7 @@ export interface JobSftpExchangeIntent extends JobExchangeIntentBase {
  * discriminated on `channel`. It is the ONLY channel from the client into a CLI
  * invocation, and it is injection-closed by construction: every field is either
  * bounded structured data validated by a core schema, a closed enum, a
- * numeric/boolean tuning knob, fixed-name file CONTENT (`inputCsv`), an opaque
+ * numeric/boolean tuning setting, fixed-name file CONTENT (`inputCsv`), an opaque
  * single-segment name selecting a file in the operator-mounted directory
  * (`inputFile.name`), or credential material written to a fixed key file. There
  * is no field that becomes a path, a host, a credential reference (`@path`), or
@@ -581,7 +581,7 @@ export interface JobZeroSetupSftpIntent extends JobZeroSetupIntentBase {
  * The typed, schema-validated intent a client submits to create a zero-setup job,
  * discriminated on `channel`. Injection-closed by construction exactly as the
  * exchange intent is: every field is a bounded input source, a numeric/boolean/enum
- * tuning knob, a closed strategy enum, or a bounded identity label. No field becomes
+ * tuning setting, a closed strategy enum, or a bounded identity label. No field becomes
  * a path, host, credential reference, or argv string; the connection is drawn only
  * from the server (the authored SFTP connection, or the configured rendezvous mount).
  */

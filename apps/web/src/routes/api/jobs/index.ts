@@ -20,9 +20,9 @@ import { jobCreateIntentSchema } from "@jobs/intent";
  *
  * Feature-gated. The request body is a JSON {@link JobCreateIntent}, discriminated
  * on `mode` (a missing `mode` defaults to `exchange` for the merged client), then
- * on `channel` (filedrop | sftp): an `exchange` intent carries validated linkage
+ * on `channel` (filedrop | sftp): an `exchange` intent contains validated linkage
  * terms, a shared secret, and exactly one input source; a `zeroSetup` intent
- * carries neither terms nor secret (both parties infer terms from their files),
+ * contains neither terms nor secret (both parties infer terms from their files),
  * only an input source and bounded tuning. The server generates the job id, and for
  * an exchange composes the CLI config and key file (every path a server-chosen name
  * in the workdir; sftp connection material drawn only from the operator-authored
@@ -31,7 +31,7 @@ import { jobCreateIntentSchema } from "@jobs/intent";
  * `--save`. Either way no client string reaches argv or a file path.
  *
  * The console facilitates one exchange at a time: while an exchange occupies the
- * single slot, a second create is a 409 carrying `{ id }` -- the occupying
+ * single slot, a second create is a 409 containing `{ id }` -- the occupying
  * exchange's id -- until the current exchange is deleted. The browser re-attaches
  * to that id rather than dead-ending on the "already running" alert.
  *
@@ -42,7 +42,7 @@ import { jobCreateIntentSchema } from "@jobs/intent";
  * The unavailable rejection is EMPTY-bodied: an sftp intent with no connection
  * authored, a filedrop intent with no rendezvous directory, and a filedrop intent
  * a split-provisioned console cannot run without retain mode are each 400. The busy
- * rejection is a 409 carrying only the occupying exchange's id (nothing else about
+ * rejection is a 409 containing only the occupying exchange's id (nothing else about
  * it), disclosed to the same-origin operator on their own loopback console.
  */
 export const Route = createFileRoute("/api/jobs/")({

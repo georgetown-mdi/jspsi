@@ -63,7 +63,7 @@ export const DIRECT_STEP_ORDER: ReadonlyArray<DirectStep> = [
 export const DEFAULT_PREVIEW_IDENTITY = "you";
 
 /** The strategy a direct run uses until the operator chooses otherwise: the
- * CLI's own default, which a zero-setup command selects by carrying no
+ * CLI's own default, which a zero-setup command selects by including no
  * `--linkage-strategy` at all. */
 export const DIRECT_LINKAGE_STRATEGY_DEFAULT: LinkageStrategy = "cascade";
 

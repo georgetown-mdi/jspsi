@@ -83,7 +83,7 @@ export class ManagedExchangeSpentError extends Error {
 
 /**
  * Raised when a run cannot read whether this device's copy was handed off:
- * the sibling entry does not validate, or its store did not answer. Carries
+ * the sibling entry does not validate, or its store did not answer. Has
  * its own `custody-unreadable` kind rather than the retryable `transport`
  * tier -- a scheduled window ends here rather than re-attempting an
  * unchanged reading -- or the `storage` kind a failed rotation persist
@@ -125,7 +125,7 @@ export interface ManagedExchangeRunPhases<TInput, THandshake, TExchange> {
     input: TInput,
   ) => Promise<{ rotatedSecret: string; handshake: THandshake }>;
   /** Begin and complete the data exchange -- reachable only after the durable
-   * persist resolves. Receives the handshake's carried value. */
+   * persist resolves. Receives the value the handshake produced. */
   dataExchange: (handshake: THandshake) => Promise<TExchange>;
   /** Invoked once, synchronously, at the instant the data exchange begins
    * (after the persist resolves and the lock releases, immediately before
@@ -241,7 +241,7 @@ export async function runManagedExchange<TInput, THandshake, TExchange>(
           // Best-effort: the storage subsystem that just failed the rotation
           // persist may fail this write too, and a second storage rejection must
           // never replace the RotationPersistError -- the runner's instanceof
-          // classification, and the storage lastRun the error itself carries,
+          // classification, and the storage lastRun the error itself holds,
           // depend on the original propagating.
           try {
             await recordLastRun(record.id, error.lastRun);

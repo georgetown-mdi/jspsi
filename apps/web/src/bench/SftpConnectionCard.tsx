@@ -23,7 +23,7 @@ import type { SftpConnectionProjection } from "@jobs/jobManager";
  * whichever connection is effective and, when the operator may author one,
  * drives `PUT /api/jobs/sftp` from a credential source.
  *
- * With a connection: edit/clear affordances and the honest "Ready to try"
+ * With a connection: edit/clear affordances and the accurate "Ready to try"
  * label (authored, not yet verified), plus any non-blocking credential
  * warnings; a split-directory connection whose retain mode has since been
  * turned off is labelled as needing it back instead. Without one: the empty
@@ -176,7 +176,7 @@ export function SftpConnectionCard({
 }
 
 /** Seed the form from an existing connection's locator (host, port, and whichever
- * remote-directory form it carries -- the shared `path`, or the split pair, whose
+ * remote-directory form it holds -- the shared `path`, or the split pair, whose
  * inbound half seeds the remote-directory field); the username and credential are
  * not recoverable from the credential-free projection, so an edit re-enters them. */
 function initialFormFor(

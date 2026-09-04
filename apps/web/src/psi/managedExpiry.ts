@@ -20,14 +20,14 @@ import type { ManagedExchangeRecord } from "./managedExchangeRecord";
 
 /**
  * Whether the record's stored secret has lapsed as of `now`: `true` when the
- * record carries an `expires` bound whose instant is at or before `now`. A
+ * record has an `expires` bound whose instant is at or before `now`. A
  * record with no bound (`expires` absent) never lapses. The comparison is
  * at-or-before, matching the spec's "the instant after which `sharedSecret` must
  * not be used" -- the boundary instant itself is already lapsed.
  *
  * Fails closed on a value the comparison cannot parse: an unreadable `expires`
  * stops the secret being used rather than letting it run unbounded. A stored
- * record cannot carry one -- the schema validates `expires` as an ISO datetime
+ * record cannot hold one -- the schema validates `expires` as an ISO datetime
  * on every read -- so the direction only decides what an unreachable value
  * would do.
  */
@@ -48,7 +48,7 @@ export function managedExchangeLapsed(
  * lapsed instant rides the error so the surface can name it.
  */
 export class ManagedExchangeExpiredError extends Error {
-  /** The lapsed `expires` instant (ISO 8601 UTC) the record carried. */
+  /** The lapsed `expires` instant (ISO 8601 UTC) the record held. */
   readonly expires: string;
   constructor(expires: string) {
     super("managed exchange stored secret has lapsed; re-invite to run again");

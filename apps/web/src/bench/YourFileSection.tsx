@@ -56,10 +56,10 @@ export function YourFileSection({
   /** Whether the read file can back at least one matching key. */
   linkable: boolean;
   alert: AlertContent | undefined;
-  /** The file committed to the bench on the console (its profiled reference), so the
+  /** The file committed to the host on the console (its profiled reference), so the
    * picker marks its row; unused off the console. */
   committed?: WorkInputReference;
-  /** Commit a profiled console file to the bench (the picker's "Use this file");
+  /** Commit a profiled console file to the host (the picker's "Use this file");
    * unused off the console. */
   onCommit?: (profile: ProfiledJobInput) => void;
   onContinue: () => void;

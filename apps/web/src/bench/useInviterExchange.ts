@@ -538,7 +538,7 @@ export function useInviterExchange({
     const serverJobTransport = (): ServerJobExchangeTransport =>
       channel === "sftp" ? { channel: "sftp" } : { channel: "filedrop" };
 
-    // The console carries out the exchange: the driver POSTs the sealed
+    // The console conducts the exchange: the driver POSTs the sealed
     // terms, this party's authored metadata/standardization (when
     // present, so the CLI honors the operator's data-prep edits rather than
     // inferring), the shared secret, and the input source to the job API, then

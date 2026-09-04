@@ -33,7 +33,7 @@ import type { SftpConnectionProjection } from "@jobs/jobManager";
  * The direct-exchange server step: choose the agreed transport, then author (or
  * confirm) the server both parties settled on out of band. SFTP is authored
  * free-hand -- inviter-style, never prefilled from a partner locator (a direct
- * exchange carries no invitation) -- through the shared {@link SftpConnectionCard},
+ * exchange has no invitation) -- through the shared {@link SftpConnectionCard},
  * with the save-a-file affordance dropped since this flow always runs on the
  * console. Filedrop runs through the console's configured rendezvous mount and
  * is offered only when one is mounted.
@@ -85,7 +85,7 @@ export function DirectServerSection({
   onConnectionTuningOpen: (open: boolean) => void;
   /** The operator's per-run diagnostic and recovery choices. Authored here, with
    * the other pre-run cards, because the sweep is a decision about the very
-   * directory this step settles. */
+   * directory this step determines. */
   runDiagnostics: RunDiagnosticsDraft;
   runDiagnosticsOpen: boolean;
   onRunDiagnostics: (draft: RunDiagnosticsDraft) => void;

@@ -1,16 +1,17 @@
 /**
  * The browser wiring of a managed (recurring) exchange re-run: it builds the
- * platform seams the pure orchestration in {@link ./managedRun.ts} gates, out of
- * the same building blocks the one-shot flows compose -- the rendezvous, the peer
- * message connection, the authenticated handshake, core's `runExchange`, and the
- * run-outputs builder -- with the durable rotate-and-persist interposed between
- * the handshake and the data exchange (the persist-before-success ordering
- * {@link runManagedRerun} inherits from {@link runManagedExchange}).
+ * platform boundary the pure orchestration in {@link ./managedRun.ts} gates,
+ * out of the same building blocks the one-shot flows compose -- the
+ * rendezvous, the peer message connection, the authenticated handshake,
+ * core's `runExchange`, and the run-outputs builder -- with the durable
+ * rotate-and-persist interposed between the handshake and the data exchange
+ * (the persist-before-success ordering {@link runManagedRerun} inherits from
+ * {@link runManagedExchange}).
  *
  * It reuses the one-shot flows' primitives rather than their hooks: the one-shot
  * `runExchangeLifecycle` bundles the handshake and the data exchange into one
- * unit with no seam to persist the rotated secret between them, so a managed
- * re-run cannot drive it directly. The shared primitives it composes
+ * unit with no call site to persist the rotated secret between them, so a
+ * managed re-run cannot drive it directly. The shared primitives it composes
  * ({@link openPeerMessageConnection}, {@link authenticateExchange},
  * {@link runExchange}, {@link buildRunOutputs}) are standalone, so this composes
  * them with the rotation interposed and the one-shot flows are untouched.
@@ -67,7 +68,7 @@ interface ManagedRerunInput {
   prepared: ReturnType<typeof prepareManagedRerunExchange>;
 }
 
-/** The carried value the handshake phase hands the data exchange through the lock:
+/** The held value the handshake phase hands the data exchange through the lock:
  * the open message connection, the resolved PSI library, the prepared exchange, and
  * the live peer/channel for teardown. */
 interface ManagedRerunCarried {
@@ -182,7 +183,7 @@ export function runManagedExchangeInBrowser(
         return { prepared };
       },
       // Inside the lock: open the side-dispatched rendezvous, authenticate the
-      // partner, and yield the rotated secret plus the carried exchange resources.
+      // partner, and yield the rotated secret plus the held exchange resources.
       handshake: async (input) => {
         const psiPromise = loadPsiBackend(
           { loadWasm: () => PSI() as Promise<PSILibrary> },

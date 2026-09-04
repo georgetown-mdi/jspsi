@@ -87,7 +87,7 @@ export class NonEmptyRateController {
    * above it. A compute superseded by {@link dispose} never settles -- the caller
    * (the hook) guards with its own cancellation flag and ignores a stale result. A
    * compute after a worker failure ({@link onError}) rejects at once, so the hook
-   * settles to an unavailable state rather than posting to a dead worker and hanging.
+   * decides on an unavailable state rather than posting to a dead worker and hanging.
    */
   compute(
     standardization: Standardization,
@@ -99,7 +99,7 @@ export class NonEmptyRateController {
     if (this.disposed)
       // Superseded by dispose: leave it unsettled (the hook discards it via its own
       // cancellation flag). Rejecting on a teardown the caller already abandoned
-      // would surface an unhandled rejection.
+      // would expose an unhandled rejection.
       return new Promise<Array<FieldValueCoverage>>(() => {
         /* intentionally never settles -- see above */
       });
@@ -137,7 +137,7 @@ export class NonEmptyRateController {
     if (this.disposed) return;
     // A worker-level failure is unrecoverable for this row set: terminate the broken
     // worker and mark the controller failed so a later compute() rejects fast (the
-    // hook then settles to an unavailable state) instead of posting to a dead worker
+    // hook then decides on an unavailable state) instead of posting to a dead worker
     // that never replies and hangs the check. Fail every in-flight compute likewise.
     this.failed = true;
     this.worker?.terminate();

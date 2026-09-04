@@ -23,7 +23,7 @@ import type { InviterEditor } from "./inviterModel";
 
 /**
  * The Cleaning tab: per-field pipelines with previews and whole-file coverage,
- * mounted from the shared standardization workbench over the bench's draft.
+ * mounted from the shared standardization workbench over the console's draft.
  * Add/remove same-typed fields is the expert control, gated with the keys tab's
  * expert switch.
  */
@@ -50,7 +50,7 @@ export function CleaningTab({
    * `csv.rawRows`, which the console acquired shape does not have. */
   columnSamples: ColumnSamples;
   expertMode: boolean;
-  /** The full-CSV per-field coverage, swept once at the bench and shared with the
+  /** The full-CSV per-field coverage, swept once at the console and shared with the
    * Customize fact and the coverage Problems entry (`null` before the first sweep
    * finishes). Lifted so the fact and the create gate render regardless of the
    * active section. */

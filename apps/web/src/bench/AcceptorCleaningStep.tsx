@@ -32,8 +32,8 @@ import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
  * add/remove-field control. The dead-key advisory (a self-defeating adopted rule)
  * appears here, amber not red, routing the fix to the partner.
  *
- * Presentational over the shared column-step state the bench owns; the full-CSV
- * coverage (`rates`) and the per-column preview samples are computed by the bench
+ * Presentational over the shared column-step state the host owns; the full-CSV
+ * coverage (`rates`) and the per-column preview samples are computed by the host
  * (from the browser rows on the hosted build, read from the server-side profile on
  * the console) and passed in, so one sweep drives both this tab and the Customize
  * menu's Cleaning-attention value and the console never reads rows it does not hold.

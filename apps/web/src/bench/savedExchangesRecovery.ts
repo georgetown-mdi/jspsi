@@ -7,10 +7,10 @@
  *
  * A readable entry shows its label, side, and last-run date; an unreadable entry
  * shows a fixed "Unreadable record" label and no other detail, since nothing
- * about it could be parsed. Every row carries the stored key the one-step
+ * about it could be parsed. Every row holds the stored key the one-step
  * delete-by-key acts on, so an unreadable record is discardable without a
  * successful parse. Secret material never reaches this model: the diagnostic
- * entries carry display essentials only.
+ * entries hold display essentials only.
  */
 
 import { SIDE_LABEL } from "./savedExchangesModel";
@@ -46,7 +46,7 @@ export interface RecoveryRow {
   /** Whether the entry could not be parsed. */
   unreadable: boolean;
   /** Whether an exported backup remains under the operator's custody, so the delete
-   * confirm carries the custody note. Survives record unreadability. */
+   * confirm states the custody note. Survives record unreadability. */
   backedUp: boolean;
 }
 
@@ -54,7 +54,7 @@ export interface RecoveryRow {
  * its essentials (an empty label displays as "(unnamed exchange)" for the row
  * text, matching the run list, while the delete confirm names the raw label);
  * an unreadable entry shows only its key and the fixed unreadable label. Both
- * carry the entry's backup custody state through to the delete confirm. */
+ * hold the entry's backup custody state through to the delete confirm. */
 export function recoveryRow(
   entry: ManagedExchangeDiagnosticEntry,
 ): RecoveryRow {

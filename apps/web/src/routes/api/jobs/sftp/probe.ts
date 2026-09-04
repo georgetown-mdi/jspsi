@@ -29,10 +29,10 @@ const probeBodySchema = z.strictObject({
 });
 
 /**
- * The 200 envelope for a probe attempt that ran: `ok` carries the fingerprint
+ * The 200 envelope for a probe attempt that ran: `ok` holds the fingerprint
  * and key type; a probe with no key is `unreachable` / `timeout` / `error`.
  * Non-2xx is reserved for HTTP-level conditions (a bad body, a probe already
- * in flight, the gate off, an internal fault). An `unreachable` may carry a
+ * in flight, the gate off, an internal fault). An `unreachable` may hold a
  * closed `peerAnswer` vocabulary and, for a non-SSH answer, the shape and an
  * ESCAPED, capped excerpt of the peer's first bytes, bounded in `sftpProbe`.
  */
@@ -63,7 +63,7 @@ function probeEnvelope(result: SftpProbeResult): Record<string, unknown> {
  * is stateless (it never touches the authored connection, records nothing) and
  * single-flight (a concurrent probe is a 409).
  *
- * The request carries host + port ONLY; the response carries a fingerprint and a
+ * The request contains host + port ONLY; the response contains a fingerprint and a
  * key type ONLY (fingerprint regex-validated, key type charset/length-capped), or
  * a probe-outcome category and, on an `unreachable` the child diagnosed, a closed
  * peer-answer vocabulary with a bounded escaped excerpt of the peer's first

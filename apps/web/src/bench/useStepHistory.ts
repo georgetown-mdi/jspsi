@@ -11,7 +11,7 @@ import {
  * Forward walk the steps in place instead of leaving the route. It does not own
  * the step -- the component keeps its `useState` -- but it pushes a marked
  * history entry on each forward move and, on a `popstate`, hands the caller the
- * step the target entry carries so the component can restore it without
+ * step the target entry holds so the component can restore it without
  * remounting or losing the loaded file.
  *
  * A restore may be clamped: the step the entry names can require backing state

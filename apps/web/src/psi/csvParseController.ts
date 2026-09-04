@@ -34,7 +34,7 @@ export type CSVParseInput = Parameters<typeof loadCSVFile>[0];
  * from its return type for the same no-papaparse-import reason. */
 export type CSVParseResult = Awaited<ReturnType<typeof loadCSVFile>>;
 
-/** The row array a {@link CSVParseResult} carries -- the part the worker reply streams
+/** The row array a {@link CSVParseResult} holds -- the part the worker reply streams
  * in batches and {@link parseInWorker} accumulates back. Derived from
  * {@link CSVParseResult} for the same no-papaparse-import reason. */
 export type CSVParseRows = CSVParseResult["data"];
@@ -63,9 +63,9 @@ export interface CSVParseRequest {
 
 /**
  * Worker response, delivered as a STREAM rather than a single post: zero or more
- * `{ ok: true; done: false }` batches, each carrying a slice of the parsed rows
+ * `{ ok: true; done: false }` batches, each holding a slice of the parsed rows
  * in order, followed by exactly one terminal message. The terminal message is
- * either `{ ok: true; done: true }` -- carrying the non-row remainder of the
+ * either `{ ok: true; done: true }` -- holding the non-row remainder of the
  * result (`errors` and `meta`), which {@link parseInWorker} pairs with the
  * accumulated rows to rebuild the full {@link CSVParseResult} -- or
  * `{ ok: false }`, a serialized error (message plus name, so it survives

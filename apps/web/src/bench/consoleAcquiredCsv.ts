@@ -25,13 +25,13 @@ export interface ConsoleAcquiredProfile {
  *
  * `rawRows` is a getter that throws in dev and test and yields the empty array in a
  * production build. Any explicit `rawRows` read is a consumer that does not source
- * from the profile (rowCount, dateInputFormat, and the preview/coverage seams);
+ * from the profile (rowCount, dateInputFormat, and the preview/coverage boundaries);
  * failing loud in every dev run and test catches it at once, while degrading to
  * empty in production keeps an overlooked reader rendering an empty preview rather
  * than crashing the operator's session. The ESLint `rawRows` restriction is the
  * static half of the same safety check.
  *
- * The getter is defined NON-ENUMERABLE: a bench component receives this shape as a
+ * The getter is defined NON-ENUMERABLE: a console component receives this shape as a
  * prop, and React's dev-mode render logging enumerates prop values, which would trip
  * the throwing getter on an entirely legitimate render. A non-enumerable property is
  * skipped by that reflection (and by spreads / `Object.keys`) yet still throws on an

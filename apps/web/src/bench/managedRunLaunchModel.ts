@@ -130,9 +130,9 @@ function expiredFailure(expires: string): ManagedRunFailureAlert {
  * away, so the run refused before reading the input file and before connecting --
  * the single-owner invariant holding, not a failure to recover from.
  *
- * It carries no copy and offers nothing to take the exchange back with. Taking a
+ * It holds no copy and offers nothing to take the exchange back with. Taking a
  * handed-off exchange back happens on that exchange's own surface, not through a
- * refused run; reaching this state settles the run surface onto the stored spent
+ * refused run; reaching this state fixes the run surface onto the stored spent
  * state, which tells the operator where the exchange runs and what the refused
  * run did. */
 const HANDED_OFF_FAILURE: ManagedRunHandedOffFailure = {

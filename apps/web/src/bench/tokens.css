@@ -1,4 +1,4 @@
-/* Design tokens for the linkage bench, matching the mockup at
+/* Design tokens for the linkage console, matching the mockup at
    design/web-redesign/proposal-c.html and namespaced --bench-* so they cannot
    collide with Mantine's variables. The dark set keys off Mantine's
    color-scheme attribute rather than prefers-color-scheme, so it follows the

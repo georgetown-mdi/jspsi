@@ -70,7 +70,7 @@ export interface ConfigRow {
  * The read-only linkage-terms rows for the configuration view, derived from this
  * party's persisted exchange-file document: the matched-on keys, what this party
  * sends, whether it receives the result, and the legal agreement. Renders names
- * and categories only, never a row value, exactly as the document carries (see
+ * and categories only, never a row value, exactly as the document states (see
  * docs/spec/MANAGED_EXCHANGE_RECORD.md, the `exchangeFile` row).
  */
 export function linkageTermsRows(exchangeFile: ExchangeSpec): Array<ConfigRow> {
@@ -214,7 +214,7 @@ export interface RunHistoryEntry {
   when: string;
   /** The outcome phrased for display, e.g. "Succeeded", "Partner did not arrive". */
   outcome: string;
-  /** The plain, accurate disclosure line for this entry. The run bookkeeping carries
+  /** The plain, accurate disclosure line for this entry. The run bookkeeping holds
    * no match result, count, or row value (it is closed enums and a timestamp), so
    * this states what the record can accurately say, not a fabricated disclosure. */
   disclosure: string;
@@ -323,7 +323,7 @@ export function runHistoryEntries(
  *
  * The accounting view reads this to keep its empty state accurate: an empty
  * accounting is not evidence nothing was disclosed, since a reset clears stored
- * entries without touching the record, and export/import carries the exchange
+ * entries without touching the record, and export/import moves the exchange
  * without its accounting.
  *
  * ONE-WAY: the record keeps only the most recent run (see

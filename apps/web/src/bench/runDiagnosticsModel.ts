@@ -121,7 +121,7 @@ export function runDiagnosticsWithControl<
 }
 
 /**
- * The draft carried across a RE-TARGET of the directory a sweep would run
+ * The draft's state after a RE-TARGET of the directory a sweep would run
  * against -- a transport switch, or an SFTP connection authored afresh. The
  * confirmation attests ONE directory, so it does not survive that directory
  * changing; the operator's other choices are about the run rather than the
