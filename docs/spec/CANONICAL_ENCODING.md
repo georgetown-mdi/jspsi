@@ -34,7 +34,7 @@ One case falls outside that equivalence, and it is stated here rather than left
 to be discovered. RFC 8785 section 3.2.2.2 requires a compliant implementation
 to **terminate with an error** on invalid Unicode data such as a lone surrogate;
 PSI-Link instead escapes it and emits bytes (see [Strings](#strings)). So for a
-value carrying a lone surrogate the two do not agree: an implementation written
+value containing a lone surrogate the two do not agree: an implementation written
 to RFC 8785 alone produces no output where PSI-Link produces a hashable byte
 string. Reproducing PSI-Link's bytes for that input requires this document's
 rule, not the RFC's. For every other value in the domain below, RFC 8785 output
@@ -75,7 +75,7 @@ A value to be canonically encoded is one of:
 
 | Kind | Notes |
 |------|-------|
-| string | any JavaScript string, including one carrying an unpaired UTF-16 surrogate (see [Strings](#strings)) |
+| string | any JavaScript string, including one containing an unpaired UTF-16 surrogate (see [Strings](#strings)) |
 | number | finite; integers must be **safe** (see [Numbers](#numbers)) |
 | boolean | `true` or `false` |
 | null | the JSON null literal |
@@ -83,7 +83,7 @@ A value to be canonically encoded is one of:
 | object | unordered set of string-keyed members whose values are in this domain |
 
 Everything else is **rejected** rather than coerced -- as is a value of the
-shapes above that carries a member an encoder would substitute or drop --
+shapes above that contains a member an encoder would substitute or drop --
 because silent coercion is the classic way two implementations diverge:
 
 - `undefined` -- as an object member value, an array element, or the top-level
@@ -140,21 +140,21 @@ the hash cross-party reproducible.
 
 A third-party implementation reproducing the agreed-terms hash MUST apply the
 identical key fold before encoding, because the fold is byte-significant and is
-deliberately a minimal rewrite, not a general snake_case-to-camelCase conversion.
+a minimal rewrite, not a general snake_case-to-camelCase conversion.
 The normative rule: in **every** object key throughout the terms (applied
 recursively), replace each underscore immediately followed by an ASCII lowercase
 letter (`a`-`z`) with that letter upper-cased and drop the underscore; leave every
 other character unchanged, and never transform string *values*, only keys. It is
 exactly the substitution `s.replace(/_([a-z])/g, (_, c) => c.toUpperCase())`. The
-edge cases a reproducer must match: an underscore NOT followed by an ASCII
+edge cases a reproducer must match: an underscore not followed by an ASCII
 lowercase letter is left intact, so `input_format` -> `inputFormat` but
 `INPUT_FORMAT` -> `INPUT_FORMAT` (the `_F` does not fold), `field_1` -> `field_1`
 (digit), and `input__format` -> `input_Format` (only the second underscore folds);
-a LEADING underscore before a lowercase letter still folds and is dropped, so
+a leading underscore before a lowercase letter still folds and is dropped, so
 `_format` -> `Format`; an already-camelCase key has no underscore-plus-lowercase
 and is unchanged. psilink
 emits only camelCase keys, so a token it produced is already in this normal form --
-the fold is observable only for a hand-authored or third-party token carrying
+the fold is observable only for a hand-authored or third-party token containing
 `snake_case` keys.
 
 ### Numbers
@@ -217,7 +217,7 @@ is not "absent in a tidy way" -- it is rejected. Producers express "no value" by
 ### Binary fields
 
 Binary data embedded in a receipt or record -- salts, signatures, certificate
-fingerprints, certificate blobs -- is carried as a **base64url string without
+fingerprints, certificate blobs -- is encoded as a **base64url string without
 padding** (the URL- and filename-safe alphabet of
 [RFC 4648](https://www.rfc-editor.org/rfc/rfc4648#section-5) section 5,
 `A-Z a-z 0-9 - _`, with no trailing `=`). That section fixes the alphabet and
@@ -287,7 +287,7 @@ equals `sha256Hex`).
 
 One normative case is absent from the file: the `-0` to `0` normalization
 ([Numbers](#numbers) and the worked example `{"n":-0}` -> `{"n":0}`). JSON has no
-negative zero -- a `-0` literal parses to `0` -- so it cannot be carried as a
+negative zero -- a `-0` literal parses to `0` -- so it cannot be represented as a
 JSON `value`. Verify it from a `-0` literal in your own language; the Node suite
 does so directly.
 
