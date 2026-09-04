@@ -14,13 +14,9 @@ import type { DoctorCheckRecord, DoctorReport } from "./verdict";
 import { fail, ok, skipped, warn } from "./verdict";
 
 // The userspace half of the file-drop checks: what the exchange needs, asked of
-// the server over TCP with smbclient, with nothing mounted. It answers the
-// questions a failed exchange leaves open in the wrong order -- is the name
-// resolvable from in here, is 445 reachable, are the credentials accepted, does
-// the share open, does the folder open, can a file be created, renamed, and
-// deleted -- so an operator is told which one failed instead of "the exchange
-// did not work". `doctor mount` is the other half: the same folder as the kernel
-// sees it once mounted.
+// the server over TCP with smbclient, with nothing mounted. `doctor mount` is
+// the other half, against the same folder as the kernel sees it once mounted.
+// See docs/CLI.md, "Checking a network file drop".
 
 /** Ceiling on one smbclient invocation. */
 const SMBCLIENT_TIMEOUT_MS = 30_000;
@@ -28,10 +24,10 @@ const SMBCLIENT_TIMEOUT_MS = 30_000;
 /** Ceiling on the port-445 reachability probe. */
 const TCP_PROBE_TIMEOUT_MS = 8_000;
 
-/** The SMB port an exchange over a file drop is carried on. */
+/** The SMB port a file-drop exchange runs over. */
 const SMB_PORT = 445;
 
-/** Free space below which the share is worth a note, in MB. */
+/** Free space below which the share earns a warning, in MB. */
 const LOW_FREE_SPACE_MB = 100;
 
 /**
@@ -105,12 +101,10 @@ export function statusOf(output: string): string | undefined {
 
 /**
  * Whether a command died without the server having supplied a verdict. An empty
- * status means "the server said nothing", never "the command succeeded": a
- * transport that dies before the server answers -- a firewall that completes the
- * TCP handshake and then swallows the session, a server wedged mid-negotiation
- * -- carries no NT_STATUS token at all, so scraping alone reads it as success
- * and every later check reports an OK it never established. The exit status is
- * the only evidence the command ran, so both are consulted.
+ * status never means success: a transport that dies before the server answers
+ * -- a swallowed session, a server wedged mid-negotiation -- has no NT_STATUS
+ * token, so scraping alone would read it as success. The exit status is the
+ * other evidence the command ran, so both are consulted.
  * @internal exported for testing
  */
 export function transportFailed(result: CommandResult): boolean {
@@ -130,10 +124,10 @@ export function freeMegabytes(listing: string): number | undefined {
 }
 
 /**
- * Entries in a listing, excluding `.` and `..`. A count, deliberately, and not
- * the listing: these are the operator's own filenames on their own share, and
- * the runbook asks them to send this output on to whoever is helping them, who
- * is not a party to their exchange.
+ * Entries in a listing, excluding `.` and `..`. A count by design, not the
+ * listing: these are the operator's own filenames on their own share, and the
+ * runbook asks them to send this output on to whoever is helping them, who is
+ * not a party to their exchange.
  * @internal exported for testing
  */
 export function countEntries(listing: string): number {
@@ -145,9 +139,9 @@ export function countEntries(listing: string): number {
 }
 
 /**
- * The subdirectory check over the folder the exchange will run in, carrying the
- * advisory a folder earns when it already holds more entries than the transport
- * will list.
+ * The subdirectory check over the folder the exchange will run in, including
+ * the advisory a folder earns when it already holds more entries than the
+ * transport will list.
  */
 function entryCountCheck(summary: string, entries: number): DoctorCheckRecord {
   if (entries <= MAX_DIRECTORY_ENTRIES) return ok("subdirectory", summary);
@@ -328,7 +322,7 @@ function authenticationCheck(
       // still refuse the share list -- refusing IPC$ to ordinary accounts is
       // common and reports as ACCESS_DENIED -- and aborting on that sends the
       // operator to ask for rights they already have. Opening the share the
-      // exchange will use is the question worth answering.
+      // exchange will use is what actually decides it.
       return ok("authentication", "the credentials were accepted.", {
         meaning:
           `the server would not list its shares (${status}). That is common ` +
@@ -466,10 +460,9 @@ function freeSpaceCheck(listing: string): DoctorCheckRecord {
 }
 
 /**
- * Run the userspace SMB battery and report a verdict. Performs no mount and
+ * Run the userspace SMB checks and report a verdict. Performs no mount and
  * changes nothing on the share except the probe files it creates and removes,
- * plus the marker it deliberately leaves behind for a later `doctor mount` to
- * find.
+ * plus the marker it leaves behind for a later `doctor mount` to find.
  */
 export async function runProbe(
   input: SmbProbeInput,
@@ -547,17 +540,10 @@ export async function runProbe(
 
   // The credentials file is the delivery channel for the password: an argv value
   // is readable by every process on the machine, and an environment variable by
-  // anything that can read /proc. It is created inside an owner-only directory
-  // and removed on every exit path below. The password lands under the same
-  // write construction every other psilink credential takes: the 0600 mode set
-  // on the descriptor before any content, and on macOS the extended ACL cleared
-  // first. The directory is the other half of that on macOS: a mkdtemp directory
-  // under the operator's TMPDIR inherits an ACE of its own and hands it down to
-  // everything created inside, so it is stripped before the credentials file
-  // exists -- clearing the ACE on the directory an smbclient run reads through,
-  // and leaving none for the file, the write probe, or the marker to inherit. A
-  // refused strip or write takes the whole run with it, rather than delivering
-  // the password through a directory or a file that could not be secured.
+  // anything that can read /proc. Its write construction -- the 0600 mode, and
+  // the macOS extended-ACL strip on both the file and its mkdtemp directory --
+  // is specified in docs/spec/CREDENTIAL_STORAGE.md, "macOS extended-ACL strip".
+  // A refused strip or write takes the whole run with it.
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-doctor-"));
   const authFile = path.join(workDir, "auth");
   const lines = [
@@ -613,9 +599,9 @@ export async function runProbe(
     }
     // Ahead of the status classification on purpose: a server that dies
     // mid-negotiation and one that refuses the dialect both mention
-    // negotiation, and only the second carries an NT_STATUS token, so
-    // classifying on the token rather than the word keeps a wedged server from
-    // being reported as a dialect disagreement.
+    // negotiation, and only the second has an NT_STATUS token, so classifying
+    // on the token rather than the word keeps a wedged server from being
+    // reported as a dialect disagreement.
     if (/protocol negotiation/i.test(list.output)) {
       checks.push(
         fail(
@@ -727,7 +713,7 @@ export async function runProbe(
     // failed run litters again. The sweep is by mask because it has to match what
     // a PREVIOUS run named, which a fixed list cannot do.
     //
-    // The marker file is deliberately not swept. It is the one file another
+    // The marker file is not swept, by design. It is the one file another
     // operator may be relying on right now, and deleting it turns their mount
     // check into a "wrong folder" verdict that blames their server.
     const stale = await smb("del psilink-probe-*.tmp*");

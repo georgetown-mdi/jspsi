@@ -187,7 +187,7 @@ export function readSmbProbeInput(env: NodeJS.ProcessEnv): SmbProbeInput {
 
 /**
  * Read and validate the `doctor mount` inputs from `env`. Both are optional:
- * without them the mount battery runs its write, exclusive-create, and rename
+ * without them the mount run performs its write, exclusive-create, and rename
  * checks and reports the marker cross-check as skipped.
  *
  * @throws {UsageError} on a malformed marker name or token.
