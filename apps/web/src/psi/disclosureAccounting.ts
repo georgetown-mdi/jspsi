@@ -1,32 +1,24 @@
 /**
  * A managed exchange's accounting of disclosures: the self-attested exchange
  * records its runs produce, accumulated in run order. This is the pure,
- * IndexedDB-free half of {@link ./disclosureAccountingStore.ts}, so the shape and
- * the append rule are unit-testable in Node with no database.
+ * IndexedDB-free half of {@link ./disclosureAccountingStore.ts}, so the shape
+ * and the append rule are unit-testable in Node with no database.
  *
- * An entry IS a run's exchange record, verbatim -- not a summary derived from one
- * and not a second format beside it. Every fact the accounting states (the
- * partner, the governing agreement and the purpose of the disclosure under it,
- * what kind of disclosure the algorithm made, the categories of data disclosed
- * each way, the matching basis the linkage keyed on and the rule set the terms
- * cited it to, the records this party exposed, the result size where both parties
- * were entitled to it, where this party filed its copy of the result, and the
- * instant) is a field of that record, which is exactly what makes the record the
- * accounting's single source (see docs/spec/EXCHANGE_RECORD.md). A reader that
- * wants more than the accounting renders opens the entry itself.
+ * An entry IS a run's exchange record, verbatim -- not a derived summary.
+ * Every fact the accounting states is a field of that record (see
+ * docs/spec/EXCHANGE_RECORD.md), which is exactly what makes the record the
+ * accounting's single source.
  *
- * The managed record deliberately cannot hold this: its `lastRun` is a timestamp
- * and closed enums by design, and it keeps only the most recent run (see
- * docs/spec/MANAGED_EXCHANGE_RECORD.md, the `lastRun` row). So the accounting is a
- * SIBLING store keyed by the same record id, exactly as the local sibling state is
- * -- which is also what keeps it out of the export artifact, since the exporter
- * reads only the records store.
+ * The managed record cannot hold this by design: its `lastRun` keeps only
+ * the most recent run (see docs/spec/MANAGED_EXCHANGE_RECORD.md, the
+ * `lastRun` row). So the accounting is a SIBLING store keyed by the same
+ * record id, which also keeps it out of the export artifact.
  *
- * What it holds at rest is the record's own cleartext content: names, categories,
- * references, and aggregate counts, never a payload value, a linkage-field value,
- * or a matched identifier. The `resultSize` an entry carries is the intersection
- * CARDINALITY under the record format's entitlement gate, not the intersection --
- * the no-match-result rule the managed record states is untouched.
+ * What it holds at rest is the record's own cleartext content -- names,
+ * categories, references, aggregate counts -- never a payload value,
+ * linkage-field value, or matched identifier. The `resultSize` an entry
+ * holds is the intersection CARDINALITY under the record format's
+ * entitlement gate, not the intersection itself.
  */
 
 import { z } from "zod";
@@ -77,19 +69,13 @@ const accountingEnvelopeSchema: ZodType<{
   .strict();
 
 /**
- * Parse the ENVELOPE of a value read from the accounting store, returning the
- * stored entries verbatim and unvalidated. Rejects an unrecognized accounting
- * `version` or an unknown key, but looks inside no entry.
- *
- * This is the recovery read, and the ONLY admitted use of what it returns is
- * handing the stored bytes back to the operator. A record-format version bump
- * invalidates the entries while leaving the envelope intact, which strands an
- * accounting the full read below can no longer load; this is the read that gets
- * it out. What it returns must never be rendered AS an accounting: the entries
- * are exactly what the full read refused to vouch for, and reading an older
- * entry's absent fields through the current format's meaning of their absence is
- * the quietly false account {@link parseDisclosureAccounting} exists to prevent
- * (see docs/spec/EXCHANGE_RECORD.md on the version literal moving with the field
+ * Parse the ENVELOPE of a value read from the accounting store: the stored
+ * entries verbatim and unvalidated. Rejects an unrecognized `version` or an
+ * unknown key, but looks inside no entry. This is the recovery read -- the
+ * only admitted use is handing stored bytes back to the operator, since a
+ * record-format version bump can strand entries the full read below can no
+ * longer load. Never render what it returns AS an accounting (see
+ * docs/spec/EXCHANGE_RECORD.md on the version literal moving with the field
  * set).
  *
  * @throws {ZodError} if the envelope is not a valid accounting envelope.
@@ -121,26 +107,15 @@ function versionParts(
 }
 
 /**
- * Whether any stored entry names a LATER exchange-record format than this build
- * admits -- the direction that says the READER is behind, not the stored value.
- *
- * A refused entry means one of two opposite things, and only the entry's own
- * version literal tells them apart. An entry from an EARLIER format is the
- * app-upgrade case: this build is current, and the entries are stranded until
- * they are exported and cleared. An entry from a LATER one is the reverse -- a
- * newer deployment activated while this page kept the code it started with (the
- * service worker does not swap code under a running page; see
- * {@link ../utils/appShellUpdate.ts}), so a build that reads these entries
- * already exists and reloading onto it is the whole fix. Clearing them there
- * would destroy readable records over a stale tab.
- *
- * True on ANY such entry, including an accounting that mixes the two: whatever
- * else is stranded, the build that should be deciding about it is the current
- * one, not this page.
- *
- * A version literal this cannot order -- another family, or a shape carrying no
- * ordinal -- is not later. So a value nothing can be concluded about keeps the
- * app-upgrade reading, which is the one that offers a way out.
+ * Whether any stored entry names a LATER exchange-record format than this
+ * build admits -- the direction that says the READER is behind, not the
+ * stored value. An earlier-format entry is the app-upgrade case (stranded
+ * until exported and cleared); a later one means a newer deployment already
+ * exists and reloading is the fix (the service worker does not swap code
+ * under a running page; see {@link ../utils/appShellUpdate.ts}), so clearing
+ * it here would destroy readable records. True on any such entry, including a
+ * mixed accounting. A version literal this cannot order (another family, or
+ * a shape holding no ordinal) is treated as not later.
  */
 export function storedEntriesAheadOfThisBuild(
   stored: StoredDisclosureAccounting,
@@ -163,16 +138,12 @@ export function storedEntriesAheadOfThisBuild(
 
 /**
  * Parse and validate a value read from the accounting store. Rejects an
- * unrecognized `version`, an unknown key, or an entry that is not a valid exchange
- * record, rather than loading it -- so a corrupted or app-upgrade-invalidated
- * accounting surfaces as a read failure. Surfacing it matters more here than
- * elsewhere: an accounting that silently dropped its unreadable entries would
- * still render, as a shorter and quietly false account of what was disclosed.
- *
- * Composed on {@link parseStoredDisclosureAccounting} so the split the recovery
- * path rests on is structural rather than asserted: this read IS the envelope
- * read plus the per-entry validation, so the two can only ever fail together or
- * fail at the entries.
+ * unrecognized `version`, an unknown key, or an entry that is not a valid
+ * exchange record, rather than loading it -- so a corrupted or
+ * app-upgrade-invalidated accounting shows as a read failure rather than
+ * silently rendering a shorter, false account. Composed on
+ * {@link parseStoredDisclosureAccounting}, so the envelope read and the
+ * per-entry validation can only ever fail together or fail at the entries.
  *
  * @throws {ZodError} if the value is not a valid accounting.
  */
@@ -185,15 +156,14 @@ export function parseDisclosureAccounting(raw: unknown): DisclosureAccounting {
 }
 
 /**
- * Append one run's exchange record to the accounting, returning the result; a
- * missing accounting starts one. The record is stored verbatim.
+ * Append one run's exchange record to the accounting, returning the result;
+ * a missing accounting starts one. The record is stored verbatim.
  *
  * Appending the same run twice is a no-op, matched on the record's own
- * `bindingNonce`: it is CSPRNG-generated per exchange and generated locally, so it
- * distinguishes runs within this holder's own log (see
- * docs/spec/EXCHANGE_RECORD.md, "Record fields") -- which is precisely the
- * question a re-appended entry poses. That makes the append idempotent, so a
- * retried write cannot inflate the count of disclosures the accounting reports.
+ * `bindingNonce` (CSPRNG-generated locally per exchange, so it distinguishes
+ * runs within this holder's own log; see docs/spec/EXCHANGE_RECORD.md,
+ * "Record fields"). The append is idempotent, so a retried write cannot
+ * inflate the disclosure count.
  */
 export function appendDisclosureRecord(
   current: DisclosureAccounting | undefined,

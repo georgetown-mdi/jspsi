@@ -10,23 +10,23 @@ import type { AuthoredSftpServerRequest } from "@jobs/sftpServer";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
 
 /**
- * The browser-side client for authoring the console appliance's SFTP connection
+ * The browser-side client for authoring the console's SFTP connection
  * ({@link ../jobs/routes} `PUT`/`DELETE /api/jobs/sftp`) and browsing the mounted
  * secrets directory for a credential file (`GET /api/jobs/mounts/secrets/entries`).
  * Every call is a same-origin fetch to a `gateJobRoute`-protected endpoint; off
- * the console appliance those endpoints answer 404, so a hosted build never
- * reaches them. Responses are validated defensively -- the appliance is trusted,
- * but a malformed body degrades to an honest error state rather than a crash.
+ * the console those endpoints answer 404, so a hosted build never reaches
+ * them. Responses are validated defensively -- the console is trusted, but a
+ * malformed body degrades to a graceful error state rather than a crash.
  *
- * The authoring body carries a credential source: a file-reference credential (a
+ * The authoring body holds a credential source: a file-reference credential (a
  * typed `@path` or a secrets-mount locator the server resolves) by default, or --
  * as a de-emphasized fallback -- a pasted value the server materializes to a file
- * on the appliance. Under the single-party-appliance trust model the value crosses
+ * on the console. Under the single-operator console trust model the value crosses
  * only same-origin loopback on the operator's own machine. The secrets browse
  * reads no file bytes.
  */
 
-/** The authoring request body a `PUT /api/jobs/sftp` carries. Mirrors the server's
+/** The authoring request body a `PUT /api/jobs/sftp` sends. Mirrors the server's
  * wire contract: a file-reference credential or a pasted value the server
  * materializes to a file. */
 export type AuthoredSftpConnectionRequest = AuthoredSftpServerRequest;
@@ -58,12 +58,12 @@ export type SecretsEntriesResult =
 
 /**
  * The outcome of a `PUT /api/jobs/sftp` authoring request:
- * - `ok`: the connection was authored; carries the effective credential-free
+ * - `ok`: the connection was authored; holds the effective credential-free
  *   projection.
  * - `invalid`: a `400` -- the body failed validation; `message` is the server's
- *   field-path-only reason (no submitted value or secret), safe to surface.
- * - `tooLarge`: a `413` -- the request body exceeded the appliance's size limit,
- *   a distinct cause from an unreachable appliance.
+ *   field-path-only reason (no submitted value or secret), safe to show.
+ * - `tooLarge`: a `413` -- the request body exceeded the console's size limit,
+ *   a distinct cause from an unreachable console.
  * - `error`: another non-2xx, a network fault, or a malformed success body.
  */
 export type PutSftpConnectionResult =
@@ -73,7 +73,7 @@ export type PutSftpConnectionResult =
   | { kind: "error" };
 
 /** Read the field-path-only validation message off a `400` body, or a fixed
- * fallback when the body carries none. The server generates the message from
+ * fallback when the body holds none. The server generates the message from
  * field paths and fixed reasons (never a submitted value), so it is safe to
  * display. */
 function validationMessageOf(body: unknown): string {
@@ -88,7 +88,7 @@ function secretsEntriesOf(body: unknown): SecretsEntriesResult | null {
   if (!isRecord(body)) return null;
   const { configured, entries } = body;
   if (typeof configured !== "boolean") return null;
-  // Absent `readable` reads as readable: the non-alarming direction.
+  // Absent `readable` is treated as readable: the non-alarming direction.
   const readable = body.readable;
   if (readable !== undefined && typeof readable !== "boolean") return null;
   if (!Array.isArray(entries)) return null;
@@ -139,7 +139,7 @@ export async function fetchSecretsEntries(
 }
 
 /** Author the SFTP connection through `PUT /api/jobs/sftp`. Distinguishes a
- * validation rejection (a surfaceable field message) from a transport/other
+ * validation rejection (a showable field message) from a transport/other
  * error, so the form can name what to fix. */
 export async function putSftpConnection(
   body: AuthoredSftpConnectionRequest,
@@ -185,14 +185,14 @@ export async function deleteSftpConnection(
 
 /**
  * The outcome of a `POST /api/jobs/sftp/probe` host-key read:
- * - `ok`: the appliance read a host key; carries the observed fingerprint and key
+ * - `ok`: the console read a host key; holds the observed fingerprint and key
  *   type (both re-validated client-side, defense in depth over the server check).
  * - `invalid`: a `400` -- the host was malformed; `message` is the server's
- *   field-path-only reason, safe to surface.
+ *   field-path-only reason, safe to show.
  * - `busy`: a `409` -- a probe is already running; the operator can retry.
  * - `unreachable` / `timeout`: the probe ran but read no key (the server could not
- *   be reached, or the attempt exceeded the appliance's budget). An `unreachable`
- *   may carry the appliance's {@link ProbePeerAnswer} of what answered the port.
+ *   be reached, or the attempt exceeded the console's budget). An `unreachable`
+ *   may hold the console's {@link ProbePeerAnswer} of what answered the port.
  * - `disabled`: a `404` -- the job API is off (a hosted build).
  * - `error`: another non-2xx, a network fault, or a malformed/`error` body.
  */
@@ -205,7 +205,7 @@ export type ProbeSftpHostKeyResult =
   | { kind: "disabled" }
   | { kind: "error" };
 
-/** The shapes the appliance reports a non-SSH answer as. */
+/** The shapes the console reports a non-SSH answer as. */
 export type ProbePeerAnswerShape = "http" | "tls-alert" | "unrecognized";
 
 /**
@@ -215,18 +215,18 @@ export type ProbePeerAnswerShape = "http" | "tls-alert" | "unrecognized";
  * having sent nothing.
  *
  * `excerpt` is a fragment somebody else chose. It arrives already escaped by the
- * appliance -- the display sink for those bytes is on the server side of this
+ * console -- the display sink for those bytes is on the server side of this
  * boundary -- so it is rendered verbatim and never escaped a second time. Its
  * length is bounded again on the way in, and its characters are checked against
- * what that escape can emit, like every other field this body carries.
+ * what that escape can emit, like every other field this body holds.
  */
 export type ProbePeerAnswer =
   | { kind: "nonSsh"; shape: ProbePeerAnswerShape; excerpt: string }
   | { kind: "closedUnanswered" };
 
 /** Read the probe-outcome body defensively: re-check the fingerprint against the
- * canonical regex client-side (the appliance is trusted, but a malformed body
- * degrades to an honest error rather than filling a pin with a bad value) and
+ * canonical regex client-side (the console is trusted, but a malformed body
+ * degrades to a graceful error rather than filling a pin with a bad value) and
  * require a non-empty key type. An unexpected shape is the error state. */
 function probeOutcomeOf(body: unknown): ProbeSftpHostKeyResult {
   if (!isRecord(body)) return { kind: "error" };
@@ -260,20 +260,20 @@ const PROBE_PEER_ANSWER_SHAPES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * The cap on the excerpt, in UTF-16 code units: the same bound the appliance
+ * The cap on the excerpt, in UTF-16 code units: the same bound the console
  * applies when it escapes the peer's bytes (`PROBE_EXCERPT_MAX_DISPLAY_LENGTH`
- * in jobs/sftpProbe.ts), re-applied here for the reason every other field on
- * this body is re-checked -- a malformed body degrades to a bounded value rather
- * than reaching the alert copy at whatever length it arrived with.
+ * in jobs/sftpProbe.ts), re-applied here so a malformed body degrades to a
+ * bounded value rather than reaching the alert copy at whatever length it
+ * arrived with.
  *
  * Mirrored rather than imported: the server module it lives in is not client
- * code, and re-validation at this boundary has to check what THIS side is
- * willing to render, independent of the producer.
+ * code, and re-validation here has to check what this side is willing to
+ * render, independent of the producer.
  */
 const PROBE_EXCERPT_MAX_LENGTH = 512;
 
 /**
- * Every character the appliance's display escape can emit: printable ASCII and
+ * Every character the console's display escape can emit: printable ASCII and
  * nothing else. `sanitizeForDisplay` passes U+0020 through U+007E and rewrites
  * every other code point as a `\xHH` / `\uHHHH` escape built from those same
  * characters, and its truncation marker is plain ASCII too.
@@ -281,24 +281,20 @@ const PROBE_EXCERPT_MAX_LENGTH = 512;
 const ESCAPED_EXCERPT_CHARACTERS = /^[\x20-\x7e]*$/;
 
 /**
- * Read the peer-answer diagnosis off an `unreachable` body, or undefined when it
- * carries none or carries one outside the closed vocabulary. A body without one
- * is the state every unreachable probe was in before the appliance grew the
- * field, so an unrecognized value degrades to the bare category rather than to
- * an error.
+ * Read the peer-answer diagnosis off an `unreachable` body, or undefined when
+ * it holds none or one outside the closed vocabulary; an unrecognized value
+ * degrades to the bare category rather than to an error.
  *
- * The excerpt is bounded rather than dropped: it is a fragment somebody else
- * chose, so an over-long one is the malformed-body case this module's other
- * checks cover, not a reason to lose the diagnosis. The bound is applied the way
- * the appliance applies its own -- the kept prefix plus the truncation marker --
- * so an excerpt the appliance already truncated passes through unchanged.
+ * The excerpt is bounded rather than dropped: an over-long one is the
+ * malformed-body case this module's other checks cover, not a reason to lose
+ * the diagnosis. The bound is applied the way the console applies its own --
+ * the kept prefix plus the truncation marker -- so an excerpt the console
+ * already truncated passes through unchanged.
  *
- * A character the escape cannot emit is the one excerpt fault answered by
- * dropping the diagnosis: the alert renders these bytes verbatim, so a value
- * carrying a line break, a control character, or a bidi override never went
- * through the appliance's escape, and there is no shortening that makes it
- * renderable. Escaping it here instead would double every backslash an honest
- * excerpt already carries, so the bare category is what such a body yields.
+ * A character the escape cannot emit drops the diagnosis instead: the alert
+ * renders these bytes verbatim, so a value holding a line break, a control
+ * character, or a bidi override never went through the console's escape, and
+ * there is no shortening that makes it renderable.
  */
 function probePeerAnswerOf(
   body: Record<string, unknown>,
@@ -321,16 +317,16 @@ function probePeerAnswerOf(
 
 /** The excerpt clipped to {@link PROBE_EXCERPT_MAX_LENGTH} characters, with
  * {@link DISPLAY_TRUNCATION_MARKER} appended -- on top of the cap, as the
- * appliance's own escape appends it -- when anything was dropped. Escaping is
- * the appliance's, since doing it again here would double every backslash it
+ * console's own escape appends it -- when anything was dropped. Escaping is
+ * the console's, since doing it again here would double every backslash it
  * wrote, so this only shortens.
  *
- * Measured limit: an appliance escape that stopped at an escape boundary BELOW
- * the cap still arrives past it with the marker attached, and the clip then lands
- * inside that marker and appends a second one, ending the excerpt
- * `......[truncated]`. Cosmetic, and out of an honest CLI's reach, whose
- * 128-byte excerpt escapes to at most the 512 characters the appliance caps at,
- * so the appliance never truncates one. */
+ * Measured limit: a console escape that stopped at an escape boundary below
+ * the cap still arrives past it with the marker attached, and the clip then
+ * lands inside that marker and appends a second one, ending the excerpt
+ * `......[truncated]`. Cosmetic, and out of a conforming CLI's reach, whose
+ * 128-byte excerpt escapes to at most the 512 characters the console caps
+ * at, so the console never truncates one. */
 function boundedExcerpt(excerpt: string): string {
   return excerpt.length <= PROBE_EXCERPT_MAX_LENGTH
     ? excerpt
@@ -349,9 +345,9 @@ function probeValidationMessage(body: unknown): string {
 /**
  * Read the host-key fingerprint an SFTP server presents through
  * `POST /api/jobs/sftp/probe`, so the form can offer it beside the paste field for
- * a comparison. Carries the host and optional port ONLY; the response is validated
+ * a comparison. Sends the host and optional port only; the response is validated
  * defensively (the fingerprint re-checked client-side). Distinguishes an
- * unreachable/timed-out server, a busy appliance, a disabled API, and a bad host
+ * unreachable/timed-out server, a busy console, a disabled API, and a bad host
  * from a generic error so the form can name each.
  */
 export async function probeSftpHostKey(

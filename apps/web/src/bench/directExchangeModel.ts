@@ -18,7 +18,7 @@ import type { LinkageStrategy, LinkageTerms, Metadata } from "@psilink/core";
 import type { LinkageRefusal } from "@psi/linkageRefusal";
 
 /**
- * The pure model behind the console "Direct exchange" bench: the symmetric spine's
+ * The pure model behind the "Direct exchange" console: the symmetric spine's
  * steps, the agreed-server step's continue gate, and the browser-side terms
  * preview the confirm screen renders. No React, no I/O -- the tested boundary for
  * "the previewed terms match what the CLI infers from the same columns" and for
@@ -26,7 +26,7 @@ import type { LinkageRefusal } from "@psi/linkageRefusal";
  */
 
 /** The transport a direct exchange runs over. SFTP composes its connection from
- * the appliance's effective authored server (`PUT /api/jobs/sftp`); filedrop from
+ * the console's effective authored server (`PUT /api/jobs/sftp`); filedrop from
  * the operator-configured rendezvous mount. No WebRTC arm, mirroring the CLI's
  * zero-setup channels. */
 export type DirectTransport = "sftp" | "filedrop";
@@ -56,9 +56,9 @@ export const DIRECT_STEP_ORDER: ReadonlyArray<DirectStep> = [
  * The identity the preview stands the operator's label in for. The preview is
  * memoized on the committed file rather than rebuilt per keystroke, so it does
  * not read the identity field at all. That costs nothing: the preview is never
- * displayed with an identity -- the confirm screen shows the inferred terms under
- * a self-terms ("proposing") framing that does not surface the identity string --
- * and a run that leaves the field blank sends no identity rather than a stand-in.
+ * displayed with an identity -- the confirm screen's self-terms ("proposing")
+ * framing does not show the identity string -- and a run that leaves the field
+ * blank sends no identity rather than a stand-in.
  */
 export const DEFAULT_PREVIEW_IDENTITY = "you";
 
@@ -80,13 +80,12 @@ export const DIRECT_LINKAGE_STRATEGY_AGREEMENT_NOTICE =
   "records are compared.";
 
 /**
- * The strategy field a zero-setup intent carries for the operator's choice.
- *
+ * The strategy field a zero-setup intent holds for the operator's choice.
  * Only a non-default choice is emitted, matching every other zero-setup flag
- * (see `zeroSetupOptionsArgv`): a zero-setup run loads no configuration file for
- * a flag to override, so `--linkage-strategy=cascade` and no flag at all select
- * the same strategy, and the graduated command line stays the shortest one that
- * runs what was prototyped.
+ * (see `zeroSetupOptionsArgv`): a zero-setup run loads no configuration file
+ * for a flag to override, so `--linkage-strategy=cascade` and no flag select
+ * the same strategy, and the graduated command line stays the shortest one
+ * that runs what was prototyped.
  */
 export function directLinkageStrategyIntentFields(strategy: LinkageStrategy): {
   linkageStrategy?: LinkageStrategy;
@@ -115,21 +114,19 @@ export interface DirectServerGates {
   runDiagnosticsBlocked: boolean;
   /** Whether the authored connection and the retain choice disagree over the
    * split-directory precondition. The remedy is stated in full by the step's own
-   * alert, so the gate carries the state rather than a second copy of it. */
+   * alert, so the gate holds the state rather than a second copy of it. */
   splitDirectoryBlocked: boolean;
 }
 
 /**
- * Why the agreed-server step cannot be left yet, as the sentence shown beside the
- * disabled Continue button -- `undefined` exactly when nothing blocks, which is
- * what the step enables on. The gate and the explanation are ONE derivation, so a
- * state that disables the button while saying nothing is unrepresentable rather
- * than merely tested against.
- *
- * The chain follows the step's own reading order, so an operator working down the
- * screen is sent to the first unresolved surface they meet, and each sentence
- * names the card to open: both authoring cards are collapsed disclosures whose
- * own problem notice is invisible until they are.
+ * Why the agreed-server step cannot be left yet, as the sentence shown beside
+ * the disabled Continue button -- `undefined` exactly when nothing blocks,
+ * which is what the step enables on. The gate and the explanation are ONE
+ * derivation, so a state that disables the button while saying nothing is
+ * unrepresentable. The chain follows the step's own reading order, sending
+ * the operator to the first unresolved surface, and each sentence names the
+ * card to open (both authoring cards are collapsed disclosures whose problem
+ * notice is invisible until opened).
  */
 export function directServerBlockedReason(
   gates: DirectServerGates,
@@ -157,8 +154,8 @@ export function directServerBlockedReason(
  * preview and run desyncs, caught by the runtime two-party terms check. */
 export interface DirectTermsPreview {
   /** The inferred linkage terms, with `payload.send` authored from the disclosed
-   * columns so the terms display honestly reflects what leaves the machine (the
-   * default terms carry no payload block; disclosure rides the metadata at run
+   * columns so the terms display accurately reflects what leaves the machine (the
+   * default terms hold no payload block; disclosure rides the metadata at run
    * time). */
   linkageTerms: LinkageTerms;
   /** The inferred column metadata the terms derive from. */
@@ -167,7 +164,7 @@ export interface DirectTermsPreview {
    * records -- what this file contributes on the wire. */
   disclosedPayloadColumns: Array<string>;
   /** The 1-based positions of the disclosed columns whose name is too long to
-   * carry ({@link overlongDisclosedColumnPositions}); non-empty means the run
+   * hold ({@link overlongDisclosedColumnPositions}); non-empty means the run
    * would be refused at prepare time, so the confirm screen refuses it here
    * instead. This spine has no disclosure control -- the inferred metadata sends
    * every non-linkage column -- so the remedy is a shorter header. */
@@ -179,27 +176,20 @@ export interface DirectTermsPreview {
 }
 
 /**
- * Compute the direct-exchange terms preview from the input file's columns. Mirrors
- * the CLI's zero-setup inference (`prepareForExchange({}, identity, rows, columns)`
- * infers metadata then default terms) so the preview matches what actually runs;
- * `payload.send` is authored from the inferred metadata's disclosed set the same
- * way the quick-invitation mint does, so the "columns sent" display is honest
- * rather than empty.
- *
- * The operator's selected `linkageStrategy` is applied over the inferred terms,
- * as the CLI's zero-setup command applies `--linkage-strategy` over the terms
- * `prepareForExchange` authored -- so a run set to single-pass previews the terms
- * it runs, disclosure note and all, rather than the cascade it does not.
+ * Compute the direct-exchange terms preview from the input file's columns.
+ * Mirrors the CLI's zero-setup inference (`prepareForExchange({}, identity,
+ * rows, columns)`) so the preview matches what actually runs; `payload.send`
+ * is authored from the inferred metadata's disclosed set, so the "columns
+ * sent" display is accurate rather than empty. The operator's selected
+ * `linkageStrategy` is applied over the inferred terms, mirroring how the CLI
+ * applies `--linkage-strategy` over `prepareForExchange`'s terms.
  *
  * The refusal grades the PREVIEWED terms with the inferred metadata and no
- * authored standardization, the same three inputs `prepareForExchange` grades on
- * this spine, so the screen refuses exactly what the run would. The unsatisfied
- * set it names when the narrowing leaves no key is assessed against the FULL
- * default terms instead: the narrowed set no longer declares the dropped fields,
- * and those field types are what a conforming file would carry.
- *
- * `inferMetadata` throws on an empty column name; the picker's commit refuses a
- * blank header before the preview is computed, so callers pass only named columns.
+ * authored standardization -- the same inputs `prepareForExchange` grades --
+ * so the screen refuses exactly what the run would; when narrowing leaves no
+ * key, the unsatisfied set is assessed against the FULL default terms
+ * instead. `inferMetadata` throws on an empty column name, so callers pass
+ * only named columns (the picker's commit refuses a blank header first).
  */
 export function previewInferredTerms(
   columns: Array<string>,

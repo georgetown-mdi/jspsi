@@ -1,6 +1,6 @@
-/* Layout and identity classes for the linkage bench, translated from the
+/* Layout and identity classes for the linkage console, translated from the
    approved mockup (design/web-redesign/proposal-c.html) onto the --bench-*
-   tokens (tokens.css). Interactive controls stay Mantine; these classes carry
+   tokens (tokens.css). Interactive controls stay Mantine; these classes hold
    only what Mantine cannot: the top bar and work/ledger grid, and the
    mockup's type discipline (mono = real data or protocol state, sans =
    guidance). */
@@ -62,16 +62,13 @@
 /* Excludes a Mantine Button rendered as an anchor (component={Link}): a filled
    Button's label color is --button-color (routed to the per-scheme contrast
    color by the theme, see theme.ts FILLED_PRIMARY_CONTRAST), and this rule's
-   higher specificity (a class + type selector vs. Mantine's single class on
-   .mantine-Button-root) would otherwise overwrite that with --bench-accent --
-   which resolves close enough to the filled background color that the label
-   became unreadable until :hover repainted the background. An outline/light
-   Button legitimately wants accent-colored text, so the exclusion is scoped
-   to the Button root, not to Mantine controls generally. mantine-Button-root
-   is one of Mantine's global static class names (unhashed by design, so apps
-   can target it), so it must be wrapped in :global() here -- CSS Modules
-   would otherwise locally scope/hash the name inside :not() and the
-   exclusion would silently never match. */
+   higher specificity would otherwise overwrite it with --bench-accent, close
+   enough to the filled background to make the label unreadable. An
+   outline/light Button still wants accent-colored text, so the exclusion is
+   scoped to the Button root only. mantine-Button-root is one of Mantine's
+   unhashed global class names, so it must be wrapped in :global() here --
+   CSS Modules would otherwise hash the name inside :not() and the exclusion
+   would silently never match. */
 .page a:not(:global(.mantine-Button-root)) {
   color: var(--bench-accent);
 }
@@ -194,7 +191,7 @@
 
 /* Scoped under .topBar so the left-auto margin outweighs the .page p margin
    rule (higher specificity), keeping the note pinned to the bar's right edge
-   rather than reading as a sixth step. */
+   rather than being treated as a sixth step. */
 .topBar .topBarNote {
   margin: 0 0 0 auto;
   font-size: 12px;
@@ -505,7 +502,7 @@
 
 /* The input of the read-only field holding the peer's own first bytes, below the
    probe's failure alert and outside it: monospace and neutral ink rather than
-   the alert's voice, so a fragment somebody else chose reads as theirs on screen
+   the alert's voice, so a fragment somebody else chose displays as theirs on screen
    as well as in the accessibility tree. Grows to its content rather than
    scrolling (the field autosizes): the whole capped excerpt is what the operator
    judges. */
@@ -621,7 +618,7 @@
 
 /* An offered key the built-in set does not declare. Neutral rather than a
    severity color: it marks provenance, not a problem, and it sits beside a
-   verdict badge that does carry severity. */
+   verdict badge that does hold severity. */
 .keyBadgeOptIn {
   color: var(--bench-secondary);
   border: 1px solid var(--bench-rule);
@@ -1012,9 +1009,9 @@
   font-weight: 600;
 }
 
-/* A configuration row's value list: one entry per line, so a name carrying a
-   list separator cannot read as two entries. Unbulleted and unindented, so it
-   sits in the row exactly where a single value would. */
+/* A configuration row's value list: one entry per line, so a name holding a
+   list separator cannot be treated as two entries. Unbulleted and unindented,
+   so it sits in the row exactly where a single value would. */
 .dlValueList {
   list-style: none;
   margin: 0;
