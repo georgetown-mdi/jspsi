@@ -6,19 +6,12 @@ import { PSIParticipant } from "../../src/participant";
 import { createMessagePipe } from "../../src/connection/messageConnection";
 import { psiElementBounds } from "../../src/connection/frameSize";
 
-// End-to-end stress: a full identifyIntersection round between two in-memory
-// participants at large N, not just the setup message. This exercises the whole
-// pipeline -- server setup, client request, doubly-encrypted response,
-// association-table assembly, and the lockstep send/receive -- and so also
-// covers the byte-by-byte protobuf marshalling cost on the large-Raw path.
-//
-// That marshalling makes the full round ~50x costlier per element than the
-// setup-message-only test (~1.5ms/element here), so this carries its own
-// smaller default and its own knob (PSI_STRESS_E2E_N) rather than sharing
-// PSI_STRESS_N. The createSetupMessage test already guards the ~125k overflow
-// cliff; pushing a full round above it end-to-end takes minutes, so a heavier
-// run needs both the knob and a raised stress-project timeout. OVERLAP is the
-// known intersection.
+// End-to-end stress: a full identifyIntersection round at large N,
+// exercising the whole pipeline including protobuf marshalling cost --
+// about 50x costlier per element than the setup-message-only test, hence a
+// smaller default and its own env setting (PSI_STRESS_E2E_N) rather than
+// PSI_STRESS_N. createSetupMessage covers the ~125k overflow cliff; a
+// heavier run here takes minutes, needing the setting and a raised timeout.
 const N = Number(process.env.PSI_STRESS_E2E_N ?? 25_000);
 const OVERLAP = Math.min(1_000, N);
 
@@ -33,10 +26,11 @@ test(`identifyIntersection over ${N} elements yields the ${OVERLAP} shared ids`,
     serverData[i] = clientData[i] = `shared-${i}`;
   }
 
-  // Exercise the element-count guard at scale with the REAL derived bound rather
-  // than disabling it: one PSI round (keyCount 1) over N distinct values per side,
-  // so each masked set carries exactly N elements and the tight bound N admits it
-  // -- proving the guard never rejects a genuinely large legitimate frame.
+  // Exercise the element-count guard at scale with the real derived bound
+  // rather than disabling it: one PSI round (keyCount 1) over N distinct
+  // values per side, so each masked set holds exactly N elements and the
+  // tight bound N admits it -- proving the guard never rejects a large
+  // legitimate frame.
   const [serverConn, clientConn] = createMessagePipe();
   const bounds = psiElementBounds(
     { effectiveKeyCount: 1, recordCount: N },

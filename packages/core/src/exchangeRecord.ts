@@ -34,7 +34,7 @@ import type { Algorithm, AssociationTable } from "./types.js";
 // of data exchanged, both self-asserted identities, the timestamp, this party's
 // exposed record count, the result size when both parties are entitled to it,
 // and an optional retention pointer -- enough for a HIPAA or FERPA accounting
-// without re-matching the linkage-terms config. It carries governance metadata
+// without re-matching the linkage-terms config. It holds governance metadata
 // only, never a payload, linkage-field, or matched-identifier value; the
 // exchanged data is bound by commitments, not embedded.
 //
@@ -95,7 +95,7 @@ export type CommitmentName =
 // each party's committed data and recomputes the canonical bytes (see
 // CommittedPayload) rather than comparing commitment strings. Recomputing the
 // OTHER party's commitment also needs that party's salt, so it is not
-// derivable from one's own record alone; VerificationKeys carries only salts,
+// derivable from one's own record alone; VerificationKeys holds only salts,
 // never a data snapshot.
 const COMMITMENT_DOMAINS: Record<CommitmentName, string> = {
   associationTable: "psilink-commit-association-table/v1",
@@ -142,7 +142,7 @@ export async function computeCommitment(
  * `false` for a tampered data set, a wrong salt, or any other mismatch.
  *
  * `data` is re-supplied by the caller (from its own retained input and result),
- * not read from a stored snapshot -- the verification keys carry only salts.
+ * not read from a stored snapshot -- the verification keys hold only salts.
  * The caller must reproduce the exact canonical bytes the commitment was
  * computed over (the record format's `CommittedPayload` / association-table
  * shape; see docs/spec/CANONICAL_ENCODING.md), or verification fails even for a
@@ -236,7 +236,7 @@ interface RecordPayloadColumn {
   name: string;
   /** Optional data-dictionary description. Unlike the name, a description is NOT
    * cross-party validated at exchange time, so the two parties' records may
-   * legitimately carry different description text for the same column. */
+   * legitimately hold different description text for the same column. */
   description?: string;
 }
 
@@ -248,7 +248,7 @@ interface RecordLegalAgreement {
   /** Human-readable agreement identifier (e.g. "MOU-2025-0042"). */
   reference: string;
   /** Readable statement of the purpose/authority for this disclosure under the
-   * agreement -- the HIPAA 164.528 / FERPA 99.32 purpose, carried so the record
+   * agreement -- the HIPAA 164.528 / FERPA 99.32 purpose, included so the record
    * states why the disclosure happened without opening the agreement. Metadata
    * only -- never a protected, linkage-field, or payload value. */
   purpose: string;
@@ -261,7 +261,7 @@ interface RecordLegalAgreement {
  * match keyed on and its semantic type. Names and types only, never values.
  * The standardized `name` (not the raw source column) is the identifier the
  * linkage keys, the standardization config, and the cross-party agreement
- * all reference; `type` is the human-legible PII category. Both are
+ * all reference; `type` is the human-readable PII category. Both are
  * validated identical across parties at exchange time. */
 interface RecordLinkageField {
   /** Standardized linkage-field name (not the raw source column). */
@@ -273,7 +273,7 @@ interface RecordLinkageField {
 /** The named rule set the agreed terms cited their linkage fields and keys to,
  * copied from those terms: the name and content version of each half. It lets
  * the record answer "which rules did this linkage match on" with a citation an
- * agreement or governance review can carry, alongside the per-field
+ * agreement or governance review can hold, alongside the per-field
  * {@link RecordLinkageField} basis.
  *
  * A citation, not an account: the set is an upper bound on the keys that could
@@ -285,9 +285,9 @@ interface RecordLinkageField {
  * The CITATION's cross-party consistency is the terms' own: two parties that
  * both cite a set must cite the same one before any data moves. Where the
  * partner cited none, this is this party's own citation and the partner's
- * record carries none -- an asymmetry the exchange permits so hand-authored
+ * record holds none -- an asymmetry the exchange permits so hand-authored
  * rules can meet a named set. The
- * {@link ExchangeRecordGovernance.linkageRuleSetVerdict} beside it carries no
+ * {@link ExchangeRecordGovernance.linkageRuleSetVerdict} beside it holds no
  * such guarantee: it is this party's own check, not an agreed term. */
 export interface RecordLinkageRuleSet {
   /** Name and content version of the set the linkage fields were cited to. */
@@ -336,7 +336,7 @@ interface RecordLinkageRuleSetVerdict {
  * linkage-field, or matched-identifier value. The algorithm, legal agreement,
  * and matching basis are drawn from terms both parties validated at exchange
  * time; the payload column sets are drawn from the committed payloads instead.
- * Both parties' records still carry consistent metadata for the same exchange
+ * Both parties' records still hold consistent metadata for the same exchange
  * -- the committed payloads are byte-identical, so one party's
  * {@link payloadSent} equals the other's {@link payloadReceived} -- except a
  * column's free-text {@link RecordPayloadColumn.description}, which is not
@@ -385,7 +385,7 @@ interface ExchangeRecordGovernance {
  * point or it did not -- the whole set these two values divide.
  *
  * - `completed`: the run finished. A run that signed exchanged its receipt; a
- *   run with no signing identity had none to exchange and carries no
+ *   run with no signing identity had none to exchange and has no
  *   {@link ExchangeRecord.receiptBinder}.
  * - `receipt-swap-terminated`: the disclosure occurred and the run then
  *   terminated without this party holding a receipt for it. The signed-receipt
@@ -428,9 +428,9 @@ export const EXCHANGE_RECORD_OUTCOMES = [
  * Unicode (bidi-override, zero-width, homoglyph) in these fields. Every sink
  * that renders a record to a person MUST escape each such field where it is
  * shown (`sanitizeForDisplay`), never mutating the stored value, which stays
- * byte-exact. Each sink carries this obligation on its own -- a new viewer,
+ * byte-exact. Each sink holds this obligation on its own -- a new viewer,
  * exporter, or log line does not inherit another's escaping. The web app's
- * accounting-of-disclosures view and its CSV export carry it through the
+ * accounting-of-disclosures view and its CSV export hold it through the
  * `Displayable` brand `sanitizeForDisplay` returns, so a raw field does not
  * typecheck into what they render.
  */
@@ -463,7 +463,7 @@ export interface ExchangeRecord {
    * {@link resultSize}: this is the size of THIS party's input, not the
    * intersection, so it stays meaningful even under a future algorithm that
    * discloses neither the result size nor the partner's set size. Always
-   * present; carries no protected value -- an aggregate count of the holder's
+   * present; holds no protected value -- an aggregate count of the holder's
    * own records. */
   recordsExposed: number;
   /** Intersection size, present only in the both-output case: stored only when
@@ -471,7 +471,7 @@ export interface ExchangeRecord {
    * not what a party happens to observe. A single-output helper can observe its
    * match count during the clean cascade, but the record does not surface it:
    * privacy here is enforced by what the tool writes down, not by what is
-   * theoretically discoverable. Each party's own outbound exposure is carried
+   * theoretically discoverable. Each party's own outbound exposure is held
    * by {@link recordsExposed} instead. */
   resultSize?: number;
   /** Optional self-facing retention/disposition pointer: a free-text operator
@@ -480,13 +480,13 @@ export interface ExchangeRecord {
    * Unlike the {@link governance} block, it is NOT drawn from the agreed terms:
    * it is sourced from this party's local exchange config, never exchanged with
    * the partner, and not folded into {@link ExchangeRecord.termsHash} -- so the
-   * two parties' records may legitimately carry different pointers (or none).
+   * two parties' records may legitimately hold different pointers (or none).
    * Metadata only, no protected, linkage-field, or payload value. Omitted
    * entirely when absent -- its absence is explicit, never an empty string. */
   retentionDisposition?: string;
   /** Per-exchange CSPRNG binder (base64url, >= 128 bits) so two runs with
    * identical terms still produce distinct records. Generated locally, so the two
-   * parties' records for one run carry DIFFERENT nonces -- it distinguishes runs
+   * parties' records for one run hold DIFFERENT nonces -- it distinguishes runs
    * within one holder's own log and pairs nothing across artifacts. Distinct from
    * the per-commitment salts; not a hiding secret. */
   bindingNonce: string;
@@ -497,9 +497,9 @@ export interface ExchangeRecord {
    * Present exactly when the run DERIVED one, so its absence states that no
    * receipt can belong to this record -- an unpaired receipt beside it is
    * therefore a mismatch, not merely unchecked. A {@link outcome} of
-   * `receipt-swap-terminated` still carries the binder while this party holds
+   * `receipt-swap-terminated` still has the binder while this party holds
    * no receipt, since the partner may hold a completed receipt bearing it and
-   * dropping it would make that receipt unpairable. Carries no secret: it is a
+   * dropping it would make that receipt unpairable. Holds no secret: it is a
    * one-way HKDF output the signed receipt already publishes (see
    * `deriveReceiptBinder`). */
   receiptBinder?: string;
@@ -525,7 +525,7 @@ interface CommitmentSalts {
  * the operator chose to write, never in this file.
  *
  * Still private, not shareable: a salt together with the record's commitment
- * can brute-force a low-entropy committed value (notably the intersection), so
+ * can brute-force a low-entropy committed value (the intersection), so
  * anyone holding both the keys and the record could open the commitments.
  * Verification therefore re-supplies the committed data (from the holder's own
  * retained input and result) and recomputes the canonical bytes; see
@@ -542,7 +542,7 @@ export interface VerificationKeys {
 
 // Untrusted-input bounds. parseExchangeRecord's production caller is the
 // verification reader, ingesting a record file from another party, so every
-// partner-controlled string and array below carries a generous length /
+// partner-controlled string and array below has a generous length /
 // element-count cap -- the same caps the linkage-terms producers imply
 // (MAX_NAME_LENGTH, MAX_TEXT_LENGTH, MAX_LINKAGE_ENTRIES, MAX_PAYLOAD_ENTRIES),
 // so a record this module produces always parses back, while an oversized
@@ -553,7 +553,7 @@ export interface VerificationKeys {
 // defense-in-depth ceilings, not semantic limits.
 
 // Length cap for the fixed-size base64url crypto values a record and its keys
-// carry (termsHash, bindingNonce, receiptBinder, each commitment, each salt):
+// hold (termsHash, bindingNonce, receiptBinder, each commitment, each salt):
 // every one is a 32-byte value -- 43 unpadded base64url characters -- so 256 is
 // far above any legitimate value yet refuses a megabyte-scale hostile string.
 // Bounds the field for the untrusted reader without pinning the exact byte
@@ -631,7 +631,7 @@ const RecordLinkageFieldSchema: z.ZodType<RecordLinkageField> = z.object({
   name: z.string().min(1).max(MAX_NAME_LENGTH),
   // `type` is not pinned to the current LinkageField type enum: the record is a
   // frozen log, so a reader accepts whatever category a (possibly newer) writer
-  // recorded rather than rejecting an unrecognized type. It carries the same
+  // recorded rather than rejecting an unrecognized type. It has the same
   // length cap as a name -- a semantic category is a short label, not prose.
   type: z.string().min(1).max(MAX_NAME_LENGTH),
 });
@@ -652,7 +652,7 @@ const RecordLinkageRuleSetSchema: z.ZodType<RecordLinkageRuleSet> = z.object({
   keySet: RecordLinkageSetIdentitySchema,
 });
 
-// Pinned to the closed set of verdicts, the same asymmetry `algorithm` carries
+// Pinned to the closed set of verdicts, the same asymmetry `algorithm` has
 // against its open sibling `RecordLinkageField.type`: a set name or a content
 // version is descriptive text a frozen-log reader passes through, while a
 // verdict is meaning-bearing -- it states what the writer checked and what it
@@ -679,7 +679,7 @@ const ExchangeRecordGovernanceSchema: z.ZodType<ExchangeRecordGovernance> = z
     // does not change what the record means, so a frozen-log reader passes it
     // through. algorithm is meaning-bearing protocol structure that gates the
     // disclosure semantics (psi revealed identifiers, psi-c only a count); a
-    // record carrying an algorithm this version does not define is not a v1
+    // record that has an algorithm this version does not define is not a v1
     // record, so reject an unknown one here rather than admit semantics a v1
     // reader cannot interpret.
     algorithm: AlgorithmSchema,
@@ -760,7 +760,7 @@ const VerificationKeysSchema: z.ZodType<VerificationKeys> = z.object({
  * this on-disk, version-frozen format.
  *
  * It binds the column names and the values, NOT any party's internal row
- * indices. The received payload's rows carry the PARTNER's row indices on the
+ * indices. The received payload's rows contain the PARTNER's row indices on the
  * wire (see `PartnerPayload`), which the holder does not retain in a
  * reproducible form -- the human result file records the received values, not
  * the partner's row numbers -- so committing them would leave a holder unable
@@ -777,7 +777,7 @@ const VerificationKeysSchema: z.ZodType<VerificationKeys> = z.object({
  * is not part of it; a no-data payload is the empty-arrays value
  * `{ columns: [], rows: [] }`.
  *
- * Declared as a `type` (not an `interface`) so it carries an implicit index
+ * Declared as a `type` (not an `interface`) so it has an implicit index
  * signature and is assignable to {@link CanonicalValue} without a cast.
  */
 export type CommittedPayload = {
@@ -831,7 +831,7 @@ export interface ExchangeRecordInputs {
   /** The signed receipt's per-exchange binder for this run, when the run
    * derived one. Supply it whenever the derivation succeeded -- the caller
    * derives it once and passes the same value here and into the receipt
-   * content, so the two artifacts carry one shared per-run value, including
+   * content, so the two artifacts hold one shared per-run value, including
    * for a run whose swap then terminated, whose partner may hold a receipt
    * bearing it. Omit it on every path that derived none (no session key, or no
    * signing identity): the record's absent field then accurately states that
@@ -863,7 +863,7 @@ export interface BuiltExchangeRecord {
  * `algorithm`, `legalAgreement`, the rule-set citation, and the matching basis
  * come from this party's agreed terms: the first two are cross-party validated
  * (so they equal the partner's), the citation is validated between two parties
- * that both carry one, and the matching basis is the linkage fields the keys
+ * that both hold one, and the matching basis is the linkage fields the keys
  * reference. The citation's VERDICT is not drawn from the terms: it is computed
  * here, against the rule sets this build ships, so it is this party's own
  * statement rather than an agreed one.
@@ -880,7 +880,7 @@ export interface BuiltExchangeRecord {
  * `partnerPayloadReceived` commit over byte-identical data) keeps the two
  * parties' records mutually consistent. The dictionary is still consulted, by
  * column name, for the optional data-dictionary DESCRIPTION on each committed
- * column; an undescribed column carries a bare name. Reads names, types,
+ * column; an undescribed column has a bare name. Reads names, types,
  * descriptions, and the agreement reference and purpose only -- never a value.
  */
 function governanceFromTerms(
@@ -1056,7 +1056,7 @@ export async function buildExchangeRecord(
     // Readable governance metadata. The agreement, algorithm, and matching
     // basis come from this party's agreed terms (already schema-validated);
     // the payload column sets come from the committed payloads, so the
-    // readable disclosure cannot diverge from the committed bytes. Carries no
+    // readable disclosure cannot diverge from the committed bytes. Holds no
     // values -- only names, categories, descriptions, and the agreement
     // reference. Validated on build with the parser's own schema:
     // payloadReceived's column names come from the partner's payload wire

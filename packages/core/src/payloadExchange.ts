@@ -47,7 +47,7 @@ export interface PartnerPayload {
   /**
    * Payload rows, one per DISTINCT matched record of the sender. Positional
    * against {@link columns}: `rows[i][j]` is the value the column named at
-   * `columns[j]` contributed, so every row carries exactly one cell per column
+   * `columns[j]` contributed, so every row has exactly one cell per column
    * and a received message whose rows do not is refused at parse. Empty when
    * partner had no data.
    */
@@ -95,8 +95,8 @@ const hasDistinctRowIndices = (rowIndices: ReadonlyArray<number>): boolean => {
 
 // A payload row is positional against `columns`: its cell at each offset is
 // the value of the column named at that offset, so a row of any other width
-// carries a value no column names or leaves a named column without one -- and
-// a frame naming NO column while carrying rows is the whole of one row's
+// has a value no column names or leaves a named column without one -- and
+// a frame naming NO column while holding rows is the whole of one row's
 // values against none. The record commits the column names and the row
 // VALUES together (toCommittedPayload) while its readable governance list is
 // the names alone, so the two halves of one exchange record describe the same
@@ -108,7 +108,7 @@ const hasDistinctRowIndices = (rowIndices: ReadonlyArray<number>): boolean => {
 // first offender.
 //
 // Each row is held to being an array before its width is read: a string
-// carries a `length` of its own, so one spelling the declared count would
+// has a `length` of its own, so one spelling the declared count would
 // pass a width comparison alone and hand out its characters as the row's
 // cells. The wire schema refuses a non-array row at parse, but this guard
 // also stands behind an exported entry point whose PartnerPayload argument no
@@ -143,9 +143,9 @@ const payloadWireSchema = z.discriminatedUnion("hasData", [
       //
       // `columns` additionally bounds each NAME's LENGTH to the same
       // MAX_NAME_LENGTH ceiling the operator's own `terms.payload.receive`
-      // names carry: a received column name flows verbatim into this party's
+      // names have: a received column name flows verbatim into this party's
       // local exchange-record file (via governance.payloadReceived), so it
-      // carries the same bound those names do. Both the `.min(1)` floor and
+      // has the same bound those names do. Both the `.min(1)` floor and
       // the MAX_NAME_LENGTH ceiling are enforced here, as a per-ELEMENT length
       // check folded into the same single `every` pass (not a count `.max()`),
       // so it caps accumulation at one issue regardless of element count. The
@@ -209,11 +209,11 @@ const payloadWireSchema = z.discriminatedUnion("hasData", [
 export type PayloadWireMessage = z.infer<typeof payloadWireSchema>;
 
 /**
- * The local rows a payload frame carries for a matched table: each distinct
+ * The local rows a payload frame holds for a matched table: each distinct
  * matched row once, in first-occurrence order.
  *
  * A payload row is addressed by the SENDER's own row index, so a frame
- * carries one row per matched RECORD however many pairs that record stands
+ * holds one row per matched RECORD however many pairs that record stands
  * in. Under a deduplicating cardinality the local half of the association
  * table repeats a row -- several of the partner's records link to one of this
  * party's (see {@link AssociationTable}) -- and emitting one payload row per
@@ -784,7 +784,7 @@ export function assertOutboundPayloadConsented(
  * receiving party did not consent to receive.
  *
  * `declared` is the column set this party LOCKED IN as what it will receive
- * -- the inviter's `disclosedPayloadColumns` carried on the invitation (the
+ * -- the inviter's `disclosedPayloadColumns` held on the invitation (the
  * set the acceptor consented to on its review screen), a recurring party's
  * persisted expectation, or the EMPTY set for a party not entitled to the
  * result (which must receive no payload at all). `assertPayloadSendDisclosed`
@@ -802,7 +802,7 @@ export function assertOutboundPayloadConsented(
  * empty `declared` means "receive nothing," so a non-empty received set
  * against it aborts -- the fail-closed path for a party not entitled to the
  * result (the caller passes `[]` when its own `expectsOutput` is false) and
- * for an inviter that disclosed nothing (the mint carries `[]`, not an
+ * for an inviter that disclosed nothing (the mint holds `[]`, not an
  * omitted field). Only an ABSENT (undefined) `declared` is lazy -- empty is
  * NOT absent.
  *
@@ -820,7 +820,7 @@ export function assertOutboundPayloadConsented(
  *   empty, received empty) pass, and avoids a false abort on a zero-match
  *   exchange. The values riding with the columns are held to the names by
  *   the wire schema, which admits no row a column does not name, so an
- *   empty received set carries nothing to consent to.
+ *   empty received set holds nothing to consent to.
  *
  * @throws {ConnectionError} of kind `"protocol"` when `declared` is present
  *   and the received non-empty column set is not exactly it. A protocol
@@ -960,14 +960,14 @@ function uniqueColumnName(base: string, taken: ReadonlySet<string>): string {
  * against one of the partner's, or the reverse -- and each such pair is its
  * own result row: our identifier repeats down the column where the
  * multiplicity is ours, and one partner payload row is written against each
- * of our records where it is the partner's. The partner's payload carries
+ * of our records where it is the partner's. The partner's payload holds
  * one row per distinct record IT matched ({@link distinctMatchedRows}), so
  * the join below addresses that row once per pair rather than expecting one
  * payload row per pair.
  *
  * The first column identifies our matched records, headed by our identifier
  * column name (or `row_id` when no identifier column exists). The second
- * carries the partner's 0-based row index for each matched record, headed
+ * holds the partner's 0-based row index for each matched record, headed
  * `row_id` (disambiguated to `their_row_id`, then `their_row_id_2`, ... on
  * collision). It is emitted in every result -- not only when the partner sent
  * no payload -- so the result stays self-sufficient for later verification:
@@ -1030,7 +1030,7 @@ export function buildOutputTable(
   // One pass, refusing a row that is not a row and a cell that is not a cell. The
   // cell half is what keeps a value of another shape out of the CSV: quoteCsvField
   // looks for the characters RFC 4180 escapes with `includes`, which an ARRAY
-  // answers by element rather than by substring, so an array cell carrying a
+  // answers by element rather than by substring, so an array cell holding a
   // separator reports none and would reach the result unquoted, breaking the row's
   // framing. isPayloadCell is the wire schema's own cell predicate.
   for (const row of partnerPayload.rows) {
@@ -1084,7 +1084,7 @@ export function buildOutputTable(
   // A repeated index is a MALFORMED payload -- a sender emitting a row it
   // should have sent once -- refused under every cardinality: the frame
   // names two payload rows for one of the sender's records without saying
-  // which is the record's. Multiplicity is carried on the association
+  // which is the record's. Multiplicity is held on the association
   // table's side of the join, never here. The wire schema refuses the
   // repeat at parse, but this is an exported entry point taking a plain
   // PartnerPayload whose argument no type ties to a parsed frame, so the

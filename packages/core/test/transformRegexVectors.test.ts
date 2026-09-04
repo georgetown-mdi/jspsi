@@ -5,19 +5,12 @@ import { describe, expect, test } from "vitest";
 import { runPipeline } from "../src/standardization";
 import type { FieldValue } from "../src/standardization";
 
-// The Node half of the transform-regex cross-build contract. The vectors in
-// transform-regex-vectors.json carry the output each step produced on the
-// JavaScript `RegExp` engine (computed by generate-transform-regex-vectors.mjs);
-// runPipeline runs those steps on the linear-time engine (re2js). Asserting
-// the engine reproduces every vector pins that in-dialect patterns are
-// byte-identical to `RegExp` for the patterns and inputs these vectors
-// cover -- including every bundled default-template pattern. That corpus
-// deliberately excludes the inputs where re2js and `new RegExp` differ (e.g. `.`
-// over a non-BMP code point, `\s` being ASCII-only); those are exercised
-// separately by the divergent vector set below, whose expected values come from
-// re2js itself rather than `new RegExp`. apps/web/test/browser/transformRegex.test.ts
-// replays both files in the BROWSER build, so the two build targets are checked to
-// agree byte-for-byte on both the agree-domain and the divergent inputs.
+// These vectors hold each step's JavaScript RegExp output
+// (generate-transform-regex-vectors.mjs); runPipeline must reproduce them
+// exactly on the linear-time engine (re2js). Inputs where re2js diverges
+// from RegExp (e.g. `.` over a non-BMP code point, `\s` ASCII-only) are
+// excluded here and covered by the divergent vector set below. The browser
+// suite replays both files, so both build targets stay in agreement.
 
 interface Vector {
   name: string;
@@ -33,14 +26,12 @@ const { vectors } = JSON.parse(
   ),
 ) as { vectors: Vector[] };
 
-// A second set covering the inputs where re2js DIVERGES from `new RegExp` (the
-// documented code-point / class differences: `.` over a code point, `\s`
-// ASCII-only, `.` excluding only `\n`). Their expected values come from re2js
-// itself (generate-transform-regex-divergent-vectors.mjs), not `new RegExp`, so
-// they pin re2js's own behavior on exactly the inputs where an ESM/CJS build or a
-// re2js version change would first diverge -- the cases the agree-domain corpus
-// above cannot reach. The browser suite replays the same file, so the two build
-// targets are checked to agree here too.
+// A second set covering inputs where re2js diverges from `new RegExp`
+// (code-point/class differences: `.` over a code point, `\s` ASCII-only,
+// `.` excluding only `\n`). Expected values come from re2js itself
+// (generate-transform-regex-divergent-vectors.mjs), pinning its behavior on
+// the inputs where an ESM/CJS build or version change would first diverge.
+// The browser suite replays the same file, so both builds agree here too.
 const { vectors: divergentVectors } = JSON.parse(
   readFileSync(
     new URL(

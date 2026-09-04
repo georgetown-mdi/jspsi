@@ -192,7 +192,7 @@ interface InvitationRuleSetIdentitySummary {
 
 /**
  * The named rule set the inviter cites its linkage fields and keys to. Present
- * only when the invitation declares one; terms whose rules were authored carry
+ * only when the invitation declares one; terms whose rules were authored have
  * no citation, and a surface renders nothing rather than inventing one.
  */
 export interface InvitationRuleSetSummary {
@@ -210,7 +210,7 @@ interface InvitationPayloadSummary {
    * apart from the lazy case. */
   send: Array<Displayable>;
   /**
-   * Whether the send set is a definite DECLARATION -- the carried disclosed
+   * Whether the send set is a definite DECLARATION -- the held disclosed
    * subset (possibly empty), or an authored `payload.send` -- rather than the
    * lazy case (the inviter sends whatever its own metadata discloses, nothing
    * declared up front). When true and {@link send} is empty, the acceptor is
@@ -222,16 +222,16 @@ interface InvitationPayloadSummary {
    */
   sendDeclared: boolean;
   /**
-   * Whether {@link send} is the disclosed subset the invitation CARRIED -- the
+   * Whether {@link send} is the disclosed subset the invitation HELD -- the
    * inviter's own transmission predicate run over its own metadata -- rather
    * than the authored `payload.send` fallback used when no subset was
-   * carried. Strictly narrower than {@link sendDeclared}: a carried subset is
+   * held. Strictly narrower than {@link sendDeclared}: a held subset is
    * always a declaration, but an authored send is a declaration with no
    * subset behind it.
    *
    * Enforcement turns on this narrower condition: an acceptance commits to
-   * the CARRIED subset as what it will receive and reconciles the received
-   * payload against it. Where none was carried, there is no set to
+   * the HELD subset as what it will receive and reconciles the received
+   * payload against it. Where none was held, there is no set to
    * reconcile against, so an online run accepts whatever the inviter
    * transmits. A surface classifying the received-columns fact reads this
    * flag, not {@link sendDeclared}.
@@ -314,7 +314,7 @@ interface InvitationTransformSummary {
 /**
  * One element of a linkage key, reduced to what determines whether records
  * match on it: the field it derives from and any non-default matching rule it
- * carries (a value transform or a fuzzy-comparison expansion).
+ * holds (a value transform or a fuzzy-comparison expansion).
  */
 interface InvitationKeyElementSummary {
   /**
@@ -493,7 +493,7 @@ interface InvitationFieldSummary {
  */
 export interface InvitationSummary {
   /** The inviter's self-asserted identity, sanitized for display, or the
-   * absence marker `partyIdentityDisplay.ts` carries where the inviter supplied
+   * absence marker `partyIdentityDisplay.ts` holds where the inviter supplied
    * none. */
   invitingParty: Displayable;
   /** `psi` reveals matched identifiers; `psi-c` reveals only the count. */
@@ -562,7 +562,7 @@ export interface InvitationSummary {
   fanOutApplied: boolean;
   /**
    * Linkage keys (records are matched on these), in the inviter's order, each
-   * carrying its ordered elements and matching rules.
+   * holding its ordered elements and matching rules.
    */
   linkageKeys: Array<InvitationKeySummary>;
   /**
@@ -965,8 +965,8 @@ const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
 /**
  * The terse informative marker for a key element's collapsed-header entry.
  * Returns a SINGLE, most-salient marker, not one per rule -- the header is
- * terse by design, so an element carrying more than one rule shows just the
- * first, while its complete rule set is carried on
+ * terse by design, so an element holding more than one rule shows just the
+ * first, while its complete rule set is held in
  * {@link InvitationKeySummary.elements} for the per-key detail.
  *
  * A rule the exchange refuses outright is named as one ("not supported")
@@ -991,7 +991,7 @@ const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
  *   whose output a later `substring` run is measured to leave constant for
  *   every date ({@link substringCollapsesParsedDateToConstant}) -- the
  *   maximal collapse, checked first since it dominates any other rule the
- *   element also carries.
+ *   element also holds.
  * - "fallback": a `coalesce` that substitutes a constant on every record an
  *   earlier rule of the element emptied (core's
  *   {@link coalesceSubstitutesConstant}), the same collapse as "any date"
@@ -1230,7 +1230,7 @@ function summarizeKey(
         // transforms, else a one-directional donor -> recipient note when
         // exactly one does (`swapTransformDonor` names the donor first).
         // Keyed on transforms, not on fuzzy comparisons: a not-yet-applied
-        // fuzzy expansion carries its own "(proposed)" caveat in the detail
+        // fuzzy expansion has its own "(proposed)" caveat in the detail
         // and needs no separate note here.
         const firstTransforms = (first.transform?.length ?? 0) > 0;
         const secondTransforms = (second.transform?.length ?? 0) > 0;
@@ -1277,13 +1277,13 @@ function summarizeKey(
 
 /**
  * Build a display-ready {@link InvitationSummary} from an invitation's
- * linkage terms, optional expiry, and optional carried disclosed-columns
+ * linkage terms, optional expiry, and optional held disclosed-columns
  * subset. The parameter is a structural subset of {@link InvitationToken}
  * (`linkageTerms`, `expires`, `disclosedPayloadColumns`,
  * `connectionEndpoint`, `inviterRetainsFiles`), so a full decoded token is
  * accepted as-is, and so is the terms/expiry pair the exchange screen holds
  * without a token. The "columns your partner will send" line derives from
- * the carried `disclosedPayloadColumns` when present (the wire's own
+ * the held `disclosedPayloadColumns` when present (the wire's own
  * disclosure predicate), falling back to the authored `payload.send`
  * otherwise; the retained-files line derives from the declaration or the
  * endpoint's split-directory shape (see
@@ -1451,12 +1451,12 @@ export function summarizeInvitation(
     };
   }
 
-  // The columns the acceptor will RECEIVE derive from the carried
+  // The columns the acceptor will RECEIVE derive from the held
   // disclosedPayloadColumns -- the inviter's own isDisclosedToPartner
   // predicate output, exactly the set preparePayload transmits -- so the
   // displayed and consented set cannot drift from the bytes that flow.
   // Falls back to the authored payload.send names for an invitation that
-  // carried no disclosed subset (an older or metadata-unknown mint) and for
+  // held no disclosed subset (an older or metadata-unknown mint) and for
   // the inviter's own pre-mint "proposing" preview, which has authored its
   // send but holds no token field yet. `receive` (what the inviter requests
   // FROM the acceptor) has no transmission predicate to derive from and

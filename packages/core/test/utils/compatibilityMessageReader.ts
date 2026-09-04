@@ -1,20 +1,19 @@
 import { TERMS_VALUE_DELIMITER } from "../../src/config/compatibilityMessage";
 
 /**
- * Walk a composed diagnostic under the grammar `quoteTermsValue` emits: outside
- * a run every character stands for itself; inside one, a doubled delimiter is a
- * literal and a single delimiter closes the run.
+ * Walks a composed diagnostic under the grammar `quoteTermsValue` emits:
+ * outside a run every character stands for itself; inside one, a doubled
+ * delimiter is a literal and a single delimiter closes the run.
  *
- * Returns the message's CLAUSE SKELETON -- each run collapsed to one placeholder
- * -- and the raw values the runs carried. The skeleton is what the seam's
- * assertions compare: two runs of the same diagnostic, one with a benign value
- * and one with an adversarial one, must produce the SAME skeleton, which is the
- * precise statement that no value can be shown to the operator as a clause
- * psilink wrote.
+ * Returns the message's clause skeleton (each run collapsed to one
+ * placeholder) and the raw values the runs held. Two runs of the same
+ * diagnostic -- one with a benign value, one with an adversarial one --
+ * must produce the same skeleton: that is what proves no value can display
+ * to the operator as a clause psilink itself wrote.
  *
- * Shared rather than restated per suite: every message the seam composes is read
- * back through this one parser, so the reader `compatibilityMessage.test.ts` pins
- * against the constructor is the reader each caller's claim rests on.
+ * Every message compatibilityMessage.ts composes is read back through this
+ * one parser, so the reading compatibilityMessage.test.ts pins against the
+ * constructor is the reading every caller's claim rests on.
  */
 export const readMessage = (
   message: string,

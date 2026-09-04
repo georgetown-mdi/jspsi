@@ -19,13 +19,12 @@ import {
 import { safeParseSigningConfig } from "../src/config/signing";
 import { safeParseMetadata } from "../src/config/metadata";
 
-// Every safeParseX config helper runs camelizeKeys BEFORE Zod's safeParse, so a
-// camelize structural bound (the depth bound or the node-count/width budget)
-// must surface as a { success: false } result, not a throw -- the contract the
-// `safe` name promises for EVERY caller, not just the ones a try/catch wraps
-// today. One bound-tripping input exercises all six: camelize runs on the raw
-// value ahead of any schema, so the rejection is independent of which helper
-// (and which schema) is called.
+// Every safeParseX config helper runs camelizeKeys before Zod's safeParse, so
+// a camelize structural bound (the depth bound or the node-count/width
+// budget) must return a { success: false } result, not throw -- the contract
+// the `safe` name promises for every caller. camelize runs on the raw value
+// ahead of any schema, so one bound-tripping input exercises all six here,
+// independent of which helper or schema is called.
 
 // A flat array one past the node-count budget -- the cheapest node-count trip
 // (the O(1) array-length check rejects before .map allocates). Mirrors
@@ -63,7 +62,7 @@ for (const { name, fn } of safeHelpers) {
     // The synthesized failure has the shape a Zod safeParse failure has -- one
     // issue at the root path -- so a caller reading result.error.issues handles
     // it identically to any other invalid input. The message is the bound's
-    // fixed text: it carries no input bytes, satisfying the no-echo contract.
+    // fixed text: it holds no input bytes, satisfying the no-echo contract.
     expect(result?.success === false && result.error.issues).toEqual([
       {
         code: "custom",
@@ -105,8 +104,8 @@ test("a legitimate config still parses through the safe helper", () => {
   expect(result.success).toBe(true);
 });
 
-// The throwing parseX siblings are deliberately left throwing -- their
-// partner-wire call sites (protocolSetup.ts) catch the bound and surface the
+// The throwing parseX siblings are left throwing by design -- their
+// partner-wire call sites (protocolSetup.ts) catch the bound and report the
 // same sanitized rejection. Only the `safe` helpers absorb it.
 test("the throwing parseLinkageTerms still throws the camelize bound", () => {
   expect(() => parseLinkageTerms(overWideInput())).toThrow(

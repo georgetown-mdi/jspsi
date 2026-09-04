@@ -18,9 +18,8 @@ function isNativeUnavailable(error: unknown): boolean {
 /**
  * Loads the native N-API PSI addon for the running platform, or resolves
  * `undefined` when no prebuild is shipped here so the caller can skip. A
- * present-but-broken addon is re-thrown so the test FAILS rather than silently
- * skipping -- otherwise a corrupt or ABI-mismatched prebuild would report a false
- * green in exactly the CI environment these native tests exist to protect.
+ * present-but-broken addon is re-thrown so the test fails rather than
+ * silently skipping.
  */
 export async function loadNativeAddonOrSkip(): Promise<PSILibrary | undefined> {
   try {

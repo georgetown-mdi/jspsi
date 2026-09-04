@@ -18,11 +18,11 @@ import { fanOutFreeBounds } from "./utils/singlePassBounds";
 
 const psiLibrary = await PSI();
 
-// A WorkerPsiEngine wired to an in-process dispatcher instead of a real thread, so
-// the request/response protocol, id correlation, and (via structuredClone at the
-// boundary) the clonability of everything that crosses it are all exercised without
-// spawning a worker. structuredClone is what a real worker's postMessage does, so a
-// value that is not clonable -- a live library handle leaking across the seam --
+// A WorkerPsiEngine wired to an in-process dispatcher instead of a real
+// thread, so the request/response protocol, id correlation, and (via
+// structuredClone at the boundary) the clonability of everything that
+// crosses it are all exercised without spawning a worker. A value that is
+// not clonable -- a live library handle leaking across the boundary --
 // would throw here exactly as it would in production.
 function inProcessWorkerEngine(
   role: Config["role"],

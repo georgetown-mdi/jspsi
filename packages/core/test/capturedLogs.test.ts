@@ -19,7 +19,7 @@ afterEach(() => {
 });
 
 // A fresh name per case: loglevel's registry is process-wide, so a reused name
-// would carry one case's level into the next.
+// would leak one case's level into the next.
 let nextLoggerId = 0;
 const uniqueName = (prefix: string) => `${prefix}-${nextLoggerId++}`;
 
@@ -38,6 +38,6 @@ test("a .debug() line at verbose 1 is uncapturable until the root is raised firs
   logLibrary.setLevel("trace");
   const raised = capturedDebugLines(uniqueName("raised"), 1);
   expect(raised).toHaveLength(1);
-  // The captured line carries the prefixer's timestamp/level/name framing.
+  // The captured line holds the prefixer's timestamp/level/name framing.
   expect(raised[0]).toContain("sentinel line");
 });

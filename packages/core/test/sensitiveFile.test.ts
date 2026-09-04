@@ -8,7 +8,8 @@ import {
   parseSensitiveJson,
 } from "../src/sensitiveFile";
 
-// A distinctive credential value that must never appear in a surfaced message.
+// A distinctive credential value that must never appear in a displayed
+// message.
 const SECRET = "S3cr3tCredentialValue_2026";
 const LABEL = "config file /tmp/psilink.yaml";
 
@@ -61,10 +62,9 @@ test.each(throwingChannels)(
 
 test("the JSON structural bound stays path-only (no source), like every channel", () => {
   // parseSensitiveJson routes through parseBoundedJson, which rejects a
-  // structurally pathological document (here nesting past the depth bound) BEFORE
-  // JSON.parse can run. That rejection -- a distinct channel from a syntax error
-  // -- must also surface path-only, never the source. Pins the core-only behavior
-  // the promotion added.
+  // structurally pathological document (here nesting past the depth bound)
+  // before JSON.parse can run. That rejection -- a distinct channel from a
+  // syntax error -- must also report path-only, never the source.
   const deep = "[".repeat(5000) + `"${SECRET}"` + "]".repeat(5000);
   let caught: unknown;
   try {
@@ -90,7 +90,7 @@ test("suppresses the source-bearing YAML warning channel (stderr)", () => {
 
 test("the warning channel really leaks by default (guards the suppression test)", () => {
   // Proves the suppression test is meaningful: the same input through a default
-  // YAML.parse emits a warning whose text carries the secret.
+  // YAML.parse emits a warning whose text contains the secret.
   const spy = vi.spyOn(process, "emitWarning").mockImplementation(() => {});
   // Intentionally exercises the unguarded default YAML.parse to prove the
   // chokepoint closes a real channel. (No raw-parser ESLint ban applies to core

@@ -5,15 +5,13 @@ import { resolveRole } from "../src/protocolSetup.js";
 import type { Output } from "../src/config/linkageTerms.js";
 import type { PsiRole } from "../src/types.js";
 
-// Both acceptance surfaces withhold the `partnerLearnsOwnMembership` fact from a
-// `psi-c` invitation on a fact of role resolution, not on a judgment about copy: on
-// a one-sided exchange the party NOT entitled to the result is the sender, and the
-// sender of a count-only round computes nothing from it and is sent no count-report
-// frame (docs/spec/PROTOCOL.md, PSI-C), so it learns no membership for the surfaces
-// to state. Were that branch of `resolveRole` to change -- a non-entitled party that
-// can come out the receiver -- both surfaces would go on suppressing a warning about
-// a disclosure that then happens, and every render test pinning the suppression
-// would stay green. The premise is checked here so that change reds a test instead.
+// Both acceptance surfaces withhold `partnerLearnsOwnMembership` from a
+// psi-c invitation on a fact of role resolution, not a copy judgment: on a
+// one-sided exchange the non-entitled party is always the sender, and a
+// count-only sender computes nothing and gets no count-report frame
+// (docs/spec/PROTOCOL.md, PSI-C), so it has no membership to disclose. This
+// test pins that role-resolution assumption directly, since the render
+// tests that assert the suppression cannot see a regression in it.
 
 /** The entitled side of a one-sided pair: the only party the run delivers to. */
 const ENTITLED: Output = { expectsOutput: true, shareWithPartner: false };

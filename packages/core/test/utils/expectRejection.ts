@@ -2,8 +2,8 @@ import { expect } from "vitest";
 
 import { ConnectionError } from "../../src/connection/messageConnection";
 
-// Assert that `p` rejects with a ConnectionError of `kind`, and return the error
-// so a caller can layer further assertions (its message, or sticky-state
+// Assert that `p` rejects with a ConnectionError of `kind`, and return the
+// error so a caller can layer further assertions (its message, or sticky-state
 // identity checks across later calls).
 export async function expectRejectionKind(
   p: Promise<unknown>,

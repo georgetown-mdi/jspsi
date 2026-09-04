@@ -16,8 +16,8 @@ import type { WebRTCEndpoint } from "./invitation.js";
 // --- Locator-only connection description -------------------------------------
 
 /**
- * The SFTP locator a web-composed exchange config carries: WHERE the
- * rendezvous is, never HOW to authenticate to it. Carries only the public
+ * The SFTP locator a web-composed exchange config holds: WHERE the
+ * rendezvous is, never HOW to authenticate to it. Holds only the public
  * locator fields -- host, optional port, a single shared `path` OR the
  * split `inboundPath`/`outboundPath` pair, and optional tuning
  * {@link FileSyncOptions}.
@@ -51,9 +51,9 @@ interface SftpExchangeLocator {
 }
 
 /**
- * The file-drop locator a web-composed exchange config carries: the shared
+ * The file-drop locator a web-composed exchange config holds: the shared
  * directory (or the split inbound/outbound pair) both parties rendezvous in. A
- * file-drop exchange has no host or credentials at all, so this type carries only
+ * file-drop exchange has no host or credentials at all, so this type holds only
  * the directory locator and optional {@link FileSyncOptions} -- a credential is
  * unrepresentable here too (see {@link SftpExchangeLocator}).
  */
@@ -72,10 +72,10 @@ interface FiledropExchangeLocator {
 
 /**
  * The credential-free WebRTC locator a web-composed exchange config
- * carries: WHERE the PeerJS peer-coordination server is (`host`/optional
+ * holds: WHERE the PeerJS peer-coordination server is (`host`/optional
  * `port`/optional `path`), never HOW to reach it privately. It is the
  * invitation's {@link WebRTCEndpoint} -- one locator type, not a second
- * parallel definition -- so the endpoint the code carries and the
+ * parallel definition -- so the endpoint the code holds and the
  * connection block a managed record persists agree on the credential-free
  * shape by construction.
  *
@@ -90,7 +90,7 @@ export type WebRTCExchangeLocator = WebRTCEndpoint;
 
 /**
  * A credential-free connection description the browser mints a
- * DOWNLOADABLE exchange config from, discriminated by `channel`. Carries
+ * DOWNLOADABLE exchange config from, discriminated by `channel`. Holds
  * ONLY locator fields -- no credential is representable by construction,
  * so the minted file cannot leak one. Covers only the file-sync channels a
  * downloadable config targets (`sftp`, `filedrop`); a webrtc exchange is
@@ -134,12 +134,12 @@ export interface ExchangeFileInput {
    */
   disclosedPayloadColumns?: string[];
   /**
-   * This party's RECEIVE-side lock-in (the partner's column namespace) -- the
+   * This party's RECEIVE-side commitment (the partner's column namespace) -- the
    * top-level `expected_payload_columns` a later `psilink exchange` enforces it
    * receives. Optional; omit to reconcile lazily.
    */
   expectedPayloadColumns?: string[];
-  /** See {@link ExchangeSpecAssembly.outboundPayloadConsent} -- carried verbatim
+  /** See {@link ExchangeSpecAssembly.outboundPayloadConsent} -- held verbatim
    * through {@link mintExchangeFile} on the same caller's-obligation terms. */
   outboundPayloadConsent?: OutboundPayloadConsent;
   /**
@@ -149,7 +149,7 @@ export interface ExchangeFileInput {
    * (there is then no declaration to bind).
    */
   expectedPartnerDeduplicate?: boolean;
-  /** See {@link ExchangeSpecAssembly.signing} -- carried verbatim through
+  /** See {@link ExchangeSpecAssembly.signing} -- held verbatim through
    * {@link mintExchangeFile} on the same no-secret terms. */
   signing?: SigningConfig;
   /** See {@link ExchangeSpecAssembly.retentionDisposition}. */
@@ -179,7 +179,7 @@ interface ExchangeSpecAssembly {
    * (`assertOutboundPayloadConsented`). Absent for every party that is not
    * an acceptor, whose own set is authored at mint.
    *
-   * Carried verbatim: the assembler neither derives nor checks this
+   * Held verbatim: the assembler neither derives nor checks this
    * record against the `metadata` assembled beside it. Naming the set the
    * operator was shown is the CALLER's obligation, via
    * `deriveOutboundPayloadConsent` from that same metadata.
@@ -194,7 +194,7 @@ interface ExchangeSpecAssembly {
    * private key lives in the identity file this block only NAMES, and the
    * pinned fingerprint is a public digest (see `config/signing.ts`).
    *
-   * Every path it carries is the assembling caller's to choose: a caller
+   * Every path it holds is the assembling caller's to choose: a caller
    * composing a config for another machine must state a path that machine
    * has, since a container-internal path assembled into a portable
    * document names nothing on the host that would run it.
@@ -291,9 +291,9 @@ export function mintExchangeFile(input: ExchangeFileInput): string {
 /**
  * Expand a credential-free {@link ExchangeLocator} into the CLI's
  * {@link ConnectionConfig} shape. The single-vs-split directory form is
- * carried through verbatim; the schema enforces the both-or-neither and
+ * included verbatim; the schema enforces the both-or-neither and
  * mutual-exclusion rules. For SFTP the placeholder username is seeded --
- * the one identity field a locator cannot carry.
+ * the one identity field a locator cannot hold.
  *
  * For WebRTC the expansion copies only the
  * {@link WebRTCEndpointSchema}-validated `host`/`port`/`path` into
@@ -323,7 +323,7 @@ export function connectionFromLocator(
       channel: "sftp",
       server: {
         host: locator.host,
-        // The locator carries no credential; seed the one SSH identity field the
+        // The locator holds no credential; seed the one SSH identity field the
         // operator must fill in with an obvious placeholder (see mintExchangeFile).
         username: PLACEHOLDER_SSH_USERNAME,
         ...(locator.port !== undefined ? { port: locator.port } : {}),

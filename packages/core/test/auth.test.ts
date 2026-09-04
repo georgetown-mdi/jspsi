@@ -24,7 +24,7 @@ const OTHER_SHARED_SECRET = toBase64Url(
 );
 
 // Every shape SHARED_SECRET_REGEX must refuse: absent, empty, too short, too
-// long, and 43 characters whose final character carries non-zero trailing bits.
+// long, and 43 characters whose final character has non-zero trailing bits.
 const MALFORMED_SECRETS: Array<string | undefined> = [
   undefined,
   "",
@@ -66,7 +66,7 @@ test("a shared secret expiring one millisecond from now is still usable", () => 
 test("a well-formed shared secret with no expiry set is ready for the handshake", () => {
   // The expiry guard must stay conditional on `expires` being set: an unexpiring
   // credential is the common case, and an absent date parses to NaN, which the
-  // guard reads as expired -- so reaching it at all refuses every such secret.
+  // guard treats as expired -- so reaching it at all refuses every such secret.
   expect(() =>
     assertSharedSecretReadyForHandshake({ sharedSecret: SHARED_SECRET }),
   ).not.toThrow();
@@ -77,7 +77,7 @@ test("an absent, empty, or wrong-length shared secret is refused as malformed, n
   vi.setSystemTime(NOW_MS);
   for (const sharedSecret of MALFORMED_SECRETS) {
     // A live expiry, so only the format guard can be what rejects these; the two
-    // refusals carry different recovery instructions and must stay distinct.
+    // refusals have different recovery instructions and must stay distinct.
     const authentication: Authentication = {
       sharedSecret,
       expires: new Date(NOW_MS + 86_400_000).toISOString(),

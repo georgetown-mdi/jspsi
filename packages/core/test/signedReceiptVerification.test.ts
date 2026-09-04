@@ -76,7 +76,7 @@ const fingerprintC = await computeCertificateFingerprint(outsider.certificate);
 
 const TERMS_HASH = "dGVybXNIYXNo";
 // The run binder both the receipt content and the exchange record for that run
-// carry; one constant so the fixture and the pairing input cannot drift apart.
+// hold; one constant so the fixture and the pairing input cannot drift apart.
 const BINDER = "YmluZGVy";
 
 function content(overrides: Partial<ReceiptContent> = {}): ReceiptContent {
@@ -130,7 +130,7 @@ function withUnevaluableResponder(record: DualSignedRecord): DualSignedRecord {
 
 // What a party holding its own exchange record supplies: the partner's pin, its
 // own signing identity (found from the same config rather than restated), and both
-// parties' identities, agreed-terms hash, and the run binder that record carries.
+// parties' identities, agreed-terms hash, and the run binder that record holds.
 // Party A is the initiator here, so its own identity anchors that slot and the pin
 // anchors the responder's.
 const fullyAnchored = {
@@ -162,7 +162,7 @@ describe("verifyDualSignedRecord", () => {
     expect(report.pinnedFingerprints).toBe("matched");
     expect(report.localIdentity).toBe("matched");
     // The outcome turns on how that identity reached the verification, so the
-    // report states it rather than leaving a consumer to carry it alongside.
+    // report states it rather than leaving a consumer to hold it alongside.
     expect(report.localIdentitySource).toBe("resolved");
     // The report names each party and its fingerprint so an operator can see
     // whose certificate was checked.
@@ -205,7 +205,7 @@ describe("verifyDualSignedRecord", () => {
   });
 
   test("one pinned value cannot anchor both certificates", async () => {
-    // A record whose two slots carry the same certificate would otherwise let a
+    // A record whose two slots hold the same certificate would otherwise let a
     // single pin claim both and reach verified; each anchoring value claims at
     // most one slot, so the second is left for something else to anchor.
     const record = await signedRecord(content(), {
@@ -243,7 +243,7 @@ describe("verifyDualSignedRecord", () => {
 
   test("a pin equal to the verifier's own identity cannot anchor both slots of a repeated certificate", async () => {
     // The same record against a verifier that pinned its OWN fingerprint: the
-    // pin and the identity carry one digest, so they are one anchoring value
+    // pin and the identity hold one digest, so they are one anchoring value
     // and claim one slot between them, not a slot each.
     const record = await signedRecord(content(), {
       initiator: identityA,
@@ -315,9 +315,9 @@ describe("verifyDualSignedRecord", () => {
 
   test("the binder is reported verbatim, not recomputed", async () => {
     // Recomputing it would need the exchange's session key, which the record
-    // never carries and neither party retains: the verifier can only confirm that
-    // the signers signed a receipt carrying this value, and that the record for the
-    // run carries the same one.
+    // never holds and neither party retains: the verifier can only confirm that
+    // the signers signed a receipt holding this value, and that the record for the
+    // run holds the same one.
     const report = await verifyDualSignedRecord(
       await signedRecord(content({ binder: "b3RoZXJCaW5kZXI" })),
       { ...fullyAnchored, recordReceiptBinder: "b3RoZXJCaW5kZXI" },
@@ -650,7 +650,7 @@ describe("decideSignedReceiptVerdict", () => {
   test("a fully verified record names what anchored each certificate", async () => {
     const verdict = await verdictFor(fullyAnchored);
     expect(verdict.headline.tone).toBe("verified");
-    // The verified headline carries both slots and what anchored each, which is
+    // The verified headline holds both slots and what anchored each, which is
     // what lets a surface state it without re-deriving the assignment.
     if (verdict.headline.tone !== "verified") throw new Error("unreachable");
     expect(verdict.headline.anchoredSlots).toEqual([
@@ -724,7 +724,7 @@ describe("decideSignedReceiptVerdict", () => {
   });
 
   test("an unanchored slot a pinned value does match is not narrated as one it missed", async () => {
-    // Both slots carry one certificate, so the pin that anchored the responder's
+    // Both slots hold one certificate, so the pin that anchored the responder's
     // slot matches the initiator's too: what leaves that slot unanchored is each
     // value claiming a single slot, not a pin that missed.
     const oneCertificate = await signedRecord(content(), {
@@ -918,7 +918,7 @@ describe("decideSignedReceiptVerdict", () => {
   test.each(["verified", "incomplete", "failed"] as const)(
     "an anchor outside the union is refused under a %s outcome, not named",
     (outcome) => {
-      // The anchoring assignment produces the three statuses the union carries
+      // The anchoring assignment produces the three statuses the union holds
       // and nothing else, so a status from outside it reaches the decision only
       // from a caller that stepped past the type. Every surface words the slot
       // from that status, on the degraded headlines as much as the verified one,

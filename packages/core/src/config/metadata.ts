@@ -79,7 +79,7 @@ export function isDisclosedToPartner(column: ColumnMetadata): boolean {
 
 /**
  * The names of the columns disclosed to the partner, in metadata order -- exactly
- * the set {@link preparePayload} transmits. The seam a disclosure summary or
+ * the set {@link preparePayload} transmits. The boundary a disclosure summary or
  * launch confirmation reads so it cannot drift from what is actually sent.
  */
 export function disclosedColumnNames(metadata: Metadata): Array<string> {
@@ -90,10 +90,10 @@ export function disclosedColumnNames(metadata: Metadata): Array<string> {
  * Whether this party's input metadata would transmit a column under a
  * count-only (`psi-c`) algorithm -- the fifth count-only shape rule
  * (docs/spec/PROTOCOL.md, PSI-C), the one no linkage-terms document
- * carries, so it lives here beside {@link isDisclosedToPartner}.
+ * has, so it lives here beside {@link isDisclosedToPartner}.
  *
  * False for every `psi` exchange and for an absent metadata block. The
- * terms-carried rules are `countOnlyShapeViolation` in
+ * terms-held rules are `countOnlyShapeViolation` in
  * `config/linkageTerms.ts`.
  */
 export function countOnlyTransmitsColumn(
@@ -110,7 +110,7 @@ export function countOnlyTransmitsColumn(
  * agreed algorithm: where an invitation is minted, and where one is
  * accepted.
  *
- * Fail-closed like its terms-carried siblings
+ * Fail-closed like its terms-held siblings
  * ({@link assertCountOnlyTermsShape}): marked columns are never quietly
  * dropped to fit the count-only shape. A no-op on `psi` and on an
  * unresolved metadata block. Plain {@link UsageError}; the message names
@@ -136,11 +136,11 @@ export function assertCountOnlyTransmitsNoColumn(
  * operator cannot rewrite.
  *
  * Counted in UTF-16 code units (`name.length`), matching the `.max` bound
- * on every other carried-name schema; a code-point count would pass a
+ * on every other transmitted-name schema; a code-point count would pass a
  * name of astral characters those bounds refuse.
  *
  * Positions, not names -- an offending name is by construction too long
- * to carry in a message. The position is the entry's place in the
+ * to include in a message. The position is the entry's place in the
  * METADATA; inferred metadata preserves header order, while a
  * hand-authored block is matched by name and may list entries in any
  * order, so there the position locates the entry in the block itself.
@@ -163,7 +163,7 @@ export function overlongDisclosedColumnPositions(
 // a `role: payload` entry for the same name could resolve differently,
 // silently defeating the ignored exclusion. Rejected at the schema; the
 // message is static and does not echo the user-controlled name (it can
-// carry control/ANSI/bidi bytes).
+// hold control/ANSI/bidi bytes).
 export const MetadataSchema = z.array(ColumnMetadataSchema).refine(
   (cols) => {
     const names = cols.map((c) => c.name);
@@ -320,7 +320,7 @@ export function inferMetadata(columnNames: Array<string>): Metadata {
     );
   }
 
-  // id/identifier columns already carry role: "identifier" via
+  // id/identifier columns already have role: "identifier" via
   // ALIAS_TYPE_META_MAP
   return result;
 }
