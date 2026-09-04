@@ -415,4 +415,27 @@ describe("the title-length rule as the workflow runs it", () => {
     });
     expect(r.status).toBe(0);
   });
+
+  it("refuses to pass on a runner whose PR number it cannot read", () => {
+    const r = runCli(passingBody, {
+      GITHUB_ACTIONS: "true",
+      PR_HEAD_SHA: HEAD,
+      PR_TITLE: SHORT_TITLE,
+    });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("could not read the PR number");
+  });
+
+  it("labels a title violation as the PR title, not the body source", () => {
+    const r = runCli(passingBody, {
+      GITHUB_ACTIONS: "true",
+      PR_BODY: passingBody,
+      PR_HEAD_SHA: HEAD,
+      PR_TITLE: "x".repeat(43),
+      PR_NUMBER: "1274",
+    });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("PR title: PR title is 43 characters");
+    expect(r.stderr).not.toContain("PR body: PR title is");
+  });
 });

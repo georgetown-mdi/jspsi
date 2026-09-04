@@ -14,9 +14,10 @@
 //      be the PR head: a commit pushed after a review turns the PR red until the
 //      new head is reviewed and the line updated.
 //   7. The PR title must fit in 50 characters once GitHub's own `(#<number>)`
-//      squash-merge suffix is appended -- the budget is derived from the PR's
-//      actual number, or a 42-character fallback off the runner (a local run,
-//      with no number to derive the suffix from).
+//      squash-merge suffix is appended. This rule runs on the runner only,
+//      where PR_NUMBER is required and the budget is derived from it;
+//      titleBudget()'s 42-character fallback serves a direct call with no
+//      number, not reachable through this CLI.
 //
 // The limits are deliberate. This is a mechanical BACKSTOP for the tells that a
 // checklist was left unresolved or resolved dishonestly by shape; whether a
@@ -328,11 +329,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     );
     process.exit(2);
   }
+  const onRunner = process.env.GITHUB_ACTIONS === "true";
   // On the runner the head must be readable, or the attestation degrades to a
   // presence check and a green result would mean nothing: say so and stop
   // instead of passing quietly.
   const headSha = prHeadSha();
-  if (headSha === null && process.env.GITHUB_ACTIONS === "true") {
+  if (headSha === null && onRunner) {
     console.error(
       "PR checklist check could not read the head sha the workflow passes in PR_HEAD_SHA, so the Security review line's attestation cannot be verified.",
     );
@@ -342,7 +344,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   // would leave the title rule silently skipped and the run green. Off the
   // runner there is no PR event to read a title from, so the rule is skipped
   // outright rather than treated as a failure to read one.
-  const onRunner = process.env.GITHUB_ACTIONS === "true";
   const title = prTitle();
   if (title === null && onRunner) {
     console.error(
@@ -350,20 +351,29 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     );
     process.exit(2);
   }
+  // Same reasoning again: on the runner an unreadable PR_NUMBER would leave
+  // titleBudget() silently on its fallback figure, mismatched to the suffix
+  // GitHub actually appends.
   const rawPrNumber = process.env.PR_NUMBER;
   const prNumber =
     typeof rawPrNumber === "string" && rawPrNumber.trim() !== ""
       ? rawPrNumber
       : null;
-  const violations = [
-    ...bodyViolations(body, headSha),
-    ...(onRunner ? titleViolations(title, prNumber) : []),
-  ];
+  if (prNumber === null && onRunner) {
+    console.error(
+      "PR checklist check could not read the PR number the workflow passes in PR_NUMBER, so the title-length rule's budget cannot be derived.",
+    );
+    process.exit(2);
+  }
+  const bodyIssues = bodyViolations(body, headSha);
+  const titleIssues = onRunner ? titleViolations(title, prNumber) : [];
+  const violations = [...bodyIssues, ...titleIssues];
   if (violations.length > 0) {
     console.error(
       `PR checklist check failed (${violations.length} issue${violations.length === 1 ? "" : "s"}):\n`,
     );
-    for (const v of violations) console.error("  " + source + ": " + v);
+    for (const v of bodyIssues) console.error("  " + source + ": " + v);
+    for (const v of titleIssues) console.error("  PR title: " + v);
     console.error(
       "\nSee .github/PULL_REQUEST_TEMPLATE.md, Checklist: every line resolved, every n/a earned with a reason, and the Security review line naming the head it reviewed.",
     );
