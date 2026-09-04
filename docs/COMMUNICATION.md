@@ -1,10 +1,10 @@
 ---
-title: "PSI-Link Communication"
+title: "psilink Communication"
 ---
 
-# PSI-Link communication
+# psilink communication
 
-This document covers the communication channels available for PSI-Link exchanges, how parties synchronize protocol steps, how the web invitation and acceptance flows disclose and gate consent, how errors are handled, and what supporting services are required. Authentication and channel security are not covered here - see [SECURITY_DESIGN.md](SECURITY_DESIGN.md) for those topics. It does not cover the PSI protocol itself (see [PROTOCOL.md](spec/PROTOCOL.md)) or CLI configuration (see [CLI.md](CLI.md)). The classification rationale behind the terminal `ConnectionErrorKind` taxonomy is recorded in [a design note](notes/connection-error-kind-taxonomy.md). Intended readers are IT staff and developers.
+This document covers the communication channels available for psilink exchanges, how parties synchronize protocol steps, how the web invitation and acceptance flows disclose and gate consent, how errors are handled, and what supporting services are required. Authentication and channel security are not covered here - see [SECURITY_DESIGN.md](SECURITY_DESIGN.md) for those topics. It does not cover the PSI protocol itself (see [PROTOCOL.md](spec/PROTOCOL.md)) or CLI configuration (see [CLI.md](CLI.md)). The classification rationale behind the terminal `ConnectionErrorKind` taxonomy is recorded in [a design note](notes/connection-error-kind-taxonomy.md). Intended readers are IT staff and developers.
 
 ## Channels
 

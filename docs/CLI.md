@@ -1,10 +1,10 @@
 ---
-title: "PSI-Link CLI"
+title: "psilink CLI"
 ---
 
-# PSI-Link CLI
+# psilink CLI
 
-This document covers the CLI commands, configuration files, invitation strings, and recovery procedures for PSI-Link. It does not cover the PSI protocol (see [PROTOCOL.md](spec/PROTOCOL.md)), the security and authentication model (see [SECURITY_DESIGN.md](SECURITY_DESIGN.md)), or deployment of supporting services (see [DEPLOYMENT.md](DEPLOYMENT.md)). Intended readers are IT staff and power users.
+This document covers the CLI commands, configuration files, invitation strings, and recovery procedures for psilink. It does not cover the PSI protocol (see [PROTOCOL.md](spec/PROTOCOL.md)), the security and authentication model (see [SECURITY_DESIGN.md](SECURITY_DESIGN.md)), or deployment of supporting services (see [DEPLOYMENT.md](DEPLOYMENT.md)). Intended readers are IT staff and power users.
 
 Before a first SFTP exchange against a server you do not administer yourself, work through the [SFTP server checklist](DEPLOYMENT.md#sftp-server): the settings covered there -- upload-triggered automation, scanning, auto-cleanup, account permissions, anti-flood bans, and session limits -- are the usual cause of an SFTP exchange that stalls, and each one reaches you as that stall rather than as a message naming it.
 

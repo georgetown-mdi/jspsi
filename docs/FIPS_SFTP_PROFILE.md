@@ -6,13 +6,13 @@ title: "FIPS Deployment Profile for SFTP Exchanges"
 
 An agency required to use FIPS-validated cryptography needs its SFTP exchanges to negotiate only approved algorithms. This profile is the settings that constrain that negotiation, what each setting excludes, what happens when the partner's server offers nothing approved, and the one part of the SSH handshake an operator cannot constrain at all.
 
-It is deployment guidance and stands on its own: it narrows what the SSH layer will negotiate whether or not the image you run embeds a validated cryptographic module. Constraining negotiation is **not** a validated-module claim, and this profile makes none -- what PSI-Link can and cannot say about module validation is in [COMPLIANCE.md](COMPLIANCE.md#fips-140).
+It is deployment guidance and stands on its own: it narrows what the SSH layer will negotiate whether or not the image you run embeds a validated cryptographic module. Constraining negotiation is **not** a validated-module claim, and this profile makes none -- what psilink can and cannot say about module validation is in [COMPLIANCE.md](COMPLIANCE.md#fips-140).
 
 ## Scope: the command-line application
 
 SFTP exchanges are conducted by the CLI. The web application conducts WebRTC exchanges in the browser and, for an SFTP exchange, saves an exchange file for the command-line tool to run rather than conducting it itself (see [CONSOLE.md](CONSOLE.md)). A browser has no equivalent of the settings below, so this profile is CLI guidance and not guidance for the web application.
 
-It applies to a `psilink.yaml`-configured CLI run. The console appliance is not a place to apply it: the SFTP connection an operator authors there admits a strict, fixed set of server fields and no transport-tuning block ([SERVER_JOB_API.md](spec/SERVER_JOB_API.md#authoring-the-sftp-connection)). That fits the console's role -- it is a prototyping tool an exchange graduates from to a plain scheduled CLI run ([CONSOLE.md](CONSOLE.md)) -- so apply this profile to the configuration you graduate to.
+It applies to a `psilink.yaml`-configured CLI run. The console is not a place to apply it: the SFTP connection an operator authors there admits a strict, fixed set of server fields and no transport-tuning block ([SERVER_JOB_API.md](spec/SERVER_JOB_API.md#authoring-the-sftp-connection)). That fits the console's role -- it is a prototyping tool an exchange graduates from to a plain scheduled CLI run ([CONSOLE.md](CONSOLE.md)) -- so apply this profile to the configuration you graduate to.
 
 ## What you can constrain, and what you cannot
 
@@ -84,7 +84,7 @@ An algorithm name the SSH library does not know is refused when the connection i
 
 ## Host-key types cannot be constrained
 
-`serverHostKey` is dropped from the `algorithms` passthrough by design: which host-key types a client will accept is a host-key-trust decision, not transport tuning, and PSI-Link does not let a configuration file weaken it ([EXCHANGE_REFERENCE.md](EXCHANGE_REFERENCE.md#connectionprovider_options)). Setting it produces a warning naming the dropped sub-key and changes nothing.
+`serverHostKey` is dropped from the `algorithms` passthrough by design: which host-key types a client will accept is a host-key-trust decision, not transport tuning, and psilink does not let a configuration file weaken it ([EXCHANGE_REFERENCE.md](EXCHANGE_REFERENCE.md#connectionprovider_options)). Setting it produces a warning naming the dropped sub-key and changes nothing.
 
 The consequence is direct: **`ssh-rsa`, which signs with SHA-1, stays in the host-key offer and cannot be excluded from negotiation.** On an ordinary runtime a dial made with the profile above offers, in order, `ssh-ed25519`, `ecdsa-sha2-nistp256`, `ecdsa-sha2-nistp384`, `ecdsa-sha2-nistp521`, `rsa-sha2-512`, `rsa-sha2-256`, `ssh-rsa` -- and the server picks from that list; from inside a FIPS-configured image the same dial offers that list without `ssh-ed25519` ([The default offer measured inside the image](#the-default-offer-measured-inside-the-image)). A server that offers only `ssh-rsa` is negotiated with, and no client-side setting refuses it.
 
@@ -116,19 +116,19 @@ The remedy is server-side: the partner enables an approved algorithm in that cat
 Two different failures both end a run at the handshake, and their remedies are opposites:
 
 - **The partner offers nothing approved** -- the messages above, naming a category (`key exchange algorithm`, `C->S cipher`, `C->S MAC`). Nothing about your host is wrong; the fix is on the partner's server.
-- **Your own runtime cannot perform what was asked** -- the error names the missing primitive (today, X25519) rather than a category, and points at the server's administrator or at running from a different host. PSI-Link withholds from its offer any algorithm the running process cannot perform, so this failure means the server accepts nothing outside that withheld set. The mechanics, including what happens when part or all of a `kex` list is unavailable, are in [EXCHANGE_REFERENCE.md](EXCHANGE_REFERENCE.md#key-exchange-algorithms-and-the-hosts-crypto-provider).
+- **Your own runtime cannot perform what was asked** -- the error names the missing primitive (today, X25519) rather than a category, and points at the server's administrator or at running from a different host. psilink withholds from its offer any algorithm the running process cannot perform, so this failure means the server accepts nothing outside that withheld set. The mechanics, including what happens when part or all of a `kex` list is unavailable, are in [EXCHANGE_REFERENCE.md](EXCHANGE_REFERENCE.md#key-exchange-algorithms-and-the-hosts-crypto-provider).
 
 The profile above is chosen so the second case does not arise from the profile itself: none of its entries rests on X25519.
 
 ## Running in a FIPS-configured image
 
-If you run PSI-Link in a container configured with an OpenSSL FIPS provider, the provider build -- not this profile -- decides which SSH algorithms are available at all. The SSH stack reaches `node:crypto`, which dispatches through the configured provider, so an algorithm the provider does not carry cannot be performed however it is configured here.
+If you run psilink in a container configured with an OpenSSL FIPS provider, the provider build -- not this profile -- decides which SSH algorithms are available at all. The SSH stack reaches `node:crypto`, which dispatches through the configured provider, so an algorithm the provider does not carry cannot be performed however it is configured here.
 
 What that means for the lists above, from the provider measurements recorded in [fips-provider-surface.md](notes/fips-provider-surface.md):
 
 - **The profile's algorithms survive both measured provider builds.** ECDH and finite-field DH are in the key-exchange listing of every build measured (3.0.8, 3.0.9, 3.0.21 and 3.5.7), as are the AES modes and HMAC-SHA-2 the cipher and hmac lists name.
 - **`curve25519-sha256` is unavailable under a 3.5.x provider, and in the one FIPS image measured end to end.** X25519 keypair generation fails under a from-source 3.5.7 provider, taking every key exchange built on it with it, while the from-source 3.0.8, 3.0.9 and 3.0.21 builds serve X25519. The version line is not what settles it: the measured image pairs the 3.5.7 OpenSSL Node links with the certified Amazon Linux 3.0.8 provider module, and an X25519 derivation fails there ([fips-variant-image.md](notes/fips-variant-image.md)) -- a property of that pairing, which the measurement does not attribute to either component, and that module is separately read to carry no X25519 at all ([What each list excludes](#what-each-list-excludes)). So the 3.0.x/3.5.x split holds for the from-source builds it was taken on and is unverified for a mixed base-and-module pairing; confirm X25519 in your own image before depending on it. This is one more reason the `kex` list above excludes it: a recommendation that depended on the provider build would fail at negotiation for a reason the operator could not see from the profile.
-- **MD5 is unavailable under a fips-only configuration.** PSI-Link pins and displays a host key by its OpenSSH SHA-256 fingerprint, so the pin above is unaffected -- but tooling that produces an MD5 fingerprint (`ssh-keygen -E md5`, and some server documentation) cannot be used inside such an image to derive the value you pin.
+- **MD5 is unavailable under a fips-only configuration.** psilink pins and displays a host key by its OpenSSH SHA-256 fingerprint, so the pin above is unaffected -- but tooling that produces an MD5 fingerprint (`ssh-keygen -E md5`, and some server documentation) cannot be used inside such an image to derive the value you pin.
 
 Which certificate and base image the variant pairs with, and what a claim about it may say, are in [fips-variant-image.md](notes/fips-variant-image.md) and [COMPLIANCE.md](COMPLIANCE.md#fips-140).
 
@@ -147,7 +147,7 @@ The key-exchange field also carried `ext-info-c` and `kex-strict-c-v00@openssh.c
 
 Four names an ordinary runtime offers are absent from it:
 
-- **`curve25519-sha256` and its `@libssh.org` spelling**, from the key exchange. X25519 cannot be performed in that image, and PSI-Link withholds the algorithms built on it ([Distinguishing this from a runtime that cannot perform the algorithm](#distinguishing-this-from-a-runtime-that-cannot-perform-the-algorithm)); excluding them in the `kex` list above costs nothing there.
+- **`curve25519-sha256` and its `@libssh.org` spelling**, from the key exchange. X25519 cannot be performed in that image, and psilink withholds the algorithms built on it ([Distinguishing this from a runtime that cannot perform the algorithm](#distinguishing-this-from-a-runtime-that-cannot-perform-the-algorithm)); excluding them in the `kex` list above costs nothing there.
 - **`chacha20-poly1305@openssh.com`**, from the ciphers.
 - **`ssh-ed25519`**, from the host-key offer, which is otherwise the list described under [Host-key types cannot be constrained](#host-key-types-cannot-be-constrained) -- `ssh-rsa` at the end of it included.
 
@@ -157,7 +157,7 @@ The measurement is one image on one host, and it is what the client offers rathe
 
 ## What to ask of the partner's server
 
-PSI-Link enforces none of the following -- it constrains only what this side offers and accepts. These are the server-side settings to agree with your partner out of band, alongside the exchange directory and account access ([DEPLOYMENT.md](DEPLOYMENT.md#sftp-server)):
+psilink enforces none of the following -- it constrains only what this side offers and accepts. These are the server-side settings to agree with your partner out of band, alongside the exchange directory and account access ([DEPLOYMENT.md](DEPLOYMENT.md#sftp-server)):
 
 - Restrict `KexAlgorithms`, `Ciphers`, and `MACs` to the same approved sets. A server restricted this way and a client running this profile fail closed toward each other rather than settling on the weaker of the two.
 - Restrict `HostKeyAlgorithms` to exclude `ssh-rsa`, and offer an `ecdsa-sha2-nistp256` or `rsa-sha2-256`/`rsa-sha2-512` host key. This is the only place the SHA-1 host-key signature described above can be closed, since the client side cannot constrain it.
@@ -167,7 +167,7 @@ A partner who applies none of this is still reachable: the profile constrains th
 
 ## See also
 
-- [COMPLIANCE.md](COMPLIANCE.md#fips-140) - what PSI-Link does and does not claim about FIPS 140 validation
+- [COMPLIANCE.md](COMPLIANCE.md#fips-140) - what psilink does and does not claim about FIPS 140 validation
 - [EXCHANGE_REFERENCE.md](EXCHANGE_REFERENCE.md#connectionprovider_options) - the `algorithms` passthrough, its filter, and its warnings
 - [CLI.md](CLI.md#sftp-host-key-trust) - host-key pinning, first-use trust, and rotation
 - [DEPLOYMENT.md](DEPLOYMENT.md#sftp-server) - operating the SFTP server the exchange runs over

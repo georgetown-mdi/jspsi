@@ -1,8 +1,8 @@
 ---
-title: "PSI-Link Roadmap"
+title: "psilink Roadmap"
 ---
 
-# PSI-Link roadmap
+# psilink roadmap
 
 This document lists planned work, grouped by the release in which it is targeted. Major functionality that has already shipped is summarized in [CHANGELOG.md](../CHANGELOG.md), not here. Project overview and architecture are in [DESIGN.md](DESIGN.md).
 

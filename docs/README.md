@@ -1,10 +1,10 @@
 ---
-title: "PSI-Link Documentation"
+title: "psilink Documentation"
 ---
 
-# PSI-Link documentation
+# psilink documentation
 
-PSI-Link is a privacy-preserving record linkage (PPRL) tool that enables partner agencies to identify shared members across administrative datasets without revealing anything about the records they do not have in common. It implements a private set intersection (PSI) protocol available both as a browser-based web application and a containerized CLI, and is designed to work within the policy and infrastructure constraints typical of government agencies.
+psilink is a privacy-preserving record linkage (PPRL) tool that enables partner agencies to identify shared members across administrative datasets without revealing anything about the records they do not have in common. It implements a private set intersection (PSI) protocol available both as a browser-based web application and a containerized CLI, and is designed to work within the policy and infrastructure constraints typical of government agencies.
 
 ## Role-based reading guide
 
@@ -58,7 +58,7 @@ The documentation is organized in three tiers: this **overview** tier (`docs/`) 
 - [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md) - the browser-persisted managed-exchange record: the persisted exchange-file document plus local fields, the persist-before-success ordering, the linear-secret single-owner invariant, and the export artifact's custody model and CLI-separable format
 - [CLI_EVENTS.md](spec/CLI_EVENTS.md) - the CLI's opt-in machine-interface event stream (`--event-stream`): the file descriptor, NDJSON framing, event types, terminal-error categories, and per-field sanitization
 - [CLI_DOCTOR.md](spec/CLI_DOCTOR.md) - the `psilink doctor` verdict under `--json`: the document's fields, the schema version and compatibility rule, the status and `overall` vocabularies, both modes' fixed check lists, and the exit-code mapping
-- [SERVER_JOB_API.md](spec/SERVER_JOB_API.md) - the web server's job API that drives the CLI as a subprocess for the console appliance: endpoints, the injection-closed intent schema, the operator-authored SFTP connection, the single-active-exchange lifecycle, the workdir layout, the SSE event relay, and the gate/startup rules (the console facilitates one exchange at a time; a second create is refused until it is deleted, and a restart forgets it)
+- [SERVER_JOB_API.md](spec/SERVER_JOB_API.md) - the web server's job API that drives the CLI as a subprocess for the console: endpoints, the injection-closed intent schema, the operator-authored SFTP connection, the single-active-exchange lifecycle, the workdir layout, the SSE event relay, and the gate/startup rules (the console facilitates one exchange at a time; a second create is refused until it is deleted, and a restart forgets it)
 - [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md) - why the SFTP and WebRTC stacks are exact-pinned, their internal premises, the per-stack upgrade checklists, and the `allowScripts` install-script policy
 - [CONTAINER_IMAGES.md](spec/CONTAINER_IMAGES.md) - how the shipped CLI image and its FIPS variant freeze their npm tree to the committed lockfile and what each pins by digest, hash, or NVR, what the CMVP certificate behind the FIPS provider attests, and the writable-set and setuid/setgid inventories measured on the built images
 

@@ -1,5 +1,5 @@
 ---
-title: "PSI-Link"
+title: "psilink"
 author: "Vincent Dorie"
 ---
 
@@ -43,7 +43,7 @@ Verifying a receipt checks a completed exchange's self-attested record against i
 
 The web console is a browser-based management interface for the command line application, run on the operator's own machine. It reuses the web application's machinery -- served locally as a web server bound to the host, used by the same person who conducts the exchange and not shared beyond that host -- to remove the friction of driving the CLI by hand: authoring a configuration and supplying the right arguments. From it an operator runs a single SFTP or synced-folder exchange, which the console conducts either by invoking the CLI or by running it directly in the server process, from an invitation the operator authors or accepts or, when both parties already agreed on a server out of band, from a "Direct exchange" with no invitation and terms inferred from each party's own file -- the console's local surface for the CLI's zero-setup mode (see [CONSOLE.md](CONSOLE.md)).
 
-The console works on one mounted working directory at a time, holding that one exchange's configuration, secret, input, and results. It is not a directory of saved connections, a scheduler or recurring-exchange manager -- recurring exchanges live in the web application, and the command line application is scheduled from the command line -- a manager of many exchanges at once, or a network service that fronts the operator behind an access-control perimeter. The published Docker image runs the console when started with `serve`; how it is enabled and deployed is in [CONSOLE.md](CONSOLE.md), the single-operator trust invariant that shape follows from -- and what violates it -- in [SECURITY_DESIGN.md](SECURITY_DESIGN.md#single-party-appliance-trust-boundary), and the server-side job API's wire contract in [SERVER_JOB_API.md](spec/SERVER_JOB_API.md).
+The console works on one mounted working directory at a time, holding that one exchange's configuration, secret, input, and results. It is not a directory of saved connections, a scheduler or recurring-exchange manager -- recurring exchanges live in the web application, and the command line application is scheduled from the command line -- a manager of many exchanges at once, or a network service that fronts the operator behind an access-control perimeter. The published Docker image runs the console when started with `serve`; how it is enabled and deployed is in [CONSOLE.md](CONSOLE.md), the single-operator trust invariant that shape follows from -- and what violates it -- in [SECURITY_DESIGN.md](SECURITY_DESIGN.md#single-party-console-trust-boundary), and the server-side job API's wire contract in [SERVER_JOB_API.md](spec/SERVER_JOB_API.md).
 
 # User journey
 
@@ -106,9 +106,9 @@ It may also be beneficial to build the web application as a desktop Electron app
 
 # License and disclaimer
 
-PSI-Link is free, open-source software released under the [Apache License, Version 2.0](../LICENSE.md) and will remain available at no cost. It is provided "as-is," without warranty of any kind, express or implied, including without limitation any warranties of merchantability, fitness for a particular purpose, or non-infringement. The full warranty disclaimer and limitation of liability appear in sections 7 and 8 of the Apache License.
+psilink is free, open-source software released under the [Apache License, Version 2.0](../LICENSE.md) and will remain available at no cost. It is provided "as-is," without warranty of any kind, express or implied, including without limitation any warranties of merchantability, fitness for a particular purpose, or non-infringement. The full warranty disclaimer and limitation of liability appear in sections 7 and 8 of the Apache License.
 
-Agencies evaluating PSI-Link for operational use are responsible for their own risk assessments, authority-to-operate (ATO) determinations, and compliance reviews under applicable federal, state, or local regulations. The project documentation -- including this document, [SECURITY_DESIGN.md](SECURITY_DESIGN.md), [PROTOCOL.md](spec/PROTOCOL.md), and [COMPLIANCE.md](COMPLIANCE.md) -- is intended to support those reviews, not to substitute for them.
+Agencies evaluating psilink for operational use are responsible for their own risk assessments, authority-to-operate (ATO) determinations, and compliance reviews under applicable federal, state, or local regulations. The project documentation -- including this document, [SECURITY_DESIGN.md](SECURITY_DESIGN.md), [PROTOCOL.md](spec/PROTOCOL.md), and [COMPLIANCE.md](COMPLIANCE.md) -- is intended to support those reviews, not to substitute for them.
 
 # See also
 

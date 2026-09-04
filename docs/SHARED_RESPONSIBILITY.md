@@ -60,7 +60,7 @@ An agency that deploys the web application on its own infrastructure takes every
 | Incident response | Coordinated vulnerability disclosure on the timeline in [SECURITY.md](../SECURITY.md#reporting-a-vulnerability), with advisories and CVE assignment where applicable, and a documented compromise response for a leaked shared secret ([SECURITY_DESIGN.md](SECURITY_DESIGN.md#compromise-response)). | Detection and response in its own environment, executing the compromise response with the partner, any breach notification it owes, and applying patched releases. |
 | Patching and supply chain | Signed release tags, Cosign-signed images carrying a SLSA build provenance attestation, a CycloneDX SBOM per release ([COMPLIANCE.md](COMPLIANCE.md#release-integrity)), and security patches for the current and previous major release ([SECURITY.md](../SECURITY.md#supported-versions)). | Verifying those signatures before deploying, tracking releases, and scheduling the upgrade ([RELEASES.md](RELEASES.md#verifying-a-release)). |
 
-**The local console adds one operator-side control.** Its job API carries no authentication by design, because it assumes the single operator at the host. What it is reachable from is decided by the container's publish binding and the host firewall, both the agency's ([CONSOLE.md](CONSOLE.md)); the trust invariant and what violates it are in [SECURITY_DESIGN.md](SECURITY_DESIGN.md#single-party-appliance-trust-boundary).
+**The local console adds one operator-side control.** Its job API carries no authentication by design, because it assumes the single operator at the host. What it is reachable from is decided by the container's publish binding and the host firewall, both the agency's ([CONSOLE.md](CONSOLE.md)); the trust invariant and what violates it are in [SECURITY_DESIGN.md](SECURITY_DESIGN.md#single-party-console-trust-boundary).
 
 ## Responsibility split: hosted web application
 
@@ -110,7 +110,7 @@ The per-service detail is in [PRIVACY.md](../PRIVACY.md#what-supporting-services
 - **Data practices** -- what is collected, transmitted, and retained, and by whom: [PRIVACY.md](../PRIVACY.md) is the authority. Both documents set out the two deployments, because the responsibility split turns on the same facts; each states them in its own terms, and this one links back for the data-practices detail rather than carrying it.
 - **Regulatory framings and control mappings** -- NIST SP 800-53, FIPS 140, HIPAA, FERPA, CJIS, IRS 1075, Section 508, export control: [COMPLIANCE.md](COMPLIANCE.md).
 - **The threat model and the security controls themselves**: [SECURITY_DESIGN.md](SECURITY_DESIGN.md).
-- **How to operate a deployment** -- the container, the console appliance, the SFTP server checklist, and egress restriction: [DEPLOYMENT.md](DEPLOYMENT.md).
+- **How to operate a deployment** -- the container, the console, the SFTP server checklist, and egress restriction: [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ## Review and ownership
 
@@ -123,5 +123,5 @@ The per-service detail is in [PRIVACY.md](../PRIVACY.md#what-supporting-services
 - [PRIVACY.md](../PRIVACY.md) - what the project collects, transmits, and retains, and what supporting services can observe
 - [COMPLIANCE.md](COMPLIANCE.md) - regulatory framings, the NIST 800-53 control mapping, and the FIPS 140 position
 - [SECURITY_DESIGN.md](SECURITY_DESIGN.md) - threat model, authentication design, channel security, and data handling
-- [DEPLOYMENT.md](DEPLOYMENT.md) - operating the container, the console appliance, and the supporting services
+- [DEPLOYMENT.md](DEPLOYMENT.md) - operating the container, the console, and the supporting services
 - [SECURITY.md](../SECURITY.md) - vulnerability reporting, response timeline, and supported versions

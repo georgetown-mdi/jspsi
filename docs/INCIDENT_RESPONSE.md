@@ -1,6 +1,6 @@
 ---
 title: "Security Incident Response Runbook"
-review_owner: "PSI-Link maintainers"
+review_owner: "psilink maintainers"
 last_reviewed: "2026-08-15"
 ---
 
@@ -50,13 +50,13 @@ Reproduce before deciding anything. If the report is not reproducible, say so in
 
 **Is it in scope?** [SECURITY.md#scope](../SECURITY.md#scope) lists what is in and what is out. A flaw in the PSI primitive itself goes upstream to OpenMined/PSI, with a note back to us so the vendored copy gets updated. Declining is a legitimate verdict and gets the same care as confirming: name the scope line it falls outside, and where the reporter should take it instead. One caveat when reading that list: it is a reporter-facing summary rather than the boundary of what gets fixed, so a report describing a real defect in a control this project documents is triaged even when the list does not name that control, and the scope question goes to the maintainer rather than to the reporter as a decline.
 
-**How severe?** Anchor the call in what PSI-Link claims:
+**How severe?** Anchor the call in what psilink claims:
 
 - **Critical or High** -- a result revealing more than the agreed intersection, authentication bypass or partner impersonation, shared-secret or key-file exposure, or record data exposed in plaintext on a path documented as confidential.
 - **Moderate** -- a documented control that fails open without being fully bypassed, or an exposure that needs an unlikely configuration.
 - **Low** -- disclosure of non-record metadata, or a denial of service against a party's own run.
 
-Two design facts settle a recurring class of report before it consumes a week. Zero-setup exchanges carry no application-layer AEAD by design and rely on transport encryption alone ([SECURITY_DESIGN.md#channel-security](SECURITY_DESIGN.md#channel-security)), and an adversary who has already compromised the host running PSI-Link is out of scope. A report resting on either is a documented limitation; say which one, explicitly, when declining on that basis.
+Two design facts settle a recurring class of report before it consumes a week. Zero-setup exchanges carry no application-layer AEAD by design and rely on transport encryption alone ([SECURITY_DESIGN.md#channel-security](SECURITY_DESIGN.md#channel-security)), and an adversary who has already compromised the host running psilink is out of scope. A report resting on either is a documented limitation; say which one, explicitly, when declining on that basis.
 
 Score the severity with CVSS in the draft advisory (step 5) rather than in the thread, so the number the reporter is told and the number that publishes are the same one.
 
@@ -94,7 +94,7 @@ The advisory and the CVE both run through the repository's Security tab, under A
 
 1. **Draft it from the report.** Starting the draft from the private report thread keeps the reporter attached to it, which is what carries the credit through to publication.
 2. **Fill in the substance**: a title naming the component and the impact; a description covering impact, affected versions, the fixed version, and a workaround for anyone who cannot upgrade immediately; the CVSS vector; and a CWE if one fits.
-3. **Affected products.** That section is built around package ecosystems, and PSI-Link publishes no registry package -- the released artifacts are a signed container image and the tagged source ([RELEASES.md#release-artifacts](RELEASES.md#release-artifacts)). Put the affected and fixed versions in the description as well, where they are legible regardless of what the form accepts. This project has not yet driven that form against a real advisory, so treat this paragraph as a starting point to confirm at first use rather than as tested guidance, and correct it here afterwards.
+3. **Affected products.** That section is built around package ecosystems, and psilink publishes no registry package -- the released artifacts are a signed container image and the tagged source ([RELEASES.md#release-artifacts](RELEASES.md#release-artifacts)). Put the affected and fixed versions in the description as well, where they are legible regardless of what the form accepts. This project has not yet driven that form against a real advisory, so treat this paragraph as a starting point to confirm at first use rather than as tested guidance, and correct it here afterwards.
 4. **Request the CVE ID** from the draft before publishing. The identifier is assigned to the draft and travels with it to publication.
 5. **Credit the reporter** by the name or handle they use, unless they asked for anonymity ([SECURITY.md#disclosure-policy](../SECURITY.md#disclosure-policy)).
 6. **Share the draft with the reporter** for accuracy before publishing. They usually catch an overstated or understated impact.
@@ -159,7 +159,7 @@ This runbook is walked once a year against a simulated report, and again after a
 
 ### 2026-08-15
 
-**Scenario (simulated).** A researcher privately reports that on Windows the CLI writes the result CSV with an inherited ACL granting a second local account read access, so any user of that machine can read the linked records. This scenario is invented for the exercise and describes no defect in PSI-Link: the owner-only write path it imagines failing is specified in [CREDENTIAL_STORAGE.md](spec/CREDENTIAL_STORAGE.md). It was chosen because it is confirmable, platform-scoped, and severe enough to reach publication, so the walk covers every step rather than ending at a decline.
+**Scenario (simulated).** A researcher privately reports that on Windows the CLI writes the result CSV with an inherited ACL granting a second local account read access, so any user of that machine can read the linked records. This scenario is invented for the exercise and describes no defect in psilink: the owner-only write path it imagines failing is specified in [CREDENTIAL_STORAGE.md](spec/CREDENTIAL_STORAGE.md). It was chosen because it is confirmable, platform-scoped, and severe enough to reach publication, so the walk covers every step rather than ending at a decline.
 
 **Walked.** Steps 1 through 7 in order, against the repository as it stood on the exercise date: intake and acknowledgement, the severity call (High -- record data readable by a non-owner on the same host), affected versions (`v0.1.0`, the only signed release tag; no previous major exists on a `0.x` line), the hotfix path (branch from `v0.1.0`, fix, `v0.1.1`), advisory drafting and CVE request, and the reporter messages at each milestone.
 

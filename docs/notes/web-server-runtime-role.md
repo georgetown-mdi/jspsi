@@ -53,7 +53,7 @@ hosted build answers every job route `404` whatever the data root says
 (`apps/web/src/jobs/gate.ts`), so the public deployment cannot serve the
 server-side driver at all. The single-operator trust boundary the API's design
 rests on is the console's alone
-([SECURITY_DESIGN.md](../SECURITY_DESIGN.md#single-party-appliance-trust-boundary)).
+([SECURITY_DESIGN.md](../SECURITY_DESIGN.md#single-party-console-trust-boundary)).
 
 ## Why the framework's server half is not required
 

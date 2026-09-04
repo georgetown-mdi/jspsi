@@ -78,9 +78,9 @@ What managed does **not** add:
   runtime -- an installed app kept running on the operator's machine -- never
   on a server acting for the party. The installed-software path for scheduled
   runs remains the CLI plus a host scheduler such as cron (see [Scheduling the
-  run](CLI.md#scheduling-the-run)). The console appliance is not a scheduling
+  run](CLI.md#scheduling-the-run)). The console is not a scheduling
   path -- it facilitates a single exchange (see
-  [SECURITY_DESIGN.md](SECURITY_DESIGN.md#single-party-appliance-trust-boundary)).
+  [SECURITY_DESIGN.md](SECURITY_DESIGN.md#single-party-console-trust-boundary)).
 - **No second copy of the input data.** The record never holds the input file's
   contents or any row value. Where the platform allows, it holds a file
   **handle** -- a pointer to the operator's file, not a copy (see

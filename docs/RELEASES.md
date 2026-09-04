@@ -4,17 +4,17 @@ title: "Release Process"
 
 # Release Process
 
-This document describes how PSI-Link releases are prepared, tagged, and published.
+This document describes how psilink releases are prepared, tagged, and published.
 
 ## Versioning
 
-PSI-Link uses [semantic versioning](https://semver.org/) (MAJOR.MINOR.PATCH):
+psilink uses [semantic versioning](https://semver.org/) (MAJOR.MINOR.PATCH):
 
 - **PATCH**: backwards-compatible bug fixes, documentation updates, dependency patches.
 - **MINOR**: backwards-compatible new features or new configuration fields. Exchange specification files written for an earlier MINOR version of the same MAJOR must continue to work.
 - **MAJOR**: breaking changes to the exchange protocol, configuration schema, or CLI interface. A MAJOR bump means existing key files or exchange specs may need to be updated.
 
-`apps/cli/package.json` is the canonical release version: Docker image tags and GitHub Release tags reflect the CLI version. The web console appliance baked into that image (`apps/web`, run via `serve`) is versioned to the CLI version along with the rest of the image; the hosted `apps/web` deployment carries no release version of its own. `packages/core` (and any future sub-packages) version independently -- a patch to the core library does not require a CLI release unless the CLI itself is also affected. The hosted `apps/web` deployment is continuously deployed and carries no release version. The root `package.json` version is a monorepo workspace marker and is not independently meaningful.
+`apps/cli/package.json` is the canonical release version: Docker image tags and GitHub Release tags reflect the CLI version. The console baked into that image (`apps/web`, run via `serve`) is versioned to the CLI version along with the rest of the image; the hosted `apps/web` deployment carries no release version of its own. `packages/core` (and any future sub-packages) version independently -- a patch to the core library does not require a CLI release unless the CLI itself is also affected. The hosted `apps/web` deployment is continuously deployed and carries no release version. The root `package.json` version is a monorepo workspace marker and is not independently meaningful.
 
 Compatibility between the CLI and its core dependency is recorded by the lockfile and embedded in the Docker image; no separate compatibility matrix is maintained.
 
@@ -32,7 +32,7 @@ Each release produces:
 | Launchers      | GitHub Release assets          | `start-psilink.sh`, `Start-Psilink.ps1`, `Setup-PsilinkFileDrop.ps1`     |
 | Build provenance | GitHub attestation store     | Subject `docker.io/vdorie/psi-link`, one attestation per released manifest digest |
 
-Each image carries both the CLI and the web console appliance; which role it runs is decided by its first argument (see [DEPLOYMENT.md](DEPLOYMENT.md#docker-deployment)). Both run unprivileged as uid 1000, take the same arguments, and speak the same protocol, so a partner on one can exchange with a partner on the other.
+Each image carries both the CLI and the console; which role it runs is decided by its first argument (see [DEPLOYMENT.md](DEPLOYMENT.md#docker-deployment)). Both run unprivileged as uid 1000, take the same arguments, and speak the same protocol, so a partner on one can exchange with a partner on the other.
 
 The hosted web deployment (`apps/web`) is a separate deployment to its hosting environment as part of CI/CD; it is not this image and is not distributed as a versioned artifact.
 
@@ -41,7 +41,7 @@ The hosted web deployment (`apps/web`) is a separate deployment to its hosting e
 The two tags differ in one thing: what serves the cryptography underneath `crypto.subtle`.
 
 - **`vdorie/psi-link:X.Y.Z`** -- the default artifact, built on `node:26-alpine`. It embeds no validated cryptographic module and the project claims none for it. Take this one unless a FIPS obligation says otherwise: it is smaller, its SFTP support is unrestricted, and it is the image the launchers and the Windows file-drop setup scripts pull.
-- **`vdorie/psi-link:X.Y.Z-fips`** -- built on Amazon Linux 2023 and carrying the CMVP-validated OpenSSL FIPS provider AWS publishes for that distribution, so PSI-Link's `crypto.subtle` calls dispatch into that module. It costs roughly 1.8x the size, and by default it cannot reach an SFTP server that offers only `curve25519` key exchange, only the `chacha20-poly1305@openssh.com` cipher, or only an Ed25519 host key.
+- **`vdorie/psi-link:X.Y.Z-fips`** -- built on Amazon Linux 2023 and carrying the CMVP-validated OpenSSL FIPS provider AWS publishes for that distribution, so psilink's `crypto.subtle` calls dispatch into that module. It costs roughly 1.8x the size, and by default it cannot reach an SFTP server that offers only `curve25519` key exchange, only the `chacha20-poly1305@openssh.com` cipher, or only an Ed25519 host key.
 
 **What the FIPS variant does and does not support a claim of** is in [COMPLIANCE.md](COMPLIANCE.md#fips-140), which is the single place this project states it: the certificate, the module version, the environments that certificate covers, and what stays outside the module either way. Two bounds are worth carrying here as well, because they decide whether pulling this tag is worth anything to a given deployment:
 
@@ -69,7 +69,7 @@ Both `--certificate-` arguments are required and each carries its own weight; [V
 docker run --rm vdorie/psi-link:X.Y.Z-fips --help
 ```
 
-A run whose crypto is being served by the module reports `FIPS provider active`, naming the baked-in module version when `FIPS_MODULE_VERSION` is intact in the container's environment and saying plainly that it cannot name one when that variable was cleared or overridden at start; anything else is a warning naming what the startup probe found instead. The host kernel's FIPS-mode line is separate and is reported the same way. Neither line is parsed from `openssl list`: the probe is a Node process making PSI-Link's own call shapes under the image's configuration, and its exit status is the whole verdict.
+A run whose crypto is being served by the module reports `FIPS provider active`, naming the baked-in module version when `FIPS_MODULE_VERSION` is intact in the container's environment and saying plainly that it cannot name one when that variable was cleared or overridden at start; anything else is a warning naming what the startup probe found instead. The host kernel's FIPS-mode line is separate and is reported the same way. Neither line is parsed from `openssl list`: the probe is a Node process making psilink's own call shapes under the image's configuration, and its exit status is the whole verdict.
 
 What the variant is, what may and may not be said about it, the three deployment tiers a claim has to keep apart, and the measured list of what does not work in it are in [fips-variant-image.md](notes/fips-variant-image.md); its pins and the checks that hold them are in [CONTAINER_IMAGES.md](spec/CONTAINER_IMAGES.md).
 
