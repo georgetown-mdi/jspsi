@@ -218,6 +218,7 @@ import { basename, resolve } from "node:path";
 
 import { commandOf, eventCwd, eventForTools } from "./lib/event.mjs";
 import { splitPipelines, splitStages, tokenize } from "./lib/shell.mjs";
+import { isInside, isStrictlyInside } from "./lib/worktrees.mjs";
 
 const CLAUDE_DIR = ".claude";
 const WORKTREES_DIR = "worktrees";
@@ -416,17 +417,6 @@ function worktreeContext(path) {
   return null;
 }
 
-// The prefix a path carries when it lies strictly under `directory`, which is
-// just "/" at the filesystem root -- appending a separator there builds "//",
-// which nothing starts with, and `rm -rf /` would match no worktree at all.
-function childPrefix(directory) {
-  return directory === "/" ? "/" : `${directory}/`;
-}
-
-function isInside(path, directory) {
-  return path === directory || path.startsWith(childPrefix(directory));
-}
-
 function treeCount(root) {
   try {
     return readdirSync(root).length;
@@ -501,7 +491,7 @@ function rootsUnder(target, knownRoots) {
     candidates.add(resolve(target, WORKTREES_DIR));
   }
   return [...candidates].filter(
-    (root) => root.startsWith(childPrefix(target)) && treeCount(root) > 0,
+    (root) => isStrictlyInside(root, target) && treeCount(root) > 0,
   );
 }
 

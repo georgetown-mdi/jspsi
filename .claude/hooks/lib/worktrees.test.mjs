@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   isInside,
+  isStrictlyInside,
   owningWorktree,
   parseWorktreeRecords,
   worktreeRecords,
@@ -107,6 +108,22 @@ describe("isInside", () => {
   it("holds for every path at the filesystem root", () => {
     expect(isInside("/repo", "/")).toBe(true);
     expect(isInside("/", "/")).toBe(true);
+  });
+});
+
+describe("isStrictlyInside", () => {
+  it("holds for a path under the directory but not for the directory", () => {
+    expect(isStrictlyInside("/repo/src", "/repo")).toBe(true);
+    expect(isStrictlyInside("/repo", "/repo")).toBe(false);
+  });
+
+  it("holds for every path at the filesystem root, the root included", () => {
+    expect(isStrictlyInside("/repo", "/")).toBe(true);
+    expect(isStrictlyInside("/", "/")).toBe(true);
+  });
+
+  it("does not hold for a sibling whose name starts the same way", () => {
+    expect(isStrictlyInside("/repo-other/file", "/repo")).toBe(false);
   });
 });
 

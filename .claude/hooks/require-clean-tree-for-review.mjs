@@ -82,6 +82,7 @@ import { dirname, join } from "node:path";
 
 import { eventCwd, eventForTools } from "./lib/event.mjs";
 import { git } from "./lib/shell.mjs";
+import { worktreeRecords } from "./lib/worktrees.mjs";
 
 const DIRTY_ENTRIES_SHOWN = 10;
 const ROUNDS_DIR = join("scratch", "review-rounds");
@@ -143,31 +144,6 @@ function namesLightReview(toolInput) {
   return [toolInput?.scriptPath, toolInput?.workflow, toolInput?.name].some(
     (field) => typeof field === "string" && field.includes(LIGHT_REVIEW_MARKER),
   );
-}
-
-// Worktrees of this repository as `{path, head, branch}`, main worktree first
-// (git lists it first, from any of them); null when git would not answer.
-function worktreeRecords(root) {
-  const listing = git(["-C", root, "worktree", "list", "--porcelain"]);
-  if (listing === null) return null;
-  const records = [];
-  for (const line of listing.split("\n")) {
-    if (line.startsWith("worktree ")) {
-      records.push({
-        path: line.slice("worktree ".length),
-        head: null,
-        branch: null,
-      });
-      continue;
-    }
-    const current = records[records.length - 1];
-    if (current === undefined) continue;
-    if (line.startsWith("HEAD ")) current.head = line.slice("HEAD ".length);
-    else if (line.startsWith("branch ")) {
-      current.branch = line.slice("branch ".length);
-    }
-  }
-  return records.length === 0 ? null : records;
 }
 
 function branchName(ref) {

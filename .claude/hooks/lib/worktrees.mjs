@@ -55,13 +55,18 @@ export function worktreeRecords(directory) {
 }
 
 /**
- * Whether `path` is `directory` or lies under it. The child prefix is just "/"
- * at the filesystem root, where appending a separator would build a "//" that
- * nothing starts with.
+ * Whether `path` carries the prefix a child of `directory` carries. That prefix
+ * is just "/" at the filesystem root, where appending a separator would build a
+ * "//" that nothing starts with and `rm -rf /` would then contain no worktree at
+ * all; the root is the one directory that reads as a child of itself.
  */
+export function isStrictlyInside(path, directory) {
+  return path.startsWith(directory === "/" ? "/" : `${directory}/`);
+}
+
+/** Whether `path` is `directory` or lies under it. */
 export function isInside(path, directory) {
-  const prefix = directory === "/" ? "/" : `${directory}/`;
-  return path === directory || path.startsWith(prefix);
+  return path === directory || isStrictlyInside(path, directory);
 }
 
 /**

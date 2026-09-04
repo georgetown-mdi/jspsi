@@ -87,7 +87,7 @@ import { existsSync, realpathSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 
 import { eventCwd, eventForTools } from "./lib/event.mjs";
-import { git } from "./lib/shell.mjs";
+import { owningWorktree, worktreeRecords } from "./lib/worktrees.mjs";
 
 const GUARDED_TOOLS = new Set(["Edit", "Write", "NotebookEdit"]);
 const PATH_KEYS = ["file_path", "notebook_path"];
@@ -163,28 +163,14 @@ function nearestExistingDirectory(path) {
   }
 }
 
-// Worktree paths of the repository the directory belongs to, main worktree first
-// (git lists it first, from any of them); null when git would not answer.
+// Worktree paths of the repository the directory belongs to, main worktree
+// first, each resolved through its symlinks the way a target path is; null when
+// git would not answer.
 function worktreePaths(directory) {
-  const listing = git(["-C", directory, "worktree", "list", "--porcelain"]);
-  if (listing === null) return null;
-  const paths = listing
-    .split("\n")
-    .filter((line) => line.startsWith("worktree "))
-    .map((line) => canonical(line.slice("worktree ".length)));
-  return paths.length === 0 ? null : paths;
-}
-
-function isInside(path, directory) {
-  return path === directory || path.startsWith(`${directory}/`);
-}
-
-// The worktree a path belongs to: the longest registered path containing it, so
-// a linked worktree nested under the main root wins over the main root itself.
-function owningWorktree(path, paths) {
-  return paths
-    .filter((candidate) => isInside(path, candidate))
-    .sort((a, b) => b.length - a.length)[0];
+  const records = worktreeRecords(directory);
+  return records === null
+    ? null
+    : records.map((record) => canonical(record.path));
 }
 
 // The worktree the session itself is working in, or undefined when its directory
