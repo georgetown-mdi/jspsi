@@ -1,7 +1,7 @@
 ---
 title: "psilink Security Design"
 review_owner: "psilink maintainers"
-last_reviewed: "2026-08-30"
+last_reviewed: "2026-09-04"
 ---
 
 # psilink security
@@ -41,24 +41,11 @@ Each agency runs the software itself, in a container on its own machine or in it
 
 ### What the deploying agency is responsible for
 
-- **At-rest confidentiality** -- storage or full-disk encryption over the input file, the result, the key file, and any backup of them.
-- **The environment** -- the host, the container engine, the network path, and the SFTP server or shared directory the parties rendezvous through, including a directory scoped to the one exchange.
-- **The credentials** -- carrying the shared secret and the server's host-key fingerprint to the partner over a trusted channel, and protecting both thereafter.
-- **Retention and disposition** of the result, the exchange records, and the rendezvous directory's contents.
-- **The decision to disclose**, its legal basis, and the risk assessment or authorization that covers it.
-
-The complete split, stated separately for the container deployment and the hosted web application, is in [SHARED_RESPONSIBILITY.md](SHARED_RESPONSIBILITY.md).
+Everything around the exchange: at-rest confidentiality, the environment it runs in, the credentials carried to the partner, retention and disposition, and the decision to disclose. [SHARED_RESPONSIBILITY.md](SHARED_RESPONSIBILITY.md) states the split area by area, separately for the container deployment and the hosted web application, and is the document to answer a responsibility question from.
 
 ### Where a reviewer's usual questions are answered
 
-| A reviewer asks | The short answer | Where it is set out |
-|-----------------|------------------|---------------------|
-| Is psilink suitable for our data class? | Designed for PII; PHI and education records are conditional on the agency's own determination; CJI and FTI have not been assessed. | [COMPLIANCE.md](COMPLIANCE.md#intended-use-and-data-classification) |
-| Is our data encrypted at rest? | No -- the software encrypts nothing on disk. It writes its files owner-only, and at-rest confidentiality is the agency's storage or full-disk encryption. | [Key file security](#key-file-security) |
-| Is our data encrypted in transit? | On a recurring exchange, yes: application-layer AES-256-GCM on top of the channel's own encryption. A zero-setup exchange relies on the channel alone. | [Channel security](#channel-security) |
-| What is our agency still responsible for? | Everything around the exchange: at-rest confidentiality, the environment, the credentials, retention, and the decision to disclose. | [What the deploying agency is responsible for](#what-the-deploying-agency-is-responsible-for) above, and [SHARED_RESPONSIBILITY.md](SHARED_RESPONSIBILITY.md) |
-| What happens if the shared secret leaks? | Treat it as invalid immediately, notify the partner, delete both key files, and re-invite over an uncompromised channel. | [Compromise response](#compromise-response) |
-| Which NIST controls does it address, and is the cryptography FIPS 140-validated? | The control mapping and the scoped FIPS 140 claim, with its conditions and the places an unqualified version of it fails. | [COMPLIANCE.md](COMPLIANCE.md#nist-sp-800-53) and [COMPLIANCE.md](COMPLIANCE.md#fips-140) |
+A reviewer's recurring questions -- the data classes psilink is designed for, encryption at rest and in transit, what the agency still owns, what to do if the shared secret leaks, the NIST SP 800-53 control mapping, and the FIPS 140 position -- are tabulated with a short answer and a pointer each in [COMPLIANCE.md](COMPLIANCE.md#where-a-reviewers-usual-questions-are-answered). The vendor-shaped versions a security questionnaire asks are answered in [SHARED_RESPONSIBILITY.md](SHARED_RESPONSIBILITY.md#recurring-questionnaire-answers).
 
 ### How to read the rest of this document
 
