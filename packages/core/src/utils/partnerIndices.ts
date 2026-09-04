@@ -62,7 +62,7 @@ export function assertPartnerIndexCount(
   if (count !== expected)
     throw partnerProtocolError(
       participantId,
-      `${what} carries ${entryCount(count)}, expected ${expected}`,
+      `${what} has ${entryCount(count)}, expected ${expected}`,
     );
 }
 
@@ -342,7 +342,7 @@ export function assertPartnerIndices(
   if (distinct && indices.length > exclusiveBound)
     throw partnerProtocolError(
       participantId,
-      `${what} carries ${entryCount(indices.length)}, more than the ` +
+      `${what} has ${entryCount(indices.length)}, more than the ` +
         `${exclusiveBound} this side can address`,
     );
   // A half admitting ungrouped repeats reports none, and allocates no detector for
@@ -371,12 +371,12 @@ export function assertPartnerIndices(
     if (!Number.isInteger(index))
       throw partnerProtocolError(
         participantId,
-        `${what} carries an entry that is not a whole number`,
+        `${what} has an entry that is not a whole number`,
       );
     if (index < 0 || index >= exclusiveBound)
       throw partnerProtocolError(
         participantId,
-        `${what} carries an index outside [0, ${exclusiveBound})`,
+        `${what} has an index outside [0, ${exclusiveBound})`,
       );
     if (runGroups) {
       while (entry === runEnd) {

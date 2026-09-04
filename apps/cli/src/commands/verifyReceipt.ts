@@ -351,7 +351,7 @@ const RESULT_SIZE_WORD: Record<ResultSizeStatus, string> = {
   verified: "matches the matched-pairs table it counts",
   mismatch:
     "DOES NOT MATCH the matched-pairs table it counts, which opened and " +
-    "carries a different number of pairs -- the recorded figure is what " +
+    "has a different number of pairs -- the recorded figure is what " +
     "disagrees, not the data",
   "not-supplied":
     "not checked (re-supply the result file so its matched pairs can be " +
@@ -359,7 +359,7 @@ const RESULT_SIZE_WORD: Record<ResultSizeStatus, string> = {
   unopenable:
     "not checked (no matched pairs to recount: where the record commits to a " +
     "table that did not open, the matched-pairs line above names the cause; a " +
-    "table that opened but is not shaped as a pairing carries no count to " +
+    "table that opened but is not shaped as a pairing has no count to " +
     "recount; a count-only exchange records no such table at all)",
 };
 
@@ -576,7 +576,7 @@ const RUN_BINDING_WORD: Record<RunBindingStatus, string> = {
     "DOES NOT MATCH the exchange record's run binder: the receipt and the " +
     "record are from different runs, not from one exchange",
   unpaired:
-    "the exchange record carries no run binder, so it records an exchange that " +
+    "the exchange record has no run binder, so it records an exchange that " +
     "produced no signed receipt -- this receipt is not that run's",
   "not-checked":
     "not checked (name this exchange's record as the positional and pass this " +
@@ -994,7 +994,7 @@ function resolvePinnedFingerprints(
   if (flagValues.length > 2)
     throw new UsageError(
       "--partner-fingerprint may be given at most twice: a dual-signed record " +
-        "carries two certificates, so a third pinned value can anchor none of " +
+        "has two certificates, so a third pinned value can anchor none of " +
         "them",
     );
   for (const value of flagValues)

@@ -65,11 +65,12 @@ import {
  * is the behavior this refusal removes.
  */
 const NO_IDENTITY_PATH_REFUSAL =
-  "no signing identity path is configured, and psilink chooses none: this is a " +
-  "long-lived credential reused across every exchange and every partner, so " +
-  "where it is kept is yours to decide. Name the path and re-run -- 'psilink " +
-  "fingerprint --identity-file /run/signing/psilink-signing-identity.json', or " +
-  "signing.identity_file in the configuration. Its directory must be writable " +
+  "no signing identity path is configured. Name the path and re-run -- " +
+  "'psilink fingerprint --identity-file " +
+  "/run/signing/psilink-signing-identity.json', or signing.identity_file in " +
+  "the configuration. This is a long-lived credential reused across every " +
+  "exchange and every partner, so where it is kept is yours to decide. Its " +
+  "directory must be writable " +
   "for this creating run; every run after it only reads the file, so a " +
   "read-only mount of its own is right from then on. Choose somewhere " +
   "durable, and never a directory your partner syncs into -- that would put " +
@@ -93,8 +94,8 @@ export function builder(cmd: Argv): Argv {
       describe:
         "path to the signing identity file, created there if absent; " +
         "overrides signing.identity_file in the config. Required unless the " +
-        "config sets that field -- psilink chooses no location for a " +
-        "credential (example: /run/signing/psilink-signing-identity.json)",
+        "config sets that field (example: " +
+        "/run/signing/psilink-signing-identity.json)",
     })
     .option("config-file", {
       type: "string",
@@ -202,7 +203,7 @@ function assertBindableIdentity(identity: string): void {
   if (TEXT_CONTROL_CHAR_PATTERN.test(identity))
     throw new UsageError(
       "the identity to bind into the signing certificate cannot be used: " +
-        `${TEXT_CONTROL_CHAR_MESSAGE}. Supply one that carries none, through ` +
+        `${TEXT_CONTROL_CHAR_MESSAGE}. Supply one that has none, through ` +
         "--identity or linkage_terms.identity.",
     );
   if (identity.length > MAX_TEXT_LENGTH)

@@ -464,6 +464,10 @@ function assertDeclaredWidthMatchesStrategy(
  * When a session-derived receipt path lands, REPLACE this refusal with it rather
  * than merely widening the allowlist: the mode needs a signing step of its own,
  * not just permission to reach the certificate one.
+ *
+ * It refuses before the exchange runs rather than at receipt time: a
+ * non-certificate mode would otherwise leave the exchange with the ordinary
+ * unsigned record while the configuration asked for a signed receipt.
  */
 export function assertSigningModeImplemented(
   mode: SigningMode | undefined,
@@ -471,11 +475,9 @@ export function assertSigningModeImplemented(
   if (mode === undefined || mode === "none" || mode === "certificate") return;
   throw new OperatorConfigError(
     'this receipt signing mode is not yet implemented: only "certificate" ' +
-      'signing produces a receipt. A "session-derived" MAC, or any other ' +
-      "non-certificate mode, would leave this exchange with the ordinary " +
-      "unsigned record while the configuration asks for a signed receipt, so " +
-      "it is refused before the exchange runs. Set signing.mode to " +
-      '"certificate" to sign receipts, or to "none" to run unsigned.',
+      'signing produces a receipt, and a "session-derived" MAC or any other ' +
+      'non-certificate mode is refused. Set signing.mode to "certificate" to ' +
+      'sign receipts, or to "none" to run unsigned.',
   );
 }
 
@@ -639,9 +641,9 @@ export function assertSignedReceiptNamesBothParties(
     "a signed receipt names both parties, and " +
       (localTerms.identity === undefined
         ? partnerTerms.identity === undefined
-          ? "neither party's agreed terms carry an identity"
-          : "this party's agreed terms carry none"
-        : "the partner's agreed terms carry none") +
+          ? "neither party's agreed terms name an identity"
+          : "this party's agreed terms name none"
+        : "the partner's agreed terms name none") +
       ". A certificate is trusted by the identity its holder used in the " +
       "agreed terms, so an unnamed party cannot present or verify one: set " +
       "linkage_terms.identity on both sides, or run without receipt signing.",
@@ -695,8 +697,8 @@ export function assertLocalCertificateAuthorizesAgreedIdentity(
       "the identity its holder used in the agreed terms, so the partner " +
       "authorizes the presented certificate against that name and refuses it, " +
       "and a receipt signed under it verifies nowhere. Set " +
-      "linkage_terms.identity to the name the certificate carries, or sign " +
-      "with an identity bound to the name the agreed terms carry. The " +
+      "linkage_terms.identity to the name on the certificate, or sign " +
+      "with an identity bound to the name in the agreed terms. The " +
       `certificate is bound to "${certificate.identity}"; the agreed terms ` +
       `name "${agreedIdentity}".`,
   );
@@ -711,7 +713,7 @@ export function assertLocalCertificateAuthorizesAgreedIdentity(
 // certificate is bound away from the name it agreed terms under, which is this
 // party's own configuration and nothing the partner supplied.
 const UNNAMED_PARTY_ABORT_REASON =
-  "a signed receipt names both parties and one side's agreed terms carry no " +
+  "a signed receipt names both parties and one side's agreed terms name no " +
   "identity";
 const CERTIFICATE_DIVERGENCE_ABORT_REASON =
   "a signing certificate does not authorize the identity its holder agreed " +

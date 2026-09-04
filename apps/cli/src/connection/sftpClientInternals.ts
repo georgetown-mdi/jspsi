@@ -290,13 +290,16 @@ export function resolveTransportCloseSeams(
  * decides its own severity from the same reading: the connect-time check and the
  * idle release raise it (a boundary that silently stopped meaning anything is
  * worse than a failed dial), while the terminal close warns and returns.
+ *
+ * The message names no ssh2 internal: the caller logs the missing seam at debug,
+ * and the premises are re-verified per the "Upgrading the SFTP Stack" checklist
+ * in docs/spec/DEPENDENCY_PINS.md.
  */
-export function transportCloseSeamError(seam: string): Error {
+export function transportCloseSeamError(): Error {
   return new Error(
-    `closing an SFTP connection from this side drives ssh2's ${seam}, which ` +
-      `is not available after connect(); the installed ssh2 / ` +
-      `ssh2-sftp-client version may have renamed, relocated, or removed it - ` +
-      `re-verify the internal premises per the "Upgrading the SFTP Stack" ` +
-      `checklist in docs/spec/DEPENDENCY_PINS.md`,
+    `this exchange closes the SFTP connection from this side at every poll ` +
+      `boundary, which the installed SFTP library does not support, so the ` +
+      `exchange cannot run. This build of psilink is not compatible with ` +
+      `that library; report it with the version from 'psilink --version'`,
   );
 }

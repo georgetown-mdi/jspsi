@@ -130,15 +130,10 @@ export function addCommonBootstrapOptions(
     .option("identity", {
       type: "string",
       describe:
-        "identity string for this party (name, org, contact): the label your " +
-        "partner reads in the agreed linkage terms. Required by 'invite' and " +
-        "'accept', which author a partnership your partner reads a name off -- " +
-        "except over a configuration they keep rather than write, which runs " +
-        "under its linkage_terms.identity and reports this flag as having no " +
-        "effect. Optional elsewhere: a run whose terms come from " +
-        "a configuration file takes the label from its linkage_terms.identity, " +
-        "and a quick exchange given none sends none -- psilink names no party " +
-        "you did not name",
+        "who this party is (name, organization, contact). Your partner sees " +
+        "this label in the agreed linkage terms. Required by 'invite' and " +
+        "'accept'; elsewhere the label comes from linkage_terms.identity in " +
+        "the configuration file and this flag is ignored",
     })
     .option("server-port", {
       type: "number",
@@ -219,14 +214,8 @@ export function addCommonBootstrapOptions(
     .option("max-reconnect-attempts", {
       type: "number",
       describe:
-        "how many times to retry dialing the connection within a single " +
-        "connect attempt after a fast transient failure; default: 3. The same " +
-        "value also caps the cumulative number of mid-exchange reconnections in " +
-        "the default held-session mode: once that many session drops have been " +
-        "re-dialed, the exchange fails terminally (raise it for a flaky link, or " +
-        "use --connection-per-poll for a server that caps session lifetime). " +
-        "--connection-per-poll is not subject to that count, and the teardown " +
-        "abort-marker write is not charged against it.",
+        "how many times to retry a failed connection; default: 3. It also " +
+        "caps mid-exchange reconnections in the default held-session mode.",
     })
     .option("log-level", {
       type: "string",
@@ -256,12 +245,9 @@ export function addCommonBootstrapOptions(
     .option("event-stream", {
       type: "boolean",
       describe:
-        "emit a machine-readable NDJSON event stream on file descriptor 3 for a " +
-        "supervising process: stage transitions, warnings, and one terminal " +
-        "result/error event carrying a classified category (exchange, output, " +
-        "security, config). stdout (the CSV result) and stderr (human logs) are " +
-        "unchanged. Fails fast (exit 64) if fd 3 is not wired. No effect on an " +
-        "offline invite/accept, which runs no exchange. See docs/spec/CLI_EVENTS.md",
+        "emit a machine-readable NDJSON event stream on file descriptor 3 for " +
+        "a supervising process. Exits 64 if fd 3 is not wired. stdout and " +
+        "stderr are unchanged",
     })
     .option("lockless-rendezvous", {
       type: "boolean",
@@ -302,12 +288,8 @@ export function addCommonBootstrapOptions(
       type: "boolean",
       describe:
         "open a fresh SFTP session for each poll cycle instead of holding one " +
-        "session for the whole exchange; the session is released before the loop " +
-        "goes idle. Use it when the partner's SFTP server caps session lifetime " +
-        "and the exchange spans many idle poll gaps. This is an SFTP-only, purely " +
-        "local dialing choice that the peer does not observe, so each party sets " +
-        "it independently. Pair it with a long --polling-frequency, since a fresh " +
-        "SSH handshake per cycle is wasteful at a seconds-scale interval",
+        "for the whole exchange. Use it when the partner's SFTP server caps " +
+        "session lifetime, and pair it with a long --polling-frequency",
     })
     .option("outbound-path", {
       type: "string",

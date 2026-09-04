@@ -638,7 +638,7 @@ export async function linkViaPSI(
     if (theirIdentifiedIndexIterationMap.length > partnerRecordCount)
       throw partnerProtocolError(
         participant.id,
-        "the partner's mapped-element list carries " +
+        "the partner's mapped-element list has " +
           `${theirIdentifiedIndexIterationMap.length} entries, more than the ` +
           `${partnerRecordCount} record(s) the partner counted`,
       );
@@ -1863,7 +1863,7 @@ export function decodeRaggedIndexTable(
   // which is what lets the slot bound be enforced ahead of the allocation.
   const totalIndexWords = words.length - cellCount;
   if (totalIndexWords > slotBound)
-    refuse("carries more candidate values than the sender's declared width");
+    refuse("has more candidate values than the sender's declared width");
 
   const values = new Int32Array(totalIndexWords);
   const starts: Array<Int32Array> = [];
@@ -1894,8 +1894,7 @@ export function decodeRaggedIndexTable(
     }
     starts.push(keyStarts);
   }
-  if (read !== words.length)
-    refuse("carries trailing words past its last cell");
+  if (read !== words.length) refuse("has trailing words past its last cell");
   return starts.map((keyStarts) => new RaggedKeyCells(keyStarts, values));
 }
 

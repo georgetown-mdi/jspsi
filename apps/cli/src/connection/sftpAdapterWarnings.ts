@@ -223,8 +223,12 @@ export function sessionRecoveredHeldWarning(
 }
 
 /**
- * Reported on the terms every other seam failure on the re-dial path is: what
- * broke, what it costs, and this project's upgrade checklist.
+ * Reported when whether a connection still owes ssh2 its 'close' cannot be
+ * read: that state is watched through ssh2's client.on(), not available after
+ * connect(), so rather than dial into a window it cannot see, every mid-exchange
+ * re-dial closes the connection from this side first and waits for that close.
+ * Re-verify the premises per the "Upgrading the SFTP Stack" checklist in
+ * docs/spec/DEPENDENCY_PINS.md.
  *
  * @param forcedCloseTimeoutMs - The wait each mid-exchange re-dial spends on the
  * close it drives instead of the reading it cannot take, which is what the
@@ -234,18 +238,12 @@ export function unreadableTransportLifecycleWarning(
   forcedCloseTimeoutMs: number,
 ): string {
   return (
-    `Re-dialing an SFTP session the partner's server dropped mid-exchange ` +
-    `means telling a connection that still owes ssh2 its 'close' from one ` +
-    `whose events have all been delivered, which is watched through ` +
-    `ssh2's client.on() -- not available after connect(), so there is no ` +
-    `reading to take. Rather than dial into a window it cannot see, every ` +
-    `mid-exchange re-dial this exchange closes the connection from this ` +
-    `side first and waits up to ${forcedCloseTimeoutMs} ms for that ` +
-    `close, which costs that wait on a connection that had already ` +
-    `closed. The installed ssh2 / ssh2-sftp-client version may have ` +
-    `renamed, relocated, or removed it - re-verify the internal premises ` +
-    `per the "Upgrading the SFTP Stack" checklist in ` +
-    `docs/spec/DEPENDENCY_PINS.md`
+    `Every mid-exchange re-dial on this SFTP connection closes it from this ` +
+    `side first and waits up to ${forcedCloseTimeoutMs} ms for that close, ` +
+    `even on a connection that had already closed, so re-dialing is slower ` +
+    `than it needs to be. This build of psilink is not compatible with the ` +
+    `installed SFTP library; report it with the version from ` +
+    `'psilink --version'.`
   );
 }
 

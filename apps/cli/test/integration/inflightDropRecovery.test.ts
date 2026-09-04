@@ -228,7 +228,9 @@ inProcessOnly(
       // A recovered drop is never reported as zero drops.
       expect(
         logs.filter((entry) =>
-          entry.message.includes("Upgrading the SFTP Stack"),
+          entry.message.includes(
+            "not compatible with the installed SFTP library",
+          ),
         ),
       ).toEqual([]);
     } finally {

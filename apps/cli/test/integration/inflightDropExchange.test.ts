@@ -241,8 +241,8 @@ inProcessOnly(
       ).toBeGreaterThanOrEqual(1);
 
       // Each survived drop is reported to the operator as one, and no seam the
-      // recovery drives degraded on the way (every degradation warns with the
-      // upgrade checklist).
+      // recovery drives degraded on the way (every degradation warns that this
+      // build and the installed SFTP library disagree).
       expect(
         logs.filter((entry) =>
           entry.message.includes("dropped mid-exchange and was transparently"),
@@ -250,7 +250,9 @@ inProcessOnly(
       ).toBeGreaterThanOrEqual(1);
       expect(
         logs.filter((entry) =>
-          entry.message.includes("Upgrading the SFTP Stack"),
+          entry.message.includes(
+            "not compatible with the installed SFTP library",
+          ),
         ),
       ).toEqual([]);
     } finally {

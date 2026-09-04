@@ -283,7 +283,7 @@ describe("formatVerificationReport: the recorded result size", () => {
     // Each way a figure ends up with no pair count behind it is named, so the
     // line is not read as the one cause the matched-pairs line above explains.
     expect(out).toContain("the matched-pairs line above names the cause");
-    expect(out).toContain("is not shaped as a pairing carries no count");
+    expect(out).toContain("is not shaped as a pairing has no count");
     expect(out).toContain("count-only exchange records no such table at all");
     expect(exitCode).toBe(0);
   });
@@ -597,7 +597,7 @@ describe("formatSignedRecordReport", () => {
     );
     const out = lines.join("\n");
     expect(out).toContain(
-      "receipt-record pairing: the exchange record carries no run binder",
+      "receipt-record pairing: the exchange record has no run binder",
     );
     expect(out).toContain("produced no signed receipt");
     expect(exitCode).toBe(1);
@@ -1284,7 +1284,7 @@ describe("handler", () => {
       "commitment partnerPayloadReceived: DOES NOT MATCH",
     );
     expect(stdout).toContain(
-      "note: the re-supplied received payload carries empty cells",
+      "note: the re-supplied received payload has empty cells",
     );
     expect(stdout).toContain(
       "cannot distinguish a committed empty string from a committed null",
@@ -1476,7 +1476,7 @@ describe("handler", () => {
     });
     expect(exits).toEqual([]);
     expect(stdout).toContain(
-      "receipt-record pairing: the exchange record carries no run binder",
+      "receipt-record pairing: the exchange record has no run binder",
     );
     expect(exitCode).toBe(1);
   });

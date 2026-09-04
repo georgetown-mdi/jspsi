@@ -910,9 +910,9 @@ function reconcileAcceptConfig(params: {
   const recordedLockIn = existing.expectedPayloadColumns;
   if (recordedLockIn !== undefined && consentedPayloadColumns === undefined)
     log.warn(
-      `this invitation declares no disclosed columns, so accepting it removes ` +
-        `the received-payload lock-in recorded in ${configPath}. That lock-in ` +
-        `holds the partner's payload to ` +
+      `this invitation declares no disclosed columns, so accepting it clears ` +
+        `the list of columns you previously agreed to receive, recorded in ` +
+        `${configPath}. That list holds the partner's payload to ` +
         (recordedLockIn.length === 0
           ? "no columns at all (a strict receive-nothing consent)."
           : "exactly these columns:\n" +

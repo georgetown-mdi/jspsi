@@ -392,7 +392,7 @@ export function assertEventStreamFdOpen(): void {
     throw new UsageError(
       `--event-stream was given but file descriptor ${EVENT_STREAM_FD} is not ` +
         "open; spawn psilink with that descriptor wired to a pipe your " +
-        "supervisor reads (see docs/spec/CLI_EVENTS.md), or drop --event-stream",
+        "supervisor reads, or drop --event-stream",
     );
   }
 }

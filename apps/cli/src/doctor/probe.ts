@@ -226,8 +226,8 @@ function padSkipped(
       .map((id) =>
         skipped(id, "not run: an earlier check did not pass.", {
           meaning:
-            "an earlier check failed and stopped the battery before this " +
-            "one, so nothing was established about it.",
+            "an earlier check failed and the remaining checks did not run, " +
+            "so nothing was established about this one.",
         }),
       ),
   ];
@@ -443,7 +443,7 @@ function freeSpaceCheck(listing: string): DoctorCheckRecord {
   if (freeMb === undefined)
     return skipped("free_space", "the server did not report free space.", {
       meaning:
-        "the listing carried no free-space figure, so nothing was " +
+        "the listing had no free-space figure, so nothing was " +
         "established about it.",
     });
   if (freeMb === 0)

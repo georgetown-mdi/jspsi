@@ -1012,13 +1012,13 @@ describe("assertSignedReceiptNamesBothParties", () => {
       ReceiptVerificationError,
     );
     expect((raised(terms, unnamedTerms) as Error).message).toContain(
-      "the partner's agreed terms carry none",
+      "the partner's agreed terms name none",
     );
     expect((raised(unnamedTerms, partnerTerms) as Error).message).toContain(
-      "this party's agreed terms carry none",
+      "this party's agreed terms name none",
     );
     expect((raised(unnamedTerms, unnamedTerms) as Error).message).toContain(
-      "neither party's agreed terms carry an identity",
+      "neither party's agreed terms name an identity",
     );
   });
 

@@ -216,21 +216,21 @@ test("single-pass sender refuses a resolved table naming a row it does not have"
   const err = await singlePassWithDeviation(
     onIndexTable((table) => [[ROWS], [table[1][0]]]),
   );
-  expectProtocolRefusal(err, /local half carries an index outside \[0, 3\)/);
+  expectProtocolRefusal(err, /local half has an index outside \[0, 3\)/);
 });
 
 test("single-pass sender refuses a resolved table naming a partner row beyond the exchanged count", async () => {
   const err = await singlePassWithDeviation(
     onIndexTable((table) => [[table[0][0]], [ROWS]]),
   );
-  expectProtocolRefusal(err, /partner half carries an index outside \[0, 3\)/);
+  expectProtocolRefusal(err, /partner half has an index outside \[0, 3\)/);
 });
 
 test("single-pass sender refuses a resolved table whose halves disagree in length", async () => {
   const err = await singlePassWithDeviation(
     onIndexTable((table) => [table[0], table[1].slice(1)]),
   );
-  expectProtocolRefusal(err, /partner half carries 1 entry, expected 2/);
+  expectProtocolRefusal(err, /partner half has 1 entry, expected 2/);
 });
 
 test("single-pass sender refuses a resolved table with a fractional index", async () => {
@@ -239,7 +239,7 @@ test("single-pass sender refuses a resolved table with a fractional index", asyn
   );
   expectProtocolRefusal(
     err,
-    /local half carries an entry that is not a whole number/,
+    /local half has an entry that is not a whole number/,
   );
 });
 
@@ -247,7 +247,7 @@ test("single-pass sender refuses a resolved table with a negative index", async 
   const err = await singlePassWithDeviation(
     onIndexTable((table) => [table[0], [-1, ...table[1].slice(1)]]),
   );
-  expectProtocolRefusal(err, /partner half carries an index outside \[0, 3\)/);
+  expectProtocolRefusal(err, /partner half has an index outside \[0, 3\)/);
 });
 
 test("single-pass sender refuses a resolved table that claims one of its rows twice", async () => {
@@ -267,7 +267,7 @@ test("single-pass sender refuses a resolved table longer than its own row count"
       [0, 1, 2, 0],
     ]),
   );
-  expectProtocolRefusal(err, /local half carries 4 entries, more than the 3/);
+  expectProtocolRefusal(err, /local half has 4 entries, more than the 3/);
 });
 
 test("single-pass sender refuses a resolved table whose local half descends", async () => {
@@ -396,7 +396,7 @@ test("single-pass sender bounds the table by the many side's row count", async (
   );
   expectProtocolRefusal(
     asOneSide.outcome,
-    /partner half carries 4 entries, more than the 3/,
+    /partner half has 4 entries, more than the 3/,
   );
   // Where the SENDER is the "many" side, its own half is the one that keeps
   // distinctness, so its own row count is what caps the table.
@@ -409,7 +409,7 @@ test("single-pass sender bounds the table by the many side's row count", async (
   );
   expectProtocolRefusal(
     asManySide.outcome,
-    /local half carries 4 entries, more than the 3/,
+    /local half has 4 entries, more than the 3/,
   );
 });
 
@@ -423,7 +423,7 @@ test("cascade starter refuses a round table indexing past the set it encrypted",
   );
   expectProtocolRefusal(
     err,
-    /round's association table, local half carries an index outside \[0, 3\)/,
+    /round's association table, local half has an index outside \[0, 3\)/,
   );
 });
 
@@ -433,7 +433,7 @@ test("cascade starter refuses a round table naming a partner element beyond its 
   );
   expectProtocolRefusal(
     err,
-    /round's association table, partner half carries an index outside \[0, 3\)/,
+    /round's association table, partner half has an index outside \[0, 3\)/,
   );
 });
 
@@ -443,7 +443,7 @@ test("cascade starter refuses a round table whose halves disagree in length", as
   );
   expectProtocolRefusal(
     err,
-    /round's association table, partner half carries 3 entries, expected 2/,
+    /round's association table, partner half has 3 entries, expected 2/,
   );
 });
 
@@ -455,7 +455,7 @@ test("cascade starter refuses a round table with a fractional index", async () =
   );
   expectProtocolRefusal(
     err,
-    /round's association table, local half carries an entry that is not a whole number/,
+    /round's association table, local half has an entry that is not a whole number/,
   );
 });
 
@@ -465,7 +465,7 @@ test("cascade starter refuses a round table with a negative index", async () => 
   );
   expectProtocolRefusal(
     err,
-    /round's association table, partner half carries an index outside \[0, 3\)/,
+    /round's association table, partner half has an index outside \[0, 3\)/,
   );
 });
 
@@ -488,23 +488,20 @@ test("cascade starter refuses a round table longer than the set it encrypted", a
   );
   expectProtocolRefusal(
     err,
-    /round's association table, local half carries 4 entries, more than the 3/,
+    /round's association table, local half has 4 entries, more than the 3/,
   );
 });
 
 test("cascade joiner refuses an original-index list of the wrong length", async () => {
   const err = await cascadeWithJoinerDeviation((list) => [...list, 0]);
-  expectProtocolRefusal(
-    err,
-    /original-index list carries 3 entries, expected 2/,
-  );
+  expectProtocolRefusal(err, /original-index list has 3 entries, expected 2/);
 });
 
 test("cascade joiner refuses an original-index list naming an element beyond its bound", async () => {
   const err = await cascadeWithJoinerDeviation((list) => list.map(() => 99));
   expectProtocolRefusal(
     err,
-    /original-index list carries an index outside \[0, 3\)/,
+    /original-index list has an index outside \[0, 3\)/,
   );
 });
 
@@ -512,7 +509,7 @@ test("cascade joiner refuses an original-index list with a fractional entry", as
   const err = await cascadeWithJoinerDeviation((list) => list.map(() => 1.5));
   expectProtocolRefusal(
     err,
-    /original-index list carries an entry that is not a whole number/,
+    /original-index list has an entry that is not a whole number/,
   );
 });
 
@@ -523,7 +520,7 @@ test("cascade joiner refuses an original-index list with a negative entry", asyn
   ]);
   expectProtocolRefusal(
     err,
-    /original-index list carries an index outside \[0, 3\)/,
+    /original-index list has an index outside \[0, 3\)/,
   );
 });
 
@@ -607,7 +604,7 @@ test("cascade refuses a mapped-element list longer than this side's match count"
   );
   expectProtocolRefusal(
     err,
-    /partner's mapped-element list carries 3 entries, expected 2/,
+    /partner's mapped-element list has 3 entries, expected 2/,
   );
 });
 
@@ -622,7 +619,7 @@ test("cascade refuses a returned mapped-element list naming a partner row beyond
   );
   expectProtocolRefusal(
     err,
-    /returned mapped-element list carries an index outside \[0, 3\)/,
+    /returned mapped-element list has an index outside \[0, 3\)/,
   );
 });
 
@@ -641,7 +638,7 @@ test("cascade refuses a returned mapped-element list of the wrong length", async
   );
   expectProtocolRefusal(
     err,
-    /returned mapped-element list carries 1 entry, expected 2/,
+    /returned mapped-element list has 1 entry, expected 2/,
   );
 });
 
@@ -653,7 +650,7 @@ test("cascade refuses a returned mapped-element list with a fractional partner r
   );
   expectProtocolRefusal(
     err,
-    /returned mapped-element list carries an entry that is not a whole number/,
+    /returned mapped-element list has an entry that is not a whole number/,
   );
 });
 
@@ -666,7 +663,7 @@ test("cascade refuses a returned mapped-element list with a negative partner row
   );
   expectProtocolRefusal(
     err,
-    /returned mapped-element list carries an index outside \[0, 3\)/,
+    /returned mapped-element list has an index outside \[0, 3\)/,
   );
 });
 

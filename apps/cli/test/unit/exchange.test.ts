@@ -986,7 +986,9 @@ test("loadConfig hard-stops an expired token before any exchange", () => {
   expect(message).not.toContain("psilink accept URL");
   expect(message).toContain("Each side's configuration is reused");
   expect(message).toContain("only the key file is recreated");
-  expect(message).toContain("docs/CLI.md#out-of-sync-tokens");
+  // The remedy is stated in full above, so the message needs no reference to a
+  // repository path the shipped image does not contain.
+  expect(message).not.toContain("docs/CLI.md");
 });
 
 test("loadConfig accepts a not-yet-expired token", () => {

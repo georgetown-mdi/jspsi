@@ -172,7 +172,7 @@ export function builder(cmd: Argv): Argv {
         "provision the key file from an invitation code (use @path -- " +
         "`--invitation @code.txt` -- to keep the code out of shell history), the " +
         "same code `psilink accept` takes. For the party that composed the " +
-        "exchange in the web app and downloaded a config that carries no secret: " +
+        "exchange in the web app and downloaded a config that has no secret: " +
         "this completes local provisioning from the invitation and runs the " +
         "exchange in one command. The code is decoded and validated (checksum, " +
         "schema, expiry) before anything is written; a malformed or expired code " +
@@ -525,8 +525,7 @@ export function loadConfig(options: ExchangeOptions): {
       `key file ${options.keyFile} does not exist. ` +
         "Create one with 'psilink invite' (generate an invitation) or " +
         "'psilink accept' (accept a partner's invitation); both write a " +
-        ".psilink.key. See docs/CLI.md#offline-invitation and " +
-        "docs/SECURITY_DESIGN.md#recurring-exchange-authentication.",
+        ".psilink.key.",
     );
   // Hard stop on an already-expired token before any dataset prep, connection, or
   // PAKE handshake. The `expires` in the key file is authoritative regardless of
@@ -549,7 +548,7 @@ export function loadConfig(options: ExchangeOptions): {
         "file on both sides, then one party runs 'psilink invite' (the offline " +
         "form, with no URL) and the other runs 'psilink accept INVITATION " +
         "[INPUT_FILE]'. Each side's configuration is reused; only the key file " +
-        "is recreated. See docs/CLI.md#out-of-sync-tokens.",
+        "is recreated.",
     );
   }
   const authPersist: AuthPersist = {
@@ -669,13 +668,12 @@ export function tokenExpiringAdvisory(
     return (
       `the shared secret in ${keyFilePath} expired at ${expiresShown} during ` +
       `this exchange and was not refreshed; both parties must re-invite to ` +
-      `establish a new shared secret. See docs/CLI.md#out-of-sync-tokens.`
+      `establish a new shared secret.`
     );
   return (
     `the shared secret in ${keyFilePath} is expiring soon (expires ` +
     `${expiresShown}) and was not refreshed by this exchange. Run a successful ` +
-    `exchange before it expires; once it lapses, both parties must re-invite. ` +
-    `See docs/CLI.md#out-of-sync-tokens.`
+    `exchange before it expires; once it lapses, both parties must re-invite.`
   );
 }
 
@@ -807,15 +805,14 @@ export async function prepareDataset(
  */
 const SIGNING_IDENTITY_FILE_UNSET_REFUSAL =
   "this exchange signs receipts (signing.mode: certificate) but names no " +
-  "signing identity, and psilink chooses no location for one: the identity is " +
-  "a long-lived credential reused across every exchange and every partner, so " +
-  "where it lives is yours to decide. Set signing.identity_file to that path " +
-  "-- a mount of its own is the usual home, for example " +
+  "signing identity. Set signing.identity_file to the path where the " +
+  "identity lives -- a mount of its own is the usual home, for example " +
   "/run/signing/psilink-signing-identity.json -- and create the file there " +
   "with 'psilink fingerprint --identity-file " +
-  "/run/signing/psilink-signing-identity.json'. The run reads it and writes " +
-  'nothing to it, so a read-only mount is enough. Or set signing.mode to "none" ' +
-  "to run unsigned.";
+  "/run/signing/psilink-signing-identity.json'. The identity is a long-lived " +
+  "credential reused across every exchange and every partner, so where it " +
+  "lives is yours to decide. The run reads it and writes nothing to it, so a " +
+  'read-only mount is enough. Or set signing.mode to "none" to run unsigned.';
 
 /**
  * The tilde-expanded path a `certificate`-mode signing block names, refusing the

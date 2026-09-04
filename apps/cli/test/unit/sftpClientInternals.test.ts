@@ -201,12 +201,18 @@ describe("the order the seams are resolved in", () => {
 });
 
 describe("transportCloseSeamError", () => {
-  test("names the seam and the checklist that re-verifies it", () => {
-    const error = transportCloseSeamError("client._sock.destroy()");
+  test("states what failed and what the operator can do about it", () => {
+    const error = transportCloseSeamError();
 
     expect(error).toBeInstanceOf(Error);
-    expect(error.message).toContain("client._sock.destroy()");
-    expect(error.message).toContain("Upgrading the SFTP Stack");
-    expect(error.message).toContain("docs/spec/DEPENDENCY_PINS.md");
+    expect(error.message).toContain(
+      "closes the SFTP connection from this side at every poll boundary, " +
+        "which the installed SFTP library does not support",
+    );
+    expect(error.message).toContain("'psilink --version'");
+    // The ssh2 internal that is missing is contributor-tier detail: the caller
+    // logs it at debug rather than putting it on the operator's terminal, and no
+    // operator message cites a docs path the shipped image does not contain.
+    expect(error.message).not.toContain("docs/spec/DEPENDENCY_PINS.md");
   });
 });

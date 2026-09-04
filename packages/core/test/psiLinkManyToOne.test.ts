@@ -529,7 +529,7 @@ test("a non-conforming starter reinstating the dropped group is refused on the c
   expect(outcome).toBeInstanceOf(ConnectionError);
   expect((outcome as ConnectionError).kind).toBe("protocol");
   expect((outcome as Error).message).toMatch(
-    /the partner's mapped-element list carries 3 entries, expected 1/,
+    /the partner's mapped-element list has 3 entries, expected 1/,
   );
 });
 
@@ -616,14 +616,14 @@ for (const manySide of ["starter", "joiner"] as const) {
     await expectProtocolRefusal(
       manySide,
       onMappedElementList(2, (list) => list.slice(0, -1)),
-      /the returned mapped-element list carries 2 entries, expected 3/,
+      /the returned mapped-element list has 2 entries, expected 3/,
     );
     // ...and the one side's comes back EXPANDED, to the count its partner's
     // inbound list already implied.
     await expectProtocolRefusal(
       oneSide,
       onMappedElementList(2, (list) => list.slice(0, -1)),
-      /the returned mapped-element list carries 2 entries, expected 3/,
+      /the returned mapped-element list has 2 entries, expected 3/,
     );
   });
 

@@ -153,7 +153,7 @@ describe("assertBlockDiagonalClosure", () => {
       [0, 0, 0],
     );
     expect(thrown.message).toMatch(
-      /carries 3 pair\(s\) over 2 record\(s\) of this party and 2 of the partner's/,
+      /holds 3 pair\(s\) over 2 record\(s\) of this party and 2 of the partner's/,
     );
   });
 

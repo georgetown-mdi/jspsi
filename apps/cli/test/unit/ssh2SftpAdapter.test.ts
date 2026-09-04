@@ -103,7 +103,7 @@ const protocolTempPath = (dir = "/remote"): string =>
 // here loses no coverage (this.log.warn is the adapter's only WARN sink).
 function stubAdapterLog(adapter: SSH2SFTPClientAdapter): void {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (adapter as any).log = { warn: vi.fn() };
+  (adapter as any).log = { warn: vi.fn(), debug: vi.fn() };
 }
 
 // Replaces a client's exists() with one the test answers by hand, so the
@@ -576,7 +576,7 @@ describe("rename retry", () => {
         if (++calls < 3) throw sftpError("_rename: Failure", 4);
       });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (adapter as any).log = { warn: vi.fn() };
+      (adapter as any).log = { warn: vi.fn(), debug: vi.fn() };
       // rename reads this.options!.retries; an empty object falls back to 5.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (adapter as any).options = {};
@@ -604,7 +604,7 @@ describe("rename retry", () => {
         if (++calls < 3) throw sftpError("_rename: Failure", 4);
       });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (adapter as any).log = { warn: vi.fn() };
+      (adapter as any).log = { warn: vi.fn(), debug: vi.fn() };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (adapter as any).options = {};
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -632,7 +632,7 @@ describe("rename retry", () => {
         throw sftpError("_rename: Failure", 4);
       });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (adapter as any).log = { warn: vi.fn() };
+      (adapter as any).log = { warn: vi.fn(), debug: vi.fn() };
       // Bound the retries explicitly so the attempt count is asserted, not the
       // default: 2 retries == 3 total attempts.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -665,7 +665,7 @@ describe("rename retry", () => {
         throw sftpError("_rename: No such file or directory", 2);
       });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (adapter as any).log = { warn: vi.fn() };
+      (adapter as any).log = { warn: vi.fn(), debug: vi.fn() };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (adapter as any).options = {};
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -692,7 +692,7 @@ describe("rename retry", () => {
         throw sftpError("_rename: Failure", 4);
       });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (adapter as any).log = { warn: vi.fn() };
+      (adapter as any).log = { warn: vi.fn(), debug: vi.fn() };
       // retries: 0 must disable the retry, not be coerced to the default of 5 --
       // the `?? 5` (not `|| 5`) guard. A status-4 failure that would otherwise be
       // retried is surfaced after the single attempt.
@@ -726,7 +726,7 @@ describe("rename retry", () => {
         throw sftpError("_rename: Failure", 4);
       });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (adapter as any).log = { warn: vi.fn() };
+      (adapter as any).log = { warn: vi.fn(), debug: vi.fn() };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (adapter as any).options = {};
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1045,7 +1045,7 @@ describe("bounded metadata write/stat/delete", () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (adapter as any).options = {};
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (adapter as any).log = { warn: vi.fn() };
+      (adapter as any).log = { warn: vi.fn(), debug: vi.fn() };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (adapter as any).client = {
         // Accepts the call but never settles: the server withholds the rename ack.
@@ -1070,7 +1070,7 @@ describe("bounded metadata write/stat/delete", () => {
     try {
       const adapter = new SSH2SFTPClientAdapter();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (adapter as any).log = { warn: vi.fn() };
+      (adapter as any).log = { warn: vi.fn(), debug: vi.fn() };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (adapter as any).client = {
         delete: vi.fn().mockImplementation(() => new Promise(() => {})),
@@ -1093,7 +1093,7 @@ describe("bounded metadata write/stat/delete", () => {
     try {
       const adapter = new SSH2SFTPClientAdapter();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (adapter as any).log = { warn: vi.fn() };
+      (adapter as any).log = { warn: vi.fn(), debug: vi.fn() };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (adapter as any).client = {
         exists: vi.fn().mockImplementation(() => new Promise(() => {})),
@@ -1118,7 +1118,7 @@ describe("bounded metadata write/stat/delete", () => {
     try {
       const adapter = new SSH2SFTPClientAdapter();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (adapter as any).log = { warn: vi.fn() };
+      (adapter as any).log = { warn: vi.fn(), debug: vi.fn() };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (adapter as any).client = {
         delete: vi.fn().mockResolvedValue(undefined),
@@ -1144,7 +1144,7 @@ describe("bounded safeDelete", () => {
     try {
       const adapter = new SSH2SFTPClientAdapter();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (adapter as any).log = { warn: vi.fn() };
+      (adapter as any).log = { warn: vi.fn(), debug: vi.fn() };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (adapter as any).client = {
         // Withholds the delete callback: the inner promise never settles, so only
@@ -1167,7 +1167,7 @@ describe("bounded safeDelete", () => {
     // safeDelete swallows it and resolves promptly, never arming a lingering wait.
     const adapter = new SSH2SFTPClientAdapter();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (adapter as any).log = { warn: vi.fn() };
+    (adapter as any).log = { warn: vi.fn(), debug: vi.fn() };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (adapter as any).client = {
       delete: vi.fn().mockRejectedValue(new Error("permission denied")),
@@ -1431,7 +1431,7 @@ describe("bounded put (idle window)", () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (adapter as any).options = {};
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (adapter as any).log = { warn: vi.fn() };
+      (adapter as any).log = { warn: vi.fn(), debug: vi.fn() };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (adapter as any).client = {
         put: vi.fn().mockImplementation((source: Readable) => {
@@ -1473,7 +1473,7 @@ describe("bounded put (idle window)", () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (adapter as any).options = {};
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (adapter as any).log = { warn: vi.fn() };
+      (adapter as any).log = { warn: vi.fn(), debug: vi.fn() };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (adapter as any).client = {
         put: vi.fn().mockImplementation((source: Readable) => {
@@ -1507,7 +1507,7 @@ describe("bounded put (idle window)", () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (adapter as any).options = {};
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (adapter as any).log = { warn: vi.fn() };
+      (adapter as any).log = { warn: vi.fn(), debug: vi.fn() };
       // Consume one chunk per half-window: each gap stays under the 60 s window,
       // but the six-chunk total spans ~3 windows.
       const gap = SFTP_STALL_DEADLINE_MS / 2;
@@ -1549,7 +1549,7 @@ describe("bounded put (idle window)", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (adapter as any).options = {};
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (adapter as any).log = { warn: vi.fn() };
+    (adapter as any).log = { warn: vi.fn(), debug: vi.fn() };
     const received: Buffer[] = [];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (adapter as any).client = {
@@ -1578,7 +1578,7 @@ describe("bounded put (idle window)", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (adapter as any).options = {};
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (adapter as any).log = { warn: vi.fn() };
+    (adapter as any).log = { warn: vi.fn(), debug: vi.fn() };
     const received: Buffer[] = [];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (adapter as any).client = {
@@ -1614,7 +1614,7 @@ describe("bounded put (idle window)", () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (adapter as any).options = {};
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (adapter as any).log = { warn: vi.fn() };
+      (adapter as any).log = { warn: vi.fn(), debug: vi.fn() };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (adapter as any).client = {
         put: vi.fn().mockImplementation((source: Readable) => {
@@ -1651,7 +1651,7 @@ describe("bounded put (idle window)", () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (adapter as any).options = { retries: 2 };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (adapter as any).log = { warn: vi.fn() };
+      (adapter as any).log = { warn: vi.fn(), debug: vi.fn() };
       let calls = 0;
       let delivered: Buffer | undefined;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1697,7 +1697,7 @@ describe("bounded put (idle window)", () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (adapter as any).options = {};
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (adapter as any).log = { warn: vi.fn() };
+      (adapter as any).log = { warn: vi.fn(), debug: vi.fn() };
       let calls = 0;
       const put = vi.fn().mockImplementation(() => {
         calls += 1;
@@ -1733,7 +1733,7 @@ describe("bounded put (idle window)", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (adapter as any).options = {}; // retries falls back to the default of 5
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (adapter as any).log = { warn: vi.fn() };
+    (adapter as any).log = { warn: vi.fn(), debug: vi.fn() };
     let calls = 0;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (adapter as any).client = {
@@ -1758,7 +1758,7 @@ describe("bounded put (idle window)", () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (adapter as any).options = { retries: 2 };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (adapter as any).log = { warn: vi.fn() };
+      (adapter as any).log = { warn: vi.fn(), debug: vi.fn() };
       let calls = 0;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (adapter as any).client = {
@@ -1789,7 +1789,7 @@ describe("bounded put (idle window)", () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (adapter as any).options = {};
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (adapter as any).log = { warn: vi.fn() };
+      (adapter as any).log = { warn: vi.fn(), debug: vi.fn() };
       let calls = 0;
       const put = vi.fn().mockImplementation(() => {
         calls += 1;
@@ -2157,7 +2157,7 @@ describe("slow-operation warning", () => {
       const adapter = new SSH2SFTPClientAdapter();
       const warn = vi.fn();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (adapter as any).log = { warn };
+      (adapter as any).log = { warn, debug: vi.fn() };
       let resolveGet!: (s: Writable) => void;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (adapter as any).client = {
@@ -2196,7 +2196,7 @@ describe("slow-operation warning", () => {
       const warn = vi.fn();
       let resolvePut!: () => void;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (adapter as any).log = { warn };
+      (adapter as any).log = { warn, debug: vi.fn() };
       // put reads this.options!.retries; an empty object falls back to the default.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (adapter as any).options = {};
@@ -2229,7 +2229,7 @@ describe("slow-operation warning", () => {
       const adapter = new SSH2SFTPClientAdapter();
       const warn = vi.fn();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (adapter as any).log = { warn };
+      (adapter as any).log = { warn, debug: vi.fn() };
       let readdirCalls = 0;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (adapter as any).client = {
@@ -2277,7 +2277,7 @@ describe("slow-operation warning", () => {
       const warn = vi.fn();
       let resolveExists!: (value: boolean) => void;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (adapter as any).log = { warn };
+      (adapter as any).log = { warn, debug: vi.fn() };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (adapter as any).client = {
         exists: vi.fn().mockImplementation(
@@ -2537,7 +2537,7 @@ describe("session heartbeat and TCP keepalive", () => {
     const adapter = new SSH2SFTPClientAdapter();
     const warn = vi.fn();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (adapter as any).log = { warn, trace: vi.fn() };
+    (adapter as any).log = { warn, trace: vi.fn(), debug: vi.fn() };
     const { client } = connectMock();
     // Model an ssh2 upgrade that relocated the socket: no _sock. connect must
     // still succeed (keepalive is transport hygiene, not a correctness need).
@@ -2759,6 +2759,7 @@ describe("session recovery", () => {
     (adapter as any).log = {
       warn: vi.fn(),
       info: vi.fn(),
+      debug: vi.fn(),
       trace: vi.fn(),
       error: vi.fn(),
     };
@@ -3361,7 +3362,12 @@ describe("session recovery", () => {
     const adapter = new SSH2SFTPClientAdapter();
     const warn = vi.fn();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+    (adapter as any).log = {
+      warn,
+      trace: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    };
     install(adapter, client);
 
     await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
@@ -3415,7 +3421,12 @@ describe("session recovery", () => {
     const adapter = new SSH2SFTPClientAdapter();
     const warn = vi.fn();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+    (adapter as any).log = {
+      warn,
+      trace: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    };
     install(adapter, client);
 
     // A budget comfortably above the escalation interval so the cap does not fire:
@@ -3982,7 +3993,12 @@ describe("session recovery", () => {
     const adapter = new SSH2SFTPClientAdapter();
     const warn = vi.fn();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+    (adapter as any).log = {
+      warn,
+      trace: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    };
     install(adapter, client);
 
     // The shipped default: a budget well below the escalation interval.
@@ -4029,7 +4045,12 @@ describe("session recovery", () => {
     const adapter = new SSH2SFTPClientAdapter();
     const warn = vi.fn();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+    (adapter as any).log = {
+      warn,
+      trace: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    };
     install(adapter, client);
 
     // Budget 0: a NON-teardown drop would fail terminally on the first drop.
@@ -4344,9 +4365,13 @@ describe("mid-exchange drop against a partner that withholds its close", () => {
     expect(del).toHaveBeenCalledOnce();
     expect(log.warn).toHaveBeenCalledOnce();
     const message = log.warn.mock.calls[0][0] as string;
-    expect(message).toContain("client._sock.destroy()");
-    expect(message).toContain("Upgrading the SFTP Stack");
-    expect(message).toContain("docs/spec/DEPENDENCY_PINS.md");
+    expect(message).toContain("could not be re-opened");
+    expect(message).toContain("not compatible with the installed SFTP library");
+    // The ssh2 internal that moved is contributor-tier detail, so it is logged
+    // at debug rather than put on the operator's terminal.
+    expect(log.debug).toHaveBeenCalledWith(
+      expect.stringContaining("client._sock.destroy()"),
+    );
     // Nothing was recovered, and the session was lost all the same: the counters
     // report sessions lost rather than recoveries completed.
     expect(adapter.midExchangeReconnectCount).toBe(1);
@@ -4381,10 +4406,11 @@ describe("mid-exchange drop against a partner that withholds its close", () => {
     const message = log.warn.mock.calls[0][0] as string;
     expect(message).toContain("socket already destroyed");
     // A destroy that raises is the shape a change in ssh2's teardown semantics
-    // reaches the operator as, so this warning routes them to the same
-    // re-verification checklist its two sibling failures do.
-    expect(message).toContain("Upgrading the SFTP Stack");
-    expect(message).toContain("docs/spec/DEPENDENCY_PINS.md");
+    // reaches the operator as, so this warning names the same suspect its two
+    // sibling failures do.
+    expect(message).toContain(
+      "may not be compatible with the installed SFTP library",
+    );
     // Counted as the lost session it was, whether or not the re-dial for it ran.
     expect(adapter.midExchangeReconnectCount).toBe(1);
   });
@@ -4415,8 +4441,10 @@ describe("mid-exchange drop against a partner that withholds its close", () => {
       expect(del).toHaveBeenCalledOnce();
       expect(log.warn).toHaveBeenCalledOnce();
       const message = log.warn.mock.calls[0][0] as string;
-      expect(message).toContain("did not clear");
-      expect(message).toContain("Upgrading the SFTP Stack");
+      expect(message).toContain("did not close within");
+      expect(message).toContain(
+        "may not be compatible with the installed SFTP library",
+      );
       // Counted as the lost session it was, whether or not the re-dial for it ran.
       expect(adapter.midExchangeReconnectCount).toBe(1);
     } finally {
@@ -4871,7 +4899,12 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
     const warn = vi.fn();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+    (adapter as any).log = {
+      warn,
+      trace: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    };
     install(adapter, client);
 
     await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
@@ -5071,7 +5104,12 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
     const warn = vi.fn();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+    (adapter as any).log = {
+      warn,
+      trace: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    };
     install(adapter, client);
 
     await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
@@ -5736,7 +5774,12 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
     const warn = vi.fn();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+    (adapter as any).log = {
+      warn,
+      trace: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    };
     install(adapter, client);
 
     await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
@@ -5819,7 +5862,12 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
     const warn = vi.fn();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+    (adapter as any).log = {
+      warn,
+      trace: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    };
     install(adapter, client);
 
     await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
@@ -5859,7 +5907,12 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
     const warn = vi.fn();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+    (adapter as any).log = {
+      warn,
+      trace: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    };
     install(adapter, client);
 
     await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
@@ -5960,10 +6013,14 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       install(adapter, client);
 
       const dial = adapter.connect({ host: "h", maxReconnectAttempts: 2 });
-      await expect(dial).rejects.toThrow(seam);
-      // Named alongside the checklist that re-verifies it, so the operator who
-      // hits this on an upgrade is not left to find it.
-      await expect(dial).rejects.toThrow("DEPENDENCY_PINS.md");
+      await expect(dial).rejects.toThrow(
+        "which the installed SFTP library does not support",
+      );
+      // The seam itself is contributor-tier detail: logged at debug rather than
+      // put on the operator's terminal.
+      expect(adapterLog(adapter).debug).toHaveBeenCalledWith(
+        expect.stringContaining(seam),
+      );
     },
   );
 
@@ -6021,7 +6078,12 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
       const warn = vi.fn();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+      (adapter as any).log = {
+        warn,
+        trace: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+      };
       install(adapter, client);
 
       await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
@@ -6094,7 +6156,12 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
       const warn = vi.fn();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+      (adapter as any).log = {
+        warn,
+        trace: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+      };
       install(adapter, client);
 
       await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
@@ -6132,7 +6199,12 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
       const warn = vi.fn();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+      (adapter as any).log = {
+        warn,
+        trace: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+      };
       install(adapter, client);
 
       await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
@@ -6292,7 +6364,12 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
       const warn = vi.fn();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+      (adapter as any).log = {
+        warn,
+        trace: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+      };
       install(adapter, client);
 
       await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
@@ -6337,7 +6414,12 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
       const warn = vi.fn();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+      (adapter as any).log = {
+        warn,
+        trace: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+      };
       install(adapter, client);
 
       await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
@@ -6373,7 +6455,12 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
     const warn = vi.fn();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+    (adapter as any).log = {
+      warn,
+      trace: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    };
     install(adapter, client);
 
     await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
@@ -6521,7 +6608,12 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
       const warn = vi.fn();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+      (adapter as any).log = {
+        warn,
+        trace: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+      };
       install(adapter, client);
 
       await adapter.connect({ host: "h", retries: 0, maxReconnectAttempts: 2 });
@@ -6547,7 +6639,12 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
     const warn = vi.fn();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+    (adapter as any).log = {
+      warn,
+      trace: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    };
     install(adapter, client);
 
     await adapter.connect({ host: "h", retries: 0, maxReconnectAttempts: 2 });
@@ -6639,7 +6736,12 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     const adapter = new SSH2SFTPClientAdapter();
     const warn = vi.fn();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+    (adapter as any).log = {
+      warn,
+      trace: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    };
     install(adapter, client);
 
     await adapter.connect({ host: "h", maxReconnectAttempts: 1 });
@@ -6739,7 +6841,12 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
       const warn = vi.fn();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+      (adapter as any).log = {
+        warn,
+        trace: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+      };
       install(adapter, client);
 
       // No reconnection budget at all, so a handshake lost to a release's close is
@@ -6795,7 +6902,12 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
       const warn = vi.fn();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+      (adapter as any).log = {
+        warn,
+        trace: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+      };
       install(adapter, client);
 
       await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
@@ -6843,7 +6955,12 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
     const warn = vi.fn();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+    (adapter as any).log = {
+      warn,
+      trace: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    };
     install(adapter, client);
 
     await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
@@ -6900,7 +7017,12 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
     const warn = vi.fn();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+    (adapter as any).log = {
+      warn,
+      trace: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    };
     install(adapter, client);
 
     await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
@@ -7180,7 +7302,12 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
     const warn = vi.fn();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+    (adapter as any).log = {
+      warn,
+      trace: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    };
     install(adapter, client);
 
     // No reconnection budget at all, so a handshake lost to a concurrent dial is
@@ -7739,6 +7866,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       (adapter as any).log = {
         warn,
         info: vi.fn(),
+        debug: vi.fn(),
         trace: vi.fn(),
         error: vi.fn(),
       };
@@ -7758,8 +7886,9 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       expect(warn).toHaveBeenCalledOnce();
       const message = warn.mock.calls[0][0] as string;
       expect(message).toContain("did not close within");
-      expect(message).toContain("Upgrading the SFTP Stack");
-      expect(message).toContain("docs/spec/DEPENDENCY_PINS.md");
+      expect(message).toContain(
+        "may not be compatible with the installed SFTP library",
+      );
       // Nothing was recovered, and nothing is reported as recovered; the session
       // was lost all the same, which is what the counter reports.
       expect(adapter.midExchangeReconnectCount).toBe(1);
@@ -7795,7 +7924,9 @@ describe("ephemeral session mode (connection-per-poll)", () => {
   ): string[] {
     return warn.mock.calls
       .map((call) => call[0] as string)
-      .filter((message) => message.includes("client.on()"));
+      .filter((message) =>
+        message.includes("Every mid-exchange re-dial on this SFTP connection"),
+      );
   }
 
   test("a Client whose on() has moved still recovers the torn operation, warning for the reading it lost", async () => {
@@ -7813,6 +7944,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     (adapter as any).log = {
       warn,
       info: vi.fn(),
+      debug: vi.fn(),
       trace: vi.fn(),
       error: vi.fn(),
     };
@@ -7828,8 +7960,9 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     expect(adapter.midExchangeReconnectCount).toBe(1);
     const lostReading = unreadableLifecycleWarnings(warn);
     expect(lostReading).toHaveLength(1);
-    expect(lostReading[0]).toContain("Upgrading the SFTP Stack");
-    expect(lostReading[0]).toContain("docs/spec/DEPENDENCY_PINS.md");
+    expect(lostReading[0]).toContain(
+      "not compatible with the installed SFTP library",
+    );
   });
 
   test("a Client whose on() has moved pays the forced close's bound where the drop had already run its whole sequence", async () => {
@@ -7882,6 +8015,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     (adapter as any).log = {
       warn,
       info: vi.fn(),
+      debug: vi.fn(),
       trace: vi.fn(),
       error: vi.fn(),
     };
@@ -7920,6 +8054,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       (adapter as any).log = {
         warn,
         info: vi.fn(),
+        debug: vi.fn(),
         trace: vi.fn(),
         error: vi.fn(),
       };
@@ -7942,10 +8077,12 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       const messages = warn.mock.calls.map((call) => call[0] as string);
       expect(unreadableLifecycleWarnings(warn)).toHaveLength(1);
       expect(messages).toHaveLength(2);
-      expect(messages[1]).toContain("client.once()");
+      expect(messages[1]).toContain("could not be re-opened");
       for (const message of messages) {
-        expect(message).toContain("Upgrading the SFTP Stack");
-        expect(message).toContain("docs/spec/DEPENDENCY_PINS.md");
+        expect(message).toContain(
+          "not compatible with the installed SFTP library",
+        );
+        expect(message).toContain("'psilink --version'");
       }
     } finally {
       vi.useRealTimers();
@@ -8025,7 +8162,12 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
     const warn = vi.fn();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+    (adapter as any).log = {
+      warn,
+      trace: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    };
     install(adapter, client);
 
     // No reconnection budget at all, so a re-dial charged to the exchange would
@@ -8341,7 +8483,12 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
     const warn = vi.fn();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+    (adapter as any).log = {
+      warn,
+      trace: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    };
     install(adapter, client);
 
     await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
@@ -8785,7 +8932,12 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
     const warn = vi.fn();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+    (adapter as any).log = {
+      warn,
+      trace: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    };
     install(adapter, client);
 
     await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
@@ -8821,7 +8973,12 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
       const warn = vi.fn();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+      (adapter as any).log = {
+        warn,
+        trace: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+      };
       install(adapter, client);
 
       await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
@@ -8861,7 +9018,12 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
     const warn = vi.fn();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+    (adapter as any).log = {
+      warn,
+      trace: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    };
     install(adapter, client);
 
     await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
@@ -8878,7 +9040,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     // The release that follows drives nothing either: the same absent seam refuses
     // it before it reaches the transport, so it too ends nothing.
     await expect(adapter.releaseForIdle()).rejects.toThrow(
-      "client._sock.writableEnded",
+      "which the installed SFTP library does not support",
     );
     expect(state.live).toBe(true);
 
@@ -8908,7 +9070,12 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
     const warn = vi.fn();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+    (adapter as any).log = {
+      warn,
+      trace: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    };
     install(adapter, client);
 
     await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
@@ -9345,6 +9512,11 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       internals.forceCloseAbandonedTeardown();
 
       expect(adapterLog(adapter).warn).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "not compatible with the installed SFTP library",
+        ),
+      );
+      expect(adapterLog(adapter).debug).toHaveBeenCalledWith(
         expect.stringContaining("client._sock.destroy()"),
       );
       await vi.advanceTimersByTimeAsync(SFTP_HEARTBEAT_INTERVAL_MS * 3);
@@ -9386,8 +9558,12 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     delete rawClient.end;
 
     const release = adapter.releaseForIdle();
-    await expect(release).rejects.toThrow("client.end()");
-    await expect(release).rejects.toThrow("DEPENDENCY_PINS.md");
+    await expect(release).rejects.toThrow(
+      "which the installed SFTP library does not support",
+    );
+    expect(adapterLog(adapter).debug).toHaveBeenCalledWith(
+      expect.stringContaining("client.end()"),
+    );
   });
 
   test("a transition that needs the retained connect options and has none fails loudly", async () => {
@@ -10497,9 +10673,13 @@ describe("terminal close against a partner that withholds its close", () => {
       expect(settled).toBe(true);
       expect(log.warn).toHaveBeenCalledTimes(1);
       const message = log.warn.mock.calls[0][0] as string;
-      expect(message).toContain("client._sock.destroy()");
-      // Named alongside the checklist that re-verifies it.
-      expect(message).toContain("DEPENDENCY_PINS.md");
+      expect(message).toContain(
+        "not compatible with the installed SFTP library",
+      );
+      // The seam it drives is logged at debug, not put on the terminal.
+      expect(log.debug).toHaveBeenCalledWith(
+        expect.stringContaining("client._sock.destroy()"),
+      );
       expect(log.info).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
@@ -10529,7 +10709,9 @@ describe("terminal close against a partner that withholds its close", () => {
       expect(log.warn).toHaveBeenCalledTimes(1);
       const message = log.warn.mock.calls[0][0] as string;
       expect(message).toContain("did not close after this side destroyed it");
-      expect(message).toContain("DEPENDENCY_PINS.md");
+      expect(message).toContain(
+        "may not be compatible with the installed SFTP library",
+      );
       // The connection was not closed on this branch, so the operator is not
       // told it was: the informational line follows the close it reports.
       expect(log.info).not.toHaveBeenCalled();

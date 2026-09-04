@@ -809,8 +809,8 @@ test("the refusal carries the whole remedy, unrendered by the display sanitizer"
   // every partner. It renders through sanitizeErrorForDisplay, which truncates a
   // long message, so each part is asserted where the operator actually reads it.
   const { stderr } = await runFingerprint({ identity: "Party A" });
-  // Why psilink chooses none.
-  expect(stderr).toContain("psilink chooses none");
+  // Why the operator names the path.
+  expect(stderr).toContain("where it is kept is yours to decide");
   expect(stderr).toContain("reused across every exchange and every partner");
   // Both spellings, with an example under a mount of the identity's own.
   expect(stderr).toContain("--identity-file");

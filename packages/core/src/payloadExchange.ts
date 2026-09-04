@@ -362,6 +362,13 @@ export function preparePayload(
  * psilink's own, and the display escape still runs once where the error is
  * rendered.
  *
+ * Why the two must agree: a payload column's values are sent only when its
+ * metadata has `is_payload: true` and `role` is not `ignored`, while
+ * `payload.send` is the data dictionary exchanged with the partner, shown for
+ * consent, written into the exchange record, and mirrored into a recurring
+ * partner's record of the columns it agreed to receive. A dictionary that does
+ * not match the disclosed set therefore mis-states what is actually sent.
+ *
  * @param output This party's own output declaration, from the same
  *   {@link LinkageTerms} the `payload` comes from. Required rather than optional so
  *   every call site states the direction and the `shareWithPartner` reading lives
@@ -437,7 +444,7 @@ export function assertPayloadSendDisclosed(
     (left, right) => compatibilityMessage`${left} ${right}`,
   );
   throw new UsageError(
-    compatibilityMessage`payload.send must name exactly the columns this party's metadata discloses, but it ${problem}. A payload column's values are sent only when its metadata has is_payload: true and role is not ignored; payload.send is the data dictionary exchanged with the partner, shown for consent, written into the exchange record, and mirrored into a recurring partner's received-payload lock-in, so a dictionary that does not match the disclosed set mis-states what is actually sent. ${remedy}`,
+    compatibilityMessage`payload.send must name exactly the columns this party's metadata discloses, but it ${problem}. ${remedy}`,
   );
 }
 
@@ -1098,7 +1105,7 @@ export function buildOutputTable(
   const columnCount = partnerPayload.columns.length;
   if (!hasOneCellPerColumn(columnCount, partnerPayload.rows)) {
     throw new Error(
-      "partner payload rows do not carry one cell per declared column: " +
+      "partner payload rows do not have one cell per declared column: " +
         `expected ${columnCount} cell${columnCount === 1 ? "" : "s"} per row`,
     );
   }

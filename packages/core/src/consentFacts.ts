@@ -183,7 +183,7 @@ export const CONSENT_FACTS = {
       "entitlements, which is what OUTBOUND_SEND_NO_PAYLOAD_SENTENCE reasons " +
       "from and so cannot state here.",
     note:
-      "A count-only exchange carries no data columns in either direction, so no " +
+      "A count-only exchange sends no data columns in either direction, so no " +
       "columns are sent to your partner -- whatever your file contains.",
   },
   linkageStrategy: {
@@ -281,11 +281,9 @@ export const CONSENT_FACTS = {
       "classified fact of its own rather than as a clause of a sentence whose " +
       "basis is the headline's.",
     note:
-      "The matching rounds do carry that grouping to the accepting party's " +
-      "software, so presenting none of it is this client's doing rather than a " +
-      "property of the wire: the accepting party is shown no group sizes and " +
-      "no row positions because psilink withholds them, not because the " +
-      "exchange kept them from that party's machine.",
+      "psilink receives the group sizes and row positions and does not show " +
+      "them to you. Withholding them is this software's choice rather than a " +
+      "limit of the exchange, so other software on this side could show them.",
   },
   matchedFields: {
     basis: "enforced",
@@ -337,16 +335,15 @@ export const CONSENT_FACTS = {
       "divergence between a specification and the sentence an acceptor consents " +
       "on.",
     note:
-      "A linkage key here splits a value into several candidates, and each one " +
-      "is matched on its own -- so a record matches when any single candidate " +
-      "does, which can be as little as one part of a name and is weaker " +
-      "evidence than a match on the whole value. A record that matches this way " +
-      "is paired at most once and then takes no part in the later, less precise " +
-      "keys, whether or not that pairing stands. Matching on candidates runs " +
-      "under single-pass linkage, so the party that receives the other's key " +
-      "structure also learns how many candidates each of the other's records " +
-      "contributed for each key and which of its values belong to the same " +
-      "record.",
+      "A linkage key here splits a value into parts and matches each part on " +
+      "its own, so a record matches when any single part does. That match can " +
+      "rest on as little as one part of a name, which is weaker evidence than " +
+      "a match on the whole value. A record matched this way is paired at most " +
+      "once and is then left out of the later, less precise keys, whether or " +
+      "not that pairing stands. Splitting runs under single-pass linkage, so " +
+      "the party that receives the other's key values also learns how many " +
+      "parts each of the other's records produced for each key and which of " +
+      "its values came from the same record.",
   },
   fanOutRefused: {
     basis: "enforced",
@@ -457,13 +454,13 @@ export const CONSENT_FACTS = {
       "Your partner runs this exchange in retain mode, so every file it writes " +
       "stays where the two of you meet instead of being deleted once it has " +
       "been read. What you send stays encrypted there, and nothing left behind " +
-      "is your file or the matched result; the small files the two sides meet " +
-      "through are not encrypted, so anyone who can read that location " +
-      "afterwards sees that an exchange happened, when, how many messages each " +
-      "side sent and how large they were, the name each side ran under, and the " +
-      "settings each side announced. Your side must run retain mode too or the " +
-      "two of you stop with an error when you meet, and what becomes of that " +
-      "transcript afterwards is your partner's to decide rather than something " +
+      "is your file or the matched result. The small files the two sides meet " +
+      "through are not encrypted. Anyone who can read that location afterwards " +
+      "sees that an exchange happened, when it ran, how many messages each " +
+      "side sent and how large they were, the name each side ran under, and " +
+      "the settings each side announced. Your side must run retain mode too, " +
+      "or the two of you stop with an error when you meet. What becomes of " +
+      "that transcript afterwards is your partner's decision, not something " +
       "this tool controls.",
   },
 } as const satisfies Record<string, ConsentFact>;

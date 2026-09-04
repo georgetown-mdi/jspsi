@@ -483,7 +483,7 @@ export function reconstructCommittedData(
         `the identifier column "${ourIdColumn}" has duplicate values in the ` +
           "input, so a matched row's index is ambiguous; the first occurrence " +
           "is used. An input holding several rows for one individual -- what a " +
-          "deduplicating exchange sets out to group -- carries duplicates here " +
+          "deduplicating exchange sets out to group -- has duplicates here " +
           "whenever its identifier names the individual rather than the row, so " +
           "this is the expected case for such an input rather than an unusual " +
           "one. Every later duplicate then reproduces the first row's values " +
@@ -578,7 +578,7 @@ export function reconstructCommittedData(
     }
     if (anyDivergentCopy)
       warnings.push(
-        "the result carries several rows for one partner record whose " +
+        "the result has several rows for one partner record whose " +
           "received values differ. The partner sent one row for that record " +
           "and the received-payload commitment binds it once, so the copies a " +
           "grouped result writes against this party's records have to agree; " +
@@ -647,7 +647,7 @@ export function reproductionMismatchCauses(
   if (report.commitments.partnerPayloadReceived !== "mismatch") return [];
   if (!carriesEmptyCell(data.partnerPayloadReceived)) return [];
   return [
-    "the re-supplied received payload carries empty cells, and a result cell " +
+    "the re-supplied received payload has empty cells, and a result cell " +
       "cannot distinguish a committed empty string from a committed null -- " +
       "the result writes both as an empty cell. A partner-sent null in one of " +
       "those cells would reproduce here as an empty string and report this " +

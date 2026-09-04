@@ -295,21 +295,18 @@ describe("the recovered-session line, held session", () => {
 });
 
 describe("the unreadable transport lifecycle", () => {
-  test("names what broke, what the substitute costs, and the upgrade checklist", () => {
+  test("names what it costs and what the operator can do about it", () => {
     const message = unreadableTransportLifecycleWarning(1_000);
     expect(message).toContain(
-      "which is watched through ssh2's client.on() -- not available after " +
-        "connect(), so there is no reading to take.",
+      "closes it from this side first and waits up to 1000 ms for that " +
+        "close, even on a connection that had already closed",
     );
-    expect(message).toContain(
-      "closes the connection from this side first and waits up to 1000 ms for " +
-        "that close, which costs that wait on a connection that had already " +
-        "closed.",
-    );
-    expect(message).toContain(
-      'per the "Upgrading the SFTP Stack" checklist in ' +
-        "docs/spec/DEPENDENCY_PINS.md",
-    );
+    expect(message).toContain("not compatible with the installed SFTP library");
+    expect(message).toContain("'psilink --version'");
+    // The ssh2 reading behind it is contributor-tier detail, logged at debug by
+    // the adapter rather than put on the operator's terminal.
+    expect(message).not.toContain("ssh2's client.on()");
+    expect(message).not.toContain("docs/spec/DEPENDENCY_PINS.md");
   });
 });
 

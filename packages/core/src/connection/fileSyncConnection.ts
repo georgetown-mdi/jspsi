@@ -1615,7 +1615,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     if (this.options.retainFiles && !this.options.timestampInFilename)
       throw new UsageError(
         "retain mode requires timestamp_in_filename: without it message " +
-          "filenames carry no NNN segment and the receiver cannot sequence " +
+          "filenames have no NNN segment and the receiver cannot sequence " +
           "them (every message would be silently skipped)",
       );
 

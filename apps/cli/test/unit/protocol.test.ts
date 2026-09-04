@@ -1399,10 +1399,13 @@ test("reports a count-only exchange's count instead of reading as withheld", asy
     mockState.infos.some((line) => line.includes("you receive no result")),
   ).toBe(false);
   // The receiver computed its own count under an enforced mode, so it gets no
-  // trust-contingent caveat -- one there would be false.
-  expect(mockState.infos.some((line) => line.includes("your partner"))).toBe(
-    false,
-  );
+  // trust-contingent caveat -- one there would be false. Asserted on the caveat's
+  // own clause: the rendezvous lines name the partner too, in the ordinary way.
+  expect(
+    mockState.infos.some((line) =>
+      line.includes("Only your partner computed the count"),
+    ),
+  ).toBe(false);
 }, 20_000);
 
 test("caveats a count-only count the partner reported rather than computed", async () => {
@@ -5655,7 +5658,7 @@ test("summarizes the poll cycles a declined cycle-start re-dial skipped", async 
   );
   expect(skipped).toBeDefined();
   expect(skipped).toContain("not a dropped session");
-  expect(skipped).toContain("those cycles carried no session");
+  expect(skipped).toContain("those cycles had no session");
   expect(
     mockState.infos.some((line) =>
       line.includes("did not close the session at 6 idle boundaries"),
