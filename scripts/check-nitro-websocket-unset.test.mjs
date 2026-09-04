@@ -73,7 +73,7 @@ describe("the CLI entry, driven against a fixture tree", () => {
     roots.length = 0;
   });
 
-  /** A minimal tree carrying only apps/web/nitro.config.ts, as a bare object
+  /** A minimal tree holding only apps/web/nitro.config.ts, as a bare object
    * export -- no nitropack import, so the fixture resolves with no dependency
    * on this repository's node_modules. */
   function fixtureTree(configBody) {
