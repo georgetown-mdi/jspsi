@@ -20,7 +20,7 @@ import type {
  * Source-specific wording for {@link checkLinkageSatisfiability}. The accept,
  * exchange, and invite entry points share the refusal and the field sanitization
  * but differ in where the terms came from, what proceeding would cost, and how an
- * operator settles terms their input cannot satisfy.
+ * operator fixes terms their input cannot satisfy.
  */
 export interface LinkagePreflightMessaging {
   /** Possessive noun naming the terms' origin in the messages: `"invitation"` on
@@ -34,18 +34,15 @@ export interface LinkagePreflightMessaging {
    * running a short exchange. */
   blockConsequence: string;
   /** Clause closing the block error's remedy link after the remedy lead the
-   * verdict selects ("...covers the required field types, "). Accept points at
-   * requesting a fresh invitation and exchange at re-establishing the committed
-   * exchange -- the out-of-band renegotiation that is the real remedy for terms
-   * an adopted set leaves this input unable to satisfy. Invite points at the
-   * operator's own authoring instead: the inviter wrote these terms, and no
-   * partner has seen them yet, so there is nothing to renegotiate. */
+   * verdict selects. Accept and exchange point at renegotiating the terms out
+   * of band; invite points at the operator's own authoring, since no partner
+   * has seen the terms yet. */
   blockRemedy: string;
-  /** Where these terms stand between the two parties, which selects the standing
-   * core's shortfall fragment states and whether the keyless refusal's remedy
-   * reads as an agreement or as this operator's own declaration. Accept and
-   * exchange hold terms a partner is held to as well; the mint holds none until
-   * the invitation it is about to generate is sent. */
+  /** Where these terms stand between the two parties: selects the standing
+   * core's shortfall fragment states, and whether the keyless refusal's remedy
+   * is treated as an agreement or as this operator's own declaration. Accept
+   * and exchange hold terms a partner is held to as well; the mint holds none
+   * until the invitation it is about to generate is sent. */
   termsStanding: LinkageTermsStanding;
 }
 
@@ -60,26 +57,19 @@ export const RUN_BLOCK_CONSEQUENCE =
 
 /**
  * How many cause links a block's name enumeration may occupy. The display
- * boundary walks at most {@link MAX_ERROR_CAUSE_DEPTH} links of a rendered
- * chain, and each block {@link checkLinkageSatisfiability} raises spends two of
- * them before any name: the summary on the error's own message, and the remedy
- * chained ahead of the names. A name beyond this budget would be walked past and
- * never rendered, so the last of these links reports the overflow instead of
- * naming one more.
+ * boundary walks at most {@link MAX_ERROR_CAUSE_DEPTH} links; each block
+ * {@link checkLinkageSatisfiability} raises spends two of them before any name
+ * (the summary and the chained remedy). A name beyond this budget is not
+ * rendered, so the last link reports the overflow instead of naming one more.
  */
 const REFUSAL_DETAIL_LINK_BUDGET = MAX_ERROR_CAUSE_DEPTH - 2;
 
 /**
  * Fit an ordered enumeration of labelled detail fragments to
- * {@link REFUSAL_DETAIL_LINK_BUDGET}, replacing the tail the renderer would walk
- * past with one link reporting how many entries stand behind it.
- *
- * The enumerations are terms content and are bounded only at
- * `MAX_LINKAGE_ENTRIES`, so one can ask for more links than the renderer walks.
- * What overflows is counted here rather than left to the renderer's generic
- * elision marker: this is where the count is known, and the count is what tells
- * the operator how much of the mismatch they are not reading. `overflowNoun`
- * names what those unread entries are.
+ * {@link REFUSAL_DETAIL_LINK_BUDGET}, replacing the tail the renderer would
+ * walk past with one link stating how many entries stand behind it --
+ * `MAX_LINKAGE_ENTRIES` bounds the enumeration higher than the renderer walks.
+ * `overflowNoun` names what those unread entries are.
  */
 function fitDetailLinks(details: string[], overflowNoun: string): string[] {
   if (details.length <= REFUSAL_DETAIL_LINK_BUDGET) return details;
@@ -97,31 +87,21 @@ function fitDetailLinks(details: string[], overflowNoun: string): string[] {
  * terms declare at least one linkage key and this CSV can satisfy every one of
  * them.
  *
- * It holds no policy of its own. The grading is core's
- * {@link decideLinkageTermsVerdict}, the same verdict `prepareForExchange`
- * enforces at the run boundary, so this is advance notice of a refusal that would
- * fire anyway -- earlier, before any connection or credential, and in wording that
- * names where the terms came from. The offline accept path calls no prepare at
- * all, so there this is the only place the refusal lands; the offline mint path
- * calls none either, and there the refusal is what keeps an invitation whose own
- * exchange is refused from reaching a partner at all.
- *
- * This wrapper owns the source-specific wording and the partner-sourced name
- * handling, kept in one copy so the accept, exchange, and invite paths cannot
- * drift apart on the escaping. The shortfall itself is phrased by core's
- * {@link summarizeLinkageShortfall}, the same fragment the run-boundary refusal
- * states, at the standing this seat's terms hold.
+ * Grading is core's {@link decideLinkageTermsVerdict}, the same verdict
+ * `prepareForExchange` enforces at the run boundary -- this is advance notice of
+ * a refusal that would fire anyway, before any connection or credential. The
+ * offline accept and mint paths call no prepare, so here is the only place the
+ * refusal lands for them. `messaging` supplies the accept, exchange, and invite
+ * paths' source-specific wording so they cannot drift apart; the shortfall
+ * itself is phrased by {@link summarizeLinkageShortfall}.
  *
  * @param standardization The committed config's explicit standardization, when
  *   any: an explicit column remap satisfies a field whose semantic type is
- *   otherwise absent, so passing it keeps a remapped field from being mis-flagged.
- *   Omit (accept) to use the type-based approximation, which matches the default
- *   type-based pipelines a party infers from its own CSV.
- * @param metadata The committed config's explicit metadata, when any: it retypes
- *   columns for the type fallback exactly as the exchange does, so a non-standard
- *   column name the config types explicitly is not mis-flagged, and a config whose
- *   metadata describes a since-swapped CSV is still caught. Omit (accept) to use
- *   name inference.
+ *   otherwise absent. Omit (accept) to use the type-based approximation a party
+ *   infers from its own CSV.
+ * @param metadata The committed config's explicit metadata, when any: retypes
+ *   columns for the type fallback exactly as the exchange does. Omit (accept) to
+ *   use name inference.
  */
 export function checkLinkageSatisfiability(
   columns: string[],
@@ -155,29 +135,12 @@ export function checkLinkageSatisfiability(
       },
     );
 
-  // The refusal partitions by WHO CHOSE THE BYTES rather than composing one
-  // sentence: the names are terms content -- partner-authored on the accept path
-  // -- and the display boundary caps each cause link independently, so names
-  // sharing the operative sentence's link can spend its budget and delete the step
-  // the operator has to act on. Each name gets a labelled link of its own, raw,
-  // since the boundary that renders the chain is the one altitude that escapes it.
-  // The remedy is chained ahead of the names for the reason the transport refusals
-  // chain theirs first: the renderer's depth bound reaches it before any detail.
-  //
-  // Ordered by what the verdict blocks on: the failing keys are the refusal, so
-  // they lead and survive the truncation `fitDetailLinks` applies -- a terms
-  // document declaring more entries than the renderer walks would otherwise spend
-  // the whole budget on fields and name not one of the keys they cost. The dead
-  // keys precede the unsatisfiable ones because only a corrected terms document
-  // settles them, and the fields follow as the account of WHY the unsatisfiable
-  // keys failed.
-  //
-  // Only the fields an unsatisfiable key REFERENCES are named. `unsatisfiedFields`
-  // grades every declared field, and a terms document may declare one no key
-  // draws on: that field costs no agreed key, so the run boundary does not block
-  // on it and naming it here would put a gap the operator need not close ahead of
-  // the ones they must. A dead key contributes none of these -- the dead grade is
-  // scoped to keys whose every element field resolves.
+  // Each name gets its own raw cause link: the renderer escapes each link
+  // independently, so batching names into one sentence risks one long name
+  // spending the whole link's budget. The remedy leads, ahead of the names,
+  // since the renderer's depth bound reaches it first. Dead keys precede
+  // unsatisfiable keys (only a corrected terms document fixes either), and
+  // fields follow, naming only the fields an unsatisfiable key references.
   const blockingFieldNames = new Set(
     verdict.unsatisfiableKeys.flatMap((key) =>
       key.elements.map((element) => element.field),
@@ -195,9 +158,9 @@ export function checkLinkageSatisfiability(
       .map((field) => `unsatisfied field: ${field.name} (${field.type})`),
   ];
 
-  // The remedy lead names the step each shortfall actually takes: a missing column
-  // is fixed in the CSV, a dead key only in the terms, so a refusal carrying both
-  // names both. `blockRemedy` then closes with what settles terms this input
+  // The remedy lead names the step each shortfall takes: a missing column is
+  // fixed in the CSV, a dead key only in the terms, so a refusal covering both
+  // names both. `blockRemedy` then closes with what fixes terms this input
   // cannot satisfy at all, which differs by where the terms came from.
   const remedyLeads: string[] = [];
   if (verdict.unsatisfiableKeys.length > 0)
@@ -226,14 +189,11 @@ export function checkLinkageSatisfiability(
 export type AcceptMode = "online" | "offline";
 
 /**
- * What happens to the acceptance itself after the warning, which the two accept
- * paths answer differently.
- *
- * Online, `prepareForOnlineExchange` runs inside `validateAccept` -- the same
- * `prepareForExchange` that carries the refusal -- so the `UsageError` aborts the
- * command before the terms display, the prompt, and every write. Offline there is
- * no prepare call, so the acceptance runs to its prompt and the refusal waits for
- * `psilink exchange`.
+ * What happens to the acceptance after the warning, which the two accept paths
+ * answer differently: online, `prepareForOnlineExchange` inside `validateAccept`
+ * enforces the refusal before the terms display, the prompt, or any write;
+ * offline there is no prepare call, so the acceptance runs to its prompt and the
+ * refusal waits for `psilink exchange`.
  */
 const ACCEPTANCE_OUTCOME: Record<AcceptMode, string> = {
   online:
@@ -246,45 +206,34 @@ const ACCEPTANCE_OUTCOME: Record<AcceptMode, string> = {
 };
 
 /**
- * Warn, on the ACCEPT path, when this party's input discloses payload columns the
- * invitation declares the inviting party will accept none of. Accept-only: its
- * copy names the invitation, so an exchange-path caller would have to
- * parameterize the source the way {@link LinkagePreflightMessaging} does.
+ * Warn, on the ACCEPT path, when this party's input discloses payload columns
+ * the invitation declares the inviting party will accept none of. Accept-only:
+ * its copy names the invitation.
  *
- * `terms` are the acceptor's own derived terms, whose `payload.send` is the
- * MIRROR of the inviter's `payload.receive` (`deriveAcceptedLinkageTerms`): a
- * present-but-empty `send` is the inviter declaring it accepts no payload column,
- * while an ABSENT one is the lazy direction, reconciled against this party's own
- * disclosure when the exchange runs.
+ * `terms` are the acceptor's own derived terms (`deriveAcceptedLinkageTerms`);
+ * a present-but-empty `payload.send` mirrors the inviter declaring it accepts
+ * no payload column, while an absent one is reconciled against this party's
+ * own disclosure when the exchange runs.
  *
- * Gated on the acceptor's own `output.shareWithPartner` -- mirrored from the
- * invitation's `expectsOutput`, the same fact the consent display's `columns you
- * will send` line reads. An inviting party entitled to no result receives no
- * payload at all, so `assertPayloadSendDisclosed` does not refuse that pair and
- * the display states that nothing is sent; warning there would contradict the
- * line beneath it.
+ * Gated on `output.shareWithPartner` (mirrored from the invitation's
+ * `expectsOutput`): an inviting party entitled to no result receives no
+ * payload, so `assertPayloadSendDisclosed` does not refuse that pair and no
+ * warning is due. Metadata resolution mirrors `prepareForExchange`'s own
+ * (explicit metadata, else inferred from column names), so this warns exactly
+ * where the run's own refusal would; `columnNames` absent (an offline
+ * acceptance given no input file) leaves nothing to compare, so no warning
+ * fires either.
  *
- * The disclosed set is read the way the RUN resolves it (`prepareForExchange`
- * takes the spec's metadata, else infers from the column names), so a caller that
- * holds an input's columns but no metadata for them still gets the warning the
- * run's own refusal will match. `columnNames` absent (an offline acceptance given
- * no input file) leaves nothing to compare: the disclosed set is settled by
- * whatever CSV `psilink exchange` is later given, which is what the display's
- * not-yet-known line already says.
+ * The pair this warns on cannot run: `assertPayloadSendDisclosed` refuses it
+ * inside `prepareForExchange` before any data is sent. This warns rather than
+ * refuses on both paths, since the disagreement is fixed by editing the
+ * configuration this acceptance is about to write; {@link ACCEPTANCE_OUTCOME}
+ * states what the acceptance then does.
  *
- * That pair cannot run: `assertPayloadSendDisclosed` refuses it inside
- * `prepareForExchange`, before any data is sent, so without this the operator
- * meets the refusal only after consenting, writing files, and coordinating with
- * a partner -- while both facts were on the consent surface. It warns rather than
- * refuses on both paths, because the disagreement is settled by editing the
- * configuration this acceptance is about to write; what the acceptance then does
- * differs by path, so the warning states it (see {@link ACCEPTANCE_OUTCOME}).
- *
- * A NON-EMPTY declared `send` that disagrees with the disclosed set is a
- * different comparison with different remedies and is not covered here. The
- * column names are this party's own file's and reach a log sink without ever
- * becoming an `Error`, so they are escaped at that sink, and are rendered one per
- * line so a name carrying the list separator cannot read as two.
+ * Does not cover a NON-EMPTY declared `send` that disagrees with the disclosed
+ * set -- a different comparison with different remedies. Column names are
+ * escaped per docs/spec/CHANNEL_SECURITY.md#display-sanitization-escape-format,
+ * one per line so a name holding the list separator is not treated as two.
  */
 export function warnColumnsTheInvitationWillNotAccept(params: {
   metadata: Metadata | undefined;
