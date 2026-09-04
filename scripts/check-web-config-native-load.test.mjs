@@ -17,6 +17,7 @@ import {
   loadInChildProcess,
   writeStripOnlyControl,
 } from "./check-web-config-native-load.mjs";
+import { CHECKS } from "./run-checks.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
@@ -200,8 +201,8 @@ describe("wiring", () => {
   });
 
   it("runs on every pull request", () => {
-    expect(read(".github/workflows/static_checks.yaml")).toContain(
-      "npm run check:web-config-native-load",
+    expect(CHECKS.map((check) => check.script)).toContain(
+      "check:web-config-native-load",
     );
   });
 

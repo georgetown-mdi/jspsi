@@ -23,6 +23,7 @@ import {
   classifyDirectory,
   maskExcusedValues,
 } from "./check-vectors-generators.mjs";
+import { CHECKS } from "./run-checks.mjs";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 
@@ -627,8 +628,6 @@ describe("wiring", () => {
   });
 
   it("runs on every pull request", () => {
-    expect(read(".github/workflows/static_checks.yaml")).toContain(
-      "npm run check:vectors",
-    );
+    expect(CHECKS.map((check) => check.script)).toContain("check:vectors");
   });
 });

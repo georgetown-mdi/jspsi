@@ -18,6 +18,7 @@ import {
   topLevelInstalls,
   workspaceDirectories,
 } from "./check-nested-root-package.mjs";
+import { CHECKS } from "./run-checks.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
@@ -342,13 +343,13 @@ describe("the real repository", () => {
     }
   });
 
-  it("is wired as a check script and a CI step", () => {
+  it("is wired as a check script and on the gate's list", () => {
     expect(readRootJson("package.json").scripts).toHaveProperty(
       "check:nested-root-package",
       "node scripts/check-nested-root-package.mjs",
     );
-    expect(readRoot(".github/workflows/static_checks.yaml")).toContain(
-      "run: npm run check:nested-root-package",
+    expect(CHECKS.map((check) => check.script)).toContain(
+      "check:nested-root-package",
     );
   });
 

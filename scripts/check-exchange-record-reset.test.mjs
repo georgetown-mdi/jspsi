@@ -12,8 +12,6 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 
-import { parse } from "yaml";
-
 import {
   CHECKLIST_HEADING,
   CHECKLIST_STEP,
@@ -26,6 +24,7 @@ import {
   resetViolations,
 } from "./check-exchange-record-reset.mjs";
 import { PRE_PUBLICATION_RELEASE as PROTOCOL_CHECK_FLOOR } from "./check-protocol-version-bump.mjs";
+import { CHECKS } from "./run-checks.mjs";
 import { declaredRecordVersion } from "./lib/exchangeRecordVersion.mjs";
 
 /**
@@ -357,15 +356,10 @@ describe("the check's registration", () => {
     );
   });
 
-  it("runs as a step of the Static Checks gate", () => {
-    const workflow = parse(readRoot(".github/workflows/static_checks.yaml"));
-    const steps = Object.values(workflow.jobs).flatMap((job) => job.steps);
-
-    expect(
-      steps.some((step) =>
-        (step.run ?? "").includes("npm run check:exchange-record-reset"),
-      ),
-    ).toBe(true);
+  it("is on the list the Static Checks gate runs", () => {
+    expect(CHECKS.map((check) => check.script)).toContain(
+      "check:exchange-record-reset",
+    );
   });
 
   it("is carried by the release checklist step its failures name", () => {

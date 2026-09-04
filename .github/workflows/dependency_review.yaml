@@ -18,8 +18,9 @@ name: Dependency Review
 # and holds every pull request missing the filter permanently pending, the
 # footgun image_smoke.yaml documents. Running unfiltered costs near nothing -- on
 # a PR that changes no dependency the graph diff is empty and the check passes
-# near-instantly. The Merge gate identities step in static_checks.yaml holds
-# that: this file carrying a path filter under on.pull_request fails it.
+# near-instantly. The merge-gate identities check, run by the Repository checks
+# step of static_checks.yaml, holds that: this file carrying a path filter under
+# on.pull_request fails it.
 #
 # The check reads GitHub's Dependency Review API, which requires the repository's
 # Dependency Graph feature to be enabled. That is free on public repositories

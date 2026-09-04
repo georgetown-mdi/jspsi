@@ -16,6 +16,7 @@ import {
   ROUTE_TREE,
   checkRouteTreeFreshness,
 } from "./check-routetree-fresh.mjs";
+import { CHECKS } from "./run-checks.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
@@ -142,9 +143,7 @@ describe("wiring and the documentation a contributor reads", () => {
   });
 
   it("runs on every pull request", () => {
-    expect(read(".github/workflows/static_checks.yaml")).toContain(
-      "npm run check:routetree",
-    );
+    expect(CHECKS.map((check) => check.script)).toContain("check:routetree");
   });
 
   it("agrees with the refresh command apps/web/README.md gives", () => {

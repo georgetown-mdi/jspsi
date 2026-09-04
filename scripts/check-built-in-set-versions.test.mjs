@@ -11,7 +11,6 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { afterAll, describe, expect, it } from "vitest";
-import { parse } from "yaml";
 
 import {
   FIELD_SET_DECLARATIONS,
@@ -29,6 +28,7 @@ import {
   suggestedLedger,
   suggestionVersion,
 } from "./check-built-in-set-versions.mjs";
+import { CHECKS } from "./run-checks.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
@@ -394,14 +394,10 @@ describe("the check's registration", () => {
     );
   });
 
-  it("runs as a step of the Static Checks gate", () => {
-    const workflow = parse(readRoot(".github/workflows/static_checks.yaml"));
-    const steps = Object.values(workflow.jobs).flatMap((job) => job.steps);
-    expect(
-      steps.some((step) =>
-        (step.run ?? "").includes("npm run check:built-in-set-versions"),
-      ),
-    ).toBe(true);
+  it("is on the list the Static Checks gate runs", () => {
+    expect(CHECKS.map((check) => check.script)).toContain(
+      "check:built-in-set-versions",
+    );
   });
 
   it("ships a pin for each declared set, the rule binding now", () => {

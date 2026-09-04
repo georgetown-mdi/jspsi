@@ -15,9 +15,9 @@ name: Native Addon (Alpine/musl)
 # forever on "Expected -- waiting for status to be reported". So the workflow always
 # runs and the job green-passes trivially, doing the real musl verification only
 # when the vendored tarball, the wire vectors, this workflow, or the Dockerfile
-# actually changed (the same set the old `paths:` filter named). The Merge gate
-# identities step in static_checks.yaml holds that: this file carrying a path
-# filter under on.pull_request fails it.
+# actually changed (the same set the old `paths:` filter named). The merge-gate
+# identities check, run by the Repository checks step of static_checks.yaml,
+# holds that: this file carrying a path filter under on.pull_request fails it.
 on:
   pull_request:
     branches: [main, staging]

@@ -17,13 +17,13 @@ name: Static Checks
 # gate's critical path is the one a contributor iterates on; `Guards, Scripts,
 # Audit` carries the repo-wide guard checks, the scripts suite, and the
 # production dependency audit, in parallel with it. Each job's `name:` is its
-# identity on main and staging, which is why neither is renamed as steps
+# identity on main and staging, which is why neither is renamed as the checks
 # accumulate past what it enumerates. The second identity is carried by the
 # `staging` and `main` rulesets, an edit made on the GitHub side rather than
 # here; while it is absent that job runs on every pull request without gating a
-# merge. The Merge gate identities step below holds both identities against the
-# branch rules whenever the run has a token that can read them, and states a
-# skip when it does not.
+# merge. The merge-gate identities check, one of the checks `check:all` below
+# runs, holds both identities against the branch rules whenever the run has a
+# token that can read them, and states a skip when it does not.
 #
 # Both jobs pay the setup action, since the second holds every check that reads
 # node_modules and the vectors check that reads the @psilink/core build.
@@ -63,290 +63,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      # Pins Node, installs from the lockfile, and builds @psilink/core. Most
-      # steps below read their parsers and fixtures out of the install; the
+      # Pins Node, installs from the lockfile, and builds @psilink/core. Most of
+      # the checks below read their parsers and fixtures out of the install; the
       # vectors check reads the built dist, since its generators import the
       # package the way the apps do.
       - uses: ./.github/actions/setup
-      # Resolves every Markdown link/anchor across the repo (docs/ overview,
-      # docs/spec/ technical, and the root governance files), failing on a dead
-      # path or dead heading anchor. This is the forcing function that keeps the
-      # two-tier docs from drifting into stale cross-references on a move or
-      # rename. Needs only Node and git ls-files, so it does not depend on the
-      # @psilink/core build above.
-      - name: Doc links
-        run: npm run linkcheck
-      # Backstops CONTRIBUTING.md as a quickstart: fails if it grows a section
-      # outside its heading allowlist or cites a `node_modules/` source path --
-      # the two mechanical tells that reference-depth detail (which belongs in
-      # docs/spec/DEPENDENCY_PINS.md or docs/TESTING.md) crept back in.
-      - name: CONTRIBUTING scope
-        run: npm run check:contributing
-      # Bounds CLAUDE.md by bytes, which is what every agent session pays to load
-      # it. The failure mode a shape check cannot see is uniform regrowth: each
-      # rule restating mechanics that already live in a command file or a hook
-      # header. The budget forces one-in, one-out -- a pull request that pushes
-      # past the ceiling relocates its own weight rather than deleting a rule.
-      - name: CLAUDE.md budget
-        run: npm run check:claudemd-budget
-      # Encodes the CLI command inventory as a check: every subcommand
-      # registered in apps/cli/src/cliParser.ts must be mentioned in
-      # docs/DESIGN.md and docs/CLI.md, so a shipped command cannot leave the
-      # overview enumerations silently stale.
-      - name: Command inventory
-        run: npm run check:command-inventory
-      # Encodes what the file-drop support scripts ask of the container image as
-      # a check: every psilink argument vector and helper script derived from
-      # those scripts has something in image_smoke.yaml's capability gate that
-      # exercises it against a real image. Here as well as there because this
-      # workflow carries no path filter -- a call site added in a pull request
-      # that touches nothing an image build reads would otherwise reach an
-      # operator with no run having looked at it. This half needs no daemon and
-      # asserts nothing about any image.
-      - name: Image capability coverage
-        run: npm run check:image-capabilities
-      # Encodes CLAUDE.md's agent-enforcement prose as a check: every "Enforced
-      # by <hook>" claim must name a hook that exists, is registered in
-      # .claude/settings.json, and names the tool its matcher actually gates,
-      # and every hook must carry a colocated test. A claim of enforcement the
-      # harness does not deliver is worse than no claim: an agent that believes
-      # a rule is gated stops holding it itself.
-      - name: Enforcement claims
-        run: npm run check:enforcement-claims
-      # Encodes PRIVACY.md's published no-egress claims as a check: an absolute
-      # URL literal in shipped source either sits on the script's reasoned
-      # allowlist or fails the build, so a font CDN, an error-reporting SDK, an
-      # analytics snippet, or a version-check ping cannot silently falsify the
-      # statement handed to agency security reviewers. It reads literals only --
-      # what it does not cover is stated in its header and in
-      # docs/SECURITY_DESIGN.md.
-      - name: Egress claims
-        run: npm run check:egress-claims
-      # Encodes the model-tiering rule where the hooks cannot reach it: a
-      # Workflow script's agent() call that omits `model` inherits the session
-      # model rather than the agent definition's pinned tier, and the model sits
-      # inside the script rather than a top-level tool input. Every agent() call
-      # in .claude/commands/, .claude/agents/, and .claude/skills/ must pin a
-      # literal opus/sonnet/haiku, so a committed review or panel script cannot
-      # silently run off-tier -- or on Fable, which requires the owner's per-spawn
-      # approval.
-      - name: Workflow agent models
-        run: npm run check:workflow-agent-models
-      # A Workflow script's arguments arrive as `args`, either as the caller's
-      # object or as JSON text of it. Any other delivery carries no named field
-      # and reads as undefined rather than failing, so the round spawns its
-      # agents with the caller's arguments simply missing from the prompts. Every
-      # committed script resolves once through resolveWorkflowArgs(args), which
-      # fails closed on a shape it cannot use; this fails on any other read of
-      # `args` in the same scanned blocks, so the guard cannot be sidestepped one
-      # field at a time.
-      - name: Workflow args resolve
-        run: npm run check:workflow-args-resolve
-      # Holds every action pin in .github/actions identical to one in
-      # .github/workflows, the path the github-actions Dependabot block is
-      # configured against, so a release or advisory surfacing on the workflow
-      # occurrence covers the composite one and a bump cannot land on the
-      # workflow alone. A composite pin no workflow mirrors fails closed.
-      - name: Action pin drift
-        run: npm run check:action-pin-drift
-      # Encodes the two ways a merge gate goes quietly missing as checks: a job
-      # renamed out from under the required-status-check context that names it,
-      # and a path filter added to a gating workflow, each of which leaves a
-      # required check pending forever rather than red. Reading the branch rules
-      # needs a token, so the run's own token is handed to it; the context half
-      # states a skip -- a run annotation, not a silent pass -- when that token
-      # cannot read them, while the path-filter half needs no API and always
-      # runs.
-      - name: Merge gate identities
+      # Every repo-wide guard, driven from the one list in
+      # scripts/run-checks.mjs: a line per check saying what it holds, with each
+      # check's reasoning left in its own script header. `npm run check:all` is
+      # the same run locally, and the runner goes on past a failing check, so
+      # one red result does not hide the state of the rest. The list is held
+      # to the root package.json's `check:*` scripts -- and this job to this one
+      # step plus the audit below -- by scripts/run-checks.test.mjs, so a new
+      # check is classified rather than appended here. The merge-gate check
+      # reads the branch rules through the run's own token and states a skip --
+      # a run annotation, not a silent pass -- when it cannot.
+      - name: Repository checks
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run check:merge-gate-identities
-      # The github-actions Dependabot block ignores within-major updates for
-      # several orgs, which is only sound over pins that float within their
-      # major. This reads that ignore list out of the config and fails on any
-      # pin it covers whose ref is not a bare floating major tag -- an exact,
-      # sha, or branch pin frozen under an ignore that suppresses every update
-      # it could receive.
-      - name: Dependabot ignore shape
-        run: npm run check:dependabot-ignore-shape
-      # A dependency reached past its public API carries an upgrade checklist in
-      # docs/spec/DEPENDENCY_PINS.md, which only fires if a bump is read rather
-      # than skimmed as one of a batch. This reads the packages those checklists
-      # name and fails on any the npm Dependabot groups would swallow into a
-      # batched pull request without excluding -- the drift where a checklist is
-      # written and the config never hears about it. It also holds every package
-      # a reviewed group names outright in its own patterns out of every other
-      # group's exclude-patterns, so adding a package to a group like
-      # cryptographic without excluding it elsewhere fails the same way.
-      - name: Dependabot pin coverage
-        run: npm run check:dependabot-pin-coverage
-      # The root brace-expansion override answers an advisory no bump on the
-      # dependency path can reach, and its exit condition is an upstream release
-      # rather than anything in this repo. This fails once the committed lockfile
-      # declares no brace-expansion range excluding the version it installs --
-      # the state in which the override overrules nothing and is only costing the
-      # invalid dev edge and the latent major recorded in
-      # docs/spec/DEPENDENCY_PINS.md.
-      - name: brace-expansion override
-        run: npm run check:brace-expansion-override
-      # The release SBOM's crossws workaround (docs/spec/DEPENDENCY_PINS.md,
-      # "The crossws peer conflict blocks the release SBOM") is only justified
-      # while the unflagged step 9 command still refuses. This drives that exact
-      # command -- package-lock-only, so no registry reach -- and fails once it
-      # succeeds while docs/RELEASES.md still prescribes --legacy-peer-deps, so
-      # the flag and both crossws doc sections cannot silently outlive upstream
-      # converging.
-      - name: crossws SBOM block
-        run: npm run check:crossws-sbom-block
-      # A root overrides block stops npm hoisting a later range bump
-      # incrementally, so a workspace manifest bump can keep the stale hoisted
-      # copy and nest the raised version under the workspace that asked for it.
-      # Nothing at install time reports that split, and what it costs is a bare
-      # exit code 1 naming nothing -- the dev SSR middleware never installs, so
-      # the web integration and browser suites die in their shared globalSetup
-      # with no test failing. This reads the committed lockfile and fails on any
-      # package installed at the top level of both the root node_modules and a
-      # workspace's, naming both entries.
-      - name: Nested root package
-        run: npm run check:nested-root-package
-      # apps/web/src/routeTree.gen.ts is generated but checked in, so a fresh
-      # clone can typecheck, lint, build, and test the web app with no
-      # generation step. The cost is that every web-tooling run rewrites it: a
-      # copy that has drifted behind the pinned generator reappears as an
-      # unrelated modification in a branch that touched no route. This
-      # regenerates with the pinned generator and compares, so a refresh lands
-      # as its own commit instead of riding along in someone else's. It marks
-      # the copy it hands the codegen with a probe line and fails closed if that
-      # line survives, and restores the working-tree copy either way.
-      - name: Route tree freshness
-        run: npm run check:routetree
-      # apps/web/vite.config.ts is evaluated with no transform in front of it by
-      # Vite's `configLoader: "native"` and by a plain `node` import, both of
-      # which hand it to Node's strip-only type stripping. That refuses any
-      # TypeScript construct needing code generated for it -- a parameter
-      # property, an enum, a namespace, an `import x = require(...)` alias --
-      # anywhere in the config's transitive import graph, which reaches app
-      # source that nothing else holds to erasable syntax; typecheck, lint, and
-      # `vite build` all run a real transform and see none of it. This drives
-      # both load paths for real, and calibrates each against a control fixture
-      # first, so a loader that stopped being strip-only fails the step rather
-      # than passing it silently.
-      - name: Web config native load
-        run: npm run check:web-config-native-load
-      # apps/web/server/custom-entry.ts wires exactly one production upgrade
-      # listener onto the shared HTTP server: PeerJS's path-routed signaling
-      # route. Nitro's own WebSocket support, gated behind
-      # experimental.websocket in apps/web/nitro.config.ts, would attach a
-      # second, independent upgrade listener with no path check of its own,
-      # and two such listeners on one server mis-route. This loads the real
-      # Nitro config and fails if experimental.websocket is ever turned on;
-      # see scripts/check-nitro-websocket-unset.mjs for the full reasoning.
-      - name: Nitro websocket unset
-        run: npm run check:nitro-websocket-unset
-      # The known-answer vectors under packages/core/test/vectors/ are asserted
-      # by the suites in one direction only -- that the code reproduces the
-      # checked-in JSON -- so a failing conformance assertion could be silenced
-      # by editing the JSON. This regenerates each file with its generator and
-      # compares, naming the file and the generator on a difference. It restores
-      # every file it touches, classifies each entry in that directory
-      # (generator, verifier, or no generator) so an unclassified addition
-      # fails, and masks only the two values a rerun does not reproduce -- the
-      # randomized ECDSA signatures and the recorded openssl version -- by name.
-      - name: Vectors against their generators
-        run: npm run check:vectors
-      # docs/spec/PROTOCOL.md states in prose that a wire-format delta ships
-      # within PROTOCOL_VERSION 1 while psilink is pre-publication and takes a
-      # bump from the first published deployment onward -- an obligation that
-      # falls due long after the sentence was written and that nothing would
-      # otherwise fail on. This encodes it: inert while apps/cli/package.json
-      # names no release above the pre-publication one, and from then on a moved
-      # wire-format pin (the covered vectors under packages/core/test/vectors/,
-      # digested into scripts/protocol-version-pins.json) with no bump fails,
-      # naming the paragraph. The marker is read from the tree because this
-      # checkout has no tags to read one from.
-      - name: Protocol version bump
-        run: npm run check:protocol-version-bump
-      # A managed web exchange's accounting of disclosures holds its runs'
-      # exchange records verbatim, and the reader rejects an unrecognized record
-      # version rather than migrating it -- so moving EXCHANGE_RECORD_VERSION
-      # invalidates, on every device holding one, a HIPAA/FERPA disclosure source
-      # nothing else holds a copy of, and stops the accounting accruing for the
-      # unattended runs it exists to cover. The recovery for that state is built,
-      # but its export arm rests on a premise only the current format has been
-      # driven against. This pins that literal so the move re-takes the decision
-      # instead of shipping past it, and fails when the recovery path it defers
-      # to is no longer there.
-      - name: Disclosure accounting recovery
-        run: npm run check:disclosure-recovery
-      # EXCHANGE_RECORD_VERSION is an internal development counter, cycled freely
-      # because no published artifact carries any of its literals, and first
-      # publication ships it reset to psilink-exchange-record/v1. The reset is
-      # taken at that release rather than earlier: re-using a previously-cycled
-      # value mid-development would let an old same-numbered development artifact
-      # parse as the current version and fail on its field set instead of taking
-      # the clean version refusal. This holds both ends of that -- the literal is
-      # not the reset value below the release marker apps/cli/package.json
-      # carries, and is at and above it -- and retires itself once the release
-      # that took the reset is recorded in the check.
-      - name: Exchange record format reset
-        run: npm run check:exchange-record-reset
-      # A run that configures no STUN server discloses the running host's public
-      # address to the WebRTC library's built-in default, and three surfaces name
-      # that endpoint to an operator -- the CLI's warning, the web app's
-      # command-line export panel, and the docs -- one of them right before they
-      # hand a recurring exchange's secret to a scheduler. An app may not import
-      # from another app and a document imports nothing, so those are hand-written
-      # copies of a value the library decides. This holds every copy to the one
-      # constant the CLI measures against the real library, so a bump that moved
-      # the default fails here instead of leaving a confidentiality statement
-      # quietly false.
-      - name: Built-in STUN default claims
-        run: npm run check:stun-default-claims
-      # docs/spec/WEBRTC_TRANSPORT.md and docs/EXCHANGE_REFERENCE.md state that
-      # connection.provider_options is inert on the webrtc channel: no transport
-      # on either side reads it, which is what lets the SFTP-only default-deny
-      # allowlist on that option stop there rather than needing a WebRTC
-      # counterpart. This scans the CLI's whole WebRTC connection directory and
-      # the web app's WebRTC entry points plus their first-party neighbours for
-      # a read of the option under either spelling, failing the moment one
-      # appears rather than leaving the claim to prose.
-      - name: WebRTC provider_options unread
-        run: npm run check:webrtc-provider-options-unread
-      # A zero-setup exchange authors no linkage terms: each party derives them
-      # from its own file, and the built-in keys work with no authoring only
-      # because every one of them is built from the guaranteed-minimum PII both
-      # parties are sure to bring -- the built-in field set. This holds the keys
-      # to that set, so a default key over a field outside it fails here instead
-      # of stranding the party whose file does not carry the field, at run time,
-      # with nothing naming the cause.
-      - name: Zero-setup key fields
-        run: npm run check:zero-setup-keys
-      # The built-in field set and key set each carry a version, and the recorded
-      # validation attaches to a name and a version together -- so an edited set
-      # carrying the old version leaves the design note describing rules nobody
-      # ran. That obligation was prose, which nothing fails on when it is
-      # forgotten. This digests each set's declared content and holds it to the
-      # pin scripts/built-in-set-pins.json records for the declared version,
-      # cascade order included: the order is the order the keys are applied in.
-      - name: Built-in rule set versions
-        run: npm run check:built-in-set-versions
-      # Keyless signing leaves no public key to fetch, so the `cosign verify`
-      # command docs/RELEASES.md publishes pins the release workflow's identity
-      # -- that file's own path plus its tag trigger. A rename or a widened
-      # trigger leaves the published command refusing the signature a real
-      # release produces, and the document says nothing about either. This holds
-      # the published identity to both, holds the workflow's own self-verify
-      # step to the same two `--certificate-` literals a partner runs, and holds
-      # the publish sequence to signing, verifying and attesting each pushed
-      # image before the next build starts.
-      - name: Release signing coupling
-        run: npm run check:release-signing
-      # Scripts project (.claude/scripts/*.mjs) has its own vitest suite. Plain
-      # .mjs with no server or Docker dependency, so a stock runner suffices. This
-      # is the repo-wide non-path-filtered gate that guarantees the suite is always
-      # guarded -- no workflow invoked it before this step was added.
-      - name: Scripts tests
-        run: npm run test:scripts
+        run: npm run check:all
       # Blocking half of the dependency audit, over the production tree the
       # shipped image runs: the release SBOM's scope -- the two workspaces the
       # Dockerfile's production install names, plus apps/web, whose

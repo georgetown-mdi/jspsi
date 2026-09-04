@@ -12,6 +12,7 @@ import {
   releasesPrescribesFlag,
   runUnflaggedSbom,
 } from "./check-crossws-sbom-block.mjs";
+import { CHECKS } from "./run-checks.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
@@ -207,14 +208,14 @@ describe("the real repository", () => {
     expect(readRoot("docs/RELEASES.md")).toContain(prescribed);
   });
 
-  it("is wired as a check script and a CI step", () => {
+  it("is wired as a check script and on the gate's list", () => {
     const pkg = JSON.parse(readRoot("package.json"));
     expect(pkg.scripts).toHaveProperty(
       "check:crossws-sbom-block",
       "node scripts/check-crossws-sbom-block.mjs",
     );
-    expect(readRoot(".github/workflows/static_checks.yaml")).toContain(
-      "run: npm run check:crossws-sbom-block",
+    expect(CHECKS.map((check) => check.script)).toContain(
+      "check:crossws-sbom-block",
     );
   });
 

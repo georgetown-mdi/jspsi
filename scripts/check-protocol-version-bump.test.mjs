@@ -12,8 +12,6 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 
-import { parse } from "yaml";
-
 import {
   COVERED_VECTORS,
   PINS_FILE,
@@ -32,6 +30,7 @@ import {
   protocolVersionFrom,
   wireFormatDigest,
 } from "./check-protocol-version-bump.mjs";
+import { CHECKS } from "./run-checks.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
@@ -532,14 +531,10 @@ describe("the check's registration", () => {
     );
   });
 
-  it("runs as a step of the Static Checks gate", () => {
-    const workflow = parse(readRoot(".github/workflows/static_checks.yaml"));
-    const steps = Object.values(workflow.jobs).flatMap((job) => job.steps);
-    expect(
-      steps.some((step) =>
-        (step.run ?? "").includes("npm run check:protocol-version-bump"),
-      ),
-    ).toBe(true);
+  it("is on the list the Static Checks gate runs", () => {
+    expect(CHECKS.map((check) => check.script)).toContain(
+      "check:protocol-version-bump",
+    );
   });
 
   it("starts from an empty ledger, so nothing pre-publication goes stale", () => {

@@ -11,7 +11,6 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { afterAll, describe, expect, it } from "vitest";
-import { parse } from "yaml";
 
 import {
   FIELD_SET_DECLARATIONS,
@@ -24,6 +23,7 @@ import {
   keyFieldViolations,
   substrateReport,
 } from "./check-zero-setup-keys.mjs";
+import { CHECKS } from "./run-checks.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
@@ -244,13 +244,9 @@ describe("the check's registration", () => {
     );
   });
 
-  it("runs as a step of the Static Checks gate", () => {
-    const workflow = parse(readRoot(".github/workflows/static_checks.yaml"));
-    const steps = Object.values(workflow.jobs).flatMap((job) => job.steps);
-    expect(
-      steps.some((step) =>
-        (step.run ?? "").includes("npm run check:zero-setup-keys"),
-      ),
-    ).toBe(true);
+  it("is on the list the Static Checks gate runs", () => {
+    expect(CHECKS.map((check) => check.script)).toContain(
+      "check:zero-setup-keys",
+    );
   });
 });
