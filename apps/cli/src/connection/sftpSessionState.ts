@@ -1,5 +1,5 @@
 /**
- * The connection-lifecycle state one SFTP adapter carries across its whole life:
+ * The connection-lifecycle state one SFTP adapter holds for its whole life:
  * how far its teardown has got, what the ssh2 Client's transport has reported
  * about closing, and the one-shot budgets whose whole content is "this run has
  * already done that once". Transport-blind, like {@link ./sftpAdapterLedger}: no
@@ -126,7 +126,7 @@ export class SftpSessionState {
     return true;
   }
 
-  /** The transport emitted its `'end'`; its `'close'` is now owed. */
+  /** The transport emitted its `'end'`, so its `'close'` is owed. */
   recordTransportEnd(): void {
     if (this.#transportClose !== "unreadable") this.#transportClose = "owed";
   }
