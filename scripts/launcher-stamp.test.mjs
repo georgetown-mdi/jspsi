@@ -3,7 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import { parse } from "yaml";
+import { WORKFLOW_DIR, workflowDocument } from "./lib/workflows.mjs";
 
 // The launchers carry the image as a digest, and the release workflow is what
 // fills that digest in. Both halves of that arrangement are silent when they
@@ -51,8 +51,9 @@ const read = (relative) => readFileSync(resolve(repoRoot, relative), "utf8");
 
 const occurrences = (haystack, needle) => haystack.split(needle).length - 1;
 
-const releaseWorkflow = read(".github/workflows/release.yaml");
-const releaseDocument = parse(releaseWorkflow);
+const RELEASE_WORKFLOW = `${WORKFLOW_DIR}/release.yaml`;
+const releaseWorkflow = read(RELEASE_WORKFLOW);
+const releaseDocument = workflowDocument(repoRoot, RELEASE_WORKFLOW);
 
 // Every `run:` script in the workflow, joined. The stamp step is identified by
 // the literals it must carry rather than by its name, so renaming the step does

@@ -3,7 +3,6 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { parse } from "yaml";
 import {
   BUILD_OUTPUT,
   DEPLOY_WORKFLOW,
@@ -18,6 +17,7 @@ import {
   toRepoPath,
   unreachedRoots,
 } from "./check-deploy-trigger-graph.mjs";
+import { parseWorkflow, workflowDocument } from "./lib/workflows.mjs";
 import { readFileSync } from "node:fs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -48,14 +48,18 @@ describe("reading the deploy trigger", () => {
   // the trigger out from under the check -- fails here rather than at the next
   // build-driven run.
   it("reads the push path filter out of the real deploy workflow", () => {
-    const paths = readTriggerPaths(readRepo(DEPLOY_WORKFLOW));
+    const paths = readTriggerPaths(workflowDocument(repoRoot, DEPLOY_WORKFLOW));
     expect(paths.length).toBeGreaterThan(0);
-    expect(paths).toEqual(parse(readRepo(DEPLOY_WORKFLOW)).on.push.paths);
+    expect(paths).toEqual(
+      workflowDocument(repoRoot, DEPLOY_WORKFLOW).on.push.paths,
+    );
   });
 
   it("throws when the push trigger carries no paths list", () => {
     expect(() =>
-      readTriggerPaths("on:\n  push:\n    branches: [main]\n"),
+      readTriggerPaths(
+        parseWorkflow("fixture.yaml", "on:\n  push:\n    branches: [main]\n"),
+      ),
     ).toThrow(/declares no on.push.paths/);
   });
 });
@@ -65,7 +69,9 @@ describe("compiling a path filter", () => {
   // shape the matcher reads, so a pattern added in a shape it cannot model stops
   // the change instead of silently mismatching.
   it("compiles every pattern the real deploy workflow declares", () => {
-    const filter = compileFilter(readTriggerPaths(readRepo(DEPLOY_WORKFLOW)));
+    const filter = compileFilter(
+      readTriggerPaths(workflowDocument(repoRoot, DEPLOY_WORKFLOW)),
+    );
     expect(filter.patterns.length).toBeGreaterThan(0);
   });
 
@@ -292,8 +298,9 @@ describe("wiring", () => {
   });
 
   it("runs the check from the workflow that builds the deployed server", () => {
-    const workflow = parse(
-      readRepo(".github/workflows/eb_build_and_test.yaml"),
+    const workflow = workflowDocument(
+      repoRoot,
+      ".github/workflows/eb_build_and_test.yaml",
     );
     const steps = workflow.jobs["build-and-test"].steps.map(
       (step) => step.run ?? "",
@@ -306,8 +313,9 @@ describe("wiring", () => {
   // The check reads the deploy filter, so a pull request editing only that file
   // has to reach the workflow that runs the check.
   it("triggers that workflow on a change to the deploy filter itself", () => {
-    const workflow = parse(
-      readRepo(".github/workflows/eb_build_and_test.yaml"),
+    const workflow = workflowDocument(
+      repoRoot,
+      ".github/workflows/eb_build_and_test.yaml",
     );
     const filter = compileFilter(workflow.on.pull_request.paths);
     expect(filter.matches(DEPLOY_WORKFLOW)).toBe(true);

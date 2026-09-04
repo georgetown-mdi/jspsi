@@ -49,7 +49,7 @@ import { fileURLToPath } from "node:url";
 
 import { parse } from "yaml";
 
-import { treeReferences } from "./check-action-pin-drift.mjs";
+import { WORKFLOW_DIR, treeReferences } from "./lib/workflows.mjs";
 
 const CONFIG_FILE = ".github/dependabot.yml";
 const ECOSYSTEM = "github-actions";
@@ -149,7 +149,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const { workflowReferences, actionReferences } = treeReferences(root);
   if (workflowReferences.length === 0) {
     console.error(
-      ".github/workflows: no action references matched in any workflow -- the shared extraction rotted; fix scripts/check-action-pin-drift.mjs",
+      `${WORKFLOW_DIR}: no action references matched in any workflow -- the shared extraction rotted; fix scripts/lib/workflows.mjs`,
     );
     process.exit(1);
   }

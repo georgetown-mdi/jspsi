@@ -1,9 +1,9 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
+
+import { WORKFLOW_DIR, workflowDocument } from "./lib/workflows.mjs";
 
 // Drift guard for the two web/core path filters. The pull-request gate
 // (eb_build_and_test.yaml) globs each guarded root -- apps/web/**,
@@ -30,8 +30,8 @@ import { describe, expect, it } from "vitest";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-const PR_WORKFLOW = ".github/workflows/eb_build_and_test.yaml";
-const DEPLOY_WORKFLOW = ".github/workflows/eb_deploy.yaml";
+const PR_WORKFLOW = `${WORKFLOW_DIR}/eb_build_and_test.yaml`;
+const DEPLOY_WORKFLOW = `${WORKFLOW_DIR}/eb_deploy.yaml`;
 
 // Roots whose tracked top-level subdirectories must each be deploy-covered or
 // explicitly excluded below.
@@ -65,12 +65,9 @@ const REQUIRED_DEPLOY_INPUTS = [
   ".github/actions/setup/**", // composite action: npm ci + core build -> bundle
 ];
 
-// The on.<event>.paths list of a workflow. yaml 2.x uses the YAML 1.2 core
-// schema, so the `on` key is a plain string (not folded to the boolean true the
-// way a YAML 1.1 parser would), and parsed.on.<event>.paths reads straight off.
+// The on.<event>.paths list of a workflow.
 function workflowPaths(file, event) {
-  const parsed = parse(readFileSync(resolve(repoRoot, file), "utf8"));
-  const paths = parsed?.on?.[event]?.paths;
+  const paths = workflowDocument(repoRoot, file)?.on?.[event]?.paths;
   if (!Array.isArray(paths)) {
     throw new Error(`no on.${event}.paths array in ${file}`);
   }

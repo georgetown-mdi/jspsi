@@ -50,14 +50,16 @@
 //     requirement is GitHub's resolution to make rather than one to infer here.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { parse } from "yaml";
-
-const WORKFLOW_DIR = ".github/workflows";
-const WORKFLOW_FILE = /\.ya?ml$/;
+import {
+  WORKFLOW_DIR,
+  parseWorkflow,
+  readWorkflows,
+  workflowSource,
+} from "./lib/workflows.mjs";
 
 /** The branches whose rulesets carry the merge gate. */
 export const PROTECTED_BRANCHES = ["main", "staging"];
@@ -86,14 +88,14 @@ export const GITHUB_ACTIONS_APP_ID = 15368;
 const API_ROOT = "https://api.github.com";
 
 /**
- * The check-run name of every job a workflow source declares, with whether the
+ * The check-run name of every job a parsed workflow declares, with whether the
  * name is one a required context can literally match. A job with no `name:`
  * runs under its job id, so the id stands in -- unless the job carries a
  * matrix, whose nameless check runs render as "<id> (<matrix values>)" and
  * never the bare id.
  */
-export function jobCheckNames(source) {
-  const jobs = parse(source)?.jobs;
+export function jobCheckNames(workflow) {
+  const jobs = workflow?.jobs;
   if (jobs === null || typeof jobs !== "object") return [];
   return Object.entries(jobs).map(([id, job]) => {
     const named = typeof job?.name === "string";
@@ -101,15 +103,6 @@ export function jobCheckNames(source) {
     const namelessMatrix = !named && job?.strategy?.matrix !== undefined;
     return { name, templated: name.includes("${{") || namelessMatrix };
   });
-}
-
-function workflowFiles(root) {
-  const absolute = resolve(root, WORKFLOW_DIR);
-  if (!existsSync(absolute)) return [];
-  return readdirSync(absolute)
-    .filter((name) => WORKFLOW_FILE.test(name))
-    .sort()
-    .map((name) => `${WORKFLOW_DIR}/${name}`);
 }
 
 /**
@@ -120,15 +113,10 @@ function workflowFiles(root) {
 export function workflowJobIndex(root) {
   const literal = new Set();
   const templated = [];
-  for (const file of workflowFiles(root)) {
-    const source = readFileSync(resolve(root, file), "utf8");
-    let names;
-    try {
-      names = jobCheckNames(source);
-    } catch (cause) {
-      throw new Error(`${file}: could not be parsed as YAML`, { cause });
-    }
-    for (const { name, templated: isTemplated } of names) {
+  for (const { path: file, source } of readWorkflows(root)) {
+    for (const { name, templated: isTemplated } of jobCheckNames(
+      parseWorkflow(file, source),
+    )) {
       if (isTemplated) templated.push({ file, name });
       else literal.add(name);
     }
@@ -293,13 +281,11 @@ export function contextViolations(merged, index) {
 }
 
 /**
- * A workflow source's `on.pull_request` trigger: whether it is declared at all,
- * and which path-filter keys it carries. The `yaml` package parses with the YAML
- * 1.2 core schema, so the `on` key stays the string `on` rather than folding to
- * the boolean a YAML 1.1 parser would produce.
+ * A parsed workflow's `on.pull_request` trigger: whether it is declared at all,
+ * and which path-filter keys it carries.
  */
-export function pullRequestTrigger(source) {
-  const on = parse(source)?.on;
+export function pullRequestTrigger(workflow) {
+  const on = workflow?.on;
   // The `on: pull_request` scalar and `on: [push, pull_request]` array
   // shorthands declare the trigger with no filter surface at all.
   if (on === "pull_request") return { declared: true, filters: [] };
@@ -332,7 +318,7 @@ export function pathFilterViolations(root, files = GATING_WORKFLOWS) {
       continue;
     }
     const { declared, filters } = pullRequestTrigger(
-      readFileSync(absolute, "utf8"),
+      parseWorkflow(file, workflowSource(root, file)),
     );
     if (!declared) {
       violations.push(

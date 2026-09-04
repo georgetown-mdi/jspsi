@@ -20,9 +20,16 @@ import {
   readRequiredContexts,
   workflowJobIndex,
 } from "./check-merge-gate-identities.mjs";
+import { parseWorkflow } from "./lib/workflows.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
+
+// Both rules read a parsed workflow; each case states the source it stands for.
+const jobNames = (source) =>
+  jobCheckNames(parseWorkflow("fixture.yaml", source));
+const trigger = (source) =>
+  pullRequestTrigger(parseWorkflow("fixture.yaml", source));
 
 const gatingWorkflow = (name) => `name: Gate
 on:
@@ -68,7 +75,7 @@ const withTempRoot = (body) => {
 describe("job check names", () => {
   it("reads a job's name and falls back to the job id", () => {
     expect(
-      jobCheckNames(`jobs:
+      jobNames(`jobs:
   static-checks:
     name: Typecheck, Lint, Format
   build-and-test:
@@ -82,7 +89,7 @@ describe("job check names", () => {
 
   it("marks a name carrying an expression as templated", () => {
     expect(
-      jobCheckNames(`jobs:
+      jobNames(`jobs:
   probe:
     name: Probe \${{ matrix.leg }} (\${{ matrix.tag }})
 `),
@@ -92,12 +99,12 @@ describe("job check names", () => {
   });
 
   it("reads no jobs from a source declaring none", () => {
-    expect(jobCheckNames("on:\n  pull_request:\n")).toEqual([]);
+    expect(jobNames("on:\n  pull_request:\n")).toEqual([]);
   });
 
   it("marks a nameless matrix job unmatchable rather than exposing its id", () => {
     expect(
-      jobCheckNames(`jobs:
+      jobNames(`jobs:
   build:
     runs-on: ubuntu-latest
     strategy:
@@ -279,34 +286,35 @@ describe("rule 1: a required context names a job", () => {
 
 describe("rule 2: a gating workflow filters nothing", () => {
   it("reads the pull_request trigger's shape", () => {
-    expect(pullRequestTrigger("on:\n  push:\n    branches: [main]\n")).toEqual({
+    expect(trigger("on:\n  push:\n    branches: [main]\n")).toEqual({
       declared: false,
       filters: [],
     });
-    expect(pullRequestTrigger("on:\n  pull_request:\n")).toEqual({
+    expect(trigger("on:\n  pull_request:\n")).toEqual({
+      declared: true,
+      filters: [],
+    });
+    expect(trigger("on:\n  pull_request:\n    branches: [main]\n")).toEqual({
       declared: true,
       filters: [],
     });
     expect(
-      pullRequestTrigger("on:\n  pull_request:\n    branches: [main]\n"),
-    ).toEqual({ declared: true, filters: [] });
-    expect(
-      pullRequestTrigger(
+      trigger(
         "on:\n  pull_request:\n    paths: ['apps/**']\n    paths-ignore: ['docs/**']\n",
       ),
     ).toEqual({ declared: true, filters: ["paths", "paths-ignore"] });
   });
 
   it("reads the scalar and array trigger shorthands as declared, no filters", () => {
-    expect(pullRequestTrigger("on: pull_request\n")).toEqual({
+    expect(trigger("on: pull_request\n")).toEqual({
       declared: true,
       filters: [],
     });
-    expect(pullRequestTrigger("on: [push, pull_request]\n")).toEqual({
+    expect(trigger("on: [push, pull_request]\n")).toEqual({
       declared: true,
       filters: [],
     });
-    expect(pullRequestTrigger("on: [push]\n")).toEqual({
+    expect(trigger("on: [push]\n")).toEqual({
       declared: false,
       filters: [],
     });

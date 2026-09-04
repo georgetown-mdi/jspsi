@@ -40,71 +40,10 @@
 //   - Rule A binds only actions appearing in both trees. Two workflows may pin an
 //     action no composite uses at differing refs without failing anything here.
 
-import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { parse } from "yaml";
-
-const WORKFLOW_DIR = ".github/workflows";
-const ACTION_DIR = ".github/actions";
-
-const WORKFLOW_FILE = /\.ya?ml$/;
-const ACTION_FILE = /^action\.ya?ml$/;
-
-/**
- * Every `uses:` string a YAML source carries, in document order. The walk is
- * structural rather than an enumeration of the shapes GitHub accepts, so a step's
- * `uses:`, a job-level reusable-workflow `uses:`, and a composite's
- * `runs.steps[].uses` are all collected without naming any of them.
- */
-export function usesValues(source) {
-  const found = [];
-  const walk = (node) => {
-    if (Array.isArray(node)) {
-      node.forEach(walk);
-      return;
-    }
-    if (node === null || typeof node !== "object") return;
-    for (const [key, value] of Object.entries(node)) {
-      if (key === "uses" && typeof value === "string") found.push(value);
-      walk(value);
-    }
-  };
-  walk(parse(source));
-  return found;
-}
-
-/**
- * Split a `uses:` reference into `{name, ref}`, or null when it names no remote
- * action at all: a `./` local reference or a `docker://` image. A remote
- * reference carrying no usable ref -- no `@`, a trailing `@`, or a leading `@` --
- * gets a null `ref` and its `name` is the reference as written, so rule C can
- * report it against the two legitimate skips.
- */
-export function parseActionReference(uses) {
-  const reference = uses.trim();
-  if (reference.startsWith("./") || reference.startsWith("docker://")) {
-    return null;
-  }
-  const at = reference.lastIndexOf("@");
-  if (at <= 0 || at === reference.length - 1) {
-    return { name: reference, ref: null };
-  }
-  return { name: reference.slice(0, at), ref: reference.slice(at + 1) };
-}
-
-/**
- * The remote action references one YAML source carries, as `{file, name, ref}`
- * triples. A null `ref` is a reference naming no version; local and docker
- * references do not appear at all.
- */
-export function fileReferences(file, source) {
-  return usesValues(source).flatMap((uses) => {
-    const reference = parseActionReference(uses);
-    return reference === null ? [] : [{ file, ...reference }];
-  });
-}
+import { ACTION_DIR, WORKFLOW_DIR, treeReferences } from "./lib/workflows.mjs";
 
 const isPinned = ({ ref }) => ref !== null;
 
@@ -164,52 +103,6 @@ export function pinViolations(workflowReferences, actionReferences) {
   return violations;
 }
 
-function yamlFiles(root, dir, matches) {
-  const files = [];
-  const walk = (relative) => {
-    const absolute = resolve(root, relative);
-    if (!existsSync(absolute)) return;
-    const entries = readdirSync(absolute, { withFileTypes: true }).sort(
-      (a, b) => a.name.localeCompare(b.name),
-    );
-    for (const entry of entries) {
-      const path = `${relative}/${entry.name}`;
-      if (entry.isDirectory()) walk(path);
-      else if (matches(entry.name)) files.push(path);
-    }
-  };
-  walk(dir);
-  return files;
-}
-
-function readReferences(root, dir, matches) {
-  return yamlFiles(root, dir, matches).flatMap((file) => {
-    const source = readFileSync(resolve(root, file), "utf8");
-    try {
-      return fileReferences(file, source);
-    } catch (cause) {
-      throw new Error(`${file}: could not be parsed as YAML`, { cause });
-    }
-  });
-}
-
-/**
- * The remote action references both guarded trees carry under `root`, with
- * repo-relative file paths. Workflows are every `.yml`/`.yaml`; composites are
- * every `action.yml`/`action.yaml`, the only two names GitHub loads an action
- * definition from.
- */
-export function treeReferences(root) {
-  return {
-    workflowReferences: readReferences(root, WORKFLOW_DIR, (name) =>
-      WORKFLOW_FILE.test(name),
-    ),
-    actionReferences: readReferences(root, ACTION_DIR, (name) =>
-      ACTION_FILE.test(name),
-    ),
-  };
-}
-
 // CLI entry: only runs when invoked directly, so the test can import the pure
 // functions without the process.exit.
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -217,7 +110,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const { workflowReferences, actionReferences } = treeReferences(root);
   if (workflowReferences.length === 0) {
     console.error(
-      `${WORKFLOW_DIR}: no action references matched in any workflow -- the extraction rotted; fix scripts/check-action-pin-drift.mjs`,
+      `${WORKFLOW_DIR}: no action references matched in any workflow -- the extraction rotted; fix scripts/lib/workflows.mjs`,
     );
     process.exit(1);
   }
