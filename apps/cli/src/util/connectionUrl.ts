@@ -17,17 +17,14 @@ export function redactUrlCredentials(url: URL): string {
 }
 
 /**
- * Decode a percent-encoded URL component (host, path, username, or password) to
- * the literal value the SFTP layer expects. The WHATWG `URL` parser keeps these
- * components percent-encoded -- including an `sftp://` host, which is parsed as
- * an opaque host whose non-ASCII (e.g. an internationalized domain) becomes
- * UTF-8 escapes -- but ssh2/ssh2-sftp-client consume them verbatim, so every
- * URL-to-config builder must decode before storing -- otherwise a path
- * `/my%20drop` opens a directory literally named `my%20drop` and a password
- * `p%20w` is sent to SSH as the literal string `p%20w`. A malformed escape (e.g.
- * a lone `%`) makes `decodeURIComponent` throw a `URIError`; surface it as a
- * `UsageError`, routed through `redactUrlCredentials` since the offending
- * component may be the password and must not be echoed.
+ * Decode a percent-encoded URL component (host, path, username, or password)
+ * to the literal value the SFTP layer expects: the WHATWG `URL` parser keeps
+ * these percent-encoded (an `sftp://` host's non-ASCII becomes UTF-8 escapes)
+ * but ssh2/ssh2-sftp-client consume them verbatim, so every URL-to-config
+ * builder must decode before storing. A malformed escape (e.g. a lone `%`)
+ * throws `URIError`; report it as a `UsageError`, routed through
+ * `redactUrlCredentials` since the offending component may be the password.
+ * Operator-facing behavior: docs/CLI.md#configuration.
  *
  * @internal exported for testing
  */

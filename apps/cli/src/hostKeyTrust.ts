@@ -47,25 +47,17 @@ export interface HostKeyTrustDeps {
 }
 
 /**
- * Compose a host-key refusal as a cause chain rather than one string: `summary`
- * becomes the error's own message and each `details` entry a `cause` link of its
- * own, in order.
- *
- * The split is what the display boundary forces. `sanitizeErrorForDisplay` caps
- * EVERY link at `COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH` independently, so a link
- * that mixes first-party text with a fragment somebody else chose lets that
- * chooser spend the whole budget and delete the step the operator has to act on.
- * Partitioning by WHO CHOSE THE BYTES -- first-party copy on its own links, then
- * one labelled link per chooser -- bounds the cap to a chooser's own bytes. It
- * does not remove the cap: fixed copy that outgrows a budget truncates just the
- * same, so what each link measures at the rendered boundary is pinned by test.
+ * Compose a host-key refusal as a cause chain rather than one string:
+ * `summary` becomes the error's own message and each `details` entry a
+ * `cause` link of its own, in order -- first-party copy on its own link(s),
+ * then one labelled link per chooser of the rest -- so the display cap
+ * (`sanitizeErrorForDisplay`) bounds each chooser to its own budget. See
+ * docs/spec/CHANNEL_SECURITY.md#display-sanitization-escape-format.
  *
  * Each link installs its `cause` with `Object.defineProperty` rather than the
- * two-argument `Error` constructor -- this app's emit target predates
- * `ErrorOptions`, so the direct form typechecks against the test config's newer
- * lib and then fails the build -- using the descriptor that constructor would
- * have set, so a link matches the `UsageError` above it for any sink that
- * enumerates or serializes a thrown error rather than rendering it.
+ * two-argument `Error` constructor: this app's emit target predates
+ * `ErrorOptions`, so the constructor form typechecks against the test
+ * config's newer lib and then fails the build.
  */
 const hostKeyRefusal = (summary: string, details: string[]): UsageError =>
   new UsageError(summary, {
@@ -97,41 +89,26 @@ const REAL_DEPS: HostKeyTrustDeps = {
 };
 
 /**
- * Establish first-use SSH host-key trust for an sftp connection that has no
+ * Establish first-use SSH host-key trust for an sftp connection with no
  * `host_key_fingerprint` pinned, the moment before it is opened. Modeled on
- * ssh's trust-on-first-use: the first interactive connect surfaces the server's
- * presented fingerprint, asks the operator to confirm, and pins it; every later
- * run then enforces the pin silently. A changed key is never handled here -- a
- * pinned mismatch fails closed in core and is re-pinned only by a deliberate
- * config edit, exactly as ssh refuses a changed key until `known_hosts` is
- * edited. Shared by every interactive connect path (`exchange`, the online
- * `invite`/`accept`, and `zero-setup`); the persistence mode differs per command.
+ * ssh's trust-on-first-use; shared by every interactive connect path
+ * (`exchange`, the online `invite`/`accept`, and `zero-setup`), persistence
+ * differing per command. Full behavior:
+ * docs/spec/CHANNEL_SECURITY.md#sftp-host-key-verification ("First-use trust
+ * (ssh-style)").
  *
- * Behavior:
- * - Not sftp, or a pin is already set (pinned out-of-band -- a saved
- *   `host_key_fingerprint`, or `--server-host-key-fingerprint` -- or by a prior
- *   first-use run): a no-op -- the caller proceeds and a pinned connection
- *   enforces in core. This is what lets a supervised, TTY-less run complete
- *   without the interactive prompt: pre-pinning skips the QUESTION, never the
- *   CHECK, since the real connect that follows still verifies the pin against
- *   the server's actual presented key and fails closed on a mismatch.
- * - Non-interactive (stdin is not a TTY -- an automated run, or one piping its
- *   CSV through stdin): fails closed with an actionable {@link UsageError}; it
- *   never hangs on a prompt and never auto-accepts. The error names the recovery.
- * - Interactive (stdin is a TTY): probes the server for its host key WITHOUT
- *   presenting any credential (see {@link FileSyncConnection.probeHostKeyFingerprint}),
- *   shows the fingerprint and key type, and prompts. On confirmation it pins the
- *   fingerprint into the connection (so the immediately-following real open()
- *   enforces it) and persists it per {@link HostKeyPersistence}. On decline it
- *   aborts.
+ * Not sftp, or a pin already set, is a no-op: the caller proceeds and the
+ * real connect that follows still verifies the pin and fails closed on a
+ * mismatch. A changed key is never handled here -- it fails closed in core
+ * and is re-pinned only by a deliberate config edit.
  *
  * Mutates `connection.server.hostKeyFingerprint` in place on success so the
- * caller's subsequent open() verifies the just-confirmed key -- which also
- * catches a key swapped between this probe and that connect. Callers that clone
- * the connection for live use (via `resolveConnectionCredentials`, or
- * `applyConnectionCredentials` where the credential files are read ahead of this
- * step) must invoke this on the ORIGINAL before cloning, so the mutation reaches
- * both the live connect and the persisted config.
+ * caller's subsequent open() verifies the just-confirmed key, which also
+ * catches a key swapped between this probe and that connect. A caller that
+ * clones the connection for live use (`resolveConnectionCredentials` or
+ * `applyConnectionCredentials`) must invoke this on the ORIGINAL before
+ * cloning, so the mutation reaches both the live connect and the persisted
+ * config.
  *
  * @param deps injectable probe/confirm; defaults to the real implementations
  *   (a throwaway probe connection and the stderr y/N prompt). `@internal`.
@@ -158,11 +135,11 @@ export async function establishHostKeyTrust(
   const hostDisplay = redactAndSanitizeForDisplay(host);
   // On an offline-accept-seeded config the host is the PARTNER's, copied
   // verbatim out of the invitation endpoint (connectionFromEndpoint), and
-  // SFTPServerSchema bounds it neither in length nor in format; the config path
-  // is the operator's own, and unbounded too. Each therefore rides a labelled
-  // link of its own in the refusals below rather than sharing one with the text
-  // the operator has to act on, and each is passed through the private-key
-  // redaction where it is interpolated (docs/spec/CHANNEL_SECURITY.md).
+  // unbounded by SFTPServerSchema in length or format; the config path is the
+  // operator's own, and unbounded too. Each rides a labelled link of its own
+  // in the refusals below, passed through the private-key redaction where it
+  // is interpolated -- see
+  // docs/spec/CHANNEL_SECURITY.md#display-sanitization-escape-format.
   const hostDetail = `configured host: ${redactPrivateKeyMaterial(host)}`;
   // The config the operator would pin into / where the pin will be saved; absent
   // for an ephemeral (one-off, no --save) run, which the messages adapt to.
@@ -243,7 +220,7 @@ export async function establishHostKeyTrust(
       );
       break;
     case "save-with-config":
-      // The command writes the connection (now carrying the pin) to its config
+      // The command writes the connection (now holding the pin) to its config
       // after the handshake; no separate write here.
       log.info(
         `trusted ${hostDisplay}'s host key (${presented.fingerprint}); it ` +
