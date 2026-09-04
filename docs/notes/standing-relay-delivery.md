@@ -52,17 +52,17 @@ ratified by the owner.
   rather than floating onto another publisher. The pinning convention itself is
   the repository's existing one; see
   [CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md).
-- **podman with a Quadlet unit, systemd as the only supervisor.** Daemonless, and
-  it puts the relay under the same supervisor as its certificate timer and its
-  verification timer. Because the flags are identical either way, the partner
-  README documents the equivalent `docker run` line as a first-class alternative
-  rather than a footnote: a host that already runs docker needs no different
+- **A container under systemd, which is the only supervisor.** That puts the
+  relay under the same supervisor as its certificate timer and its verification
+  timer. The runtime beneath it is whichever one the host carries: daemonless
+  podman with a Quadlet unit where podman exists, docker otherwise. The AL2023
+  AMI this reference prescribes publishes no podman package and carries no EPEL
+  while taking docker from `dnf`, so `install.sh` detects the runtime and
+  installs the matching unit; both are tracked
+  (`infra/relay/psilink-relay.container` and
+  `infra/relay/psilink-relay-docker.service`). The container flags are identical
+  either way, so a host that already runs docker needs no different
   configuration.
-  _Addendum, 2026-09-03: the first install attempt measured the AL2023 AMI this
-  reference prescribes carrying no podman package and no EPEL, and docker from
-  `dnf`. `install.sh` detects the runtime and keeps this unit where podman
-  exists; the docker half is a tracked unit paired with it,
-  `infra/relay/psilink-relay-docker.service`, rather than the README line._
 - **Host networking**, which is a requirement of the protocol rather than a
   preference: TURN hands out a relayed transport address that bridge networking
   or published ports would rewrite.

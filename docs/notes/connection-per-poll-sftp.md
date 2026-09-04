@@ -642,8 +642,9 @@ were then adversarially verified against the tree as it stood.
   the normative session-lifetime detail is specified there.
 - [CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md) -- the authenticated abort
   marker and the transport liveness/memory bounds this mode reconnects around.
-- [COMMUNICATION.md](../spec/COMMUNICATION.md) -- the connection-lifecycle contract
-  and the clean-close versus local-close classification.
+- [COMMUNICATION.md](../COMMUNICATION.md) -- the connection-lifecycle contract.
+- [connection-error-kind-taxonomy.md](connection-error-kind-taxonomy.md) -- the
+  clean-close versus local-close classification.
 - [EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md) -- the operator-facing
   configuration reference where the mode and the corrected reconnect behavior are
   surfaced.

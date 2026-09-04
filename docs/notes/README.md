@@ -14,6 +14,7 @@ from a direction still open to a decision taken and built.
 | [bound-transformed-value.md](bound-transformed-value.md) | Decided and built, by a 3-panelist design panel. |
 | [cascade-fan-out.md](cascade-fan-out.md) | Directed; a spec item precedes the realization. |
 | [cli-webrtc-stack.md](cli-webrtc-stack.md) | Decided and built. |
+| [connection-error-kind-taxonomy.md](connection-error-kind-taxonomy.md) | Decided and built; each classification records the condition that would reopen it. |
 | [connection-per-poll-sftp.md](connection-per-poll-sftp.md) | Shipped. |
 | [console-announce-and-focus.md](console-announce-and-focus.md) | Decided and built, by a 3-panelist design panel deciding 2-1. |
 | [core-dist-cache-buildinfo.md](core-dist-cache-buildinfo.md) | Decided and built. |
