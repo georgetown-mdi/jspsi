@@ -621,8 +621,9 @@ describe("runPipeline — parse_date", () => {
 
 describe("dateFormatComponents", () => {
   test("an input YY collapses to the canonical year component", () => {
-    // The input factory resolves either year token to a four-digit year, so a
-    // YY-carrying input reports the year exactly as a YYYY-carrying one does.
+    // The input factory resolves either year token to a four-digit year, so an
+    // input with a YY token reports the year exactly as one with a YYYY token
+    // does.
     expect([...dateFormatComponents("MM/DD/YY", "input")].sort()).toEqual([
       "DD",
       "MM",
@@ -637,7 +638,7 @@ describe("dateFormatComponents", () => {
 
   test("an output YY carries no year (it is an unsubstituted literal)", () => {
     // The factory substitutes only YYYY/MM/DD into the output; a YY in the output
-    // emits literally, so it carries no year component and the year has collapsed.
+    // emits literally, so it has no year component and the year has collapsed.
     expect([...dateFormatComponents("MM/DD/YY", "output")].sort()).toEqual([
       "DD",
       "MM",
@@ -818,7 +819,7 @@ describe("runPipeline — null-producing functions", () => {
     // PARTNER-authored element transform (pinned under buildKeyStrings below).
     // This pipeline is the operator's own local configuration over the
     // operator's own data, so nothing partner-influenced sizes it and the
-    // ceiling deliberately does not reach it. A strict lower bound, so a
+    // ceiling does not reach it. A strict lower bound, so a
     // regex-engine or Unicode-data change cannot satisfy it by drifting a count.
     const cell = "1234567890";
     const trailingContext = "$'".repeat(MAX_TRANSFORM_PARAM_LENGTH / 2);
@@ -956,9 +957,10 @@ describe("coalesceSubstitutesConstant", () => {
     // substitute, so hold it to the real functions rather than to a reading of
     // them: each is driven alone over the value corpus, and a function classified
     // value-preserving that returns null for any of them fails here. One
-    // direction is exact -- a witness proves a function can empty a value -- and
-    // the other is corpus-bounded: it is a backstop against a misclassification,
-    // not a proof that no input anywhere empties a preserved function's value.
+    // direction is exact -- a witness proves a function can empty a value
+    // -- and the other is corpus-bounded: it is a safety check against a
+    // misclassification, not a proof that no input anywhere empties a preserved
+    // function's value.
     for (const fn of STANDARDIZATION_FUNCTION_NAMES) {
       const step = stepFor(fn);
       const emptiesSomeValue = VALUES.some(
@@ -1028,11 +1030,11 @@ describe("coalesceSubstitutesConstant", () => {
   });
 
   test("the real builder substitutes for no absent or blank field (differential)", () => {
-    // The position half's premise, held to the key builder rather than asserted:
-    // a record whose field is missing or blank never reaches the coalesce, so its
-    // declared fallback appears in no key string. buildKeyStrings drops the row
-    // for the key when the field realizes no value, and an element pipeline runs
-    // on the value the field DID realize.
+    // The position half's assumption, held to the key builder rather than
+    // asserted: a record whose field is missing or blank never reaches the
+    // coalesce, so its declared fallback appears in no key string.
+    // buildKeyStrings drops the row for the key when the field realizes no
+    // value, and an element pipeline runs on the value the field DID realize.
     const terms: LinkageTerms = {
       version: "1.0.0",
       identity: "Party",
@@ -1059,7 +1061,7 @@ describe("coalesceSubstitutesConstant", () => {
     const keyStrings = rows.flatMap((_, index) => [
       ...(buildKeyStrings(terms.linkageKeys[0], dataset, index) ?? []),
     ]);
-    // Not vacuous: the record that carries a value does key, unsubstituted.
+    // Not vacuous: the record that holds a value does key, unsubstituted.
     expect(keyStrings.length).toBeGreaterThan(0);
     expect(keyStrings.some((key) => key.includes(FALLBACK))).toBe(false);
   });
@@ -1090,9 +1092,9 @@ describe("substringCollapsesParsedDateToConstant", () => {
   // reading even one character the DATE supplied renders differently for them,
   // and one reading only the format's own characters renders identically. That
   // makes "every output is the same non-null value" exactly the property the
-  // predicate claims. The corpus is deliberately WIDER than the probe set the
-  // predicate measures over, so a probe set too narrow to discriminate is a
-  // failure here rather than an agreement with itself.
+  // predicate claims. The corpus is WIDER than the probe set the predicate
+  // measures over, so a probe set too narrow to discriminate is a failure
+  // here rather than an agreement with itself.
   const DATES = [
     "01/02/1971",
     "12/31/2068",
@@ -1151,7 +1153,7 @@ describe("substringCollapsesParsedDateToConstant", () => {
       // The plain default layout, which has no literal to land in.
       "YYYYMMDD",
       // Reordered and repeated tokens: the factory substitutes EVERY occurrence,
-      // so the layout carries five component spans around four literals.
+      // so the layout contains five component spans around four literals.
       "MM-MM-YYYY-DD-DD",
       // Tokens the greedy scan must not mis-split: a fifth Y is literal after
       // YYYY, a third M is literal after MM, and a bare YY in an OUTPUT format is
@@ -1200,8 +1202,8 @@ describe("substringCollapsesParsedDateToConstant", () => {
           `${outputFormat} [${start}, ${length}] -> ${JSON.stringify(value)}`,
         ).toBe(value !== undefined);
       }
-    // Not vacuous, and not carried by the tokenless format alone: a layout that
-    // does render the date still has windows that read none of it.
+    // Not vacuous, and not explained by the tokenless format alone: a layout
+    // that does render the date still has windows that read none of it.
     expect(
       new Set(collapsed.filter((format) => format !== "registered")).size,
     ).toBeGreaterThan(1);
@@ -1271,7 +1273,7 @@ describe("substringCollapsesParsedDateToConstant", () => {
   test("a parse_date that yields no value at all collapses nothing", () => {
     // An input format that core cannot assemble a date from drops every record, so
     // there is no rendered layout to slice -- a narrowing the dead-key advisory
-    // surfaces, not a collapse. Held to the runtime as well as to the predicate.
+    // reports, not a collapse. Held to the runtime as well as to the predicate.
     const firstFour = slice(1, 4);
     for (const inputFormat of ["MM/DD", 7] as unknown[]) {
       const steps = [parseDate("ACME-YYYYMMDD", inputFormat), firstFour];
@@ -1610,7 +1612,7 @@ describe("substringCollapsesParsedDateToConstant", () => {
   test("a value-dependent step that drops every probe takes the wider word", () => {
     // A drop BETWEEN the parse_date and the run empties the value before the
     // window reads it, and whether a real record is emptied there is the data's
-    // to decide -- the probes settle nothing. The consent direction on an
+    // to decide -- the probes determine nothing. The consent direction on an
     // undecided measurement is the wider breadth word, so the verdict stands
     // rather than falling back to the milder truncation the last link looks like.
     // Held against the runtime, which drops every date here: the over-claim is
@@ -1829,7 +1831,7 @@ describe("substringCollapsesParsedDateToConstant", () => {
     // The consent marker must resolve that up to the collapse word rather than to
     // the reassuring "pattern replacement" the step would otherwise name, since an
     // inviter could inflate one probe while every real date still collapses onto
-    // one constant. 5000 fill characters carry the rendered probe well over the
+    // one constant. 5000 fill characters push the rendered probe well over the
     // 4096-character ceiling.
     const inflated = [
       parseDate("ACME-YYYYMMDD"),
@@ -1950,14 +1952,14 @@ describe("pipelineAlwaysDrops rescue equivalence", () => {
   // and through a rescue testing the declared default alone, and any pipeline
   // whose verdicts differ is reported.
   //
-  // Two changes make it red, both wanting a fresh look at the rescue. A THIRD
-  // source of `dropped` -- a value-independent drop the two below do not carry --
-  // would reach the rescue from a position the weaker rescue does not model. And
-  // allowlisting a function that sets `dropped` withholds the position half from
-  // a coalesce that would otherwise rescue, turning a live pipeline into a dead
-  // one on the consent surface. Allowlisting a function that never sets
-  // `dropped` leaves this sweep green; that misclassification is the
-  // value-emptying classification test's to catch.
+  // A third source of `dropped` -- a value-independent drop the two below do
+  // not have -- would reach the rescue from a position the weaker rescue does
+  // not model. Allowlisting a function that sets `dropped` withholds the
+  // position half from a coalesce that would otherwise rescue, turning a live
+  // pipeline into a dead one on the consent surface; this sweep catches both.
+  // It does not catch a function that never sets `dropped` being allowlisted
+  // anyway -- that misclassification is the value-emptying classification
+  // test's to catch.
   const FALLBACK_DEFAULT = "ZZZ_FALLBACK";
 
   // The rescue with no position half: the declared default's shape alone. The
@@ -2032,7 +2034,7 @@ describe("pipelineAlwaysDrops rescue equivalence", () => {
       if (drops !== dropsUnderDefaultShapeRescue(pipeline))
         divergent.push(JSON.stringify(pipeline));
     });
-    // Two assertions so a failure carries witnesses as well as its scale: the
+    // Two assertions so a failure includes witnesses as well as its scale: the
     // whole divergent list is elided in the diff once it runs to thousands.
     expect(divergent.slice(0, 3)).toEqual([]);
     expect(divergent).toHaveLength(0);
@@ -2076,7 +2078,7 @@ test("an unknown function name is refused as a typed usage error", () => {
   // compiled, so a consumer classifying it -- the CLI's error->exit boundary maps
   // a UsageError to 64 -- must not see a bare Error and read it as the transport
   // having failed. Both surfaces the compiler serves are pinned, since the
-  // element-transform one carries partner-authored steps.
+  // element-transform one holds partner-authored steps.
   expect(() =>
     runPipeline("x", [{ function: "nonexistent_function" }]),
   ).toThrow(UnknownStandardizationFunctionError);
@@ -2303,7 +2305,7 @@ describe("NFC-safe mid-pipeline comparisons (null_if / filter_regex / extract_re
 
   test("sanity: the case-folded value is non-NFC and differs from its NFC form", () => {
     // Guards the constants below and documents the bug precondition: the value
-    // reaching the comparison step is genuinely non-NFC.
+    // reaching the comparison step is non-NFC.
     expect(GREEK_INPUT.toUpperCase()).toBe(UPPER_NONNFC);
     expect(UPPER_NONNFC.normalize("NFC")).toBe(UPPER_NFC);
     expect(UPPER_NONNFC).not.toBe(UPPER_NFC);
@@ -2473,11 +2475,12 @@ describe("buildKeyStrings: NFC normalization of the assembled key", () => {
 
 describe("buildKeyStrings: element-transform compilation reused across rows", () => {
   // Restore the compileLinearRegex spy after every test, even one that throws
-  // mid-body: a per-test `spy.mockRestore()` is skipped when an assertion throws,
-  // and a vi.spyOn on the still-installed spy returns the same object carrying the
-  // failed test's stale call count -- inflating the next test's count (a real
-  // regression would then cascade as 50/100/160 instead of clean independent
-  // failures). afterEach restores regardless, so each count stands alone.
+  // mid-body: a per-test `spy.mockRestore()` is skipped when an assertion
+  // throws, and a vi.spyOn on the still-installed spy returns the same object
+  // holding the failed test's stale call count -- inflating the next test's
+  // count (a real regression would then cascade as 50/100/160 instead of clean
+  // independent failures). afterEach restores regardless, so each count stands
+  // alone.
   afterEach(() => vi.restoreAllMocks());
 
   // The element transform compiles once and is memoized by the step array's
@@ -2508,9 +2511,10 @@ describe("buildKeyStrings: element-transform compilation reused across rows", ()
   });
 
   // The per-element compile-once is a security control, not just a perf win: a
-  // hostile-but-schema-valid terms set can carry more distinct patterns than the
-  // linear-time engine's own compile cache holds, so per-row recompilation would
-  // thrash that cache into an unbounded per-row CPU cost over a large dataset.
+  // hostile-but-schema-valid terms set can contain more distinct patterns than
+  // the linear-time engine's own compile cache holds, so per-row recompilation
+  // would thrash that cache into an unbounded per-row CPU cost over a large
+  // dataset.
   // "Compilation does not happen per row" is therefore a runtime invariant, and a
   // comment asserting it would rot silently; these spy on the compile entry point
   // so the invariant is a check instead. compileLinearRegex is the entry point
@@ -2630,8 +2634,8 @@ describe("buildKeyStrings: element-transform compilation reused across rows", ()
     // total compiles equal the number of DISTINCT element transforms, flat in the
     // row count -- by building several at once. The schema bounds that distinct
     // count (MAX_LINKAGE_ENTRIES * MAX_KEY_ELEMENTS), far below the rows a real
-    // dataset carries, which is why per-element rather than per-row compilation is
-    // the bound that matters. Mixes regex and parse_date transforms.
+    // dataset holds, which is why per-element rather than per-row compilation
+    // is the bound that matters. Mixes regex and parse_date transforms.
     const key = {
       name: "MULTI",
       elements: [
@@ -2687,12 +2691,11 @@ describe("buildKeyStrings: element-transform compilation reused across rows", ()
     // The other compile-count tests use single-step transforms, so they pin "one
     // transform array -> one compile" but not "every STEP of the array compiles
     // once". The WeakMap caches the whole compiled step array under the array's
-    // identity, so each regex-bearing step must compile once and be reused across
-    // rows. Without this case, a regression that re-ran compileSteps per row only
-    // for multi-step arrays (e.g. a `steps.length > 1` carve-out) would pass every
-    // single-step test while recompiling up to MAX_TRANSFORM_STEPS (256) patterns
-    // per row -- the same fail-open per-row compile cost the control bounds. The
-    // real bound is distinct-transforms * regex-steps-per-transform, flat in rows.
+    // identity, so each regex-bearing step must compile once and be reused
+    // across rows -- a `steps.length > 1` carve-out that recompiled per row
+    // would pass every single-step test while costing up to
+    // MAX_TRANSFORM_STEPS (256) recompiles per row. The real bound is
+    // distinct-transforms * regex-steps-per-transform, flat in rows.
     const key = {
       name: "MULTI_STEP",
       elements: [
@@ -2819,7 +2822,7 @@ describe("StandardizedField", () => {
   });
 
   test("present prototype-member input column standardizes its real value", () => {
-    // The shadowing guard must not swallow a real value: a row carrying a
+    // The shadowing guard must not swallow a real value: a row holding a
     // 'toString' column standardizes that value as any other column would.
     const field = new StandardizedField(
       "last_name",
@@ -3363,7 +3366,7 @@ describe("buildKeyStrings", () => {
     // Only the receiver swaps, so a pair's two transforms have to agree for the
     // swapped round to compare like with like: the terms schema binds them, and
     // this is the property that binding buys. Role resolution is re-derived per
-    // run from the parties' record counts rather than carried by the terms, so a
+    // run from the parties' record counts rather than held by the terms, so a
     // pair without it would move the match set between runs of one agreed
     // document.
     const swapKey = {
@@ -3375,7 +3378,7 @@ describe("buildKeyStrings", () => {
       swap: ["first_name", "last_name"] as [string, string],
     };
     // The reversed-entry record the swap exists to catch, the two parties also
-    // disagreeing on case -- which is what the transform is there to settle.
+    // disagreeing on case -- which is what the transform is there to decide.
     const partyA = makeDataset({ first_name: "John", last_name: "smith" });
     const partyB = makeDataset({ first_name: "smith", last_name: "john" });
     // The two roles concatenate the pair in opposite orders, so the key STRING a
@@ -3542,7 +3545,7 @@ describe("buildKeyStrings", () => {
   test("a row one candidate over the width bound sits the key round out", () => {
     // The bound's upper side: the record contributes NOTHING to this key rather
     // than a truncated candidate set, exactly as an absent value does, and the
-    // drop is warned. It is deliberately not a run refusal -- a partner-authored
+    // drop is warned. By design, it is not a run refusal -- a partner-authored
     // delimiter that shatters one local value must not end the exchange
     // (docs/spec/PROTOCOL.md, The width bound).
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
@@ -3592,7 +3595,7 @@ describe("buildKeyStrings", () => {
     // elements its key declares. Three edit-distance elements over
     // eight-character values would assemble 9 x 9 x 9 = 729 key strings once that
     // gate opens -- over the bound and under the cap -- so this fails there
-    // rather than leaving fuzzy's own width behavior to be settled unnoticed.
+    // rather than leaving fuzzy's own width behavior to be decided unnoticed.
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
     const dataset = makeDataset({
       last_name: "ABCDEFGH",
@@ -3614,7 +3617,7 @@ describe("buildKeyStrings", () => {
   // The drop is normative for the listed producers alone, so a Set-producing
   // function that never made it into FAN_OUT_FUNCTION_NAMES must not inherit it:
   // dropping such a row would run the exchange to completion matching fewer
-  // records than the terms describe, where carrying the candidate set through
+  // records than the terms describe, where passing the candidate set through
   // reaches the strategy refusal that covers exactly this omission
   // (fanOutReachedMatchingRefusal, pinned at the strategies in psiLink.test.ts).
 
@@ -3640,7 +3643,7 @@ describe("buildKeyStrings", () => {
   test("two candidates on a width-1 key raise no advisory", () => {
     // The advisory's threshold is the fan-out cap, not the key's declared width.
     // A row a producer outside the listed set widened to two candidates is over
-    // the width this key declares, so it is carried to the strategy that refuses
+    // the width this key declares, so it is passed to the strategy that refuses
     // it -- but two candidates is not the wide expansion the advisory speaks
     // about, and warning per row here would put one privacy line in front of the
     // operator for every row of the file.
@@ -3847,7 +3850,7 @@ describe("buildKeyStrings", () => {
   test("the trailing-context substitution is refused, not assembled", () => {
     // Quadratic in this party's own cell: `$'` re-inserts the match's trailing
     // context and `a*` matches between every character. The refusal lands on the
-    // step's output, before anything downstream carries it.
+    // step's output, before anything downstream propagates it.
     const dataset = makeDataset({
       last_name: "1".repeat(200),
       date_of_birth: "19750716",
@@ -3884,7 +3887,7 @@ describe("buildKeyStrings", () => {
   });
 
   test("an NFC-lengthening replacement is refused", () => {
-    // The shape carrying no substitution sequence at all: replaceRegexFactory
+    // The shape with no substitution sequence at all: replaceRegexFactory
     // NFC-normalizes the replacement before substituting it, and U+0344
     // normalizes to two code units, so a 1000-character param substitutes 2000.
     const combining = String.fromCodePoint(0x0344).repeat(
@@ -3910,7 +3913,7 @@ describe("buildKeyStrings", () => {
 
   test("a value at the ceiling builds; one character over is refused", () => {
     // The base case, checked before the no-steps early return: an element that
-    // declares no transform at all carries its whole value into the key string,
+    // declares no transform at all passes its whole value into the key string,
     // so the ceiling binds what it reads as well as what a step produces.
     const atCeiling = "A".repeat(4096);
     expect(
@@ -3931,7 +3934,7 @@ describe("buildKeyStrings", () => {
 
   test("the refusal locates element and step by issue path, echoing no value", () => {
     // The value is this party's own PII and the key's name is partner-authored
-    // free text, so the message carries neither: the issue path locates the
+    // free text, so the message holds neither: the issue path locates the
     // offender, the row index locates the record, and the step's function name
     // is narrowed to a literal this build recognizes.
     const cell = `${"S3CRET".repeat(700)}`;
@@ -3989,7 +3992,7 @@ describe("buildKeyStrings", () => {
 
   // --- the row's assembled key-string bytes ----------------------------------
   // The count cap bounds how MANY key strings a row assembles; this limb bounds
-  // what they carry, because every combination replicates each element's whole
+  // what they hold, because every combination replicates each element's whole
   // value. Both are measured on the projection, before the cross-product is
   // materialized, and a row takes the same fate from either.
 
@@ -4139,7 +4142,7 @@ describe("buildKeyStrings", () => {
   // reachable once every candidate exists, so on its own it bounds the assembled
   // key strings and not the set they are assembled from. The total is the ROW's
   // and counts what each element RETAINS, so it measures what the row holds
-  // live: what a duplicate collapses into is never carried into a key string,
+  // live: what a duplicate collapses into is never included in a key string,
   // and what earlier elements retained is still held when a later one runs.
 
   test("an amplifying step over a split cell settles as the candidates accumulate", () => {
@@ -4147,7 +4150,7 @@ describe("buildKeyStrings", () => {
     // single candidate the first amplification produces is over the per-value
     // ceiling, so nothing fires until the second runs element-wise over all 1000
     // of them -- and its outputs accumulate into one set the ceiling reads only
-    // once the last of them exists. The running total settles the row on the
+    // once the last of them exists. The running total decides the row on the
     // second of them instead. A declared producer is what expanded the values
     // the amplifier is running over, so the row is dropped for this key even
     // though the step charging the crossing is the amplifier.
@@ -4216,7 +4219,7 @@ describe("buildKeyStrings", () => {
   test("the accumulation outcome echoes no value and leaves the local pipeline alone", () => {
     const secretCell = "S3CRET0,S3CRET1,S3CRET2";
     // Built fresh per call: the compiled steps capture their fan-out membership,
-    // so a shared array would carry one compilation into the other listing.
+    // so a shared array would leak one compilation into the other listing.
     const amplifyingSteps = () => [
       { function: "split_on", params: { delimiter: "," } },
       {
@@ -4240,7 +4243,7 @@ describe("buildKeyStrings", () => {
     expect(warn.mock.calls[0][0]).toContain("row 0");
     expect(warn.mock.calls[0][0]).not.toContain("S3CRET");
 
-    // The same shape refused, which is the other fate this seam takes: the
+    // The same shape refused, which is the other fate this boundary takes: the
     // producer expanding the cell is unlisted, so the crossing ends the
     // exchange. That message names no value of the row either.
     let raised: UsageError | undefined;
@@ -4300,9 +4303,9 @@ describe("buildKeyStrings", () => {
 
   test("a transform collapsing many long values to a few candidates builds", () => {
     // The same collapse from the other direction: 2200 DISTINCT in-ceiling
-    // values, each carrying 2000 characters the row would have to hold if they
-    // survived, mapped by a digit-stripping step onto four candidates. The four
-    // are what the row assembles and what the total charges.
+    // values, each contributing 2000 characters the row would have to hold if
+    // they survived, mapped by a digit-stripping step onto four candidates. The
+    // four are what the row assembles and what the total charges.
     const stem = (letter: string) => `${letter}${"A".repeat(2000)}`;
     const built = buildKeyStrings(
       amplifyingKey([
@@ -4392,7 +4395,7 @@ describe("buildKeyStrings", () => {
     expect(accumulated).toBeGreaterThan(10 * 409_400);
   });
 
-  // --- the declared fan-out's fate at the accumulating seam ------------------
+  // --- the declared fan-out's fate at the accumulation boundary --------------
   // Dropping an over-bound row is normative for the DECLARED fan-out producers
   // (docs/spec/PROTOCOL.md, Fan-out matching), and the accumulating limb takes
   // that fate at both its charges for a key whose multiplicity only they can
@@ -4404,13 +4407,13 @@ describe("buildKeyStrings", () => {
   // characters and then split on a separator the amplifier itself wrote, keeping
   // the original -- which is what makes a split RETAIN more than it was handed.
   // Each candidate charges its own 1,939 characters plus the 969 of the part
-  // carrying its token, 2,908 in all, and the shared prefix and suffix parts
+  // holding its token, 2,908 in all, and the shared prefix and suffix parts
   // land once for 968 more: at 1,442 tokens the element accumulates exactly
   // MAX_ASSEMBLED_KEY_LENGTH_PER_ROW, and each further token is 2,908 past it.
   // The last step collapses every candidate onto one string, so a row that
-  // survives the seam assembles one key string rather than meeting the count cap
-  // -- which is what a row exactly at the cap has to do to be accepted, the cap
-  // being the count cap times the per-value ceiling.
+  // survives the boundary assembles one key string rather than meeting the
+  // count cap -- which is what a row exactly at the cap has to do to be
+  // accepted, the cap being the count cap times the per-value ceiling.
   const tokenCell = (tokens: number) =>
     Array.from({ length: tokens }, (_unused, i) =>
       String.fromCodePoint(0x4e00 + i),
@@ -4419,7 +4422,7 @@ describe("buildKeyStrings", () => {
   const collapsedCandidate = "x".repeat(MAX_TRANSFORM_PARAM_LENGTH);
 
   // Built fresh per call: the compiled steps capture their fan-out membership,
-  // so a shared array would carry one compilation into the other listing.
+  // so a shared array would leak one compilation into the other listing.
   const splitRetainingSteps = () => [
     { function: "split_on", params: { delimiter: "," } },
     {
@@ -4553,10 +4556,10 @@ describe("buildKeyStrings", () => {
 
   // The row's aggregate charge, which no one step is expanding: distinct
   // candidates at the per-value ceiling, 1024 of which are exactly
-  // MAX_ASSEMBLED_KEY_LENGTH_PER_ROW, so the 1025th carries the row 4,096
+  // MAX_ASSEMBLED_KEY_LENGTH_PER_ROW, so the 1025th pushes the row 4,096
   // characters past it. Splitting those candidates between the key's two
-  // elements or holding them all in the first is what moves the crossing across
-  // the seam the fate turns on.
+  // elements or holding them all in the first is what moves the crossing
+  // across the boundary the fate turns on.
   const ceilingCandidates = (count: number) =>
     Array.from(
       { length: count },
@@ -4613,7 +4616,7 @@ describe("buildKeyStrings", () => {
     // the multiplicity is still being built. What binds the drop is the
     // producer the key DECLARES rather than one the row has been observed to
     // run, so a crossing this early takes the identical fate -- which is the
-    // whole point of settling it before the elements run.
+    // whole point of deciding it before the elements run.
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
     const dataset = makeDataset({
       last_name: ceilingCandidates(1025),
@@ -4635,8 +4638,8 @@ describe("buildKeyStrings", () => {
   // fate at an accumulation crossing does not depend on which element the
   // crossing lands in, nor on the order the partner wrote the elements in.
   // Splitting the same candidates across the key's elements moves the crossing
-  // from the first element to the last and across the seam between the two
-  // charges; none of that reaches the fate.
+  // from the first element to the last and across the boundary between the
+  // two charges; none of that reaches the fate.
 
   const splitField = (name: string, values: string[]) =>
     new StandardizedField(
@@ -4724,7 +4727,7 @@ describe("buildKeyStrings", () => {
 
   // The same property with the crossing at the OTHER charge. The cases above
   // build their multiplicity on the fields, so every crossing lands on the row's
-  // aggregate in buildKeyStrings; an element carrying the expansion in its own
+  // aggregate in buildKeyStrings; an element holding the expansion in its own
   // transform crosses inside applyStep instead, while the row's aggregate stays
   // far below the cap.
   const inStepElement = (): LinkageKeyElement => ({
@@ -4785,12 +4788,12 @@ describe("buildKeyStrings", () => {
   });
 
   test("multiplicity no classified producer accounts for refuses", () => {
-    // The fail-closed backstop under the classification. A step that expands a
-    // value while unlisted cannot reach a key classified for the drop -- the
-    // classification would have refused for it -- so this pairing is what a
-    // Set-returning function left out of the multi-value classification would
-    // produce, and it settles on the refusal rather than dropping a row whose
-    // fan-out nothing declared.
+    // The fail-closed safety check under the classification. A step that
+    // expands a value while unlisted cannot reach a key classified for the drop
+    // -- the classification would have refused for it -- so this pairing is
+    // what a Set-returning function left out of the multi-value classification
+    // would produce, and it decides on the refusal rather than dropping a row
+    // whose fan-out nothing declared.
     expect(accumulationFateAtCharge("drop", true)).toBe("refuse");
     expect(accumulationFateAtCharge("drop", false)).toBe("drop");
     expect(accumulationFateAtCharge("refuse", true)).toBe("refuse");
@@ -4825,7 +4828,7 @@ describe("buildKeyStrings", () => {
       ],
       [key],
     );
-    // The premise: this row is excluded at the first element, so the second
+    // The assumption: this row is excluded at the first element, so the second
     // element's transform is one no row runs.
     expect(
       buildKeyStrings(
@@ -4863,17 +4866,17 @@ describe("buildKeyStrings", () => {
   });
 
   test("every function that can expand a value is classified as expanding", () => {
-    // The converse of the drift test above, and the direction that carries the
+    // The converse of the drift test above, and the direction that holds the
     // classification's guarantee: a function able to return several candidates
     // for one value, left out of the classification, leaves the keys it feeds
-    // classified as producing no multiplicity, and the runtime backstop catches
-    // that only where the expansion lands before the row's crossing.
+    // classified as producing no multiplicity, and the runtime safety check
+    // catches that only where the expansion lands before the row's crossing.
     //
     // One step per name core admits, with params that let the function do its
     // job, driven alone over values chosen so a function able to expand one
-    // value into several does so for at least one of them. Every name carries
-    // an entry, including the functions taking no params, so a function added
-    // to the registry is given probe params here rather than driven paramless
+    // value into several does so for at least one of them. Every name has an
+    // entry, including the functions taking no params, so a function added to
+    // the registry is given probe params here rather than driven paramless
     // past the witness below.
     const PROBE_PARAMS: Record<string, Record<string, unknown> | undefined> = {
       remove_non_ascii: undefined,
@@ -4936,7 +4939,7 @@ describe("buildKeyStrings", () => {
     // The no-producer arm of the accumulation classification is a fail-closed
     // default rather than a fate a row reaches (docs/spec/CHANNEL_SECURITY.md):
     // nothing expands a value there, so what holds such a key is the per-value
-    // ceiling on each element it carries, and the most one row can accumulate
+    // ceiling on each element it contains, and the most one row can accumulate
     // under it is that ceiling once per element -- at most MAX_KEY_ELEMENTS of
     // them, which is where the terms schema bounds a key. Driven rather than
     // computed, so an edit to the ceiling or to the row's key-string cap, both
@@ -4983,7 +4986,7 @@ describe("buildKeyStrings", () => {
         1,
       ) ?? []),
     ];
-    // One key string carrying every element's whole value: the row was neither
+    // One key string holding every element's whole value: the row was neither
     // refused, which is the fate a crossing takes for such a key, nor dropped.
     expect(assembled).toHaveLength(1);
     expect(assembled[0]).toHaveLength(MAX_KEY_ELEMENTS * largestCarried);
@@ -4991,7 +4994,7 @@ describe("buildKeyStrings", () => {
 
   test("the accumulation drop signal reaches no caller", () => {
     // It is a plain Error whose message reports no fault an operator could act
-    // on, raised only to stop an expansion that is already settled. Unexported,
+    // on, raised only to stop an expansion that is already decided. Unexported,
     // it cannot be caught by type outside the module, and the shapes that raise
     // it return a dropped row rather than propagating.
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
@@ -5018,9 +5021,9 @@ describe("buildKeyStrings", () => {
   });
 
   test("a partner-authored key name is escaped where a drop is warned", () => {
-    // The one partner-authored text on these paths, at the one sink that carries
-    // it: a name carrying CR/LF for log-line spoofing, an ESC that drives ANSI,
-    // and a bidi override reaches the operator escaped rather than raw.
+    // The one partner-authored text on these paths, at the one sink that passes
+    // it along: a name holding CR/LF for log-line spoofing, an ESC that drives
+    // ANSI, and a bidi override reaches the operator escaped rather than raw.
     const hostileName = `LN${ESC}[31m\r\nDOB${RLO}`;
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
     expect(
@@ -5036,9 +5039,9 @@ describe("buildKeyStrings", () => {
       ),
     ).toBeNull();
 
-    // The cross-product advisory, the other sink on this path that carries the
-    // name: an unlisted producer's row is not dropped for width, so it is warned
-    // about instead.
+    // The cross-product advisory, the other sink on this path that passes along
+    // the name: an unlisted producer's row is not dropped for width, so it is
+    // warned about instead.
     withUnlistedFanOutFunctions(() =>
       buildKeyStrings(
         { name: hostileName, elements: key.elements },
@@ -5284,9 +5287,10 @@ describe("validateStandardizationAgainstTerms", () => {
   // its standardization from the (partner-authored) adopted terms via
   // getDefaultStandardization, whose outputs are exactly those terms' field names --
   // so the derived spec is consistent with the terms by construction, and this
-  // fail-closed error (whose message the web surfaces) is unreachable on the accept
-  // side. A partner-chosen field name therefore cannot reach the operator's alert
-  // through it. Pin that with a hostile name that WOULD be alarming if surfaced.
+  // fail-closed error (whose message the web shows) is unreachable on the
+  // accept side. A partner-chosen field name therefore cannot reach the
+  // operator's alert through it. Pin that with a hostile name that WOULD be
+  // alarming if shown.
   test("getDefaultStandardization is consistent with the terms it derives from, even for a hostile field name", () => {
     const hostileName = "call 1-800-EVIL now";
     const hostileTerms: LinkageTerms = {
@@ -5340,10 +5344,10 @@ describe("assertFanOutImplemented", () => {
   ];
 
   test("refuses a standardization declaring a fan-out step, naming it", () => {
-    // A standardization is only ever this party's own -- no invitation carries
-    // one, and the derived default declares no fan-out step -- so the refusal is
-    // an OperatorConfigError, which both front ends surface as the actionable
-    // config category.
+    // A standardization is only ever this party's own -- no invitation holds
+    // one, and the derived default declares no fan-out step -- so the refusal
+    // is an OperatorConfigError, which both front ends report as the
+    // actionable config category.
     const standardization = [
       { output: "last_name", input: "LN", steps: [fanOutStep] },
     ];
@@ -5642,8 +5646,8 @@ describe("resolveFieldColumns", () => {
 
   test("an explicit standardization naming a payload column does not bind it into linkage", () => {
     // role wins over a contradictory explicit transform -- the same guard that
-    // protects an ignored column now protects payload/identifier, so a column the
-    // operator marked sent-to-partner is never dragged onto the match axis.
+    // protects an ignored column also protects payload/identifier, so a column
+    // the operator marked sent-to-partner is never dragged onto the match axis.
     const resolution = resolveFieldColumns(
       terms,
       [{ output: "ssn", input: "sent_ssn" }],
@@ -6032,13 +6036,13 @@ describe("assessLinkageSatisfiability", () => {
       ...base,
       linkageFields: base.linkageFields.filter((f) => f.name !== "ssn"),
     };
-    // FULL_COLUMNS carries an ssn column, so no DECLARED field is unproducible...
+    // FULL_COLUMNS has an ssn column, so no DECLARED field is unproducible...
     const { unsatisfied, satisfiableKeyCount } = assessLinkageSatisfiability(
       FULL_COLUMNS,
       undeclaredTerms,
     );
     expect(unsatisfied).toEqual([]);
-    // ...yet the keys that reference the now-undeclared ssn are excluded.
+    // ...yet the keys that reference the undeclared ssn are excluded.
     expect(satisfiableKeyCount).toBe(base.linkageKeys.length - keysUsingSsn);
     expect(satisfiableKeyCount).toBeLessThan(base.linkageKeys.length);
   });
@@ -6251,8 +6255,8 @@ describe("assessLinkageSatisfiability dead keys", () => {
 
   test("a shape-unsatisfiable key is not double-reported as dead", () => {
     // The column is absent, so the key fails the SHAPE verdict (satisfiableKeyCount
-    // 0); even with a dead element transform it is surfaced by the count, not also
-    // listed in deadKeys, which is scoped to shape-satisfiable keys.
+    // 0); even with a dead element transform it is reported by the count, not
+    // also listed in deadKeys, which is scoped to shape-satisfiable keys.
     const { satisfiableKeyCount, deadKeys } = assessLinkageSatisfiability(
       ["other_column"],
       dobTerms([{ function: "parse_date", params: { inputFormat: "MM/DD" } }]),
@@ -6263,8 +6267,8 @@ describe("assessLinkageSatisfiability dead keys", () => {
 
   test("the recommended default setup reports no dead keys", () => {
     // The default date_of_birth parse_date lives in the field standardization with
-    // a complete input, and the default keys carry no element transforms, so no key
-    // is dead -- the no-signal-on-the-default-setup guarantee.
+    // a complete input, and the default keys have no element transforms, so no
+    // key is dead -- the no-signal-on-the-default-setup guarantee.
     const { deadKeys } = assessLinkageSatisfiability(FULL_COLUMNS, fullTerms);
     expect(deadKeys).toEqual([]);
   });
@@ -6301,7 +6305,7 @@ describe("assessLinkageSatisfiability dead keys", () => {
       ]);
       const { deadKeys } = assessLinkageSatisfiability(columns, terms);
       // A format the detector does NOT call dead may legitimately produce a value
-      // (data-dependent), which the detector deliberately ignores -- skip it.
+      // (data-dependent), which the detector ignores -- skip it.
       if (deadKeys.length === 0) continue;
       // A value shaped to the declared format, plus other shapes: a dead format
       // must yield no key for ANY of them.
@@ -6610,7 +6614,7 @@ describe("decideLinkageTermsVerdict", () => {
   });
 
   test("linkageTermsFromRuleSet can derive the keyless terms the verdict refuses", () => {
-    // The derived-defaults path, not a hand-built fixture: metadata carrying no
+    // The derived-defaults path, not a hand-built fixture: metadata holding no
     // linkage-roled column narrows the built-in rule set to no key.
     const derived = linkageTermsFromRuleSet(DEFAULT_LINKAGE_RULE_SET, "Party", [
       {
@@ -6676,7 +6680,7 @@ describe("assertLinkageTermsSatisfiable", () => {
     expect(raised).toBeInstanceOf(LinkageTermsUnsatisfiableError);
     // A UsageError subclass, so the CLI's error->exit boundary reports exit 64.
     expect(raised).toBeInstanceOf(UsageError);
-    // Deliberately not an OperatorConfigError: its message carries the agreed
+    // By design, not an OperatorConfigError: its message holds the agreed
     // terms' names, which are partner-authored on every accept path.
     expect(raised).not.toBeInstanceOf(OperatorConfigError);
     const rendered = sanitizeErrorForDisplay(raised);
@@ -6866,12 +6870,12 @@ describe("summarizeLinkageShortfall", () => {
 // the guard is sound only while the two agree. This pins the detector's verdict
 // against an actual buildStandardizedDataset + buildKeyStrings run, so a future
 // change to the builder's resolution that the detector fails to mirror turns red
-// here rather than silently letting a silent-empty config through (the failure
-// class review caught repeatedly). Each case uses identity standardization (empty
-// steps) and a non-empty value in every present column, so a key yields a string
+// here rather than silently letting a silent-empty config through. Each case
+// uses identity standardization (empty steps) and a non-empty value in every
+// present column, so a key yields a string
 // iff all its element fields resolved to a present column -- isolating the
 // resolution the detector models from the documented shape-vs-values residual
-// (whether a value survives a pipeline), which the detector deliberately ignores.
+// (whether a value survives a pipeline), which the detector ignores.
 describe("assessLinkageSatisfiability matches buildStandardizedDataset", () => {
   // One ssn key and one lastName key, so a case can satisfy both, one, or neither.
   const diffTerms: LinkageTerms = {
@@ -7126,7 +7130,7 @@ describe("describeTransformCoercions", () => {
   });
 
   test("does not report a param the function does not coerce", () => {
-    // `pattern` carries no fallback (it is used as authored), so even a token
+    // `pattern` has no fallback (it is used as authored), so even a token
     // that somehow declared it null is not annotated as coerced.
     expect(
       describeTransformCoercions({
@@ -7299,8 +7303,8 @@ describe("checkValueConstraints", () => {
 
   test("a multi-character match-everything allowedCharacters breakout cannot suppress the warning", () => {
     // `a]|.*[b` breaks the class into match-anything alternation that, applied to
-    // the whole value, would never warn. Tested per character, a genuinely
-    // disallowed value is still flagged -- a multi-character construct cannot match
+    // the whole value, would never warn. Tested per character, a disallowed
+    // value is still flagged -- a multi-character construct cannot match
     // a single code point, so this breakout family cannot turn the warning off.
     const field: LinkageField = {
       name: "fn",
@@ -7319,9 +7323,10 @@ describe("checkValueConstraints", () => {
     // negation is closed separately (see the caret tests below); neither touches a
     // class that genuinely admits the code point: `]|\w|[` parses (leading `]`
     // literal) as one class admitting every word character, so a "disallowed" letter
-    // is not flagged. This is the class behaving as a class; because allowedCharacters
-    // is warn-not-enforce, the only effect is a suppressed advisory badge -- never a
-    // data-filtering or match-correctness effect. Pinned so the accepted limit in
+    // is not flagged. This is the class behaving as a class; because
+    // allowedCharacters only warns and never blocks, the only effect is a
+    // suppressed advisory badge -- never a data-filtering or match-correctness
+    // effect. Pinned so the accepted limit in
     // withinAllowedCharacters cannot silently drift, in either direction.
     const field: LinkageField = {
       name: "fn",
@@ -7415,12 +7420,13 @@ describe("checkValueConstraints", () => {
   });
 
   test("an alternation-breakout allowedCharacters is still flagged (full match, not unanchored find)", () => {
-    // `a]*|` compiles `^[a]*|]$`, which re2js reads as `(^[a]*) | (]$)`: the first
-    // branch matches the empty string at the start anchor. An UNANCHORED find would
-    // then return true for every value and suppress the advisory entirely. The check
-    // tests each code point as a FULL match, so a branch matching only a zero-width
-    // span does not satisfy it and a disallowed value is still flagged. Pinned so a
-    // regression from full-match back to an unanchored find cannot reopen the hole.
+    // `a]*|` compiles `^[a]*|]$`, which re2js treats as `(^[a]*) | (]$)`: the
+    // first branch matches the empty string at the start anchor. An UNANCHORED
+    // find would then return true for every value and suppress the advisory
+    // entirely. The check tests each code point as a FULL match, so a branch
+    // matching only a zero-width span does not satisfy it and a disallowed
+    // value is still flagged. Pinned so a regression from full-match back to an
+    // unanchored find cannot reopen the hole.
     for (const allowedCharacters of ["a]*|", "\\w]*|", "0]?|"]) {
       const field: LinkageField = {
         name: "fn",
@@ -7442,9 +7448,10 @@ describe("checkValueConstraints", () => {
     // branch that genuinely matches one code point cannot be neutralized without
     // rejecting a legitimately permissive class like `[\s\S]` -- only the top-level
     // `|` a real class never contains distinguishes them, which would take a full
-    // class parser, out of proportion to a warn-only advisory. Same accepted-limit
-    // category as the `]|\w|[` shorthand smuggle: warn-not-enforce, so the only effect
-    // is a suppressed badge. Pinned (the closed/accepted boundary, in both directions).
+    // class parser, out of proportion to a warn-only advisory. Same
+    // accepted-limit category as the `]|\w|[` shorthand smuggle: advisory only,
+    // so the only effect is a suppressed badge. Pinned (the closed/accepted
+    // boundary, in both directions).
     const field: LinkageField = {
       name: "fn",
       type: "first_name",
@@ -7458,7 +7465,7 @@ describe("checkValueConstraints", () => {
     // Escaping the leading `^` in `^]A[` to `\^` lets the following `]` close the
     // class, so `[\^]A[]` does not compile. The raw class `[^]A[]` does (a `]` right
     // after `[^` is a literal member), so the escape -- not the partner -- broke it.
-    // The check must OVER-flag (the warn-not-enforce safe direction), not fail open
+    // The check must OVER-flag (the advisory's safe direction), not fail open
     // and suppress the advisory on every value, which a leading-^ negation would
     // otherwise still achieve for this family. Pinned so the over-flag fallback
     // cannot regress to a blanket fail-open.
@@ -7497,7 +7504,7 @@ describe("checkValueConstraints", () => {
     // rather than throwing -- the advisory reports, never blocks, so an
     // uncheckable class must not crash the run or fabricate violations. `z-a` is a
     // reversed range re2js rejects. (For a decoded token NameConstraintsSchema is
-    // the backstop; checkValueConstraints is the last line.)
+    // the safety check; checkValueConstraints is the last line.)
     const field: LinkageField = {
       name: "fn",
       type: "first_name",
@@ -7590,7 +7597,7 @@ describe("summarizeDatasetConstraintViolations", () => {
       ]),
     );
     expect(summaries).toHaveLength(2);
-    // The aggregate carries the fixed badge caption for the caller to render.
+    // The aggregate holds the fixed badge caption for the caller to render.
     expect(summaries.find((s) => s.kind === "invalidDate")?.label).toBe(
       "invalid date",
     );
@@ -7719,7 +7726,7 @@ describe("summarizeDatasetConstraintViolations", () => {
   });
 
   test("skips a constrained field no linkage key references, still reports a referenced one", () => {
-    // Both fields are declared, constrained, resolve to a column, and carry a
+    // Both fields are declared, constrained, resolve to a column, and have a
     // value that violates their constraints. Only `last_name` is referenced by a
     // linkage key; `first_name` is declared-but-unreferenced, so the exchange
     // never standardizes or consumes it and the sweep must not warn on it.

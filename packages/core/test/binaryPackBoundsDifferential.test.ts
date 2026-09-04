@@ -18,22 +18,20 @@ import type { Packable, Unpackable } from "peerjs-js-binarypack";
 // every frame is produced by the real `pack` (or, for the markers that packer never
 // emits, assembled around real-packed parts), and the cost each frame is compared
 // against is summed from the value the real `unpack` actually returns -- not from a
-// second walk of the wire. A re-implementation of `Unpacker.unpack`'s dispatch would
-// only pin the scan against this suite's own reading of the marker table; summing
-// the decoded value pins it against what the library does.
+// second walk of the wire.
 //
 // `peerjs-js-binarypack` is an exact-pinned devDependency of THIS package
 // (packages/core/package.json), so the guard holds whether or not an app keeps the
 // dependency: the scan lives here, and so does the pin backing it
 // (docs/spec/DEPENDENCY_PINS.md).
 //
-// The scan is a defensive over-approximation, so the load-bearing assertion is that
+// The scan is a defensive over-approximation, so the critical assertion is that
 // it charges at LEAST the published weights' cost for the structure the real
 // unpacker builds; the exact-agreement test beside it is the drift detector that
 // fails loudly when a bump moves the marker table. Both compare the scan against
 // that weight model, so neither is a measurement of the heap.
 
-/** The trailing value every probe frame carries after the marker under test. Both
+/** The trailing value every probe frame has after the marker under test. Both
  * the real unpacker and the scan must land on it at the same offset, so a marker
  * whose payload width the scan skips differently shifts onto a payload byte instead
  * and charges something else. It is a string rather than a small integer precisely
@@ -83,7 +81,7 @@ const MARKER_CLASSES = [
 type MarkerName = (typeof MARKER_CLASSES)[number]["name"];
 
 /** How a probe frame was produced: `packer` frames are entirely the real encoder's
- * output; `assembled` frames carry a hand-written header for a marker the pinned
+ * output; `assembled` frames have a hand-written header for a marker the pinned
  * packer never chooses, with every surrounding value still real-packed. */
 type FrameSource = "packer" | "assembled";
 
@@ -163,7 +161,7 @@ async function assembledCase(
 }
 
 /** A 4-byte big-endian element/byte count, the width `array32`/`map32`/`str32`/
- * `raw32` headers carry. */
+ * `raw32` headers state. */
 function u32Bytes(count: number): Array<number> {
   return [
     (count >>> 24) & 0xff,
@@ -241,7 +239,7 @@ async function buildMarkerCorpus(): Promise<Array<MarkerCase>> {
     await assembledCase("uint64", "2^33", [0xcf, 0, 0, 0, 2, 0, 0, 0, 0]),
   ];
 
-  // The reserved and unused ranges carry no value, so every byte in them is probed
+  // The reserved and unused ranges hold no value, so every byte in them is probed
   // rather than one representative: the scan charges each a scalar with no payload,
   // and the sentinel that follows proves the real unpacker skips no payload either.
   for (let byte = 0xc4; byte <= 0xc9; byte++) {
@@ -387,7 +385,7 @@ function nestedValues(seed: number, count: number): Array<Packable> {
   return out;
 }
 
-/** The frame shape the WebRTC transport actually carries -- an array of
+/** The frame shape the WebRTC transport actually sends -- an array of
  * `{theirIndex, iteration}` records -- so the differential covers the real
  * in-protocol frame the structural budget is sized against, not only synthetic
  * shapes. */
@@ -504,7 +502,7 @@ function stringWeightOf(wireBytes: number): number {
 }
 
 /** The number markers the model charges the boxed-number weight: every one wider
- * than 16 bits, whatever value it carries. */
+ * than 16 bits, whatever value it holds. */
 const WIDE_NUMBER_MARKERS: ReadonlySet<number> = new Set([
   0xca, // float
   0xcb, // double
@@ -525,7 +523,7 @@ const boxedCostByValue = new Map<number, number>();
  * this side of the differential reads the library's own encoding choice.
  *
  * That makes the score exact for a frame whose numbers are encoded as the packer
- * encodes them -- every frame the corpus carries. A frame that writes a small value
+ * encodes them -- every frame the corpus holds. A frame that writes a small value
  * in a wider marker is charged the boxed weight by the scan and scores nothing here:
  * the scan over-charges, which is the safe direction and has a test of its own below.
  */
@@ -573,7 +571,7 @@ async function modelledUnpackCost(value: unknown): Promise<number> {
   if (Array.isArray(value)) {
     // The decoded array's own length is the count `unpack_array` sized the backing
     // store from, so the slots are read off the value the library returned -- an
-    // element the wire never carried still occupies one.
+    // element the wire never held still occupies one.
     let cost =
       WEBRTC_VALUE_WEIGHTS.array + value.length * WEBRTC_VALUE_WEIGHTS.scalar;
     for (let i = 0; i < value.length; i++)
@@ -711,7 +709,7 @@ describe("the real packer's marker table", () => {
   test("chooses another marker for the three values that could reach an assembled one", async () => {
     // Three of the seven assembled classes have a value that would plausibly encode
     // there and does not; the other four have none at all (`reserved` and `unused`
-    // carry no value, and `array32`/`map32` need a container wider than the packer's
+    // have no value, and `array32`/`map32` need a container wider than the packer's
     // per-element recursion survives). Pinned as a check so a bump that starts
     // emitting one of these three is a red test rather than a stale corpus comment.
     expect(
@@ -830,7 +828,7 @@ describe("scanFrameStructure against the real unpacker", () => {
   test("accepts every real-encoded frame under the production budget", async () => {
     // No corpus frame comes near the production envelope, so a rejection here is a
     // divergence -- a marker the scan mis-reads relative to the real unpacker -- and
-    // not a deliberately tight test budget firing.
+    // not a tight test budget firing.
     for (const { label, frame } of await allFrames()) {
       expect(
         scanFrameStructure(
@@ -847,7 +845,7 @@ describe("scanFrameStructure against the real unpacker", () => {
 
 describe("scanFrameStructure on the shapes the wire size understates", () => {
   // The corpus above is every frame a real encoder produces, and in all of them the
-  // wire carries each declared value. These are the two shapes where what `unpack`
+  // wire holds each declared value. These are the two shapes where what `unpack`
   // retains is decided by something other than the bytes it reads: a declared count
   // an ancestor reserves room for, and a key the assignment coerces. Each is decoded
   // by the real unpacker here, and the scan's charge is held against the structure
@@ -1006,7 +1004,7 @@ describe("scanFrameStructure on a frame of boxed numbers", () => {
     // What the weight charges is a heap number, so it rests on these markers
     // decoding to numbers rather than to some other boxed type -- a `BigInt` for the
     // 64-bit markers, say, whose cost the weight would not cover. Driven on the real
-    // unpacker rather than recorded as a premise.
+    // unpacker rather than recorded as an assumption.
     const covered = new Set<MarkerName>();
     for (const { marker, label, frame } of await markerCorpus()) {
       if (!WIDE_NUMBER_CLASSES.has(marker)) continue;
@@ -1182,7 +1180,7 @@ function webrtcSendSiteValues(): Array<{ label: string; value: Packable }> {
 
 describe("the map-key rule against the real packer", () => {
   // The rule refuses any frame whose map key is not a string on the wire, which is
-  // safe only because no legitimate frame carries one. That is a claim about the
+  // safe only because no legitimate frame holds one. That is a claim about the
   // real packer's behavior on the real send-site shapes, so it is driven here rather
   // than asserted in prose: the scan itself is the detector, since a non-string key
   // anywhere in a frame is the one thing that makes it refuse at every budget.

@@ -124,7 +124,7 @@ test("preparePayload: a short row omitting a prototype-member column sends null,
 });
 
 test("preparePayload: a present prototype-member column sends its real value", () => {
-  // The shadowing guard must not swallow a real value: a row that DOES carry a
+  // The shadowing guard must not swallow a real value: a row that DOES hold a
   // 'toString' column transmits that value verbatim.
   const metaProto: Metadata = [
     { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
@@ -246,13 +246,13 @@ test("buildOutputTable: a present prototype-member identifier column emits its r
 // --- assertPayloadSendDisclosed ----------------------------------------------
 
 // The payload.send data dictionary (exchanged, consented to, written into the
-// exchange record, and mirrored into a recurring partner's lock-in) must name
-// EXACTLY what metadata actually transmits (isDisclosedToPartner = isPayload &&
-// role !== "ignored") when present: an over-declaration (a name not transmitted)
-// or an under-declaration (a transmitted column omitted) is rejected (UsageError
-// -> CLI exit 64). Only an ABSENT dictionary is a no-op: a present-but-empty one
-// is an explicit "I disclose nothing" and is held to it, in the direction where
-// the payload actually crosses.
+// exchange record, and mirrored into a recurring partner's commitment) must
+// name EXACTLY what metadata actually transmits (isDisclosedToPartner =
+// isPayload && role !== "ignored") when present: an over-declaration (a name
+// not transmitted) or an under-declaration (a transmitted column omitted) is
+// rejected (UsageError -> CLI exit 64). Only an ABSENT dictionary is a no-op:
+// a present-but-empty one is an explicit "I disclose nothing" and is held to
+// it, in the direction where the payload actually crosses.
 
 // The output direction every case below runs in unless it says otherwise: the
 // partner is entitled to the result, so this party's disclosed columns leave the
@@ -313,8 +313,9 @@ test("assertPayloadSendDisclosed: a non-empty send omitting a disclosed column i
   // A present dictionary must name the FULL disclosed set: metadata discloses
   // {diagnosis, enrollment} but the dictionary lists only diagnosis, so it
   // under-states what is sent -- and a recurring partner that mirrors this send
-  // into its receive lock-in would lock in too few columns and false-abort the
-  // honest exchange when the metadata-governed transmission delivers enrollment.
+  // into its receive commitment would commit to too few columns and false-abort
+  // the honest exchange when the metadata-governed transmission delivers
+  // enrollment.
   const meta: Metadata = [
     { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
     { name: "diagnosis", type: "other", role: "payload", isPayload: true },
@@ -362,7 +363,7 @@ test("assertPayloadSendDisclosed: an absent payload is a no-op, a present-but-em
   ).not.toThrow();
   // A present, empty send declares "I disclose nothing", so every disclosed column
   // is an under-declaration. This is the direction deriveAcceptedLinkageTerms
-  // deliberately keeps strict on the acceptor, and holding it here is what keeps
+  // keeps strict on the acceptor by design, and holding it here is what keeps
   // those columns off the wire -- a partner can only reject them after they land.
   expect(() =>
     assertPayloadSendDisclosed({ send: [] }, meta, SHARING_OUTPUT),
@@ -409,7 +410,7 @@ test("assertPayloadSendDisclosed: an empty send is not held against a partner en
 });
 
 test("assertPayloadSendDisclosed: a NON-EMPTY send stays checked in both directions", () => {
-  // Deliberately not gated on the direction, unlike the empty case above. A
+  // By design, not gated on the direction, unlike the empty case above. A
   // dictionary that names columns is exchanged with the partner, shown for
   // consent, and written into the exchange record whatever the output direction,
   // so it is an accuracy control over those surfaces rather than a disclosure
@@ -475,10 +476,11 @@ test("assertPayloadSendDisclosed: every over-declared column is named, disclosed
 // The offending names are partner-controlled on the accept side, where
 // deriveAcceptedLinkageTerms adopts the inviter's payload declaration, so this
 // refusal names values a mutually-distrusting party chose inside first-party
-// prose an operator reads as psilink's own. The names therefore compose through
-// the compatibility-message seam, each in its own delimited run, and what the
-// cases below hold is the seam's claim at this site: the clause structure the
-// operator is shown is the structure this function wrote, whatever the name says.
+// prose an operator reads as psilink's own. The names therefore compose
+// through the compatibility-message boundary, each in its own delimited run,
+// and what the cases below hold is that boundary's claim at this site: the
+// clause structure the operator is shown is the structure this function
+// wrote, whatever the name says.
 
 /** The refusal this assertion raises for `payload`/`meta`, as an operator sees it. */
 const disclosureRefusal = (payload: Payload, meta: Metadata): string => {
@@ -531,7 +533,7 @@ const NAMED_LIST_SITES: ReadonlyArray<{
 
 /**
  * The adversarial name shapes, each built around the benign token the clause
- * would carry anyway: a name that closes psilink's own delimited run, one that
+ * would hold anyway: a name that closes psilink's own delimited run, one that
  * spells this message's clause separators, and one that forges an extra element
  * into the bracketed list.
  */
@@ -572,7 +574,7 @@ describe.each(NAMED_LIST_SITES)("$id", ({ compose }) => {
       const { skeleton, values } = readMessage(compose(value));
       // The whole claim: the operator reading the hostile run is shown exactly
       // the clause structure this function wrote for the benign one, and the
-      // name is still carried whole inside its run.
+      // name is still held whole inside its run.
       expect(skeleton).toBe(readMessage(compose(BENIGN_NAME)).skeleton);
       expect(values).toContain(value);
       expect(skeleton).not.toContain(marker);
@@ -753,14 +755,15 @@ test("assertPayloadSendDisclosed (acceptor path): the common inviter-send shape 
   ).not.toThrow();
 });
 
-// --- No-drift: the carried disclosed subset equals what is transmitted -------
+// --- No-drift: the held disclosed subset equals what is transmitted ---------
 
 test("disclosedColumnNames equals preparePayload's transmitted columns over the same metadata", () => {
-  // The set carried on the invitation (disclosedColumnNames) and the set
+  // The set held on the invitation (disclosedColumnNames) and the set
   // preparePayload actually transmits are both isDisclosedToPartner over the same
   // metadata, so they cannot diverge -- the no-drift invariant the consent
-  // display and lock-in rest on. ssn (role: linkage, isPayload:false) is excluded;
-  // patient_id (role: identifier, isPayload:true) and diagnosis are included.
+  // display and enforcement rest on. ssn (role: linkage, isPayload:false) is
+  // excluded; patient_id (role: identifier, isPayload:true) and diagnosis are
+  // included.
   const carried = disclosedColumnNames(metaWithId);
   expect(carried).toEqual(["patient_id", "diagnosis"]);
   const transmitted = preparePayload(rawRows, metaWithId, [[0], [0]]);
@@ -899,7 +902,7 @@ test("assertDisclosureMatchesCommitment: the error offers a dual remedy (restore
 test("assertDisclosureMatchesCommitment: over-delivery's remedy points at narrowing, not the under-delivery wording", () => {
   // The over-delivery direction (a newly disclosed, uncommitted column) must tell
   // the operator to STOP transmitting it (is_payload:false / role ignored), with
-  // re-inviting only as the deliberate way to widen -- it must NOT reuse the
+  // re-inviting only as the way to widen -- it must NOT reuse the
   // under-delivery remedy ("set the metadata to transmit"), which would pressure
   // the operator toward WIDER disclosure to resolve an over-disclosure.
   let message = "";
@@ -987,7 +990,7 @@ test("prepareForExchange: accepts a commitment its current metadata still meets 
   ).not.toThrow();
 });
 
-// --- reconcileReceivedPayload (runtime lock-in) ------------------------------
+// --- reconcileReceivedPayload (runtime enforcement) --------------------------
 
 const received = (columns: string[]): PartnerPayload => ({
   columns,
@@ -1004,7 +1007,7 @@ test("reconcileReceivedPayload: lazy (no declared set) accepts any payload", () 
 test("reconcileReceivedPayload: a present empty declared set is strict (receive nothing)", () => {
   // An empty expected set is NOT lazy -- it means "receive nothing." A party not
   // entitled to output (runExchange passes []) and an inviter that disclosed nothing
-  // (the mint carries []) both lock in the empty set, and a non-empty received
+  // (the mint holds []) both commit to the empty set, and a non-empty received
   // payload against it aborts. Only an absent (undefined) declared set is lazy.
   expect(() => reconcileReceivedPayload(received(["a", "b"]), [])).toThrow(
     ConnectionError,
@@ -1355,7 +1358,7 @@ test("exchangePayloads: a zero-match frame naming columns but carrying no rows p
 
 test("exchangePayloads: a columnless frame carrying no rows parses, committing nothing", async () => {
   // The boundary the rule stops at. This party's own preparePayload sends
-  // hasData:false rather than this shape, but it carries no value against no
+  // hasData:false rather than this shape, but it holds no value against no
   // column, so its record's committed payload and readable column list agree at
   // empty and there is nothing for the rule to refuse.
   const [connA, connB] = createMessagePipe();
@@ -1384,8 +1387,8 @@ test("exchangePayloads: a columnless frame carrying no rows parses, committing n
 // parse. The corpus below is what holds them to that second half: every frame is
 // parsed by the real receive path and by a reference schema written the plain
 // way, and the two verdicts must agree. A frame reaches the schema as parsed
-// JSON, so each is round-tripped through JSON first and only what a JSON body can
-// carry is in scope.
+// JSON, so each is round-tripped through JSON first and only what a JSON body
+// can hold is in scope.
 const referenceFrameSchema = z.object({
   hasData: z.literal(true),
   columns: z.array(z.string().min(1).max(MAX_NAME_LENGTH)),
@@ -1509,7 +1512,7 @@ test("exchangePayloads: send rejection rejects the responder", async () => {
     receive: () => Promise.resolve({ hasData: false }),
     close: () => Promise.resolve(),
   };
-  // Responder receives first then sends; the send rejection surfaces.
+  // Responder receives first then sends; the send rejection shows up.
   await expect(
     exchangePayloads(conn, "responder", { hasData: false }),
   ).rejects.toThrow("send failed");
@@ -1978,7 +1981,7 @@ test("buildOutputTable: throws when a partner payload row is not a row at all", 
   // The exported entry point takes a plain PartnerPayload, so a caller past the
   // type can hand it a string whose LENGTH matches the declared column count.
   // The width comparison alone admits it, and the cells the result would then
-  // carry are that string's characters, one per column.
+  // hold are that string's characters, one per column.
   const partnerPayload: PartnerPayload = {
     columns: ["partner_id", "notes"],
     rowIndices: [0],
@@ -2017,7 +2020,7 @@ test("buildOutputTable: an array-valued partner payload cell is refused rather t
 test("buildOutputTable: a partner payload cell of any other shape is refused as a shape fault, not a TypeError", () => {
   // The exported entry point takes a plain PartnerPayload, so a caller past the
   // type can hand it a cell of any shape at all. Each is refused with the same
-  // class of message the not-a-row and width faults carry.
+  // class of message the not-a-row and width faults hold.
   for (const cell of [5, true, {}, ["a"], undefined, Symbol("s")]) {
     const partnerPayload: PartnerPayload = {
       columns: ["notes"],
@@ -2035,7 +2038,7 @@ test("buildOutputTable: a partner payload cell of any other shape is refused as 
 
 test("buildOutputTable: a hole in a partner payload row is emitted as an empty cell", () => {
   // `Array.prototype.every` skips holes, so a sparse row passes the cell check
-  // exactly as it passes the wire schema's row predicate. No JSON body carries a
+  // exactly as it passes the wire schema's row predicate. No JSON body holds a
   // hole, so this shape arrives only from a caller past the type, and what it
   // writes is the empty cell an absent value gets -- neither an unquoted value
   // nor a TypeError.
@@ -2057,7 +2060,7 @@ test("buildOutputTable: a hole in a partner payload row is emitted as an empty c
 test("buildOutputTable: a partner payload collection that is not an array is refused as a shape fault, not a TypeError", () => {
   // Each collection has its length read and is walked, so a non-array value would
   // otherwise reach the first array method that misses. The values below all
-  // carry a `length` of 1, so nothing downstream catches them either.
+  // hold a `length` of 1, so nothing downstream catches them either.
   for (const field of ["columns", "rowIndices", "rows"] as const) {
     const partnerPayload = {
       columns: ["notes"],
@@ -2209,7 +2212,7 @@ test("buildOutputTable: the 'many' side writes the one partner payload row again
 });
 
 test("buildOutputTable: a partner payload missing a row grouped onto several of ours names it once", () => {
-  // The malformed-partner diagnostic stays legible under multiplicity: partner
+  // The malformed-partner diagnostic stays clear under multiplicity: partner
   // row 1 stands against two of this party's records but is one missing row.
   const partnerPayload: PartnerPayload = {
     columns: ["diagnosis"],

@@ -290,14 +290,13 @@ test("safeParseLinkageTerms returns success: false on invalid input", () => {
 });
 
 test("a parse error does not echo a partner-supplied received value", () => {
-  // The terms exchange relays a parse error through describeDecodeError, which
-  // escapes each Zod issue-path segment via sanitizeForDisplay and relays the
-  // schema-fixed message text. Two distinct mechanisms keep partner bytes out
-  // of the operator-facing message; pin both.
+  // describeDecodeError escapes each Zod issue-path segment via
+  // sanitizeForDisplay and relays the schema-fixed message text. Two
+  // mechanisms keep partner bytes out of the message; this test pins both.
   //
-  // 1. For most codes (type mismatch, enum, semver/date format, too_small) the
-  //    Zod message reports the expected type/options, never the received value,
-  //    so even the RAW `error.message` carries no partner bytes.
+  // 1. Most codes (type mismatch, enum, semver/date format, too_small) report
+  //    only the expected type/options, never the received value, so even the
+  //    raw `error.message` holds no partner bytes.
   const evil = "\x1b[31mEVIL\x1b[0m\u202e";
   const enumSemver = safeParseLinkageTerms({
     ...base,
@@ -313,7 +312,7 @@ test("a parse error does not echo a partner-supplied received value", () => {
   // 2. The `invalid_key` code on the bounded `transform.params` record key
   //    (z.string().max(MAX_NAME_LENGTH)) DOES place the offending key VERBATIM
   //    in the issue PATH, which the raw `error.message` JSON-dumps -- so here
-  //    the source escaping (describeDecodeError) is load-bearing, not the
+  //    the source escaping (describeDecodeError) does the protecting, not the
   //    schema. The dangerous bytes lead the key (with padding past the bound
   //    after them) so escaping, not the display-length cap, is what neutralizes
   //    them. Assert on the rendered message the exchange actually relays.
@@ -351,7 +350,7 @@ test("a relayed parse error keeps an honest schema path readable", () => {
   // must not over-escape an ordinary schema-fixed path. `sanitizeForDisplay`
   // leaves printable ASCII intact, so the `.` separators and numeric array
   // index of a path like `linkageFields.0.type` survive unchanged and an
-  // honestly malformed config stays readable.
+  // ordinarily malformed config stays readable.
   const result = safeParseLinkageTerms({
     ...base,
     linkageFields: [{ name: "ssn", type: 123 as unknown as string }],
@@ -366,10 +365,10 @@ test("an unknown partner key is stripped, not echoed (non-strict invariant)", ()
   // The one default Zod message that echoes a received value is unrecognized_keys
   // ("Unrecognized key: \"<key>\""), raised only by a .strict() object. The
   // linkage-terms schemas are non-strict z.object, so an unknown key -- even one
-  // whose NAME carries control bytes -- is stripped and parsing still succeeds;
+  // whose NAME holds control bytes -- is stripped and parsing still succeeds;
   // the raw key never reaches the (unsanitized) parse-error message. Adding
-  // .strict() to the schema would make this parse fail with the key echoed,
-  // failing this test and flagging that the parse-error path now needs sanitizing.
+  // .strict() to the schema would fail this parse with the key echoed, failing
+  // this test and flagging that the parse-error path then needs sanitizing.
   const result = safeParseLinkageTerms({
     ...base,
     "\x1b[2J\x1b[31mEVIL": 1,
@@ -589,7 +588,7 @@ test("a fuzzy comparison outside a swap pair is unaffected", () => {
 // moves the field references and leaves each position's transform where it is, so
 // a mismatched pair transforms a column one way on the party that swaps and
 // another on the party that does not. Role resolution is re-derived per run from
-// the parties' record counts rather than carried by the terms, so the pair would
+// the parties' record counts rather than held in the terms, so the pair would
 // also decide the match set differently run to run.
 
 function swappedTransforms(
@@ -649,7 +648,7 @@ test("a swap pair declaring the same transform validates", () => {
 
 test("a swap pair's transform params are compared canonically, not by key order", () => {
   // Two spellings of one pipeline: `params` is a JSON object, whose key order
-  // carries no meaning and does not survive the canonical encoding the agreed
+  // has no meaning and does not survive the canonical encoding the agreed
   // terms are hashed in. A pair differing only there declares one transform.
   const result = safeParseLinkageTerms(
     swappedTransforms(
@@ -952,7 +951,7 @@ test("a parse_date format at exactly the length maximum parses; one over is reje
 test("a former-ReDoS parse_date inputFormat now validates (linear-time engine bounds it)", () => {
   // "MM".repeat(24) is 48 chars -- under the length cap -- and expands to 24
   // adjacent `(\d{1,2})` groups, which catastrophically backtrack on `new RegExp`.
-  // parse_date now compiles this under the linear-time engine, which bounds it by
+  // parse_date compiles this under the linear-time engine, which bounds it by
   // construction, so the format is accepted (not rejected by a screen) and its
   // per-row match stays linear over the full dataset.
   const result = safeParseLinkageTerms(
@@ -975,13 +974,14 @@ test("common parse_date formats validate", () => {
 });
 
 test("an empty parse_date outputFormat is rejected", () => {
-  // The one width-shaping param a partner can declare that settles a width of
-  // ZERO: the derived width of a parse_date element is the rendered layout's own
-  // length (elementValueWidthBound, keyElementWidth.ts), and a zero declares a key
-  // narrower than the one candidate the row builder emits for it -- refusing an
-  // honest row over a step the partner authored. No honest template declares a
-  // date that renders to nothing, so the shape is refused where the document is
-  // read. The message names the parameter and echoes no partner value.
+  // The one width-shaping param a partner can declare that fixes a width of
+  // ZERO: the derived width of a parse_date element is the rendered layout's
+  // own length (elementValueWidthBound, keyElementWidth.ts), and a zero
+  // declares a key narrower than the one candidate the row builder emits for it
+  // -- refusing an ordinary row over a step the partner authored. No ordinary
+  // template declares a date that renders to nothing, so the shape is refused
+  // where the document is read. The message names the parameter and echoes no
+  // partner value.
   const result = safeParseLinkageTerms(parseDateTerms({ output_format: "" }));
   expect(result.success).toBe(false);
   if (result.success) return;
@@ -1009,7 +1009,7 @@ test("a non-string parse_date format still validates, so the runtime factory han
   ).toBe(true);
 });
 
-// --- substring integer bounds (partner-controlled non-integer footgun) --------
+// --- substring integer bounds (partner-controlled non-integer hazard) --------
 // substring slices by numeric `start` / `length`; a non-integer bound never
 // slices as intended (the factory drops it to an all-null fn, silently excluding
 // every row). The refine rejects a present non-integer bound at validation; the
@@ -1194,7 +1194,7 @@ test("a transform regex outside the dialect is rejected by the gate", () => {
 // --- transform param content bound (partner-controlled per-row amplification) --
 // Every STRING-valued transform param is capped at MAX_TRANSFORM_PARAM_LENGTH by
 // the params record's value stage, whatever function reads it. A string param
-// sizes what the rest of the element pipeline carries on every row -- a
+// sizes what the rest of the element pipeline holds on every row -- a
 // replace_regex `replacement` rewrites the operator's own cell into a value of the
 // replacement's own size -- so the cap is uniform across params rather than per
 // measured amplifier, and rejects at validation before any row runs.
@@ -1233,7 +1233,7 @@ test("a transform param at exactly the content bound parses; one over it is refu
 test("a megabyte-scale replacement is refused as a terms error, not a mid-run allocation", () => {
   // The measured amplifier: a 1 MB replacement over a 10-character operator cell
   // rewrites every row's value to a megabyte, which each later step of the element
-  // then carries. The refusal lands at terms validation, before any row runs.
+  // then holds. The refusal lands at terms validation, before any row runs.
   const result = safeParseLinkageTerms(
     transformStepTerms("replace_regex", {
       pattern: "^.*$",
@@ -1290,7 +1290,7 @@ test("the refusal locates the offending step and param by issue path, echoing no
 });
 
 test("the refusal's path carries the param name escaped, not raw", () => {
-  // The path locates the offender, so it carries a partner-controlled param NAME
+  // The path locates the offender, so it holds a partner-controlled param NAME
   // -- and for a name UNDER the key-length bound, which the `invalid_key` route
   // never flags, this refusal is the first issue to place it there. The relay the
   // terms exchange uses escapes each path segment at the source, so the raw bytes
@@ -1351,7 +1351,7 @@ test("a replacement carrying substitution sequences parses at the bound", () => 
   // their wire meaning. What such a replacement DERIVES per row is bounded where
   // the row runs, by the ceiling on the produced value (pinned in
   // standardization.test.ts); neutralizing the sequences here would have been a
-  // wire-semantics change, and is deliberately not the closer taken
+  // wire-semantics change, and is not the closer taken
   // (docs/spec/CHANNEL_SECURITY.md, Unbounded transform-parameter rejection).
   const substituting = "$'".repeat(MAX_TRANSFORM_PARAM_LENGTH / 2);
   expect(substituting.length).toBe(MAX_TRANSFORM_PARAM_LENGTH);
@@ -1369,7 +1369,7 @@ test("a replacement carrying substitution sequences parses at the bound", () => 
 });
 
 test("a non-string param value is untouched by the content bound", () => {
-  // Only a string param carries content the pipeline amplifies; a non-string is
+  // Only a string param holds content the pipeline amplifies; a non-string is
   // left to the factory's own coercion contract (a non-string `replacement` falls
   // back to the empty string, pinned in standardization.test.ts), as a malformed
   // pad_left length is.
@@ -1440,7 +1440,7 @@ test("a swap resolving via an element name alias and a field both validate", () 
 });
 
 test("a duplicate element field with distinct name aliases still validates", () => {
-  // The same field may appear twice when each occurrence carries a distinct
+  // The same field may appear twice when each occurrence has a distinct
   // `name`; the new referential-integrity checks must not regress the existing
   // element-identifier-uniqueness rule, and a swap may target the aliases.
   const result = safeParseLinkageTerms({
@@ -1515,7 +1515,7 @@ test.each([
 
 // The old camelCase spellings are rejected (strict): there are no legacy configs
 // or in-flight tokens to accept, so a single canonical snake_case vocabulary is
-// enforced on the wire rather than carrying a dual-spelling normalization shim.
+// enforced on the wire rather than keeping a dual-spelling normalization shim.
 test.each([
   "firstName",
   "lastName",
@@ -1565,12 +1565,12 @@ test.each(["editDistances", "adjacentYears"] as const)(
 
 test("a rejected camelCase enum value is not echoed in the parse error", () => {
   // These enums ride a partner-controlled invitation token and operator config
-  // that may carry secrets, so the strict-rejection path must stay a static
+  // that may hold secrets, so the strict-rejection path must stay a static
   // error located by issue path -- protocolSetup leaves the Zod parse-error
   // message unsanitized, relying on the reachable issue codes (invalid
   // discriminator, invalid enum) reporting the EXPECTED options and the schema
   // path, not the received value. Pin that the offending camelCase value
-  // does not surface raw in the message, for both the semantic-type discriminator
+  // is not exposed raw in the message, for both the semantic-type discriminator
   // and the fuzzy-comparison enum.
   const fieldResult = safeParseLinkageTerms({
     ...base,
@@ -1769,9 +1769,9 @@ test("every value a warning can carry is already escape-stable", () => {
   // warning makes two passes on that route (recorded as a limit in
   // CHANNEL_SECURITY.md). That second pass is unobservable only while every
   // value interpolated into a warning is constrained to a shape the escape does
-  // not rewrite. This pins that premise where it actually holds -- the schema --
-  // so a future warning carrying free text fails here rather than silently
-  // reaching an operator double-escaped.
+  // not rewrite. This pins that assumption where it actually holds -- the
+  // schema -- so a future warning holding free text fails here rather than
+  // silently reaching an operator double-escaped.
   const { warnings } = validateCompatibility(termsA, {
     ...termsB,
     date: "2025-06-01",
@@ -1903,7 +1903,7 @@ test("linkage keys mismatch is an error", () => {
 test("a non-canonical linkage-key param is reported, not thrown", () => {
   // transform.params is Record<string, unknown>, so an integer beyond 2^53
   // survives schema parsing but cannot be canonically encoded. The canonical
-  // comparison must surface that as an error rather than letting the thrown
+  // comparison must report that as an error rather than letting the thrown
   // CanonicalEncodingError escape validateCompatibility's {errors,warnings}
   // contract (the callers in protocolSetup abort the exchange on a non-empty
   // errors list; an uncaught throw would crash the process instead).
@@ -2212,9 +2212,9 @@ test("an explicit empty receive: [] is strict and aborts a partner that sends co
   // partner sends nothing" -- distinct from an ABSENT receive (lazy) -- so it
   // takes the present-field branch of the gate and a partner that discloses any
   // column fails the check. This agrees with the received-payload runtime
-  // lock-in (an empty committed set is strict) and the web consent display's
-  // "(none)" lock-in; reading [] as lazy here would admit an exchange that lock-in
-  // then aborts.
+  // enforcement (an empty committed set is strict) and the web consent
+  // display's "(none)" commitment; reading [] as lazy here would admit an
+  // exchange that enforcement later aborts.
   const local = { ...termsA, payload: { receive: [] } };
   const partner = {
     ...termsB,
@@ -2336,9 +2336,9 @@ test("a partner reference with an ANSI/control sequence is neutralized", () => {
     e.includes("legal agreement reference mismatch"),
   );
   expect(msg).toBeDefined();
-  // The raw ESC is gone (no terminal injection); it survives as the seam's own
-  // visible marker rather than as the escape's `\xHH`, which is what a control
-  // character psilink itself composed renders to.
+  // The raw ESC is gone (no terminal injection); it survives as the display
+  // boundary's own visible marker rather than as the escape's `\xHH`, which is
+  // what a control character psilink itself composed renders to.
   expect(rendered(msg!)).not.toContain("\x1b");
   expect(rendered(msg!)).not.toContain("\\x1b");
   expect(rendered(msg!)).toContain(controlCharacterMarker(0x1b));
@@ -2414,7 +2414,7 @@ test("a partner payload column name with a control sequence is neutralized", () 
 test("the empty-receive diagnostic neutralizes a partner-supplied send column name", () => {
   // The empty-receive branch is a DIFFERENT code path from the non-empty mismatch
   // above and embeds the SENDER's column names in the message. When local strictly
-  // declares receive:[] and the partner's advertised send names carry a control
+  // declares receive:[] and the partner's advertised send names hold a control
   // sequence, those partner-controlled names must still be sanitized in the
   // operator-facing diagnostic -- the non-empty test above does not reach this
   // branch.
@@ -2470,7 +2470,7 @@ test("both parties deduplicating is compatible when both expect output", () => {
 // --- Untrusted-input bounds --------------------------------------------------
 // These terms ride inside an invitation token whose only integrity check is a
 // transcription checksum anyone can recompute, so each partner-controlled
-// free-text and array field carries a generous `.max()`. The bounds are wide
+// free-text and array field holds a generous `.max()`. The bounds are wide
 // enough that no real configuration hits them (asserted by the boundary-accept
 // cases) but still refuse a token padded to exhaust the recipient.
 
@@ -2542,7 +2542,7 @@ test("rejects an over-long constraint exclude value", () => {
 // --- Free-text control-character rule ----------------------------------------
 // The document's four free-text fields -- the party `identity`, the legal
 // agreement's `purpose`, a payload column's `description`, and each constraint
-// `exclude` value -- carry one rule between them: no C0 control (NUL included),
+// `exclude` value -- hold one rule between them: no C0 control (NUL included),
 // no DEL, no C1, and no exception for tab, line feed, or carriage return. The
 // cases below pin the reach (every one of the four refuses) and the two edges
 // the rule is drawn at: a control character is refused wherever it sits, and a
@@ -2557,7 +2557,7 @@ const C1_NEXT_LINE = "\u0085";
 const NBSP = "\u00a0";
 
 // A denylist entry, a description, and a purpose alongside the identity, so a
-// case that varies one field leaves the other three carrying real values.
+// case that varies one field leaves the other three holding real values.
 const freeTextTerms = (overrides: {
   identity?: string;
   purpose?: string;
@@ -2631,7 +2631,7 @@ test("rejects a constraint exclude value carrying a control character", () => {
 test("accepts free text carrying non-ASCII letters", () => {
   // The refused ranges stop below U+00A0, so a party writing its name, its
   // purpose, or its denylist in its own script is admissible -- as is the
-  // no-break space at that first admitted code point, carried in the identity
+  // no-break space at that first admitted code point, placed in the identity
   // here so the boundary is pinned from above as well as below.
   expect(() =>
     parseLinkageTerms(
@@ -2797,7 +2797,7 @@ test("a pathological-count transform params record fails cleanly, not with a Ran
   }).not.toThrow();
   expect(result?.success).toBe(false);
   if (result && !result.success) {
-    // A single count-bound issue, not one per key, and it carries no partner key
+    // A single count-bound issue, not one per key, and it holds no partner key
     // bytes (the over-long keys never reach the per-key validation).
     expect(
       result.error.issues.some((i) => /must not exceed/.test(i.message)),
@@ -3054,9 +3054,10 @@ test("a pathological-count payload send list is rejected by the node budget, not
   // ~3.5M `Invalid string length` threshold the unbounded schema hit. The
   // camelize pre-pass fronts the boundedArray count gate: an over-budget partner
   // collection is rejected by that budget before the O(n) walk -- and so before
-  // Zod (path b) -- never a RangeError. safeParseLinkageTerms now ABSORBS that
+  // Zod (path b) -- never a RangeError. safeParseLinkageTerms ABSORBS that
   // bound into a { success: false } result (the "safe" contract) instead of
-  // throwing, so the rejection surfaces as the node-count issue, not an exception.
+  // throwing, so the rejection appears as the node-count issue, not an
+  // exception.
   const send = Array.from({ length: 4_000_000 }, () => 123);
   let result: ReturnType<typeof safeParseLinkageTerms> | undefined;
   expect(() => {
@@ -3391,8 +3392,8 @@ test.each([
   ({ output }) => {
     // The acceptor's own side of the cardinality is never the inviter's to set, so
     // it is derived rather than read off the invitation, for either output shape and
-    // for either value the invitation carries. That is what closes the flip: a
-    // hostile inviter carrying `true` and then presenting `false` at the terms
+    // for either value the invitation holds. That is what closes the flip: a
+    // hostile inviter declaring `true` and then presenting `false` at the terms
     // exchange cannot make this party the "many" side, because this party's value
     // was never the invitation's.
     for (const declared of [false, true]) {
@@ -3407,7 +3408,7 @@ test.each([
       // two documents make is the runnable one-sided one rather than an abort.
       expect(derived.identity).toBe("Accepting Org");
       expect(derived.linkageKeys).toEqual(inviterTerms.linkageKeys);
-      // `deduplicate` carries no cross-party consistency rule -- the differing
+      // `deduplicate` holds no cross-party consistency rule -- the differing
       // pair IS the one-sided run -- so it passes compatibility from both sides.
       // What binds the inviter's side is not an equality rule here but the
       // invitation's own declaration, held at the run boundary
@@ -3544,7 +3545,7 @@ test("deriveAcceptedLinkageTerms mirrors payload send/receive (asymmetric invite
 });
 
 test("deriveAcceptedLinkageTerms mirrors an explicit empty inviter receive to an explicit empty acceptor send", () => {
-  // Decision: an explicit `receive: []` is strict. The acceptor mirror carries
+  // Decision: an explicit `receive: []` is strict. The acceptor mirror passes
   // it through as an explicit empty `send: []` -- present, not absent -- so the
   // inviter's strict "send me nothing" becomes the acceptor's strict "I send
   // nothing." (An ABSENT inviter receive instead yields an absent acceptor
@@ -3689,8 +3690,9 @@ describe("linkageRuleSet", () => {
 
   test("delimits a partner set name that carries the clause's own connective", () => {
     // The name is free text the partner chooses, so an undelimited one could pass
-    // itself off as the whole clause: "keys 1.0.0 over pii" as a name would read as
-    // a rule set the partner does not cite. The quotes keep each name one value.
+    // itself off as the whole clause: "keys 1.0.0 over pii" as a name would be
+    // treated as a rule set the partner does not cite. The quotes keep each
+    // name one value.
     const local = parseLinkageTerms({ ...base, linkage_rule_set: citation });
     const partner = parseLinkageTerms({
       ...base,
@@ -3708,7 +3710,7 @@ describe("linkageRuleSet", () => {
   });
 
   test("is skipped where either party cites nothing", () => {
-    // A hand-authored document carries no citation, and holding it to the
+    // A hand-authored document holds no citation, and holding it to the
     // partner's would refuse an exchange whose fields and keys match exactly.
     const cited = parseLinkageTerms({ ...base, linkage_rule_set: citation });
     const uncited = parseLinkageTerms({

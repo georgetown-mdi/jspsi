@@ -32,8 +32,8 @@ import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";
 import { DISPLAY_TRUNCATION_MARKER } from "../src/utils/sanitizeForDisplay";
 
 // A SHARED_SECRET_REGEX-valid placeholder (43 base64url chars = 32 zero bytes).
-// InvitationTokenSchema now enforces that shape, so test tokens carry a real
-// one rather than a short literal.
+// InvitationTokenSchema enforces that shape, so test tokens hold a real one
+// rather than a short literal.
 const VALID_SECRET = "A".repeat(43);
 
 const baseTerms = {
@@ -57,7 +57,7 @@ const baseToken: InvitationToken = {
 // Appends a valid 4-byte checksum over an ARBITRARY payload string, reproducing
 // encodeInvitation's body+checksum encoding without its schema validation. The
 // payload-string form (rather than an object) lets a test craft a checksum-valid
-// invitation whose decoded bytes are deliberately NOT valid JSON, to exercise
+// invitation whose decoded bytes are NOT valid JSON, to exercise
 // decodeInvitation's JSON.parse swallow -- a path encodeRaw cannot reach because
 // it always emits well-formed JSON.
 async function encodeRawPayload(payload: string): Promise<string> {
@@ -233,7 +233,7 @@ test("decodeInvitation rejects linkage terms carrying an out-of-dialect transfor
   // linear-time dialect (a backreference, which the engine cannot compile).
   // InvitationTokenSchema embeds LinkageTermsSchema, so the dialect-conformance
   // check fires at decode, before any pattern executes. (A pattern that merely
-  // backtracks catastrophically on `new RegExp`, like `(a+)+$`, is now in-dialect
+  // backtracks catastrophically on `new RegExp`, like `(a+)+$`, is in-dialect
   // and accepted -- the linear-time engine runs it safely; see standardization
   // and linearRegex tests.)
   const malicious = {
@@ -269,7 +269,7 @@ test("decodeInvitation rejects linkage terms carrying an out-of-dialect transfor
 // per-step length and dialect screens run on the normalized form.
 
 test("decodeInvitation normalizes snake_case transform.params keys to camelCase", async () => {
-  // A hand-crafted token can carry snake_case params (the params record is
+  // A hand-crafted token can hold snake_case params (the params record is
   // z.unknown() content with no key-form constraint). The decode chokepoint folds
   // them to camelCase, so a third-party token converges with a psilink-minted one
   // and the standardization runtime (which reads params.inputFormat) sees them.
@@ -342,22 +342,16 @@ test("decodeInvitation screens a snake_case parse_date inputFormat for length (t
 });
 
 test("decodeInvitation: a param spelling the fold leaves non-canonical is inert (screen and runtime read the same name)", async () => {
-  // The complement of the length-screen test above, pinning the safety margin the
-  // whole fold rests on: the per-step length screen and the standardization runtime
-  // (parseDateFactory) read the SAME camelCase param name, `inputFormat`. A spelling
-  // the snake->camel fold does NOT canonicalize to that name -- here SCREAMING_SNAKE
-  // `INPUT_FORMAT`, whose `_F` the fold leaves intact (camelizeKeys only collapses
-  // `_` followed by a lowercase letter) -- is therefore invisible to BOTH: the
-  // length screen does not fire, so decode does not reject, AND the runtime never
-  // reads it (`params.inputFormat` is absent, so parse_date falls back to its
-  // default format). An over-cap format parked under such a key is inert, never a
-  // value that slips the screen and then activates downstream. The over-cap format
-  // is the same payload the length-screen test rejects under the canonical key;
-  // under this non-canonical key it parses cleanly and is left verbatim. Were a
-  // future camelizeKeys change to canonicalize `INPUT_FORMAT` to `inputFormat`, the
-  // fold-before-validation ordering would route this very token through the screen
-  // and decode would start rejecting it -- so this test fails loudly either way,
-  // guarding the screen/runtime name agreement against silent drift.
+  // The complement of the length-screen test above: the per-step length screen
+  // and the standardization runtime (parseDateFactory) both read the same
+  // camelCase param name, `inputFormat`. A spelling the snake->camel fold does
+  // NOT canonicalize to that name -- here SCREAMING_SNAKE `INPUT_FORMAT`, whose
+  // `_F` the fold leaves intact (camelizeKeys only collapses `_` followed by a
+  // lowercase letter) -- reaches neither: the length screen does not fire, and
+  // the runtime never reads it (`params.inputFormat` is absent, so parse_date
+  // falls back to its default format). The over-cap format is the same payload
+  // the length-screen test rejects under the canonical key; under this
+  // non-canonical key it parses cleanly and is left verbatim.
   const overCap = "M".repeat(MAX_DATE_FORMAT_LENGTH + 1);
   const token = {
     ...baseToken,
@@ -519,9 +513,10 @@ test("rejects a body whose length is not a valid base64 length", async () => {
 });
 
 test("rejects a body carrying the whitespace a wrapped paste leaves", async () => {
-  // The strictness the accept seams normalize for: whitespace inside the token
-  // is refused here, and stripInvitationWhitespace is what makes the same paste
-  // decode. Pinning both halves keeps the seams and the decoder in agreement.
+  // The strictness the accept call sites normalize for: whitespace inside the
+  // token is refused here, and stripInvitationWhitespace is what makes the same
+  // paste decode. Pinning both halves keeps the call sites and the decoder in
+  // agreement.
   const encoded = await encodeInvitation(baseToken);
   const wrapped = `${encoded.slice(0, 20)}\n  ${encoded.slice(20)}`;
   await expect(decodeInvitation(wrapped)).rejects.toThrow(
@@ -533,7 +528,7 @@ test("rejects a body carrying the whitespace a wrapped paste leaves", async () =
 
 test("stripInvitationWhitespace removes the ECMAScript whitespace class", () => {
   expect(stripInvitationWhitespace(" ab\n c\td\r\ne ")).toBe("abcde");
-  // The trim-set code points a hard-wrapped or NBSP-padded paste can carry,
+  // The trim-set code points a hard-wrapped or NBSP-padded paste can hold,
   // stripped at interior positions the same as at the edges.
   expect(stripInvitationWhitespace("ab\u00a0cd")).toBe("abcd");
   expect(stripInvitationWhitespace("ab\u2028cd")).toBe("abcd");
@@ -560,13 +555,12 @@ test("decodeInvitation refuses an over-bound raw input with the length message",
   ).rejects.toThrow(/exceeds the maximum length/);
 });
 
-// --- Decode-error message swallows (display-injection backstop) --------------
+// --- Decode-error message swallows (display-injection safety check) ----------
 
-// decodeInvitation deliberately catches the JSON.parse and base64url-decode
-// failures and rethrows a FIXED string rather than the underlying message,
-// because those
+// decodeInvitation catches the JSON.parse and base64url-decode failures and
+// rethrows a FIXED string rather than the underlying message, because those
 // messages can quote partner-controlled input bytes. That thrown .message is
-// relayed verbatim by describeDecodeError for a non-Zod Error. Its load-bearing
+// relayed verbatim by describeDecodeError for a non-Zod Error. Its critical
 // consumer is the web accept page's operator-facing alert (apps/web
 // AcceptorBench), which renders describeDecodeError's output in a React text
 // node with no further sanitize pass: React neutralizes HTML markup but NOT the
@@ -609,12 +603,12 @@ test("decodeInvitation swallows the JSON.parse error, never relaying partner byt
     expect((err as Error).message).not.toContain(byte);
   }
 
-  // Proves the swallow is load-bearing rather than the assertion vacuous: the
+  // Proves the swallow is required rather than the assertion vacuous: the
   // SAME bytes parsed raw DO leak into the engine's message, so without the
   // swallow at least one would reach the operator-facing alert. If a future
   // engine stopped quoting input this would fail here, signaling the swallow's
-  // premise (not just our code) needs re-examination -- the right place to learn
-  // it, rather than a silently toothless test elsewhere.
+  // assumption (not just our code) needs re-examination -- the right place to
+  // learn it, rather than a silently toothless test elsewhere.
   let rawMessage = "";
   try {
     JSON.parse(hostile);
@@ -628,13 +622,13 @@ test("decodeInvitation swallows the JSON.parse error, never relaying partner byt
 
 test("decodeInvitation swallows the base64url decode error, throwing only the fixed string", async () => {
   // Reach the decode catch through the real path: the body (everything but the
-  // trailing 6-char checksum slot) carries the planted bytes, all outside the
-  // base64url alphabet, so the shared primitive rejects it. Deliberately NO
-  // planted-bytes loop here, unlike the JSON test: neither the primitive's
-  // message nor Node's atob beneath it echoes the input, so no input byte can
-  // reach the thrown message even with the swallow removed -- a not.toContain
-  // assertion would pass vacuously and falsely imply this path is as
-  // load-bearing as the JSON one. The regression guard is the fixed string
+  // trailing 6-char checksum slot) holds the planted bytes, all outside the
+  // base64url alphabet, so the shared primitive rejects it. No planted-bytes
+  // loop here, unlike the JSON test: neither the primitive's message nor
+  // Node's atob beneath it echoes the input, so no input byte can reach the
+  // thrown message even with the swallow removed -- a not.toContain assertion
+  // would pass vacuously and falsely imply this path is as critical as the
+  // JSON one. The regression guard is the fixed string
   // itself: relaying the primitive's message (or one that interpolated the
   // offending input) changes it and fails the toBe below.
   const encoded = PLANTED_DISPLAY_BYTES.join("") + "AAAAAA";
@@ -675,7 +669,7 @@ test("encodeInvitation rejects an empty sharedSecret", async () => {
 });
 
 test("rejects a token whose sharedSecret is not a base64url-encoded 32-byte value", async () => {
-  // A non-empty but wrong-shape secret is now caught at decode (matching the
+  // A non-empty but wrong-shape secret is caught at decode (matching the
   // KeyFile and Authentication schemas) instead of slipping through to fail
   // later at saveKeyFile / authenticateConnection.
   const encoded = await encodeRaw({ ...baseToken, sharedSecret: "abc123" });
@@ -762,20 +756,20 @@ const CHANNEL_SHAPES: Record<
   },
 };
 
-// Non-locator fields a real connection config carries that an endpoint must
+// Non-locator fields a real connection config has that an endpoint must
 // reject -- both credentials and server-identity material -- using the actual
 // SFTP and PeerJS field identifiers from connection.ts. `certificate` is SSH
 // cert-based auth material; `hostKeyFingerprint`/`knownHosts` are the
 // server-identity fields SECURITY_DESIGN.md names as excluded (not secret, but
 // not locators either). `providerOptions` is the opaque transport-options map:
-// it is operator-local-only by design and an invitation must never carry it, so
-// this case pins that invariant -- a future change that let an invitation smuggle
-// a `providerOptions` (and thus reach the SFTP connect path) would fail this test
-// loudly. Every name is rejected by the same strictObject unrecognized-keys
-// branch, so this matrix documents the invariant and guards against the allowlist
-// being loosened (e.g. strictObject -> looseObject); it is not additional branch
-// coverage. This list is a curated regression sample, not an exhaustive denylist
-// -- the binding rule is the locator allowlist.
+// it is operator-local-only by design and an invitation must never include it,
+// so this case pins that invariant -- a future change that let an invitation
+// smuggle a `providerOptions` (and thus reach the SFTP connect path) would
+// fail this test loudly. Every name is rejected by the same strictObject
+// unrecognized-keys branch, so this matrix documents the invariant and guards
+// against the allowlist being loosened (e.g. strictObject -> looseObject); it
+// is not additional branch coverage. This list is a curated regression sample,
+// not an exhaustive denylist -- the binding rule is the locator allowlist.
 const FORBIDDEN_FIELDS = [
   "password",
   "privateKey",
@@ -900,7 +894,7 @@ test.each([
     // retain_files is a file-sync option the webrtc channel does not have (the
     // connection schema rejects the same pairing), so a token declaring one is
     // stating a mode no run of it could be in. Refused at both halves, so
-    // neither a mint path nor a consent surface can carry it.
+    // neither a mint path nor a consent surface can hold it.
     const token: InvitationToken = {
       ...baseToken,
       connectionEndpoint: { channel: "webrtc", host: "example.test" },
@@ -1011,8 +1005,9 @@ test.each(splitRetainEndpoints)(
     // The mint-only half of the asymmetry: psilink never EMITS a rendezvous whose
     // permanent transcript is readable from the locator's shape alone, since any
     // artifact composed from the declaration -- an accept kit's file-handling
-    // disclosure -- would then state nothing. Held at this one seam rather than at
-    // each producer's own gate, so no mint path can reach the state by omission.
+    // disclosure -- would then state nothing. Held at this one call site rather
+    // than at each producer's own gate, so no mint path can reach the state by
+    // omission.
     await expect(
       encodeInvitation({ ...baseToken, connectionEndpoint: endpoint }),
     ).rejects.toThrow(/inviterRetainsFiles must be true/);
@@ -1037,7 +1032,7 @@ test.each(splitRetainEndpoints)(
   },
 );
 
-// The same two channels carrying a single shared directory: a shape that
+// The same two channels using a single shared directory: a shape that
 // requires nothing of the mode, so it is the control the refusal must not catch.
 const sharedDirEndpoints: { name: string; endpoint: ConnectionEndpoint }[] = [
   {
@@ -1145,9 +1140,9 @@ test.each(nonLocatorCases)(
 
 test("escapes a hostile unrecognized endpoint key name in the rejection message", async () => {
   // The unrecognized-key rejection echoes the key NAME, which the inviter
-  // controls; the shared describeDecodeError surfaces that message (the issue's
+  // controls; the shared describeDecodeError exposes that message (the issue's
   // message string) to the accepting operator (CLI terminal or web accept
-  // screen), relaying it as is. A name carrying control/ANSI bytes must be
+  // screen), relaying it as is. A name holding control/ANSI bytes must be
   // escaped at this source, not relayed raw.
   const hostileKey = "\x1b[31mFAKE";
   const encoded = await encodeRaw({
@@ -1197,7 +1192,7 @@ test("does not relay a hostile partner VALUE raw through describeDecodeError", a
   // partner-controlled VALUE. An over-long identity (the inviter controls the
   // token) is rejected with a default Zod message, which reports the constraint
   // (a length) and not the offending value, so describeDecodeError -- which
-  // relays the issue message verbatim -- must not surface the planted control
+  // relays the issue message verbatim -- must not expose the planted control
   // bytes. Pins that invariant end to end through the real schema: a future Zod
   // that began interpolating the rejected value into its default message would
   // trip this even though no source-level escape changed.
@@ -1266,7 +1261,7 @@ test.each([
 
 // --- Split-directory endpoint ------------------------------------------------
 
-// A split sftp/filedrop endpoint carries the inviter's own inbound/outbound pair
+// A split sftp/filedrop endpoint holds the inviter's own inbound/outbound pair
 // (the acceptor mirror-swaps it at connectionFromEndpoint, not here), so the
 // token round-trips the pair verbatim -- the token stays a faithful record of
 // the inviter's config. The directory-mode refines reject a half pair, both
@@ -1378,7 +1373,7 @@ test("encodeInvitation also rejects a malformed split endpoint (half pair)", asy
 
 test("strips an unknown top-level field rather than embedding it", async () => {
   // encodeInvitation serializes the parse() result, so a field a caller adds by
-  // bypassing the types is not carried onto the wire. decode would re-strip, so
+  // bypassing the types does not reach the wire. decode would re-strip, so
   // this asserts on the encoded bytes: encoding with the extra field must
   // produce the identical string as encoding the clean token.
   const withExtra = await encodeInvitation({
