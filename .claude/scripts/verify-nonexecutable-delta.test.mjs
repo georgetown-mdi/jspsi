@@ -24,10 +24,10 @@ import {
   yamlVerdict,
 } from "./verify-nonexecutable-delta.mjs";
 
-// These tests, not the comparison, are the load-bearing part of the verifier:
+// These tests, not the comparison, are the critical part of the verifier:
 // they are what distinguishes it from the two implementations CLAUDE.md retires
 // as measured wrong -- the compiler's emit (which erases type positions along
-// with comments) and a raw scanner (which reads a backtick inside a comment as
+// with comments) and a raw scanner (which treats a backtick inside a comment as
 // entering a template). Pinning both failure modes here means a TypeScript
 // upgrade that changes printer behavior fails a check instead of silently
 // degrading an attestation to a guess.
@@ -35,8 +35,8 @@ import {
 // Every claim below about what the printer does was measured by running it, not
 // read off the compiler's source. Where the measured answer is a normalization
 // (formatting collapses to equal) or a false positive (parenthesizing an
-// expression reads as a change), the measurement is pinned as it stands rather
-// than argued with.
+// expression is treated as a change), the measurement is pinned as it stands
+// rather than argued with.
 
 const verdictOf = (before, after, path = "a.ts") =>
   fileVerdict({ path, before, after }).verdict;
@@ -58,7 +58,7 @@ describe("comment suppression", () => {
     ).toBe("comment-only");
   });
 
-  it("reads a backtick inside a comment as comment-only", () => {
+  it("treats a backtick inside a comment as comment-only", () => {
     const base =
       "const a: string = `x`;\nfunction f(p: number) {\n  return p;\n}\n";
     expect(verdictOf(base, "// a backtick ` inside a comment\n" + base)).toBe(
@@ -110,7 +110,7 @@ describe("type-position edits", () => {
   ];
 
   for (const [label, before, after] of cases) {
-    it(`reads a ${label} edit as an executable delta`, () => {
+    it(`treats a ${label} edit as an executable delta`, () => {
       expect(verdictOf(before, after)).toBe("executable-delta");
     });
   }
@@ -181,12 +181,12 @@ describe("added and deleted files", () => {
     expect(canonicalSource("// only a comment\n", "a.ts").canonical).toBe("");
   });
 
-  it("reads adding or deleting a comments-only file as comment-only", () => {
+  it("treats adding or deleting a comments-only file as comment-only", () => {
     expect(verdictOf(null, "// only a comment\n")).toBe("comment-only");
     expect(verdictOf("/* only a comment */\n", null)).toBe("comment-only");
   });
 
-  it("reads adding or deleting a file carrying a statement as an executable delta", () => {
+  it("treats adding or deleting a file holding a statement as an executable delta", () => {
     expect(verdictOf(null, "export const a = 1;\n")).toBe("executable-delta");
     expect(verdictOf("export const a = 1;\n", null)).toBe("executable-delta");
   });
@@ -222,8 +222,8 @@ describe("formatting-only edits (measured, not assumed)", () => {
     );
   });
 
-  it("reads parenthesizing an expression as a change, the safe direction", () => {
-    // Parentheses are an AST node, so this formatting-only edit reads as a
+  it("treats parenthesizing an expression as a change, the safe direction", () => {
+    // Parentheses are an AST node, so this formatting-only edit is treated as a
     // delta. That costs a full review round it did not strictly need; the
     // opposite error would attest an unreviewed head.
     expect(verdictOf("const e = 1 + 2;\n", "const e = (1 + 2);\n")).toBe(
@@ -259,30 +259,30 @@ describe("YAML comparison", () => {
   const yamlVerdictOf = (before, after, path = "a.yaml") =>
     yamlVerdict({ path, before, after }).verdict;
 
-  it("reads a comment-only edit as comment-only", () => {
+  it("treats a comment-only edit as comment-only", () => {
     expect(yamlVerdictOf("a: 1 # note\nb: 2\n", "a: 1\nb: 2 # moved\n")).toBe(
       "comment-only",
     );
   });
 
-  it("reads reordered mapping keys as comment-only", () => {
+  it("treats reordered mapping keys as comment-only", () => {
     expect(yamlVerdictOf("a: 1\nb: 2\n", "b: 2\na: 1\n")).toBe("comment-only");
   });
 
-  it("reads a one-key value change as a content difference", () => {
+  it("treats a one-key value change as a content difference", () => {
     expect(yamlVerdictOf("a: 1\nb: 2\n", "a: 1\nb: 3\n")).toBe(
       "executable-delta",
     );
   });
 
-  it("reads a reordered sequence as a content difference", () => {
+  it("treats a reordered sequence as a content difference", () => {
     expect(yamlVerdictOf("a:\n  - 1\n  - 2\n", "a:\n  - 2\n  - 1\n")).toBe(
       "executable-delta",
     );
   });
 
   // The four values below share one JSON text (`null`), so a comparison key
-  // built by stringifying the value reads every edit among them as
+  // built by stringifying the value treats every edit among them as
   // comment-only -- an executable delta attested away.
   it("tells NaN, Infinity, -Infinity, and null apart", () => {
     expect(yamlVerdictOf("a: .nan\n", "a: .inf\n")).toBe("executable-delta");
@@ -291,12 +291,12 @@ describe("YAML comparison", () => {
     expect(yamlVerdictOf("a: -.inf\n", "a: ~\n")).toBe("executable-delta");
   });
 
-  it("reads a comment edit beside an unchanged NaN as comment-only", () => {
+  it("treats a comment edit beside an unchanged NaN as comment-only", () => {
     expect(yamlVerdictOf("a: .nan # note\n", "a: .nan\n")).toBe("comment-only");
   });
 
   // `!!timestamp` materializes to a Date and `!!set` to a Set, neither of which
-  // carries its value in its own keys: an own-keys walk reads both sides of
+  // holds its value in its own keys: an own-keys walk treats both sides of
   // each pair below as the same empty object.
   it("tells two timestamps and two sets apart", () => {
     expect(
@@ -310,7 +310,7 @@ describe("YAML comparison", () => {
     );
   });
 
-  it("reads an unchanged timestamp or set as comment-only", () => {
+  it("treats an unchanged timestamp or set as comment-only", () => {
     expect(
       yamlVerdictOf(
         "a: !!timestamp 2001-12-14 # note\n",
@@ -420,12 +420,12 @@ describe("YAML comparison", () => {
     });
   });
 
-  it("reads adding or deleting a comment-only YAML file as comment-only", () => {
+  it("treats adding or deleting a comment-only YAML file as comment-only", () => {
     expect(yamlVerdictOf(null, "# only a comment\n")).toBe("comment-only");
     expect(yamlVerdictOf("# only a comment\n", null)).toBe("comment-only");
   });
 
-  it("reads adding or deleting a YAML file carrying a value as a content difference", () => {
+  it("treats adding or deleting a YAML file holding a value as a content difference", () => {
     expect(yamlVerdictOf(null, "a: 1\n")).toBe("executable-delta");
     expect(yamlVerdictOf("a: 1\n", null)).toBe("executable-delta");
   });
@@ -504,8 +504,8 @@ describe("diff status handling", () => {
   });
 
   it("fails a record shape it does not model closed, without desyncing the rest", () => {
-    // A bare name-status record and a combined-diff record: neither carries the
-    // modes the comparison needs, so neither may be read as a modelled entry.
+    // A bare name-status record and a combined-diff record: neither has the
+    // modes the comparison needs, so neither may be treated as a modelled entry.
     for (const unmodelled of [
       "M",
       "::100644 100644 100644 aaaaaaa bbbbbbb ccccccc MM",
@@ -646,7 +646,7 @@ function makeFixture() {
 
 // The `-z` records above are hand-written, which makes them a model of git's
 // output rather than a measurement of it. These drive real git instead, through
-// the same seam the CLI uses. The fixtures build their own repo rather than
+// the same boundary the CLI uses. The fixtures build their own repo rather than
 // naming a sha from this one: CI checks out with no `fetch-depth`, and in the
 // resulting shallow clone no historical sha resolves.
 describe("against a real git repository", () => {
@@ -717,7 +717,7 @@ describe("against a real git repository", () => {
       /after refers to itself/,
     );
     // Exit 1 is the documented unverifiable-path outcome; a throw escaping the
-    // run would surface as exit 2, the usage-or-git-error code.
+    // run would show up as exit 2, the usage-or-git-error code.
     expect(summarize(verdicts).exitCode).toBe(1);
   });
 
@@ -769,8 +769,8 @@ describe("against a real git repository", () => {
     chmod("src/tool.mjs", 0o755);
     const head = commit("Make it runnable");
 
-    // The premise of reading modes off `--raw`, measured rather than assumed:
-    // under `--name-status` this change carries no mode information at all, and
+    // The assumption of reading modes off `--raw`, measured rather than assumed:
+    // under `--name-status` this change has no mode information at all, and
     // the blobs it points at are the same one.
     expect(
       git(["diff", "--name-status", "--no-renames", "-z", attested, head]),
@@ -836,7 +836,7 @@ describe("against a real git repository", () => {
     });
   });
 
-  it("fails a chmod carried alongside a comment edit, which alone would hold", () => {
+  it("fails a chmod alongside a comment edit, which alone would hold", () => {
     const { git, write, chmod, commit } = makeFixture();
     write("src/both.ts", "export const a = 1;\n");
     const attested = commit("Base");
@@ -904,7 +904,7 @@ describe("against a real git repository", () => {
   // The base-sync route in `.claude/commands/assess-review.md` (Step 4) is about
   // what this verifier reports across a merge whose first parent is the attested
   // sha and whose second is the staging tip, so these build that merge with real
-  // git rather than reasoning about it. The attested-to-head diff carries the
+  // git rather than reasoning about it. The attested-to-head diff holds the
   // whole merged staging range, so the verdict follows what that range touched:
   // the merge is not itself a verdict.
   describe("across a real base-sync merge", () => {
@@ -914,7 +914,7 @@ describe("against a real git repository", () => {
 
     /**
      * A repository whose `staging` branch holds one base commit, with `branch`
-     * cut from it carrying one branch-authored commit -- the sha a round
+     * cut from it holding one branch-authored commit -- the sha a round
      * attested. `base` is the file content that commit starts from.
      */
     function branchCutFromStaging(base) {
@@ -1015,9 +1015,9 @@ describe("against a real git repository", () => {
       expect(conflicted.status).toBe(1);
       expect(conflicted.stdout).toMatch(/CONFLICT \(content\)/);
 
-      // Resolving is branch-authored change, and the resolution can carry a line
+      // Resolving is branch-authored change, and the resolution can include a line
       // neither side had. Here the merged range was itself only a comment, and
-      // the two-ref diff still reads the invented line.
+      // the two-ref diff still shows the invented line.
       write("src/shared.ts", "// the merged note\nexport const a = 2;\n");
       const head = commit("Resolve the conflict");
 

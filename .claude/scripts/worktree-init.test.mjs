@@ -15,8 +15,8 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 // worktree-init.sh decides what it does from what git and npm report, and CLAUDE.md
-// settles a question about an external tool by driving the tool. So each case here
-// builds a real repository in a temp directory -- a bare origin carrying main,
+// determines a question about an external tool by driving the tool. So each case here
+// builds a real repository in a temp directory -- a bare origin holding main,
 // staging and two branches past it, a primary clone with a real install, worktrees
 // cut from that clone -- and runs the script itself against it. The packages are
 // local tarballs packed by `npm pack`, so the suite needs no network and no
@@ -221,7 +221,7 @@ describe("the base a worktree starts on", () => {
     expect(head(tree)).toBe(before);
   }, 180_000);
 
-  it("names the stale base of a tree carrying a commit, and moves nothing", () => {
+  it("names the stale base of a tree holding a commit, and moves nothing", () => {
     const tree = worktree("committed", "origin/main");
     writeFileSync(join(tree, "work.txt"), "in flight\n");
     commitAll(tree, "Work in flight");

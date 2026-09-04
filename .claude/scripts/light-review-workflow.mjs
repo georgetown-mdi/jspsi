@@ -146,7 +146,7 @@ const ROLE_SCHEMA = {
 
 // The harness may hand a script its arguments as JSON text rather than as the
 // object the caller passed. Any other delivery -- an array, a bare scalar, null,
-// nothing at all -- carries no named field, and reading one off it yields
+// nothing at all -- has no named field, and reading one off it yields
 // undefined rather than failing, so the round would reach its agents with holes
 // where the caller's arguments belong. Resolving fails closed on it instead, and
 // `npm run check:workflow-args-resolve` holds every read of `args` in a
@@ -183,7 +183,7 @@ function resolveWorkflowArgs(delivered) {
 
 const input = resolveWorkflowArgs(args);
 
-// The ref under review. There is deliberately no default: a round that fell back
+// The ref under review. There is no default by design: a round that fell back
 // to HEAD would review whatever the CALLER's checkout happens to hold, which is
 // the false-scope bug the by-ref flow exists to close, and it would do it
 // silently. A caller that names no ref gets a thrown round instead.
@@ -223,7 +223,7 @@ const diffScope = `Generate the diff yourself with git diff "origin/staging...${
 Review the branch's own changes and nothing else. Anything attributable to staging advancing since the branch forked -- the branch's base or starting point moving, the "root" of the branch changing, upstream commits the branch has not yet absorbed -- is OUT OF SCOPE and not this branch's responsibility. Do not flag it, describe it, or even mention that the base moved; treat such material as invisible. If a hunk merely re-states upstream staging work rather than introducing new behavior authored on this branch, ignore it. Open another file only if a hunk cannot be judged without it.`;
 
 // Where the reviewer stands, and where anything it creates goes. Both halves are
-// load-bearing: a shell's working directory does not persist between an agent's
+// critical: a shell's working directory does not persist between an agent's
 // tool calls, so an unscoped command runs against whatever tree the harness
 // dropped it in; and a scratch file left in the tree under review wedges every
 // later round of that branch, because the clean-tree gate statuses that tree.

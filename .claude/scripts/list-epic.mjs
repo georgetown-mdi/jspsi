@@ -4,10 +4,10 @@
 // sorted by `Order`. Companion to fetch-issues.mjs and
 // edit-issue.mjs.
 //
-// Addressing a listed item, and seeing its Epic / Order, used to
-// require `gh project item-list` plus hand-decoding the PVTI_ node IDs it prints
+// Addressing a listed item, and seeing its Epic / Order, otherwise
+// requires `gh project item-list` plus hand-decoding the PVTI_ node IDs it prints
 // and guessing the camelized jq key names it derives (e.g. "Order"). This
-// script removes both: it pulls all items with their field values over
+// script avoids both: it pulls all items with their field values over
 // GraphQL, converts each node ID to a numeric ID via numericIdFromNodeId
 // (the inverse used by fetch/edit), and prints the numeric IDs so the output
 // pipes straight into fetch-issues.mjs / edit-issue.mjs.

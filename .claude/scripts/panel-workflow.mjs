@@ -35,7 +35,7 @@ const SCHEMA = {
 
 // The harness may hand a script its arguments as JSON text rather than as the
 // object the caller passed. Any other delivery -- an array, a bare scalar, null,
-// nothing at all -- carries no named field, and reading one off it yields
+// nothing at all -- has no named field, and reading one off it yields
 // undefined rather than failing, so the round would reach its agents with holes
 // where the caller's arguments belong. Resolving fails closed on it instead, and
 // `npm run check:workflow-args-resolve` holds every read of `args` in a

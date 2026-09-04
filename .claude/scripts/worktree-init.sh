@@ -24,8 +24,8 @@
 # onto origin/staging. A tree that does hold work is reported and provisioned where
 # it stands, never moved -- a branch that fell behind while staging moved is the
 # ordinary state of one, so a refusal there would fire on correct branches daily and
-# teach agents to skip the script. Set PSILINK_WORKTREE_BASE_REF to work
-# deliberately from another base. The check binds only a tree that runs this script.
+# teach agents to skip the script. Set PSILINK_WORKTREE_BASE_REF to work from
+# another base. The check binds only a tree that runs this script.
 #
 # The mirroring trick: external deps are shared from the primary by absolute
 # symlink, but a workspace package's own RELATIVE symlink (e.g. @psilink/core ->

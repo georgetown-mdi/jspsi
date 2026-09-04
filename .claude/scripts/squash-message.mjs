@@ -14,7 +14,7 @@
 // Usage:
 //   node squash-message.mjs <pr-number>
 //
-// A pull request carrying ONE commit is refused rather than drafted for: GitHub
+// A pull request holding ONE commit is refused rather than drafted for: GitHub
 // squash-merges it with that commit's own message, so a drafted one is discarded
 // on merge and the writing belongs in the commit instead. The count is `gh pr
 // view --json commits`, the list GitHub squashes, rather than a local revision
@@ -95,7 +95,7 @@ export function parsePrNumber(argv) {
   return Number.isInteger(number) && number > 0 ? number : null;
 }
 
-/** The `gh` argument vector that reports how many commits a pull request carries. */
+/** The `gh` argument vector that reports how many commits a pull request holds. */
 export function commitCountArgs(prNumber) {
   return [
     "pr",

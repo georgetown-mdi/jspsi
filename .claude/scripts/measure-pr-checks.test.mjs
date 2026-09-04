@@ -26,7 +26,7 @@ import {
   summarizeWorkflows,
 } from "./measure-pr-checks.mjs";
 
-/** A job as the normalized sample carries it. Minutes in, ISO timestamps out. */
+/** A job as the normalized sample holds it. Minutes in, ISO timestamps out. */
 function job(name, { queued, started, ran, conclusion = "success" }) {
   const startedAt = new Date(Date.parse(queued) + started * 1000).toISOString();
   return {
@@ -460,7 +460,7 @@ describe("summarizeSteps", () => {
     );
   });
 
-  it("returns nothing when the sample carries no step timings", () => {
+  it("returns nothing when the sample has no step timings", () => {
     expect(summarizeSteps(SAMPLE.shas.flatMap((s) => s.runs))).toEqual([]);
   });
 });
