@@ -11,7 +11,6 @@ import {
   parseWorkflow,
   readWorkflows,
   treeReferences,
-  usesValues,
   workflowDocument,
   workflowFiles,
 } from "./workflows.mjs";
@@ -71,14 +70,18 @@ runs:
   steps:
     - uses: actions/setup-node@v7
 `;
-    expect(usesValues(source)).toEqual([
-      "octo/repo/.github/workflows/reusable.yaml@v3",
-      "actions/checkout@v7",
-      "actions/setup-node@v7",
+    expect(fileReferences("wf.yaml", source)).toEqual([
+      {
+        file: "wf.yaml",
+        name: "octo/repo/.github/workflows/reusable.yaml",
+        ref: "v3",
+      },
+      { file: "wf.yaml", name: "actions/checkout", ref: "v7" },
+      { file: "wf.yaml", name: "actions/setup-node", ref: "v7" },
     ]);
   });
 
-  it("collects every uses: value, leaving the reference filter to decide", () => {
+  it("leaves out the local and docker references the filter names no action for", () => {
     const source = `jobs:
   build:
     steps:
@@ -86,7 +89,6 @@ runs:
       - uses: docker://alpine:3.20
       - uses: actions/checkout@v7
 `;
-    expect(usesValues(source)).toHaveLength(3);
     expect(fileReferences("wf.yaml", source)).toEqual([
       { file: "wf.yaml", name: "actions/checkout", ref: "v7" },
     ]);
@@ -147,9 +149,19 @@ describe("the parse", () => {
   it("reads a reference-shaped scalar the parser refuses as its own failure", () => {
     // A leading @ is a YAML reserved indicator, so a workflow can only hold
     // that shape quoted; the parser rejects the plain form outright.
-    expect(() =>
-      usesValues("jobs:\n  build:\n    steps:\n      - uses: @v7\n"),
-    ).toThrow(/cannot start with reserved character @/);
+    let thrown;
+    try {
+      fileReferences(
+        "wf.yaml",
+        "jobs:\n  build:\n    steps:\n      - uses: @v7\n",
+      );
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown?.message).toMatch(/wf\.yaml: could not be parsed as YAML/);
+    expect(thrown?.cause?.message).toMatch(
+      /cannot start with reserved character @/,
+    );
   });
 });
 

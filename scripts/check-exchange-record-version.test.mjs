@@ -471,6 +471,27 @@ describe("the check as CI runs it", () => {
     expect(stderr).toContain("extraction pattern rotted");
   });
 
+  it("reports the missing recovery entry points beside a literal it cannot read", () => {
+    // The recovery rule reads the recovery sources and not the literal, so a
+    // tree that lost both gets both reports in one run: whoever fixes the
+    // extraction pattern would otherwise meet the second failure only on the
+    // next run.
+    const [omitted] = Object.keys(RECOVERY_ENTRY_POINTS);
+    const { status, stderr } = runCheck(
+      fixtureTree({
+        recordSource:
+          "export const EXCHANGE_RECORD_VERSION = RECORD_VERSIONS.current;\n",
+        omitRecovery: omitted,
+      }),
+    );
+
+    expect(status).toBe(1);
+    expect(stderr).toContain("extraction pattern rotted");
+    expect(stderr).toContain("nothing to defer to");
+    for (const name of RECOVERY_ENTRY_POINTS[omitted])
+      expect(stderr).toContain(`${omitted}: "${name}"`);
+  });
+
   it("refuses a --root it was handed no value for", () => {
     const { status } = (() => {
       try {

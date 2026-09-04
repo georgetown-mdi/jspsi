@@ -58,7 +58,7 @@ import {
   WORKFLOW_DIR,
   parseWorkflow,
   readWorkflows,
-  workflowSource,
+  workflowDocument,
 } from "./lib/workflows.mjs";
 
 /** The branches whose rulesets carry the merge gate. */
@@ -318,7 +318,7 @@ export function pathFilterViolations(root, files = GATING_WORKFLOWS) {
       continue;
     }
     const { declared, filters } = pullRequestTrigger(
-      parseWorkflow(file, workflowSource(root, file)),
+      workflowDocument(root, file),
     );
     if (!declared) {
       violations.push(

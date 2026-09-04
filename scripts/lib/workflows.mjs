@@ -2,14 +2,9 @@
 // listings, the source reads, the parse, and the `uses:` extraction over a
 // parsed document.
 //
-// Five checks and the CI path-filter guard stand on it:
-// check-action-pin-drift.mjs and check-dependabot-ignore-shape.mjs over both
-// trees' `uses:` pins, check-merge-gate-identities.mjs over every workflow's
-// jobs and triggers, check-release-signing.mjs over the one that signs a
-// release, and check-deploy-trigger-graph.mjs and ci-path-filters.test.mjs over
-// the deploy filter. A change to what counts as a workflow file, to the order
-// the tree is read in, or to what a parse failure says is one edit here rather
-// than one per check.
+// Every check and test that reads that tree stands on it, so a change to what
+// counts as a workflow file, to the order the tree is read in, or to what a
+// parse failure says is one edit here rather than one per reader.
 //
 // The parse is the `yaml` package's, which reads the YAML 1.2 core schema: the
 // `on` key stays the string `on` rather than folding to the boolean a YAML 1.1
@@ -74,11 +69,6 @@ export function compositeFiles(root) {
   return files;
 }
 
-/** One file's source, by its repo-relative path. */
-export function workflowSource(root, path) {
-  return read(root, path);
-}
-
 /** Every workflow under `root` as `{path, source}`, in path order. */
 export function readWorkflows(root) {
   return workflowFiles(root).map((path) => ({
@@ -124,11 +114,6 @@ function usesInDocument(document) {
   };
   walk(document);
   return found;
-}
-
-/** Every `uses:` string a YAML source holds, in document order. */
-export function usesValues(source) {
-  return usesInDocument(parse(source));
 }
 
 /**

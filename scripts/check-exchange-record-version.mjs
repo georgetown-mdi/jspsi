@@ -208,13 +208,22 @@ export function bumpViolations(declared, sources) {
       ].join("\n"),
     });
   }
-  for (const { file, name } of missingRecoveryEntryPoints(sources)) {
-    violations.push({
-      kind: "recovery",
-      message: `${file}: "${name}" is no longer exported. This check defers a version-bump decision to the recovery path from a version-invalidated accounting of disclosures; without that entry point there is nothing to defer to, and a bump would strand every stored accounting with no way out. Restore it, or retire this rule along with the obligation it carries.`,
-    });
-  }
+  violations.push(...recoveryViolations(sources));
   return violations;
+}
+
+/**
+ * The reasons there is nothing left for rule 1 to defer to, as
+ * `{kind, message}`; empty when every entry point is exported from the file
+ * that should carry it. It reads the recovery sources and nothing else, so an
+ * input the other rules cannot read does not withhold it: a tree that lost both
+ * reports both.
+ */
+export function recoveryViolations(sources) {
+  return missingRecoveryEntryPoints(sources).map(({ file, name }) => ({
+    kind: "recovery",
+    message: `${file}: "${name}" is no longer exported. This check defers a version-bump decision to the recovery path from a version-invalidated accounting of disclosures; without that entry point there is nothing to defer to, and a bump would strand every stored accounting with no way out. Restore it, or retire this rule along with the obligation it carries.`,
+  }));
 }
 
 /**
@@ -300,7 +309,8 @@ export function resetViolations({
  * Read the tree at `root` and report what both rules hold there, as
  * `{published, releaseVersion, declared, takenAtRelease, violations, blocked}`.
  * `blocked` carries the reasons an input could not be read at all, which fail
- * rather than passing as inert.
+ * rather than passing as inert. A blocked run still reports the recovery
+ * violations, which rest on no input it is blocked on.
  */
 export function inspect(root) {
   const read = (relative) => readFileSync(resolve(root, relative), "utf8");
@@ -350,7 +360,7 @@ export function inspect(root) {
             takenAtRelease: RESET_TAKEN_AT_RELEASE,
           }),
         ]
-      : [];
+      : recoveryViolations(sources);
 
   return {
     published,
@@ -369,8 +379,9 @@ const LABEL = "Exchange record version check";
 // functions without the process.exit.
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const report = inspect(obligationRoot(process.argv.slice(2), CHECK_SOURCE));
-  if (reportBlocked(LABEL, report.blocked)) process.exit(1);
-  if (reportViolations(LABEL, report.violations)) process.exit(1);
+  const blocked = reportBlocked(LABEL, report.blocked);
+  const failed = reportViolations(LABEL, report.violations);
+  if (blocked || failed) process.exit(1);
 
   console.log(
     `check-exchange-record-version: EXCHANGE_RECORD_VERSION stands at "${RECORD_VERSION_PIN}", and the recovery path from a version-invalidated accounting is in place.`,
