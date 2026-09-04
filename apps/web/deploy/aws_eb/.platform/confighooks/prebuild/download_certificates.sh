@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 # Installs the TLS certificate that .platform/nginx/conf.d/https.conf serves
 # from /etc/pki/tls/certs.
 #
