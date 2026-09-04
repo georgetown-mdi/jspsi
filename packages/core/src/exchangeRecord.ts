@@ -243,7 +243,7 @@ export async function computeTermsHash(
  * payload sent and the partner payload received are always present (committing
  * to a no-data payload is a valid attestation); the association table is present
  * only when this party holds it (it received output). */
-export interface ExchangeRecordCommitments {
+interface ExchangeRecordCommitments {
   localPayloadSent: string;
   partnerPayloadReceived: string;
   associationTable?: string;
@@ -254,7 +254,7 @@ export interface ExchangeRecordCommitments {
  * mirrors a linkage-terms payload column but is owned by the record format (like
  * {@link CommittedPayload}), so a change to the config type cannot silently move
  * this version-frozen on-disk format. */
-export interface RecordPayloadColumn {
+interface RecordPayloadColumn {
   name: string;
   /** Optional data-dictionary description. Unlike the name, a description is NOT
    * cross-party validated at exchange time, so the two parties' records may
@@ -266,7 +266,7 @@ export interface RecordPayloadColumn {
  * terms. A single shared reference: the two parties' agreement reference,
  * purpose, and expiration are required to match at exchange time, so the record
  * stores one authority for the disclosure rather than two. */
-export interface RecordLegalAgreement {
+interface RecordLegalAgreement {
   /** Human-readable agreement identifier (e.g. "MOU-2025-0042"). */
   reference: string;
   /** Readable statement of the purpose/authority for this disclosure under the
@@ -286,7 +286,7 @@ export interface RecordLegalAgreement {
  * so it is the stable anchor for tracing the basis back through standardization to
  * the data; the `type` is the human-legible PII category. Both are mutually
  * validated identical across parties at exchange time. */
-export interface RecordLinkageField {
+interface RecordLinkageField {
   /** Standardized linkage-field name (not the raw source column). */
   name: string;
   /** Semantic PII type (e.g. "last_name", "date_of_birth", "ssn4"). */
@@ -353,7 +353,7 @@ export interface RecordLinkageRuleSet {
  * three values are spelled out here rather than imported from the checker, so a
  * verdict added to the core union stops compiling against this version-frozen
  * on-disk format instead of silently entering it. */
-export interface RecordLinkageRuleSetVerdict {
+interface RecordLinkageRuleSetVerdict {
   /** Verdict on the set the linkage fields were cited to. */
   fieldSet: "consistent" | "contradicted" | "unchecked";
   /** Verdict on the set the linkage keys were cited to. */
@@ -375,7 +375,7 @@ export interface RecordLinkageRuleSetVerdict {
  * exception of a column's free-text {@link RecordPayloadColumn.description}, which
  * is not cross-party validated.
  */
-export interface ExchangeRecordGovernance {
+interface ExchangeRecordGovernance {
   /** The matching algorithm: `psi` revealed matched identifiers, `psi-c` revealed
    * only a count -- i.e. whether identifiers or only a count were disclosed. */
   algorithm: Algorithm;
@@ -550,7 +550,7 @@ export interface ExchangeRecord {
  * commitments. Each salt is the secret HMAC key for its commitment; the local
  * payload sent and partner payload received are always present, the association
  * table only when this party committed it. */
-export interface CommitmentSalts {
+interface CommitmentSalts {
   /** Base64url per-commitment salt (>= 128 bits). */
   localPayloadSent: string;
   partnerPayloadReceived: string;
@@ -1204,7 +1204,7 @@ export function parseVerificationKeys(raw: unknown): VerificationKeys {
 /** Per-commitment verdicts from {@link verifyRecordCommitments}, keyed by
  * {@link CommitmentName}. A commitment is valid when its salt and the re-supplied
  * data recompute to the stored value. */
-export type RecordCommitmentVerdicts = Partial<Record<CommitmentName, boolean>>;
+type RecordCommitmentVerdicts = Partial<Record<CommitmentName, boolean>>;
 
 /**
  * Verify that every commitment present in `record` opens against the salt in

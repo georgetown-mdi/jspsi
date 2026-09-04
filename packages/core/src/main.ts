@@ -1,20 +1,77 @@
-export * from "./errors";
-export * from "./participant";
-export * from "./psiBackend";
-export * from "./psiEngine";
-export * from "./psiWorkerEngine";
-export * from "./link";
-export * from "./protocolSetup";
-export * from "./types";
-export * from "./connection/fileSyncConnection";
+export {
+  DirectoryListingBoundsError,
+  FrameSizeExceededError,
+  InternalConsistencyError,
+  LinkageTermsUnsatisfiableError,
+  OperatorConfigError,
+  OutboundDisclosureRefusalError,
+  PeerAbortError,
+  StandardizationTermsError,
+  TransportOperationStalledError,
+  TransportPublishIndeterminateError,
+  UnknownStandardizationFunctionError,
+  UsageError,
+  causeChainSome,
+  chainDetailCauses,
+  isPeerWaitTimeout,
+} from "./errors";
+export { PSIParticipant, ProcessState } from "./participant";
+export { loadPsiBackend } from "./psiBackend";
+export type { PsiBackendOptions, PsiBackendSelection } from "./psiBackend";
+export { InProcessPsiEngine } from "./psiEngine";
+export type { PsiEngine, PsiEngineMode } from "./psiEngine";
+export { WorkerPsiEngine, servePsiWorker } from "./psiWorkerEngine";
+export type {
+  PsiWorkerHandle,
+  PsiWorkerInit,
+  PsiWorkerRequest,
+  PsiWorkerResponse,
+} from "./psiWorkerEngine";
+export { linkViaSinglePassPSI } from "./link";
+
+export { AlgorithmSchema, SEMANTIC_TYPES } from "./types";
+export type {
+  Algorithm,
+  AssociationTable,
+  HandshakeRole,
+  SemanticType,
+} from "./types";
+export {
+  DEFAULT_PEER_TIMEOUT_MS,
+  DEFAULT_POLLING_FREQUENCY_MS,
+  FileSyncConnection,
+  MESSAGE_ENVELOPE_VERSION,
+  MESSAGE_HEADER_BYTES,
+  MESSAGE_TYPE_BINARY,
+  TERMINAL_FRAME_DRAIN_TIMEOUT_MS,
+  normalizeFiledropPath,
+} from "./connection/fileSyncConnection";
+export type {
+  FileInfo,
+  FileTransportClient,
+  GetOptions,
+  PresentedHostKey,
+  PutOptions,
+  PutSource,
+} from "./connection/fileSyncConnection";
 // The filename grammar module is not barrelled (see its header); this one
 // recognizer is named individually because a FileTransportClient implementation
 // outside this package needs it -- the CLI's SFTP adapter decides from it
 // whether a path handed to safeDelete is the protocol's own in-flight temp
 // write.
 export { isProtocolTempName } from "./connection/fileSyncNames";
-export type { HelloEnvelope } from "./connection/controlEnvelope";
-export * from "./connection/messageConnection";
+export {
+  ConnectionError,
+  QueuedMessageConnection,
+  asConnectionError,
+  createMessagePipe,
+  errorMessage,
+  fromEventConnection,
+} from "./connection/messageConnection";
+export type {
+  ConnectionErrorKind,
+  MessageConnection,
+} from "./connection/messageConnection";
 export {
   EncryptedMessageConnection,
   AEAD_ENVELOPE_VERSION,
@@ -23,12 +80,23 @@ export {
 // because the enforcement point is per-transport and lives outside this package
 // (the web app's PeerJS reassembly wrapper), while the constants and the
 // structural pre-scan they parameterize must stay one implementation.
-export * from "./connection/binaryPackBounds";
+export {
+  MAX_CHUNKS_PER_REASSEMBLY,
+  MAX_CONCURRENT_REASSEMBLIES,
+  MAX_WEBRTC_FRAME_BYTES,
+  MAX_WEBRTC_FRAME_STRUCTURE_BYTES,
+  MAX_WEBRTC_REASSEMBLY_DEPTH,
+  MAX_WEBRTC_STRING_BYTES,
+  MIN_CHUNK_RESIDENT_BYTES,
+  WEBRTC_VALUE_WEIGHTS,
+  describeFrameStructureRefusal,
+  scanFrameStructure,
+} from "./connection/binaryPackBounds";
+export type { FrameStructureRefusal } from "./connection/binaryPackBounds";
 export {
   getLogger,
   getLoggerForVerbosity,
   setLogLevel,
-  setLogPrefixer,
   setDiagnosticSink,
   getDiagnosticSink,
 } from "./utils/logger";
@@ -39,7 +107,7 @@ export { retryPromise, withTimeout, TimeoutError } from "./utils/promise";
 // reads JSON text off a socket the signaling server and the remote peer both
 // feed -- and that parse must be the same structurally-bounded one, not a second
 // implementation of it (CONTRIBUTING.md, Untrusted-JSON parsing).
-export { parseBoundedJson, JsonStructureBoundError } from "./utils/boundedJson";
+export { parseBoundedJson } from "./utils/boundedJson";
 // The split-directory distinctness comparison. Barrelled because the console
 // decides, ahead of a mint, whether the two rendezvous locators it would put on an
 // invitation endpoint are distinct -- and that verdict has to be the one core's own
@@ -69,7 +137,6 @@ export {
 export {
   canonicalString,
   canonicalBytes,
-  safeIntegerSchema,
   CanonicalEncodingError,
 } from "./utils/canonical";
 export type { CanonicalValue } from "./utils/canonical";
@@ -86,10 +153,7 @@ export {
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
   WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
 } from "./utils/sanitizeForDisplay";
-export type {
-  Displayable,
-  SanitizeForDisplayOptions,
-} from "./utils/sanitizeForDisplay";
+export type { Displayable } from "./utils/sanitizeForDisplay";
 export {
   sanitizeErrorForDisplay,
   sanitizeErrorChainLinks,
@@ -115,24 +179,189 @@ export {
 export type { CompatibilityMessageFragment } from "./config/compatibilityMessage";
 export { reconcileHostKeyFingerprints } from "./hostKeyReconciliation";
 export { describeDecodeError } from "./utils/describeDecodeError";
-export { compileLinearRegex } from "./utils/linearRegex";
-export type { CompiledLinearRegex } from "./utils/linearRegex";
 
-export * from "./config/standardization";
-export * from "./config/connection";
-export * from "./defaults/linkageTerms";
-export * from "./defaults/standardization";
-export * from "./config/exchangeSpec";
-export * from "./config/linkageTerms";
-export * from "./config/invitation";
-export * from "./config/endpointProducer";
-export * from "./config/exchangeFile";
-export * from "./config/metadata";
-export * from "./config/outboundPayloadConsent";
-export * from "./config/signing";
-export * from "./signingIdentity";
-export * from "./standardization";
-export * from "./fuzzyComparisons";
+export { StandardizationSchema } from "./config/standardization";
+export type {
+  Standardization,
+  StandardizationStep,
+} from "./config/standardization";
+export {
+  CONNECTION_PER_POLL_SHORT_INTERVAL_WARN_MS,
+  ConnectionConfigSchema,
+  DEFAULT_MAX_RECONNECT_ATTEMPTS,
+  DEFAULT_SERVER_CONNECT_TIMEOUT_MS,
+  HOST_KEY_FINGERPRINT_REGEX,
+  LOW_POLLING_FREQUENCY_WARN_MS,
+  MAX_RECONNECT_ATTEMPTS,
+  MAX_TIMEOUT_SECONDS,
+  MAX_TOKEN_MAX_AGE_DAYS,
+  SHARED_SECRET_REGEX,
+  generateSharedSecret,
+  safeParseConnectionConfig,
+  safeParseFileSyncOptions,
+  withRetainModeImplications,
+} from "./config/connection";
+export type {
+  Authentication,
+  ConnectionConfig,
+  FileDropConnectionConfig,
+  FileSyncOptions,
+  HttpAuth,
+  SFTPConnectionConfig,
+  WebRTCConnectionConfig,
+} from "./config/connection";
+export {
+  DEFAULT_LINKAGE_KEY_SET_NAME,
+  DEFAULT_LINKAGE_RULE_SET,
+  OPT_IN_LINKAGE_FIELD_TYPES,
+  authoredLinkageFields,
+  encodeForComparison,
+  getDefaultLinkageTerms,
+  isDrawnFromLinkageRuleSet,
+  isOptInLinkageKey,
+  linkageRuleSetReferenceFor,
+  optInLinkageKeys,
+} from "./defaults/linkageTerms";
+export type {
+  BuiltInLinkageRuleSet,
+  LinkageRuleSetCitationVerdict,
+} from "./defaults/linkageTerms";
+export { getDefaultStandardization } from "./defaults/standardization";
+export {
+  ExchangeSpecSchema,
+  parseExchangeSpec,
+  safeParseExchangeSpec,
+} from "./config/exchangeSpec";
+export type { ExchangeSpec } from "./config/exchangeSpec";
+export {
+  DEDUPLICATE_IMPLEMENTED_BY_STRATEGY,
+  LinkageStrategySchema,
+  LinkageTermsSchema,
+  MAX_NAME_LENGTH,
+  MAX_PAYLOAD_ENTRIES,
+  MAX_TEXT_LENGTH,
+  MAX_TRANSFORM_PATTERN_LENGTH,
+  TEXT_CONTROL_CHAR_MESSAGE,
+  TEXT_CONTROL_CHAR_PATTERN,
+  assertDeduplicateImplemented,
+  countOnlyShapeViolation,
+  deriveAcceptedLinkageTerms,
+  referencedLinkageFieldNames,
+  safeParseLinkageTerms,
+  swapPairTransformsDiffer,
+  validateCompatibility,
+} from "./config/linkageTerms";
+export type {
+  CountOnlyShapeViolation,
+  LinkageField,
+  LinkageKey,
+  LinkageKeyElement,
+  LinkageRuleSetReference,
+  LinkageSetIdentity,
+  LinkageStrategy,
+  LinkageTerms,
+  Output,
+  Payload,
+  TransformStep,
+} from "./config/linkageTerms";
+export {
+  INVITATION_LIFETIME_SECONDS,
+  MAX_ENDPOINT_HOST_LENGTH,
+  MAX_ENDPOINT_PATH_LENGTH,
+  MAX_INVITATION_LIFETIME_SECONDS,
+  MAX_RAW_INVITATION_LENGTH,
+  decodeInvitation,
+  encodeInvitation,
+  endpointRequiresRetainedFiles,
+  hasExpiryInstantPassed,
+  isInvitationExpired,
+  stripInvitationWhitespace,
+} from "./config/invitation";
+export type {
+  ConnectionEndpoint,
+  FileDropEndpoint,
+  InvitationToken,
+  SFTPEndpoint,
+  WebRTCEndpoint,
+} from "./config/invitation";
+export {
+  PLACEHOLDER_SFTP_HOST,
+  PLACEHOLDER_SSH_USERNAME,
+  endpointFromConnection,
+} from "./config/endpointProducer";
+export type { EndpointSourceConnectionConfig } from "./config/endpointProducer";
+export {
+  assembleExchangeSpec,
+  connectionFromLocator,
+  mintExchangeFile,
+} from "./config/exchangeFile";
+export type {
+  ExchangeFileConnection,
+  ExchangeFileInput,
+  ExchangeLocator,
+  WebRTCExchangeLocator,
+} from "./config/exchangeFile";
+export {
+  MetadataSchema,
+  assertCountOnlyTransmitsNoColumn,
+  countOnlyTransmitsColumn,
+  disclosedColumnNames,
+  inferMetadata,
+  isDisclosedToPartner,
+  overlongDisclosedColumnPositions,
+  safeParseMetadata,
+} from "./config/metadata";
+export type { ColumnMetadata, Metadata } from "./config/metadata";
+export type { OutboundPayloadConsent } from "./config/outboundPayloadConsent";
+export { FINGERPRINT_REGEX } from "./config/signing";
+export type { SigningConfig } from "./config/signing";
+export {
+  SIGNING_CERTIFICATE_VERSION,
+  SIGNING_IDENTITY_VERSION,
+  certificateAuthorizesIdentity,
+  computeCertificateFingerprint,
+  generateSigningIdentity,
+  parseCertificate,
+  parseSigningIdentity,
+  serializeCertificate,
+  serializeSigningIdentity,
+  verifyCertificateSelfSignature,
+} from "./signingIdentity";
+export type {
+  CertificateBody,
+  P256PrivateJwk,
+  SigningCertificate,
+  SigningIdentity,
+} from "./signingIdentity";
+export {
+  FAN_OUT_FUNCTION_NAMES,
+  STANDARDIZATION_FUNCTION_DESCRIPTORS,
+  STANDARDIZATION_FUNCTION_NAMES,
+  StandardizedDataset,
+  StandardizedField,
+  assertFanOutImplemented,
+  assertStandardizationMatchesTerms,
+  assessLinkageSatisfiability,
+  buildKeyStrings,
+  buildStandardizedDataset,
+  checkValueConstraints,
+  coalesceSubstitutesConstant,
+  decideLinkageTermsVerdict,
+  pipelineAlwaysDrops,
+  runPipeline,
+  stepCanEmptyRealizedValue,
+  summarizeDatasetConstraintViolations,
+  summarizeLinkageShortfall,
+  validateStandardizationAgainstTerms,
+} from "./standardization";
+export type {
+  FieldValue,
+  LinkageKeyFitness,
+  LinkageTermsStanding,
+  LinkageTermsVerdict,
+  StandardizationFunctionDescriptor,
+} from "./standardization";
+
 // The one display model both acceptance surfaces render the inviter's proposed
 // terms from -- the web consent screen and the CLI accept prompt -- so the
 // judgment of what an acceptor is consenting to, and the escaping of every
@@ -142,15 +371,9 @@ export {
   TRANSFORM_FUNCTION_GLOSSARY,
 } from "./invitationSummary.js";
 export type {
-  InvitationFieldSummary,
-  InvitationKeyElementSummary,
   InvitationKeySummary,
-  InvitationLegalAgreementSummary,
-  InvitationPayloadSummary,
-  InvitationRuleSetIdentitySummary,
   InvitationRuleSetSummary,
   InvitationSummary,
-  InvitationTransformSummary,
 } from "./invitationSummary.js";
 // The classification and caveat copy that go with that display model: whether a
 // fact the acceptance surfaces state is enforced by the exchange or rests on the
@@ -170,12 +393,7 @@ export {
   distinctLinkageRuleSetVerdicts,
   linkageRuleSetVerdictNote,
 } from "./consentFacts.js";
-export type {
-  ConsentFact,
-  ConsentFactBasis,
-  ConsentFactId,
-  LinkageRuleSetVerdictReader,
-} from "./consentFacts.js";
+export type { ConsentFact, ConsentFactId } from "./consentFacts.js";
 // The count every acceptance surface paints a partner-declared name list under,
 // and the sentence a bounded list closes on: one cut and one wording across the
 // CLI accept prompt and the two web surfaces.
@@ -189,7 +407,6 @@ export {
 export { APPLIED_SETTINGS } from "./appliedSettings.js";
 export {
   loadCSVFile,
-  loadCSVColumnSample,
   streamCSVRows,
   readRowColumn,
   CSV_LINE_BYTE_CEILING,
@@ -201,7 +418,6 @@ export {
   inferDateInputFormatFromSource,
   inferDateOfBirthColumn,
 } from "./inferDateInputFormat";
-export type { InferredDateInputFormat } from "./inferDateInputFormat";
 
 export {
   inferDateFormat,
@@ -212,25 +428,129 @@ export {
   computeHostKeyFingerprint,
   keyTypeFromBlob,
 } from "./utils/sshHostKey.js";
-export * from "./exchange";
-export * from "./pairTableProjection";
-export * from "./exchangeRecord";
-export * from "./partyIdentityDisplay";
-export * from "./signedReceipt";
-export * from "./recordVerification";
-export * from "./signedReceiptVerification";
-export * from "./payloadExchange";
+export {
+  CONFIRMING_PROTOCOL_STAGE_ID,
+  InvitationTermDivergenceError,
+  assertAlgorithmImplemented,
+  assertLocalCertificateAuthorizesAgreedIdentity,
+  assertSigningModeImplemented,
+  countIsPartnerReported,
+  describeExchangeStages,
+  exchangeRecordFromFailure,
+  exchangeRecordOwedButUnbuilt,
+  matchedPairCount,
+  prepareForExchange,
+  resolveExchangeInputs,
+  runExchange,
+} from "./exchange";
+export type {
+  ExchangeBootstrapResult,
+  ExchangeDataSpec,
+  ExchangeResult,
+  ExchangeStageDefinition,
+  PreparedExchange,
+  RunExchangeOptions,
+} from "./exchange";
+export { describeResolvedRunShape } from "./pairTableProjection";
+export type { ResolvedRunShape } from "./pairTableProjection";
+export {
+  EXCHANGE_KEYS_VERSION,
+  EXCHANGE_RECORD_OUTCOMES,
+  EXCHANGE_RECORD_VERSION,
+  buildExchangeRecord,
+  computeTermsHash,
+  parseExchangeRecord,
+  parseVerificationKeys,
+  serializeExchangeRecord,
+  serializeVerificationKeys,
+  verifyRecordCommitments,
+} from "./exchangeRecord";
+export type {
+  BuiltExchangeRecord,
+  CommitmentName,
+  CommittedPayload,
+  ExchangeRecord,
+  ExchangeRecordInputs,
+  ExchangeRecordOutcome,
+  RecordLinkageRuleSet,
+  VerificationKeys,
+} from "./exchangeRecord";
+export {
+  UNNAMED_PARTY_LABEL,
+  displayPartyIdentity,
+  redactAndDisplayPartyIdentity,
+} from "./partyIdentityDisplay";
+export {
+  ReceiptVerificationError,
+  SIGNED_RECEIPT_VERSION,
+  deriveReceiptBinder,
+  parseDualSignedRecord,
+  serializeDualSignedRecord,
+  signReceiptContent,
+  verifyReceiptSignature,
+} from "./signedReceipt";
+export type { DualSignedRecord, ReceiptContent } from "./signedReceipt";
+export {
+  deriveOurIdColumn,
+  reconstructCommittedData,
+  recordAlterationIsTheOnlyExplanation,
+  recordedVersionMatches,
+  reproductionMismatchCauses,
+  toRetainedResult,
+  verifyExchangeRecord,
+} from "./recordVerification";
+export type {
+  CommitmentStatus,
+  RecordVerificationReport,
+  ResultSizeStatus,
+  TermsHashStatus,
+} from "./recordVerification";
+export {
+  decideSignedReceiptVerdict,
+  verifyDualSignedRecord,
+} from "./signedReceiptVerification";
+export type {
+  AnchoredCertificateSlot,
+  AnchoredCertificateStatus,
+  AssertedIdentityStatus,
+  CertificateBindingStatus,
+  DualSignedRecordVerificationInputs,
+  DualSignedRecordVerificationReport,
+  LocalIdentityAnchor,
+  LocalIdentitySource,
+  ReceiptSignatureStatus,
+  RunBindingStatus,
+  SignedReceiptPartyReport,
+  SignedReceiptVerdictAnchor,
+  SignedReceiptVerdictCheck,
+  SignedReceiptVerdictGuidance,
+  SignedReceiptVerdictHeadline,
+  SignedReceiptVerdictParty,
+  SignedReceiptVerdictRunBinding,
+  UnanchoredCertificateClause,
+} from "./signedReceiptVerification";
+export {
+  assertDisclosedNamesCarriable,
+  assertPayloadSendDisclosed,
+  assessOutboundPayloadConsent,
+  buildOutputTable,
+  deriveOutboundPayloadConsent,
+  outboundPayloadConsentRefusal,
+  preparePayload,
+  reconcileReceivedPayload,
+  toCommittedPayload,
+} from "./payloadExchange";
+export type {
+  OutboundPayloadConsentConfirmationRequired,
+  PartnerPayload,
+} from "./payloadExchange";
 export {
   authenticateConnection,
   assertSharedSecretReadyForHandshake,
-  deriveAeadKey,
-  AEAD_CONTEXTS,
   deriveAbortToken,
-  ABORT_TOKEN_ROLES,
 } from "./auth";
-export type { AuthResult, AeadContext, AbortTokenRole } from "./auth";
+export type { AuthResult } from "./auth";
 export { runKex } from "./kex";
-export type { KexResult } from "./kex";
 export { deriveRendezvousPeerId, RENDEZVOUS_ROLES } from "./rendezvous";
 export type { RendezvousRole } from "./rendezvous";
 // The shared chokepoint for parsing config/credential documents that may hold

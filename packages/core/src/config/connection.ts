@@ -41,7 +41,7 @@ const HttpAuthSchema: z.ZodType<HttpAuth> = z
  * exchange begins. See EXCHANGE_REFERENCE.md section connection.server for lifecycle vs.
  * address-returning provisioning semantics.
  */
-export interface ServerProvision {
+interface ServerProvision {
   host: string;
   port?: number;
   path?: string;
@@ -58,7 +58,7 @@ const ServerProvisionSchema: z.ZodType<ServerProvision> = z.object({
 // --- Servers -----------------------------------------------------------------
 
 /** PeerJS peer-coordination server for a WebRTC exchange. */
-export interface WebRTCServer {
+interface WebRTCServer {
   host: string;
   port?: number;
   /** URL path for WebRTC signaling. */
@@ -107,7 +107,7 @@ export const HOST_KEY_FINGERPRINT_REGEX =
  * (`password` or `privateKey`) may be specified. `privateKeyPassphrase` is a
  * companion to `privateKey` and is invalid without it.
  */
-export interface SFTPServer {
+interface SFTPServer {
   host: string;
   port?: number;
   /** Remote working directory (shared mode). */
@@ -426,7 +426,7 @@ export const AuthenticationSchema: z.ZodType<Authentication> = z.strictObject({
  * A TURN server used when a direct peer-to-peer connection cannot be
  * established.
  */
-export interface TurnServer {
+interface TurnServer {
   /** TURN server URI (`turn:` or `turns:`). */
   url: string;
   username: string;
@@ -450,7 +450,7 @@ const TurnServerSchema: z.ZodType<TurnServer> = z.object({
  * A provisioning endpoint returning a combined set of ICE servers (STUN +
  * TURN) for the current exchange. Mutually exclusive with `stun` and `turn`.
  */
-export interface IceProvision {
+interface IceProvision {
   host: string;
   port?: number;
   path?: string;
@@ -472,7 +472,7 @@ const IceProvisionSchema: z.ZodType<IceProvision> = z.object({
  * The two parties' configs may therefore differ here even when connecting to
  * the same server.
  */
-export interface SFTPProxy {
+interface SFTPProxy {
   host: string;
   port?: number;
   path?: string;
@@ -491,7 +491,7 @@ const SFTPProxySchema: z.ZodType<SFTPProxy> = z.object({
 /**
  * Channel-agnostic tuning parameters shared by all connection types.
  */
-export interface SharedOptions {
+interface SharedOptions {
   /**
    * Total milliseconds to wait for the partner before giving up; default:
    * 3600000. Must be a positive integer: it is the per-await peer-inactivity
@@ -1160,21 +1160,11 @@ export function safeParseConnectionConfig(raw: unknown) {
 }
 
 /**
- * Parse and validate a raw value as {@link FileSyncOptions}.
+ * Parse and validate a raw value as {@link FileSyncOptions}, without throwing.
  * Snake_case keys are converted to camelCase before validation; already-
  * camelCase objects (e.g. from {@link applyConnectionOverrides}) are accepted
- * unchanged.
- *
- * @throws {ZodError} if validation fails.
- */
-export function parseFileSyncOptions(raw: unknown): FileSyncOptions {
-  return FileSyncOptionsSchema.parse(camelizeKeys(raw));
-}
-
-/**
- * Non-throwing version of {@link parseFileSyncOptions}. Honors the "safe"
- * contract for the {@link camelizeKeys} bounds too -- see
- * {@link safeParseCamelized}.
+ * unchanged. Honors the "safe" contract for the {@link camelizeKeys} bounds too
+ * -- see {@link safeParseCamelized}.
  */
 export function safeParseFileSyncOptions(raw: unknown) {
   return safeParseCamelized(FileSyncOptionsSchema, raw);

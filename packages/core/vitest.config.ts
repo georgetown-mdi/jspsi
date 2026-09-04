@@ -5,8 +5,9 @@ export default defineConfig({
     // Run-level, not per-project: the reporter names every skipped test at the
     // end of the run, so a leg that quietly stopped running is visible rather
     // than folded into a count, for every project below and every one added
-    // later. No dist guard beside it -- `pretest` rebuilds, and these suites
-    // import src rather than the built package.
+    // later. No dist guard beside it -- `pretest` rebuilds, these suites import
+    // src rather than the built package, and the one that reads the built
+    // package guards its own freshness.
     reporters: ["default", "../../scripts/lib/skippedLegReporter.mjs"],
     // Coverage is an informational REPORT, produced on demand by `npm run
     // coverage` (see package.json), never a gate: there is deliberately NO

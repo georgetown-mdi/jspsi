@@ -37,13 +37,13 @@ import type { Algorithm, SemanticType } from "../types";
  * is transmitted -- but each axis is opted into explicitly; neither implies the
  * other.
  */
-export const ColumnRoleSchema = z.enum([
+const ColumnRoleSchema = z.enum([
   "linkage",
   "identifier",
   "payload",
   "ignored",
 ]);
-export type ColumnRole = z.infer<typeof ColumnRoleSchema>;
+type ColumnRole = z.infer<typeof ColumnRoleSchema>;
 
 /**
  * Information about a specific input column used to determine its possible

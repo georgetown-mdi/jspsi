@@ -243,7 +243,7 @@ function removeAffixes(s: string): string {
  * `DD`), so it emits literally and collapses the year -- {@link dateFormatComponents}
  * separates those two contexts.
  */
-export type DateFormatToken = "YYYY" | "YY" | "MM" | "DD";
+type DateFormatToken = "YYYY" | "YY" | "MM" | "DD";
 
 /**
  * The year tokens {@link parseDateFormat} recognizes when parsing an INPUT format,
@@ -253,7 +253,7 @@ export type DateFormatToken = "YYYY" | "YY" | "MM" | "DD";
  * Exported so a component-detection consumer can recover the same year vocabulary
  * rather than re-listing it.
  */
-export const YEAR_FORMAT_TOKENS: readonly DateFormatToken[] = ["YYYY", "YY"];
+const YEAR_FORMAT_TOKENS: readonly DateFormatToken[] = ["YYYY", "YY"];
 
 /**
  * The fixed protocol pivot for resolving a two-digit `YY` year to four digits: a
@@ -834,7 +834,7 @@ export function fanOutReachedMatchingRefusal(): UsageError {
  *   check {@link regexPatternSchema} applies) and present with extra care, since a
  *   pattern still shapes which records match.
  */
-export type StandardizationFunctionTier = "standard" | "regex";
+type StandardizationFunctionTier = "standard" | "regex";
 
 /**
  * A single standardization function's editor-facing descriptor: enough for a web
@@ -1196,7 +1196,7 @@ const TRANSFORM_PARAM_FALLBACKS: Record<string, Record<string, unknown>> = {
  * One parameter whose declared value a transform function replaces at match
  * time, paired with the value it actually uses.
  */
-export interface TransformParamCoercion {
+interface TransformParamCoercion {
   /** The camelCase parameter name. */
   param: string;
   /** The value the function applies in place of the declared (nullish) one. */
@@ -1673,7 +1673,7 @@ export class StandardizedDataset {
  * because it is {@link resolveFieldColumns}'s return type, not as a supported
  * entry point.
  */
-export interface FieldColumnResolution {
+interface FieldColumnResolution {
   /**
    * The input column the field binds to, regardless of whether that column is
    * present in the data, or `undefined` when no column resolves the field. The
@@ -3940,7 +3940,7 @@ export function pipelineAlwaysDrops(
  * for a surface that reports it; whether a run may proceed under these terms is
  * {@link LinkageTermsVerdict.fullySatisfied}, not a threshold read off
  * {@link satisfiableKeyCount}. */
-export interface LinkageSatisfiability {
+interface LinkageSatisfiability {
   /** The linkage fields the columns cannot produce (see
    * {@link unsatisfiedLinkageFields}); empty when the input satisfies every field. */
   unsatisfied: LinkageField[];
@@ -4034,7 +4034,7 @@ export type LinkageKeyFitness = "satisfiable" | "unsatisfiable" | "dead";
 
 /** One declared linkage key beside the {@link LinkageKeyFitness} this input gives
  * it. */
-export interface GradedLinkageKey {
+interface GradedLinkageKey {
   /** The declared key, verbatim from the terms. */
   key: LinkageKey;
   /** How it fares against the input's columns. */
@@ -4362,7 +4362,7 @@ export function assertLinkageTermsSatisfiable(
  * - `invalidSsn4` -- a 4-digit `ssn4` value is the all-zero serial 0000, the one
  *   SSA structural rule a bare last-four can be judged against (under `validOnly`).
  */
-export type ConstraintViolationKind =
+type ConstraintViolationKind =
   | "excluded"
   | "disallowedCharacters"
   | "invalidDate"
@@ -4378,7 +4378,7 @@ export type ConstraintViolationKind =
  * wording. An empty result from {@link checkValueConstraints} means the value
  * conforms to every constraint that has a clean value-level test.
  */
-export interface ConstraintViolation {
+interface ConstraintViolation {
   /** Stable, partner-independent discriminant; see {@link ConstraintViolationKind}. */
   kind: ConstraintViolationKind;
   /** Short fixed badge caption (e.g. "excluded value"). */
@@ -4657,7 +4657,7 @@ export function checkValueConstraints(
  * not the offending values, which are the operator's own data and are never echoed
  * into a log.
  */
-export interface ConstraintViolationSummary {
+interface ConstraintViolationSummary {
   /** The linkage field name whose values violated. Partner-controlled on the
    * accept path (adopted from the inviter's terms via
    * {@link deriveAcceptedLinkageTerms}), so a display surface must sanitize it. */

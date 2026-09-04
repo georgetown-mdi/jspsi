@@ -85,7 +85,7 @@ export const PAIR_TABLE_ADVISORY_MAX_PAIRS = 10_000_000;
  * A run's projected derived pair table: what the two counts multiply to, and
  * whether that product is above {@link PAIR_TABLE_ADVISORY_MAX_PAIRS}.
  */
-export interface PairTableProjection {
+interface PairTableProjection {
   /**
    * This party's own raw dataset record count. Not a factor of the product: it
    * is the rows the advisory names behind a declared count its cleaning fanned.
@@ -258,7 +258,7 @@ function describePairTableProjection(projection: PairTableProjection): string {
 }
 
 /** What a front end renders for a resolved run at the pre-round seam. */
-export interface ResolvedRunShapeNotices {
+interface ResolvedRunShapeNotices {
   /**
    * Names the deduplicating cardinality this run resolved to and what it means
    * for the result this party holds and for what the partner reads, or

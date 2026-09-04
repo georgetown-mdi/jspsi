@@ -541,7 +541,7 @@ async function receiveHandshake(conn: MessageConnection): Promise<unknown> {
  * handshake. It has forward secrecy (it mixes a fresh ephemeral P-256 ECDH) and
  * is mutually authenticated by the pre-shared secret.
  */
-export interface KexResult {
+interface KexResult {
   /** 32-byte session key. */
   sessionKey: Uint8Array<ArrayBuffer>;
   /**

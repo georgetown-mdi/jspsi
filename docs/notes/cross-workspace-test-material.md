@@ -182,14 +182,40 @@ priced -- not this note.
   cost: a fixture wanted on two surfaces reaches them by living in a published
   package.
 - The helpers `testing.ts` defines -- `sortAssociationTable`,
-  `withSuppressedLogs`, `withCapturedLogs`, `installCapturedLogsInterceptor`,
-  and the `LogEntry` shape -- test-only. No product code calls them.
+  `withCapturedLogs`, `installCapturedLogsInterceptor`, and the `LogEntry`
+  shape -- test-only. No product code calls them.
 - `computeKexKeys`, re-exported from `kex.ts` -- NOT test-only, and it does not
   move whatever is decided later. It is product code `runKex` calls; only its
   exposure is test-scoped, so that the browser cross-implementation suite can
   drive the checked-in known-answer vectors through the browser build. A test
   home is the wrong place for it: what it needs is a decision about core's
   export map, not about where tests keep their fixtures.
+
+## What the export-map decision did to this channel
+
+The open question below named one event that would move a subject off this
+channel or onto it: a decision about core's export map that has to rule on
+whether `./testing` stays a public subpath. That decision has since been taken.
+Core's main entry was a barrel of `export *` lines, so what the package
+published was whatever its modules happened to export; the barrel is now a named
+list, and `./testing` stays a public subpath beside it.
+
+The ruling moved names in both directions. Core's own known-answer vector
+generators are plain Node scripts, so they read the built package rather than
+the source tree beside them, and the wire pieces they compose their documents
+from -- the index-table and single-pass reply codecs, the terms envelope, the
+standardized key iterable -- were reachable only because the barrel published
+everything. A caller runs an exchange rather than composing a table encoding, so
+none of them belongs on the main entry; they are on `./testing`, which states
+what they are. `withSuppressedLogs` went the other way: nothing called it, so it
+is deleted rather than published.
+
+One subject arrived that is neither a fixture nor a codec:
+`withNoListedFanOutFunctions`, the lever that stands a listed fan-out producer
+in for an unlisted one. It rewrites module state, so it carries a build
+condition the other subjects do not -- both published entry points must reach
+one copy of the module holding that state, which is why they build together with
+a shared chunk rather than as two independent bundles.
 
 ## Alternatives weighed
 
@@ -267,10 +293,11 @@ neither decision introduced.
 The operational form of this, in the place a contributor meets it, is in
 [TESTING.md](../TESTING.md#shared-test-material).
 
-- The shipped `dist/testing.*` surface is still unpriced. What would price it: a
-  consumer raising it, a package-size or supply-chain review, or a decision about
-  core's export map that has to rule on whether `./testing` stays a public
-  subpath. Until then the material on that channel stays where it is.
+- The shipped `dist/testing.*` surface is still unpriced. The export-map ruling
+  above settled whether `./testing` stays a public subpath without pricing what
+  it ships, so what is left to price it is a consumer raising it, or a
+  package-size or supply-chain review. Until then the material on that channel
+  stays where it is.
 - The composite/references arms above are untaken, and the testkit did not force
   them.
 - The testkit's admission rule is held by review, not by a check. It has one

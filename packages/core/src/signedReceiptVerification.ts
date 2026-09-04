@@ -104,7 +104,7 @@ export type CertificateAnchorStatus =
  * What one anchoring value the verifier supplied reached in the record.
  * `unmatched` means it matches neither certificate.
  */
-export type AnchorMatchStatus = "matched" | "unmatched" | "not-supplied";
+type AnchorMatchStatus = "matched" | "unmatched" | "not-supplied";
 
 /** How the verifier's own certificate fingerprint reached the verification,
  * which fixes what a non-match costs. */
@@ -617,7 +617,7 @@ export async function verifyDualSignedRecord(
  * verification: a row is `incomplete` when its own check could not be made,
  * whatever the whole record's outcome.
  */
-export type SignedReceiptVerdictTone = "verified" | "incomplete" | "failed";
+type SignedReceiptVerdictTone = "verified" | "incomplete" | "failed";
 
 /** A certificate anchor that reached a slot: what a verdict may name as having
  * anchored one, which excludes the case there is nothing to name. */

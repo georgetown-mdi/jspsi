@@ -134,7 +134,7 @@ export interface PartnerIndexGrouping {
  * position) it sent, and a count it accumulated from a frame already checked --
  * never anything read from the frame under check.
  */
-export interface PartnerIndexRunGrouping extends PartnerIndexGrouping {
+interface PartnerIndexRunGrouping extends PartnerIndexGrouping {
   /**
    * How many consecutive entries of the list answer each outbound entry. Two
    * outbound entries this party grouped together carry the same length, both
@@ -442,7 +442,7 @@ export function assertPartnerIndices(
 // admits a GROUPED repeat therefore checks its halves itself, against a count it
 // computed, rather than through this form.
 /** One half of a partner-supplied association table, with what bounds it. */
-export interface PartnerIndexTableHalf extends Omit<
+interface PartnerIndexTableHalf extends Omit<
   PartnerIndexRules,
   "repeatsGroupedBy" | "repeatsGroupedByRuns"
 > {
@@ -458,10 +458,7 @@ export interface PartnerIndexTableHalf extends Omit<
  * The half a two-half check anchors on: the one that keeps its distinctness, and
  * so cannot admit repeats. See {@link assertPartnerIndexTable}.
  */
-export type PartnerIndexTableAnchorHalf = Omit<
-  PartnerIndexTableHalf,
-  "repeats"
->;
+type PartnerIndexTableAnchorHalf = Omit<PartnerIndexTableHalf, "repeats">;
 
 /**
  * Requires both halves of a partner-supplied association table to hold whole,

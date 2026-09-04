@@ -5,16 +5,7 @@ import type { AssociationTable } from "./types";
 export {
   CONSENT_PROBE_TERMS,
   COUNT_ONLY_PROBE_TERMS,
-  LINKAGE_TERM_CONSENT_CLASSIFICATION,
   consentRepresentationProbes,
-} from "./linkageTermConsentCoverage.js";
-export type {
-  ConsentProbeShape,
-  ConsentRelevantTerm,
-  ConsentRepresentationProbe,
-  ConsentSurfaceName,
-  ExcludedTerm,
-  LinkageTermClassification,
 } from "./linkageTermConsentCoverage.js";
 
 export {
@@ -26,16 +17,43 @@ export {
   hostileSource,
   hostileTerms,
   hostileVariants,
-  swapDonorSource,
-  swapDonorTerms,
 } from "./displayEscapingFixtures.js";
-export type { HostileSource } from "./displayEscapingFixtures.js";
 
 // The key-schedule core, so the browser cross-implementation suite can run the
 // checked-in known-answer vectors through the browser build the way the Node
 // suite runs them through the Node build. It stays out of the main entry point:
 // callers conduct a handshake with runKex, never by composing the schedule.
 export { computeKexKeys } from "./kex.js";
+
+// The wire pieces the known-answer vector generators under test/vectors build
+// their documents from. Those generators are plain Node scripts, so they read
+// the built package rather than this source tree, and each of these encodes or
+// decodes one layer of the protocol below what a caller ever composes: a caller
+// runs an exchange, not a table encoding or a terms envelope.
+export {
+  decodeFixedWidthIndexTable,
+  decodeInt32LE,
+  decodeRaggedIndexTable,
+  decodeSinglePassReply,
+  encodeInt32LE,
+  encodeSinglePassReply,
+  getSortedDistinctValueIndices,
+  linkViaPSI,
+} from "./link.js";
+export { FAN_OUT_CANDIDATES_PER_ELEMENT } from "./fanOutFunctions.js";
+export { StandardizedKeyIterable } from "./standardization.js";
+export {
+  PROTOCOL_VERSION,
+  TERMS_ENVELOPE_FIELDS,
+  exchangeTerms,
+  sendAbort,
+} from "./protocolSetup.js";
+
+// The lever that stands a listed fan-out producer in for an unlisted one. Both
+// published entry points build as one bundle with a shared chunk, so the listing
+// this rewrites is the one the main entry's compiled steps read; a build that
+// gave each entry its own copy would leave it rewriting a listing nothing reads.
+export { withNoListedFanOutFunctions } from "./fanOutFunctions.js";
 
 /** @internal */
 export function sortAssociationTable(
@@ -65,31 +83,6 @@ export function sortAssociationTable(
           },
           [[], []] as [Array<number>, Array<number>],
         );
-}
-
-/** Suppresses log output below `minLevel` for the duration of `fn`; restores the previous level when done. */
-export function withSuppressedLogs<T>(
-  fn: () => Promise<T>,
-  minLevel?: number,
-): Promise<T>;
-export function withSuppressedLogs<T>(fn: () => T, minLevel?: number): T;
-export function withSuppressedLogs<T>(
-  fn: () => T | Promise<T>,
-  minLevel: number = logLibrary.levels.ERROR,
-): unknown {
-  const original = logLibrary.getLevel();
-  logLibrary.setLevel(minLevel as Parameters<typeof logLibrary.setLevel>[0]);
-  try {
-    const result = fn();
-    if (result instanceof Promise) {
-      return result.finally(() => logLibrary.setLevel(original));
-    }
-    logLibrary.setLevel(original);
-    return result;
-  } catch (e) {
-    logLibrary.setLevel(original);
-    throw e;
-  }
 }
 
 /** @internal */

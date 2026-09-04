@@ -599,7 +599,7 @@ export function distinctLinkageRuleSetVerdicts(
  * the citing party is looking at its own terms, which it can correct before it
  * proposes them.
  */
-export type LinkageRuleSetVerdictReader = "recipient" | "citing-party";
+type LinkageRuleSetVerdictReader = "recipient" | "citing-party";
 
 /** The caveats {@link linkageRuleSetVerdictNote} substitutes for a citing-party
  * reader. Only `contradicted` has one: the other two caveats attribute the

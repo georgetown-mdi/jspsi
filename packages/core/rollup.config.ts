@@ -66,33 +66,46 @@ export default defineConfig([
     },
     plugins: [resolve(), typescript({ outputToFilesystem: true }), commonjs()],
   },
+  // The two published entry points build TOGETHER, with code splitting, so a
+  // module both of them reach exists once at run time. Built separately they
+  // would each hold their own copy, and a module holding mutable state -- the
+  // fan-out listing the testing entry's lever rewrites (src/fanOutFunctions.ts)
+  // -- would be two independent states, so the lever would rewrite a listing the
+  // main entry's code never reads.
   {
-    input: "src/main.ts",
+    input: { core: "src/main.ts", testing: "src/testing.ts" },
     external: makeExternal(ALWAYS_BUNDLED),
     // resolve() lets rollup inline the ALWAYS_BUNDLED packages (currently
     // canonicalize) from node_modules; everything else is held external by the
     // `external` predicate above, so only the bundled set is pulled in.
     plugins: [resolve(), typescript({ outputToFilesystem: true })],
+    // `[name]` is the input key above, so the entry names have to stay `core`
+    // and `testing`: package.json points main, module, and both `exports`
+    // conditions at dist/core.* and dist/testing.*. A manifest rename that left
+    // these alone is caught by the dist freshness guard, which derives the files
+    // it looks for from that exports map (scripts/lib/coreDistFreshness.mjs).
+    // The chunk name is fixed rather than hashed so a rebuild overwrites the
+    // shared chunk instead of leaving the previous one behind in a published
+    // dist.
     output: [
-      { file: pkg.main, format: "cjs" },
-      { file: pkg.module, format: "es" },
+      {
+        dir: "dist",
+        format: "cjs",
+        entryFileNames: "[name].cjs",
+        chunkFileNames: "shared.cjs",
+      },
+      {
+        dir: "dist",
+        format: "es",
+        entryFileNames: "[name].esm.js",
+        chunkFileNames: "shared.esm.js",
+      },
     ],
   },
   {
     input: "src/main.ts",
     output: { file: "dist/index.d.ts", format: "es" },
     plugins: [dts()],
-  },
-  {
-    input: "src/testing.ts",
-    external: makeExternal(ALWAYS_BUNDLED),
-    // resolve() for the same reason as the main build above (testing.ts imports
-    // no ALWAYS_BUNDLED package today, but this keeps the two builds symmetric).
-    plugins: [resolve(), typescript({ outputToFilesystem: true })],
-    output: [
-      { file: "dist/testing.cjs", format: "cjs" },
-      { file: "dist/testing.esm.js", format: "es" },
-    ],
   },
   {
     input: "src/testing.ts",

@@ -34,11 +34,10 @@ import PSI from "@openmined/psi.js";
 
 import {
   PSIParticipant,
-  linkViaPSI,
   createMessagePipe,
   buildStandardizedDataset,
-  StandardizedKeyIterable,
 } from "../../dist/core.esm.js";
+import { StandardizedKeyIterable, linkViaPSI } from "../../dist/testing.esm.js";
 
 // PSI element-count bounds that never reject; mirrors
 // test/utils/psiElementBounds.ts. These tests exercise PSI correctness, not the

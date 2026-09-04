@@ -34,7 +34,7 @@ import type {
  * The two surfaces an acceptor consents from: the web app's structured
  * invitation summary and the CLI accept command's prompt output.
  */
-export type ConsentSurfaceName = "web" | "cli";
+type ConsentSurfaceName = "web" | "cli";
 
 /**
  * @internal
@@ -120,7 +120,7 @@ export interface ConsentRelevantTerm {
  * One surrounding shape a {@link ConsentRelevantTerm} is measured under, with the
  * copy that shape's variant owes a reader and the copy it must not carry.
  */
-export interface ConsentProbeShape {
+interface ConsentProbeShape {
   /**
    * What this shape is, in a few words. Appended to the field path as the
    * probe's {@link ConsentRepresentationProbe.label}, so a failing assertion
@@ -156,14 +156,14 @@ export interface ConsentProbeShape {
  * it is out of scope. An excluded field needs no variant: nothing asserts where
  * it does or does not appear.
  */
-export interface ExcludedTerm {
+interface ExcludedTerm {
   classification: "excluded";
   /** Why consent does not turn on this field. */
   reason: string;
 }
 
 /** @internal */
-export type LinkageTermClassification = ConsentRelevantTerm | ExcludedTerm;
+type LinkageTermClassification = ConsentRelevantTerm | ExcludedTerm;
 
 function edited(
   terms: LinkageTerms,
@@ -761,7 +761,7 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
  * differing from it at that field alone. A surface represents the field when it
  * renders the two differently.
  */
-export interface ConsentRepresentationProbe {
+interface ConsentRepresentationProbe {
   /**
    * The derived `LinkageTerms` field path this pair varies. Shared by every pair
    * of a field measured under several {@link ConsentRelevantTerm.shapes}, which

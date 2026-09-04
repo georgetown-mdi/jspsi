@@ -43,7 +43,7 @@ import type { P256PrivateJwk, P256PublicJwk } from "./signingKeys.js";
 // signingKeys.ts, the one chokepoint this module and signedReceipt.ts share.
 
 export { SigningError } from "./signingKeys.js";
-export type { P256PrivateJwk, P256PublicJwk } from "./signingKeys.js";
+export type { P256PrivateJwk } from "./signingKeys.js";
 
 // --- Versions and domains ----------------------------------------------------
 
@@ -75,7 +75,7 @@ const CERTIFICATE_FINGERPRINT_DOMAIN = "psilink-signing-cert-fingerprint/v1";
  * `r || s` (IEEE P1363). A field rather than an implicit assumption so an
  * authority-backed mode (which may carry another scheme) can add a value without
  * changing the certificate shape. */
-export type SigningAlgorithm = "ecdsa-p256-sha256";
+type SigningAlgorithm = "ecdsa-p256-sha256";
 
 const SIGNING_ALGORITHM: SigningAlgorithm = "ecdsa-p256-sha256";
 
@@ -160,12 +160,10 @@ const CertificateBodyShape = {
  * {@link assertPartnerCertificateTrusted} / {@link verifyPresentedCertificate},
  * which check the self-signature and the fingerprint pin.
  */
-export const SigningCertificateSchema: z.ZodType<SigningCertificate> = z.object(
-  {
-    ...CertificateBodyShape,
-    signature: base64UrlSchema,
-  },
-);
+const SigningCertificateSchema: z.ZodType<SigningCertificate> = z.object({
+  ...CertificateBodyShape,
+  signature: base64UrlSchema,
+});
 
 const SigningIdentitySchema: z.ZodType<SigningIdentity> = z.object({
   version: z.literal(SIGNING_IDENTITY_VERSION),
@@ -227,7 +225,7 @@ export async function computeCertificateFingerprint(
 // --- Generation --------------------------------------------------------------
 
 /** Options for {@link generateSigningIdentity}. */
-export interface GenerateSigningIdentityOptions {
+interface GenerateSigningIdentityOptions {
   /** A fixed P-256 private key to bind instead of generating a fresh one.
    * Production callers omit this -- `crypto.subtle.generateKey` takes no seed,
    * so a fixed key is the only way to make generation reproducible; tests and
@@ -506,7 +504,7 @@ export async function assertPartnerCertificateTrusted(
 }
 
 /** Inputs to {@link verifyPresentedCertificate}. */
-export interface PresentedCertificateCheck {
+interface PresentedCertificateCheck {
   /** The certificate presented by the partner (e.g. carried in a receipt). */
   certificate: SigningCertificate;
   /** The locally pinned partner fingerprint, if any. */

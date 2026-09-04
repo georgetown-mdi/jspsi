@@ -20,7 +20,7 @@ export function inferDateOfBirthColumn(
 
 /** The header columns plus the inferred date-input format of a source's
  * date-of-birth column, as {@link inferDateInputFormatFromSource} resolves them. */
-export interface InferredDateInputFormat {
+interface InferredDateInputFormat {
   /** The CSV header field names. */
   columns: Array<string>;
   /** The date-of-birth column the format was inferred from, absent when the

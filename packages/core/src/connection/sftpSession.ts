@@ -80,7 +80,7 @@ interface SftpSessionDeps {
  *
  * @internal
  */
-export interface HostKeyRefusal {
+interface HostKeyRefusal {
   /**
    * The refusal itself: first-party text, the presented fingerprint (base64, of
    * fixed length), and the pin or re-pin instruction the operator acts on.

@@ -49,7 +49,7 @@ import {
   encodeInt32LE,
   encodeSinglePassReply,
   getSortedDistinctValueIndices,
-} from "../../dist/core.esm.js";
+} from "../../dist/testing.esm.js";
 
 const hex = (bytes) => Buffer.from(bytes).toString("hex");
 const fromHex = (text) => Uint8Array.from(Buffer.from(text, "hex"));

@@ -497,7 +497,7 @@ export type LinkageRuleSetCitationVerdict =
  * reason they are named and versioned independently: a document can truthfully
  * cite the built-in field set while its keys are not the built-in key set.
  */
-export interface LinkageRuleSetCitationVerdicts {
+interface LinkageRuleSetCitationVerdicts {
   /** The verdict on the set the declared linkage fields are cited to. */
   fieldSet: LinkageRuleSetCitationVerdict;
   /** The verdict on the set the declared linkage keys are cited to. */
@@ -686,7 +686,7 @@ export const OPT_IN_LINKAGE_FIELD_TYPES = [
 ] as const satisfies ReadonlyArray<LinkageField["type"]>;
 
 /** A semantic type {@link OPT_IN_LINKAGE_FIELD_TYPES} offers. */
-export type OptInLinkageFieldType = (typeof OPT_IN_LINKAGE_FIELD_TYPES)[number];
+type OptInLinkageFieldType = (typeof OPT_IN_LINKAGE_FIELD_TYPES)[number];
 
 /**
  * The one linkage key each {@link OPT_IN_LINKAGE_FIELD_TYPES} type is offered as:

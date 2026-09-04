@@ -33,11 +33,8 @@ import { SftpSession } from "./sftpSession";
 export type { PresentedHostKey } from "./sftpConnect";
 export {
   MESSAGE_ENVELOPE_VERSION,
-  MESSAGE_TYPE_OBJECT,
   MESSAGE_TYPE_BINARY,
   MESSAGE_HEADER_BYTES,
-  serializeFileSyncMessageHeader,
-  serializeFileSyncMessage,
 } from "./fileSyncFraming";
 import {
   composeDirsDisplay,
