@@ -189,17 +189,13 @@ export function resolveInvitePositionals(
 }
 
 /**
- * The disclosed-columns subset to carry on the invitation: exactly the columns
- * the acceptor will RECEIVE for matched records, derived from this party's
- * metadata via the same `isDisclosedToPartner` predicate `preparePayload`
- * transmits on. Returns undefined -- so the field is omitted and the acceptor
- * reconciles lazily ONLY when the metadata is unknown at mint (a config-as-source
- * invite whose config carries no explicit metadata block, where the run infers
- * metadata from the exchange input the invite command never sees). When the
- * metadata IS known, the disclosed set is carried verbatim -- INCLUDING the empty
- * set when nothing is disclosed, which locks the acceptor in to "receive nothing"
- * so a non-empty payload later aborts, rather than leaving it lazy. Empty is a
- * constraint here, not the absence of one. See the InvitationToken field.
+ * The disclosed-columns subset the invitation includes: the columns the
+ * acceptor will receive for matched records, from this party's metadata via
+ * the same `isDisclosedToPartner` predicate `preparePayload` transmits on.
+ * Undefined when the metadata is unknown at mint (a config-as-source invite
+ * whose config declares no metadata block); otherwise the set is included
+ * verbatim, including the empty set, which locks the acceptor to receiving
+ * nothing. See the InvitationToken field.
  */
 function disclosedColumnsFor(
   metadata: Metadata | undefined,
@@ -210,18 +206,10 @@ function disclosedColumnsFor(
 
 /**
  * Mint-time wording for the shared linkage pre-flight
- * ({@link checkLinkageSatisfiability}), whose grading is core's and whose copy is
- * each caller's.
- *
- * Every part differs from the run paths' because the operator's position does.
- * Nothing runs here, so what a block prevents is disclosing an invitation, not
- * exchanging a short set of keys; and the inviter AUTHORED these terms, so the
- * remedy is their own configuration rather than the out-of-band renegotiation the
- * accept and exchange paths point at -- there is no partner to renegotiate with
- * until this invitation is sent. That is the same reason the terms stand as a
- * draft: the shortfall this seat states counts linkage keys nobody has agreed to.
- * `configPath` names the file the terms came from, composed raw: the CLI's error
- * boundary escapes the rendered chain once.
+ * ({@link checkLinkageSatisfiability}): core grades the terms, this function
+ * supplies the copy for {@link LinkagePreflightMessaging}. `configPath` names
+ * the file the terms came from, composed raw -- the CLI's error boundary
+ * escapes the rendered chain once.
  */
 function mintPreflightMessaging(configPath: string): LinkagePreflightMessaging {
   return {
@@ -242,9 +230,8 @@ function mintPreflightMessaging(configPath: string): LinkagePreflightMessaging {
  * effects (printing the token, writing files, opening a connection): conflict
  * detection, URL validation (online), input reading, and minting+encoding the
  * invitation. The caller's commit step performs the side effects from this
- * bundle, so any failure here aborts before the live token reaches stdout or a
- * config is written. Diagnostics are logged here (so they precede the token
- * print), so this is not literally side-effect-free.
+ * bundle, so a failure here aborts before the live token reaches stdout or a
+ * config is written. Diagnostics are logged here, before the token print.
  */
 type InviteReady =
   | {
@@ -290,27 +277,22 @@ type InviteReady =
 /**
  * Validate and prepare an invitation without committing any side effect. Throws
  * (for the shared {@link runOrExit} mapper) on any failure; mints `expires` and
- * the shared secret at encode time so the lifetime clock starts when the shared
- * secret exists, not at process entry.
+ * the shared secret at encode time, so the lifetime clock starts when the
+ * shared secret exists, not at process entry.
  *
- * `expiresIn`, when given, overrides the default 1-hour lifetime. It is parsed
- * (and rejected if zero, negative, or malformed) at the very top -- before any
- * conflict gate, input read, or token mint -- so a bad value never produces a
- * token or touches disk.
+ * `expiresIn`, when given, overrides the default 1-hour lifetime and is parsed
+ * (rejecting zero, negative, or malformed values) before any conflict gate,
+ * input read, or token mint.
  *
- * `linkageStrategy`, when given, is the operator's `--linkage-strategy`
- * selection. It is applied to the terms this command authors from the input
- * (the online and infer-from-input paths); when the terms instead come from a
- * pre-existing configuration file the config is authoritative and the selection
- * is warned-ignored rather than silently overriding it. Selecting `single-pass`
- * surfaces the disclosure-tradeoff note at this point of selection.
+ * `linkageStrategy`, when given, applies only to terms this command authors
+ * from the input (the online and infer-from-input paths); a pre-existing
+ * configuration file is authoritative instead, and the selection is reported
+ * as ignored. Selecting `single-pass` shows the disclosure-tradeoff note.
  *
- * `--identity` follows the same rule, for the same reason: the two paths that
- * author terms require it (there is no label to mint an invitation under
- * otherwise), while the config-as-source path takes the label from the config's
- * own `linkage_terms.identity` and warns that the flag had no effect. Every path
- * requires one, though: an invitation names its inviter, so a configuration
- * carrying no identity is refused rather than minted under none.
+ * `--identity` follows the same rule: the two paths that author terms require
+ * it, while the config-as-source path takes the label from the config's own
+ * `linkage_terms.identity` and warns the flag had no effect. Every path
+ * requires an identity; an invitation names its inviter.
  *
  * @internal exported for testing
  */
@@ -345,7 +327,7 @@ export async function validateInvite(params: {
   // mutually exclusive -- each returns -- and each reads the input through a
   // single loadInputRows call with allowStdin enabled. When the input is `-`
   // that stream is process.stdin, which is single-use, so this exclusivity is
-  // load-bearing: merging these branches such that two loadInputRows calls could
+  // critical: merging these branches such that two loadInputRows calls could
   // both run would read stdin twice and silently yield empty rows the second time.
   if (resolved.mode === "online") {
     const { url, input, output } = resolved;
@@ -369,7 +351,7 @@ export async function validateInvite(params: {
     // still aborts here: reusing it as the linkage-terms source is a documented
     // remaining limitation (see docs/CLI.md "Online invitation"). A pre-existing
     // key file, on the online path only, is downgraded to a warning below -- it
-    // will be overwritten by the rotated token if the partner accepts, so surface
+    // will be overwritten by the rotated token if the partner accepts, so report
     // it rather than abort (docs/CLI.md "Online invitation").
     assertNoProvisionConflicts(
       { configPath: options.configFile, keyPath: options.keyFile },
@@ -383,14 +365,13 @@ export async function validateInvite(params: {
       );
     // Validate the URL before the token is minted, so an unusable URL (e.g. one
     // with no host) fails before the caller can disclose the token. The role is
-    // stamped here because this command IS the inviting end; on a ws:/wss: URL
-    // that is what makes the connection dialable, since a URL carries no role.
+    // stamped here because this command is the inviting end; on a ws:/wss: URL
+    // that is what makes the connection dialable, since a URL has no role field.
     //
-    // --accept-timeout is deliberately NOT merged in: this connection is what the
-    // bootstrap persists, and an accept-only wait written as the config's
-    // peer_timeout_ms would silently become the budget of every later recurring
-    // run. It reaches this run alone, through runOnlineBootstrap's
-    // runOnlyPeerTimeoutSeconds.
+    // --accept-timeout is not merged in: this connection is what the bootstrap
+    // persists, and an accept-only wait written as the config's peer_timeout_ms
+    // would silently become the budget of every later recurring run. It reaches
+    // this run alone, through runOnlineBootstrap's runOnlyPeerTimeoutSeconds.
     const connection = withWebRTCPeerRole(
       inviterConnectionFromURL(url, connectionOverridesFrom(options)),
       "inviter",
@@ -398,7 +379,7 @@ export async function validateInvite(params: {
     // The file-sync half of this connection's options, absent on webrtc (whose
     // options block is the shared timeouts alone). The diagnostics and the retain
     // declaration below all read file-sync facts, so each reads it through here
-    // rather than off a connection that may carry no such field.
+    // rather than off a connection that may have no such field.
     const fileSyncOptions =
       connection.channel === "webrtc" ? undefined : connection.options;
     // Only on this online path -- the offline path reports the override ignored
@@ -410,12 +391,12 @@ export async function validateInvite(params: {
     );
     // Warn when a file-sync flag resolves to a channel that ignores it (a file://
     // URL is filedrop, which holds no session; a ws:// URL is webrtc, which has
-    // no directory to poll or retain). applyConnectionOverrides drops each on the
-    // channels that cannot use it, so the raw flag is the only carrier of the
+    // no directory to poll or retain). applyConnectionOverrides drops each flag on
+    // channels that cannot use it, so the raw flag is the only source of the
     // operator's intent; read it alongside the merged value a future persisted
-    // source would set. --connection-per-poll on sftp is a no-op here, where
-    // warnConnectionPerPollShortInterval covers the short-interval case instead
-    // -- the two are channel-exclusive and never double-warn.
+    // source would set. --connection-per-poll on sftp is a no-op here --
+    // warnConnectionPerPollShortInterval covers the short-interval case instead,
+    // and the two never double-warn.
     warnUnsupportedFileSyncFlags(
       connection.channel,
       {
@@ -447,7 +428,7 @@ export async function validateInvite(params: {
       log,
       "url",
     );
-    // A webrtc endpoint carries no scheme, so a plaintext coordination server is
+    // A webrtc endpoint holds no scheme, so a plaintext coordination server is
     // one thing this invitation cannot convey: the acceptor seeded from it
     // resolves TLS and would meet nobody. Name it where the operator can still
     // act, beside the disclosure warning the dial itself raises.
@@ -461,7 +442,7 @@ export async function validateInvite(params: {
           "coordination server.",
       );
     // Warn when --connection-per-poll is paired with a short poll interval. Built
-    // from the URL with no loaded config, so `connection` carries the effective
+    // from the URL with no loaded config, so `connection` holds the effective
     // mode and interval (the CLI overrides applied when it was built).
     warnConnectionPerPollShortInterval(
       connection.channel,
@@ -470,15 +451,13 @@ export async function validateInvite(params: {
       log,
     );
 
-    // --accept-timeout is this run's peer budget unconditionally -- it is always
-    // set, by the flag or its default -- so a --peer-timeout typed here does not
-    // bound the wait it reads as bounding. It is not discarded either: it is the
-    // budget the configuration keeps for the runs that follow, if that
-    // configuration is written at all -- this warning is raised before the
-    // partner has accepted, so it states the destination conditionally rather
-    // than promising a write a failed save would falsify. Name both halves
-    // rather than leaving the operator to read silence as the budget they asked
-    // for.
+    // --accept-timeout is this run's peer budget unconditionally, since it is
+    // always set (by the flag or its default), so a --peer-timeout typed here
+    // does not bound this wait. It is not discarded either: when the
+    // configuration is written, it becomes the budget of the runs that follow.
+    // This warning fires before the partner has accepted, so it states that
+    // destination conditionally, naming both budgets rather than leaving the
+    // operator to read silence as the one they asked for.
     if (options.peerTimeout !== undefined)
       log.warn(
         "--peer-timeout does not bound this online invitation: " +
@@ -515,20 +494,20 @@ export async function validateInvite(params: {
       builtDataSpec.metadata ?? inferMetadata(rows.columns);
 
     // Fail closed, before the token is minted or any file is written, on a
-    // disclosed column whose name is too long to carry. This path infers its
-    // metadata from the input header, which passes through no schema, so the name
-    // would otherwise reach the token's own MAX_NAME_LENGTH bound inside
-    // encodeInvitation as a raw ZodError rather than an operator-facing refusal
-    // naming the offending position. The same guard prepareForExchange applies at
-    // exchange time. See assertDisclosedNamesCarriable.
+    // disclosed column whose name is too long to hold. This path infers its
+    // metadata from the input header (no schema), so the name would otherwise
+    // reach the token's own MAX_NAME_LENGTH bound inside encodeInvitation as a
+    // raw ZodError, not an operator-facing refusal naming the position. The same
+    // guard applies at exchange time in prepareForExchange. See
+    // assertDisclosedNamesCarriable.
     assertDisclosedNamesCarriable(
       disclosureMetadata,
       builtDataSpec.linkageTerms.output,
     );
 
     // The columns this party will transmit for matched records, over that same
-    // metadata, so the declared set equals what preparePayload transmits. Carried
-    // on the token AND persisted into the saved config as
+    // metadata, so the declared set equals what preparePayload transmits.
+    // Included on the token and persisted into the saved config as
     // disclosedPayloadColumns, so a later recurring `psilink exchange` verifies
     // its current metadata still discloses exactly this set before any data is
     // sent (assertDisclosureMatchesCommitment) -- the send-side commitment the
@@ -551,14 +530,15 @@ export async function validateInvite(params: {
       // Embed the credential-free locator for the connection this invite is
       // using, so the acceptor seeds its connection block from it (the same path
       // web-originated invitations exercise) rather than reconstructing it by
-      // hand. On webrtc that locator is the whole of what the acceptor needs to
-      // reach this party's own coordination server, which no printed hint could
-      // convey. Derived from the post-override `connection`, so a `--server-port`
-      // or `--outbound-path` override is reflected; carries no credentials by
-      // construction (see endpointFromConnection).
+      // hand. On webrtc that locator is all the acceptor needs to reach this
+      // party's own coordination server. Derived from the post-override
+      // `connection`, so a `--server-port` or `--outbound-path` override is
+      // reflected; holds no credentials by construction (see
+      // endpointFromConnection).
       connectionEndpoint: endpointFromConnection(connection),
       // The same disclosed-columns subset persisted above: the acceptor's consent
-      // screen and runtime lock-in derive from the wire's own disclosure predicate.
+      // screen and runtime enforcement derive from the wire's own disclosure
+      // predicate.
       disclosedPayloadColumns,
       // Declare retain mode where this invite's own connection runs it, so the
       // acceptor is told before consenting that the exchange leaves a permanent
@@ -591,9 +571,9 @@ export async function validateInvite(params: {
   // Offline: the server-block overrides (--server-* and --outbound-path) and the
   // connection-options overrides (timeouts, --max-reconnect-attempts, the
   // file-sync toggles) cannot take effect (the connection block is written as a
-  // placeholder to edit, not built from a URL), so warn rather than drop a
-  // deliberately-passed flag silently. Two diagnostics: the server block and the
-  // connection.options block have distinct remedies.
+  // placeholder to edit, not built from a URL), so warn rather than silently
+  // drop a flag the operator chose to pass. Two diagnostics: the server block
+  // and the connection.options block have distinct remedies.
   warnServerOverridesIgnoredOffline(options, log);
   warnOptionsOverridesIgnoredOffline(options, log);
 
@@ -603,7 +583,7 @@ export async function validateInvite(params: {
 
   if (configSource !== undefined) {
     const configTerms = configSource.linkageTerms;
-    // The config is the source of the terms this mint carries, so a citation its
+    // The config is the source of the terms this mint uses, so a citation its
     // rules no longer support is reported before the token is built rather than
     // after it has left for the partner.
     warnOnLinkageRuleSetCitationDrift(
@@ -628,11 +608,11 @@ export async function validateInvite(params: {
     // The identity is one of those terms, so it is governed by the same rule:
     // the config supplies the label this invitation is minted under, and a flag
     // typed here is reported rather than silently dropped. A configuration
-    // carrying none refuses instead -- an invitation names its inviter, and this
+    // holding none refuses instead -- an invitation names its inviter, and this
     // path cannot write the label anywhere the partnership's later runs would
     // read it. A blank flag value is nothing to report -- it is what a scripted
-    // `--identity "$ORG"` sends with ORG unset, and the config would carry this
-    // run either way.
+    // `--identity "$ORG"` sends with ORG unset, and the config supplies it
+    // either way.
     const configIdentity = resolveInvitationIdentity(
       configTerms.identity,
       options.configFile,
@@ -648,13 +628,12 @@ export async function validateInvite(params: {
           `${redactAndSanitizeForDisplay(options.configFile)} to change it.`,
       );
     // Config-as-source: the config supplies the linkage terms and persists
-    // unchanged. The config read above is the mode discriminator -- it must run
-    // first to know a config exists -- but it is a pure read; the only conflict
-    // that can clobber state here is an existing key file (the config existing is
-    // expected, not an error), so gate just the key path -- the same primitive
-    // accept uses when reusing a reconciled config. Run it before the input is
-    // read or the token is minted, mirroring the "conflicts first" order of the
-    // online path.
+    // unchanged. The config read above is the mode discriminator, so it must run
+    // first; the only conflict it can clobber here is an existing key file (the
+    // config existing is expected), so gate just the key path -- the same
+    // primitive accept uses when reusing a reconciled config -- before the input
+    // is read or the token is minted, mirroring the online path's
+    // conflicts-first order.
     assertNoProvisionConflicts(
       { configPath: options.configFile, keyPath: options.keyFile },
       ["key"],
@@ -699,31 +678,28 @@ export async function validateInvite(params: {
     }
 
     // Fail closed, before the token is minted, on a count-only (`psi-c`) config
-    // whose own metadata would transmit a column: the algorithm carries no
-    // payload in either direction, and this is the one count-only shape rule no
-    // linkage-terms document carries, so the config parse above (which applies
-    // the other four) cannot reach it. Ahead of the generic payload-disclosure
-    // guard below and the algorithm gate further below, so the operator is told
-    // which rule the config breaks rather than only that no count-only run path
-    // exists yet -- and so it still refuses once that path lands and the gate
-    // below stops firing. Gated on an explicit metadata block for the same
-    // reason as the payload guard below: without one, metadata is inferred from
-    // the exchange's input columns, which this offline mint never reads.
+    // whose own metadata would transmit a column: the algorithm exchanges no
+    // payload in either direction, and no other check here covers that shape.
+    // Ahead of the generic payload-disclosure guard and the algorithm gate
+    // below, so the operator is told the specific rule broken. Gated on an
+    // explicit metadata block, like the payload guard below: without one,
+    // metadata is inferred from the exchange's input columns, which this
+    // offline mint never reads.
     assertCountOnlyTransmitsNoColumn(
       configTerms.algorithm,
       configSource.metadata,
     );
 
     // Reject a payload.send that does not match what this party's metadata
-    // discloses before the token is minted, so the partner's consent screen and
-    // the encoded token never carry a dictionary that misstates what is sent (a
+    // discloses, before the token is minted, so the partner's consent screen and
+    // the encoded token never state a dictionary that misstates what is sent (a
     // column metadata gates off, or one it transmits but the dictionary omits);
     // the exchange-time check in prepareForExchange protects the record but runs
-    // too late for the consent surface. Only this config-as-source path can carry a hand-authored
-    // payload.send -- the online and infer paths build terms from columns and
-    // author none. Gated on an explicit metadata block: without one, metadata is
-    // inferred from the exchange's input columns (unknown here), so that case is
-    // left to the exchange-time check.
+    // too late for the consent surface. Only this config-as-source path can hold
+    // a hand-authored payload.send -- the online and infer paths build terms
+    // from columns and author none. Gated on an explicit metadata block: without
+    // one, metadata is inferred from the exchange's input columns (unknown
+    // here), left to the exchange-time check.
     if (configSource.metadata !== undefined)
       assertPayloadSendDisclosed(
         configTerms.payload,
@@ -733,14 +709,12 @@ export async function validateInvite(params: {
 
     // Fail closed, before the token is minted, on a config whose authored
     // standardization contradicts its own linkage terms -- the mint-boundary
-    // counterpart of the exchange-time check in prepareForExchange (the same shared
-    // assert), so this path -- the only offline mint that carries a hand-authored
-    // standardization -- never discloses an invitation the config's own
-    // `psilink exchange` would then refuse (exit 64). Gated on an explicit
-    // standardization: absent, the exchange reconstructs one from the terms (the
-    // terms-only path), which cannot contradict them. Mirrors the
-    // assertPayloadSendDisclosed guard above, which fails closed pre-mint for the
-    // same "never disclose a token the exchange rejects" reason.
+    // counterpart of the exchange-time check in prepareForExchange, since this is
+    // the only offline mint that holds a hand-authored standardization. Gated on
+    // an explicit standardization: absent, the exchange reconstructs one from the
+    // terms, which cannot contradict them. Mirrors the assertPayloadSendDisclosed
+    // guard above: never disclose a token the exchange would then reject
+    // (exit 64).
     if (configSource.standardization !== undefined)
       assertStandardizationMatchesTerms(
         configSource.standardization,
@@ -748,19 +722,18 @@ export async function validateInvite(params: {
       );
 
     // Fail closed, before the token is minted, on a config whose `algorithm` the
-    // run cannot honor -- the mint-boundary counterpart of the same shared
-    // exchange-time check, so this hand-authored offline mint never discloses an
-    // invitation the config's own `psilink exchange` would then refuse (exit 64).
-    // Unconditional, unlike the two guards above: `algorithm` is always present,
-    // and only this config-as-source path can carry a hand-authored algorithm at
-    // all (the online and infer paths build terms from columns via
-    // getDefaultLinkageTerms, which is always `psi`). See
+    // run cannot honor -- the mint-boundary counterpart of the same exchange-time
+    // check, so this hand-authored offline mint never discloses an invitation the
+    // config's own `psilink exchange` would then refuse (exit 64). Unconditional,
+    // unlike the two guards above: `algorithm` is always present, and only this
+    // config-as-source path can hold a hand-authored one (the online and infer
+    // paths always build `psi` via getDefaultLinkageTerms). See
     // assertAlgorithmImplemented.
     assertAlgorithmImplemented(configTerms.algorithm);
 
     // Likewise fail closed pre-mint on a `deduplicate: true` term the agreed
     // strategy cannot match: the schema alone admits it beside a `single-pass`
-    // strategy, and only this hand-authored config-as-source path can carry that
+    // strategy, and only this hand-authored config-as-source path can hold that
     // pair (the online and infer paths build terms via getDefaultLinkageTerms,
     // which is always deduplicate: false). See assertDeduplicateImplemented.
     assertDeduplicateImplemented(configTerms);
@@ -768,14 +741,14 @@ export async function validateInvite(params: {
     // Likewise fail closed pre-mint on a transform that fans one value out into
     // several match candidates under a strategy that matches one value per
     // record, where a splitting record contributes no key at all. Covers this
-    // path's terms and, where the config carries one, its hand-authored
+    // path's terms and, where the config holds one, its hand-authored
     // standardization -- the two places only this config-as-source path can
     // declare a fan-out step (the online and infer paths build terms and
     // standardization from columns, which declare none). See
     // assertFanOutImplemented.
     assertFanOutImplemented(configTerms, configSource.standardization);
 
-    // Carry the disclosed-columns subset only when the config declares an
+    // Include the disclosed-columns subset only when the config declares an
     // explicit metadata block: without one the run infers metadata from the
     // exchange input (which this offline invite never reads), so the transmitted
     // set is unknown at mint and the acceptor reconciles lazily. The same value
@@ -812,7 +785,7 @@ export async function validateInvite(params: {
   }
 
   // No config: infer terms from the input file, then write both files. Nothing
-  // here carries a label, so it is the operator's to supply, refused ahead of
+  // here holds a label, so it is the operator's to supply, refused ahead of
   // the input read and the token mint below.
   const identity = resolveIdentity(options.identity);
   if (resolved.input === undefined)
@@ -839,7 +812,7 @@ export async function validateInvite(params: {
   const disclosureMetadata =
     builtDataSpec.metadata ?? inferMetadata(rows.columns);
 
-  // Fail closed pre-mint on a disclosed column name too long to carry, for the
+  // Fail closed pre-mint on a disclosed column name too long to hold, for the
   // reason the online path above does: this path's metadata comes from the input
   // header too, so the refusal is the operator's own file's, named by position,
   // rather than the raw ZodError of the token bound inside encodeInvitation --
@@ -851,9 +824,9 @@ export async function validateInvite(params: {
   );
 
   // The disclosed-columns subset over that metadata, so the acceptor's consent and
-  // lock-in derive from what preparePayload will actually transmit. Carried on the
-  // token AND persisted into the written config as disclosedPayloadColumns, so a
-  // later recurring `psilink exchange` verifies its metadata still discloses
+  // commitment derive from what preparePayload will actually transmit. Included
+  // on the token and persisted into the written config as disclosedPayloadColumns,
+  // so a later recurring `psilink exchange` verifies its metadata still discloses
   // exactly this set before any data is sent (assertDisclosureMatchesCommitment).
   const disclosedPayloadColumns = disclosedColumnsFor(disclosureMetadata);
   const dataSpec: ResolvedDataSpec = {
@@ -865,10 +838,10 @@ export async function validateInvite(params: {
 
   const expires = expiresFromNow(lifetimeSeconds);
   const sharedSecret = generateSharedSecret();
-  // No retain declaration on this path, deliberately: the config it writes is a
+  // No retain declaration on this path, by design: the config it writes is a
   // placeholder scaffold whose connection block the operator still has to fill in
-  // and may set either way, so this mint has no settled mode to declare. An
-  // absent declaration states nothing, which is the honest answer here.
+  // and may set either way, so this mint has no fixed mode to declare. An
+  // absent declaration states nothing, which is the accurate answer here.
   const invitation = await encodeInvitation({
     version: "1",
     linkageTerms: dataSpec.linkageTerms,
@@ -895,7 +868,7 @@ export async function handler(argv: Arguments): Promise<void> {
       // Install the sink, apply the level, and build getLogger("invite") through
       // the shared configureLogging helper (in that order, so the logger inherits
       // the sink): the file sink when --log-file is given, otherwise the default
-      // stderr sink so stdout carries only the invitation token. A missing parent
+      // stderr sink so stdout contains only the invitation token. A missing parent
       // directory is a UsageError -> exit 64, mapped here by the enclosing
       // runOrExit.
       const { log, close } = configureLogging({
@@ -908,9 +881,9 @@ export async function handler(argv: Arguments): Promise<void> {
       // malformed or bare-integer value is a clean usage error (exit 64) before any
       // side effect; durationFlagSeconds also rejects a repeat (via singleValue)
       // before the array could reach validateInvite's numeric comparisons. expires-in
-      // is read as a string and parsed inside validateInvite; singleValue rejects its
-      // repeat too, before the array would hit parseDuration's .trim() and surface as
-      // a confusing exit 69.
+      // is read as a string and parsed inside validateInvite; singleValue still
+      // rejects its repeat first, before the array would hit parseDuration's
+      // .trim() and appear as a confusing exit 69.
       const acceptTimeout =
         durationFlagSeconds(argv, "accept-timeout", MAX_TIMEOUT_SECONDS) ??
         DEFAULT_ACCEPT_TIMEOUT_SECONDS;
@@ -944,13 +917,13 @@ export async function handler(argv: Arguments): Promise<void> {
           url: ready.url,
           channel: ready.connection.channel,
         });
-        // State the invitation's validity contract before announcing the wait. The
+        // State the invitation's validity contract before announcing the wait: the
         // inviter's exit (cancel, connection timeout, or accept-timeout) already
-        // makes the printed invitation unacceptable -- the setup secret is held
-        // only in memory until a handshake succeeds and the rendezvous is swept on
-        // cleanup -- so this notice is the user-facing half of that guarantee. It
-        // is logged here rather than at exit because a SIGINT exits via the signal
-        // handler's process.exit before any post-wait line could run.
+        // makes the printed invitation unacceptable, since the setup secret is
+        // held only in memory until a handshake succeeds and the rendezvous is
+        // swept on cleanup. Logged here rather than at exit, since a SIGINT exits
+        // via the signal handler's process.exit before any post-wait line could
+        // run.
         log.info(onlineWaitInvalidationNotice(acceptTimeout));
         log.info("waiting for the partner to accept...");
         const { configWriteError } = await runOnlineBootstrap({
@@ -988,7 +961,7 @@ export async function handler(argv: Arguments): Promise<void> {
           keyFile: options.keyFile,
           configWriteError,
         });
-        // State the peer budget that configuration carries, only once it is
+        // State the peer budget that configuration holds, only once it is
         // actually on disk: the accept timeout this run waited on is not it, and
         // an operator who never reads the file would otherwise have to infer
         // what a later recurring run is bounded by.
@@ -1017,24 +990,23 @@ export async function handler(argv: Arguments): Promise<void> {
 
         // Refresh the machine-managed send-side commitment in place (comments and
         // operator content preserved), binding the write to this mint so it can
-        // never lag the token the acceptor locks in: this closes the drift the
+        // never lag the token the acceptor commits to: this closes the drift the
         // partner would otherwise abort on mid-exchange, whether this is a first
-        // invite from a metadata-only config (no commitment persisted before) or a
-        // re-invite over edited metadata (a prior commitment now stale). A config
-        // with no metadata publishes no subset, so the field is removed here rather
-        // than left stale. Before the token print, so a failure never follows
-        // disclosure.
+        // invite from a metadata-only config or a re-invite over edited metadata.
+        // A config with no metadata publishes no subset, so the field is removed
+        // rather than left stale. Before the token print, so a failure never
+        // follows disclosure.
         persistDisclosedPayloadColumns(
           ready.configPath,
           ready.disclosedPayloadColumns,
         );
         // The outbound-consent record is the acceptor-role sibling of the
-        // commitment above, and this mint re-establishes the config as the
-        // INVITING side, whose outbound set is the commitment itself: an
-        // acceptor-era record left behind would go stale against re-edited
-        // metadata and refuse a later unattended run with remedy text about
-        // re-accepting. Removed on the same no-field-lags-this-mint rule the
-        // commitment refresh follows; a no-op where no record exists.
+        // commitment above; this mint re-establishes the config as the inviting
+        // side, whose outbound set is the commitment itself. An acceptor-era
+        // record left behind would go stale against re-edited metadata and
+        // refuse a later unattended run with remedy text about re-accepting.
+        // Removed on the same no-field-lags-this-mint rule the commitment
+        // refresh follows; a no-op where no record exists.
         persistOutboundPayloadConsent(ready.configPath, undefined);
 
         printInvitation(ready.invitation, undefined);
@@ -1091,12 +1063,12 @@ function specWithPlaceholderConnection(
 }
 
 /**
- * Surface the single-pass disclosure-tradeoff note at the point of selection,
- * when the operator's `--linkage-strategy single-pass` was applied to the
- * authored terms. A no-op for `cascade` or an absent selection. Called only from
- * the two paths where the flag is actually applied (online and infer-from-input)
- * -- not the config-as-source path, where the flag is warned-ignored and the
- * note would misrepresent what was used.
+ * Show the single-pass disclosure-tradeoff note at the point of selection, when
+ * the operator's `--linkage-strategy single-pass` was applied to the authored
+ * terms. A no-op for `cascade` or an absent selection. Called only from the two
+ * paths where the flag is actually applied (online and infer-from-input) -- not
+ * the config-as-source path, where the flag is reported as ignored and the note
+ * would misrepresent what was used.
  */
 function noteSinglePassSelection(
   strategy: LinkageStrategy | undefined,
@@ -1109,14 +1081,12 @@ function noteSinglePassSelection(
  * What bounds a later `psilink exchange` run from a configuration recording no
  * `peer_timeout_ms`, phrased for the channel that run will use.
  *
- * Each figure is read from the constant the channel's OWN transport falls back
+ * Each figure is read from the constant the channel's own transport falls back
  * to: the file-sync pair from core's file-sync budget, webrtc from the three
- * budgets `webRtcDialFrom` leaves unset. Those constants only coincide in value
- * (see `connection/webrtc/webrtcMessageConnection.ts`), and the rendezvous half
- * does not coincide at all, so quoting one transport's number on another's
- * channel would misreport the wait. A channel with no default named here gets
- * the reference row rather than a figure belonging to a transport that is not
- * its own.
+ * budgets `webRtcDialFrom` leaves unset. These values differ by transport (see
+ * `connection/webrtc/webrtcMessageConnection.ts`), so quoting one transport's
+ * number on another channel would misreport the wait. A channel with no
+ * default named here gets the reference row instead.
  */
 function absentPeerBudgetDefaults(
   channel: ConnectionConfig["channel"],
@@ -1147,18 +1117,15 @@ function absentPeerBudgetDefaults(
 
 /**
  * The line reporting which peer budget the configuration an online invite just
- * saved carries, logged once that configuration is on disk.
+ * saved holds, logged once that configuration is on disk.
  *
  * `--accept-timeout` bounds the invite's own run and is not written: the two
  * timeouts bound different lifetimes -- one operator waiting at a rendezvous,
- * versus every later unattended `psilink exchange` -- so persisting the first as
- * the second would hand a recurring run a budget nobody chose for it. What the
- * configuration records is therefore `--peer-timeout` when the operator set one,
- * and nothing otherwise, in which case those runs fall to the defaults of the
- * channel they run on -- which differ by transport, so the absent-field line
- * names the ones belonging to `channel` (see {@link absentPeerBudgetDefaults}).
- * Either way the value is named here rather than left to be read out of the
- * file.
+ * versus every later unattended `psilink exchange` -- so the configuration
+ * instead records `--peer-timeout` when the operator set one, and nothing
+ * otherwise. Absent a recorded value, those runs fall to the channel's own
+ * defaults (see {@link absentPeerBudgetDefaults}). Either way, the value is
+ * named here rather than left to be read out of the file.
  *
  * @internal exported for testing
  */
@@ -1186,14 +1153,13 @@ export function persistedPeerBudgetNotice(
 
 /**
  * The notice logged once an online invitation has been printed and the inviter
- * begins waiting, stating the invitation's validity contract: it can be accepted
- * only while this command waits at the rendezvous. Cancelling (Ctrl-C), the
+ * begins waiting: it states the invitation's validity contract -- accepted only
+ * while this command waits at the rendezvous. Cancelling (Ctrl-C), the
  * connection timing out, or reaching the accept-timeout all leave the rendezvous
  * and discard the one-time setup secret (held only in memory until a handshake
- * succeeds), so the printed invitation can no longer be accepted afterward and a
- * fresh one must be issued. This is the user-facing half of the early-revocation
- * guarantee the inviter's exit already enforces (see docs/CLI.md "Online
- * invitation").
+ * succeeds), so the invitation can no longer be accepted afterward. The
+ * user-facing half of the early-revocation guarantee the inviter's exit already
+ * enforces (see docs/CLI.md, "Online invitation").
  *
  * @internal exported for testing
  */
@@ -1210,19 +1176,15 @@ export function onlineWaitInvalidationNotice(
 }
 
 /**
- * The hint logged after an offline invitation is written, naming the early
- * abandonment path. Unlike the online flow (whose pending secret lives only in
- * the inviter's memory during the wait and is discarded on exit), the offline
- * flow persists the pending shared secret to the key file at `keyPath`. Deleting
- * that file invalidates the invitation before its nominal `expires`: the offline
- * key exchange cannot complete unless the inviting party still holds the pending
- * shared secret, so once the file is gone the secret carried in the forwarded
- * invitation can no longer authenticate a handshake against the inviter. The
- * hint directs the user to delete only the key file, never the configuration, so
- * abandoning a pending invitation leaves intact any configuration a recurring
- * exchange still serves. This is the offline counterpart to
- * {@link onlineWaitInvalidationNotice} and the user-facing half of the
- * abandonment affordance documented in docs/CLI.md ("Offline invitation").
+ * The hint logged after an offline invitation is written, naming the
+ * early-abandonment path. Unlike the online flow (whose pending secret lives
+ * only in memory during the wait), the offline flow persists the pending
+ * shared secret to the key file at `keyPath`; deleting that file invalidates
+ * the invitation before its nominal `expires`, since the offline key exchange
+ * cannot complete without it. Directs deleting only the key file, never the
+ * configuration, so an existing recurring exchange stays undisturbed. The
+ * offline counterpart to {@link onlineWaitInvalidationNotice} (see
+ * docs/CLI.md, "Offline invitation").
  *
  * @internal exported for testing
  */
@@ -1237,26 +1199,22 @@ export function offlineAbandonNotice(keyPath: string): string {
 
 /**
  * How the accept templates name the invitation: a placeholder the operator fills
- * in from the line stdout carries, never the invitation itself.
+ * in from the line stdout holds, never the invitation itself.
  *
- * The invitation encodes the setup shared secret, and every template below is a
- * DIAGNOSTIC line -- routed through the process-wide sink an operator points at a
- * file with `--log-file`, and re-emitted by anything that captures stderr. A
- * template that interpolated the invitation would put the secret wherever that
- * routing leads, for as long as the file lives, while the invitation's own
- * delivery is the stdout line below (which the operator directs, and which the
- * diagnostic routing never sees). It stands beside `<INPUT_FILE>`, which is a
- * placeholder for the same reason of shape: the template is a recipe to fill in,
- * not a line to paste unchanged.
+ * Every template below is a diagnostic line, routed through the process-wide
+ * log sink (`--log-file`, or re-emitted by anything that captures stderr);
+ * interpolating the invitation into one would put the secret in that routing,
+ * so the invitation itself is delivered only on the stdout line below. It
+ * stands beside `<INPUT_FILE>`, a placeholder for the same reason of shape: the
+ * template is a recipe to fill in, not a line to paste unchanged.
  *
- * {@link ../../test/unit/invite.test.ts} holds the runtime half -- the invite
- * command's diagnostic output is asserted to carry no substring of the invitation
- * it prints -- since a comment cannot fail when a later template interpolates it
- * again.
+ * {@link ../../test/unit/invite.test.ts} holds the runtime check: the invite
+ * command's diagnostic output must contain no substring of the invitation it
+ * prints.
  */
 const INVITATION_PLACEHOLDER = "<INVITATION>";
 
-/** The identity placeholder the accept templates carry. Accepting requires the
+/** The identity placeholder the accept templates use. Accepting requires the
  * partner's own label -- psilink stands in none -- so the template names the flag
  * where the partner meets the command, rather than leaving the refusal to teach
  * it. A placeholder for the same reason `<INPUT_FILE>` is: nobody but the partner
@@ -1270,13 +1228,12 @@ const IDENTITY_PLACEHOLDER = "--identity <YOUR NAME, YOUR ORGANIZATION>";
  * Print the invitation string (to stdout, so it is captured even at a quiet log
  * level) with the usage instructions for the partner. An online file-sync
  * invitation's accept template references the shared server the partner reaches
- * it at; an online webrtc invitation's does not, because there is no shared
- * server the partner types -- the invitation's own endpoint names the
- * coordination server, so their accept writes the connection block and dials it
- * in the one command, while this one waits.
+ * it at; an online webrtc invitation's does not, since there is no shared
+ * server to type -- the invitation's own endpoint names the coordination
+ * server, so accepting dials it in one command while this one waits.
  *
  * The templates name the invitation by {@link INVITATION_PLACEHOLDER} rather than
- * carrying it.
+ * including it.
  */
 function printInvitation(
   invitation: string,

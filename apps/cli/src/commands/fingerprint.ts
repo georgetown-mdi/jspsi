@@ -31,38 +31,25 @@ import {
   singleValue,
 } from "../util/cli";
 
-// `psilink fingerprint` is the front door to the signing identity. Generation is
-// LAZY and anchored here, not at exchange time: a party must display its
-// fingerprint to share it before any signed exchange (the partner pins it
-// out-of-band first), so the fingerprint command is the natural -- and earliest
-// -- point at which the identity must exist. Creating it here (rather than via a
-// separate keygen step) keeps the CLI surface minimal while respecting the
-// pin-first ordering. Creation is announced, never silent; regeneration is a
-// deliberate, gated action (`--force`) because it invalidates pins.
+// `psilink fingerprint` is the front door to the signing identity: generation
+// is lazy and anchored here, not at exchange time, since a party must display
+// its fingerprint to share it before any signed exchange. Creation is
+// announced, never silent; regeneration is a gated action (`--force`) because
+// it invalidates pins.
 //
-// Where the identity is kept is the OPERATOR's decision, never this command's:
-// the file is a credential, and a location psilink picked would be an ephemeral
-// container home (a fresh key and a fresh fingerprint every run) or a folder a
-// partner syncs into (the private key handed over) as easily as the right place.
-// So a run given no path refuses and says how to name one, rather than creating
-// the identity somewhere the operator did not choose.
+// Where the identity is kept is the OPERATOR's decision, never this
+// command's: the file is a credential, so a run given no path refuses and
+// says how to name one, rather than creating the identity somewhere the
+// operator did not choose.
 
 /**
  * What a run that names no identity path is told, in place of creating one.
  *
- * The guidance carries the whole remedy because a bare "name a path" invites a
- * throwaway location: this file is the only thing that keeps a pinned
- * fingerprint valid, and losing it costs a re-key coordinated with every
- * partner. So it states both spellings of the path, an example under a mount of
- * the identity's own, what the directory has to be (writable for this run,
- * read-only afterwards, durable, and never partner-synced), and the reuse case
- * that must not turn into a second identity.
- *
- * A single line, and one that ends in the message rather than in a probe: it
- * renders through the display-boundary sanitizer, which escapes a newline and
- * truncates past `COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH`, and psilink looks in no
- * location to tell the operator whether an earlier identity is there -- looking
- * is the behavior this refusal removes.
+ * A single line: it renders through the display-boundary sanitizer, which
+ * escapes a newline and truncates past `COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH`.
+ * Holds the whole remedy -- both spellings of the path, the directory's
+ * requirements, and the reuse-vs-new-identity guidance -- because psilink has
+ * no way to tell the operator whether an earlier identity exists elsewhere.
  */
 const NO_IDENTITY_PATH_REFUSAL =
   "no signing identity path is configured. Name the path and re-run -- " +

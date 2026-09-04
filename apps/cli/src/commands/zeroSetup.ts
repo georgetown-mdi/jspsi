@@ -160,13 +160,11 @@ export function builder(cmd: Argv): Argv {
     .demand(1);
 }
 
-// The common bootstrap options plus the zero-setup-specific positionals, the
-// --save flag, and the CLI-only sweep controls. record/recordFile/logLevel/
-// verbosity come from CommonBootstrapOptions. The connection-override subset the
-// handler feeds to createConnection is CommonBootstrapOptions' server-*/tuning
-// fields (a superset of ConnectionOverrideOptions); the fields below are excluded
-// from that path -- the CLI-only sweep controls never reach the config schema,
-// and --linkage-strategy shapes the linkage terms, not the connection.
+// The common bootstrap options plus the zero-setup-specific positionals, --save,
+// and the CLI-only sweep controls. The connection-override subset handed to
+// createConnection is CommonBootstrapOptions' server-*/tuning fields; the fields
+// below are excluded from that path -- the sweep controls never reach the config
+// schema, and --linkage-strategy shapes the linkage terms, not the connection.
 interface ZeroSetupArgs extends CommonBootstrapOptions {
   positionals: Array<string | number>;
   save: boolean;
@@ -182,7 +180,7 @@ function parseArgs(argv: Arguments): ZeroSetupArgs {
   // Parse the common options through the shared parser (the same singleValue
   // repeat-rejection and log-level validation invite/accept use), then layer the
   // zero-setup-specific handling on top. Unlike exchange, an `@path` credential
-  // ref is carried through verbatim (not resolved at parse time) and read only at
+  // ref passes through verbatim (not resolved at parse time) and read only at
   // the live-use boundary (readConnectionCredentials in the handler), so a
   // persisted config keeps the `@path` rather than the resolved secret.
   const common = parseCommonBootstrapArgs(argv);
@@ -192,7 +190,6 @@ function parseArgs(argv: Arguments): ZeroSetupArgs {
     configFile: expandTilde(common.configFile),
     keyFile: expandTilde(common.keyFile),
     recordFile: expandTilde(common.recordFile),
-    // zero-setup-specific positionals and flags.
     positionals: argv._,
     save: (argv["save"] as boolean | undefined) ?? false,
     // CLI-only, never persisted: resolve to a definite boolean here since there
@@ -253,7 +250,7 @@ export function resolvePositionals(positionals: Array<unknown>): {
     arg0,
     // Do not interpolate the raw input: a malformed but credential-bearing URL
     // (e.g. a mistyped port on sftp://user:secret@host) reaches here, and the
-    // message surfaces to the terminal and any --log-file. Unlike the redacted
+    // message shows on the terminal and any --log-file. Unlike the redacted
     // file:// case below, the input failed to parse, so there is no URL to route
     // through redactUrlCredentials; drop it entirely. The usage hint stands in
     // for the offending value, which the operator just typed.
@@ -263,14 +260,11 @@ export function resolvePositionals(positionals: Array<unknown>): {
 }
 
 /**
- * Build the zero-setup connection from a server URL. A thin adapter over the
- * shared {@link connectionFromURL} domain builder: it fans this command's parsed
- * options into the structured {@link ConnectionOverrides} shape at the call site
- * (the domain builder takes the pre-built overrides, never the CLI option bag),
- * so the URL-to-config mapping -- percent-decoding, the bare-host path guard, the
- * filedrop non-localhost and host-less-sftp rejections -- lives in one place
- * shared with invite/accept. Widens the builder's {@link RunnableConnectionConfig}
- * back to {@link ConnectionConfig} for the handler, which casts to
+ * Build the zero-setup connection from a server URL: a thin adapter over the
+ * shared {@link connectionFromURL} domain builder, keeping the URL-to-config
+ * mapping (percent-decoding, path guards, channel rejections) in one place
+ * shared with invite/accept. Widens the builder's result back to
+ * {@link ConnectionConfig}, which the handler casts to
  * {@link ProtocolConnectionConfig} at the runProtocol boundary.
  *
  * @internal exported for testing
@@ -294,12 +288,10 @@ async function prepareDataset(
   });
   const prepared = prepareForExchange({}, identity, rawRows, columns);
   // Apply the operator's --linkage-strategy onto the terms prepareForExchange
-  // authored from the input (a no-op for the cascade default), so it rides into
-  // both the exchange and the --save spec. The strategy does not affect the
-  // standardization/dataset prepareForExchange already built, so reshaping the
-  // terms here is safe. Surface the disclosure tradeoff at selection, mirroring
-  // invite; zero-setup never sources terms from a config, so the note always
-  // reflects what is used.
+  // authored (a no-op for cascade), so it rides into the exchange and the
+  // --save spec; it never touches the standardization/dataset already built.
+  // Reports the disclosure tradeoff at selection like invite -- zero-setup
+  // never sources terms from a config, so the note always reflects what runs.
   prepared.linkageTerms = withLinkageStrategy(
     prepared.linkageTerms,
     linkageStrategy,
@@ -311,18 +303,15 @@ async function prepareDataset(
 
 /**
  * Build the {@link ExchangeSpec} a `--save` zero-setup exchange persists: the
- * connection actually used plus the inferred linkage terms and metadata.
- * Standardization is omitted -- `psilink exchange` re-infers it from the input
- * file on load (the same inference that already succeeded here), so the saved
- * config stays minimal. The connection carries whatever credentials the URL or
- * --server-* flags supplied; `saveConfig` writes it owner-read-only.
+ * connection used plus the inferred linkage terms and metadata. Standardization
+ * is omitted -- `psilink exchange` re-infers it from the input file on load, so
+ * the saved config stays minimal. `saveConfig` writes it owner-read-only.
  *
- * `observedReceivedColumns` is the received-payload set this party observed in the
- * exchange (from {@link runProtocol}'s result). When non-empty it is recorded as
- * `expectedPayloadColumns` so a later recurring `psilink exchange` fails closed on
- * a divergent received payload; an empty or absent observation records nothing and
- * stays lazy (see {@link observedReceivedColumnsForSave} for why an empty
- * observation must not be persisted).
+ * `observedReceivedColumns` is the received-payload set observed in the
+ * exchange; when non-empty it is recorded as `expectedPayloadColumns` so a
+ * later recurring `psilink exchange` fails closed on a divergent payload. An
+ * empty or absent observation records nothing (see
+ * {@link observedReceivedColumnsForSave}).
  *
  * @internal exported for testing
  */
@@ -344,23 +333,17 @@ export function buildSaveSpec(
 
 /**
  * Apply the `--save` bootstrap outcome after a successful zero-setup exchange:
- * persist config/key as appropriate and emit the matching notice. It performs no
+ * persist config/key as appropriate and emit the matching notice. Performs no
  * network I/O -- only provisioning-layer writes and logging -- so it is unit
- * tested directly. Conflict detection already ran up front in the handler (via
+ * tested directly. Conflict detection already ran in the handler (via
  * {@link assertNoProvisionConflicts}); the both-saved path re-checks through
- * {@link provisionConfigAndKey}, and the config-only path writes through
- * {@link saveConfig}, the same writer that helper uses.
+ * {@link provisionConfigAndKey}, the config-only path through {@link saveConfig}.
  *
- * The four cases mirror docs/SECURITY_DESIGN.md "Bootstrapping a shared secret":
- * we-saved + both-saved (write config + key), we-saved + partner-did-not (write
- * config only, instruct to invite), we-did-not-save + partner-did (save nothing,
- * explain), and neither-saved (the standard recurring-exchange hint).
+ * The four cases mirror docs/SECURITY_DESIGN.md, "Bootstrapping a shared secret".
  *
- * A throw from here does not fail the run: the exchange it follows has already
- * completed, so the handler reports the failure as a persistence loss on both
- * machine channels. An error raised here therefore steers the operator to
- * `psilink invite` rather than to a re-run, which would conduct a second
- * exchange.
+ * A throw from here does not fail the run -- the exchange already completed, so
+ * the handler reports it as a persistence loss and steers the operator to
+ * `psilink invite` rather than a re-run, which would conduct a second exchange.
  *
  * @internal exported for testing
  */
@@ -403,16 +386,11 @@ export function finalizeBootstrap(params: {
     }
     // We saved but the partner did not: there is no secret, so persist the
     // config alone (no key file) and steer the user to the invitation flow.
-    // Re-check for a config conflict before writing: the both-saved branch gets
-    // this from provisionConfigAndKey, but this branch writes through saveConfig
-    // directly. The up-front gate ran before the network round-trip, so a file
-    // that appeared at the path in that window must abort here rather than
-    // clobber the user's configuration -- the same "never clobber a half-finished
-    // bootstrap" intent as the pre-flight check. Only configFile is re-checked,
-    // not keyFile: this branch writes no key file, so gating on a path it will
-    // not touch would reject a write that is safe. The asymmetry with the
-    // pre-flight (which reserves both) is deliberate -- the pre-flight cannot yet
-    // know the partner declined to save, whereas here that is settled.
+    // Re-check for a config conflict here since this branch writes through
+    // saveConfig directly, not provisionConfigAndKey: a file that appeared at
+    // the path during the network round-trip must abort rather than clobber the
+    // user's configuration. Only configFile is re-checked -- this branch never
+    // writes a key file, so gating keyFile here would reject a safe write.
     const conflicts = detectFileConflicts([configFile]);
     if (conflicts.length > 0)
       throw new UsageError(
@@ -453,18 +431,16 @@ export function finalizeBootstrap(params: {
 /**
  * The persistence-loss notice a `--save` bootstrap that did not reach disk
  * reports on the machine-interface stream, naming the files this run was asked
- * to write: both parties saving provisions a config and a key file, a partner
- * that declined to save leaves the config alone, and a party that passed no
- * `--save` writes nothing at all (see {@link finalizeBootstrap}). The CAUSE is
- * deliberately absent -- it goes to the human log beside the call, because the
+ * to write (see {@link finalizeBootstrap} for the four cases). The CAUSE is
+ * absent by design -- it goes to the human log beside the call, since the
  * emitter escapes its message exactly once and pre-rendered error text would
  * reach a supervisor double-escaped.
  *
  * `configLeftOnDisk` is the both-saved corner where the config was written, the
  * key file then failed, and the rollback of that config failed too
- * ({@link provisionLeftConfigOnDisk}): the file is on disk, so the notice names
- * it as written and steers the operator past the conflict it would otherwise
- * hit on the `psilink invite` this very notice advises.
+ * ({@link provisionLeftConfigOnDisk}): the notice names the config as written
+ * and steers the operator past the conflict it would otherwise hit on the
+ * `psilink invite` this notice advises.
  */
 function unsavedBootstrapNotice(params: {
   save: boolean;
@@ -554,7 +530,7 @@ export async function handler(argv: Arguments): Promise<void> {
     // Warn before createConnection can throw so the user sees the flag issue even
     // if the channel is refused. The channel is derived from the URL here
     // (pre-connection); an unknown scheme is swallowed because createConnection
-    // surfaces it below.
+    // reports it below.
     let channel: ConnectionConfig["channel"] | undefined;
     try {
       channel = channelFromURL(server);
@@ -596,22 +572,16 @@ export async function handler(argv: Arguments): Promise<void> {
     if (channel === "webrtc")
       exitWithError(log, new UsageError(WEBRTC_RENDEZVOUS_SECRET_REQUIRED), 64);
 
-    // Detect a pre-existing config/key before any network activity. With --save,
-    // a target that already exists is an error -- a half-finished bootstrap must
-    // never clobber a user's configuration -- and the check runs up front so it
-    // aborts before a connection is opened. Without --save, no files are written,
-    // so an existing config/key is merely ignored; warn and point at the command
-    // that would use it (docs/CLI.md "Zero-setup exchange").
+    // Detect a pre-existing config/key before any network activity. With --save
+    // an existing target is an error, checked up front so it aborts before a
+    // connection opens. Without --save, an existing config/key is ignored; warn
+    // and point at the command that would use it (docs/CLI.md "Zero-setup
+    // exchange").
     //
-    // Both paths are reserved here even though the partner-did-not-save branch
-    // ends up writing only the config: whether a key file is written depends on
-    // the partner's intent, which is not known until after the terms round-trip.
-    // Reserving both up front fails fast on an existing key file rather than
-    // discovering the conflict post-exchange, where the secret has already crossed
-    // the wire and the only recovery is a re-invite. The conservative gate trades a
-    // rare false block (a stale key file plus a partner who declines to save) for
-    // never stranding a half-saved bootstrap, and matches docs/CLI.md (an existing
-    // config OR key with --save is an error).
+    // Both paths are reserved even though the partner-did-not-save branch writes
+    // only the config: whether a key file is written depends on the partner's
+    // intent, unknown until after the terms round-trip, and a key-file conflict
+    // found post-exchange would find the secret already on the wire.
     if (options.save) {
       try {
         assertNoProvisionConflicts({
@@ -642,9 +612,9 @@ export async function handler(argv: Arguments): Promise<void> {
     try {
       connection = createConnection(server, options);
       // The quick path asks nothing and requires nothing: `--identity` rides
-      // into the terms when it names this party, and the terms carry none when
+      // into the terms when it names this party, and the terms have none when
       // it does not. A blank value is what a scripted `--identity "$ORG"` sends
-      // with ORG unset, so it reads as absent rather than as an empty label.
+      // with ORG unset, so it is treated as absent rather than as an empty label.
       prepared = await prepareDataset(
         optionalIdentity(options.identity),
         input,
@@ -659,16 +629,11 @@ export async function handler(argv: Arguments): Promise<void> {
       const credentials = readConnectionCredentials(connection);
       // Establish first-use SSH host-key trust on the ORIGINAL `connection`
       // (before the clone below), so the pin reaches both the live connect and,
-      // under --save, the persisted config (finalizeBootstrap saves this same
-      // object). A pinned connection is a no-op; an unpinned one prompts on a TTY
-      // and fails closed otherwise. With --save the pin is saved with the config;
-      // without it the key is trusted for this one-off exchange only. It follows
-      // the preparation and the credential read above because the first-use probe
-      // opens a real transport to the server, while every refusal those two can
-      // raise -- an unreadable or unparsable CSV, a dataset core refuses to
-      // prepare, a credential @path naming a file that is not there -- is decided
-      // from this party's own input alone; deciding those first is what keeps a
-      // refused run from connecting.
+      // under --save, the persisted config. A pinned connection is a no-op; an
+      // unpinned one prompts on a TTY and fails closed otherwise -- persisted
+      // under --save, one-off otherwise. Runs after dataset prep and the
+      // credential read above: those can only fail from this party's own input,
+      // so a refused run never opens a connection.
       await establishHostKeyTrust(connection, {
         verbosity,
         loggerName: "psilink",
@@ -682,7 +647,7 @@ export async function handler(argv: Arguments): Promise<void> {
       liveConnection = applyConnectionCredentials(connection, credentials);
     } catch (err) {
       // A bad URL scheme or unsupported channel is a usage error (exit 64);
-      // prepareDataset failures carry their own exitCode; otherwise exit 69.
+      // prepareDataset failures have their own exitCode; otherwise exit 69.
       exitWithError(log, err, exitCodeForError(err));
     }
 
@@ -691,13 +656,10 @@ export async function handler(argv: Arguments): Promise<void> {
     try {
       // The --save bootstrap persists from the onOutputComplete hook below and
       // reports what it loses on the machine-interface stream, so this command
-      // opens that stream itself and hands runProtocol the emitter rather than
-      // the flag: both sources then ride the one stream that carries the run's
+      // opens the stream itself and hands runProtocol the emitter rather than the
+      // flag, keeping both sources on the one stream that sends the run's
       // terminal event. openEventStream runs the same fail-closed fd-3 preflight
-      // runProtocol would have run, at the same point in the run, so an unwired
-      // descriptor stays a usage error (exit 64) raised before any connection is
-      // opened and after the command-level work ahead of it (see
-      // docs/spec/CLI_EVENTS.md).
+      // runProtocol would, at the same point (see docs/spec/CLI_EVENTS.md).
       const eventStreamEmitter = openEventStream(eventStream);
       // Cast: `liveConnection` is `ConnectionConfig` (which includes the webrtc
       // channel), so TypeScript cannot verify it fits `ProtocolConnectionConfig`
@@ -717,18 +679,16 @@ export async function handler(argv: Arguments): Promise<void> {
           enabled: options.record,
           recordFile: options.recordFile,
         }),
-        // Carry this party's --save intent into the in-band bootstrap. The
-        // exchange advertises it to the partner and, when both saved, hands the
-        // established secret to the hook below. Pass the raw boolean, never
-        // `options.save || undefined`: a non-saving party (options.save === false)
-        // must still receive a defined bootstrap so finalizeBootstrap can emit the
-        // "your partner wanted to save" notice. Collapsing false to undefined
-        // would leave the hook with nothing to act on and silently swallow that
-        // notice. The wire is unaffected either way -- the save field only rides
-        // the terms frame when intent is true (see exchangeTerms).
+        // Carry this party's --save intent into the in-band bootstrap; the
+        // exchange advertises it and, when both saved, hands the established
+        // secret to the hook below. Pass the raw boolean, never `options.save ||
+        // undefined`: a non-saving party must still receive a defined bootstrap so
+        // finalizeBootstrap can emit the "your partner wanted to save" notice --
+        // collapsing false to undefined would silently swallow it. The wire is
+        // unaffected either way (see exchangeTerms).
         options.save,
         // onAuthenticated is undefined on the unauthenticated zero-setup path; the
-        // trailing object carries the CLI-only sweep controls, the stream opened
+        // trailing object holds the CLI-only sweep controls, the stream opened
         // above, and this command's own post-exchange persistence.
         undefined,
         {
@@ -768,16 +728,13 @@ export async function handler(argv: Arguments): Promise<void> {
                 log,
               });
             } catch (err) {
-              // The exchange has already succeeded and written its output, so a
-              // failure here cannot undo the linkage: what is lost is the
-              // recurring-exchange setup, which is the persistence-loss class,
-              // not a transport failure a supervisor should retry -- a retried
-              // zero-setup run conducts a second exchange and re-sends this
-              // party's records. The config conflict that appeared after the
-              // pre-flight takes the same report rather than its own usage code:
-              // the pre-flight passed when the run began, so there is nothing
-              // about the invocation for the operator to correct, and 64 would
-              // invite that same re-run.
+              // The exchange already succeeded and wrote its output, so a failure
+              // here cannot undo the linkage -- what is lost is the recurring-
+              // exchange setup, not a transport failure to retry, since a retry
+              // would conduct a second exchange and re-send this party's records.
+              // The post-preflight config conflict takes the same report rather
+              // than exit 64: there is nothing about the invocation to correct,
+              // and 64 would invite that same re-run.
               const notice = unsavedBootstrapNotice({
                 save: options.save,
                 sharedSecret: bootstrap?.sharedSecret,

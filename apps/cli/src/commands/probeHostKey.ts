@@ -27,14 +27,11 @@ import {
 import { asciiSafeJsonLine } from "../util/jsonLine";
 
 // `psilink probe-host-key` is the ssh-keyscan analogue: it connects only far
-// enough to read the SFTP server's presented host key, then refuses the
-// connection before any credential is offered (see
-// FileSyncConnection.probeHostKeyFingerprint / sftpSession.ts). It prints the
-// observed fingerprint so it can be compared out-of-band against the value the
-// server operator published and pinned as connection.server.host_key_fingerprint.
-// It NEVER establishes trust on its own: reading a key over the same untrusted
-// network the exchange will use is not a substitute for verifying it. The
-// console spawns this command's --json form to fill its host-key pin field.
+// enough to read the SFTP server's presented host key, then refuses before any
+// credential is offered (see FileSyncConnection.probeHostKeyFingerprint). It
+// establishes no trust on its own -- reading a key over the same untrusted
+// network the exchange will use is not a substitute for verifying it. Full
+// behavior: docs/CLI.md, "Reading a host key with probe-host-key".
 
 /**
  * The single external effect the probe performs, injectable so the URL/format
@@ -110,21 +107,19 @@ export function builder(cmd: Argv): Argv {
  * sent in the SSH userauth phase -- which the host-key verifier aborts BEFORE, by
  * calling `verify(false)` at host-key verification -- so it never reaches the
  * server. A neutral placeholder rather than a real account keeps even a
- * hypothetical from carrying the operator's identity.
+ * hypothetical from exposing the operator's identity.
  */
 const PROBE_USERNAME = "psilink-host-key-probe";
 
 /**
- * Build the minimal probe connection from an `sftp://host[:port]` URL: host and
- * port only, plus a placeholder {@link PROBE_USERNAME} (ssh2 requires a username
- * to connect, but the probe aborts before it is sent) and the connect timeout as
- * `serverConnectTimeoutMs` (enforced by ssh2 as `readyTimeout`). It carries NO
- * credential and no username FROM THE URL -- the host-key verifier refuses before
- * authenticating, so none is ever needed, and omitting the credential keeps the
- * probe from parsing an (unresolved) one. A non-sftp scheme, an unparseable URL,
- * or a host-less URL is a {@link UsageError} (exit 64), never a transport failure.
- * Reuses the URL-handling primitives the connection builders share so the
- * scheme/host rules cannot drift.
+ * Build the minimal probe connection from an `sftp://host[:port]` URL: host,
+ * port, a placeholder {@link PROBE_USERNAME}, and the connect timeout as
+ * `serverConnectTimeoutMs`. It includes NO credential and no username FROM THE
+ * URL -- the host-key verifier refuses before authenticating, so none is ever
+ * sent, and omitting it avoids parsing an unresolved one. A non-sftp scheme, an
+ * unparseable URL, or a host-less URL is a {@link UsageError} (exit 64), never a
+ * transport failure, reusing the URL-handling primitives the connection
+ * builders share so the scheme/host rules cannot drift.
  *
  * @internal exported for testing
  */
@@ -171,7 +166,7 @@ export function buildProbeConfig(
  * Confirm the presented fingerprint is in canonical OpenSSH SHA256 form before
  * it is printed. `computeHostKeyFingerprint` already produces this shape, so a
  * value that fails here is an anomaly (a corrupt or subverted probe result), not
- * ordinary input -- surfaced as a transport-class failure rather than silently
+ * ordinary input -- reported as a transport-class failure rather than silently
  * emitted.
  */
 function assertCanonicalFingerprint(presented: PresentedHostKey): void {
@@ -184,7 +179,7 @@ function assertCanonicalFingerprint(presented: PresentedHostKey): void {
 
 /** The single stdout line the `--json` form emits: snake_case keys, the machine
  * form the console consumes. `keyType` is the server's choice within core's
- * charset and length bound, so it is carried as a JSON string value and
+ * charset and length bound, so it is included as a JSON string value and
  * re-validated at the console's trust boundary; the line rides
  * {@link asciiSafeJsonLine} like every machine line this command emits, so a
  * bound that ever admitted a byte outside printable ASCII could still not put
@@ -197,23 +192,20 @@ function probeJsonLine(presented: PresentedHostKey): string {
 }
 
 /**
- * The single stdout line the `--json` form emits for a dial that died before the
- * peer identified itself: the classification and, for a peer that answered with
- * something, the shape and the first bytes it sent. Snake_case keys like the
- * success line, and `diagnosis` is the discriminant -- the success line carries
- * no such key, so the two shapes can never be read for one another.
+ * The single stdout line the `--json` form emits for a dial that died before
+ * the peer identified itself: the classification and, for a peer that answered
+ * with something, the shape and the first bytes it sent. `diagnosis` is the
+ * discriminant key -- the success line never includes it, so the two shapes
+ * are never read for one another.
  *
- * The excerpt is bytes an untrusted party chose. It arrives redacted of
- * private-key material and bounded, both done where it is produced (see
- * `classifyPeerAnswer` and `PEER_EXCERPT_MAX_BYTES` in
- * connection/sftpPeerIdentification), so this route carries the same bytes the
- * human one does and emits them through {@link asciiSafeJsonLine}, which leaves
- * every byte of the LINE printable ASCII.
- *
- * Those escapes are the JSON encoding's own, so what a consumer parses back is
- * the peer's bytes unchanged: this is not a display boundary, and a consumer
- * that renders the excerpt to a human still escapes it at that sink, exactly
- * once (see CONTRIBUTING.md, Operator-facing escaping).
+ * The excerpt is untrusted bytes, already redacted of private-key material and
+ * bounded where it is produced (`classifyPeerAnswer`, `PEER_EXCERPT_MAX_BYTES`
+ * in connection/sftpPeerIdentification) and emitted through
+ * {@link asciiSafeJsonLine}. Its escapes are JSON's own, not a display
+ * boundary: a consumer parses back the peer's bytes unchanged, and one that
+ * renders the excerpt to a human still escapes it once at that sink (see
+ * docs/spec/CHANNEL_SECURITY.md, "SFTP host-key verification", and
+ * CONTRIBUTING.md, Operator-facing escaping).
  *
  * @internal exported for testing
  */
@@ -233,11 +225,10 @@ export function probeDiagnosisJsonLine(
 
 /** The human-readable summary, mirroring the trust-prompt copy in
  * hostKeyTrust.ts. `keyType` is the server's choice within core's bound, so it
- * is escaped before display, exactly as sftpSession.ts treats it; the
- * fingerprint is base64 and format-validated, and the host is already a bare
- * address but is escaped defensively too. Both sit ahead of the out-of-band
- * verification step, so each is redacted where it is interpolated and the log
- * sink's own pass cannot consume that step. */
+ * is escaped before display like sftpSession.ts; the fingerprint is base64
+ * and format-validated, and the host -- already a bare address -- is escaped
+ * defensively too, both ahead of the out-of-band verification step so neither
+ * depends on the log sink's own pass. */
 function probeHumanSummary(host: string, presented: PresentedHostKey): string {
   return (
     `${redactAndSanitizeForDisplay(host)} presented a ` +
@@ -308,7 +299,7 @@ export async function handler(argv: Arguments): Promise<void> {
     // The dial's own diagnosis of a peer that never identified itself goes to
     // stdout on the --json path, where the exit-69 result would otherwise be
     // indistinguishable from an unreachable host: a machine consumer discards
-    // stderr precisely because it can carry server-controlled bytes, so the
+    // stderr precisely because it can hold server-controlled bytes, so the
     // classification and the bounded excerpt need a route of their own. The
     // human path keeps reading it off the rendered cause chain below.
     const diagnosis = json ? peerIdentificationDiagnosisOf(err) : undefined;

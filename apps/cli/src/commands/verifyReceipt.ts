@@ -76,7 +76,7 @@ import {
 //     parties' terms are supplied) its agreed-terms hash re-derives. This proves
 //     nothing about the partner.
 //   - The dual-signed record (SIGNED): evidence against the partner. Each party's
-//     receipt signature is checked against the certificate the record carries, each
+//     receipt signature is checked against the certificate the record holds, each
 //     certificate's identity binding is checked, and each certificate is checked
 //     against what anchors it outside the record -- a fingerprint the verifier
 //     pinned, or the verifier's own signing identity.
@@ -84,7 +84,7 @@ import {
 // The positional accepts either artifact, dispatched on its format `version`; the
 // dual-signed record can also be named with --signed-record to verify both
 // artifacts of one exchange in a single run, which is what lets the record's terms
-// hash, party identities, and run binder be carried into the signature checks. The
+// hash, party identities, and run binder be included in the signature checks. The
 // run binder is the pairing: without the exchange record beside it a receipt
 // verifies against a partnership under a set of terms, not against one run of it.
 //
@@ -186,10 +186,10 @@ function readTextFile(pathValue: string, kind: string): string {
   }
 }
 
-// Reject an unrecognized version with a clear, specific message BEFORE the schema
+// Reject an unrecognized version with a specific message BEFORE the schema
 // parse -- so a future-format or hand-edited file is not mis-reported as a generic
 // shape error. The version literal is also enforced by the schema; this only makes
-// the failure legible.
+// the failure clear.
 function assertRecognizedVersion(
   raw: unknown,
   expected: string,
@@ -346,7 +346,7 @@ const COMMITMENT_WORD: Record<CommitmentStatus, string> = {
 // The recorded result size is the matched-pairs table's entry count and no
 // commitment covers it, so the verdict recounts the opened table rather than
 // opening anything. A mismatch is stated without the altered-or-wrong-file
-// hedge the commitment lines carry: a result that did not belong to this
+// hedge the commitment lines include: a result that did not belong to this
 // exchange fails the table's own line above and never reaches this one.
 const RESULT_SIZE_WORD: Record<ResultSizeStatus, string> = {
   verified: "matches the matched-pairs table it counts",
@@ -367,7 +367,7 @@ const RESULT_SIZE_WORD: Record<ResultSizeStatus, string> = {
 /**
  * What this run supplied, so a "not checked" line names an input that is still
  * missing rather than one already on the command line, and the note explaining a
- * config that carries no terms sits next to the line it explains.
+ * config that defines no terms sits next to the line it explains.
  * @internal exported for testing
  */
 export interface SuppliedVerificationInputs {
@@ -377,18 +377,14 @@ export interface SuppliedVerificationInputs {
   localTerms: boolean;
   /** Whether `--partner-terms` was supplied. */
   partnerTerms: boolean;
-  /** Whether this section carries the note explaining a config that defines no
+  /** Whether this section includes the note explaining a config that defines no
    * `linkage_terms`. A run reporting both artifacts prints it once, under the
-   * first agreed-terms line it explains. Defaults to carrying it. */
+   * first agreed-terms line it explains. Defaults to including it. */
   noteConfigTerms?: boolean;
   /**
-   * Whether the sources this run DID supply name fewer than two parties, which is
-   * the second reason the identity check can go unperformed. `linkage_terms.identity`
-   * is optional, so a run holding the exchange record -- or both terms documents --
-   * can still have no pair to check the certificates against, and the line then
-   * names that rather than sending the operator after an input they already passed
-   * (or, where nothing is missing, past `termsRemediation`'s refusal to render an
-   * empty one).
+   * Whether the sources this run supplied name fewer than two parties -- the
+   * second reason the identity check goes unperformed, since
+   * `linkage_terms.identity` is optional.
    */
   unnamedParty?: boolean;
 }
@@ -415,8 +411,8 @@ function missingTermsInputs(supplied: SuppliedVerificationInputs): string[] {
 
 // The agreed-terms hash is reported as not checked only when one of the two terms
 // documents is missing, so there is always an input to name. An empty remediation
-// would read as "pass" and send the operator nowhere, so it is refused rather than
-// rendered.
+// would display as "pass" and send the operator nowhere, so it is refused rather
+// than rendered.
 function termsRemediation(supplied: SuppliedVerificationInputs): string {
   const missing = missingTermsInputs(supplied);
   if (missing.length === 0)
@@ -436,7 +432,7 @@ function termsWord(
   return `not checked (pass ${termsRemediation(supplied)})`;
 }
 
-// The note a config carrying no linkage_terms earns: it names a path the operator
+// The note a config defining no linkage_terms earns: it names a path the operator
 // supplied, so it is escaped at this display sink.
 function configTermsNote(
   supplied: SuppliedVerificationInputs,
@@ -479,8 +475,8 @@ export function formatVerificationReport(
     [string, CommitmentStatus]
   >)
     lines.push(`  commitment ${name}: ${COMMITMENT_WORD[status]}`);
-  // Omitted when the record carries no result size: only a both-output exchange
-  // records one, and a line reporting the absence would read as a gap.
+  // Omitted when the record has no result size: only a both-output exchange
+  // records one, and a line reporting the absence would be treated as a gap.
   if (report.resultSize !== undefined)
     lines.push(`  result size: ${RESULT_SIZE_WORD[report.resultSize]}`);
   lines.push(`  agreed-terms hash: ${termsWord(report.termsHash, supplied)}`);
@@ -548,7 +544,7 @@ function unanchoredCertificateWord(
 }
 
 // How the verdict's own sentence names each anchor. The verdict's verified
-// headline carries only slots something anchored, so there is no unanchored case
+// headline includes only slots something anchored, so there is no unanchored case
 // to leave unnamed.
 const ANCHOR_SOURCE_PHRASE: Record<AnchoredCertificateStatus, string> = {
   "partner-pin": "a fingerprint you pinned out-of-band",
@@ -567,7 +563,7 @@ function signedTermsWord(
   if (status === "verified") return "matches the terms this exchange agreed";
   if (status === "mismatch")
     return "DOES NOT MATCH the terms this exchange agreed";
-  // The exchange record carries the hash outright, so it is the shorter route to
+  // The exchange record holds the hash outright, so it is the shorter route to
   // this check than restating both parties' terms.
   return `not checked (pass the exchange record, or ${termsRemediation(supplied)})`;
 }
@@ -629,7 +625,7 @@ function signedPartyLines(
   return [
     // The identity is free text the certificate's holder chose, so it is escaped
     // at this display sink; the fingerprint beside it is recomputed by the
-    // verifier rather than carried by the record.
+    // verifier rather than held by the record.
     `  ${party.role}: ${sanitizeForDisplay(party.identity)}`,
     `    ${fingerprintWord}: ${anchorWord}`,
     `    certificate identity binding: ` +
@@ -703,7 +699,7 @@ export function formatSignedRecordReport(
         "or the partner it is being checked against.",
     );
   else if (headline.tone === "incomplete")
-    // The record carries two certificates and a verdict speaks for both, so the
+    // The record holds two certificates and a verdict speaks for both, so the
     // headline names the slot nothing outside the record reaches rather than
     // speaking past it.
     lines.push(
@@ -745,7 +741,7 @@ export function formatSignedRecordReport(
   // The binder is never RECOMPUTED: deriving it needs the exchange's session key,
   // which only the two parties ever held and neither retains. What an offline
   // verifier can check is the pairing line above -- that the binder is the value
-  // the run's own record carries. A binder substituted into both artifacts is
+  // the run's own record holds. A binder substituted into both artifacts is
   // detectable only during the live exchange, where each party derives it
   // independently.
   lines.push(
@@ -764,24 +760,14 @@ export function formatSignedRecordReport(
 // --- Handler -----------------------------------------------------------------
 
 /**
- * This party's linkage terms, from the config named by `--config-file`.
- *
- * That config is also where `signing.partner_fingerprint` and
- * `signing.identity_file` are read from -- the signed-record verdict directs the
- * operator to a config carrying exactly those fields -- so one defining no
- * `linkage_terms` is accepted for them, and its absent terms are reported beside
- * the agreed-terms line rather than refused.
- *
- * A path that does not exist is a usage error: this command never auto-loads a
- * config, so a path that reaches here was named on the command line, and mapping
- * a typo to "no terms supplied" would leave the agreed-terms hash reported as
- * merely not checked (the distinction {@link pinnedFingerprintFromConfig} draws
- * for the same file's pin).
- *
- * The rule-set citation these terms carry is checked against them here rather
- * than in the reader they share with `--partner-terms`: a citation on the
- * PARTNER's document is that party's statement about that party's own rules,
- * which this party's config load has no standing to report on.
+ * This party's linkage terms, from the config named by `--config-file`,
+ * which also supplies `signing.partner_fingerprint` and
+ * `signing.identity_file` -- so a config that defines no `linkage_terms` is
+ * accepted rather than refused. A path that does not exist is a usage error
+ * (this command never auto-loads a config). The rule-set citation is
+ * checked here, not in the reader shared with `--partner-terms`: this
+ * party's config load has no standing to report on the PARTNER's own
+ * citation of its rules.
  */
 function configFileTerms(
   configFile: string | undefined,
@@ -830,7 +816,7 @@ function partnerTermsFrom(
 /**
  * The `signing` block of an exchange config, read once per invocation and shared
  * by the two fields this command takes from it: the config is a secret-bearing
- * document, so it is read and parsed once rather than once per field. It carries
+ * document, so it is read and parsed once rather than once per field. It holds
  * the config path as the operator wrote it, for the messages that name it.
  * @internal exported for testing
  */
@@ -840,17 +826,14 @@ export interface ConfigSigningBlock {
 }
 
 /**
- * Read the `signing` block out of an exchange config, so a party re-verifying its
- * own exchange gets the pin and the identity it already configured without
- * restating either on the command line. Only the two fields this command uses are
- * read from it, so an unrelated block a verification run never touches cannot
- * fail one.
+ * Read the `signing` block out of an exchange config, so a party
+ * re-verifying its own exchange gets the pin and the identity it already
+ * configured. Only the two fields this command uses are read from it.
  *
- * `explicit` marks a path the operator named on the command line rather than a
- * default, and a named path that does not exist is a usage error rather than an
- * empty block (the distinction `psilink fingerprint` draws for its own config
- * hints): a typo'd `--config-file` would otherwise verify unanchored and report
- * trust as merely not established.
+ * `explicit` marks a path named on the command line: a missing explicit
+ * path is a usage error, not an empty block (the same distinction `psilink
+ * fingerprint` draws for its own config hint) -- so a typo'd `--config-file`
+ * does not silently verify unanchored.
  * @internal exported for testing
  */
 export function readConfigSigningBlock(
@@ -925,29 +908,14 @@ function signingIdentityPathFrom(
 }
 
 /**
- * What the signature checks are anchored to besides the certificates: the two
- * parties' identities (which each certificate must authorize), the agreed-terms
- * hash the receipt content carries, and the run binder that pairs the receipt to
- * one exchange. The exchange record holds all three already, so a party verifying
- * its own exchange supplies them by naming the record; an auditor without the
- * record restates the first two from both parties' terms instead, and pairs
- * nothing -- terms are a partnership's, not a run's. With neither, every check is
- * reported as not performed rather than assumed.
- *
- * A record carrying no run binder is passed as an explicit `null`, so a record of
- * an exchange that produced no receipt is reported as contradicting the receipt in
- * hand rather than as a pairing nobody could check.
- *
- * The identities are unordered: no artifact outside the dual-signed record records
- * which party held which handshake role, and the per-signer signature binding is
- * what fixes a certificate to its role.
- *
- * The pair is supplied only when BOTH parties are named. `linkage_terms.identity`
- * is optional, and an unnamed party has nothing a certificate could be authorized
- * against -- which is why an exchange with one refuses to produce a receipt at all
- * (core's `runExchange`). A half-pair would anchor one signer and silently leave
- * the other's identity check reading as performed, so the check is reported as not
- * performed instead.
+ * What the signature checks are anchored to besides the certificates: both
+ * parties' identities, the agreed-terms hash, and the run binder. Supplied
+ * from the exchange record when named; without it, an auditor restates
+ * identities and the hash from both parties' terms and supplies no run
+ * binder. A record with no run binder is passed as explicit `null`, not
+ * omitted. Identities are unordered (the per-signer signature binding fixes
+ * a certificate to its role) and are supplied only when both parties are
+ * named -- a half-pair would leave one identity check appearing performed.
  */
 async function signedRecordExpectations(
   record: ExchangeRecord | undefined,
@@ -985,12 +953,11 @@ function namedPair(
 
 /**
  * The fingerprints pinned out-of-band for the signed-record check: every
- * `--partner-fingerprint` value, or the config's `signing.partner_fingerprint`
- * when the flag is absent. The flag wins over the config, so a third party given a
- * fingerprint out-of-band can verify against a config it does not have (or one
- * written for another partner), and a verifier that was party to no exchange
- * repeats the flag to pin both signers. The record carries two certificates, so a
- * third value could anchor nothing and is refused rather than quietly dropped.
+ * `--partner-fingerprint` value, or (when none are given) the config's
+ * `signing.partner_fingerprint`. The flag takes precedence, so a
+ * third-party verifier without the config can still supply it directly;
+ * repeat it to pin both signers. A third value cannot anchor anything (the
+ * record holds two certificates) and is refused rather than dropped.
  */
 function resolvePinnedFingerprints(
   flagValues: string[],
@@ -1143,7 +1110,7 @@ export async function handler(argv: Arguments): Promise<void> {
       );
 
     const artifact = readVerifiableArtifact(recordPath);
-    // A dual-signed record carries no commitments and no terms, so the options
+    // A dual-signed record holds no commitments and no terms, so the options
     // that only apply to an exchange record are refused rather than ignored.
     if (artifact.kind === "signed") {
       if (signedRecordArg !== undefined)
@@ -1257,7 +1224,7 @@ export async function handler(argv: Arguments): Promise<void> {
       });
       const rendered = formatSignedRecordReport(report, {
         ...supplied,
-        // The note explaining a config that carries no terms belongs beside
+        // The note explaining a config that defines no terms belongs beside
         // the first agreed-terms line it explains, and a combined run has
         // already printed that line above.
         noteConfigTerms: artifact.kind !== "record",
