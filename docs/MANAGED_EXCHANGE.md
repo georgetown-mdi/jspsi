@@ -40,13 +40,13 @@ handoff's destination is exactly the installed, IT-operated tooling it does not
 have. The managed exchange gives that operator a recurring partnership without
 leaving the browser.
 
-The calibration is honest in both directions. An organization **with** IT
+The calibration is accurate in both directions. An organization **with** IT
 support should still graduate to the CLI plus host cron -- the CLI remains the
 stronger recurring tool: on-disk key-file durability instead of evictable
 browser storage, an OS scheduler instead of a browser runtime kept alive, and
 the hardened container deployment. The graduation point is when the
 organization can vet and operate installed software at all. Every posture
-choice in this document -- browser persistence with honest eviction handling,
+choice in this document -- browser persistence with accurate eviction handling,
 automation inside the operator's own browser runtime, a plaintext export under
 operator custody -- is calibrated to the no-IT persona, not to the organization
 that has better options.
@@ -68,7 +68,7 @@ What managed **adds**:
   discard.
 - **Scheduled, unattended runs** as the design goal: once an exchange is
   managed and a schedule agreed, runs happen with nobody present, on the
-  platforms that can carry it -- with an attended one-action re-run as the
+  platforms that can support it -- with an attended one-action re-run as the
   named degradation (see [The automation
   goal](#the-automation-goal-and-its-platform-envelope)).
 
@@ -95,12 +95,12 @@ The design goal is a **fully automated recurring exchange**: once an exchange
 is managed and its schedule agreed with the partner, runs happen unattended.
 Browser automation is inherently a compromise against installed software, and
 the compromises are accepted -- what is not accepted is settling for an
-attended flow where the platform can carry an unattended one.
+attended flow where the platform can support an unattended one.
 
-**The first-class path is an installed PWA on Chromium.** The app is installed
+**The primary path is an installed PWA on Chromium.** The app is installed
 and launched at OS login (or otherwise kept running), and the exchange executes
 in the app's own window context: WebRTC is unavailable to service workers, and
-Periodic Background Sync's short opportunistic windows cannot carry a live
+Periodic Background Sync's short opportunistic windows cannot support a live
 exchange, so an open app runtime -- not a service-worker wakeup -- is the
 mechanism. At the agreed window the runtime re-reads the input file through the
 record's persisted `FileSystemFileHandle` under its persistent read permission
@@ -157,7 +157,7 @@ needs:
 
 ### Enabling launch at sign-in
 
-Chromium-based desktop browsers carry a per-app "start at sign-in" setting for an
+Chromium-based desktop browsers have a per-app "start at sign-in" setting for an
 installed app, offered from the installed app's own menu; it is the browser's
 setting, not the application's, so psilink cannot turn it on and does not ask to.
 A browser that does not offer it cannot be made to, and nothing here claims
@@ -234,7 +234,7 @@ own page: the date and time of the first agreed window on their own clock, how
 often a window opens, and how long it stays open. Scheduling is off until
 someone enters one, and turning it off again returns the exchange to
 attended-only without touching anything else. The schedule is
-**not** minted into the exchange-file document and **not** carried on the
+**not** minted into the exchange-file document and **not** part of the
 invitation wire: the document is the shared terms-and-locator config, fixed for
 the partnership -- changing the terms means setting up a new exchange, not
 altering this one -- and a reschedule is neither a terms change nor a credential,
@@ -271,14 +271,14 @@ elapses with no completed handshake -- the peer never arrived, or arrived and
 left before this side did -- the window is recorded as **missed** and the runner
 advances to the next planned window.
 
-The window width is deliberately generous -- hours, not minutes -- for two
+The window width is generous by design -- hours, not minutes -- for two
 reasons. It absorbs clock skew between the two machines (the runners never
 exchange a clock reading, so a wide window is what guarantees overlap despite
-small clock differences; the honest bound is in
+small clock differences; the accurate bound is in
 [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#clock-skew-and-the-window-width)),
 and it absorbs the ordinary slack of two independently-kept machines -- a laptop
 that woke late, an app launched a few minutes after login. A missed window
-carries no security meaning (see [A missed window is neither desync nor
+has no security meaning (see [A missed window is neither desync nor
 attack](#a-missed-window-is-neither-desync-nor-attack)).
 
 ### Retry and repeated misses
@@ -295,15 +295,14 @@ and a two-sided absence are the same benign outcome from each present party's
 point of view. There is no "who retries" question to answer: neither party
 retries early, and both simply meet again at the next window.
 
-That bookkeeping is **one-sided by construction, and deliberately so**:
-"whoever showed up records the miss" means the escalating surface below fires
-on the party that keeps showing up -- exactly the party positioned to reach out
--- while a persistently absent party's runtime may never be awake to see
-anything. The asymmetry is accepted because reconciliation needs only one side
-to raise it, over the channel where the schedule was agreed. Nor is the absent
-side left permanently ignorant: a runtime that wakes to find windows fully
-elapsed counts each one as a miss and lands on the next live window (the
-catch-up rule; see
+That bookkeeping is **one-sided by construction**: "whoever showed up records
+the miss" means the escalating surface below fires on the party that keeps
+showing up -- exactly the party positioned to reach out -- while a persistently
+absent party's runtime may never be awake to see anything. The asymmetry is
+accepted because reconciliation needs only one side to raise it, over the
+channel where the schedule was agreed. Nor is the absent side left permanently
+ignorant: a runtime that wakes to find windows fully elapsed counts each one as
+a miss and lands on the next live window (the catch-up rule; see
 [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#catch-up-on-wake)),
 so its own repeated-miss surface fires at that wake -- it learns late, but it
 does learn.
@@ -324,10 +323,10 @@ check with your partner, and check this machine's own clock -- a wrong local
 time source produces exactly this pattern, and a no-IT operator pointed only at
 the partner would never look at their own machine.
 
-The threshold is a window count, not a wall-clock age, so it is deliberately
-**cadence-relative**: on a monthly partnership the escalated state is months
-away. That is accepted because each miss already
-fires its own moment-anchored notification at its window (see [The between-visit
+The threshold is a window count, not a wall-clock age, so it is
+**cadence-relative** by design: on a monthly partnership the escalated state is
+months away. That is accepted because each miss already fires its own
+moment-anchored notification at its window (see [The between-visit
 notification](#the-between-visit-notification)), so the operator is not in the
 dark in the interim -- the threshold gates only the escalated
 coordination-problem framing, not the operator's first knowledge of a miss.
@@ -336,9 +335,9 @@ coordination-problem framing, not the operator's first knowledge of a miss.
 
 A design question this raises: after enough consecutive misses, should the app
 **automatically pause** the schedule (stop attempting until the operator
-re-enables it), or only **surface** the problem and keep attempting on cadence?
+re-enables it), or only **report** the problem and keep attempting on cadence?
 
-This design chooses **surface-only, no auto-pause**, because for the no-IT
+This design chooses **report-only, no auto-pause**, because for the no-IT
 persona this feature serves the two failure modes are not symmetric:
 
 - **Auto-pausing is silent, and the persona visits rarely.** A paused schedule
@@ -362,7 +361,7 @@ persona this feature serves the two failure modes are not symmetric:
   leaves the device, nothing of the exchange is sent anywhere, and the secret is
   neither exposed nor rotated.
 
-The honest cost of not pausing is that the miss surface must itself be
+The full cost of not pausing is that the miss surface must itself be
 trustworthy: if it read as noise the operator learned to ignore, endless quiet
 retries would mask a dead partnership just as a silent pause would. That is why
 the miss surface is **moment-anchored and escalating** -- one informational
@@ -404,22 +403,22 @@ already defines:
   eviction](#surviving-storage-eviction)).
 - **This did not run: a missed window.** Each miss fires one quiet,
   informational notification at its window -- the run the operator expected did
-  not happen, said honestly at its moment, with the next planned window named;
+  not happen, said accurately at its moment, with the next planned window named;
   no action is demanded, because the retry is automatic. A runtime that wakes to
-  find windows already elapsed surfaces its accrued misses **once**, at the wake
+  find windows already elapsed reports its accrued misses **once**, at the wake
   (the catch-up rule; see
   [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#catch-up-on-wake)),
   not one notification per slept-through window. Once the consecutive-miss count
   crosses the escalation threshold, the copy becomes the coordination prompt --
   check with your partner, and check this machine's own clock -- and further
   misses stop firing individually while that state stands (the in-app state
-  carries it), so a dead partnership on a short cadence does not become a daily
+  holds it), so a dead partnership on a short cadence does not become a daily
   nag.
 - **This needs you: the input file is missing or was rejected.** A benign
   pre-run input failure on an unattended run -- the handle's file gone at run
   start, or a refresh that cannot satisfy the standing terms -- means no
   scheduled run can succeed until the operator re-points the handle, drops a
-  conforming file, or settles new terms with the partner, so it is actionable at
+  conforming file, or decides new terms with the partner, so it is actionable at
   its moment (see [The input file each run](#the-input-file-each-run)).
 - **This needs you: what this run would send is not what was agreed.** A
   pre-connection disclosure refusal on an unattended run -- the input file this
@@ -431,22 +430,22 @@ already defines:
   ran and failed closed with no recorded benign cause (the Tier-2 case; see
   [Telling a desync from an attack](#telling-a-desync-from-an-attack)) is the
   one failure that needs the operator's out-of-band confirmation work, so it is
-  worth surfacing between visits rather than waiting for the next visit.
+  worth reporting between visits rather than waiting for the next visit.
 
 Everything else stays quiet, and nothing repeats: each notification fires once
-at its state's transition, and a condition already surfaced is carried by the
+at its state's transition, and a condition already reported is held by the
 in-app state rather than re-announced at every subsequent wake (the in-app
 surfaces follow the same discipline; see [Moment-anchored backup
 surfaces](#moment-anchored-backup-surfaces)).
 
-Because the notification is a concept over states the record already carries, a
+Because the notification is a concept over states the record already holds, a
 platform without OS notifications loses only the *sooner* prompt: every one of
-these states is still carried honestly to the operator's next in-app visit.
+these states is still reported accurately at the operator's next in-app visit.
 
 ## The second run, end to end
 
 The managed exchange is judged by its second run -- the first thing the feature
-does that the one-shot flow cannot. On the first-class path the second run is
+does that the one-shot flow cannot. On the primary path the second run is
 **scheduled**, and nobody is present:
 
 1. **The window arrives.** The installed app runtime, running since OS login,
@@ -460,7 +459,7 @@ does that the one-shot flow cannot. On the first-class path the second run is
 4. **Rotate-and-persist, then the data exchange** -- the durability contract
    below, unchanged by nobody watching.
 5. **The outcome lands in the run bookkeeping**, the disclosure is filed to this
-   exchange's accounting, and the next visit's surfaces carry the result of all
+   exchange's accounting, and the next visit's surfaces hold the result of all
    that: the refreshed-backup prompt (the secret rotated), or the failure state.
    An OS-level notification from the installed app is the "this ran / this needs
    you" surface between visits (see [The between-visit
@@ -486,7 +485,7 @@ the partner's copy is in doubt (the exits and their wording:
 [WEBRTC_TRANSPORT.md](spec/WEBRTC_TRANSPORT.md#the-clean-close)). It is raised
 at the moment the close resolves, so it is a completion-surface notice for
 whoever is present rather than a state the next visit reads -- the run
-bookkeeping carries no close outcome.
+bookkeeping holds no close outcome.
 
 An attended re-run has a third ending: the wait for the partner runs out and
 nobody arrives, so no handshake is attempted and nothing leaves this device.
@@ -494,7 +493,7 @@ That is the benign no-show a missed window records, and the surface names it as
 one -- the partner was not there, this device is not at fault -- rather than
 sending the operator to check their own connection. Where this device already
 holds a reason its stored secret may no longer be the partnership's, that
-reason is what the run surfaces instead (see [A missed window is neither desync
+reason is what the run reports instead (see [A missed window is neither desync
 nor attack](#a-missed-window-is-neither-desync-nor-attack)).
 
 ### The input file each run
@@ -525,7 +524,7 @@ file read with a clean not-found before any connection is attempted: a third
 benign state alongside expiry and the missed window, never routed through the
 desync/attack framing. An unattended run records it in the run bookkeeping (a
 benign `input` failure; see
-[MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md)) and surfaces it
+[MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md)) and reports it
 through the notification concept and the next visit's state; an attended visit
 offers re-selection to re-point the handle. Because that state is harmless,
 the same mechanics double as optional hygiene: an operator can remove the file
@@ -535,7 +534,7 @@ the run window (see
 [SECURITY_DESIGN.md](SECURITY_DESIGN.md#metadata-at-rest-presence-and-shape)).
 
 On every path -- unattended, one-action, or re-selection -- the app rejects an
-input file that cannot satisfy the standing terms: the record's document carries
+input file that cannot satisfy the standing terms: the record's document holds
 the agreed terms, and the guard holds the file to the same rule the run boundary
 does -- every declared linkage key satisfiable, none declaring cleaning that
 drops every record -- so a malformed or drifted refresh is rejected as a benign
@@ -546,7 +545,7 @@ That shortfall is a state of its own on the run surface, held apart from the fil
 that could not be read: the same file falls the same way short of the same keys
 however many times it runs, so the alert copy and the affordances beside it --
 the recovery block and the saved-exchanges footer -- point at the two ways
-forward: a file covering every agreed key, or terms settled with the partner
+forward: a file covering every agreed key, or terms decided with the partner
 over the keys both files can supply. The run control itself is not withheld;
 it stays enabled on the input source and the device's connectivity alone, the
 same as any other state. The copy names no key or field: the shortfall's detail
@@ -555,7 +554,7 @@ is partner-authored.
 It is a state of its own in the run bookkeeping too -- its own `failureKind`,
 distinct from the unreadable file's (see
 [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md)) -- so an
-unattended run that met it surfaces the same two ways forward at the operator's
+unattended run that met it shows the same two ways forward at the operator's
 next visit, rather than the re-pick that would refuse identically. That is the
 case the split exists for: nobody was watching when it failed.
 
@@ -564,7 +563,7 @@ case the split exists for: nobody was watching when it failed.
 The persisted secret is a **linear resource**: after each successful run both
 parties derive the same replacement secret and retire the old one, so there is
 exactly one live secret between the two parties at any moment. That property makes
-the ordering of persistence and success load-bearing.
+the ordering of persistence and success critical.
 
 ### Persist-before-success
 
@@ -667,7 +666,7 @@ property rests on migration-not-sync (below), not on the lock.
 
 Moving a managed exchange to another device is **migration**: the source copy is
 spent when the handover completes, so the secret is handed over, not duplicated.
-There is deliberately no sync: syncing a linear secret across two live copies is
+There is no sync by design: syncing a linear secret across two live copies is
 the exact fork the invariant forbids. Importing the artifact on the target
 device installs the exchange there, and a spent source will not run again
 without a fresh import or a re-invite. Framing the operation as "take over on
@@ -684,13 +683,13 @@ source live and recoverable by exporting again; declining the attestation keeps
 the exchange on this device. On confirmation the source record visibly
 transitions to a spent, handed-off state -- no Run affordance, no scheduled
 runs, labeled with the handoff date -- so the cooperation-not-cryptography
-invalidation below is legible at the one moment it is violable. A record spent this
+invalidation below is clear at the one moment it is violable. A record spent this
 way can be deleted, or revived only by importing the artifact back.
 
 **A hand-off refuses a copy a run has already superseded.** Confirming either
 hand-off -- the device migration here, or the command-line export below --
 re-reads the stored record first, and refuses unless what was downloaded still
-carries the exchange's current secret. A run rotates that secret at its
+holds the exchange's current secret. A run rotates that secret at its
 handshake, so a run that reaches the partner between the download and the
 attestation supersedes what was downloaded: confirming it would hand the new
 owner a copy whose first run meets a partner that has moved on, and only a
@@ -740,7 +739,7 @@ remedy. A confirmation that spends and a run that rotates therefore exclude each
 other rather than racing, in either order.
 
 The artifact is a **plaintext credential file in the operator's custody**.
-Passphrase encryption is deliberately not done: the record must be usable with
+Passphrase encryption is not done, by design: the record must be usable with
 nobody present to supply a passphrase at the moment of use. It is the browser
 analog of handing over `psilink.yaml` plus `.psilink.key`, and it adopts the key
 file's exact trust model: `.psilink.key` is a plaintext credential protected by
@@ -750,7 +749,7 @@ same handling -- owner-only storage, never an unencrypted transmission channel,
 an encrypted location or secrets manager if the operator wants encryption at
 rest. The artifact does not rotate -- it snapshots the secret current at export
 -- so a stale artifact stays usable until the partnership rotates past it or any
-`expires` it carries (stamped when a max-age policy is set) lapses. Its shape
+`expires` it holds (stamped when a max-age policy is set) lapses. Its shape
 and the no-anti-rollback caveat are in
 [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#export-artifact).
 
@@ -781,9 +780,9 @@ differently once they land:
   security](SECURITY_DESIGN.md#key-file-security)).
 
 Saved into one folder, the two are what the emitted invocation opens: the CLI
-reads both at its default paths, so the command carries no path from any machine
-and needs no flag. The panel shows that invocation beside the cron and Task
-Scheduler lines that run it daily.
+reads both at its default paths, so the command includes no path from any
+machine and needs no flag. The panel shows that invocation beside the cron and
+Task Scheduler lines that run it daily.
 
 The spend is **operator-attested**, exactly as a device migration's is: two
 downloads are two chances for a save to fail, and a click gives no landing
@@ -797,10 +796,10 @@ the recovery a migration has -- import the artifact back -- has nothing to act o
 here, because the two files are the CLI's own, not the artifact. An older browser
 backup does not stand in for them either. Importing an artifact exported before the
 hand-off is **refused** while the handed-off exchange is still listed here and the
-artifact carries the secret it was spent holding: importing it would either run a
+artifact has the secret it was spent holding: importing it would either run a
 copy this browser gave away or leave that copy live beside the spent one, and one
 owner holds a recurring exchange's secret. Where an import is offered at all --
-the list's empty and could-not-read states are the only surfaces carrying one --
+the list's empty and could-not-read states are the only surfaces holding one --
 the refusal names the exchange and what it has instead: it runs on the machine
 holding those two files from then on, and bringing it back to this browser means
 a fresh invitation. Alongside a healthy listing there is no import to refuse, so
@@ -809,18 +808,18 @@ in practice the fresh invitation is the recovery an operator reaches for.
 Those two conditions bound it, and an import outside them installs an ordinary
 fresh exchange:
 
-- **An artifact older than the last rotation** carries a secret no spent record
+- **An artifact older than the last rotation** has a secret no spent record
   here holds, so nothing matches it.
 - **Deleting the handed-off exchange** takes away the record the match is made
   against -- the operator's own choice, and the same cooperation every
   single-owner rule here rests on.
 
-Neither leaves two copies running side by side for long. An older artifact already
-carries a secret the partnership has moved past, and a copy of the current one
-diverges from the handed-off files the moment either side runs and rotates, so the
-losing copy's next run fails its handshake and surfaces through [Desync detection
-and recovery](#desync-detection-and-recovery), whose recovery is a fresh
-invitation.
+Neither leaves two copies running side by side for long. An older artifact
+already has a secret the partnership has moved past, and a copy of the current
+one diverges from the handed-off files the moment either side runs and rotates,
+so the losing copy's next run fails its handshake and is exposed through
+[Desync detection and recovery](#desync-detection-and-recovery), whose recovery
+is a fresh invitation.
 
 Two things do not travel with the files:
 
@@ -839,7 +838,7 @@ changes is **whose** address is disclosed -- the scheduling machine's rather tha
 this browser's -- and that the CLI names it in a warning on every run. Naming a
 `stun` server in the exported `psilink.yaml` is what replaces the default.
 
-The two files carry the current secret, but they are a backup for the command line,
+The two files have the current secret, but they are a backup for the command line,
 not for this browser: reconstituting a browser copy after an eviction is the artifact
 import ([Eviction recovery is the import
 flow](#eviction-recovery-is-the-import-flow)), which these two files are not. So --
@@ -864,7 +863,7 @@ and recover quickly.
 
 When the two parties hold different secrets, the authenticated handshake simply
 **fails closed** -- the same failure a wrong secret, a tampered frame, or an
-active impersonation attempt produces. That surfaces as one generic
+active impersonation attempt produces. That shows as one generic
 authentication failure with no way to distinguish "we rotated out of sync" from
 "someone is attacking this exchange": the web handshake wrapper re-tags every
 trust failure as a single `security`-kind error (on the one-shot and managed
@@ -895,7 +894,7 @@ every time, for as long as the desync stands. The no-show is therefore the
 reading of last resort: where this device already holds a standing reason its
 secret may no longer be the partnership's -- a restore since the last
 successful run, a one-sided persist failure, or a lapsed bound -- the run
-surfaces that state and its re-invite recovery instead. Where it does not, the
+reports that state and its re-invite recovery instead. Where it does not, the
 no-show state names the persistent case in its own copy, so a partner who was
 demonstrably at their machine at an agreed time and still never arrived is
 pointed at a re-invite rather than at another wait.
@@ -907,7 +906,7 @@ reading is therefore per run, not per visit: a persist failure one run records
 is the standing reason the next run in the same visit weighs. Where that
 persist failure's own bookkeeping write did not land -- the write is
 best-effort, and the storage that failed the rotation can fail it too -- there
-is no standing reason to read, and the no-show reads as itself. Where the
+is no standing reason to read, and the no-show is treated as itself. Where the
 launch read itself fails, or finds no record to read, the run falls back to
 the record the run surface already holds, for that run alone.
 
@@ -915,7 +914,7 @@ A no-show's own bookkeeping entry replaces the previous one and records no
 failure kind, so a one-sided persist failure is no longer in the record for
 anything reading it afterwards: the recurring-exchanges list line, the run
 history, and a later run all name the no-show. A recorded failed handshake goes
-the same way: a record whose last run was a no-show reads as that no-show
+the same way: a record whose last run was a no-show is treated as that no-show
 rather than as the unexplained state, so the next visit does not put the
 out-of-band confirmation in front of the operator. The other two reasons live
 outside that entry -- a lapsed bound is the record's own `expires`, and a
@@ -927,7 +926,7 @@ could not save its rotated secret is therefore told so on the run that meets
 the no-show.
 
 A pattern of missed windows is a coordination problem, resolved out-of-band
-where the schedule itself was agreed -- surfaced, not auto-paused (see [Retry
+where the schedule itself was agreed -- reported, not auto-paused (see [Retry
 and repeated misses](#retry-and-repeated-misses)).
 
 ### The grace window
@@ -938,7 +937,7 @@ failure self-heals on the next run instead of forcing a re-invite -- is a
 core-level change deferred to a later, separately-reviewed step, and is **not
 implemented anywhere** (neither the CLI nor core accepts a previous secret; the
 only current handling is the re-invite recovery procedure). The first managed
-release ships with implicit-only detection plus the explicit, honest recovery
+release ships with implicit-only detection plus the explicit recovery
 affordance below.
 
 The grace window belongs in core rather than the web app, and later rather than
@@ -957,7 +956,7 @@ desync from an attack -- both are the same failed handshake. What the managed UX
 does is **tier the response by what the record already knows**, so the operator
 faces the full confirmation machinery only when nothing else explains the
 failure. The tiers read the record's evidence, not the operator's presence: a
-failure from an unattended run surfaces through the same tiers at the
+failure from an unattended run is reported through the same tiers at the
 operator's next visit.
 
 **Tier 1: local evidence explains the failure.** When the record holds a benign
@@ -965,7 +964,7 @@ explanation -- a recorded persist failure on the last run (the structured
 `failureKind` bookkeeping), a detected restore-from-backup or import since the
 last successful run, or a lapsed age bound (which never even reaches here; see
 [Expiry is its own state](#expiry-is-its-own-state-never-routed-through-attack-framing))
--- the failure surfaces as that specific benign state with its specific
+-- the failure shows as that specific benign state with its specific
 recovery, which for each of them is re-invite, **without** the attack
 checklist. The record's
 run bookkeeping is structured enums precisely so this tier can be derived
@@ -990,20 +989,20 @@ operator synthesizes under stress -- asking the partner:
   profile, another device, a restored backup): an accidental self-fork is
   indistinguishable at the other party from an attack (see [Single-device
   ownership](#single-device-ownership)), and this question is the only way to
-  surface it.
+  expose it.
 
 The partner's reply feeds a **two-outcome gate**, not a free-form judgment:
 "the partner confirmed a real failure on their side" proceeds to re-invite;
 "something does not add up" is treated as compromise and routes to the
-[compromise response](SECURITY_DESIGN.md#compromise-response). The honest
-framing is the CLI's posture: the tool surfaces the failure and structures the
+[compromise response](SECURITY_DESIGN.md#compromise-response). The accurate
+framing is the CLI's posture: the tool reports the failure and structures the
 confirmation, but the operator, not the tool, makes the desync-versus-attack
 call out-of-band.
 
 ### Expiry is its own state, never routed through attack framing
 
 A lapsed age bound (`expires` in the past) is detected **before** any
-connection or handshake, so it is never ambiguous: it surfaces as its own
+connection or handshake, so it is never ambiguous: it shows as its own
 unambiguous, benign state with plain re-invite copy -- mirroring the CLI's
 distinct expired-token error, which names re-invitation rather than the generic
 out-of-sync guidance -- and is never delivered through the desync/attack
@@ -1012,18 +1011,17 @@ framing above.
 The age bound is **opt-in and off by default** -- exactly the CLI's no-bound
 default (see [Token age and rotation
 policy](SECURITY_DESIGN.md#token-age-and-rotation-policy)). It is set at setup
-and remains editable in place afterward, from the exchange's detail surface,
-where it can also be cleared; an edit re-derives the bound conservatively and
-never moves the stored secret's lapse later than it already stood. When the
-operator sets one, the exchange surfaces its cadence implication -- "this
-exchange must run or be renewed within N days" -- for the operator to weigh
-against the partnership's known cadence. Where the exchange also carries an
-agreed schedule, that weighing is done for them: a cadence whose next window
-opens at or past the bound is surfaced as a problem at entry, since the stored
-secret would lapse before the window that would have refreshed it. It is stated
-rather than refused -- an operator who renews by hand is entitled to that
-cadence -- and it is unreachable for an exchange that set no bound. The reason
-to opt in is a dormant
+and remains editable afterward, from the exchange's detail surface, where it
+can also be cleared; an edit re-derives the bound conservatively and never
+moves the stored secret's lapse later than it already stood. When the operator
+sets one, the exchange shows its cadence implication -- "this exchange must run
+or be renewed within N days" -- for the operator to weigh against the
+partnership's known cadence. Where the exchange also has an agreed schedule,
+that weighing is done for them: a cadence whose next window opens at or past
+the bound is reported as a problem at entry, since the stored secret would
+lapse before the window that would have refreshed it. It is stated rather than
+refused -- an operator who renews by hand is entitled to that cadence -- and it
+is unreachable for an exchange that set no bound. Opt in for a dormant
 partnership: rotation caps exposure only for an exchange that actually runs, so
 an idle stored secret has no automatic exposure bound unless a max-age is set
 (see [The primary controls](SECURITY_DESIGN.md#the-primary-controls)).
@@ -1038,7 +1036,7 @@ parties discard the desynced secret and re-establish one from a fresh invitation
 **not** the secret -- the exchange-file document, with its terms and rendezvous
 locator -- so a re-invite reuses the standing definition and only re-mints and
 re-exchanges the setup secret, rather than re-authoring the exchange from
-scratch. This makes re-invite cheap enough to be the honest first-line recovery,
+scratch. This makes re-invite cheap enough to be the first-line recovery,
 which is what lets the first release ship without the grace window.
 
 The two sides recover differently, and only one has cleanup to do. The inviter
@@ -1048,7 +1046,7 @@ accepting a fresh one -- and saving that accepted invitation adds a **new**
 recurring exchange rather than updating the superseded one: nothing links an
 accept to a stored partnership, and no duplicate is detected, merged, or retired.
 The acceptor is left holding two records for one partnership, the superseded one
-still offering a run that fails closed -- surfacing as the unexplained tier this
+still offering a run that fails closed -- showing as the unexplained tier this
 recovery exists to clear. So the acceptor's recovery names the step: delete the
 superseded exchange once the fresh one is saved. It stays the operator's own act
 on their own record store -- nothing is deleted for them, and nothing blocks the
@@ -1057,21 +1055,21 @@ second exchange from being saved.
 Cheap recovery has a cost that must be named. Every re-invite puts a fresh live
 setup secret on the out-of-band channel, so over a partnership's life the
 invitation-confidentiality requirement (see [Invitation contents and
-confidentiality](SECURITY_DESIGN.md#invitation-contents-and-confidentiality)) is
-**ongoing, not one-time** -- each re-invite is a fresh invitation-in-transit
+confidentiality](SECURITY_DESIGN.md#invitation-contents-and-confidentiality))
+is **ongoing, not one-time** -- each re-invite is a fresh invitation-in-transit
 exposure on a channel whose security must still hold. And an adversary who can
 provoke handshake failures, or who is exploiting the desync ambiguity itself,
 can farm an operator who re-invites on autopilot for fresh secrets over a
 channel the adversary may already have compromised. The confirmation checklist
 above is what breaks that loop -- it is why the confirmation must verify a real
 partner-side failure rather than rubber-stamp the benign reading. This trade --
-cheap recovery against repeated secret-in-transit exposure -- is accepted
-deliberately.
+cheap recovery against repeated secret-in-transit exposure -- is accepted by
+design.
 
 ## What the setup consent carries across runs
 
 A managed exchange runs again on an agreement made once. The linkage terms and
-the columns each side discloses are settled at setup and then **fixed for the
+the columns each side discloses are decided at setup and then **fixed for the
 partnership** -- they are not edited in place, and changing them means setting
 up a new exchange rather than altering this one (see [Where the schedule is
 agreed, and where it lives](#where-the-schedule-is-agreed-and-where-it-lives)).
@@ -1101,16 +1099,16 @@ That refusal is its own benign state, recorded as such in the run bookkeeping
 (see [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md)) and never
 routed through the desync/attack framing -- nothing connected, and nothing left
 the device. It is also the one benign failure a surface must **not** present as
-retryable: unlike a transport drop, a later attempt on the same file settles the
-same disclosure, so the remedy is the operator's -- run the exchange with the
-file whose columns were agreed, or set the exchange up again to settle a new
-disclosure with the partner. Presenting it as a connection blip with retry copy
-would leave a scheduled exchange failing every window with no step named.
+retryable: unlike a transport drop, a later attempt on the same file determines
+the same disclosure, so the remedy is the operator's -- run the exchange with
+the file whose columns were agreed, or set the exchange up again to decide a
+new disclosure with the partner. Presenting it as a connection blip with retry
+copy would leave a scheduled exchange failing every window with no step named.
 
 A re-invite reopens **the secret, not the agreement**. On the inviter's side
 nothing is re-authored: the fresh invitation is composed from the stored
-document alone, carrying its linkage terms and its committed set of disclosed
-columns over verbatim, and the setup secret is the only part newly minted --
+document alone, reusing its linkage terms and its committed set of disclosed
+columns verbatim, and the setup secret is the only part newly minted --
 alongside a rendezvous locator rebuilt from where the app is running and the
 invitation's own fresh setup lifetime (see [Recovery: fast
 re-invite](#recovery-fast-re-invite)). The accepting side is not a no-op,
@@ -1118,8 +1116,8 @@ though. Only the inviter can re-mint from a stored document, so the partner's
 route is to accept a fresh invitation: it walks the accept flow again and
 re-enters its own local fields -- its name, its metadata, its standardization
 -- none of which are terms the two parties agreed. Its receive commitment lands
-on the same set it originally agreed to because the re-invite carried that set
-over, not because anything checks the new invitation against the old; no such
+on the same set it originally agreed to because the re-invite reused that set,
+not because anything checks the new invitation against the old; no such
 comparison exists, so an acceptor reviews a fresh invitation on its own merits,
 exactly as at setup.
 
@@ -1141,7 +1139,7 @@ attack](#telling-a-desync-from-an-attack)).
 
 What each run disclosed is accounted for **run by run**. Every successful run
 produces the same self-attested exchange record a one-shot exchange does -- this
-party's own local, unsigned account of what it disclosed on that run, carrying
+party's own local, unsigned account of what it disclosed on that run, holding
 no protected value (see [EXCHANGE_RECORD.md](spec/EXCHANGE_RECORD.md)) -- and a
 managed exchange files each of them in its own [accounting of
 disclosures](#the-accounting-of-disclosures).
@@ -1159,9 +1157,9 @@ exchange's own page, below its run history.
   record says -- the partner, the governing agreement and the purpose of the
   disclosure under it, the categories of data that moved each way, how many
   records this party exposed, the result size where both parties received the
-  result, and the instant -- and says "not recorded" where the record carries
+  result, and the instant -- and says "not recorded" where the record holds
   nothing, rather than inferring a value from elsewhere. It is self-attested and
-  unsigned, exactly as the record is: an honest local account, not a signed or
+  unsigned, exactly as the record is: an accurate local account, not a signed or
   non-repudiable receipt.
 - **A run files its own entry, present or not.** The entry is written as part of
   the run, before it reports its results. This is what an unattended run needs:
@@ -1173,7 +1171,7 @@ exchange's own page, below its run history.
   per run, for handing to a compliance reader.
 - **It stays in this browser, and is deleted with the exchange.** Nothing prunes
   it -- a silently dropped entry would falsify the account -- and it is not
-  carried in the export/import artifact, which migrates the runnable exchange
+  included in the export/import artifact, which migrates the runnable exchange
   rather than its history. Export the accounting before deleting or handing off
   the exchange; the record files offered at a run's completion stand in only for
   the runs somebody was there to download one from.
@@ -1204,10 +1202,10 @@ only way to let the exchange file again.
    secret, the schedule, and the run history are untouched. You do not have to
    delete the exchange to recover its accounting.
 
-A cleared accounting reads as empty until the next run files into it. Where the
-run history beside it records a completed run, the page names the two ways an
-accounting is emptied -- clearing it here, or restoring the exchange from an
-export or backup file, which does not carry one -- rather than reporting that no
+A cleared accounting displays as empty until the next run files into it. Where
+the run history beside it records a completed run, the page names the two ways
+an accounting is emptied -- clearing it here, or restoring the exchange from an
+export or backup file, which does not hold one -- rather than reporting that no
 run has completed.
 
 Occasionally the stored records are damaged past the point where even that
@@ -1298,7 +1296,7 @@ the backup state to actionable at the next visit.
 
 Eviction is silent, so the UI must not be -- but a warning that is always on
 trains the operator to click through the one that matters. The design therefore
-collapses persistence status into **one derived backup state**, surfaced at the
+collapses persistence status into **one derived backup state**, shown at the
 moments it changes rather than as standing chrome:
 
 - **Backed up.** A current export exists (taken since the last rotation): the
@@ -1321,11 +1319,11 @@ run-completion surface's "download updated backup" (see [The second
 run](#the-second-run-end-to-end)) is the moment the previous backup went stale,
 so taking it there keeps that path green and quiet. An unattended scheduled run
 rotates the secret with nobody present, so a scheduled exchange's standing
-export goes stale between visits **by design**; the backup state carries that
-honestly -- actionable at the next visit, a state, not a nag -- and an OS-level
+export goes stale between visits **by design**; the backup state states that
+accurately -- actionable at the next visit, a state, not a nag -- and an OS-level
 notification from the installed app prompts a re-export sooner (see [The
 between-visit notification](#the-between-visit-notification)). The frame
-throughout: every honest statement appears at the moment it becomes true and
+throughout: every accurate statement appears at the moment it becomes true and
 actionable.
 
 The in-browser copy is treated as convenience and the exported credential
@@ -1339,16 +1337,16 @@ recovery affordance is the empty state itself, which offers the import of the
 backup file the operator exported. Restoring after eviction and migrating to
 a new device are the **same import operation** (consistent with
 migration-not-sync): an import re-establishes the one owner, wherever it
-runs. One honest limit: a wholesale eviction erases the evidence that
+runs. One limit: a wholesale eviction erases the evidence that
 anything existed, so the app cannot always distinguish a first visit from a
 post-eviction one -- which is exactly why the managed-exchange list's empty
-state carries the import affordance standing, rather than surfacing it only
+state has the import affordance standing, rather than exposing it only
 behind a detected loss.
 
 ## Deleting a managed exchange
 
-Removing a managed exchange is a first-class, always-available action, and it
-removes **everything the browser holds for it in one step**: the record, the
+Removing a managed exchange is a fully supported, always-available action, and
+it removes **everything the browser holds for it in one step**: the record, the
 secret, the persisted input-file handle, the schedule, the run bookkeeping, and
 its [accounting of disclosures](#the-accounting-of-disclosures) -- which is why
 the confirm says to export the accounting first if it must be kept.

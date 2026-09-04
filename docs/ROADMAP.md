@@ -23,12 +23,12 @@ Work required before the 1.0 release.
 
 - SSH channel as a lower-latency alternative to SFTP polling
 - Parallelizing the commutative-encryption step
-- Many-to-many deduplication under `linkage_strategy: single-pass`. Both parties setting `deduplicate: true` runs under `cascade`, with transitive-closure resolution of the result's pairs into entity clusters; the same pair under `single-pass` is refused before the exchange begins, that strategy holding the resolved table to a bound a both-sided multiplicity leaves it without
+- Many-to-many deduplication under `linkage_strategy: single-pass`. Both parties setting `deduplicate: true` runs under `cascade`, with transitive-closure resolution of the result's pairs into entity clusters; the same pair under `single-pass` is refused before the exchange begins: that strategy holds the resolved table to a bound that a both-sided multiplicity would remove
 
 ## Version 1.1
 
 - PSI-Sum
-- Fan-out matching (the `split_on` standardization function, e.g. last names split on `-`) under `linkage_strategy: cascade`. It runs under `single-pass`, where one party replays the whole per-key candidate structure and resolves the record-level pairing alone; reproducing the identical table on the cascade means carrying that grouping on its per-round frames, which is a wire-format change in the innermost loop of the protocol. Terms declaring a fan-out under `cascade` are refused until then. Authoring one in the web invite editor is the other half: its cleaning-step menu offers no splitting function and its Generate gate refuses an imported document that declares one, so a fan-out exchange is authored in a configuration file and run from the command line
+- Fan-out matching (the `split_on` standardization function, e.g. last names split on `-`) under `linkage_strategy: cascade`. It runs under `single-pass`, where one party replays the whole per-key candidate structure and resolves the record-level pairing alone; reproducing the identical table on the cascade means including that grouping in its per-round frames, which is a wire-format change in the innermost loop of the protocol. Terms declaring a fan-out under `cascade` are refused until then. Authoring one in the web invite editor is the other half: its cleaning-step menu offers no splitting function and its Generate gate refuses an imported document that declares one, so a fan-out exchange is authored in a configuration file and run from the command line
 - Synchronous protocol execution for the CLI (the web WebRTC path is already synchronous; this eliminates file-based polling latency where the channel allows)
 - Provisioning of supporting services (peer coordination, STUN/TURN, SFTP, WebSocket-to-TCP proxy)
 - Reference configurations and deployment guides for each supporting service; the section pointers in [DEPLOYMENT.md](DEPLOYMENT.md) will be replaced with concrete guidance

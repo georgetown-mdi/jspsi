@@ -14,7 +14,7 @@ psilink uses [semantic versioning](https://semver.org/) (MAJOR.MINOR.PATCH):
 - **MINOR**: backwards-compatible new features or new configuration fields. Exchange specification files written for an earlier MINOR version of the same MAJOR must continue to work.
 - **MAJOR**: breaking changes to the exchange protocol, configuration schema, or CLI interface. A MAJOR bump means existing key files or exchange specs may need to be updated.
 
-`apps/cli/package.json` is the canonical release version: Docker image tags and GitHub Release tags reflect the CLI version. The console baked into that image (`apps/web`, run via `serve`) is versioned to the CLI version along with the rest of the image; the hosted `apps/web` deployment carries no release version of its own. `packages/core` (and any future sub-packages) version independently -- a patch to the core library does not require a CLI release unless the CLI itself is also affected. The hosted `apps/web` deployment is continuously deployed and carries no release version. The root `package.json` version is a monorepo workspace marker and is not independently meaningful.
+`apps/cli/package.json` is the canonical release version: Docker image tags and GitHub Release tags reflect the CLI version. The console baked into that image (`apps/web`, run via `serve`) is versioned to the CLI version along with the rest of the image; the hosted `apps/web` deployment has no release version of its own. `packages/core` (and any future sub-packages) version independently -- a patch to the core library does not require a CLI release unless the CLI itself is also affected. The hosted `apps/web` deployment is continuously deployed and has no release version. The root `package.json` version is a monorepo workspace marker and is not independently meaningful.
 
 Compatibility between the CLI and its core dependency is recorded by the lockfile and embedded in the Docker image; no separate compatibility matrix is maintained.
 
@@ -32,7 +32,7 @@ Each release produces:
 | Launchers      | GitHub Release assets          | `start-psilink.sh`, `Start-Psilink.ps1`, `Setup-PsilinkFileDrop.ps1`     |
 | Build provenance | GitHub attestation store     | Subject `docker.io/vdorie/psi-link`, one attestation per released manifest digest |
 
-Each image carries both the CLI and the console; which role it runs is decided by its first argument (see [DEPLOYMENT.md](DEPLOYMENT.md#docker-deployment)). Both run unprivileged as uid 1000, take the same arguments, and speak the same protocol, so a partner on one can exchange with a partner on the other.
+Each image contains both the CLI and the console; which role it runs is decided by its first argument (see [DEPLOYMENT.md](DEPLOYMENT.md#docker-deployment)). Both run unprivileged as uid 1000, take the same arguments, and speak the same protocol, so a partner on one can exchange with a partner on the other.
 
 The hosted web deployment (`apps/web`) is a separate deployment to its hosting environment as part of CI/CD; it is not this image and is not distributed as a versioned artifact.
 
@@ -41,9 +41,9 @@ The hosted web deployment (`apps/web`) is a separate deployment to its hosting e
 The two tags differ in one thing: what serves the cryptography underneath `crypto.subtle`.
 
 - **`vdorie/psi-link:X.Y.Z`** -- the default artifact, built on `node:26-alpine`. It embeds no validated cryptographic module and the project claims none for it. Take this one unless a FIPS obligation says otherwise: it is smaller, its SFTP support is unrestricted, and it is the image the launchers and the Windows file-drop setup scripts pull.
-- **`vdorie/psi-link:X.Y.Z-fips`** -- built on Amazon Linux 2023 and carrying the CMVP-validated OpenSSL FIPS provider AWS publishes for that distribution, so psilink's `crypto.subtle` calls dispatch into that module. It costs roughly 1.8x the size, and by default it cannot reach an SFTP server that offers only `curve25519` key exchange, only the `chacha20-poly1305@openssh.com` cipher, or only an Ed25519 host key.
+- **`vdorie/psi-link:X.Y.Z-fips`** -- built on Amazon Linux 2023 and containing the CMVP-validated OpenSSL FIPS provider AWS publishes for that distribution, so psilink's `crypto.subtle` calls dispatch into that module. It costs roughly 1.8x the size, and by default it cannot reach an SFTP server that offers only `curve25519` key exchange, only the `chacha20-poly1305@openssh.com` cipher, or only an Ed25519 host key.
 
-**What the FIPS variant does and does not support a claim of** is in [COMPLIANCE.md](COMPLIANCE.md#fips-140), which is the single place this project states it: the certificate, the module version, the environments that certificate covers, and what stays outside the module either way. Two bounds are worth carrying here as well, because they decide whether pulling this tag is worth anything to a given deployment:
+**What the FIPS variant does and does not support a claim of** is in [COMPLIANCE.md](COMPLIANCE.md#fips-140), which is the single place this project states it: the certificate, the module version, the environments that certificate covers, and what stays outside the module either way. Two bounds matter here as well, because they decide whether pulling this tag is worth anything to a given deployment:
 
 - The image does not put the host in FIPS mode and cannot. The operational environment is the host plus the runtime plus the image together, and supplying a host in FIPS mode is the operator's.
 - The PSI masking itself runs in BoringSSL inside a vendored WebAssembly module, which no OpenSSL provider reaches. That is permanent rather than a gap this image closes.
@@ -61,7 +61,7 @@ cosign verify \
   vdorie/psi-link:X.Y.Z-fips
 ```
 
-Both `--certificate-` arguments are required and each carries its own weight; [Verifying a Release](#verifying-a-release) explains what they pin and how to verify the build provenance attestation, which the variant also gets.
+Both `--certificate-` arguments are required and each does its own work; [Verifying a Release](#verifying-a-release) explains what they pin and how to verify the build provenance attestation, which the variant also gets.
 
 **Confirming the module inside it.** A signature says which build this is, not what is running in it. Run the image and read its first two stderr lines:
 
@@ -79,7 +79,7 @@ The three launcher files are the host-side front door an operator runs to open t
 
 ## Stamped launchers
 
-A launcher is plaintext an operator reads before running, and it names the image by digest rather than by a floating tag, so a release copy runs exactly the manifest this release signed. The digest is not in the repository: each launcher carries a placeholder line, and the release workflow fills it in.
+A launcher is plaintext an operator reads before running, and it names the image by digest rather than by a floating tag, so a release copy runs exactly the manifest this release signed. The digest is not in the repository: each launcher has a placeholder line, and the release workflow fills it in.
 
 **What gets stamped.** One line per launcher, replaced whole:
 
@@ -90,11 +90,11 @@ A launcher is plaintext an operator reads before running, and it names the image
 
 The value substituted is `steps.build.outputs.digest` from the image build -- the manifest-list digest, the same value [step 8](#8-build-and-publish-the-container-image-ci) signs with Cosign. Each launcher also names the repository in full, `docker.io/vdorie/psi-link`, because podman requires the registry prefix and docker accepts it.
 
-**What holds the seam together.** The workflow refuses the release if a launcher does not carry its placeholder line exactly once, and again if a placeholder survives the substitution, so a reworded line cannot make the stamp silently no-op. `npm run test:scripts` pins the same two lines from the repository side, in both the launchers and the workflow. A copy that reaches an operator unstamped refuses to run and says where a release copy comes from, rather than falling back to a tag.
+**What keeps the launcher and the workflow in step.** The workflow refuses the release if a launcher does not contain its placeholder line exactly once, and again if a placeholder survives the substitution, so a reworded line cannot make the stamp silently no-op. `npm run test:scripts` pins the same two lines from the repository side, in both the launchers and the workflow. A copy that reaches an operator unstamped refuses to run and says where a release copy comes from, rather than falling back to a tag.
 
 **What a release publishes.** The `launchers` job attaches the two stamped files plus `Setup-PsilinkFileDrop.ps1` -- unstamped, and the one `Start-Psilink.ps1` dot-sources -- as assets on the release for this tag, creating it as a draft if the tag has none yet. That job is the only one in the workflow holding `contents: write`.
 
-**How an organisation verifies a copy.** The digest a launcher carries is a claim about which image it will run; Cosign is what makes it checkable. Read the digest out of the launcher and verify the signature over that exact reference:
+**How an organisation verifies a copy.** The digest a launcher names is a claim about which image it will run; Cosign is what makes it checkable. Read the digest out of the launcher and verify the signature over that exact reference:
 
 ```sh
 grep PSILINK_IMAGE_DIGEST start-psilink.sh
@@ -110,13 +110,13 @@ A digest that verifies is the image the official release workflow published. The
 
 Every release image is scanned for OS-layer vulnerabilities before it is published. The release workflow builds each image single-arch, scans it, and only then authenticates to Docker Hub and pushes, so an image the workflow published is an image that passed the scan. Both gates sit ahead of the login, so a finding against either image stops the whole release rather than publishing one artifact and withholding the other. The hand-built push in [step 8](#8-build-and-publish-the-container-image-ci) is the one path around that.
 
-**What the gate is.** Trivy, over the image's OS package layer, failing the release on a vulnerability that is HIGH or CRITICAL _and_ has a fix available. An unfixable finding does not block a release: a gate that fires on something no bump can resolve is unactionable and ends up switched off. The npm dependency tree is covered separately -- by Dependabot, the [dependency review workflow](../.github/workflows/dependency_review.yaml), and [step 4](#4-review-and-audit-dependencies) below -- so this gate deliberately does not reach it.
+**What the gate is.** Trivy, over the image's OS package layer, failing the release on a vulnerability that is HIGH or CRITICAL _and_ has a fix available. An unfixable finding does not block a release: a gate that fires on something no bump can resolve is unactionable and ends up switched off. The npm dependency tree is covered separately -- by Dependabot, the [dependency review workflow](../.github/workflows/dependency_review.yaml), and [step 4](#4-review-and-audit-dependencies) below -- so this gate does not reach it by design.
 
-**Where the threshold lives.** On the scan step itself, as literal inputs: `.github/workflows/release.yaml` for this gate and `.github/workflows/image_smoke.yaml` for the pre-merge one. Accepted exceptions are in `.github/trivyignore.yaml`, each vulnerability id carrying the reason it was accepted and an `expired_at` date. Trivy stops applying an entry on that date and the finding returns to the gate, so an acceptance that outlives the condition it was written for re-reds the weekly scan rather than standing unread.
+**Where the threshold lives.** On the scan step itself, as literal inputs: `.github/workflows/release.yaml` for this gate and `.github/workflows/image_smoke.yaml` for the pre-merge one. Accepted exceptions are in `.github/trivyignore.yaml`, each vulnerability id with the reason it was accepted and an `expired_at` date. Trivy stops applying an entry on that date and the finding returns to the gate, so an acceptance that outlives the condition it was written for re-reds the weekly scan rather than standing unread.
 
-**What a finding means.** Each base image is pinned by digest deliberately (see [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md)), so a finding is a prompt to bump that pin rather than something a dependency update resolves. Edit the digest in `Dockerfile` or `Dockerfile.fips` -- on the variant, its Amazon Linux release snapshot moves with the digest, the two being one release rather than two compatible ones -- let the pre-merge scan confirm the new base on that pull request, then tag.
+**What a finding means.** Each base image is pinned by digest by design (see [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md)), so a finding is a prompt to bump that pin rather than something a dependency update resolves. Edit the digest in `Dockerfile` or `Dockerfile.fips` -- on the variant, its Amazon Linux release snapshot moves with the digest, the two being one release rather than two compatible ones -- let the pre-merge scan confirm the new base on that pull request, then tag.
 
-**When it runs.** On every pull request that can change either image, on a weekly schedule against a refreshed vulnerability database, and again in the release workflow ahead of the push. The scheduled run is the one that catches a vulnerability published against a base image nothing in this repository has touched. Pull-request and scheduled findings surface as code-scanning alerts in the repository Security tab, one category per image; the release gate reports on the run's summary page, one section per image.
+**When it runs.** On every pull request that can change either image, on a weekly schedule against a refreshed vulnerability database, and again in the release workflow ahead of the push. The scheduled run is the one that catches a vulnerability published against a base image nothing in this repository has touched. Pull-request and scheduled findings appear as code-scanning alerts in the repository Security tab, one category per image; the release gate reports on the run's summary page, one section per image.
 
 **What it does not cover.** It reads the amd64 build, while a release publishes amd64 and arm64 for both images; each comes from the same digest-pinned base and the same committed lockfile, so the package set it reads is the one that ships, but a vulnerability in an architecture-specific binary alone is outside it.
 
@@ -138,22 +138,22 @@ Set the release version, following the policy in [Versioning](#versioning):
 
 - `apps/cli/package.json` -- to `X.Y.Z`; it is the canonical release version.
 - `packages/core/package.json` -- only if the core library changed in this release, bumped to its own next version (it versions independently of the CLI, so this need not equal `X.Y.Z`).
-- `apps/web/package.json` and the root `package.json` -- leave unchanged; neither carries a release version.
+- `apps/web/package.json` and the root `package.json` -- leave unchanged; neither has a release version.
 
 The canonical release version is also what arms the wire-format pin. `npm run check:protocol-version-bump` is inert while it names `0.1.0` or below; the first release above that publishes deployed peers, so the check asks for the pin covering what the linkage rounds put on the wire and prints the block to record in `scripts/protocol-version-pins.json`. From that release onward, a change to that wire format takes a `PROTOCOL_VERSION` bump with its own pin recorded beside the earlier ones -- see [PROTOCOL.md](spec/PROTOCOL.md#wire-format-deltas-existing-frames-only-and-no-version-bump).
 
 #### Reset the exchange-record format at first publication
 
-`EXCHANGE_RECORD_VERSION` is an internal development counter, cycled freely because no published artifact carries any of its literals. The first release above `0.1.0` ships it reset to `psilink-exchange-record/v1`, and `npm run check:exchange-record-reset` -- armed by the same marker -- fails from that release until the reset is taken. Take it as one piece:
+`EXCHANGE_RECORD_VERSION` is an internal development counter, cycled freely because no published artifact contains any of its literals. The first release above `0.1.0` ships it reset to `psilink-exchange-record/v1`, and `npm run check:exchange-record-reset` -- armed by the same marker -- fails from that release until the reset is taken. Take it as one piece:
 
 1. Set `EXCHANGE_RECORD_VERSION` to `psilink-exchange-record/v1` in `packages/core/src/exchangeRecord.ts`.
 2. Regenerate the record vectors through their generator, `packages/core/test/vectors/generate-exchange-record-vectors.mjs`; `npm run check:vectors` holds every vectors file to its generator.
 3. Discharge the obligations `scripts/check-disclosure-recovery.mjs` names -- it fails on its own once the literal moves -- and re-record its `RECORD_VERSION_PIN`.
 4. Clear the development artifacts below, then record the reset: set `RESET_TAKEN_AT_RELEASE` to `X.Y.Z` in `scripts/check-exchange-record-reset.mjs`. That retires the rule, so an ordinary forward bump after this release is not held to `v1`.
 
-**Clearing development artifacts.** This reset moves the literal downward, and a leftover artifact the counter numbered on its way up is misread rather than refused. Two classes can be carrying one, and no released artifact is among them: `packages/core/src/exchangeRecord.ts` does not exist at `v0.1.0`, so nothing published carries a `psilink-exchange-record/vN` literal at all.
+**Clearing development artifacts.** This reset moves the literal downward, and a leftover artifact the counter numbered on its way up is misread rather than refused. Two classes can hold one, and no released artifact is among them: `packages/core/src/exchangeRecord.ts` does not exist at `v0.1.0`, so nothing published contains a `psilink-exchange-record/vN` literal at all.
 
-- **Browser-stored managed accountings** -- the `disclosures` store of the `psilink-managed-exchanges` IndexedDB database, on any browser that ran a development build of the web app. An entry naming a higher ordinal than the build reads as a stale page, whose remedy is a reload that cannot help and which deliberately withholds the export-then-reset recovery (see [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#what-an-exchange-record-version-bump-does-to-a-stored-accounting)). Clear the site data for the app's origin on those devices.
+- **Browser-stored managed accountings** -- the `disclosures` store of the `psilink-managed-exchanges` IndexedDB database, on any browser that ran a development build of the web app. An entry naming a higher ordinal than the build is treated as a stale page, whose remedy is a reload that cannot help and which withholds the export-then-reset recovery by design (see [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#what-an-exchange-record-version-bump-does-to-a-stored-accounting)). Clear the site data for the app's origin on those devices.
 - **CLI record files on disk** -- `psilink-record-<timestamp>.json` and the `.keys.json` beside it, wherever a development build wrote one. One numbered above the reset value is refused on the version with the file still in the operator's hands; one written back when the counter itself read `v1` is not, and parses as current before failing on its field set. Delete or archive pre-release record files.
 
 ### 3. Update CHANGELOG.md
@@ -172,9 +172,9 @@ This covers the npm tree only. The image's OS package layer is gated separately,
 
 The unscoped `npm audit` additionally reports development-tree findings, which are triaged separately rather than at release time; how the last one was resolved, and what holds it resolved, is recorded in [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md#the-brace-expansion-advisory-is-fixed-by-a-root-override).
 
-A Dependabot alert in the repository's Security tab is evaluated against `main`, which routinely lags `staging` by dozens of commits, so an alert can still read as open against `main` after `staging` already carries the fix -- check `staging`'s lockfile before triaging a default-branch alert. That check narrows the triage rather than closing it: a package `staging` has not yet patched still gets a full triage.
+A Dependabot alert in the repository's Security tab is evaluated against `main`, which routinely lags `staging` by dozens of commits, so an alert can still read as open against `main` after `staging` already has the fix -- check `staging`'s lockfile before triaging a default-branch alert. That check narrows the triage rather than closing it: a package `staging` has not yet patched still gets a full triage.
 
-The same default-branch evaluation decides which `.github/dependabot.yml` Dependabot reads, so an `ignore` entry merged to `staging` suppresses no pull request until a promotion carries it to `main`, and a bump the entry names arrives anyway meanwhile. The evidence for that reading, what settles it, and how such a pull request is handled are in [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md#bumping-the-fips-base-image).
+The same default-branch evaluation decides which `.github/dependabot.yml` Dependabot reads, so an `ignore` entry merged to `staging` suppresses no pull request until a promotion brings it to `main`, and a bump the entry names arrives anyway meanwhile. The evidence for that reading, what decides it, and how such a pull request is handled are in [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md#bumping-the-fips-base-image).
 
 ### 5. Run the full test suite
 
@@ -231,7 +231,7 @@ Do not reach for `@cyclonedx/cyclonedx-npm --ignore-npm-errors` instead of the f
 
 ### 10. Publish the GitHub Release
 
-Step 8 leaves a draft release for tag `vX.Y.Z` carrying the stamped launchers. Open it, copy the CHANGELOG section for this version as the release body, attach `psilink-X.Y.Z.cdx.json`, record both Docker image digests from step 8 in the release notes -- the default image's and the FIPS variant's, each beside its tag -- and publish. Leave the launcher assets in place: they are the copy an operator downloads.
+Step 8 leaves a draft release for tag `vX.Y.Z` with the stamped launchers. Open it, copy the CHANGELOG section for this version as the release body, attach `psilink-X.Y.Z.cdx.json`, record both Docker image digests from step 8 in the release notes -- the default image's and the FIPS variant's, each beside its tag -- and publish. Leave the launcher assets in place: they are the copy an operator downloads.
 
 ### 11. Merge back to staging
 
@@ -265,7 +265,7 @@ docker inspect --format '{{index .RepoDigests 0}}' vdorie/psi-link:X.Y.Z
 
 Compare the digest against the value in the release notes. The FIPS variant is verified the same way, at `vdorie/psi-link:X.Y.Z-fips`; every command in this section takes either reference.
 
-Each release image is also signed with Cosign, keylessly through Sigstore. The signature carries a short-lived certificate Fulcio issued against the release workflow's OIDC identity, and it is recorded in Rekor's public transparency log. There is no project-held signing key and no public key to fetch: what a verifier pins is the workflow that produced the signature. Why the signature is arranged that way, and what it does not settle, are in [cosign-keyless-signing.md](notes/cosign-keyless-signing.md).
+Each release image is also signed with Cosign, keylessly through Sigstore. The signature includes a short-lived certificate Fulcio issued against the release workflow's OIDC identity, and it is recorded in Rekor's public transparency log. There is no project-held signing key and no public key to fetch: what a verifier pins is the workflow that produced the signature. Why the signature is arranged that way, and what it does not decide, are in [cosign-keyless-signing.md](notes/cosign-keyless-signing.md).
 
 This verifies by tag, which is the right form when the reference comes from the release notes; a reference read out of a stamped launcher is verified by digest instead (see [Stamped launchers](#stamped-launchers)). To verify:
 
@@ -276,7 +276,7 @@ cosign verify \
   vdorie/psi-link:X.Y.Z
 ```
 
-Both `--certificate-` arguments are required, and each carries its own weight:
+Both `--certificate-` arguments are required, and each does its own work:
 
 - `--certificate-identity-regexp` pins the signer. The certificate's identity is the workflow file's path in this repository plus the ref it ran from, so an anchored pattern refuses a signature produced by a different workflow here, by a branch run of this one, or by a fork.
 - `--certificate-oidc-issuer` pins who vouched for that identity to GitHub Actions: verification compares the certificate's issuer for equality and refuses any mismatch, so a certificate from another issuer does not satisfy the check.
@@ -291,7 +291,7 @@ Install Cosign before running this command (see the Cosign documentation for you
 
 The Cosign signature and the SLSA build provenance attestation are complementary rather than alternatives, so verify both. The signature establishes that the release workflow published this exact manifest, and travels with the image in the registry. The attestation establishes what the build consumed -- which source repository and commit it ran from, and which workflow produced it -- and is held by GitHub rather than by the registry.
 
-The release workflow attests each manifest-list digest, the same digests Cosign signs and, for the default image, the one the launchers carry, and stores both attestations against this repository. Verify by digest:
+The release workflow attests each manifest-list digest, the same digests Cosign signs and, for the default image, the one the launchers name, and stores both attestations against this repository. Verify by digest:
 
 ```sh
 docker pull vdorie/psi-link:X.Y.Z
@@ -301,7 +301,7 @@ gh attestation verify oci://docker.io/vdorie/psi-link@sha256:... \
   --signer-workflow georgetown-mdi/jspsi/.github/workflows/release.yaml
 ```
 
-Both subjects are recorded as `docker.io/vdorie/psi-link`, the same reference the Cosign step signs under; the two attestations are told apart by their digests, not by their subject names. Neither the attest step nor this verify command has been driven against a published release yet, and reference canonicalization is the untested edge: if verification reports no matching attestation for an image that is certainly attested, check the reference host first -- Docker Hub's OCI-canonical name is `index.docker.io`, and the first real release is what settles whether the alias matches.
+Both subjects are recorded as `docker.io/vdorie/psi-link`, the same reference the Cosign step signs under; the two attestations are told apart by their digests, not by their subject names. Neither the attest step nor this verify command has been driven against a published release yet, and reference canonicalization is the untested edge: if verification reports no matching attestation for an image that is certainly attested, check the reference host first -- Docker Hub's OCI-canonical name is `index.docker.io`, and the first real release is what decides whether the alias matches.
 
 Notes on the command:
 
@@ -328,6 +328,14 @@ git verify-tag vX.Y.Z
 
 ## Software Bill of Materials (SBOM)
 
-An SBOM in CycloneDX format is generated as part of the release checklist (step 9) and attached to each GitHub Release. One BOM covers both published images: they resolve the same committed lockfile through the same production install, so their npm trees are identical and only their OS package layers differ -- which no `npm sbom` run reaches on either image, and which the [image vulnerability scan](#image-vulnerability-scan) covers separately. The `--omit=dev -w packages/core -w apps/cli -w apps/web` scoping covers everything a shipped image runs rather than the whole workspace: the CLI role's production tree (`packages/core` and `apps/cli`, which the Dockerfile installs as `npm ci --omit=dev --omit=optional -w packages/core -w apps/cli`, so this scoping is a superset of it by the optional edges) plus the web console's runtime dependencies, which ship bundled into the Nitro `.output` the image copies. `--omit=dev` excludes devDependencies (`apps/web`'s build tools among them), which the image does not ship. Because the `.output` is tree-shaken, the `apps/web` entry is a superset of what actually ships -- acceptable for a security SBOM. Because both the SBOM and the image resolve from the same committed lockfile, every dependency it does list appears at the exact resolved version the image runs. The one known residual: `npm sbom` omits a small number of packages that are hoisted to a single `node_modules` entry shared with a dev-only consumer elsewhere in the workspace (for example `yaml` and `tslib`, both installed in the shipped tree but currently absent from the SBOM's component list) -- confirm against `npm ls <pkg> --omit=dev -w packages/core -w apps/cli -w apps/web` if a specific package's presence in the image needs checking and it is missing from the SBOM. The superset also runs the other way: a devDependency of a source-only workspace that hoists to the root `node_modules` and satisfies another package's optional peer flips to `devOptional` and enters this graph without shipping (`tsx`, hoisted by `packages/peerjs-broker` and satisfying `vite`'s optional peer, is the known case). See `docs/spec/DEPENDENCY_PINS.md`.
+An SBOM in CycloneDX format is generated as part of the release checklist (step 9) and attached to each GitHub Release.
 
-The release command also carries `--legacy-peer-deps` (see [step 9](#9-generate-and-attach-the-sbom)), which disables the invocation's peer-conflict validation but does not change which components the lockfile-only walk resolves or includes -- it only stops that walk from refusing on the one known conflict. See [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md#the-crossws-peer-conflict-blocks-the-release-sbom) for why the conflict exists and what the flag costs.
+- One BOM covers both published images: they resolve the same committed lockfile through the same production install, so their npm trees are identical and only their OS package layers differ -- which no `npm sbom` run reaches on either image, and which the [image vulnerability scan](#image-vulnerability-scan) covers separately.
+- The `--omit=dev -w packages/core -w apps/cli -w apps/web` scoping covers everything a shipped image runs rather than the whole workspace: the CLI role's production tree (`packages/core` and `apps/cli`, which the Dockerfile installs as `npm ci --omit=dev --omit=optional -w packages/core -w apps/cli`, so this scoping is a superset of it by the optional edges) plus the web console's runtime dependencies, which ship bundled into the Nitro `.output` the image copies. `--omit=dev` excludes devDependencies (`apps/web`'s build tools among them), which the image does not ship. Because the `.output` is tree-shaken, the `apps/web` entry is a superset of what actually ships -- acceptable for a security SBOM.
+- Because both the SBOM and the image resolve from the same committed lockfile, every dependency it does list appears at the exact resolved version the image runs.
+- The one known residual: `npm sbom` omits a small number of packages that are hoisted to a single `node_modules` entry shared with a dev-only consumer elsewhere in the workspace (for example `yaml` and `tslib`, both installed in the shipped tree but currently absent from the SBOM's component list) -- confirm against `npm ls <pkg> --omit=dev -w packages/core -w apps/cli -w apps/web` if a specific package's presence in the image needs checking and it is missing from the SBOM.
+- The superset also runs the other way: a devDependency of a source-only workspace that hoists to the root `node_modules` and satisfies another package's optional peer flips to `devOptional` and enters this graph without shipping (`tsx`, hoisted by `packages/peerjs-broker` and satisfying `vite`'s optional peer, is the known case).
+
+See `docs/spec/DEPENDENCY_PINS.md`.
+
+The release command also passes `--legacy-peer-deps` (see [step 9](#9-generate-and-attach-the-sbom)), which disables the invocation's peer-conflict validation but does not change which components the lockfile-only walk resolves or includes -- it only stops that walk from refusing on the one known conflict. See [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md#the-crossws-peer-conflict-blocks-the-release-sbom) for why the conflict exists and what the flag costs.

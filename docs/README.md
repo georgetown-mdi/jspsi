@@ -59,17 +59,17 @@ The documentation is organized in three tiers: this **overview** tier (`docs/`) 
 - [CLI_EVENTS.md](spec/CLI_EVENTS.md) - the CLI's opt-in machine-interface event stream (`--event-stream`): the file descriptor, NDJSON framing, event types, terminal-error categories, and per-field sanitization
 - [CLI_DOCTOR.md](spec/CLI_DOCTOR.md) - the `psilink doctor` verdict under `--json`: the document's fields, the schema version and compatibility rule, the status and `overall` vocabularies, both modes' fixed check lists, and the exit-code mapping
 - [SERVER_JOB_API.md](spec/SERVER_JOB_API.md) - the web server's job API that drives the CLI as a subprocess for the console: endpoints, the injection-closed intent schema, the operator-authored SFTP connection, the single-active-exchange lifecycle, the workdir layout, the SSE event relay, and the gate/startup rules (the console facilitates one exchange at a time; a second create is refused until it is deleted, and a restart forgets it)
-- [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md) - why the SFTP and WebRTC stacks are exact-pinned, their internal premises, the per-stack upgrade checklists, and the `allowScripts` install-script policy
+- [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md) - why the SFTP and WebRTC stacks are exact-pinned, their internal assumptions, the per-stack upgrade checklists, and the `allowScripts` install-script policy
 - [CONTAINER_IMAGES.md](spec/CONTAINER_IMAGES.md) - how the shipped CLI image and its FIPS variant freeze their npm tree to the committed lockfile and what each pins by digest, hash, or NVR, what the CMVP certificate behind the FIPS provider attests, and the writable-set and setuid/setgid inventories measured on the built images
 
 ### Design notes ([`docs/notes/`](notes/README.md))
 
-Tracked, citeable design records: the model behind a mechanism, the options weighed, and the decisions taken. Nothing here binds an implementation; a note points at the spec for the normative rows. Its [index](notes/README.md) lists each note with its status and carries the maturity ladder from `scratch/` up to the formal tiers.
+Tracked, citeable design records: the model behind a mechanism, the options weighed, and the decisions taken. Nothing here binds an implementation; a note points at the spec for the normative rows. Its [index](notes/README.md) lists each note with its status and holds the maturity ladder from `scratch/` up to the formal tiers.
 
 The web application's interface has its own record outside this tree: [`design/web-redesign/`](../design/web-redesign/README.md) holds the chosen redesign as a non-functional HTML mockup, with the framing, the alternatives weighed, and the civic-design sourcing behind it -- the direction `apps/web/src/bench/` implements.
 
 ## System architecture
 
-![Component diagram: the core protocol library, the two applications that fill its seams, and the external transport boundary](img/architecture.svg)
+![Component diagram: the core protocol library, the two applications that supply what it leaves abstract, and the external transport boundary](img/architecture.svg)
 
 One library, `packages/core`, holds the protocol; the apps supply what core leaves abstract - the transport channel (`MessageConnection`) and the PSI compute backend (`PsiEngine`). Both apps ship in one Docker image. [DESIGN.md](DESIGN.md) narrates this architecture; the [spec tier](spec/README.md) holds the wire-level detail.

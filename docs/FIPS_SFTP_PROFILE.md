@@ -56,7 +56,7 @@ connection:
         - hmac-sha2-512
 ```
 
-Order is preference order: the negotiation settles on the first entry the partner's server also accepts. Drop entries from the end to narrow further -- a shorter list is a stricter deployment, at the cost of more partners it cannot reach.
+Order is preference order: the negotiation uses the first entry the partner's server also accepts. Drop entries from the end to narrow further -- a shorter list is a stricter deployment, at the cost of more partners it cannot reach.
 
 ### The reference the selection follows
 
@@ -70,13 +70,13 @@ Approval at the algorithm-standard level is a different thing from module-certif
 
 ### What each list excludes
 
-- **`kex`** excludes `curve25519-sha256` and its `@libssh.org` spelling: X25519 is not an approved key-agreement algorithm on any OpenSSL Project certificate ([fips-provider-surface.md](notes/fips-provider-surface.md)), and the FIPS 140-3 certificate this project targets -- 5021, for the Amazon Linux 2023 module the variant image carries -- names it in no table at all, approved or non-approved, and states its non-approved-but-allowed category empty. There is no status X25519 could hold on that certificate, and the certified module does not carry the primitive to begin with ([CONTAINER_IMAGES.md](spec/CONTAINER_IMAGES.md#what-certificate-5021-attests)). It also excludes every SHA-1 key exchange (`diffie-hellman-group1-sha1`, `diffie-hellman-group14-sha1`, `diffie-hellman-group-exchange-sha1`) and the group-exchange family generally, whose modulus the server chooses at handshake time rather than being one of the approved safe primes.
+- **`kex`** excludes `curve25519-sha256` and its `@libssh.org` spelling: X25519 is not an approved key-agreement algorithm on any OpenSSL Project certificate ([fips-provider-surface.md](notes/fips-provider-surface.md)), and the FIPS 140-3 certificate this project targets -- 5021, for the Amazon Linux 2023 module the variant image contains -- names it in no table at all, approved or non-approved, and states its non-approved-but-allowed category empty. There is no status X25519 could hold on that certificate, and the certified module does not include the primitive to begin with ([CONTAINER_IMAGES.md](spec/CONTAINER_IMAGES.md#what-certificate-5021-attests)). It also excludes every SHA-1 key exchange (`diffie-hellman-group1-sha1`, `diffie-hellman-group14-sha1`, `diffie-hellman-group-exchange-sha1`) and the group-exchange family generally, whose modulus the server chooses at handshake time rather than being one of the approved safe primes.
 - **`cipher`** excludes `chacha20-poly1305@openssh.com` (not an approved algorithm), `3des-cbc`, and the AES-CBC suites. CBC is itself an approved mode; it is excluded here for the SSH-specific plaintext-recovery weakness, not on FIPS grounds, so an operator who must interoperate with a CBC-only server is widening the list on a security tradeoff rather than a compliance one.
 - **`hmac`** excludes every `hmac-sha1` spelling and the `umac-*` family, which is not FIPS-approved. The `-etm@openssh.com` entries are the same HMAC construction in encrypt-then-MAC order and are listed first for that reason.
 
 ### The hmac list applies only to the non-AEAD fallback
 
-When the negotiation settles on one of the AES-GCM ciphers, the MAC list is not used: those suites carry their own integrity, and the handshake records an empty MAC in both directions. The `hmac` list governs the run that falls back to a CTR cipher instead, which is why it is still load-bearing -- leaving it unset would let a CTR fallback negotiate `hmac-sha1`.
+When the negotiation selects one of the AES-GCM ciphers, the MAC list is not used: those suites provide their own integrity, and the handshake records an empty MAC in both directions. The `hmac` list governs the run that falls back to a CTR cipher instead, which is why it is still critical -- leaving it unset would let a CTR fallback negotiate `hmac-sha1`.
 
 ### A misspelled algorithm name fails the dial
 
@@ -109,7 +109,7 @@ Against a server restricted to a non-approved set in any one of the three catego
 | `chacha20-poly1305@openssh.com` | `Handshake failed: no matching C->S cipher` |
 | `hmac-sha1` | `Handshake failed: no matching C->S MAC` |
 
-The remedy is server-side: the partner enables an approved algorithm in that category (see [What to ask of the partner's server](#what-to-ask-of-the-partners-server)). Widening your own list to reach them is the other option, and it is a decision to make deliberately -- it is the whole control this profile consists of.
+The remedy is server-side: the partner enables an approved algorithm in that category (see [What to ask of the partner's server](#what-to-ask-of-the-partners-server)). Widening your own list to reach them is the other option, and it is a choice to make knowingly -- it is the whole control this profile consists of.
 
 ### Distinguishing this from a runtime that cannot perform the algorithm
 
@@ -122,19 +122,19 @@ The profile above is chosen so the second case does not arise from the profile i
 
 ## Running in a FIPS-configured image
 
-If you run psilink in a container configured with an OpenSSL FIPS provider, the provider build -- not this profile -- decides which SSH algorithms are available at all. The SSH stack reaches `node:crypto`, which dispatches through the configured provider, so an algorithm the provider does not carry cannot be performed however it is configured here.
+If you run psilink in a container configured with an OpenSSL FIPS provider, the provider build -- not this profile -- decides which SSH algorithms are available at all. The SSH stack reaches `node:crypto`, which dispatches through the configured provider, so an algorithm the provider does not provide cannot be performed however it is configured here.
 
 What that means for the lists above, from the provider measurements recorded in [fips-provider-surface.md](notes/fips-provider-surface.md):
 
 - **The profile's algorithms survive both measured provider builds.** ECDH and finite-field DH are in the key-exchange listing of every build measured (3.0.8, 3.0.9, 3.0.21 and 3.5.7), as are the AES modes and HMAC-SHA-2 the cipher and hmac lists name.
-- **`curve25519-sha256` is unavailable under a 3.5.x provider, and in the one FIPS image measured end to end.** X25519 keypair generation fails under a from-source 3.5.7 provider, taking every key exchange built on it with it, while the from-source 3.0.8, 3.0.9 and 3.0.21 builds serve X25519. The version line is not what settles it: the measured image pairs the 3.5.7 OpenSSL Node links with the certified Amazon Linux 3.0.8 provider module, and an X25519 derivation fails there ([fips-variant-image.md](notes/fips-variant-image.md)) -- a property of that pairing, which the measurement does not attribute to either component, and that module is separately read to carry no X25519 at all ([What each list excludes](#what-each-list-excludes)). So the 3.0.x/3.5.x split holds for the from-source builds it was taken on and is unverified for a mixed base-and-module pairing; confirm X25519 in your own image before depending on it. This is one more reason the `kex` list above excludes it: a recommendation that depended on the provider build would fail at negotiation for a reason the operator could not see from the profile.
+- **`curve25519-sha256` is unavailable under a 3.5.x provider, and in the one FIPS image measured end to end.** X25519 keypair generation fails under a from-source 3.5.7 provider, taking every key exchange built on it with it, while the from-source 3.0.8, 3.0.9 and 3.0.21 builds serve X25519. The version line is not what decides it: the measured image pairs the 3.5.7 OpenSSL Node links with the certified Amazon Linux 3.0.8 provider module, and an X25519 derivation fails there ([fips-variant-image.md](notes/fips-variant-image.md)) -- a property of that pairing, which the measurement does not attribute to either component, and that module is separately read to contain no X25519 at all ([What each list excludes](#what-each-list-excludes)). So the 3.0.x/3.5.x split holds for the from-source builds it was taken on and is unverified for a mixed base-and-module pairing; confirm X25519 in your own image before depending on it. This is one more reason the `kex` list above excludes it: a recommendation that depended on the provider build would fail at negotiation for a reason the operator could not see from the profile.
 - **MD5 is unavailable under a fips-only configuration.** psilink pins and displays a host key by its OpenSSH SHA-256 fingerprint, so the pin above is unaffected -- but tooling that produces an MD5 fingerprint (`ssh-keygen -E md5`, and some server documentation) cannot be used inside such an image to derive the value you pin.
 
 Which certificate and base image the variant pairs with, and what a claim about it may say, are in [fips-variant-image.md](notes/fips-variant-image.md) and [COMPLIANCE.md](COMPLIANCE.md#fips-140).
 
 ### The default offer measured inside the image
 
-The three points above rest on the provider's own measured algorithm surface; what such an image puts on the SSH wire is a separate measurement, taken directly. On an Amazon Linux 2023 host with kernel FIPS mode enabled (`/proc/sys/crypto/fips_enabled` reads `1`), the FIPS variant image -- carrying the AL2023 FIPS provider module `3.0.8-d694bfa693b76001` under a fips-only OpenSSL configuration -- was dialed at a listener that answers the SSH version banner, decodes the client's first packet (`SSH_MSG_KEXINIT`), and drops the connection. No key exchange completed and no server key was involved. The dial carried no `algorithms` block, so what it offered is the default, before any setting on this page narrows it:
+The three points above rest on the provider's own measured algorithm surface; what such an image puts on the SSH wire is a separate measurement, taken directly. On an Amazon Linux 2023 host with kernel FIPS mode enabled (`/proc/sys/crypto/fips_enabled` reads `1`), the FIPS variant image -- containing the AL2023 FIPS provider module `3.0.8-d694bfa693b76001` under a fips-only OpenSSL configuration -- was dialed at a listener that answers the SSH version banner, decodes the client's first packet (`SSH_MSG_KEXINIT`), and drops the connection. No key exchange completed and no server key was involved. The dial had no `algorithms` block, so what it offered is the default, before any setting on this page narrows it:
 
 | Negotiated | Offered by default from inside the FIPS image |
 |---|---|
@@ -143,7 +143,7 @@ The three points above rest on the provider's own measured algorithm surface; wh
 | Message authentication | `hmac-sha2-256-etm@openssh.com`, `hmac-sha2-512-etm@openssh.com`, `hmac-sha1-etm@openssh.com`, `hmac-sha2-256`, `hmac-sha2-512`, `hmac-sha1` |
 | Host-key type | `ecdsa-sha2-nistp256`, `ecdsa-sha2-nistp384`, `ecdsa-sha2-nistp521`, `rsa-sha2-512`, `rsa-sha2-256`, `ssh-rsa` |
 
-The key-exchange field also carried `ext-info-c` and `kex-strict-c-v00@openssh.com`, which signal protocol extensions rather than naming algorithms.
+The key-exchange field also included `ext-info-c` and `kex-strict-c-v00@openssh.com`, which signal protocol extensions rather than naming algorithms.
 
 Four names an ordinary runtime offers are absent from it:
 
