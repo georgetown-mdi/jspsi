@@ -155,7 +155,7 @@ describe("reading a stored accounting", () => {
  * read no longer returns verbatim -- the recovery has no export arm, and this is
  * what fails rather than an operator discovering it while stranded. The
  * complementary check, that the version literal cannot move without the decision
- * being re-taken, is scripts/check-disclosure-recovery.mjs.
+ * being re-taken, is scripts/check-exchange-record-version.mjs.
  *
  * A bump is simulated by presenting a stored entry under a literal that is not the
  * current one, which is parse-identical to the app's own constant moving forward.
