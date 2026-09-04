@@ -3,7 +3,7 @@ name: assess-review
 description: Triage a cold code review of one branch -- read that branch's findings file under the primary checkout, judge trajectory and step-back triggers here in the orchestrating session, dispatch the fixes to one implementer pointed at the branch's own worktree, and report what was left plus a security-review readiness call. Takes the branch as an argument and never enters its tree, so several branches can be in triage at once; pairs with light-review, which deposits the findings file.
 ---
 
-You are the engineer accountable for the changes, now triaging a cold code review
+You are the engineer accountable for the changes, triaging a cold code review
 of them. The JUDGMENT is yours and happens here: what the round means, whether the
 branch is converging, which findings get fixed, and whether it is ready. The
 EDITING is not: it is dispatched to one implementer working in the branch's own
@@ -11,8 +11,7 @@ worktree.
 
 You stay where you are. You do not `cd` into the branch's worktree, and you do not
 check anything out -- reads go through `git -C <tree>` and `git show <ref>:<path>`,
-and anything that must RUN goes to a spawn. That is what lets several branches be
-in triage at once.
+and anything that must RUN goes to a spawn.
 
 ## Input
 
@@ -46,11 +45,11 @@ Start with the whole, not the parts:
   findings file, and the rounds ledger at
   `PRIMARY/scratch/review-rounds/<key>.jsonl` for the rounds before it (fall back
   to reconstructing rounds from `git log staging..<branch>` review-fix commits if
-  either is missing; a review lens carried by a `general-purpose` spawn is
+  either is missing; a review lens run by a `general-purpose` spawn is
   invisible to accounting keyed on `subagent_type`, which undercounts the
   rounds a branch ran). Converging is confirmed-new falling with repeats near
   zero; churn is fixes spawning findings.
-- **Kind.** Each ledger row carries a `kind`: `light` for a lens round, or the
+- **Kind.** Each ledger row has a `kind`: `light` for a lens round, or the
   name of the role that ran it (`security-reviewer`, `adversarial-verifier`).
   A row with no `kind` predates the field and is a `light` round. Compare a
   round only against prior rounds of the same kind -- a role round's claims and
@@ -74,7 +73,7 @@ surface, its limit stated in the spec) -- presented to the owner in prose with
 options and a recommendation. Churn escalates to a different activity, never to
 another blind whole-branch round.
 
-1. The same file or area carries confirmed findings in three consecutive rounds
+1. The same file or area has confirmed findings in three consecutive rounds
    (two, for a diff under ~150 lines).
 2. This round confirmed as many findings as the previous round's fixes closed,
    or more.
@@ -82,7 +81,7 @@ another blind whole-branch round.
    list (high-severity, single-reviewer findings) grew from the previous round.
    A role round has one reviewer, so this trigger reads light rounds only.
 4. Two or more reviewers voted that a materially simpler shape exists. Only a
-   light round carries that vote.
+   light round holds that vote.
 5. A fix you are about to order would grow the branch's diff by roughly a third
    or more.
 6. The driving board issue's **Affected areas** is in context and the diff has
@@ -112,7 +111,7 @@ A gated claim or confirmed review finding has four dispositions, not one:
    `docs/spec/` line, and NO BOARD ITEM -- the ledger entry is the record, and it
    is durable because the ledger is per branch and survives the round.
 
-The last two are the cheap ones, not failures. A true finding whose fix would
+The last two are the cheap ones. A true finding whose fix would
 grow the guarded surface is usually best narrowed, and one that costs nothing a
 user or partner can reach is usually best stated.
 
@@ -123,8 +122,8 @@ differently. Reach past it -- to a fix, or to any sink that costs a board item -
 only for a finding that reaches such a surface, or one you can say in a line why
 the branch is worse for leaving. Absent that line, state it and move on.
 
-- **Default to fixing.** Drive-by corrections are welcome -- you do not need
-  permission to fix something small and clearly right.
+- **Default to fixing.** You do not need permission to fix something small and
+  clearly right.
 - **Contest by measurement before fixing for it.** A finding or refuted claim
   about an external tool's behavior that rests on reading rather than running
   is still open: reproduce the claimed behavior against the real tool first.
@@ -136,32 +135,31 @@ the branch is worse for leaving. Absent that line, state it and move on.
   contest, narrow, and stated limit on a gated `security-reviewer` or
   `adversarial-verifier` round is the adjudication CLAUDE.md's model-tier rule
   reserves Fable for -- a one-shot, owner-approved consult on the choice, never
-  a Fable fix round. It is the highest-judgment call in the loop, and a consult
-  on it is cheaper than the fix-and-attest round it can replace.
+  a Fable fix round.
 - **A fix that adds behavior gets a test.** When a fix introduces new branching
   or a new code path (error handling, a guard, a fallback), the brief orders its
   guarantees pinned with a test in the same pass. No later round re-reviews a
   fix: another round exists only for the step-back triggers.
 - **A pattern in the findings gets a class sweep.** When several findings share
-  one mechanism (a port dropping behavior its original carried, a rename
+  one mechanism (a port dropping behavior its original had, a rename
   missing sites, a repeated idiom misused), the brief orders one focused pass
   over that class across the whole branch -- a review round samples; the sweep
   completes.
 - **Prose findings get a high bar.** Order a fix for a finding that asks for a
   comment, JSDoc, or doc paragraph only when the missing constraint is
   unrecoverable from the code, names, types, and tests AND its absence enables a
-  concrete wrong edit you can name -- and prefer carrying it as a check, a test,
+  concrete wrong edit you can name -- and prefer encoding it as a check, a test,
   or a more explicit name over prose. Reviews here have a measured many-to-one
   bias toward adding prose; do not ratchet. The same bar applies to prose you
   are tempted to add defensively while triaging: pre-empting a re-raise is not a
   reason.
-- **Autonomy boundary.** Settle implementation details yourself. STOP and ask the
+- **Autonomy boundary.** Decide implementation details yourself. STOP and ask the
   owner or PM before a fix that reaches beyond this change: public API / CLI /
   config-schema, protocol or wire format, security-relevant behavior, a
   dependency, a shared convention, or the branch's scope. Ask in prose with the
   options and a recommendation; do NOT use the question tool.
-- **Leave it** only when it is truly out of scope for this branch, genuinely
-  not worth the change, or best taken as a limit per the four dispositions above
+- **Leave it** only when it is truly out of scope for this branch, not worth
+  the change, or best taken as a limit per the four dispositions above
   -- narrowed, where the brief writes the limits line into the governing
   `docs/spec/` file in the same pass, or stated, where the ledger entry is the
   whole record. Do NOT file a board issue for anything -- no automated filings;
@@ -170,7 +168,7 @@ the branch is worse for leaving. Absent that line, state it and move on.
 
 ### Dispatching the fixes
 
-Everything you decided to fix goes into ONE fix brief for this branch, carried by
+Everything you decided to fix goes into ONE fix brief for this branch, run by
 ONE `implementer` spawn -- one per branch, never one per finding, and never an
 edit you make yourself: you are not in the branch's tree, and the fix that lands
 there is the one the brief describes.
@@ -182,7 +180,7 @@ there is the one the brief describes.
   tells the implementer to run `bash .claude/scripts/worktree-init.sh` from that
   tree before its first edit, which is what provisions it.
 - Name the tree by ABSOLUTE PATH -- "the branch's worktree at `<TREE>`". Do not
-  write "your worktree" or "this worktree": those read as a claim of harness
+  write "your worktree" or "this worktree": those are treated as a claim of harness
   isolation, and `require-declared-worktree-isolation.mjs` blocks a spawn that
   makes one without the flag. The spawn is NOT worktree-isolated; the branch's
   tree already exists and is where its work belongs.
@@ -196,7 +194,7 @@ there is the one the brief describes.
   worktree: an untracked leftover there blocks
   `require-clean-tree-for-review.mjs` on the branch's next round.
 - **A small fix travels as its exact edit.** For a fix under roughly 20 lines,
-  the brief carries the edit itself -- the file, the old text, the new text, and
+  the brief contains the edit itself -- the file, the old text, the new text, and
   the test to run -- and the spawn is a `sonnet` implementer applying it. Writing
   the edit out is the cheap path: the reading and the judgment already happened
   here, and re-deriving them is what a full spawn would charge for. Dispatching
@@ -214,15 +212,15 @@ there is the one the brief describes.
   the spawn ran and what it reported.
 
 Then record what you decided. The round's row in
-`PRIMARY/scratch/review-rounds/<key>.jsonl` carries a `dispositions` entry per
+`PRIMARY/scratch/review-rounds/<key>.jsonl` contains a `dispositions` entry per
 confirmed cluster, gating claim, and out-of-claim finding, each written `open`
 by the round that raised it. Rewrite each in place to the disposition you took:
 `fixed`, `contested` (the disputed behavior was measured first-hand and did not
 hold), `narrowed` (the limits line is on the branch), `limit` (accepted as it
 stands, no board item), or `deferred` (it has a row in Step 4's table). A `limit`
-entry carries a `note` beside it -- one phrase saying what the branch is living
+entry has a `note` beside it -- one phrase saying what the branch is living
 with -- because the entry is the whole record of that finding and an unannotated
-one reads as an entry nobody wrote down. An entry left `open` says nobody decided
+one is treated as an entry nobody wrote down. An entry left `open` says nobody decided
 that finding, so leave none behind -- and a round whose entries are all still
 `open` is a round that was read and not triaged.
 
@@ -286,7 +284,7 @@ Each path is recorded on the checklist line naming both shas:
 
 A head moved by a BASE SYNC -- a merge commit whose first parent is the attested
 sha and whose second parent is on origin/staging -- is outside all three paths.
-The attested-to-head diff carries the whole merged staging range, so the verifier
+The attested-to-head diff contains the whole merged staging range, so the verifier
 answers for what that range touched rather than for the merge, and a conflict
 resolution is branch-authored change no round has read. What it reports across
 one is measured rather than asserted here:
@@ -301,7 +299,7 @@ refutation contract in full at the merge head
 contract is the union of the claims the branch's role rounds have run -- each
 ledger row records its claims verbatim, so the union survives a lost claims
 file -- and never the last row's delta subset.
-No verdict is carried across the merge -- a claim's truth is not a function of
+No verdict applies across the merge -- a claim's truth is not a function of
 its recorded subject file, the ledger does not record the file set a claim
 ranges over, and the merge composes the branch with content no round has read --
 while re-verifying a claim that held costs little inside the one round that must
