@@ -56,7 +56,7 @@ function readCliVersion(): string {
   const pkgPath = path.join(__dirname, "..", "package.json");
   // Non-sensitive: this package's own manifest, not a credential file, so there
   // is no secret for a parse error to leak.
-  // eslint-disable-next-line no-restricted-syntax -- non-credential parse, see above
+  // eslint-disable-next-line no-restricted-properties -- non-credential parse, see above
   const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version: string };
   return pkg.version;
 }

@@ -229,12 +229,6 @@ export default tseslint.config(
           message:
             "Parse operator/credential files through apps/cli/src/sensitiveFile.ts (parseSensitiveYaml / editSensitiveYamlDocument); raw YAML.parse leaks source into errors and stderr. Non-sensitive parse: eslint-disable-next-line with a one-line justification.",
         },
-        {
-          selector:
-            "CallExpression[callee.object.name='JSON'][callee.property.name='parse']",
-          message:
-            "Parse credential files through apps/cli/src/sensitiveFile.ts (parseSensitiveJson); raw JSON.parse can echo a leading span of the source. Non-sensitive parse: eslint-disable-next-line with a one-line justification.",
-        },
         ...weriftStaticLoadBan,
         noBareRootLoglevelEmit,
         ...noRawErrorAtDisplaySink,
@@ -253,6 +247,18 @@ export default tseslint.config(
             },
           ],
           patterns: crossWorkspaceImportBans.cli,
+        },
+      ],
+      // no-restricted-properties (a property-access ban, not a CallExpression
+      // selector) so the ban also catches an alias, a computed access, and a
+      // destructure -- same form as packages/core/src's ban below.
+      "no-restricted-properties": [
+        "error",
+        {
+          object: "JSON",
+          property: "parse",
+          message:
+            "Parse credential files through apps/cli/src/sensitiveFile.ts (parseSensitiveJson); raw JSON.parse can echo a leading span of the source. Non-sensitive parse: eslint-disable-next-line with a one-line justification.",
         },
       ],
     },
