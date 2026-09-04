@@ -39,8 +39,8 @@ export const MAX_PORT = 65535;
  * malformed value is rejected here, at parse time, as a {@link UsageError} (CLI
  * exit 64), the same "reject loudly before any connection is attempted"
  * contract {@link nonNegativeIntFlag} and {@link durationFlagSeconds} give
- * their flags, rather than surfacing later as a confusing host-key mismatch at
- * connect time.
+ * their flags, rather than showing up later as a confusing host-key mismatch
+ * at connect time.
  *
  * The `@file` read and re-validation are {@link resolveHostKeyFingerprintRef}
  * -- the same helper the config-load path applies to an `@`-authored
@@ -344,7 +344,7 @@ export interface CommonBootstrapOptions {
   peerTimeout?: number;
   // The --polling-frequency override, in MILLISECONDS (not seconds like the two
   // timeout fields above): the poll interval is millisecond-scaled and accepts a
-  // sub-second value, so it carries its native unit through to the connection's
+  // sub-second value, so it keeps its native unit through to the connection's
   // pollIntervalMs without a lossy seconds round-trip.
   pollingFrequencyMs?: number;
   maxReconnectAttempts?: number;
@@ -384,7 +384,7 @@ export function parseCommonBootstrapArgs(
     identity: singleValue(argv, "identity") as string | undefined,
     serverPort: nonNegativeIntFlag(argv, "server-port", MAX_PORT),
     serverUsername: singleValue(argv, "server-username") as string | undefined,
-    // Credential values are carried through verbatim; an `@path` ref is read only
+    // Credential values are kept verbatim; an `@path` ref is read only
     // at the live-use boundary (resolveConnectionCredentials in
     // runOnlineBootstrap), so a persisted config keeps the `@path`, not the
     // resolved secret.
@@ -400,7 +400,7 @@ export function parseCommonBootstrapArgs(
     serverKeyboardInteractive: argv["server-keyboard-interactive"] as
       boolean | undefined,
     // Unlike the credential flags above, a host-key fingerprint is non-secret and
-    // carries no "keep the @path out of the saved config" concern -- resolved (and
+    // has no "keep the @path out of the saved config" concern -- resolved (and
     // format-validated) here at parse time, same as the config-load path already
     // does for an @-authored host_key_fingerprint (resolveHostKeyFingerprintRef).
     serverHostKeyFingerprint: hostKeyFingerprintFlag(argv),
@@ -443,7 +443,7 @@ export function parseCommonBootstrapArgs(
 /**
  * The subset of parsed common options {@link connectionOverridesFrom} reads. A
  * `Pick` rather than the full {@link CommonBootstrapOptions} so the command
- * `Options` shapes that carry only the override fields (exchange's, zero-setup's)
+ * `Options` shapes that hold only the override fields (exchange's, zero-setup's)
  * also satisfy it; the full options object is assignable to it too.
  */
 export type ConnectionOverrideOptions = Pick<
@@ -537,7 +537,7 @@ export function connectionOverridesFrom(
  * live, and {@link warnLowPollingFrequency} (the aggressively-low advisory) is
  * correspondingly a no-op off those channels so the two never both fire.
  *
- * `--outbound-path` is deliberately NOT one of these flags: unlike the silently-
+ * `--outbound-path` is NOT one of these flags, by design: unlike the silently-
  * ignored options above, {@link applyConnectionOverrides} throws on it off the
  * file-sync channels, so it needs no "ignored" warning -- a warning here would
  * falsely promise it was tolerated.
@@ -596,7 +596,7 @@ export function warnUnsupportedFileSyncFlags(
 
 /**
  * Where the webrtc connection whose `--server-*` flags were dropped came from,
- * which is the only thing the two flags carrying their own remedy differ on: a
+ * which is the only thing the two flags holding their own remedy differ on: a
  * `ws://`/`wss://` URL the command was given (`url`), or the `connection` block
  * of the configuration it is running (`configuration`).
  */
@@ -612,9 +612,9 @@ export type WebRTCConnectionSource = "url" | "configuration";
  * where the wording below (which names a coordination server) would not apply.
  * Warn-not-block, per the trusted-operator posture.
  *
- * `--server-port` and `--server-username` carry remedies of their own, so each
+ * `--server-port` and `--server-username` have remedies of their own, so each
  * warns for itself: the coordination server's port is part of the location the
- * connection already carries, while its `username` has no webrtc form at all --
+ * connection already has, while its `username` has no webrtc form at all --
  * the server is reached by location and its API key alone (the same remedy
  * {@link WEBRTC_URL_EXTRAS_REFUSED} gives for `server.key`). Where that location
  * came from is what `source` selects, so neither remedy points at a URL on the
@@ -630,7 +630,7 @@ export type WebRTCConnectionSource = "url" | "configuration";
  * channel does send, because the flags' own silence is not the channel's: a
  * configured `server.key` goes to the coordination server as part of the
  * request it authorizes, so a blanket "no credential of any kind is sent" would
- * be false on any connection carrying one.
+ * be false on any connection holding one.
  */
 export function warnUnsupportedWebRTCServerFlags(
   channel: ConnectionConfig["channel"],
@@ -713,7 +713,7 @@ export { LOW_POLLING_FREQUENCY_WARN_MS };
  * sub-second poll hammers the shared directory with listings and can trip a
  * commercial SFTP server's anti-flood/DoS protection and drop the connection (the
  * partner-deployment failure that motivated the conservative default). There is
- * deliberately no hard floor: a demo against a controlled server may want ~100ms.
+ * no hard floor: a demo against a controlled server may want ~100ms.
  * A no-op when the flag is absent or at/above the threshold, so a conservative
  * value emits nothing.
  *
@@ -803,7 +803,7 @@ export function warnConnectionPerPollShortInterval(
  * `connection.options`. This server block is what the offline placeholder stands
  * in for: {@link connectionFromEndpoint} writes a `REPLACE_WITH_...` host/username
  * stub, or a seeded host/port/path, so these are the overrides that would have
- * populated a field the operator edits. (The set carries the
+ * populated a field the operator edits. (The set holds the
  * username/password/private-key the placeholder marks for replacement, so it is
  * NOT the credential-free public {@link ConnectionEndpoint}, which omits them by
  * construction.)
@@ -899,8 +899,8 @@ export function warnServerOverridesIgnoredOffline(
  * The offline placeholder has no `options` block on any channel (a split seed
  * pre-seeds only the fixed retain-mode trio there, {@link SPLIT_SEED_OPTIONS},
  * never operator tuning), so these overrides are parsed and silently dropped on
- * the offline paths. They are the `connection.options` half deliberately scoped
- * out of {@link OfflineIgnoredServerOverrides}: warning for them belongs
+ * the offline paths. They are the `connection.options` half scoped out of
+ * {@link OfflineIgnoredServerOverrides} by design: warning for them belongs
  * in a separate, differently-worded diagnostic ("set them under
  * connection.options") rather than folded into the server warning's "set the
  * connection details in that block" remedy.
@@ -961,7 +961,7 @@ export function warnOptionsOverridesIgnoredOffline(
     ignored.push("--max-reconnect-attempts");
   // The three toggles gate on `=== true`, not presence: yargs sets the negated
   // form (--no-retain-files etc.) to `false`, and `false` is the default a fresh
-  // placeholder already carries, so only the enabling form was an override that
+  // placeholder already has, so only the enabling form was an override that
   // could have done something. This matches warnUnsupportedFileSyncFlags's
   // `=== true` gate on the same toggles and avoids a warning that names
   // --retain-files when the operator actually typed --no-retain-files.

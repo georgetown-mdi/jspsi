@@ -33,9 +33,9 @@ export function resolveAtSignRef(value: string): string {
     );
   }
   // Reject an empty result here rather than letting "" pass to a schema that
-  // already accepted the non-empty @path string (resolution now runs after
+  // already accepted the non-empty @path string (resolution runs after
   // parse, so e.g. turn.credential's min(1) has validated the literal "@path",
-  // not the file contents) and surface only later as an opaque network-layer
+  // not the file contents) and show up only later as an opaque network-layer
   // auth failure with no reference to the offending field.
   if (content === "")
     throw new UsageError(
@@ -48,7 +48,7 @@ export function resolveAtSignRef(value: string): string {
  * Recursively resolve every `@path` string in a JSON-like value, reading each
  * referenced file in place.
  *
- * Use this only where every contained string is genuinely `@`-eligible: a
+ * Use this only where every contained string is `@`-eligible: a
  * single field-scoped scalar (the `invite`/`accept` invitation argument, a
  * `--server-password` / `--server-private-key` flag value) or an explicitly
  * opaque subtree (`connection.providerOptions`, whose values are passed verbatim
@@ -89,7 +89,7 @@ export function resolveAtSignRefs(obj: unknown): unknown {
  * WebRTC `turn[].credential`,
  * and the opaque `providerOptions` map. Every other field is left verbatim, so a
  * free-text value with a literal leading `@` (`linkageTerms.identity`,
- * `retentionDisposition`, ...) is carried through unread rather than exfiltrating
+ * `retentionDisposition`, ...) passes through unread rather than exfiltrating
  * a local file into the self-attested exchange record. A local-path field such as
  * `signing.identityFile` is likewise left alone: its consumer opens that path, so
  * resolving it to the file's contents would corrupt it.
@@ -103,7 +103,6 @@ export function resolveExchangeSpecRefs(spec: ExchangeSpec): ExchangeSpec {
   return { ...spec, connection: resolveConnectionAtSignRefs(spec.connection) };
 }
 
-/** Resolve `@path` refs in the supported fields of one parsed connection. */
 function resolveConnectionAtSignRefs(
   connection: ConnectionConfig,
 ): ConnectionConfig {
@@ -135,7 +134,7 @@ function resolveConnectionAtSignRefs(
       resolveProviderOptionsAtSignRefs(resolved);
       break;
     case "webrtc":
-      // A WebRTC server carries no password/privateKey -- only the provisioning
+      // A WebRTC server has no password/privateKey -- only the provisioning
       // endpoints' HTTP auth, the TURN credentials, and providerOptions.
       resolveHttpAuthAtSignRefs(resolved.server.provision?.auth);
       resolveHttpAuthAtSignRefs(resolved.iceProvision?.auth);
@@ -151,7 +150,6 @@ function resolveConnectionAtSignRefs(
   return resolved;
 }
 
-/** Resolve an optional `@path` field; `undefined` passes through unchanged. */
 function resolveOptionalAtSignRef(
   value: string | undefined,
 ): string | undefined {
@@ -221,7 +219,7 @@ function resolveProviderOptionsAtSignRefs(connection: {
  * The values a connection's `@path` credential references resolve to, read
  * ahead of the connection they are applied to (see
  * {@link readConnectionCredentials}). A field is present exactly when the
- * connection read from carried one, so applying the record never invents a
+ * connection read from had one, so applying the record never invents a
  * credential the connection did not set.
  */
 export interface ResolvedConnectionCredentials {
@@ -235,7 +233,7 @@ export interface ResolvedConnectionCredentials {
 
 /**
  * Read the `@path` credential references on a connection without applying them,
- * so every local-file refusal is settled at this call: a missing, unreadable, or
+ * so every local-file refusal is decided at this call: a missing, unreadable, or
  * empty referenced file is a {@link UsageError} (exit 64) raised here rather
  * than wherever the resolved connection is built.
  *

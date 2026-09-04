@@ -34,9 +34,9 @@ export const EVENT_STREAM_VERSION = 1;
  * these strings -- none is partner-derived -- so a consumer can switch on the
  * discriminant safely. `stages` is the one-shot stage-list event; `stage` marks
  * each stage transition; `stageEnd` reports a completed stage's wall-clock
- * duration; `warning` carries a non-fatal warning (a terms-exchange warning, the
+ * duration; `warning` holds a non-fatal warning (a terms-exchange warning, the
  * cross-party host-key divergence notice, the resolved-cardinality and
- * pair-table notices of the post-terms, pre-round seam, the
+ * pair-table notices of the post-terms, pre-round boundary, the
  * signing-without-a-record notice, a missing audit artifact, or any
  * post-exchange persistence failure);
  * `metrics` is the one-shot operational-counter summary emitted just before the
@@ -51,7 +51,7 @@ export type EventType =
  * `ExchangeErrorCategory` (apps/web/src/psi/exchangeLifecycle.ts) so a consumer
  * classifies a CLI failure exactly as it would a web one:
  * - `config`: a PREPARE-phase {@link OperatorConfigError} -- a fault composed
- *   solely of this party's own configuration, actionable and safe to surface.
+ *   solely of this party's own configuration, actionable and safe to show.
  * - `security`: a trust-boundary failure -- a `security`-kind
  *   {@link ConnectionError} from the authenticated key exchange (wrong secret,
  *   tamper, replay), from SFTP host-key verification (a pinned-fingerprint
@@ -101,7 +101,7 @@ export interface StageEvent extends EventBase {
 }
 
 /**
- * A stage-completion event, emitted when a protocol stage finishes and carrying
+ * A stage-completion event, emitted when a protocol stage finishes, reporting
  * how long it ran. It pairs with the start-of-stage {@link StageEvent} so a
  * supervisor can attribute wall-clock to the stage named by `id`. Only a
  * completed stage is reported: a run that aborts mid-stage emits no `stageEnd`
@@ -116,16 +116,8 @@ export interface StageEndEvent extends EventBase {
 }
 
 /**
- * A non-fatal warning: a terms-exchange warning, the cross-party host-key
- * divergence notice, the resolved-cardinality and pair-table notices raised at
- * the post-terms, pre-round seam, the pre-exchange notice that a signing
- * identity is configured while record writing is off, an audit artifact the
- * run was asked for and could not produce, or a persistence failure that
- * leaves an otherwise complete run short of what it was asked to write -- an
- * online invite/accept's configuration, one of the acceptance's consent
- * records on a reused configuration, the observed received-payload set a
- * later recurring exchange would have been held to, or a zero-setup `--save`
- * run's configuration and key file.
+ * A non-fatal warning; see the `warning` case of {@link EventType} for the
+ * warning sources `message` holds.
  */
 export interface WarningEvent extends EventBase {
   type: "warning";
@@ -159,7 +151,7 @@ export interface ResultEvent extends EventBase {
    * exchange in which this party is the helper and its agreed terms give it no
    * output -- it contributed to the match but receives no result file -- and
    * false for a count-only exchange, which produces no matched pairing for
-   * anyone, in which case {@link intersectionCount} carries the outcome.
+   * anyone, in which case {@link intersectionCount} holds the outcome.
    */
   resultWritten: boolean;
   /**
@@ -201,30 +193,19 @@ export type StreamEvent =
 
 /**
  * Classify a terminal failure into one of the four {@link ExchangeErrorCategory}
- * values, over the vocabulary the web front end defines:
+ * values, the web front end's vocabulary (`apps/web/src/psi/exchangeLifecycle.ts`):
  *
- * - `output` phase -> `output` (the exchange already succeeded; only local
- *   result-file generation failed).
- * - an {@link OperatorConfigError} in any earlier phase -> `config`. Scoped to
- *   that exact base type, NOT any {@link UsageError}: a sibling UsageError can be
- *   partner-influenced, so it stays `exchange` rather than being presented as a
- *   purely local configuration fault.
+ * - `output` phase -> `output`.
+ * - an {@link OperatorConfigError} in any earlier phase -> `config`. That exact
+ *   base type only, not any {@link UsageError}: a sibling UsageError can be
+ *   partner-influenced.
  * - a `security`-kind {@link ConnectionError} (any phase) -> `security`.
  * - everything else -> `exchange`.
  *
- * Both discriminants are structural (the error's TYPE / kind and the PHASE), not
- * a claim about which check happened to fire.
- *
- * The TYPE alone carries the `config` rule, where the web's
- * `classifyExchangeFailure` additionally requires its `prepare` phase. What that
- * category has to agree with here is the exit code, which no front-end alert has:
- * every member of the class exits 64, the code that tells an operator to change
- * their own input, while `exchange` is documented as the retryable bucket -- so a
- * member raised mid-run would have the stream inviting the retry the exit code
- * refuses, on a fault every attempt reproduces identically. Widening costs the
- * category nothing it claims: the class contract is that a member's message is
- * composed solely of this party's own content, phase included, and this stream
- * emits that message under either category anyway.
+ * Unlike the web's `classifyExchangeFailure`, `config` here is not scoped to
+ * the `prepare` phase: it has to agree with the exit code instead, and every
+ * `OperatorConfigError` exits 64 (non-retryable) regardless of phase. Full
+ * rationale: docs/spec/CLI_EVENTS.md (Error categories).
  */
 export function classifyTerminalError(
   error: unknown,
@@ -298,18 +279,10 @@ export function buildWarningEvent(message: string): WarningEvent {
     v: EVENT_STREAM_VERSION,
     type: "warning",
     // Terms-exchange warnings can embed partner-authored column names, so
-    // sanitize before the text reaches the stream. Redaction first, mirroring
-    // the log sink: this stream is a persisted machine sink too, and its error
-    // event is already redacted (sanitizeErrorForDisplay), so the warning is
-    // where the stream would otherwise carry key material in the clear. The
-    // warning sources that carry partner- or server-controlled text redact per
-    // fragment where they compose, so the fail-closed dangling rule has nothing
-    // left to consume here; the audit-artifact notices carry only an
-    // operator-configured path and compose raw, taking their whole escape from
-    // this one pass, and the persistence-failure notice composes first-party
-    // prose alone. The cap is the shared warning-composition budget, not the
-    // per-value default, so a consumer that re-escapes this field at the same
-    // budget delivers the whole composition rather than re-capping it.
+    // redact and sanitize before the text reaches the stream, at the shared
+    // warning-composition budget (WARNING_MESSAGE_MAX_DISPLAY_LENGTH) rather
+    // than the per-value default. Full rationale: docs/spec/CLI_EVENTS.md
+    // (the `warning` message field).
     message: redactAndSanitizeForDisplay(message, {
       maxLength: WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
     }),
@@ -337,7 +310,7 @@ export function buildMetricsEvent(
  * otherwise: the presence of `intersectionCount` is what a consumer keys the
  * count-only outcome off, so a zero count and an absent one must stay
  * distinguishable. The tally and its provenance travel as one argument so the
- * stream cannot carry a count without saying whose reading it is.
+ * stream cannot hold a count without saying whose reading it is.
  */
 export function buildResultEvent(
   resultWritten: boolean,
@@ -348,7 +321,7 @@ export function buildResultEvent(
     type: "result",
     resultWritten,
     // The one numeric field of this stream that a partner can influence (the
-    // count-report leg carries the receiver's tally to the sender), so it takes
+    // count-report leg sends the receiver's tally to the sender), so it takes
     // the same non-negative whole-number floor the metrics counters take. Core
     // bounds the reported figure to the smaller of the two exchanged record
     // counts before it gets here.
@@ -367,7 +340,7 @@ export function buildErrorEvent(error: unknown, phase: ErrorPhase): ErrorEvent {
     v: EVENT_STREAM_VERSION,
     type: "error",
     category: classifyTerminalError(error, phase),
-    // Error text can carry partner- or server-controlled bytes in its message or
+    // Error text can hold partner- or server-controlled bytes in its message or
     // cause chain, so route it through the display-boundary sanitizer that
     // stderr uses; the category and version fields are this party's own vocabulary.
     message: sanitizeErrorForDisplay(error),
@@ -494,14 +467,10 @@ function createEventStreamEmitter(): EventStreamEmitter {
  * when it is not -- in which case no writer exists and nothing is ever written
  * to fd 3.
  *
- * Preflight and construction are fused here because two callers open the
- * stream: `runProtocol`, for an exchange that owns its whole run, and the
- * online bootstrap, which opens it itself because it reports persistence losses
- * of its own from the hooks runProtocol invokes and needs the emitter object to
- * do it (see {@link reportPersistenceLoss}). Fusing them means a second entry
- * point cannot acquire a writer that skipped the preflight -- the writer and the
- * emitter factory are module-private, so this is the compiler's rule rather than
- * a convention: there is no exported route to a writer at all.
+ * Fused here because two callers open the stream: `runProtocol`, and the
+ * online bootstrap, which reports persistence losses of its own (see
+ * {@link reportPersistenceLoss}). The writer and the emitter factory are
+ * module-private, so no route to a writer exists that can skip the preflight.
  */
 export function openEventStream(
   enabled: boolean | undefined,
@@ -518,16 +487,9 @@ export function openEventStream(
  * write did not: the result file, an audit artifact, the configuration and
  * consent records an online `invite`/`accept` writes, or the configuration and
  * key a zero-setup `--save` writes. `EX_CANTCREAT` (73) in the BSD `sysexits`
- * convention -- an output the command was asked to create could not be created.
- *
- * Deliberately NOT `EX_UNAVAILABLE` (69), the transport-failure code. The two
- * demand opposite operator responses -- re-run the exchange, versus do not
- * re-run it and go recover what was lost -- and a bare supervisor (cron, a
- * scheduler, the console job driver) sees only the code: with both conditions
- * under 69 it either retries a completed exchange or never retries a failed
- * one. The terminal `result` event distinguishes them on fd 3, but a supervisor
- * that reads exit status has no fd 3 to read. See docs/CLI.md (Exit codes) and
- * docs/spec/CLI_EVENTS.md.
+ * convention, not `EX_UNAVAILABLE` (69): the two exit codes demand opposite
+ * operator responses (retry vs. do not retry), and a bare supervisor sees only
+ * the code. See docs/CLI.md (Exit 73) and docs/spec/CLI_EVENTS.md.
  */
 export const PERSISTENCE_LOSS_EXIT_CODE = 73;
 
@@ -537,17 +499,17 @@ export const PERSISTENCE_LOSS_EXIT_CODE = 73;
  * {@link PERSISTENCE_LOSS_EXIT_CODE}. Every non-fatal loss goes through here, so
  * a new one cannot land on one channel and miss the other. The one loss that is
  * not survivable -- a result file that could not be written -- reports as the
- * terminal `error` event instead, carrying the same exit code on the error it
- * throws (`runProtocol` stamps it at that write, so a partner-shaped fault
- * elsewhere in the same output stage is not mistaken for a local write loss).
+ * terminal `error` event instead, at the same exit code: `runProtocol` stamps
+ * it at that write, so a partner-shaped fault elsewhere in the same output
+ * stage is not mistaken for a local write loss.
  *
  * `notice` is this party's own prose naming what was lost and what the operator
- * should do; the CAUSE stays on the human log the caller writes beside this
- * call, because the emitter escapes its message exactly once and pre-rendered
- * error text would reach the stream double-escaped.
+ * should do; the cause stays on the human log beside this call, escaped once
+ * there rather than double-escaped here (see docs/spec/CLI_EVENTS.md,
+ * Persistence loss).
  *
- * `process.exitCode` rather than `process.exit` so the rest of the run's own
- * persistence still happens and still reports what it loses -- and so a signal
+ * `process.exitCode` rather than `process.exit`, so the rest of the run's own
+ * persistence still happens and still reports what it loses, and a signal
  * handler's `process.exit` is never raced.
  */
 export function reportPersistenceLoss(
