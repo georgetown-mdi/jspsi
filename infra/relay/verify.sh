@@ -42,6 +42,19 @@ die() { printf 'ABORTING: %s\n' "$*" >&2; exit 1; }
 REALM="${PSILINK_RELAY_REALM:-}"
 [ -n "$REALM" ] || die "PSILINK_RELAY_REALM is unset in $ENV_FILE"
 
+# EC2 does not hairpin an instance's traffic back to its own Elastic IP: a probe
+# run ON the relay box against the public name gets connection-refused on every
+# TCP probe even while the relay serves correctly to everyone else. Measured
+# 2026-09-03: `openssl s_client -connect <private-ip>:443 -servername
+# turn.data-bridge.org` from the box completes the handshake and returns the real
+# Let's Encrypt certificate, while the same probe via the Elastic IP is refused.
+# REALM stays the SNI name and the TURN realm in every probe regardless -- only
+# the TCP connect target changes. install.sh's end-of-install run overrides this
+# to the instance's private address; the timer-driven run leaves it at the
+# default (REALM) because it should fail if the public path -- the one a partner
+# actually uses -- is what broke.
+CONNECT="${PSILINK_RELAY_VERIFY_CONNECT:-$REALM}"
+
 # The runtime install.sh chose and recorded. A host installed by hand may carry
 # no record of it, so fall back to whichever is on PATH rather than assuming one:
 # the probes below run the relay's own image, and the wrong binary is a run that
@@ -69,7 +82,9 @@ report() {
   return 0
 }
 
-printf 'psilink relay verification: %s\n\n' "$REALM"
+printf 'psilink relay verification: %s\n' "$REALM"
+[ "$CONNECT" = "$REALM" ] || printf '(connecting via %s)\n' "$CONNECT"
+printf '\n'
 
 # --- handshake ---------------------------------------------------------------
 # Which certificate the relay serves, read out of an s_client transcript that
@@ -100,14 +115,14 @@ certificate_report() {
   fi
 }
 
-if ! HS="$(echo | timeout 20 openssl s_client -connect "$REALM:443" -servername "$REALM" \
+if ! HS="$(echo | timeout 20 openssl s_client -connect "$CONNECT:443" -servername "$REALM" \
   -verify_return_error 2>&1)"; then
   # -verify_return_error ends the handshake on an unverifiable chain before
   # s_client prints the certificate, so an untrusted or self-signed one -- the
   # case the diagnostics below exist for -- is exactly the case they would have
   # nothing to read. Ask a second time without it, for the diagnosis only: the
   # handshake that decides this probe is the verifying one above.
-  UNVERIFIED="$(echo | timeout 20 openssl s_client -connect "$REALM:443" -servername "$REALM" 2>&1)" || true
+  UNVERIFIED="$(echo | timeout 20 openssl s_client -connect "$CONNECT:443" -servername "$REALM" 2>&1)" || true
   certificate_report "$UNVERIFIED"
   report fail "TLS handshake on $REALM:443" "$(printf '%s' "$HS" | tr '\n' ' ' | cut -c1-160)"
 else
@@ -131,8 +146,12 @@ fi
 # them.
 uclient() {
   local peer="$1"
+  # The trailing argument is the TCP connect target; coturn's own 401 challenge
+  # carries the realm it authenticates against (turnserver.conf's REALM), so
+  # swapping this address does not change what realm the exchange below
+  # authenticates under.
   timeout 60 "$RUNTIME" run --rm --network host --entrypoint turnutils_uclient "$IMAGE" \
-    -t -S -p 443 -u "$TURN_USER" -w "$TURN_CRED" -e "$peer" -n 2 -c -v "$REALM" 2>&1
+    -t -S -p 443 -u "$TURN_USER" -w "$TURN_CRED" -e "$peer" -n 2 -c -v "$CONNECT" 2>&1
 }
 
 if [ -n "$TURN_USER" ] && [ -n "$TURN_CRED" ]; then

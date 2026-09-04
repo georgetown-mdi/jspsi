@@ -233,4 +233,14 @@ if [ "$SKIP_VERIFY" = 1 ]; then
 fi
 
 log "verifying"
-"$LIBEXEC/verify.sh"
+# EC2 does not hairpin an instance's traffic back to its own Elastic IP:
+# verify.sh's TCP probes get connection-refused when run on the relay box
+# against the public name, even while the relay serves correctly to everyone
+# else. Measured on the relay instance 2026-09-03. render-config.sh already
+# derived this host's private address from PSILINK_RELAY_EXTERNAL_IP_HELPER to
+# render listening-ip=; read it back from there rather than asking the helper
+# again.
+CONF="${PSILINK_RELAY_CONF:-$ETC/turnserver.conf}"
+PRIVATE_IP="$(sed -n 's/^listening-ip=//p' "$CONF" | head -1)"
+[ -n "$PRIVATE_IP" ] || die "could not read listening-ip from $CONF; render-config.sh should have written it"
+PSILINK_RELAY_VERIFY_CONNECT="$PRIVATE_IP" "$LIBEXEC/verify.sh"
