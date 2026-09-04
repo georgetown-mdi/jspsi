@@ -1,12 +1,11 @@
 #!/bin/bash
 # Ask the deployed relay, over the network, whether it is doing its job.
 #
-# UNTESTED LIVE. Nothing in this file has been run against a relay: it was
-# authored from coturn's documented interfaces on a branch that stood nothing up,
-# and the exit statuses and message strings the probes below key on are the
-# documented shapes rather than measured ones. The first real run is what turns
-# this from a proposal into a check; until then, a green result here is worth
-# what an unrun script is worth. Fix what it gets wrong on that run rather than
+# Driven end to end against a real relay from install.sh's own end-of-install
+# run on 2026-09-03/04: 6 pass / 0 fail / 0 unclear (infra/relay/README.md,
+# Provenance). The exit statuses and message strings the probes below key on
+# are what that run measured against a live coturn instance, not documented
+# shapes assumed in advance. Fix what a later run gets wrong rather than
 # loosening a probe until it passes.
 #
 # Three probes, in the order a failure matters:

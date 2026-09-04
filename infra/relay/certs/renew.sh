@@ -12,7 +12,9 @@
 # the Cloudflare shape; another provider is that provider's variables in the same
 # file and its name in PSILINK_RELAY_DNS_PROVIDER.
 #
-# UNTESTED LIVE: no certificate has been issued through this script.
+# A real Let's Encrypt certificate has been issued through this script, by
+# DNS-01 through Cloudflare, on the 2026-09-03/04 live run (infra/relay/README.md,
+# Provenance).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"

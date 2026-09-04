@@ -14,7 +14,10 @@
 # denied-peer-ip rules exist to refuse, and asking for IMDSv1 here would be
 # asking for the surface those rules close.
 #
-# UNTESTED LIVE: not run on an instance.
+# Run on the relay instance during the 2026-09-03/04 live run: render-config.sh
+# called this script by its default PSILINK_RELAY_EXTERNAL_IP_HELPER and used
+# its output to render listening-ip= (infra/relay/install.sh, the verify step;
+# infra/relay/README.md, Provenance).
 set -euo pipefail
 
 IMDS="${PSILINK_RELAY_IMDS:-http://169.254.169.254}"

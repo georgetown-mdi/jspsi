@@ -15,7 +15,8 @@
 # that certainly works. A relay restart drops any allocation in flight, which is
 # why the renewal timer runs at a fixed early hour rather than on exchange time.
 #
-# UNTESTED LIVE: no certificate has been deployed through this script.
+# A real Let's Encrypt certificate has been deployed through this script, on
+# the 2026-09-03/04 live run (infra/relay/README.md, Provenance).
 set -euo pipefail
 
 ETC=/etc/psilink-relay

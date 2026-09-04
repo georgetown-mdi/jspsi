@@ -304,8 +304,7 @@ export function AcceptorBench() {
   // until this holds a connection.
   const [sftpInfo, setSftpInfo] = useState<SftpConnectionInfo>();
   const [manageStatus, setManageStatus] = useState<ManageOfferStatus>("idle");
-  // The launched exchange (the assembled edits + optional advisory); rendering the
-  // minimal run stub the next package replaces.
+  // The launched exchange (the assembled edits + optional advisory).
   const [launched, setLaunched] = useState<AcceptorLaunched>();
 
   // Decode the fragment token once, failing closed: an empty fragment, a bad
