@@ -145,17 +145,18 @@ export default [
     },
   },
   {
-    // The sensitive-file parsing ban for the web app. The credential-leak-via-
-    // parse channel is real in the browser too -- a raw YAML parser echoes a span
-    // of source into its error, and an imported config document an operator pastes
-    // could hold a secret by mistake -- so raw `yaml` parsers are banned here:
-    // route YAML/JSON parsing through the shared chokepoint now promoted to
-    // packages/core (`@psilink/core`'s parseSensitiveYaml / parseSensitiveJson),
-    // which reports path-only. `stringify` carries no such channel and is allowed.
-    // JSON.parse is not banned yet: the web app's existing JSON.parse is
-    // non-secret peer/wire data; the JSON half lands with the browser secret-store
-    // work (tracked on the board).
-    files: ["src/**/*.{ts,tsx}"],
+    // The sensitive-file parsing ban for the web app, covering the browser bundle
+    // (src/) and the server boot code (server/) it shares the credential-leak-via-
+    // parse channel with -- a raw YAML parser echoes a span of source into its
+    // error, and an imported config document an operator pastes could hold a
+    // secret by mistake -- so raw `yaml` parsers are banned here: route YAML/JSON
+    // parsing through the shared chokepoint now promoted to packages/core
+    // (`@psilink/core`'s parseSensitiveYaml / parseSensitiveJson), which reports
+    // path-only. `stringify` carries no such channel and is allowed. JSON.parse is
+    // not banned yet: the web app's existing JSON.parse is non-secret peer/wire
+    // data; the JSON half lands with the browser secret-store work (tracked on the
+    // board).
+    files: ["src/**/*.{ts,tsx}", "server/**/*.ts"],
     // Fail CI on a stray or rule-silencing disable so the tripwire cannot be
     // quietly turned off on a sensitive parse (a bare `eslint .` only warns).
     linterOptions: { reportUnusedDisableDirectives: "error" },
