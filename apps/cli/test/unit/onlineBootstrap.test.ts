@@ -62,11 +62,9 @@ import {
   singlePassDisclosureNotice,
 } from "../../src/onlineBootstrap";
 import { redactUrlCredentials } from "../../src/util/connectionUrl";
-import {
-  MAX_TIMEOUT_SECONDS,
-  openInputSource,
-  runOrExit,
-} from "../../src/util/cli";
+import { openInputSource } from "../../src/util/dataIo";
+import { runOrExit } from "../../src/util/exit";
+import { MAX_TIMEOUT_SECONDS } from "../../src/util/flags";
 import { openEventStream } from "../../src/eventStream";
 import { establishHostKeyTrust } from "../../src/hostKeyTrust";
 import { runProtocol } from "../../src/protocol";

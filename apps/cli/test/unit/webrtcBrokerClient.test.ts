@@ -11,7 +11,7 @@ import {
   connectToBroker,
   dialedBrokerHostAndPort,
 } from "../../src/connection/webrtc/brokerClient";
-import { exitCodeForError } from "../../src/util/cli";
+import { exitCodeForError } from "../../src/util/exit";
 
 import type {
   BrokerClient,

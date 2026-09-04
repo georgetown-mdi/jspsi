@@ -18,7 +18,7 @@ import {
 } from "@psilink/core";
 
 import { singlePassDisclosureNotice } from "./onlineBootstrap";
-import { writePromptLine } from "./util/cli";
+import { writePromptLine } from "./util/prompt";
 
 import type { DialedBrokerHostAndPort } from "./connection/webrtc/brokerClient";
 import type {

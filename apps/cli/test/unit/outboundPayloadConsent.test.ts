@@ -16,18 +16,17 @@ import type { ExchangeDataSpec, LinkageTerms, Metadata } from "@psilink/core";
 
 import { confirmOutboundPayloadConsent } from "../../src/outboundPayloadConsent";
 import { prepareDataset } from "../../src/commands/exchange";
-import { promptConfirm } from "../../src/util/cli";
+import { promptConfirm } from "../../src/util/prompt";
 import { captureStdio } from "../loggingTestSupport";
 import { streamOf, ttyStream, withStdin } from "../stdinStream";
 
 // The prompt itself is mocked so these drive the answer rather than a terminal;
-// util/cli's own tests cover promptConfirm, and every other export of the module
-// (openInputSource, which prepareDataset reads its CSV through) stays real.
-vi.mock("../../src/util/cli", async () => {
-  const actual =
-    await vi.importActual<typeof import("../../src/util/cli")>(
-      "../../src/util/cli",
-    );
+// util/prompt's own tests cover promptConfirm, and util/dataIo's
+// openInputSource, which prepareDataset reads its CSV through, stays real.
+vi.mock("../../src/util/prompt", async () => {
+  const actual = await vi.importActual<typeof import("../../src/util/prompt")>(
+    "../../src/util/prompt",
+  );
   return { ...actual, promptConfirm: vi.fn() };
 });
 

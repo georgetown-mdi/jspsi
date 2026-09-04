@@ -6,7 +6,7 @@ import logLibrary from "loglevel";
 import type { Arguments } from "yargs";
 import { UsageError } from "@psilink/core";
 
-import { logLevelFlag } from "../../src/util/cli";
+import { logLevelFlag } from "../../src/util/logging";
 import {
   argv,
   captureStdio,

@@ -5,7 +5,7 @@ import path from "node:path";
 import logLibrary from "loglevel";
 import { getDiagnosticSink, getLogger, UsageError } from "@psilink/core";
 
-import { configureLogFile } from "../../src/util/cli";
+import { configureLogFile } from "../../src/util/logging";
 import { parseCommonBootstrapArgs } from "../../src/optionDefinitions";
 import {
   argv,

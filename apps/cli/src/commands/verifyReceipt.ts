@@ -58,16 +58,14 @@ import { addLoggingOptions } from "../optionDefinitions";
 import { keysPathFor } from "../recordFile";
 import { parseSensitiveJson, parseSensitiveYaml } from "../sensitiveFile";
 import { loadSigningCertificate } from "../signingIdentityFile";
+import { openInputSource } from "../util/dataIo";
 import {
-  configureLogging,
   exitCodeForError,
   exitWithError,
-  logLevelFlag,
-  openInputSource,
-  parseOrExit,
   RECEIPT_VERIFICATION_FAILED_EXIT_CODE,
-  singleValue,
-} from "../util/cli";
+} from "../util/exit";
+import { parseOrExit, singleValue } from "../util/flags";
+import { configureLogging, logLevelFlag } from "../util/logging";
 
 // `psilink verify-receipt` reports whether a stored exchange artifact holds up. It
 // is READ-ONLY -- it never mutates or re-signs an artifact -- and it verifies the

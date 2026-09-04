@@ -14,14 +14,9 @@ import {
   verdictLines,
 } from "../doctor/verdict";
 import { addLoggingOptions } from "../optionDefinitions";
-import {
-  configureLogging,
-  exitCodeForError,
-  exitWithError,
-  logLevelFlag,
-  parseOrExit,
-  singleValue,
-} from "../util/cli";
+import { exitCodeForError, exitWithError } from "../util/exit";
+import { parseOrExit, singleValue } from "../util/flags";
+import { configureLogging, logLevelFlag } from "../util/logging";
 
 // `psilink doctor` answers "why did the file drop not work" before an exchange
 // is attempted: `doctor probe` checks over the network as smbclient sees it,

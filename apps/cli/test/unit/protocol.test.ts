@@ -283,7 +283,7 @@ import {
 } from "../../src/eventStream";
 import { keysPathFor, type RecordOutput } from "../../src/recordFile";
 import { openEventStreamWithFdWired } from "../eventStreamTestSupport";
-import { exitCodeForError, runOrExit } from "../../src/util/cli";
+import { exitCodeForError, runOrExit } from "../../src/util/exit";
 import { loadKeyFile, saveKeyFile } from "../../src/keyFile";
 import { LocalFSClient } from "../../src/connection/localFSClient";
 

@@ -50,7 +50,7 @@ import { loadCliPsiBackend } from "./psiBackend";
 import { createPsiEngine } from "./psiWorkerHost";
 import { writeExchangeRecord, type RecordOutput } from "./recordFile";
 import { writeDualSignedRecord, type ReceiptOutput } from "./receiptFile";
-import { writeOutput } from "./util/cli";
+import { writeOutput } from "./util/dataIo";
 import { logRuntimeEnv } from "./util/runtimeEnv";
 import {
   PERSISTENCE_LOSS_EXIT_CODE,
@@ -1682,7 +1682,7 @@ export async function runProtocol(
         // re-send this party's data for an exchange that already
         // happened. Set the persistence-loss code on the error so a
         // command boundary reports it instead of the 69 a transport
-        // fault gets; exitCodeForError (util/cli.ts) prefers an error's
+        // fault gets; exitCodeForError (util/exit.ts) prefers an error's
         // own code, measured (not asserted) by exchange.test.ts and
         // zeroSetup.test.ts driving each handler to a trapped
         // process.exit. An error that already holds a code keeps it.

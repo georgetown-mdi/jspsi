@@ -5,7 +5,7 @@ import path from "node:path";
 import logLibrary from "loglevel";
 import { getDiagnosticSink, UsageError } from "@psilink/core";
 
-import { configureLogging } from "../../src/util/cli";
+import { configureLogging } from "../../src/util/logging";
 import {
   captureStdio,
   snapshotDiagnosticSinkAndLevel,

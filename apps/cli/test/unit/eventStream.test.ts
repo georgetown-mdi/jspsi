@@ -31,7 +31,7 @@ import {
   type ErrorPhase,
   type StreamEvent,
 } from "../../src/eventStream";
-import { exitCodeForError } from "../../src/util/cli";
+import { exitCodeForError } from "../../src/util/exit";
 import { openEventStreamWithFdWired } from "../eventStreamTestSupport";
 
 afterEach(() => {

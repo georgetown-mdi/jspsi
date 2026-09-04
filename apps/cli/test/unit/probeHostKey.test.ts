@@ -16,7 +16,7 @@ import {
   type ProbeHostKeyDeps,
 } from "../../src/commands/probeHostKey";
 import { explainPeerIdentificationFailure } from "../../src/connection/sftpPeerIdentification";
-import { configureStderrLogging } from "../../src/util/cli";
+import { configureStderrLogging } from "../../src/util/logging";
 import {
   captureStdio,
   snapshotDiagnosticSinkAndLevel,

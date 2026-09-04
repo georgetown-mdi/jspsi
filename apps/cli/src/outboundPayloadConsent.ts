@@ -17,7 +17,7 @@ import {
   consentSurfaceSink,
   type ConsentSurfaceSink,
 } from "./invitationDisplay";
-import { promptConfirm } from "./util/cli";
+import { promptConfirm } from "./util/prompt";
 
 /**
  * The heading the outbound-consent surface leads with. States only that no

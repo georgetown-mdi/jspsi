@@ -24,14 +24,9 @@ import {
   loadSigningIdentity,
   saveSigningIdentity,
 } from "../signingIdentityFile";
-import {
-  configureLogging,
-  exitCodeForError,
-  exitWithError,
-  logLevelFlag,
-  parseOrExit,
-  singleValue,
-} from "../util/cli";
+import { exitCodeForError, exitWithError } from "../util/exit";
+import { parseOrExit, singleValue } from "../util/flags";
+import { configureLogging, logLevelFlag } from "../util/logging";
 
 // `psilink fingerprint` is the front door to the signing identity: generation
 // is lazy and anchored here, not at exchange time, since a party must display

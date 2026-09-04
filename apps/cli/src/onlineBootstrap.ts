@@ -48,7 +48,8 @@ import {
   readConnectionCredentials,
 } from "./util/atSignRefs";
 import { establishHostKeyTrust, type HostKeyPersistence } from "./hostKeyTrust";
-import { openInputSource, singleValue } from "./util/cli";
+import { openInputSource } from "./util/dataIo";
+import { singleValue } from "./util/flags";
 import {
   runProtocol,
   type AuthPersist,

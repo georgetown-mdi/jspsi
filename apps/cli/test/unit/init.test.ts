@@ -40,16 +40,15 @@ import { streamOf, ttyStream, withStdin } from "../stdinStream";
 
 // Both terminal reads are mocked so the handler's interactive branches are
 // deterministic -- neither the overwrite confirmation nor the identity question
-// drives a real readline over the test runner's stdin; everything else in
-// util/cli stays real.
-vi.mock("../../src/util/cli", async () => {
-  const actual =
-    await vi.importActual<typeof import("../../src/util/cli")>(
-      "../../src/util/cli",
-    );
+// drives a real readline over the test runner's stdin; everything else stays
+// real.
+vi.mock("../../src/util/prompt", async () => {
+  const actual = await vi.importActual<typeof import("../../src/util/prompt")>(
+    "../../src/util/prompt",
+  );
   return { ...actual, promptConfirm: vi.fn(), promptFreeText: vi.fn() };
 });
-const { promptConfirm, promptFreeText } = await import("../../src/util/cli");
+const { promptConfirm, promptFreeText } = await import("../../src/util/prompt");
 const promptConfirmMock = vi.mocked(promptConfirm);
 const promptFreeTextMock = vi.mocked(promptFreeText);
 

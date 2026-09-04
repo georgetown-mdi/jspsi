@@ -16,15 +16,9 @@ import {
   decodeUrlComponent,
   redactUrlCredentials,
 } from "../util/connectionUrl";
-import {
-  configureLogging,
-  durationFlagSeconds,
-  exitCodeForError,
-  exitWithError,
-  logLevelFlag,
-  parseOrExit,
-  singleValue,
-} from "../util/cli";
+import { exitCodeForError, exitWithError } from "../util/exit";
+import { durationFlagSeconds, parseOrExit, singleValue } from "../util/flags";
+import { configureLogging, logLevelFlag } from "../util/logging";
 import { asciiSafeJsonLine } from "../util/jsonLine";
 import { addLoggingOptions } from "../optionDefinitions";
 

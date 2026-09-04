@@ -31,12 +31,9 @@ import {
   readConnectionCredentials,
 } from "../util/atSignRefs";
 import { establishHostKeyTrust } from "../hostKeyTrust";
-import {
-  configureLogging,
-  exitCodeForError,
-  exitWithError,
-  parseOrExit,
-} from "../util/cli";
+import { exitCodeForError, exitWithError } from "../util/exit";
+import { parseOrExit } from "../util/flags";
+import { configureLogging } from "../util/logging";
 import { channelFromURL, connectionFromURL } from "../connectionFromUrl";
 import {
   addCommonBootstrapOptions,

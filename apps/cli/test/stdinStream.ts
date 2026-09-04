@@ -38,7 +38,7 @@ export function ttyStream(): Readable {
  * ends: a readline interface reads the line only while its input is still open,
  * because a stream that reaches EOF closes the interface first and the prompt
  * readers resolve to "nothing answered" (see {@link streamOf}, and promptConfirm
- * / promptFreeText in src/util/cli.ts). A terminal stays open, which is why a
+ * / promptFreeText in src/util/prompt.ts). A terminal stays open, which is why a
  * prompt is asked only where one is attached.
  * @internal test-only
  */

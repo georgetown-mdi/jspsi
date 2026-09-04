@@ -16,11 +16,11 @@ import { DEFAULT_KEY_PATH } from "./keyFile";
 import {
   durationFlagMs,
   durationFlagSeconds,
-  logLevelFlag,
   MAX_TIMEOUT_SECONDS,
   nonNegativeIntFlag,
   singleValue,
-} from "./util/cli";
+} from "./util/flags";
+import { logLevelFlag } from "./util/logging";
 import { DURATION_VALUE_HELP, FINE_DURATION_VALUE_HELP } from "./util/duration";
 import { resolveHostKeyFingerprintRef } from "./util/atSignRefs";
 

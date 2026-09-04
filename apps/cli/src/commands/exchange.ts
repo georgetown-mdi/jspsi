@@ -43,13 +43,9 @@ import { loadSigningIdentity } from "../signingIdentityFile";
 import { confirmOutboundPayloadConsent } from "../outboundPayloadConsent";
 import { parseSensitiveYaml } from "../sensitiveFile";
 import { resolveAtSignRefs, resolveExchangeSpecRefs } from "../util/atSignRefs";
-import {
-  configureLogging,
-  exitCodeForError,
-  exitWithError,
-  parseOrExit,
-  singleValue,
-} from "../util/cli";
+import { exitCodeForError, exitWithError } from "../util/exit";
+import { parseOrExit, singleValue } from "../util/flags";
+import { configureLogging } from "../util/logging";
 import { loadInputRows } from "../onlineBootstrap";
 import {
   addCommonBootstrapOptions,

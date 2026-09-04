@@ -12,7 +12,7 @@ import {
 } from "@psilink/core";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { configureLogFile } from "../../src/util/cli";
+import { configureLogFile } from "../../src/util/logging";
 import { runProbe } from "../../src/doctor/probe";
 import type { ProbeDeps } from "../../src/doctor/probe";
 import type { CommandResult } from "../../src/doctor/runner";

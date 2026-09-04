@@ -46,7 +46,7 @@ import {
   readVerificationKeysFile,
   toRetainedResult,
 } from "../../src/commands/verifyReceipt";
-import { RECEIPT_VERIFICATION_FAILED_EXIT_CODE } from "../../src/util/cli";
+import { RECEIPT_VERIFICATION_FAILED_EXIT_CODE } from "../../src/util/exit";
 import {
   argv,
   captureStdio,

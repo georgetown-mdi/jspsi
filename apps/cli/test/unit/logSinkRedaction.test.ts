@@ -6,7 +6,10 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import logLibrary from "loglevel";
 import { getDiagnosticSink, getLogger, setDiagnosticSink } from "@psilink/core";
 
-import { configureLogFile, configureStderrLogging } from "../../src/util/cli";
+import {
+  configureLogFile,
+  configureStderrLogging,
+} from "../../src/util/logging";
 import {
   captureStdio,
   snapshotDiagnosticSinkAndLevel,

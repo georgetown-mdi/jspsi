@@ -40,13 +40,13 @@ import { runOnlineBootstrap } from "../../src/onlineBootstrap";
 import type { CommonBootstrapOptions } from "../../src/optionDefinitions";
 import { loadKeyFile } from "../../src/keyFile";
 import { keysPathFor, resolveRecordOutput } from "../../src/recordFile";
-import { promptConfirm } from "../../src/util/cli";
+import { promptConfirm } from "../../src/util/prompt";
 import { selectedBackend } from "../sftpServer";
 import { localPath, remotePath, sftpServer } from "../sftpServer/testContext";
 
 // Stub only promptConfirm so the first-use host-key prompt can be answered in a
-// non-interactive test run; every other util/cli export (the input-source loaders
-// the validate path uses, etc.) stays real. promptConfirm is the production
+// non-interactive test run; every other prompt export stays real, as does
+// util/dataIo's input-source loader the validate path uses. promptConfirm is the production
 // default behind HostKeyTrustDeps.confirm, so stubbing it supplies the same
 // first-use confirmation the hostKeyTrust unit layer injects -- here driven
 // through the live runOnlineBootstrap chain rather than a direct call.
@@ -60,8 +60,8 @@ import { localPath, remotePath, sftpServer } from "../sftpServer/testContext";
 // validateAccept -> runOnlineBootstrap directly), so none reach it -- but an
 // always-true default would silently auto-confirm it for a future test that did.
 // Declining by default makes such a forgotten stub abort loudly instead.
-vi.mock("../../src/util/cli", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/util/cli")>();
+vi.mock("../../src/util/prompt", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/util/prompt")>();
   return { ...actual, promptConfirm: vi.fn(async () => false) };
 });
 

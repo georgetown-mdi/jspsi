@@ -19,22 +19,22 @@ import {
 } from "@psilink/core";
 import type { ConnectionErrorKind } from "@psilink/core";
 
+import { openInputSource, writeOutput } from "../../src/util/dataIo";
+import {
+  exitCodeForError,
+  exitWithError,
+  INTERNAL_FAULT_EXIT_CODE,
+} from "../../src/util/exit";
 import {
   assertNoUnknownOptions,
   durationFlagMs,
   durationFlagSeconds,
-  exitCodeForError,
-  exitWithError,
-  INTERNAL_FAULT_EXIT_CODE,
   MAX_TIMEOUT_SECONDS,
   nonNegativeIntFlag,
-  openInputSource,
   parseOrExit,
-  promptConfirm,
-  promptFreeText,
   singleValue,
-  writeOutput,
-} from "../../src/util/cli";
+} from "../../src/util/flags";
+import { promptConfirm, promptFreeText } from "../../src/util/prompt";
 import { captureStdio } from "../loggingTestSupport";
 import {
   answeringTtyStream,

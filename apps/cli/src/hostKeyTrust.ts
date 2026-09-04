@@ -9,7 +9,7 @@ import type { ConnectionConfig, PresentedHostKey } from "@psilink/core";
 
 import { SSH2SFTPClientAdapter } from "./connection/ssh2SftpAdapter";
 import { persistHostKeyFingerprint } from "./config";
-import { promptConfirm } from "./util/cli";
+import { promptConfirm } from "./util/prompt";
 
 /**
  * How a confirmed first-use pin is persisted. Every connect path mutates the

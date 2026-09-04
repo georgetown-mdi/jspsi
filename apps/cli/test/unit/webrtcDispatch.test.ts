@@ -131,7 +131,7 @@ const { WEBRTC_URL_REFUSED, WEBRTC_URL_EXTRAS_REFUSED } =
   await import("../../src/connectionFromUrl");
 const { BROKER_ADDRESS_REFUSED, ID_TAKEN_MESSAGE } =
   await import("../../src/connection/webrtc/brokerClient");
-const { exitCodeForError } = await import("../../src/util/cli");
+const { exitCodeForError } = await import("../../src/util/exit");
 const { WEBRTC_BROKER_HOST_REFUSED, WEBRTC_BROKER_PATH_REFUSED } =
   await import("../../src/connection/webrtc/weriftPeer");
 const { saveKeyFile } = await import("../../src/keyFile");

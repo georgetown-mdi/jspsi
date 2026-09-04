@@ -15,15 +15,11 @@ import {
 } from "../fileUtils";
 import { renderConfigTemplate } from "../configTemplate";
 import type { TemplateDataSpec } from "../configTemplate";
-import {
-  assertNoUnknownOptions,
-  configureLogging,
-  logLevelFlag,
-  openInputSource,
-  promptConfirm,
-  runOrExit,
-  singleValue,
-} from "../util/cli";
+import { openInputSource } from "../util/dataIo";
+import { runOrExit } from "../util/exit";
+import { assertNoUnknownOptions, singleValue } from "../util/flags";
+import { configureLogging, logLevelFlag } from "../util/logging";
+import { promptConfirm } from "../util/prompt";
 import { addLoggingOptions } from "../optionDefinitions";
 import { buildDataSpec } from "../onlineBootstrap";
 import {
