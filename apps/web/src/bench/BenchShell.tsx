@@ -37,8 +37,7 @@ export function BenchShell({
 }) {
   const narrow = useNarrowBench();
   // gridUnderBar raises the ledger's sticky offset above the stuck top bar;
-  // a ledger with no bar (a generic layout this shell permits even though no
-  // current bench composes it) keeps the plain offset.
+  // a ledger with no bar keeps the plain offset.
   const gridClass =
     topBar === undefined && ledger === undefined
       ? `${styles.grid} ${styles.gridPlain}`

@@ -253,7 +253,8 @@ const SAMPLE_INVITER_NAME = "Sample County Health Dept";
  * required spine while the work column swaps sections in place. The draft
  * seeds from the file the moment it is read (step 1) and every step-2 edit
  * flows through the shared draft model, so the Customize facts and the
- * disclosure ledger track live. Step 3 is not built yet and says so.
+ * disclosure ledger track live. Step 3 is the review-and-create step,
+ * `ReviewCreateSection`.
  */
 export function InviterBench() {
   const [name, setName] = useState("");

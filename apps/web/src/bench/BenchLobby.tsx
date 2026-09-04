@@ -71,13 +71,13 @@ export function BenchLobby() {
   }, []);
 
   // "Review invitation" peels the token out of whatever was pasted -- a bare
-  // code or a deep-link URL -- via the shared AcceptForm rule, and routes to the
-  // accept bench with the token in the URL fragment, never a search param (the
-  // same confidential-value handling the inviter's deep-link and the legacy
-  // accept form use). An empty extraction shows the inline field error and does
-  // not navigate. The button itself is disabled until the field holds a usable
-  // token (see below), so this guard only covers a submit that slips past that
-  // disabled state.
+  // code or a deep-link URL -- via the shared tokenFromInput helper, and
+  // routes to the accept bench with the token in the URL fragment, never a
+  // search param (the same confidential-value handling the inviter's deep-link
+  // and the legacy accept form use). An empty extraction shows the inline
+  // field error and does not navigate. The button itself is disabled until the
+  // field holds a usable token (see below), so this guard only covers a submit
+  // that slips past that disabled state.
   function reviewInvitation() {
     const token = tokenFromInput(invitation);
     if (token === "") {
