@@ -5,7 +5,7 @@ import { ConnectionError, parseBoundedJson, UsageError } from "@psilink/core";
 /**
  * The PeerJS broker signaling client, written against the broker's WebSocket
  * wire rather than by running PeerJS in Node (docs/notes/cli-webrtc-stack.md).
- * It carries the OFFER/ANSWER/CANDIDATE exchange that gets two peers to a data
+ * It handles the OFFER/ANSWER/CANDIDATE exchange that gets two peers to a data
  * channel and nothing else; the negotiation that consumes those messages lives
  * in `weriftPeer.ts`.
  *
@@ -16,7 +16,7 @@ import { ConnectionError, parseBoundedJson, UsageError } from "@psilink/core";
  * - The socket is `<ws|wss>://<host>:<port><path>/peerjs?key=&id=&token=&version=`,
  *   and registration is confirmed by an unsolicited `{"type":"OPEN"}`.
  * - The server stamps `src` from the connecting socket's id, so an outbound frame
- *   carries only `type`, `payload` and `dst`; an inbound one adds `src`.
+ *   contains only `type`, `payload` and `dst`; an inbound one adds `src`.
  * - A second socket claiming a registered id is answered `ID-TAKEN` and closed.
  *   That is the signal a symmetric role misconfiguration produces, and it is
  *   mapped to an error naming that cause rather than left to become a timeout.
@@ -35,7 +35,7 @@ import { ConnectionError, parseBoundedJson, UsageError } from "@psilink/core";
  * invitation secret, so they correlate exchanges. The web app redacts them out
  * of PeerJS's own output after the fact; this client instead never puts one into
  * a message, an error or a log line in the first place -- including the socket
- * URL, which carries the id in its query string. test/unit/webrtcBrokerClient.test.ts
+ * URL, which holds the id in its query string. test/unit/webrtcBrokerClient.test.ts
  * holds that as a check rather than leaving it to prose.
  */
 
@@ -172,7 +172,7 @@ function idTakenError(): ConnectionError {
 
 /**
  * The refusal a broker location that does not form a dialable address gets. It
- * names the operator's own fields and never the value: the address carries the
+ * names the operator's own fields and never the value: the address holds the
  * derived peer id, and a `path` reaching this module can be kilobytes long.
  */
 export const BROKER_ADDRESS_REFUSED =
@@ -204,7 +204,7 @@ export const BROKER_AUTHORITY_REFUSED =
  * path, query or fragment. Each of those moves or reshapes the authority --
  * `evil@attacker.example` makes the configured name the userinfo of an
  * attacker's host, and `broker.example/x` silently drops the configured port --
- * so a host carrying one is refused rather than dialed. The port comes from
+ * so a host holding one is refused rather than dialed. The port comes from
  * `port` alone.
  *
  * The refusal is a {@link UsageError} rather than a transport failure, and so
@@ -244,12 +244,12 @@ function brokerAuthority(
  * The authority a location dials, in the form the URL parser produces -- the
  * value {@link assertDialsConfiguredBroker} compares a built address against.
  *
- * This is what an operator-facing line naming the signaling server should carry,
+ * This is what an operator-facing line naming the signaling server should contain,
  * because it is not the configured `host` text: the parser IDNA-normalizes a
  * host, lowercasing it, folding the alternative label separators (U+3002 and its
  * siblings) onto ".", and deleting the ignorable code points such as U+200B. A
  * configured `PEERS<U+3002>Example.ORG` dials `peers.example.org`, so echoing
- * the configured text would name a server the run never contacted. It carries
+ * the configured text would name a server the run never contacted. It includes
  * the port too, unless that is the scheme's default.
  *
  * @throws {UsageError} if `host` is not a bare authority.
@@ -274,12 +274,12 @@ export interface DialedBrokerHostAndPort {
  * locator: the operator is being asked to let this run reach a coordination
  * server they never typed, and the authority form omits a port that is the
  * scheme's default -- so the one line naming the server would leave the port to
- * be inferred from a scheme it does not carry. The host half is the parser's,
+ * be inferred from a scheme it does not include. The host half is the parser's,
  * for the reason above.
  *
  * The two are returned apart rather than joined so a display sink escapes the
- * host ALONE and appends the port outside that escape. An invitation may carry a
- * host as long as the escape's own display cap admits, so a joined value spends
+ * host ALONE and appends the port outside that escape. An invitation may include
+ * a host as long as the escape's own display cap admits, so a joined value spends
  * that whole budget on the host and truncates away the port this resolves --
  * driven at the longest admissible host in test/unit/accept.test.ts, which holds
  * it as a check rather than leaving it to prose.
@@ -300,8 +300,8 @@ export function dialedBrokerHostAndPort(
  * Refuse an address that does not dial the configured broker.
  *
  * The string is re-parsed rather than read off the builder because this is the
- * parse the WebSocket constructor itself performs on it. A backstop rather than
- * the primary control -- {@link brokerAuthority} and the connection resolver
+ * parse the WebSocket constructor itself performs on it. A safety check rather
+ * than the primary control -- {@link brokerAuthority} and the connection resolver
  * refuse the shapes that can move an authority in the first place -- so what it
  * covers is a host or path shape that slipped past both and still landed
  * userinfo, or a different host, in the address that would be dialed.
@@ -334,7 +334,7 @@ export function assertDialsConfiguredBroker(
 }
 
 /**
- * Build the registration URL. Never logged or interpolated: it carries the id.
+ * Build the registration URL. Never logged or interpolated: it holds the id.
  *
  * The path is assigned as a pathname rather than concatenated into the address.
  * A `path` is partner-supplied on an invitation-seeded connection, and under
@@ -426,7 +426,7 @@ function invalidKeyError(): ConnectionError {
 }
 
 /**
- * Does a generic `ERROR` payload carry the broker's invalid-key wording?
+ * Does a generic `ERROR` payload contain the broker's invalid-key wording?
  *
  * PeerJS defines an `INVALID-KEY` message type, but the vendored broker answers
  * a wrong key with a plain `ERROR` whose payload reads "Invalid key provided"
@@ -510,8 +510,8 @@ export function connectToBroker(
       // A WebSocket constructor may throw synchronously on an address it will
       // not dial. Replaced rather than wrapped: the raw error escapes this
       // module's error taxonomy, and its message can embed the URL (which
-      // carries the peer id), so the cause is dropped and the operator is
-      // pointed at the fields they control. One refusal wording carries one exit
+      // holds the peer id), so the cause is dropped and the operator is
+      // pointed at the fields they control. One refusal wording maps to one exit
       // code, so this raises the class the authority parse above raises.
       reject(new UsageError(BROKER_ADDRESS_REFUSED));
       return;
@@ -624,8 +624,8 @@ export function connectToBroker(
       handlers.onMessage(message);
     };
 
-    // The socket's `error` event carries no detail worth surfacing (and in Node
-    // its message can embed the URL, which carries the peer id), so it is
+    // The socket's `error` event has no detail worth exposing (and in Node
+    // its message can embed the URL, which holds the peer id), so it is
     // reported as a plain transport failure. `close` follows it, but `end` is
     // idempotent.
     const onSocketError = (): void =>

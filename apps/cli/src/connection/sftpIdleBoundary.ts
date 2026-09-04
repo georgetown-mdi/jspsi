@@ -1,15 +1,13 @@
 // How a connection-per-poll idle boundary is CLASSIFIED: the boundary a
-// completed session reached, the two questions a reading of one answers, and the
-// exhaustive tables that project an idle-release outcome onto both.
+// completed session reached, the two questions a reading of one answers, and
+// the exhaustive tables that project an idle-release outcome onto both.
 //
-// Everything here is a declaration or a pure lookup over one recorded outcome:
-// nothing holds adapter state, reaches an ssh2 or ssh2-sftp-client value, or
-// issues a server round trip. The outcome is what the adapter records; the
-// reading a boundary leaves behind and whether it ended a session generation are
-// projections of it, which is why each table is exhaustive over its key type --
-// a fourth boundary variant or a further outcome states every answer or it does
-// not compile. The model these belong to is
-// docs/notes/sftp-adapter-state-machine.md.
+// Everything here is a declaration or a pure lookup over one recorded
+// outcome: nothing holds adapter state, reaches an ssh2 or ssh2-sftp-client
+// value, or issues a server round trip. Each table is exhaustive over its
+// key type, so a fourth boundary variant or a further outcome fails to
+// compile until both projections state an answer for it. The model these
+// belong to is docs/notes/sftp-adapter-state-machine.md.
 import type { IdleBoundaryOutcome } from "./sftpAdapterLedger";
 
 /**
@@ -80,8 +78,8 @@ export const SESSION_BOUNDARY_READINGS: Record<
  * nothing: the forcing says how the boundary concluded, not who ended the
  * transport beneath it, and the entry classification has already recorded that
  * answer. Reading it back is what keeps a partner drop this side had to force
- * closed over charged to the partner rather than exempted as a deliberate
- * release.
+ * closed over charged to the partner rather than exempted as a release this
+ * side chose.
  */
 export const IDLE_BOUNDARY_SESSION_READING: Record<
   IdleBoundaryOutcome,
@@ -123,9 +121,9 @@ export const IDLE_BOUNDARY_ENDS_THE_GENERATION: Record<
 };
 
 /**
- * The projection above, read as the lookup the adapter's record site makes. The
- * table stays exported because its exhaustiveness is what a reader of this seam
- * checks.
+ * The projection above, read as the lookup the adapter's record site makes.
+ * The table stays exported because its exhaustiveness is what a reader of
+ * `idleBoundarySessionReading` checks.
  */
 export function idleBoundarySessionReading(
   outcome: IdleBoundaryOutcome,

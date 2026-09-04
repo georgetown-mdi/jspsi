@@ -34,7 +34,7 @@ import { ConnectionError } from "@psilink/core";
 export const PEERJS_CHUNK_MTU = 16_300;
 
 /**
- * The `serialization` value the CLI advertises on its OFFER. Load-bearing rather
+ * The `serialization` value the CLI advertises on its OFFER. Critical rather
  * than a preference: the receiving PeerJS peer selects its DataConnection
  * subclass from this field, and only the `binary` subclass implements the chunk
  * envelope below, so a mismatch is a protocol break
@@ -44,8 +44,8 @@ export const PEERJS_SERIALIZATION = "binary";
 
 /**
  * First chunk-envelope message id. PeerJS's counter starts at 1, and the receive
- * dispatch keys off `__peerData` being TRUTHY, so an id of 0 would be read as a
- * plain application frame carrying a `__peerData` property. Starting at 1 is
+ * dispatch keys off `__peerData` being TRUTHY, so an id of 0 would be treated as a
+ * plain application frame holding a `__peerData` property. Starting at 1 is
  * therefore part of the wire, not an off-by-one.
  */
 const FIRST_MESSAGE_ID = 1;
@@ -74,14 +74,13 @@ function malformedFrameError(detail: string): ConnectionError {
 }
 
 /**
- * Coerce a binary data-channel message to a `Uint8Array` view without copying.
- * werift's `onmessage` delivers a Node `Buffer` for a binary message; a string
- * arrives for a peer that opened a text-mode channel, and a zero-length binary
- * message carries nothing. Neither is a PeerJS binary frame, and each is refused
- * as malformed rather than reinterpreted: an empty view unpacks to the number
- * `0` (measured), which would otherwise be delivered as a bogus application
- * frame `0`. A WebRTC data channel carries a per-message type, so a peer can
- * choose either shape at will.
+ * Coerce a binary data-channel message to a `Uint8Array` view without
+ * copying. werift's `onmessage` delivers a Node `Buffer` for binary, a
+ * string for a text-mode peer, and nothing for a zero-length binary message;
+ * none is a PeerJS binary frame and each is refused as malformed -- an empty
+ * view unpacks to the number `0` (measured), which would otherwise pass as a
+ * bogus application frame `0`. A WebRTC data channel has a per-message type,
+ * so either shape is possible on the same channel.
  *
  * @throws {ConnectionError} of kind `protocol` on a non-binary or empty datagram.
  */
@@ -190,19 +189,18 @@ function isChunkOrdinal(value: unknown): value is number {
 }
 
 /**
- * Classify one already-unpacked inbound value by PeerJS's receive dispatch: a
- * truthy `__peerData` is either the close sentinel or a chunk, and anything else
- * is a complete application frame.
+ * Classify one already-unpacked inbound value by PeerJS's receive dispatch:
+ * a truthy `__peerData` is either the close sentinel or a chunk, and
+ * anything else is a complete application frame.
  *
- * The chunk branch validates the envelope's shape here rather than trusting it,
- * because every field is peer-chosen: a `total` that is not a positive integer,
- * an `n` outside `[0, total)`, or a `data` that is not bytes would otherwise
- * reach the reassembler as a hole or an unbounded sparse array. The numeric CAPS
- * (how many chunks, how many bytes, how many reassemblies at once) are not
- * applied here -- they belong to `inboundBounds.ts`, which owns the memory
+ * The chunk branch validates the envelope's shape (every field is
+ * peer-chosen): `total` must be a positive integer, `n` must be in
+ * `[0, total)`, and `data` must be bytes. The numeric CAPS (how many
+ * chunks, how many bytes, how many reassemblies at once) are not applied
+ * here -- they belong to `inboundBounds.ts`, which owns the memory
  * envelope.
  *
- * @throws {ConnectionError} of kind `protocol` if the value carries a
+ * @throws {ConnectionError} of kind `protocol` if the value has a
  *         `__peerData` that is neither the close sentinel nor a well-formed
  *         chunk envelope.
  */
@@ -245,7 +243,7 @@ export function classifyInboundValue(unpacked: unknown): InboundValue {
  * measured) sits in one place.
  *
  * @throws {ConnectionError} of kind `protocol` on a truncated or malformed body;
- *         `unpack`'s own throw carries a span of peer bytes, so it is replaced
+ *         `unpack`'s own throw holds a span of peer bytes, so it is replaced
  *         rather than wrapped.
  */
 export function unpackFrame(bytes: Uint8Array): unknown {

@@ -22,7 +22,7 @@ import type { RTCDataChannel } from "werift";
  * without knowing it is one. The web app's `peerMessageConnection.ts` is the
  * same mapping over a PeerJS DataConnection, and the two agree on every
  * observable: a remote close half-closes (so a final frame already queued is
- * drained before the close surfaces), an error fails, and a deliberate close
+ * drained before the close is reported), an error fails, and a deliberate close
  * flushes.
  *
  * Two things this side has to do differently, because it drives the raw channel
@@ -39,7 +39,7 @@ import type { RTCDataChannel } from "werift";
  *   process cannot leave it standing, so it sends the same sentinel and waits
  *   for the peer to ACKNOWLEDGE the bytes before tearing down.
  *
- *   That wait is load-bearing, not hygiene, and what it waits ON is the whole
+ *   That wait is critical, not hygiene, and what it waits ON is the whole
  *   point: tearing the connection down while data is outstanding loses it --
  *   measured at 4 MiB handed off and zero bytes received -- and the channel's
  *   own `bufferedAmount` is not the signal that says it is safe. It reaches
@@ -73,7 +73,7 @@ export const DEFAULT_WEBRTC_INACTIVITY_TIMEOUT_MS = 60 * 60 * 1000;
  * normally milliseconds -- and on expiry the connection tears down anyway
  * rather than hanging an unattended run forever.
  *
- * It is the backstop rather than the usual exit against a peer that has gone:
+ * It is the safety check rather than the usual exit against a peer that has gone:
  * werift's own consent-freshness check leaves the `connected` state about
  * thirty seconds after a peer disappears (measured), and the drain watches that
  * (see {@link drainOutbound}). The ceiling covers the remaining case -- a peer
@@ -128,7 +128,7 @@ async function drainOutbound(
     session.isConnected() &&
     Date.now() < deadline
   ) {
-    // A ref'd timer, deliberately: the drain IS the delivery guarantee, so it
+    // A ref'd timer: the drain IS the delivery guarantee, so it
     // must hold the event loop open rather than letting a process that has
     // finished its exchange exit with the last frame still in flight.
     await new Promise((resolve) =>
@@ -171,7 +171,7 @@ export function webRtcMessageConnection(
           // The peer's in-band clean close. `finish` rather than `fail`: the
           // sentinel travels the same ordered channel behind every frame the
           // peer already sent, so a final frame may still be queued here and
-          // must be drained before the close surfaces.
+          // must be drained before the close is reported.
           controls.finish(
             new ConnectionError("peer connection closed", "transport"),
           );
@@ -230,11 +230,11 @@ export function webRtcMessageConnection(
               // will see the drop instead of the clean close, and every frame
               // before it has already been acknowledged.
             }
-            // Phase two: the sentinel goes on the wire. It is deliberately NOT
-            // waited on for acknowledgement -- a peer closes the moment it
-            // reads the sentinel, so it stops acknowledging at exactly that
-            // point and this wait would always spend the whole budget. Losing
-            // the sentinel costs the peer its clean-close signal (it falls back
+            // Phase two: the sentinel goes on the wire. It is NOT waited on
+            // for acknowledgement -- a peer closes the moment it reads the
+            // sentinel, so it stops acknowledging at exactly that point and
+            // this wait would always spend the whole budget. Losing the
+            // sentinel costs the peer its clean-close signal (it falls back
             // to observing the connection drop), never a frame.
             await drainOutbound(
               channel,

@@ -1,22 +1,16 @@
 // The TEXT of the SFTP adapter's operator-facing warnings and typed errors: what
 // a killed session, an exhausted reconnection budget, a recovered drop, an idle
-// boundary, a declined transition or an unsettled publish is reported as. Every
-// export is a pure builder over its stated inputs -- it holds no adapter state,
-// takes no logger and no ledger, and issues no server round trip -- so the
-// adapter keeps every latch, every paced-warn call site and every log call, and a
-// call site is a builder call whose result goes where the text stood.
+// boundary, a declined transition, or an unsettled publish is reported as.
+// Every export is a pure builder over its stated inputs -- it holds no adapter
+// state, takes no logger and no ledger, and issues no server round trip -- so
+// the adapter keeps every latch, every paced-warn call site, and every log call.
 //
-// ESCAPING ALTITUDE, which the signatures here encode (CONTRIBUTING.md, Code
-// Conventions): a fragment interpolated into an `Error` message or `cause` is
-// composed RAW, because sanitizeErrorForDisplay escapes the whole rendered chain
-// once where it is shown, while a value that reaches a `log.*` sink without ever
-// becoming an `Error` is escaped with sanitizeForDisplay AT that call site, which
-// is its sink. Escaping at both altitudes double-escapes -- a literal backslash
-// in a partner filename doubles on every pass. No builder here escapes anything:
-// the error builders take their caller-supplied fragments RAW and hand them to a
-// sink that escapes the rendered chain once, and every warning builder takes only
-// first-party text and counters, so a fragment given to one of those later has to
-// arrive already escaped by the call site that is its sink.
+// Escaping altitude (CONTRIBUTING.md, Code Conventions -- Operator-facing
+// escaping): no builder here escapes anything. An error builder takes its
+// caller-supplied fragments RAW, handed to a sink that escapes the whole
+// rendered chain once. A warning builder takes only first-party text and
+// counters, so a fragment reaching one later must already arrive escaped by
+// the call site that is its sink.
 import {
   TransportOperationStalledError,
   TransportPublishIndeterminateError,

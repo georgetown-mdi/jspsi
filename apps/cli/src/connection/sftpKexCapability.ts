@@ -1,27 +1,11 @@
-// Constrains the SSH key-exchange algorithms the SFTP client OFFERS to those
-// this process can actually perform.
-//
-// The defect this closes: ssh2 builds its key-exchange list once at module load
-// and runs no capability probe over it, so on a host whose OpenSSL provider does
-// not offer X25519 it still advertises `curve25519-sha256@libssh.org`, wins the
-// negotiation against a server that offers it too, sends KEXECDH_INIT, and only
-// then discovers that `crypto.generateKeyPairSync("x25519")` throws. The
-// connection dies mid-handshake with a raw OpenSSL string, having never reached
-// the ECDH and finite-field algorithms both ends had in common. ssh2 does probe
-// its HOST-KEY formats this way; the key-exchange list is the asymmetry.
-//
-// Whether a primitive is available is a property of the RUNNING PROCESS, not of a
-// version number or of any "is this a FIPS host" flag, so this module answers it
-// by performing the primitive once and memoizing what happened. An
-// application-level FIPS switch is deliberately absent: it is redundant on a host
-// whose provider already enforces the policy and misleading on one that does not.
-//
-// How the offer list is produced -- ssh2's own `algorithms.kex` modifier object,
-// not a list psilink enumerates -- and everything else here about ssh2's
-// behaviour rests on measurement against the pinned version rather than a reading
-// of its source; the measured premises are recorded in
-// docs/spec/DEPENDENCY_PINS.md ("Upgrading the SFTP Stack") and re-verified on any
-// bump.
+// Constrains the SSH key-exchange algorithms the SFTP client offers to those
+// this process can actually perform: ssh2 builds its key-exchange offer once
+// at module load with no capability probe (unlike its host-key formats), so a
+// host missing X25519 would offer it, win negotiation, and only then fail
+// mid-handshake. Capability is measured by performing each primitive, once
+// per process. No application-level FIPS switch exists: redundant where a
+// provider already enforces policy, misleading where it does not. Measured
+// assumptions: docs/spec/DEPENDENCY_PINS.md ("Upgrading the SFTP Stack").
 
 import { generateKeyPairSync } from "node:crypto";
 
@@ -40,14 +24,11 @@ export interface KexPrimitive {
   /**
    * Matches the SSH key-exchange algorithm NAMES built on {@link primitive}.
    *
-   * A pattern rather than a list of names because an SSH algorithm name is a
-   * wire constant while the SET of names ssh2 offers is not: a version that adds
-   * a hybrid (`sntrup761x25519-sha512@openssh.com`, `mlkem768x25519-sha256`)
-   * would slip past an enumeration and silently reintroduce the mid-handshake
-   * death this module exists to prevent. Erring the other way is safe -- a
-   * needlessly withheld algorithm leaves the rest of the offer standing -- and
-   * there is nothing to err about in practice: `ed25519` is a signature
-   * algorithm and never appears in a key-exchange name list.
+   * A pattern rather than an enumerated list: a version that adds a hybrid
+   * algorithm name would slip past a list and silently reintroduce the
+   * mid-handshake failure this module exists to prevent. Erring broad is
+   * safe -- a needlessly withheld algorithm leaves the rest of the offer
+   * standing.
    */
   readonly matchesAlgorithm: RegExp;
   /**
@@ -120,32 +101,23 @@ export function unavailableKexPrimitives(): readonly KexPrimitive[] {
 }
 
 /**
- * The fragment ssh2 raises when the key-exchange negotiation finds nothing the
- * two ends have in common, as it reaches this adapter through
- * ssh2-sftp-client's `getConnection:` wrapper (measured against the pinned
- * versions; the structured `level: "handshake"` ssh2 sets does NOT survive that
- * wrapper, so the message is what there is to match on -- the same shape as the
- * `Host denied` match in {@link SSH2SFTPClientAdapter}).
- *
- * A version that reworded it degrades to ssh2's own bare message, and to a dial
- * that spends its whole reconnect budget on a negotiation that cannot succeed: a
- * rejection this fragment does not match is passed through untouched and
- * recognized as nothing, which is what makes the degradation a missing
- * diagnostic rather than a wrong one (sftpKexCapability.test.ts, "passes an
- * unrelated rejection through untouched" and "answers no for an unrelated
- * rejection and for a non-Error").
+ * The fragment ssh2 raises when key-exchange negotiation finds nothing in
+ * common, reached through ssh2-sftp-client's `getConnection:` wrapper: ssh2's
+ * structured `level: "handshake"` does not survive that wrapper (measured),
+ * so the message text is what there is to match on -- the same shape as the
+ * `Host denied` match in {@link SSH2SFTPClientAdapter}. A reworded message
+ * degrades to a missing diagnostic rather than a wrong one: an unmatched
+ * rejection passes through untouched.
  */
 const KEX_NEGOTIATION_FAILURE_FRAGMENT = "no matching key exchange algorithm";
 
-// The diagnostic explainKexNegotiationFailure raises, carried as a type rather
-// than recognized by its text: the diagnostic REPLACES ssh2's message and keeps
-// ssh2's error one cause link down, so a dial path classifying downstream of it
-// -- the connection-per-poll cycle-start re-dial, which sees what the dial
-// sequence threw rather than what ssh2 raised -- has no fragment left to match
-// on. A type is also the one recognizer no party on the wire can write: this
-// module constructs it solely for a rejection the fragment and the capability
-// verdict have already classified, and nothing outside this module constructs it
-// at all.
+// Identified by type rather than recognized by its text: this diagnostic
+// REPLACES ssh2's message and keeps it one cause link down, so a downstream
+// classifier -- the connection-per-poll cycle-start re-dial, which sees what
+// the dial sequence threw rather than what ssh2 raised -- has no fragment
+// left to match. A type is also the one recognizer no wire party can write:
+// nothing outside this module constructs it, and only for a rejection the
+// fragment and the capability verdict have already classified.
 class UnperformableKexNegotiationError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
@@ -160,17 +132,13 @@ const hasNegotiationFailureFragment = (error: unknown): boolean =>
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-// A `remove` entry the operator wrote and one this module adds are the same
-// filter only if they are the same KIND and read the same. The kind is
-// load-bearing rather than pedantry: a RegExp stringifies to its own literal, so
-// an operator entry of the string "/25519/i" reads identically to this module's
-// own /25519/i, and keying on the text alone would treat the module's removal as
-// already present and drop it. ssh2 matches a string `remove` entry exactly
-// (measured), so the operator's survivor would then remove nothing and the
-// unperformable algorithms would go back on the wire. Tagging the kind keeps the
-// two apart while still making a second constrain of the same options a no-op,
-// which matters because the adapter stores the options it dialed with and
-// re-dials from them.
+// Keyed by KIND, not just text: a RegExp stringifies to its own literal, so an
+// operator's string entry "/25519/i" would read identically to this module's
+// own /25519/i, and keying by text alone would treat the module's removal as
+// already present and drop it -- silently readmitting the unperformable
+// algorithm, since ssh2 matches a string `remove` entry exactly (measured).
+// Tagging the kind also makes a second constrain of the same options a no-op,
+// which matters because the adapter re-dials from its stored options.
 const filterKey = (entry: unknown): string =>
   entry instanceof RegExp ? `re:${String(entry)}` : `raw:${String(entry)}`;
 
@@ -180,7 +148,7 @@ const asArray = (value: unknown): unknown[] =>
 const primitiveNames = (primitives: readonly KexPrimitive[]): string =>
   primitives.map((entry) => entry.primitive).join(", ");
 
-/** A warning sink, so this module carries no dependency on the logger's type. */
+/** A warning sink, so this module has no dependency on the logger's type. */
 interface WarnSink {
   warn(message: string): void;
 }
@@ -325,25 +293,20 @@ function emptiedOperatorListError(
 }
 
 /**
- * Whether `error` is a key-exchange negotiation failure raised on a process that
- * cannot perform one of `unavailable` -- the permanently incompatible case, on
- * which no re-dial and no elapsed time changes anything.
+ * Whether `error` is a key-exchange negotiation failure on a process that
+ * cannot perform one of `unavailable` -- the permanently incompatible case,
+ * where no re-dial and no elapsed time changes anything. Recognizes both
+ * ssh2's own rejection and {@link explainKexNegotiationFailure}'s re-raise, so
+ * the connect loop's retry predicate and the connection-per-poll cycle-start
+ * re-dial reach one verdict without each needing its own matcher.
  *
- * It recognizes the rejection as ssh2 raised it AND as
- * {@link explainKexNegotiationFailure} re-raised it, so the two dial paths reach
- * the same verdict over one rejection rather than carrying a matcher each: the
- * connect loop's retry predicate classifies ahead of that re-raise, and the
- * connection-per-poll cycle-start re-dial behind it.
- *
- * The capability verdict is what conditions this, and it carries the whole
- * weight: the message fragment is not psilink's to trust, ssh2 rendering a
+ * The capability verdict decides this, not the message text: ssh2 renders a
  * server's `SSH_MSG_DISCONNECT` description into the same message, and a
- * disconnect preceding host-key verification, so a server or an on-path attacker
- * writes the fragment verbatim. The verdict is this process's own reading of its
- * own crypto provider, taken before the dial, so on a host that can perform
- * everything ssh2 offers a written fragment decides nothing at all; on a host
- * that cannot, the party writing it could already deny the exchange outright,
- * and what it gains is the dial failing sooner than the reconnect budget.
+ * disconnect precedes host-key verification, so a server or an on-path
+ * attacker can write the fragment verbatim. The verdict is this process's own
+ * reading of its own crypto provider, taken before the dial -- on a capable
+ * host a spoofed fragment decides nothing; on an incapable one the writer
+ * could already deny the exchange outright, gaining only a faster failure.
  *
  * @internal
  */
@@ -360,15 +323,13 @@ export function isUnperformableKexNegotiationFailure(
 
 /**
  * Given a dial rejection, return it as it stands, or -- when it is a
- * key-exchange negotiation failure on a process missing a primitive -- an error
- * that names the platform capability behind it, holding the original as its
- * `cause`.
- *
- * This is the permanently-incompatible case: a server that accepts only
- * algorithms built on a primitive this process cannot perform. Nothing psilink
- * offers can satisfy it, and ssh2's own "Handshake failed: no matching key
- * exchange algorithm" names neither the withheld algorithms nor the reason they
- * were withheld -- leaving an operator to conclude the SERVER is misconfigured.
+ * key-exchange negotiation failure on a process missing a primitive -- an
+ * error naming the platform capability behind it, holding the original as
+ * its `cause`. This is the permanently-incompatible case: nothing psilink
+ * offers can satisfy a server that accepts only algorithms built on a
+ * missing primitive, and ssh2's own "no matching key exchange algorithm"
+ * names neither the withheld algorithms nor the reason, leaving an operator
+ * to conclude the server is misconfigured.
  *
  * @internal
  */

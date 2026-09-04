@@ -9,29 +9,22 @@ import { fittedCauseLink } from "./causeLink";
 
 /**
  * Per-operation liveness bounds for the SFTP adapter's server-driven operations
- * ({@link ../connection/ssh2SftpAdapter.SSH2SFTPClientAdapter}'s `list()`,
- * `get()`, `createExclusive()`, and the write/stat/delete ops
- * `put()`/`rename()`/`delete()`/`exists()`). Each awaits a callback the remote
- * server controls, so a hostile (or dead) server admin -- an adversary under
- * docs/spec/CHANNEL_SECURITY.md -- can hang it forever by withholding the response.
- * These helpers bound that wait and surface a single typed, terminal
- * {@link TransportOperationStalledError}, the liveness sibling of the memory-size
- * guards in {@link ./frameSizeGuard} and {@link ./listingGuard}: those cap what a
- * hostile file or directory can allocate; this caps the time a hostile server can
- * make an operation consume.
+ * ({@link ../connection/ssh2SftpAdapter.SSH2SFTPClientAdapter}'s `list()`, `get()`,
+ * `createExclusive()`, `put()`, `rename()`, `delete()`, `exists()`). Each awaits a
+ * callback the remote server controls, so a hostile or dead server can hang it
+ * forever by withholding the response; these helpers bound the wait and produce a
+ * single typed, terminal {@link TransportOperationStalledError}.
  *
- * Each operation is bounded in the mode its shape allows: the reads and metadata
- * ops by a wall-clock deadline ({@link withSftpOperationDeadline}), and `put` by a
- * progress-based idle window ({@link createBoundedPutSource}) that tolerates a
- * large-but-progressing upload. This is the SFTP fast-fail layer, not the universal
- * backstop: the local-filesystem adapter has no per-operation bound here (a stalled
- * NFS/CIFS hard mount can hang its reads too), so it is covered by the
- * whole-exchange budget in `FileSyncConnection` (`@psilink/core`), which races EVERY
- * transport await against the coarse peer-inactivity budget beneath this tier.
+ * Reads and metadata ops are bounded by a wall-clock deadline
+ * ({@link withSftpOperationDeadline}); `put` is bounded instead by a
+ * progress-based idle window ({@link createBoundedPutSource}), so a
+ * large-but-progressing upload is not false-failed. Covers only this adapter: the
+ * local-filesystem adapter has no per-operation bound here and relies on the
+ * whole-exchange budget in `FileSyncConnection` (`@psilink/core`) instead.
  *
- * This module also holds the estimate-free, non-fatal slow-operation WARNING
+ * Also holds the non-fatal slow-operation warning
  * ({@link withSlowOperationWarning}) -- observability, not a control, layered
- * strictly above all of the above and never inside a terminal path.
+ * above all of the above and never inside a terminal path.
  */
 
 /**
@@ -39,18 +32,9 @@ import { fittedCauseLink } from "./causeLink";
  * operation is judged stalled. One constant covers the adapter's withheld-response
  * bounds, applied in the mode each operation allows (see the module header).
  *
- * Value: 60,000 ms (60 s). A coarse "the server has gone silent" threshold, not a
- * tight latency budget. It sits well above any legitimate operation -- a normal
- * listing, an exclusive lock-file create, a metadata rename/delete/exists, and
- * each chunk of a healthy transfer all complete in well under a second -- at
- * roughly twice this project's 30 s per-attempt connect bound
- * (`serverConnectTimeoutMs`, applied as ssh2's `readyTimeout` even when the
- * operator leaves it unset; ssh2's own default `readyTimeout` is 20 s), so a
- * transiently slow but live server is not cut off; yet more than an order of
- * magnitude below
+ * Value: 60,000 ms (60 s) -- well above any legitimate operation and well below
  * the one-hour peer-inactivity budget, so a withheld response fails the exchange
- * in a minute rather than after an hour. Applied as an idle window it never
- * rejects a slow-but-progressing large transfer, only one that stops sending.
+ * in a minute rather than an hour without cutting off a transiently slow server.
  * Fixed, not operator-configurable, for the same reason as the size bounds: a
  * configurable budget risks an operator raising it high enough to reintroduce the
  * denial of service.
@@ -60,28 +44,18 @@ export const SFTP_STALL_DEADLINE_MS = 60_000;
 /**
  * Construct the typed, terminal {@link TransportOperationStalledError} for an
  * SFTP operation that did not make progress within its bound. `operation` names
- * the read (e.g. `"directory listing"`, `"file read"`, `"exclusive create"`) and
- * `detail` states how it stalled, so the one error type carries an
- * operation-specific message.
+ * the op (e.g. `"directory listing"`, `"file read"`, `"exclusive create"`);
+ * `detail` states how it stalled; `serverReported`, where present, relays the
+ * server's own fatal error. `path` and `serverReported` are peer-controlled and
+ * unbounded in length, so each value gets its own labelled cause link via
+ * {@link ./causeLink.fittedCauseLink} rather than sharing one -- a shared link
+ * would let an unbounded value crowd out the budget the first-party framing
+ * needs.
  *
- * Every value beyond the operation's own label takes a labelled cause link of its
- * own rather than riding the summary, ONE chooser per link, each fitted at this
- * composition site by {@link ./causeLink.fittedCauseLink} -- the first-party
- * stall detail included, so all three links carry one rule. `path` carries a
- * peer-supplied filename of no bounded length; `detail` is first-party prose at
- * every call site but {@link ./ssh2SftpAdapter}'s dead-session one, which relays
- * the fatal error the server itself reported through `serverReported`, bounded
- * nowhere at all. On a shared link either would spend the budget the refusal and
- * the next step {@link TransportOperationStalledError} carries need, and
- * whichever filled it would then be free to compose the framing that introduced
- * what it deleted.
- *
- * The details, paths, and server error sentences of the enumerated CLI-sites
- * table each fit their budget at ordinary size, asserted by
- * apps/cli/test/unit/transportRefusalBudget.test.ts; the adapter's stall shapes
- * outside that table (delete, rename, exclusive create, existence check) are
- * covered by that suite's class-level flood half, and their ordinary-size fit is
- * measured, not pinned.
+ * apps/cli/test/unit/transportRefusalBudget.test.ts asserts the ordinary-size fit
+ * for the enumerated CLI call sites; the adapter's other stall shapes (delete,
+ * rename, exclusive create, existence check) are covered by that suite's
+ * class-level flood half and are measured, not pinned.
  */
 export function transportOperationStalledError(
   operation: string,
@@ -106,25 +80,18 @@ export function transportOperationStalledError(
 /**
  * Bound a server-driven SFTP operation by a wall-clock deadline: settles with
  * `promise`'s own result if it finishes first, otherwise rejects with
- * `makeError()` once `ms` elapses. The timer is cleared as soon as `promise`
- * settles.
+ * `makeError()` once `ms` elapses; the timer clears as soon as `promise` settles.
+ * Differs from `@psilink/core`'s `withTimeout` in taking an error factory (not a
+ * message string) and rejecting with a typed
+ * {@link TransportOperationStalledError} so the poll loop treats the stall as
+ * terminal.
  *
- * It mirrors `@psilink/core`'s `withTimeout` but differs in two ways that matter
- * here: it rejects with a caller-built typed error (a
- * {@link TransportOperationStalledError}, so the poll loop treats the stall as
- * terminal and fails the exchange) rather than a plain `Error`, and it takes an
- * error factory rather than a message string. Like `withTimeout` it only races --
- * the underlying operation's callbacks may still fire after the deadline (a
- * harmless no-op: no busy-spin, and the session tears down on the terminal
- * error). When the deadline wins, `promise` keeps running and may reject later
- * (the underlying operation eventually fails after the stall was already
- * surfaced); that late rejection has no other consumer, so a no-op `catch`
- * absorbs it rather than letting it surface as an unhandled rejection -- without
- * changing the race outcome, since the same `promise` settlement still feeds
- * `Promise.race`. The deadline timer is `unref`'d so it never holds the process
- * open on its own. A handle opened just before a withheld close is not reclaimed,
- * since a close whose own callback is withheld cannot itself complete; the
- * operations that hold a reusable handle past a stall
+ * It only races: the underlying operation may still fire after the deadline
+ * (harmless -- the session tears down on the terminal error), and a late
+ * rejection is absorbed by a no-op `catch` so it never becomes an unhandled
+ * rejection. The timer is `unref`'d. A handle opened just before a withheld close
+ * is not reclaimed, since a close whose own callback is withheld cannot itself
+ * complete; operations that hold a reusable handle past a stall
  * ({@link ./ssh2SftpAdapter}'s `list()`) close it on their own bounded-failure
  * path instead of relying on this wrapper.
  */
@@ -152,23 +119,18 @@ export function withSftpOperationDeadline<T>(
  * slices its payload into so the upload yields a continuous, server-driven
  * progress signal.
  *
- * The signal must come from chunking. ssh2's SFTP write path acknowledges a single
- * `WriteStream` write only after EVERY internal WRITE packet it split that write
- * into has been acked -- `SFTP.write` chains the overflow and fires the stream
- * callback once, at the very end -- so handing the whole payload to the library as
- * one write would surface zero progress until the entire transfer completed, and a
- * legitimately large upload would then look identical to a stalled one for its full
- * duration. Feeding the payload as a stream of bounded chunks instead makes the
- * library's `rdr.pipe(wtr)` consume one chunk per ack-driven `drain`, so the source
- * is pulled (and the idle window reset) once per chunk acknowledged. The value is
- * the bound on how much may be acked between two progress ticks.
+ * ssh2's SFTP write path acks a `WriteStream` write only after every internal
+ * WRITE packet it was split into has been acked, firing the stream callback once
+ * at the very end -- so one whole-payload write would show zero progress until
+ * the transfer completed, indistinguishable from a stalled one. Chunking instead
+ * makes the library's `rdr.pipe(wtr)` consume one chunk per ack-driven `drain`,
+ * so the source is pulled (and the idle window reset) once per chunk
+ * acknowledged.
  *
- * Value: 64 KiB. Small enough that even a slow-but-honest link ticks well within
- * the 60 s idle window -- at 64 KiB per tick the window tolerates a sustained rate
- * as low as ~1 KiB/s before a progressing transfer could be false-failed -- and
- * large enough to keep the per-chunk pipe/WRITE overhead negligible against the
- * up-to-512 MiB frame size. Not security-critical to the byte: it sets the progress
- * granularity, not a memory or time bound (the idle window is the bound).
+ * Value: 64 KiB -- small enough to tolerate a sustained rate as low as ~1 KiB/s
+ * within the 60 s idle window, and large enough to keep per-chunk overhead
+ * negligible against the up-to-512 MiB frame size. Not security-critical to the
+ * byte: it sets progress granularity, not a memory or time bound.
  */
 export const SFTP_PUT_PROGRESS_CHUNK_BYTES = 64 * 1024;
 
@@ -203,35 +165,28 @@ export interface BoundedPutSource {
 }
 
 /**
- * Build a chunked, progress-observing SOURCE that bounds an OUTBOUND SFTP `put` by
- * LIVENESS -- the write-path mirror of the read-path
- * {@link ./frameSizeGuard.createCappedSink}. The metadata write/stat/delete ops are
- * single round-trips, so a flat {@link withSftpOperationDeadline} bounds them;
- * `put` carries a payload whose legitimate transfer can exceed the deadline over a
- * slow link, so -- exactly as the capped `get` sink bounds its idle gap rather than
- * its total time -- this bounds the gap between upload-progress ticks instead.
+ * Build a chunked, progress-observing SOURCE that bounds an outbound SFTP `put`
+ * by liveness -- the write-path mirror of the read-path
+ * {@link ./frameSizeGuard.createCappedSink}. `put` accepts a payload whose
+ * legitimate transfer can exceed a flat deadline over a slow link, so this
+ * bounds the gap between upload-progress ticks instead of the total time.
  *
- * `payload` is either a single `Buffer` or an ORDERED LIST of `Uint8Array`
- * chunks (the message send path's `[header, payload]` pair): the source emits the
- * parts back-to-back in `chunkBytes`-sized slices (views, not copies -- a
- * non-Buffer part is wrapped as a zero-copy Buffer view, never re-copied), so the
- * on-disk bytes are the parts concatenated without ever concatenating them in
- * memory. ssh2-sftp-client pipes the source into the remote write stream, which
- * pulls under ack-driven backpressure: a withheld write acknowledgement stalls the
- * pipe, so the source stops being pulled. An idle timer, armed before the first
- * chunk and reset on each chunk produced, fires when no chunk has been pulled
- * within `stallDeadlineMs`: it rejects `result` with a
- * {@link TransportOperationStalledError} and destroys the source WITH an error, so
- * ssh2-sftp-client's read-stream `'error'` handler tears the write stream down at
- * the server (a bare destroy would not). Bounding the idle gap rather than the
- * total upload time never false-fails a slow-but-progressing large write, only one
- * that stops making progress. The bound also covers the tail -- the wait for the
- * final ack and close -- since the last chunk's timer is cleared only by
- * `complete()`/`fail()`. Defaults to {@link SFTP_STALL_DEADLINE_MS}.
+ * `payload` is a single `Buffer` or an ordered list of `Uint8Array` chunks (the
+ * message send path's `[header, payload]` pair); the source emits the parts
+ * back-to-back in `chunkBytes`-sized views, never copies, so the on-disk bytes
+ * are the parts concatenated without ever concatenating them in memory.
  *
- * The source is single-use (a stream cannot be re-read); the caller rebuilds a
- * fresh one from the retained payload Buffer or chunk list per retry attempt (a
- * list of `Uint8Array` views is re-iterable, so the retry stays byte-identical).
+ * ssh2-sftp-client pipes the source into the remote write stream under
+ * ack-driven backpressure, so a withheld write acknowledgement stops the source
+ * being pulled. An idle timer, armed before the first chunk and reset on each
+ * chunk produced, fires when none has been pulled within `stallDeadlineMs`: it
+ * rejects `result` and destroys the source WITH an error (not bare), so
+ * ssh2-sftp-client's read-stream `'error'` handler tears the write stream down
+ * at the server. The bound also covers the tail, since the last chunk's timer
+ * clears only on `complete()`/`fail()`. Defaults to {@link SFTP_STALL_DEADLINE_MS}.
+ *
+ * The source is single-use; the caller rebuilds a fresh one from the retained
+ * payload per retry attempt.
  */
 export function createBoundedPutSource(
   path: string,
@@ -354,13 +309,12 @@ export function createBoundedPutSource(
       clearTimeout(idleTimer);
       resolveResult(value);
       // Tear the source down on every terminal path, as the idle-stall path
-      // already does. On a clean completion the source has already reached EOF and
-      // auto-destroyed, so this is an idempotent no-op; on fail() it was left
-      // mid-stream -- ssh2-sftp-client destroys a string/file source on a
-      // write-stream error but NOT a provided stream like this one -- so destroying
-      // it here releases its stream-internal state and pipe linkage rather than
-      // leaving it to GC. destroy() is idempotent and bare (emits no 'error'), so
-      // it is safe after either settlement.
+      // already does. A clean completion already reached EOF and auto-destroyed,
+      // so this is a no-op; on fail() it was left mid-stream -- ssh2-sftp-client
+      // destroys a string/file source on a write-stream error but NOT a provided
+      // stream like this one, so destroying it here releases its state and pipe
+      // linkage. destroy() is idempotent and bare (emits no 'error'), safe after
+      // either settlement.
       source.destroy();
     },
     fail: (err: unknown) => {
@@ -374,45 +328,34 @@ export function createBoundedPutSource(
 }
 
 /**
- * Elapsed time, in milliseconds, after which an in-flight SFTP operation that has
- * not yet settled emits a non-fatal slow-operation warning. This is OBSERVABILITY,
- * not a security control: it does nothing on a headless run with no human watching
- * (the whole-exchange liveness budget in `FileSyncConnection` (`@psilink/core`)
- * defends that run), and it stays entirely outside the terminal-error paths so it
- * can never affect correctness or the liveness gate. See
+ * Elapsed time, in milliseconds, after which an in-flight SFTP operation that
+ * has not yet settled emits a non-fatal slow-operation warning. Observability,
+ * not a security control: it does nothing on a headless run with no human
+ * watching (the whole-exchange liveness budget in `FileSyncConnection`
+ * (`@psilink/core`) defends that run), and stays outside the terminal-error
+ * paths so it can never affect correctness or the liveness gate. See
  * {@link withSlowOperationWarning}.
  *
- * Value: 30,000 ms (30 s). A fixed, deliberately generous threshold -- NOT a
- * duration estimate. A false warning is cheap (the operator reads "still working"
- * and ignores it), so it may be crude: it reports OBSERVED signal (the operation,
- * elapsed time, and any cheap progress) and lets the human supply the intent the
- * machine cannot, since a slow-but-honest transfer and a deliberately slow server
- * are observationally identical. It sits well above any healthy operation (a normal
- * listing, lock create, or small transfer completes in well under a second) yet
- * below the 60 s per-operation read fast-fail ({@link SFTP_STALL_DEADLINE_MS}), so
- * for a stalled read the operator sees one "slow" warning before the read fails;
- * for an unbounded-at-the-adapter write it is the early signal beneath the coarse
- * whole-exchange budget. Fixed rather than a fraction of the (operator-tunable)
- * peer budget so the warning fires at a predictable wall-clock point regardless of
- * how high the budget is raised.
+ * Value: 30,000 ms (30 s) -- a fixed, generous threshold, not a duration
+ * estimate. Above any healthy operation and below the 60 s per-operation
+ * fast-fail ({@link SFTP_STALL_DEADLINE_MS}), so a stalled read gets one "slow"
+ * warning before it fails. Fixed rather than a fraction of the
+ * operator-tunable peer budget, so it fires at a predictable wall-clock point
+ * regardless of how high that budget is raised.
  */
 export const SFTP_SLOW_OPERATION_WARNING_MS = 30_000;
 
 /**
  * Wraps an in-flight SFTP operation with a non-fatal slow-operation warning: if
- * `promise` has not settled within `thresholdMs`, emits one `log.warn` line naming
- * the operation, the elapsed time, and -- where a cheap progress signal exists --
- * the observed progress (`progress(elapsedMs)`), then lets the operation continue
- * unchanged. The returned promise settles exactly as `promise` does (same value,
- * same rejection); the warning never alters the result, and the timer is cleared
- * the moment `promise` settles.
+ * `promise` has not settled within `thresholdMs`, emits one `log.warn` line
+ * naming the operation, elapsed time, and any observed progress
+ * (`progress(elapsedMs)`), then lets the operation continue unchanged. Never
+ * alters the result; the timer clears the moment `promise` settles.
  *
- * It is strictly observability and is layered ABOVE the terminal bounds, never
- * inside them: the per-operation read deadline ({@link withSftpOperationDeadline} /
- * the capped sink) and the consumer-layer whole-exchange budget are what actually
- * fail a stalled operation; this only tells a watching operator that an operation
- * is taking a while. The timer is `unref`'d so it never holds the process open on
- * its own, and it fires at most once (a single `setTimeout`).
+ * Strictly observability, layered above the terminal bounds, never inside
+ * them: the per-operation read deadline ({@link withSftpOperationDeadline} /
+ * the capped sink) and the whole-exchange budget are what actually fail a
+ * stalled operation. The timer is `unref`'d and fires at most once.
  */
 export function withSlowOperationWarning<T>(
   promise: Promise<T>,
@@ -434,8 +377,8 @@ export function withSlowOperationWarning<T>(
     // exactly on schedule.
     const elapsedMs = Date.now() - start;
     const observed = options.progress?.(elapsedMs);
-    // The path can carry a peer-supplied filename (a get/put of a partner file),
-    // so escape it before it reaches the operator's terminal.
+    // `path` may be a peer-supplied filename (a get/put of a partner file), so
+    // escape it before it reaches the operator's terminal.
     options.log.warn(
       `SFTP ${options.operation} of ${redactAndSanitizeForDisplay(options.path)} is ` +
         `still running after ` +
