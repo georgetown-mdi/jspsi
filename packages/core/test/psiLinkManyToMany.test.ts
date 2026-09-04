@@ -17,19 +17,18 @@ import type { CSVRow } from "../src/file";
 import type { AssociationTable } from "../src/types";
 import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
 
-// Both-sided deduplicating matching, driven at the cascade seam: each party keeps a
-// value several of its own records hold, contributes it to the round once, and
-// attributes a match on it to every record holding it -- the "many" rule applied to
-// both parties (docs/spec/PROTOCOL.md, The per-side rules). A matched value
-// therefore stands for a GROUP on each side and contributes the two groups'
-// product, so every run here drives both parties and asserts they reconstruct the
-// same pair set.
+// Both-sided deduplicating matching at the cascade boundary: each party keeps a
+// value several of its own records hold, contributes it once, and attributes a
+// match on it to every record holding it -- the "many" rule applied to both
+// parties (docs/spec/PROTOCOL.md, The per-side rules). A matched value stands
+// for a GROUP on each side and contributes the two groups' product; every run
+// here drives both parties and checks they reconstruct the same pair set.
 //
-// `many-to-many` is its own mirror, so both parties carry the one label. An
-// exchange resolves it from the agreed pair (`resolveLinkageCardinality`) and the
-// runs it produces are driven in linkageCardinality.test.ts; every case here calls
-// linkViaPSI directly, which is what lets a partner's frames deviate at the seam
-// under test.
+// `many-to-many` is its own mirror, so both parties hold the one label. An
+// exchange resolves it from the agreed pair (`resolveLinkageCardinality`) and
+// the runs it produces are driven in linkageCardinality.test.ts; every case
+// here calls linkViaPSI directly, which is what lets a partner's frames deviate
+// at the boundary under test.
 
 const psiLibrary = await PSI();
 
@@ -222,7 +221,7 @@ test("two keys form two blocks, and no pair crosses them", async () => {
   // Each round's block stands alone: rows 0 and 1 pair off on key 0 and leave
   // candidacy, rows 2 and 3 pair off on key 1. A table that linked the two blocks
   // -- the cross-round accumulation the within-round rule does not take
-  // (docs/spec/PROTOCOL.md, Multiplicity is within-round) -- would carry pairs
+  // (docs/spec/PROTOCOL.md, Multiplicity is within-round) -- would hold pairs
   // between {0,1} and {2,3}, and none is here.
   const run = await runCascade(
     [
@@ -326,13 +325,12 @@ function crossPartyClusters(
 }
 
 test("a chain across two keys never forms, and both parties cluster the same way", async () => {
-  // The chain the closure would otherwise have to reckon with: the starter's row
-  // 0 and the joiner's row 0 share "K1" on the first key, and the joiner's row 0
-  // shares "K2" with the starter's row 1 on the second. It does not form, because
-  // the joiner's row 0 appeared in the first round's candidate pairs and left
-  // candidacy -- so the starter's row 1 takes the joiner's row 1 instead, and the
-  // two clusters stay apart rather than joining through a record that shares a
-  // value with each of them.
+  // The chain the closure could otherwise form: the starter's row 0 and the
+  // joiner's row 0 share "K1" on the first key, and the joiner's row 0 shares
+  // "K2" with the starter's row 1 on the second. It does not form, since the
+  // joiner's row 0 already left candidacy in the first round's pairs -- so the
+  // starter's row 1 takes the joiner's row 1 instead, and the two clusters stay
+  // apart.
   const run = await runCascade(
     [
       ["K1", undefined],
@@ -417,7 +415,7 @@ test("a value m and n records hold writes m x n result rows and attests m x n", 
   expect(cluster).toStrictEqual({ localRows: [0, 1], partnerRows: [0, 1, 2] });
 
   // Both parties derive one figure from the one table, which is why the record
-  // carries the pair count rather than either party's matched-record count.
+  // holds the pair count rather than either party's matched-record count.
   expect(matchedPairCount(starter)).toBe(6);
   expect(matchedPairCount(joiner)).toBe(6);
   expect(matchedPairCount(starter)).toBe(
@@ -505,7 +503,7 @@ async function runNonConformingStarter(
 
   // A party contributing its dataset verbatim has one round position per record,
   // so its translation of the joiner's list is the identity and its own entries
-  // carry the joiner's positions as the round reported them.
+  // hold the joiner's positions as the round reported them.
   await conn.send(report(joinerPositions));
   const joinerList = (await conn.receive()) as Array<MappedElement>;
   await conn.send(joinerList);

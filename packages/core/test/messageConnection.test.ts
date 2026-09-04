@@ -39,7 +39,7 @@ test("messages are delivered in FIFO order", async () => {
 test("a terminal error rejects a parked receive and is sticky", async () => {
   const [a, b] = createMessagePipe();
   const parked = b.receive();
-  await a.close(); // surfaces a transport error on the peer
+  await a.close(); // raises a transport error on the peer
 
   await expectRejectionKind(parked, "transport");
 
@@ -81,7 +81,7 @@ test("exceeding capacity fails the connection as a protocol violation", async ()
   await Promise.resolve();
   // The frames buffered before the overflow drain first (the abnormal-tail
   // rule: receive() returns an already-arrived frame ahead of a terminal
-  // error); the protocol violation then surfaces once they are drained.
+  // error); the protocol violation then raises once they are drained.
   expect(await b.receive()).toBe("1");
   expect(await b.receive()).toBe("2");
   await expectRejectionKind(b.receive(), "protocol");
@@ -117,7 +117,7 @@ test("finish drains a buffered frame before surfacing the transport error", asyn
 
   // The buffered frame is still delivered...
   expect(await conn.receive()).toBe("final");
-  // ...and only the next receive surfaces the deferred transport error.
+  // ...and only the next receive raises the deferred transport error.
   await expectRejectionKind(conn.receive(), "transport");
   // Promotion does not re-run teardown.
   expect(close).toHaveBeenCalledTimes(1);
@@ -139,7 +139,7 @@ test("an abnormal drop drains a buffered frame before the error (deliver->fail)"
   controls.deliver("tail"); // buffered, no parked waiter
   controls.fail(new ConnectionError("dropped", "transport"));
   // The abnormal-tail rule applies to fail() too: an already-arrived frame is
-  // returned before the abnormal error surfaces.
+  // returned before the abnormal error raises.
   expect(await conn.receive()).toBe("tail");
   await expectRejectionKind(conn.receive(), "transport");
 });
@@ -209,7 +209,7 @@ test("a close racing the final drain still surfaces the transport error", async 
 
   // The buffered frame still drains...
   expect(await conn.receive()).toBe("final");
-  // ...and the deferred error surfaces as transport, not a generic close/usage.
+  // ...and the deferred error raises as transport, not a generic close/usage.
   await expectRejectionKind(conn.receive(), "transport");
 });
 
@@ -385,23 +385,12 @@ test("createMessagePipe: receive has no inactivity deadline", async () => {
 
 // --- I8 contract: the production `data` consumer never throws synchronously ---
 //
-// docs/spec/FILE_SYNC.md invariant I8 makes a non-throwing `data` consumer
-// load-bearing for FileSyncConnection's retain-mode poll(): the emit("data",
-// ...) hand-off sits inside the try whose catch reprocesses the never-deleted
-// message, and recvSeq advances only after the emit returns. A consumer that
-// threw synchronously would re-poll the same message until peer_timeout_ms and
-// then surface a generic peer-silence error. The sole production consumer is
-// deliver() (this file's QueuedMessageConnection, wired as fromEventConnection's
-// onData closure `(data) => controls.deliver(data)`); these tests pin that it
-// latches every failure mode it handles via a non-throwing fail() rather than
-// throwing back into emit. They lock the contract for the consumer that exists
-// today: a regression making deliver() throw on a handled mode would fail them.
-// They do NOT, and cannot, exercise a second `data` consumer that does not yet
-// exist -- a new throwing listener would be its own code path. The load-bearing
-// comment at deliver() and I8 itself, not this test, are what put a future
-// author adding such a consumer on notice. The eventB.emit("data", ...) call
-// below is structurally the same call FileSyncConnection.poll() makes at the
-// retain-mode emit site.
+// docs/spec/FILE_SYNC.md invariant I8 requires the `data` consumer never throw
+// synchronously; the sole production consumer is deliver() (wired here as
+// fromEventConnection's onData closure `(data) => controls.deliver(data)`).
+// These tests pin that it absorbs every failure mode through a non-throwing
+// fail() rather than throwing back into emit. The eventB.emit("data", ...)
+// calls below match the call FileSyncConnection.poll() makes at its emit site.
 
 test("data consumer (deliver): inbound overflow latches without throwing into emit", async () => {
   const [, eventB] = makeEventConnections();
@@ -419,11 +408,11 @@ test("data consumer (deliver): inbound overflow latches without throwing into em
 
   // The frames buffered before the overflow ("1"/"2") drain first under the
   // abnormal-tail rule: receive() returns each already-arrived frame before the
-  // latched protocol error surfaces.
+  // latched protocol error raises.
   expect(await connB.receive()).toBe("1");
   expect(await connB.receive()).toBe("2");
 
-  // Once the buffer is drained, the absorbed overflow surfaces as a sticky
+  // Once the buffer is drained, the absorbed overflow raises as a sticky
   // terminal protocol error -- confirming the consumer latched rather than
   // threw, and that the latch is sticky across further calls.
   const err = await expectRejectionKind(connB.receive(), "protocol");
@@ -445,7 +434,7 @@ test("data consumer (deliver): a frame after a terminal latch is a non-throwing 
   expect(() => eventB.emit("data", "late")).not.toThrow();
 
   // The connection is unchanged: still the original terminal transport error,
-  // with the late frame dropped rather than surfaced.
+  // with the late frame dropped rather than raised.
   await expectRejectionKind(connB.receive(), "transport");
 });
 
@@ -465,7 +454,7 @@ test("send: a transport rejection surfaces its own cause, not the liveness backs
   const { conn, send } = makeQueued({ inactivityTimeoutMs: 10_000 });
   // The guard holds the loop open so a lower, faster per-operation deadline (or a
   // socket error) rejects the hand-off first with its transport-specific cause,
-  // well before the coarse core backstop would; that specific cause must win.
+  // well before the coarse core fallback would; that specific cause must win.
   send.mockRejectedValue(new Error("SFTP file write of /x stalled"));
   const err = await expectRejectionKind(conn.send("x"), "transport");
   expect(err.message).toContain("SFTP file write of /x stalled");
@@ -541,7 +530,7 @@ test("send: a half-close (finish) draining a buffered frame rejects an in-flight
   expect((err as ConnectionError).kind).toBe("transport");
   expect((err as ConnectionError).message).toContain("peer closed mid-send");
   // Half-close semantics are preserved: the buffered frame still drains before
-  // the deferred error surfaces to receive().
+  // the deferred error reaches receive().
   expect(await conn.receive()).toBe("buffered");
 });
 
@@ -621,7 +610,7 @@ test("receiveParsed: a transport drop surfaces as transport, not protocol", asyn
 // The send-before-parse half of receiveParsed: the two direct `.parse()` sites
 // (participant.ts numberArrayMessage, link.ts associationAndIterationArray) must
 // receive a frame, acknowledge it, then parse, so they call this rather than
-// receiveParsed. It surfaces a parse failure as the same clean
+// receiveParsed. It raises a parse failure as the same clean
 // ConnectionError("protocol") -- never the validator's raw throw escaping bare.
 
 test("parseOrProtocolError: returns the validated value on success", () => {

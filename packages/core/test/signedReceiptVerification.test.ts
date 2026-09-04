@@ -850,7 +850,7 @@ describe("decideSignedReceiptVerdict", () => {
     expect(verdict.runBinding.tone).toBe("failed");
     expect(verdict.runBinding.pairByStamp).toBe(true);
     // Distinguishable from every other failure class: each signature, identity,
-    // and anchor row still reads as verified.
+    // and anchor row still displays as verified.
     for (const party of verdict.parties) {
       expect(party.signature.tone).toBe("verified");
       expect(party.certificateAnchor.tone).toBe("verified");
@@ -1008,13 +1008,12 @@ function handBuiltReport(
 
 // --- Cross-implementation bundle ---------------------------------------------
 
-// The checked-in bundle is a complete dual-signed record whose every signature --
-// both certificate self-signatures and both receipt signatures -- was produced by
-// openssl over bytes the generator assembles from docs/spec/EXCHANGE_RECORD.md,
-// not from this codebase. Verifying it is therefore accepting a bundle produced by
-// an independent implementation, and pins the signed-byte layout: a divergence in
-// either shows up here as a signature that stops verifying. The browser suite runs
-// the same file against the web build in real Chromium.
+// The checked-in bundle is a complete dual-signed record: every signature
+// -- both certificate and receipt -- was produced by openssl from bytes
+// the generator assembles from docs/spec/EXCHANGE_RECORD.md, not this
+// codebase. Verifying it accepts a bundle from another implementation and
+// pins the signed-byte layout: a divergence here fails a signature. The
+// browser suite runs this file against the web build in Chromium.
 describe("cross-implementation bundle", () => {
   const { bundle } = JSON.parse(
     readFileSync(

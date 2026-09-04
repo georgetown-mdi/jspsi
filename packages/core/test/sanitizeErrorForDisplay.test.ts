@@ -161,7 +161,7 @@ describe("sanitizeErrorForDisplay", () => {
     // The marker rides after the per-link cap, so a link that truncates can still
     // report that the chain went on: the two markers are independent losses and
     // both are stated.
-    // Each link carries a distinct message, so none is suppressed as a repeat of
+    // Each link holds a distinct message, so none is suppressed as a repeat of
     // the one before it and the walk spends its whole depth budget.
     let err = new Error("innermost");
     for (let i = 1; i < 20; i++)
@@ -182,7 +182,7 @@ describe("sanitizeErrorForDisplay", () => {
 
   test("passes a message carrying the elision marker's text through as content", () => {
     // The marker is plain printable ASCII, so a partner-controlled message that
-    // carries its text meets the escape and the cap as any other content does:
+    // holds its text meets the escape and the cap as any other content does:
     // nothing about the text is privileged, and nothing marks it as the
     // renderer's own.
     const forged = `partner failure ${CAUSE_DEPTH_ELISION_MARKER}`;
@@ -228,8 +228,8 @@ describe("sanitizeErrorForDisplay", () => {
 
     // The forgery runs one way only. A copied marker on a chain the bound DOES
     // cut cannot suppress the renderer's own, which is appended after the escape
-    // whatever the link carried -- so the marker's absence stays load-bearing
-    // even though its presence is not.
+    // whatever the link held -- so the marker's absence stays critical even
+    // though its presence is not.
     const both = sanitizeErrorForDisplay(
       chain(
         [...head, `partner failure ${CAUSE_DEPTH_ELISION_MARKER}`],
@@ -325,7 +325,7 @@ describe("sanitizeErrorForDisplay", () => {
     ).toBe("outer\ncaused by: [object Object]");
   });
 
-  // The guarantee the sink carries ALONE. Composition sites interpolate partner
+  // The guarantee the sink holds ALONE. Composition sites interpolate partner
   // and server bytes raw, so nothing between the wire and here escapes anything:
   // if this renderer let a byte through, it would reach the operator's terminal
   // as that byte. Stated as a property over every position a hostile value can
@@ -425,17 +425,18 @@ describe("sanitizeErrorForDisplay", () => {
     });
 
     test("leaves ordinary base64url-shaped values (e.g. fingerprints) intact", () => {
-      // The backstop must NOT scrub by shape: a host-key fingerprint is shown to
-      // the operator on purpose and shares the shared-secret's character set.
+      // The safety check must NOT scrub by shape: a host-key fingerprint is
+      // shown to the operator on purpose and shares the shared-secret's
+      // character set.
       const fingerprint = "SHA256:abcDEF0123456789_-ghijklmnopqrstuvwxyzABCD";
       expect(
         sanitizeErrorForDisplay(new Error(`host key ${fingerprint}`)),
       ).toContain(fingerprint);
     });
 
-    // A key sliced into an error message carries whatever structure the thing
-    // that carried it left behind: real line breaks from a file read, spaces
-    // from a folded or plain multi-line YAML scalar, or nothing at all from a
+    // A key sliced into an error message holds whatever structure the thing
+    // that held it left behind: real line breaks from a file read, spaces from
+    // a folded or plain multi-line YAML scalar, or nothing at all from a
     // single-line JSON scalar. The reach past a truncated marker is to the end
     // of the link for exactly this reason -- a rule that consumes only armor
     // organised into LINES leaks the whole body of every other delivery.
@@ -465,7 +466,7 @@ describe("sanitizeErrorForDisplay", () => {
     test("redactPrivateKeyMaterial is idempotent and never grows its input", () => {
       // Composition sites redact a fragment before it is interpolated, and the
       // renderer redacts the whole link again. The second pass must be a no-op
-      // (the replacement carries no marker), and neither pass may lengthen the
+      // (the replacement has no marker), and neither pass may lengthen the
       // text, or a display budget fitted over raw fragments would overrun.
       const inputs = [
         "",
@@ -499,12 +500,12 @@ describe("sanitizeErrorForDisplay", () => {
   });
 });
 
-// The re-render seam: a boundary that receives a chain this module already
-// rendered, as TEXT, and has to carry it onward or show it (the console relay
-// reading the CLI's terminal error, and the console seat that renders one). What
-// it must not do is charge the whole chain to one value's cap, which cuts the
-// chain inside its first link or two and drops the recovery step a later link
-// carries.
+// The re-render boundary: a call site that receives a chain this module
+// already rendered, as TEXT, and has to pass it onward or show it (the console
+// relay reading the CLI's terminal error, and the console seat that renders
+// one). What it must not do is charge the whole chain to one value's cap,
+// which cuts the chain inside its first link or two and drops the recovery
+// step a later link holds.
 describe("sanitizeErrorChainLinks", () => {
   /** A first-party link of `size` printable ASCII characters, ending on `tail`
    * so a cut anywhere in it is visible at the end of the link. */
@@ -514,7 +515,7 @@ describe("sanitizeErrorChainLinks", () => {
 
   test("splits at framing a link's own text cannot forge", () => {
     // The escape runs before the join, so every newline a link's own message
-    // carries is escaped and only this module's framing survives as a raw one.
+    // holds is escaped and only this module's framing survives as a raw one.
     // A link that spells the separator's text verbatim is therefore one link,
     // not two -- the property the split relies on.
     const forged = "spoofed\ncaused by: injected link";
@@ -538,7 +539,7 @@ describe("sanitizeErrorChainLinks", () => {
         }),
       }),
     );
-    // Only worth driving past the cap a per-value pass would apply.
+    // Driven past the cap a per-value pass would apply.
     expect(rendered.length).toBeGreaterThan(DEFAULT_MAX_DISPLAY_LENGTH);
 
     const links = sanitizeErrorChainLinks(rendered);

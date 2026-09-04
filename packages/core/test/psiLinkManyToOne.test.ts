@@ -24,18 +24,17 @@ import { singlePassReplyByteCap } from "../src/connection/frameSize";
 import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
 import { fanOutFreeBounds } from "./utils/singlePassBounds";
 
-// Deduplicating matching, driven at the strategy seam: a "many" party keeps a
-// value several of its own records hold, contributes it to the round once, and
-// attributes a match on it to every record holding it, while its partner's
-// within-round uniqueness rule is unchanged (docs/spec/PROTOCOL.md, Deduplicating
-// cardinalities). The two parties hold MIRROR labels for the one procedure -- the
-// declaring party runs many-to-one and its partner one-to-many -- so every run
-// here drives both sides and asserts they reconstruct the same pairing.
+// Deduplicating matching: a "many" party keeps a value several of its records
+// hold, contributes it once to the round, and attributes a match on it to every
+// record holding it; its partner's within-round uniqueness rule stays unchanged
+// (docs/spec/PROTOCOL.md, Deduplicating cardinalities).
 //
-// The first sections are the cascade's realization, which derives the table from
-// the exchanged mapped-element lists; the equivalence section then drives the same
-// inputs through single-pass, whose receiver derives it alone from the index
-// table, and requires the two to agree table for table.
+// The two parties hold MIRROR labels for the one procedure -- the declaring
+// party many-to-one, its partner one-to-many -- so every run drives both sides
+// and checks the reconstructed pairing agrees. The cascade sections derive the
+// table from the exchanged mapped-element lists; the equivalence section then
+// drives the same inputs through single-pass, whose receiver derives the table
+// alone from the index table, and checks the two agree table for table.
 
 const psiLibrary = await PSI();
 
@@ -58,8 +57,9 @@ function cardinalityFor(
 }
 
 // Interpose on one party's INBOUND frames, leaving both parties' own behavior
-// untouched, so a deviation stands in for a partner that computes the protocol
-// honestly right up to the frame under test. Mirrors partnerIndexValidation.ts.
+// untouched, so a deviation stands in for a partner that computes the
+// protocol correctly right up to the frame under test. Mirrors
+// partnerIndexValidation.ts.
 type Deviation = (frame: unknown) => unknown;
 
 function deviatingInbound(
@@ -438,7 +438,7 @@ async function runNonConformingStarter(
 
   // A party contributing its dataset verbatim has one round position per record,
   // so its translation of the joiner's list is the identity and its own entries
-  // carry the joiner's positions as the round reported them.
+  // hold the joiner's positions as the round reported them.
   await conn.send(report(joinerPositions));
   const joinerList = (await conn.receive()) as Array<MappedElement>;
   await conn.send(joinerList);
@@ -732,9 +732,9 @@ test("single-pass runs one-to-one, dropping the value a group would have kept", 
 
 test("single-pass refuses many-to-many", async () => {
   // Refused before any frame moves, so the unread other end of the pipe is not a
-  // partner this ever reaches -- and refused for this strategy's own reason: its
-  // seam pins the resolved table's length to the half that keeps its distinctness,
-  // and a both-sided multiplicity leaves neither half distinct.
+  // partner this ever reaches -- and refused for this strategy's own reason:
+  // single-pass pins the resolved table's length to the half that keeps its
+  // distinctness, and a both-sided multiplicity leaves neither half distinct.
   const [conn] = createMessagePipe();
   await expect(
     linkViaSinglePassPSI(
@@ -934,14 +934,12 @@ test("a group in a later round forms from the deduplicating sender's survivors a
 });
 
 // --- the single-pass bounds under multiplicity --------------------------------
-// Every single-pass bound rests on the premise that a party's (key, record) cell
-// count upper-bounds its distinct-value count. A deduplicating party contributes
-// each DISTINCT value once, so duplication can only lower that count -- which the
-// note behind the specification claims and this measures, by driving the real
-// strategy and reading the reply frame it actually builds against the cap both
-// parties derive from their declared sizes. Every fixture here fills every cell,
-// so the sender's own slot-bound check (built slots against declared width) is
-// exercised at its limit rather than under it.
+// Every single-pass bound rests on the assumption that a party's (key, record)
+// cell count upper-bounds its distinct-value count: duplication can only lower
+// it, since a deduplicating party contributes each DISTINCT value once. This
+// measures that against the real strategy's reply frame and the cap both
+// parties derive from declared sizes, with every fixture filling every cell so
+// the sender's slot-bound check is exercised at its limit.
 
 async function singlePassReplyBytes(
   cardinality: LinkageCardinality,
@@ -1008,26 +1006,24 @@ test("a deduplicating sender's reply stays within the cap its declared size deri
   expect(duplicatedBytes).toBeLessThanOrEqual(cap);
   expect(distinctBytes).toBeLessThanOrEqual(cap);
   // The deduplicating reply is the SMALLER of the two: its index table is the
-  // same one word per (key, record), and its setup carries two masked values
-  // where the distinct-valued one carries four.
+  // same one word per (key, record), and its setup holds two masked values
+  // where the distinct-valued one holds four.
   expect(duplicatedBytes).toBeLessThan(distinctBytes);
 });
 
 // --- the grouping is snapshotted before the send ------------------------------
-// The grouping the returned list is held to is copied out of the "many" side's own
-// outbound list BEFORE that list is sent. What makes the ordering load-bearing
-// rather than incidental is a transport that hands the partner the array itself
-// rather than a serialization of it: the partner's translation writes each entry's
-// index IN PLACE, over the sender's own entries, so a grouping read after the send
-// is the returned list compared against itself and the merge the check exists to
-// refuse passes. The merge deviations in the block above build fresh entries and
-// leave the sent list intact, which is the other half of the same wire fault.
+// The grouping the returned list is held to is copied out of the "many" side's
+// outbound list BEFORE it is sent, because the in-memory pipe hands the partner
+// the array itself rather than a copy: the partner's translation overwrites
+// each entry's index IN PLACE, so reading the grouping after the send would
+// compare the list against its own mutated self and let the merge this check
+// exists to refuse pass silently.
 
 test("the pipe hands the partner the sent mapped elements themselves", async () => {
-  // The premise the deviation below rests on, as a check rather than a claim: the
-  // in-memory pipe passes the array by reference and the wire schema validates it
-  // where it lies rather than rebuilding it, so a partner writing over a received
-  // entry writes over the sender's.
+  // The assumption the deviation below rests on, as a check rather than a
+  // claim: the in-memory pipe passes the array by reference and the wire schema
+  // validates it where it lies rather than rebuilding it, so a partner writing
+  // over a received entry writes over the sender's.
   const [sender, receiver] = createMessagePipe();
   const sent = [{ theirIndex: 3, iteration: 0 }];
   await sender.send(sent);

@@ -17,11 +17,11 @@ import type { ExchangeResult, PreparedExchange } from "../src/exchange";
 import type { CSVRow } from "../src/file";
 
 // The run's resolved cardinality and its projected pair table are named for the
-// operator at the post-terms, pre-round seam. Core composes both strings and
-// raises neither: the advisory is a front end's discretion (docs/spec/PROTOCOL.md,
-// The both-sided expansion has no ceiling of its own), so what the run path owes a
-// front end is the resolved shape, and what this module owes is one composition
-// every seat renders.
+// operator at the post-terms, pre-round boundary. Core composes both strings
+// and raises neither: the advisory is a front end's discretion
+// (docs/spec/PROTOCOL.md, The both-sided expansion has no ceiling of its own),
+// so what the run path owes a front end is the resolved shape, and what this
+// module owes is one composition every seat renders.
 
 // The entitlements default to the ordinary run -- this party receives the result
 // and its partner reads its own half of the table -- so a test naming one of them
@@ -86,11 +86,10 @@ test("keeps the product exact past the safe-integer range the counts admit", () 
 
 // A party whose own cleaning fans out declares its rows times the factor, and
 // that declared figure is the only one its partner ever holds -- the raw count
-// crosses no wire. Constructed shapes rather than a driven exchange because the
-// combination is unreachable through prepareForExchange today: a fan-out runs
-// under single-pass alone, which refuses the both-sided cardinality this
-// projection is the only consumer of. The public shape admits it, so the
-// projection is pinned over it here.
+// crosses no wire. The shapes here are constructed rather than driven through
+// prepareForExchange: fan-out runs only under single-pass, which refuses the
+// both-sided cardinality this projection is the only consumer of, so the
+// projection is pinned over the public shape directly.
 const fanned = (
   rows: number,
   factor: number,
@@ -148,7 +147,8 @@ test("projects nothing for a count the terms exchange would not have admitted", 
     );
   }
   expect(projectPairTable(shape("many-to-many", -1, 10))).toBeUndefined();
-  // The declared count is a factor now, so it is held to the same bounds.
+  // Here the declared count is rows times the factor, so it is held to the
+  // same bounds.
   expect(projectPairTable(fanned(MAX_RECORD_COUNT, 2, 10))).toBeUndefined();
 });
 
@@ -209,7 +209,7 @@ test("names no result file of this party's where the terms give it none", () => 
 
 test("attributes a both-sided run's pairs to whichever party the terms entitle", () => {
   // Same mechanism as the one-sided reading above, held at the branch that
-  // carries the largest table: the entitlement is a field of the resolved shape,
+  // holds the largest table: the entitlement is a field of the resolved shape,
   // so this branch reads it rather than resting its copy on the schema refinement
   // that makes a deduplicating party expect output.
   const withheldFromUs = describeResolvedRunShape(
@@ -295,7 +295,7 @@ test("the advisory refuses nothing and says so", () => {
   expect(advisory).toContain("Nothing refuses on the projection");
 });
 
-// --- The seam runExchange hands a front end ----------------------------------
+// --- The boundary runExchange hands a front end ------------------------------
 
 const psiLibrary = await PSI();
 
@@ -309,7 +309,7 @@ const termsBase = {
   linkageKeys: [{ name: "firstName", elements: [{ field: "firstName" }] }],
 };
 
-// `overrides` carries the terms a configuration under test differs by -- the
+// `overrides` holds the terms a configuration under test differs by -- the
 // output entitlement pair and the linkage strategy -- which the two parties must
 // still mirror between them, `validateCompatibility` refusing an unmirrored pair
 // at the terms exchange.
@@ -342,8 +342,8 @@ const outputFor = (expectsOutput: boolean) => ({
 
 /**
  * One party's view of the run: every `onStage` id and the resolved shape the
- * pre-round seam handed it, in arrival order, plus whatever core raised through
- * `onWarning`.
+ * pre-round boundary handed it, in arrival order, plus whatever core raised
+ * through `onWarning`.
  */
 interface SeamCapture {
   events: Array<string>;
@@ -502,11 +502,12 @@ test("a non-receiving party's own seam says so, on the cascade", async () => {
 });
 
 test("a single-pass blind helper is named as reading nothing back", async () => {
-  // The one configuration in which the "many" party's partner learns nothing: the
-  // "one" party is the resolved sender, expects no output, and discloses no
-  // payload (its only column is a linkage column), so the receiver suppresses its
-  // half of the table entirely. Only the "many" side's seam carries the fact --
-  // the helper's own partner is the entitled one and reads its table as usual.
+  // The one configuration in which the "many" party's partner learns nothing:
+  // the "one" party is the resolved sender, expects no output, and discloses no
+  // payload (its only column is a linkage column), so the receiver suppresses
+  // its half of the table entirely. Only the "many" side's own notice states
+  // this -- the helper's own partner is the entitled one and reads its table as
+  // usual.
   const singlePass = { linkageStrategy: "single-pass" };
   const [, captureA, resultB, captureB] = await runBoth(
     preparedFor("A", paddedRows("Henry", "Anna", 4), true, {

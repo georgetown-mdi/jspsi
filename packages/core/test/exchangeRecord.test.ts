@@ -337,7 +337,7 @@ describe("records exposed", () => {
 
   test("accepts zero (a party that contributed no records)", async () => {
     // Zero is the lower bound of the valid range: an empty input still produces
-    // a record, and its outbound exposure is honestly zero rather than absent.
+    // a record, and its outbound exposure is zero rather than absent.
     const { record } = await buildExchangeRecord(
       { ...baseInputs, recordsExposed: 0 },
       fixedRandomness,
@@ -682,9 +682,10 @@ describe("governance metadata", () => {
   });
 
   test("rejects an over-long payload column name on parse (read path)", async () => {
-    // The on-disk read backstop: a record whose payloadReceived name exceeds the
-    // bound is rejected by parseExchangeRecord, so an over-long name an older or
-    // hand-edited file might carry cannot be admitted. A name at the bound parses.
+    // The on-disk read safety check: a record whose payloadReceived name
+    // exceeds the bound is rejected by parseExchangeRecord, so an over-long
+    // name an older or hand-edited file might carry cannot be admitted. A
+    // name at the bound parses.
     const { record } = await buildExchangeRecord(
       {
         ...baseInputs,
@@ -713,13 +714,12 @@ describe("governance metadata", () => {
   // from opposite directions over `governanceInputs`, which populates every
   // governance channel.
   test("governance exposes only allow-listed metadata keys (a new value-bearing field would fail)", async () => {
-    // Positive, structural guard: assert governance is a CLOSED allow-list of keys
-    // at every level. The realistic regression -- governanceFromTerms (and its
-    // schema) growing a field that carries a value -- fails here because the new
-    // key is not permitted, without the test having to name a forbidden value. The
-    // allow-list is declared independently of the schema on purpose: adding a
-    // governance field forces a deliberate update here, and with it a fresh "is
-    // this value-level data?" judgement.
+    // Positive, structural guard: assert governance is a CLOSED allow-list of
+    // keys at every level. The realistic regression -- governanceFromTerms
+    // (and its schema) growing a field that carries a value -- fails here
+    // because the new key is not permitted, without naming a forbidden
+    // value. The allow-list is declared independently of the schema on
+    // purpose, so adding a governance field forces a fresh judgement here.
     const { record } = await buildExchangeRecord(
       governanceInputs,
       fixedRandomness,
@@ -774,7 +774,7 @@ describe("governance metadata", () => {
     // Out of reach by construction: legalAgreement.purpose is operator-supplied
     // free text, copied verbatim and not cross-validated, so a value an operator
     // smuggles into it cannot be detected here. Purpose-text hygiene is an operator
-    // responsibility, outside this automated invariant -- named, not papered over.
+    // responsibility, outside this automated invariant -- named, not hidden.
   });
 });
 
@@ -923,7 +923,7 @@ describe("serialize / parse", () => {
     // above never exercises the parser against a record with a purpose. Build
     // from the governance-bearing terms so parseExchangeRecord validates the
     // mandatory purpose -- a regression dropping it from RecordLegalAgreementSchema
-    // would surface here.
+    // would appear here.
     const { record } = await buildExchangeRecord(
       { ...baseInputs, localTerms: termsWithGovernance },
       fixedRandomness,

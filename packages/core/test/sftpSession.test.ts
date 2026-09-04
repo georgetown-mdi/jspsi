@@ -284,12 +284,10 @@ for (const [label, keyType] of SERVER_CHOSEN_KEY_TYPES) {
 
 // The configured host is the OTHER adversary-reachable fragment on the no-pin
 // refusal: on the acceptor route it is copied verbatim from the partner's
-// invitation endpoint into the written config, and the operator-config schema
-// bounds it neither in length nor in format, so the invitation schema's own
-// MAX_ENDPOINT_HOST_LENGTH is a floor on what can arrive rather than a ceiling.
-// A host at that floor sits on a link of its own and is delivered whole; a host
-// past the link budget -- which nothing on this route stops arriving -- is where
-// the cap falls, and it falls on that link and no other.
+// invitation endpoint, and the operator-config schema bounds it in neither
+// length nor format, so MAX_ENDPOINT_HOST_LENGTH is a floor on what can arrive,
+// not a ceiling. A host at that floor sits on its own link and is delivered
+// whole; past the link budget, the cap falls on that link and no other.
 test("a partner-supplied host at its schema's full length reaches the operator whole", async () => {
   const keyType = "ssh-ed25519";
   const presented = await computeHostKeyFingerprint(hostKeyBlob(keyType));
@@ -327,16 +325,12 @@ test("a partner-supplied host past the link budget spends only its own link", as
   ).toEqual([hostLink]);
 });
 
-// The partition does not remove the cap, it only stops the cap falling on
-// first-party text. Both bounds still hold with every fragment flooded at once:
-// each link truncates on its own budget, and the whole rendered output stays
-// inside the renderer's depth bound times that budget. A non-empty pin set
-// selects the mismatch verifier, so the two branches cannot be flooded by one
-// config and each floods the fragments IT composes -- the partner-chosen host on
-// the no-pin branch, the operator-chosen pin set on the mismatch branch. The
-// server-chosen key type is flooded too, though keyTypeFromBlob bounds it before
-// composition; what a flood of it must not do is disturb the fragments that are
-// still unbounded here.
+// Every fragment can be flooded at once and each link still truncates on its
+// own budget, so the whole output stays inside the renderer's depth bound times
+// that budget -- and the flood must not disturb any fragment still unbounded
+// here. Both refusal branches are exercised: the partner-chosen host on the
+// no-pin branch, the operator-chosen pin set on the mismatch branch, and the
+// server-chosen key type (already bounded before composition) on both.
 const FLOODED_REFUSALS: Array<[string, () => Promise<string>, string]> = [
   [
     "the no-pin refusal",
@@ -371,15 +365,12 @@ for (const [label, render, recovery] of FLOODED_REFUSALS) {
   });
 }
 
-// Each verifier refuses from a catch of its own when the presented key cannot be
-// read at all, and those refusals partition on the same rule as the two above:
-// the underlying error text is a fragment nobody first-party chose, so it takes a
-// link of its own and can consume nothing but itself. Refusal is what the catch
-// is for, so the fail-closed settle is pinned here too.
-// The text the platform throws when the view is built, read here rather than
-// restated, so the detail link can be asserted whole: an assertion that only
-// anchors the label would pass with first-party guidance re-joined behind the
-// fragment, which is the composition the partition exists to prevent.
+// Each verifier refuses from a catch of its own when the presented key cannot
+// be read at all: these refusals partition the same way as the two above, so
+// the underlying error text -- a fragment nobody first-party chose -- takes a
+// link of its own and can consume nothing else. UNREADABLE_BLOB_ERROR reads the
+// platform's own thrown text rather than hardcoding it, so the detail link is
+// asserted exactly and cannot pass if first-party guidance leaks behind it.
 const UNREADABLE_BLOB_ERROR = (() => {
   try {
     new Uint8Array(

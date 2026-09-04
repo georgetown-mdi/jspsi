@@ -35,11 +35,12 @@ import type { ExchangeResult } from "../src/exchange";
 import type { RunExchangeOptions } from "../src/exchange";
 import type { DualSignedRecordVerificationInputs } from "../src/signedReceiptVerification";
 
-// End-to-end coverage of the signed-receipt seam in runExchange: two parties run a
-// full exchange over an in-memory pipe (real PSI) with signing identities and a
-// session key, and we assert the dual-signed record each side produces. This
-// complements the isolated wire/sign/verify unit tests in signedReceipt.test.ts by
-// exercising the gate and the content-from-record wiring in runExchange itself.
+// End-to-end coverage of the signed-receipt step in runExchange: two parties
+// run a full exchange over an in-memory pipe (real PSI) with signing identities
+// and a session key, and we assert the dual-signed record each side produces.
+// This complements the isolated wire/sign/verify unit tests in
+// signedReceipt.test.ts by exercising the gate and the content-from-record
+// wiring in runExchange itself.
 
 const psiLibrary = await PSI();
 
@@ -144,9 +145,9 @@ test("both parties produce one dual-signed record with mutual verification", asy
   const receipt = resInit.signedReceipt!;
   expect(receipt.version).toBe(SIGNED_RECEIPT_VERSION);
   // The receipt content commits to the SAME agreed-terms hash the self-attested
-  // record carries.
+  // record holds.
   expect(receipt.content.termsHash).toBe(resInit.audit!.record.termsHash);
-  // It carries the two directional payload MACs (session-keyed), not the salted
+  // It holds the two directional payload MACs (session-keyed), not the salted
   // record commitments.
   expect(receipt.content.initiatorToResponderPayload).toEqual(
     expect.any(String),
@@ -187,11 +188,11 @@ test("the negative path: no signing config leaves the record path unchanged", as
 });
 
 test("one party without signing config skips the step (no half-signed exchange)", async () => {
-  // The responder has no signing identity, so IT skips the step. The initiator has
-  // one but its partner never sends a receipt frame; a real transport surfaces this
-  // as a peer-silence timeout. Here we assert the responder simply returns no
-  // signed receipt while the initiator parks -- close to release it, modeling the
-  // caller tearing down the terminated exchange.
+  // The responder has no signing identity, so IT skips the step. The initiator
+  // has one but its partner never sends a receipt frame; a real transport shows
+  // this as a peer-silence timeout. Here we assert the responder simply returns
+  // no signed receipt while the initiator parks -- close to release it,
+  // modeling the caller tearing down the terminated exchange.
   const [connInitiator, connResponder] = createMessagePipe();
   const initiator = runExchange(
     connInitiator,
@@ -372,7 +373,7 @@ describe("a signing party refuses an unnamed partner before its own data moves",
       // own frames went out and then the abort, and nothing else did -- no
       // linkage key, no payload row. The initiator sends its terms and the bare
       // proceed decision before the partner's terms are in hand; the responder's
-      // single frame carries both.
+      // single frame holds both.
       expect(signerSide.sent.map(frameKind)).toEqual(
         signerRole === "initiator"
           ? ["terms", "decision", "abort"]
@@ -461,15 +462,12 @@ test("a fingerprint-pin mismatch terminates the exchange fail-closed", async () 
 // --- A certificate bound away from its own agreed-terms identity -------------
 
 describe("a party whose certificate is bound away from its agreed terms", () => {
-  // A certificate is authorized against the AGREED-TERMS identity, so a party
-  // signing under one bound to anything else cannot leave the pair holding a
-  // verifiable receipt. What it would otherwise be left with depends on which
-  // handshake role it drew, which no configuration of its own decides: signing
-  // first its frame is refused, signing last it is handed a receipt no verifier
-  // accepts as though the run had succeeded. Both roles are driven here, against
-  // the same refusal of this party's own configuration. Both values it compares
-  // are settled the moment the partner's terms arrive, so that is where it lands
-  // and neither role reaches the rounds at all.
+  // A certificate is authorized against the AGREED-TERMS identity, so signing
+  // under one bound to anything else leaves the pair no verifiable receipt.
+  // What it is left with depends on its handshake role: signing first, its
+  // frame is refused; signing last, it is handed an unverifiable receipt
+  // instead. Both roles are driven here; the values compared are fixed the
+  // moment the partner's terms arrive, so neither reaches the rounds.
   //
   // The certificate is identityA/identityB throughout, bound to "Initiator Co" /
   // "Responder Co"; only the terms identity the diverging party runs under moves.
@@ -530,13 +528,13 @@ describe("a party whose certificate is bound away from its agreed terms", () => 
       // and then the abort, and nothing else did -- no linkage key, no payload
       // row, and no certificate. The initiator sends its terms and the bare
       // proceed decision before the partner's terms are in hand; the responder's
-      // single frame carries both.
+      // single frame holds both.
       expect(diverging.sent.map(frameKind)).toEqual(
         divergesFirst ? ["terms", "decision", "abort"] : ["terms", "abort"],
       );
       // Nothing was disclosed, so there is no disclosure to attest: the refusal
-      // carries no exchange record, where the same refusal met at the swap
-      // carries the terminated run's.
+      // holds no exchange record, where the same refusal met at the swap
+      // holds the terminated run's.
       expect(exchangeRecordFromFailure(raised)).toBeUndefined();
 
       // The partner derives no refusal of its own, so what ends its run is the
@@ -554,7 +552,7 @@ describe("a party whose certificate is bound away from its agreed terms", () => 
 
   test("a certificate that does authorize the agreed identity still signs", async () => {
     // The refusal is the divergence's, not the check's: on the same pair, each
-    // party's terms naming the identity its certificate carries, both receipt
+    // party's terms naming the identity its certificate holds, both receipt
     // frames go out and both sides return the dual-signed record. A
     // legitimately-configured exchange traverses the terms-exchange binding
     // untouched: it neither refuses nor aborts anywhere along the way.
@@ -697,13 +695,12 @@ describe("the receipt bindings held at the signature swap", () => {
   });
 });
 
-// The two identities land LAST in this refusal (assertLocalCertificateAuthorizesAgreedIdentity's
-// own JSDoc), so whatever its fixed prose spends of the renderer's per-link
-// budget (COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH) comes out of them -- and they are
-// the values an operator has to compare to act on it. What erodes that room is
-// copy rather than code, so the budget is a check rather than a comment: its CLI
-// sibling (assertIdentityMatchesAgreedTerms, apps/cli/src/signingIdentityDivergence.ts)
-// pins the identical pattern in exchangeSigning.test.ts.
+// The two identities land LAST in this refusal
+// (assertLocalCertificateAuthorizesAgreedIdentity's own JSDoc), so whatever the
+// fixed prose spends of the display budget comes out of them -- the values an
+// operator must compare to act on it. Copy, not code, erodes that room, so the
+// budget is a check, not a comment; the CLI's identical pattern
+// (assertIdentityMatchesAgreedTerms) is pinned in exchangeSigning.test.ts.
 
 /** Room the refusal must leave for the two identities together, in characters. */
 const IDENTITY_PAIR_DISPLAY_BUDGET = 350;
@@ -767,7 +764,7 @@ const firstReceipt = firstRun[0].signedReceipt!;
 /**
  * What the initiator holds when it re-verifies its own receipt offline: the partner
  * pinned out-of-band, its own certificate as the other anchor, and the identities,
- * terms hash, and run binder its exchange record carries. Everything but the
+ * terms hash, and run binder its exchange record holds. Everything but the
  * pairing is identical for either run's record, which is the point -- the pairing is
  * the only check that can separate them.
  */
@@ -802,7 +799,7 @@ describe("the run binder pairs a receipt to one exchange run", () => {
     // runs: the terms hash (recomputable from both parties' terms) and the two
     // certificates. The directional payload MACs do vary with the session key, but
     // a verifier cannot recompute them either, so they separate nothing. The binder
-    // is the one per-run value the record also carries.
+    // is the one per-run value the record also holds.
     expect(secondRecord.termsHash).toBe(firstRecord.termsHash);
     expect(secondRun[0].signedReceipt!.content.termsHash).toBe(
       firstReceipt.content.termsHash,
@@ -1060,13 +1057,12 @@ describe("a run terminated after its disclosure keeps the record of it", () => {
   });
 
   test("a received payload outside the consented set terminates with a record too", async () => {
-    // The route past the payload exchange that is not the swap. The initiator has
-    // locked in a column set the responder does not transmit, so
+    // The route past the payload exchange that is not the swap. The initiator
+    // has locked in a column set the responder does not transmit, so
     // reconcileReceivedPayload refuses AFTER both payloads have crossed: this
     // party's own data is in the partner's hands whatever came back, so the
-    // disclosure is owed a record exactly as a terminated swap's is. Run unsigned
-    // on both sides, so nothing about the receipt step is what produces the
-    // record.
+    // disclosure is owed a record exactly as a terminated swap's is. Both sides
+    // run unsigned, so the receipt step plays no part in producing it.
     const initiatorPrepared = preparedWithPayload(
       "Initiator Co",
       payloadClient,
@@ -1098,7 +1094,7 @@ describe("a run terminated after its disclosure keeps the record of it", () => {
     expect(kept?.record.governance.payloadSent).toEqual([{ name: "note" }]);
     expect(kept?.record.governance.payloadReceived).toEqual([{ name: "note" }]);
     expect(kept?.record.commitments.associationTable).toBeDefined();
-    // This run derived no binder, so it carries none -- the presence rule is "the
+    // This run derived no binder, so it holds none -- the presence rule is "the
     // run derived one", and the outcome beside it is what says no receipt exists.
     expect(kept?.record.receiptBinder).toBeUndefined();
     expect(exchangeRecordOwedButUnbuilt(failure)).toBe(false);
@@ -1118,11 +1114,10 @@ describe("a run terminated after its disclosure keeps the record of it", () => {
   test("a record that was owed and could not be built is reported on the failure", async () => {
     // The build is non-fatal and warns on the operator log alone, so a caller
     // handed a bare `undefined` cannot tell "no disclosure to attest" from "the
-    // disclosure happened and its record did not build" -- and only the second
-    // is a lost accounting entry. The responder's prepared exchange carries an
-    // empty retention disposition, a value reaching past the config schema that
-    // buildExchangeRecord validates and rejects, so its build throws on a run
-    // that had already disclosed.
+    // disclosure happened and its record did not build" -- only the second is a
+    // lost accounting entry. The responder's prepared exchange holds an empty
+    // retention disposition, past what the schema allows, so
+    // buildExchangeRecord rejects it and throws on this already-disclosed run.
     const [connInitiator, connResponder] = createMessagePipe();
     const initiator = runExchange(
       connInitiator,

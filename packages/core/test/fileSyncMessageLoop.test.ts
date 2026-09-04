@@ -327,8 +327,8 @@ const baseOptions = (): MessageLoopOptions => ({
   retainFiles: false,
   locklessRendezvous: false,
   timestampInFilename: false,
-  // Deliberately huge so a success-path reschedule never fires during a test;
-  // stop() clears the one pending timer.
+  // Set huge so a success-path reschedule never fires during a test; stop()
+  // clears the one pending timer.
   pollingFrequency: 3_600_000,
   unexpectedFiles: undefined,
 });
@@ -466,8 +466,8 @@ describe("FileSyncMessageLoop emit routing", () => {
 });
 
 // The one recovery send() prescribes for a publish the transport could not
-// settle. Spelled out here rather than imported so an edit to the module constant
-// has to be made deliberately in both places; the two messages that carry it are
+// settle. Spelled out here rather than imported so an edit to the module
+// constant has to be made in both places; the two messages that carry it are
 // asserted against this single literal, so they cannot silently diverge.
 const REMEDY =
   "Re-run the exchange in a clean directory; both parties must start the new " +
@@ -533,13 +533,12 @@ describe("FileSyncMessageLoop counter commit points", () => {
     expect([...f.responsibleFiles]).toEqual([]);
     expect([...files.keys()].filter((p) => p.endsWith(".tmp"))).toEqual([]);
 
-    // What the caller is told, read where the operator reads it. send() is the one
-    // publish reaching this class whose recovery is established, so it restates the
-    // transport's neutral rejection as one that names the MESSAGE and carries that
-    // recovery -- and tags it, which is what makes the length load-bearing: the tag
-    // suppresses the CLI's generic "retry without re-inviting" advisory, so this
-    // remedy is the only next step printed and has to end inside the renderer's
-    // per-link cap.
+    // What the caller is told, read where the operator reads it. send() is
+    // the one publish whose recovery is established, so it restates the
+    // transport's rejection, naming the message and carrying that recovery,
+    // tagged to suppress the CLI's generic "retry without re-inviting"
+    // advisory. This remedy is the only next step printed, so it must end
+    // inside the renderer's per-link cap.
     expect(
       (rejected as { psilinkRecoveryHintEmitted?: unknown })
         .psilinkRecoveryHintEmitted,
@@ -738,13 +737,11 @@ describe("FileSyncMessageLoop counter commit points", () => {
     const clock = virtualClock(f, 400);
     try {
       // The peer acks on the SECOND listing of each wait -- 800 virtual ms,
-      // inside one budget but not inside two. (Second, where the delete-mode
-      // pair above says third, for the same number of in-loop iterations: that
-      // wait spends one extra listing on the pre-check before its loop.) Each
-      // call REPLACES the previous wrapper over the clock's list() rather than
-      // nesting on top of it: a nested wrapper carries its counter over from the
-      // earlier wait, so it would fire on the next wait's very FIRST listing and
-      // that wait would never reach a second listing of its own.
+      // inside one budget but not two. (Second, not third as in the
+      // delete-mode pair, because that wait spends one extra listing on its
+      // pre-check.) Each call REPLACES the previous wrapper rather than
+      // nesting: a nested wrapper would carry over its counter and fire on
+      // the next wait's first listing instead of its second.
       const clockList = f.client.list.bind(f.client);
       const ackedOnListing: number[] = [];
       const ackOnSecondList = () => {
@@ -897,7 +894,7 @@ describe("FileSyncMessageLoop poller lifecycle", () => {
 
   test("the ENOENT threshold is terminal: pollerActive cleared before the error emit", async () => {
     const files = new Map<string, Buffer>();
-    // list() surfaces the message but get() always ENOENTs (peer consumed it).
+    // list() shows the message but get() always ENOENTs (peer consumed it).
     const f = makeLoop(
       {},
       {
@@ -1019,13 +1016,12 @@ describe("FileSyncMessageLoop resetSessionState", () => {
 
 // --- connection-per-poll session boundaries ----------------------------------
 //
-// In connection-per-poll mode the loop releases the transport session at the
-// idle boundary of every cycle and dials a fresh one at the next cycle's start.
-// The directory is server-side, so the boundary destroys nothing durable: what
-// these pin is that the loop carries its own state across it -- the sequence
-// shadow, the entry foreign-file snapshot, and the responsible-file set -- and
-// that the only thing that clears any of them is resetSessionState(), which the
-// boundary never calls.
+// In connection-per-poll mode the loop releases the transport session at
+// each idle boundary and dials a fresh one at the next cycle's start. The
+// directory is server-side, so the boundary destroys nothing durable: the
+// loop carries its own state across it -- the sequence shadow, entry
+// foreign-file snapshot, and responsible-file set -- and only
+// resetSessionState(), never the boundary, clears them.
 
 // Records every transport op and attaches the two optional cycle-boundary
 // methods, so a test can see where the boundary falls relative to the loop's own

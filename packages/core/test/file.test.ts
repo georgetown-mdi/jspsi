@@ -403,7 +403,7 @@ for (const driver of faultGateDrivers) {
 test("loadCSVFile: the fault refusal names the data row and the parser's reason", async () => {
   // The operator reading an unattended run's log needs the row and the reason; the
   // row is PapaParse's 0-based data-row index reported 1-based, so the second data
-  // row of the file reads as row 2.
+  // row of the file is reported as row 2.
   const csv = "name,dob,ssn\nAlice,1990-01-02,111\nBob,1985-12-31\n";
   await expect(loadCSVFile(streamOf(csv), 4096)).rejects.toThrow(
     /data row 2: Too few fields: expected 3 fields but parsed 2 \(TooFewFields\)/,
@@ -532,17 +532,18 @@ test("assertLeadingLineWithinByteCeiling: a non-sliceable input (a stream) is in
   ).resolves.toBeUndefined();
 });
 
-// The cases above use a tiny ceiling, so `limit` stays under the helper's 256 KiB
-// head window and only the head read runs. These two reach the tail read (the
-// `limit > window` branch) with a ceiling above that window, which the small-ceiling
-// cases never exercise -- the path where a head/tail seam off-by-one could wrongly
-// reject a valid file, the one false-positive direction this backstop must avoid.
+// The cases above use a tiny ceiling, so `limit` stays under the helper's
+// 256 KiB head window and only the head read runs. These two reach the tail
+// read (the `limit > window` branch) with a ceiling above that window,
+// which the small-ceiling cases never exercise -- the path where a
+// head/tail boundary off-by-one could wrongly reject a valid file, the one
+// false-positive direction this check must avoid.
 const HEAD_WINDOW = 256 * 1024;
 
 test("assertLeadingLineWithinByteCeiling: a terminator past the first read window is still found", async () => {
   // A header that terminates only after the head window but within the ceiling must
-  // resolve: the head/tail split must drop no bytes at the seam, so a legitimate
-  // large header is never wrongly rejected.
+  // resolve: the head/tail split must drop no bytes at the boundary, so a
+  // legitimate large header is never wrongly rejected.
   const ceiling = 2 * HEAD_WINDOW;
   const headerLen = HEAD_WINDOW + 4096; // past the head window, well under the ceiling
   const file = new File(

@@ -17,14 +17,12 @@ import {
 } from "../src/connection/messageConnection";
 import type { AssociationTable } from "../src/types";
 
-// Every index list a party receives from its partner addresses rows or per-round
-// candidate positions the RECEIVING party owns, so each is checked against that
-// party's own authenticated state before it drives the match set, the payload it
-// discloses, or the attested record. The deviation tests here drive an otherwise
-// honest two-party exchange and alter exactly one inbound frame, so what is
-// asserted is the check under test rather than a crypto or framing failure: the
-// deviating frame is refused as a classified protocol error, and an untouched run
-// stays green.
+// Every index list a party receives from its partner addresses rows or
+// per-round positions the RECEIVING party owns, so each is checked against that
+// party's own state before it can drive the match, payload, or record. The
+// tests below drive an otherwise honest exchange and alter one inbound frame,
+// so the deviating frame is refused as a classified protocol error while an
+// untouched run stays green.
 
 const psiLibrary = await PSI();
 
@@ -71,8 +69,8 @@ function deviatingInbound(
 }
 
 // The two frame shapes a deviation aims at, identified by shape rather than by
-// position so a test reads as "the association table" / "the mapped-element list"
-// and does not silently follow a renumbered sequence.
+// position, so a test names its target as "the association table" / "the
+// mapped-element list" and does not silently follow a renumbered sequence.
 const isIndexTable = (frame: unknown): frame is [number[], number[]] =>
   Array.isArray(frame) && frame.length === 2 && Array.isArray(frame[0]);
 
@@ -136,9 +134,9 @@ async function cascadeWithDeviation(deviate: Deviation): Promise<unknown> {
   return outcome;
 }
 
-// The mirror seam on the other role: the joiner reads the starter's own matched
-// indices as the round's final frame, one per pair the joiner reported. It is the
-// only inbound frame of the round that is a plain array of numbers.
+// The mirror boundary on the other role: the joiner reads the starter's own
+// matched indices as the round's final frame, one per pair the joiner reported.
+// It is the only inbound frame of the round that is a plain array of numbers.
 async function cascadeWithJoinerDeviation(
   transform: (list: Array<number>) => unknown,
 ): Promise<unknown> {
@@ -271,9 +269,10 @@ test("single-pass sender refuses a resolved table longer than its own row count"
 });
 
 test("single-pass sender refuses a resolved table whose local half descends", async () => {
-  // Reversing both halves keeps every entry whole, in range, distinct, and paired
-  // with the same partner row, so the only property left to fail is the ascending
-  // order the AssociationTable contract carries and the result rows are read in.
+  // Reversing both halves keeps every entry whole, in range, distinct, and
+  // paired with the same partner row, so the only property left to fail is the
+  // ascending order the AssociationTable contract requires and the result rows
+  // are read in.
   const err = await singlePassWithDeviation(
     onIndexTable((table) => [[...table[0]].reverse(), [...table[1]].reverse()]),
   );
@@ -300,8 +299,8 @@ test("single-pass sender accepts a resolved table whose partner half descends", 
 // label, so a repeat on the wrong half is still refused.
 
 // The "many" side holds a value twice, so one of its partner's rows takes two
-// links and the resolved table genuinely repeats -- a table the strict rule would
-// have rejected.
+// links and the resolved table repeats -- a table the strict rule would have
+// rejected.
 const groupedKeys = [["Bob", "Bob", "Carol"]];
 const ungroupedKeys = [["Alice", "Bob", "Carol"]];
 
@@ -386,7 +385,7 @@ test("single-pass sender still holds the repeating half to ascending order", asy
 test("single-pass sender bounds the table by the many side's row count", async () => {
   // Where the SENDER is the "one" side, its own row count does not cap the
   // table: the partner half's distinctness does, against the count the partner
-  // carried on the terms exchange.
+  // declared on the terms exchange.
   const asOneSide = await singlePassDeduplicating(
     "one-to-many",
     onIndexTable(() => [
@@ -668,13 +667,12 @@ test("cascade refuses a returned mapped-element list with a negative partner row
 });
 
 // --- Duplicate detection at either bound scale --------------------------------
-// The detector picks its backing by the ratio of the bound to the list length, and
-// every seam above runs at fixture scale, where the bitmap is always the smaller
-// allocation. The widest bound a partner may declare is exercised here instead:
-// the refusal must be the same classified protocol error, which it cannot be if
-// the allocation is ever sized by that bound. A bitmap of MAX_RECORD_COUNT bytes
-// does not fail cleanly -- V8 aborts the process rather than throwing -- so this
-// test's failure, should the ratio guard ever go away, is unmissable.
+// The detector's backing depends on the ratio of the bound to the list length;
+// every case above runs at fixture scale, where the bitmap is always the
+// smaller allocation. This test exercises the widest bound a partner may
+// declare instead, so the same classified refusal must still result -- a
+// MAX_RECORD_COUNT-byte bitmap aborts the V8 process rather than failing
+// cleanly, so a regression here would be unmissable but not gracefully caught.
 
 test("a repeated index is refused at either bound scale", () => {
   const refusalFor = (exclusiveBound: number): unknown => {

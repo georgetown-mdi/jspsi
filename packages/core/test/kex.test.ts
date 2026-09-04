@@ -19,7 +19,7 @@ import {
 
 import { PassthroughConnection } from "./utils/passthroughConnection";
 
-// Generic, non-oracular failure message every authentication failure surfaces.
+// Generic, non-oracular failure message every authentication failure raises.
 const GENERIC_FAILURE = "key exchange authentication failed";
 
 // Two distinct 32-byte pre-shared secrets for the matching / mismatching cases.
@@ -173,9 +173,9 @@ function offCurvePoint(
 }
 
 /**
- * The all-zero uncompressed string a peer might send for the identity,
- * 0x04 || 0 || 0, which SEC1 reads as the off-curve point (0, 0) rather than as
- * the point at infinity.
+ * The all-zero uncompressed string a peer might send for the identity, 0x04 ||
+ * 0 || 0, which SEC1 treats as the off-curve point (0, 0) rather than as the
+ * point at infinity.
  */
 function identityPoint(): Uint8Array<ArrayBuffer> {
   const out = new Uint8Array(65);
@@ -315,7 +315,7 @@ test("known-answer vector: a private key does not import against a public point 
 
 test("known-answer vector: distinct flag values produce distinct transcripts", () => {
   // Guards the vector file itself: each flag combination yields a distinct
-  // handshake hash, so the transcript binding is load-bearing rather than inert.
+  // handshake hash, so the transcript binding is critical rather than inert.
   const hashes = new Set(vectors.cases.map((c) => c.handshakeHashHex));
   expect(hashes.size).toBe(vectors.cases.length);
 });
@@ -424,14 +424,12 @@ describe("crypto.subtle.importKey peer-share validation", () => {
   });
 
   test("ACCEPTS the compressed and parity-matching hybrid encodings of a valid point, which is why the encoding is pinned above importKey", async () => {
-    // The load-bearing measurement behind the canonical-encoding check in
-    // kex.ts: importKey is not the layer that pins the encoding. On this
-    // platform it admits several encodings of one point and re-exports
-    // each as the same uncompressed point, so a share re-encoded in transit
-    // would decode to the same key while carrying different bytes into the
-    // transcript. The browser suite makes the same measurement in Chromium and
-    // gets a different answer for the hybrid form, which is the second reason
-    // the pin cannot be delegated.
+    // The critical measurement behind the canonical-encoding check in kex.ts:
+    // on this platform importKey admits several encodings of one point and
+    // re-exports each as the same uncompressed point, so a share re-encoded in
+    // transit would decode to the same key while feeding different bytes into
+    // the transcript. The browser suite gets a different answer for the hybrid
+    // form in Chromium -- the second reason the pin cannot be delegated.
     const { publicKey } = await generateEphemeral();
     const compressed = compressPoint(publicKey);
     const hybrid = hybridPoint(publicKey, "matching");
@@ -457,14 +455,12 @@ describe("crypto.subtle.importKey peer-share validation", () => {
   });
 
   test("admits a hybrid encoding only while its prefix agrees with Y's parity", async () => {
-    // The qualifier on the acceptance above, measured rather than predicted:
-    // both prefixes are driven over both parities of Y, so each of 0x06 and
-    // 0x07 is offered once as the prefix the standard pairs with the point and
-    // once as the prefix contradicting it. The two 65-byte strings in each pair
-    // differ in that octet alone, so an admitted one and a refused one isolate
-    // the parity restatement as the whole of what is checked -- neither prefix
-    // is admitted or refused on its own account. The spec's "parity-correct"
-    // qualifier and the kex.ts encoding comment rest on this case.
+    // The qualifier on the acceptance above, measured not predicted: both
+    // prefixes are driven over both Y parities, so each of 0x06 and 0x07 is
+    // offered once matching the point and once contradicting it, over otherwise
+    // identical bytes. An admitted one and a refused one isolate the parity
+    // check -- neither prefix passes or fails alone. The spec's
+    // "parity-correct" qualifier and the kex.ts comment both rest on this case.
     for (const parity of ["even", "odd"] as const) {
       const publicKey = await generateEphemeralWithYParity(parity);
       const matching = hybridPoint(publicKey, "matching");
@@ -527,7 +523,7 @@ test("a mismatched secret fails closed on both sides with the generic error", as
     const reason = (r as PromiseRejectedResult).reason as unknown;
     // The trust-boundary classification consumers key on: a security-kind
     // ConnectionError, with the message byte-identical to the generic string
-    // (the type carries the classification, never the message).
+    // (the type holds the classification, never the message).
     expect(reason).toBeInstanceOf(ConnectionError);
     expect((reason as ConnectionError).kind).toBe("security");
     expect((reason as ConnectionError).message).toBe(GENERIC_FAILURE);
@@ -551,7 +547,7 @@ test("the handshake times out if the peer never responds", async () => {
   );
   expect((err as Error).message).toBe("key exchange handshake timed out");
   // The timeout is a transport fault (the peer is gone), not an authentication
-  // verdict, so it deliberately does NOT carry the security classification the
+  // verdict, so by design it does NOT hold the security classification the
   // generic authentication failure does.
   expect(err).not.toBeInstanceOf(ConnectionError);
   // Tagged as a peer-wait timeout so a consumer that also knows the run swept
@@ -576,7 +572,7 @@ test("responder sends abort when the initiator's msg1 is malformed", async () =>
   // undecodable `e`, exercising the public-key-decode abort path.
   await connA.send({ kexMsg: "1", e: "not-base64url!!", reqEnc: false });
   const err = await responder.catch((e: unknown) => e);
-  // A malformed-frame rejection carries the same security classification as a
+  // A malformed-frame rejection holds the same security classification as a
   // confirmation mismatch: every authentication-failure site throws the one
   // generic security-kind error.
   expect(err).toBeInstanceOf(ConnectionError);
@@ -605,7 +601,7 @@ test("initiator sends abort when the responder's msg2 is malformed", async () =>
 
 // Drive a hand-rolled responder that has received msg1, so a test can inject a
 // crafted msg2. Returns the parsed msg1, the responder's fresh ephemeral, the
-// DH output, and the keys both parties would derive honestly -- binding the
+// DH output, and the keys both parties would derive correctly -- binding the
 // initiator's flag from msg1 and the chosen responder flag, so the keys match a
 // real exchange with those flags.
 async function fakeResponderUpToMsg2(
@@ -713,7 +709,7 @@ test("the responder folds an explicit abort delivered as msg3 into a generic fai
   // The responder's final receive parses msg3 as a union of the msg3 and abort
   // schemas. An explicit { kexMsg: "abort" } -- the initiator's signal that it
   // rejected the responder's tag (e.g. on a psk mismatch) -- parses successfully
-  // but is deliberately folded into the same generic authentication failure as a
+  // but is folded into the same generic authentication failure as a
   // malformed msg3. This exercises that abort arm of the union directly; its only
   // other coverage is indirect, through malformed-msg3 cases.
   const [connA, connB] = createMessagePipe();
@@ -1028,18 +1024,16 @@ test("flipping the initiator's request-encryption flag on the wire fails the han
 });
 
 test("flipping the responder's request-encryption flag on the wire fails the handshake closed (initiator side)", async () => {
-  // Symmetric to the msg1 case above, on the msg2 downgrade path. A session both
-  // parties want encrypted (initiator and responder each request true): an
-  // attacker flips the responder's reqEnc from true to false in transit. The
-  // honest responder computes its confirmation tag over a transcript binding
-  // true, but the wire copy the initiator sees is flipped to false. The initiator
-  // binds the downgraded false flag, so the responder's confirmation tag (msg2)
-  // does not verify and the initiator fails closed -- a downgrade cannot proceed
-  // with a split decision.
+  // Symmetric to the msg1 case above: an attacker flips the responder's reqEnc
+  // from true to false in transit. The honest responder computes its
+  // confirmation tag over a transcript binding true, but the wire copy the
+  // initiator sees is flipped to false, so the initiator binds the downgraded
+  // flag instead. The responder's confirmation tag (msg2) fails to verify, and
+  // the initiator fails closed rather than proceed on a split decision.
   const [connA, connB] = createMessagePipe();
   const initiator = runKex(connA, "initiator", PSK_A, true);
   initiator.catch(() => {});
-  // The hand-rolled responder honestly requests encryption (responderReqEnc:
+  // The hand-rolled responder actually requests encryption (responderReqEnc:
   // true), so keys.responderConfirm binds reqEnc: true into the transcript.
   const { eRespPub, keys } = await fakeResponderUpToMsg2(connB, PSK_A, true);
   // Only the wire copy is flipped to false: the initiator's transcript binds the
@@ -1053,8 +1047,8 @@ test("flipping the responder's request-encryption flag on the wire fails the han
   await expect(initiator).rejects.toThrow(GENERIC_FAILURE);
 });
 
-// The cross-version fail-closed mechanism for an additive payload, which the
-// protocol-version tag deliberately is not bumped for: a flag-unaware peer omits
+// The cross-version fail-closed mechanism for an additive payload that, by
+// design, does not bump the protocol-version tag: a flag-unaware peer omits
 // reqEnc entirely, and the flag-aware peer's strict (.strict()) schema rejects
 // the message before any transcript is computed.
 
