@@ -1,34 +1,25 @@
-// Rendezvous for the file-sync wire protocol, in two parts. First, the pure
-// rendezvous helpers: the hello payload builder, the bilateral-mode-mismatch
-// comparison, the peer control-file name recognizers, and the partial-sync-gated
-// control-file read. Each is a pure function of its arguments -- it reads the two
-// bilateral mode flags, an id, or a transport client passed in explicitly, holds
-// no instance state, and does no I/O beyond the transport client it is handed.
-// This module also defines RendezvousScope, the per-call path/display scope a
-// synchronize() call computes once at entry and threads through the negotiation.
+// Rendezvous for the file-sync wire protocol.
 //
-// Second, the FileSyncRendezvous coordinator: the stateful rendezvous
-// negotiation (the entry-directory scan and sweep, the lock-joiner fast-path, and
-// the symmetric hello-exchange with its lockless-ack-barrier and lock branches).
-// It is a coordinator over connection-owned state rather than an owner of durable
-// state: it reads the connection's identity/config through accessor deps and
-// WRITES role/peerId/handshakeRole back through setter deps at the commit sites,
-// and it mutates the connection's responsibleFiles/foreignFileSnapshot Sets by
-// shared reference. That bidirectional deps object is why it is a class the
-// connection composes rather than the read-only-getter shape of the abortMarker
-// and sftpSession subsystems. The rendezvous protocol RATIONALE -- the wire
-// names, the ordering, the lock-vs-lockless negotiation, and the
-// bilateral-mismatch and joiner-recovery guarantees -- is normatively specified
-// in docs/spec/FILE_SYNC.md and docs/spec/CHANNEL_SECURITY.md; this module
-// implements it and does not restate it.
+// The module holds two things: pure rendezvous helpers (the hello payload
+// builder, the bilateral-mode-mismatch comparison, the peer control-file
+// name recognizers, and the partial-sync-gated control-file read) and the
+// FileSyncRendezvous coordinator, the stateful negotiation (entry-directory
+// scan and sweep, lock-joiner fast-path, and the symmetric hello-exchange).
+// The coordinator reads the connection's identity/config through
+// RendezvousDeps accessors and writes role/peerId/handshakeRole back
+// through its setters, mutating the connection's
+// responsibleFiles/foreignFileSnapshot Sets by shared reference.
 //
-// This module is deliberately NOT re-exported by the package barrel (main.ts
-// barrels fileSyncConnection.ts via `export *`, not this file), so its
-// `@internal` exports stay out of the package's public runtime surface while a
-// unit test can deep-import them -- the same pattern as fileSyncNames.ts and
-// fileSyncFraming.ts. FileSyncConnection keeps the thin public synchronize()
-// entry (validateSynchronizeEntry() plus rendezvous.run(scope)) and injects the
-// identity/config/Set deps the coordinator negotiates over.
+// This module is not re-exported by the package barrel, so its @internal
+// exports stay out of the public runtime surface while a unit test can
+// deep-import them (fileSyncNames.ts and fileSyncFraming.ts follow the same
+// pattern). FileSyncConnection's public synchronize() entry calls
+// validateSynchronizeEntry() then rendezvous.run(scope).
+//
+// The protocol itself -- wire names, ordering, lock-vs-lockless
+// negotiation, bilateral-mismatch and joiner-recovery guarantees -- is
+// specified in docs/spec/FILE_SYNC.md and docs/spec/CHANNEL_SECURITY.md;
+// this module implements it and does not restate it.
 
 import * as z from "zod";
 import { NIL as NIL_UUID } from "uuid";
@@ -80,15 +71,12 @@ import {
 import { errorMessage } from "./messageConnection";
 import type { FileInfo, FileTransportClient } from "./fileSyncConnection";
 
-// The path/display locals a single synchronize() call computes once at entry
-// (from this.path/this.outbound, narrowed by the connected guard) and threads
-// through its phase methods. Not instance state: each field is derived per
-// call, so passing this scope by value keeps the phases from re-deriving it and
-// from depending on the order in which the guards ran. `inboundPath` is where
-// this party reads the peer's files; `outboundPath` is where it writes its own
-// (they coincide in shared mode); `split` is true only with a separate outbound
-// directory; `dirsDisplay` is the operator-facing scope naming both halves in
-// split mode.
+// The path/display scope a synchronize() call computes once at entry (from
+// this.path/this.outbound) and threads through its phase methods, so no
+// phase re-derives it. `inboundPath` is where this party reads the peer's
+// files; `outboundPath` is where it writes its own (equal in shared mode);
+// `split` is true only with a separate outbound directory; `dirsDisplay` is
+// the operator-facing scope naming both halves in split mode.
 /** @internal */
 export interface RendezvousScope {
   inboundPath: string;
@@ -98,15 +86,13 @@ export interface RendezvousScope {
 }
 
 /**
- * Compose the operator-facing directory scope, redacting each path where it is
- * interpolated rather than the composed result. The split form carries
- * first-party labels BETWEEN two paths, so redacting the composite would let a
- * marker in the inbound path consume the labels and the operator's own outbound
- * path under the fail-closed dangling rule -- the shape
- * {@link redactPrivateKeyMaterial} exists to contain. Every production producer
- * of a {@link RendezvousScope}'s `dirsDisplay`, and the sweep's own scope
- * string, goes through here -- a convention, not a guarantee: `dirsDisplay` is a
- * plain string, so a producer composing one by hand is not rejected by the type.
+ * Composes the operator-facing directory scope, redacting each path where
+ * it is interpolated rather than the composed result: redacting the
+ * composite would let a marker in the inbound path consume the split-mode
+ * labels and the outbound path under the fail-closed dangling rule (see
+ * {@link redactPrivateKeyMaterial}). Every production producer of a
+ * {@link RendezvousScope}'s `dirsDisplay` goes through here -- a
+ * convention, not a guarantee, since `dirsDisplay` is a plain string.
  *
  * @internal
  */
@@ -130,23 +116,18 @@ export function composeDirsDisplay(
 /** @internal */
 type PeerHelloProvenance = "presentAtEntry" | "appearedAfterEntry";
 
-// Reads the hello control file through the I5 partial-sync gate. Retries on a
-// transient get() failure or a JSON parse failure (indicating the sync tool has
-// not finished writing the file) until timeToLive expires, then throws a
-// transport Error. Any typed UsageError from get() is terminal -- today that is
-// an over-cap body (FrameSizeExceededError) or a stalled read
-// (TransportOperationStalledError), but the catch below is deliberately broad
-// rather than enumerated: a UsageError is a non-retryable usage fault by
-// definition, so re-reading cannot fix it and retrying would let a hostile
-// server hold the gate open until the deadline. A fully-synced body that parses
-// but fails the envelope schema (protocol mismatch, not a transient sync gap) is
-// terminal for the same reason. Peer-id recovery is always filename-based; this
-// function validates the body only.
+// Reads the hello control file through the I5 partial-sync gate: retries a
+// transient get() or JSON-parse failure until timeToLive expires, then
+// throws a transport Error. A typed UsageError from get() -- an over-cap
+// body or a stalled read -- is terminal and not retried, since retrying
+// cannot fix a usage fault and would let a hostile server hold the gate
+// open until the deadline; a body that fails the envelope schema is
+// terminal for the same reason. Peer-id recovery is always filename-based;
+// this validates the body only.
 //
-// The hello is the only control file with a body, so the gate reads only it
-// (the schema is HelloEnvelopeSchema at every call site). The acknowledgment
-// marker is a zero-length file matched by name existence, so it needs no gate:
-// a zero-byte file has no partial-sync window to guard.
+// The hello is the only control file with a body (schema is always
+// HelloEnvelopeSchema); the ack marker is zero-length and matched by name,
+// so it needs no gate.
 /** @internal */
 export async function readControlFileWithGate(
   client: FileTransportClient,
@@ -169,15 +150,12 @@ export async function readControlFileWithGate(
         maxBytes: MAX_FRAME_SIZE_BYTES,
       });
     } catch (err) {
-      // A typed UsageError from get() is terminal, not a partial-sync retry: a
-      // hostile server could otherwise hold the gate open every cycle until the
-      // deadline -- by serving an oversized hello (FrameSizeExceededError) or by
-      // withholding the transfer so each read stalls
-      // (TransportOperationStalledError). Both re-incur their cost on every pass,
-      // so rethrow any UsageError to propagate out of synchronize() as the typed,
-      // exit-64 failure rather than being swallowed and retried. (The
-      // malformed-payload UsageError thrown below is terminal for the same
-      // reason.)
+      // A typed UsageError from get() (FrameSizeExceededError,
+      // TransportOperationStalledError) is terminal: rethrow so
+      // synchronize() exits as the typed exit-64 failure instead of being
+      // retried, which would let a hostile server hold the gate open every
+      // cycle until the deadline. The malformed-payload UsageError thrown
+      // below is terminal for the same reason.
       if (err instanceof UsageError) throw err;
       // File may not be readable yet (TOCTOU or partial sync); retry.
       await cancellableDelay(pollingFrequency, signal);
@@ -210,25 +188,21 @@ export async function readControlFileWithGate(
     }
     return result.data;
   } while (Date.now() <= timeToLive.getTime());
-  // Deliberately a plain Error, not a UsageError: the pre-sweep retain
-  // inspection classifies a UsageError from this gate as terminal (I5b) and
-  // anything else as retain-uncertain, so promoting this exhausted-budget throw
-  // would turn its bounded read into a hard refusal.
+  // A plain Error, not a UsageError: the pre-sweep retain inspection
+  // classifies a UsageError from this gate as terminal (I5b) and anything
+  // else as retain-uncertain, so a UsageError here would turn a bounded
+  // read into a hard refusal.
   //
-  // Leads with the operative sentence and the recovery step, trailing the path,
-  // because each cause-chain link is truncated at the rendered boundary (see
-  // sanitizeForDisplay). Both texts are kept short deliberately: the fixed text
-  // and the path share one 256-character link, so every character here is one
-  // the path does not get, and the path is what the recovery step acts on. The
+  // Leads with the operative sentence and recovery step, trailing the
+  // path, because sanitizeErrorForDisplay truncates each cause-chain link;
+  // the fixed text and the path share one 256-character link, so the
   // budget each leaves is pinned by a test, not asserted here.
   //
-  // Neither text asserts which of the two indistinguishable causes it is
-  // looking at, because from here they are indistinguishable: the recovery step
-  // is a re-run in both, with removal conditioned on surviving it. Only the
-  // entry-present read names residue as the likelier reading -- a hello that
-  // appeared after this run's entry scan was written or propagated while the run
-  // was watching, so a peer whose publish is still landing explains it at least
-  // as well as a leftover does.
+  // Neither text claims which of the two causes applies -- residue, or a
+  // live peer still publishing -- since the recovery step (re-run, remove
+  // only if it persists) is the same either way. Only the entry-present
+  // read names residue as the likelier reading, since it predates this
+  // run.
   throw new Error(
     provenance === "presentAtEntry"
       ? "peer hello never became readable; it predates this run and may be " +
@@ -240,10 +214,10 @@ export async function readControlFileWithGate(
   );
 }
 
-// Builds a party's hello payload: the two bilateral mode flags it advertises so
-// the peer can detect a mismatch and fail fast. Written into the hello body in
-// both rendezvous branches. The hello is the only control file with a body; the
-// lockless ack is a zero-length marker that carries no flags.
+// Builds a party's hello payload: the two bilateral mode flags it advertises
+// so the peer can detect a mismatch and fail fast. Written into the hello
+// body in both rendezvous branches. The hello is the only control file with
+// a body; the lockless ack is a zero-length marker with no flags.
 /** @internal */
 export function helloEnvelope(flags: {
   locklessRendezvous: boolean;
@@ -255,17 +229,17 @@ export function helloEnvelope(flags: {
   };
 }
 
-// Compares a peer's advertised hello flags against a party's own configuration.
-// Returns a BilateralModeMismatchError naming both sides' settings for the
-// offending flag, or undefined when both flags match. Called at every site that
-// reads a peer hello.
+// Compares a peer's advertised hello flags against a party's own
+// configuration. Returns a BilateralModeMismatchError naming both sides'
+// settings for the offending flag, or undefined when both match. Called at
+// every site that reads a peer hello.
 //
-// retain_files is compared first because it is the implying flag: the only
-// way both flags differ is retain=true/lockless=true vs
-// retain=false/lockless=false (retain_files implies lockless_rendezvous), and
-// naming the retain_files mismatch lets the operator realign both with a
-// single rerun rather than risk the invalid retain=true/lockless=false state.
-// A lockless-only divergence (retain matches) still reports lockless.
+// retain_files is compared first, since it implies lockless_rendezvous: the
+// only way both flags differ is retain=true/lockless=true vs
+// retain=false/lockless=false, and naming retain_files lets the operator
+// realign both in one rerun instead of landing on the invalid
+// retain=true/lockless=false state. A lockless-only divergence still
+// reports lockless.
 /** @internal */
 export function bilateralMismatch(
   peer: HelloEnvelope,
@@ -289,11 +263,10 @@ export function bilateralMismatch(
 
 // True when `name` is a peer's hello (`<peerId>-hello.json`): it ends with
 // HELLO_SUFFIX, recovers a non-empty id (peerIdFromControlName), and that id
-// is not the querying party's own. The single definition of "a peer hello"
-// shared by the synchronize() entry guard and the in-flight lock/lockless
-// rendezvous scans, so "a valid peer hello" means the same thing at every site
-// -- in particular a bare `-hello.json` (empty id) is never a peer hello,
-// whether it is present at entry or injected mid-rendezvous.
+// is not the querying party's own. The single definition of "a peer hello",
+// shared by the entry guard and the in-flight lock/lockless scans: a bare
+// `-hello.json` (empty id) is never a peer hello, whether present at entry
+// or injected mid-rendezvous.
 /** @internal */
 export function isPeerHelloName(name: string, selfId: string): boolean {
   const id = peerIdFromControlName(name, HELLO_SUFFIX);
@@ -311,53 +284,41 @@ export function isPeerJoiningName(name: string, selfId: string): boolean {
 }
 
 // Bounds the pre-sweep retain-signal inspection's peer-hello read (see
-// sweepProtocolFiles). The read goes through the I5a gate, which retries a
-// partially-synced body until its deadline; bounding it to a small multiple of
-// the polling frequency -- a near-future deadline, never the full peer timeout
-// -- keeps a non-resolving hello from stalling the sweep. The gate's do-while
-// still guarantees one read, so a stale directory's hello resolves on the first
-// attempt; this budget only absorbs sync-tool flush jitter on sync-mediated
-// transports. Hellos are tiny (two booleans), so the read is never
-// bandwidth-bound. Expressed as poll cycles rather than a raw millisecond
-// magic constant so it tracks the configured cadence.
+// sweepProtocolFiles), through the I5a gate: a near-future deadline, never
+// the full peer timeout, so a non-resolving hello cannot stall the sweep.
+// The gate's do-while still guarantees one read, so a stale directory's
+// hello resolves on the first attempt; this budget only absorbs sync-tool
+// flush jitter. Expressed as poll cycles, not a raw millisecond constant,
+// so it tracks the configured cadence.
 const RETAIN_INSPECTION_POLL_CYCLES = 2;
 
-// Bounds every RENDEZVOUS-time peer-hello read through the same I5a gate, for
-// the same reason the inspection bounds its own: the gate retries a body it
-// cannot resolve until its deadline, so handing it the full peer timeout lets a
-// single unresolvable hello -- a torn or empty leftover from a crashed prior run
-// -- hold the entire budget in every mode.
+// Bounds every rendezvous-time peer-hello read through the same I5a gate:
+// handing it the full peer timeout would let one unresolvable hello -- a
+// torn or empty leftover from a crashed prior run -- hold the entire
+// budget.
 //
-// Three times the inspection's cycles, because this read races a peer that is
+// Three times the inspection's cycles, since this read races a peer
 // actively publishing rather than inspecting a stale directory, so it must
-// absorb a full publish propagation on a sync-mediated transport and not merely
-// flush jitter. It is not larger still because the hello is published
-// temp-then-rename: the final name appears only at the atomic rename, so the
-// body is complete before the name is visible and what remains is propagation,
-// never a write in progress.
+// absorb a full publish propagation, not just flush jitter. Not larger
+// still: the hello publishes temp-then-rename, so its body is complete
+// before its final name is visible, and what remains to absorb is
+// propagation, never a write in progress.
 const RENDEZVOUS_HELLO_READ_POLL_CYCLES = 6;
 
-// Floor under every rendezvous-time bound this module derives from poll cycles.
+// Floor under every rendezvous-time bound this module derives from poll
+// cycles: the poll interval is how often this party looks, not how long
+// the transport takes to answer, and a bound counted purely in cycles can
+// expire inside a single round trip on a slow transport. This party cannot
+// measure the peer's round trip either, so the floor is wall-clock, not
+// adaptive.
 //
-// The poll interval is how often this party LOOKS; it says nothing about how
-// long the transport takes to ANSWER, and the two are independent. An operator
-// polling a high-latency server every 20 ms has a cadence three orders of
-// magnitude below its round trip, and a bound counted purely in cycles then
-// expires inside a single one: measured against two live connections, a 6-cycle
-// bound aborted a genuinely live partner mid-round-trip in under a second and
-// prescribed deleting its hello. This party cannot measure the round trip
-// itself either -- the slow side is the PARTNER, whose operations it never
-// observes -- so the floor is wall-clock, not adaptive.
-//
-// joinerRecoveryMs is that wall-clock quantity, already: it is what the lock
-// path allows for a peer's publish-and-rename to land on this transport, which
-// is the same wait these bounds are absorbing. Reusing it keeps one knob for one
-// question rather than a second constant to tune. Neither bound below extends a
-// wait past what the operator configured: the I5a hello-read bound stays capped
-// at the remaining peer budget, while the entry-hello window is armed only
-// while it fits strictly inside that budget rather than capped to it -- on a
-// budget too small to hold the floor, the ordinary peer timeout fires instead,
-// with its ordinary message.
+// joinerRecoveryMs is that wall-clock quantity already -- what the lock
+// path allows for a peer's publish-and-rename to land -- so it is reused
+// rather than adding a second constant. Neither bound below extends a wait
+// past what the operator configured: the I5a hello-read bound stays capped
+// at the remaining peer budget, and the entry-hello window arms only when
+// it fits strictly inside that budget; below that floor the ordinary peer
+// timeout fires instead.
 const rendezvousBoundMs = (
   options: RendezvousOptions,
   pollCycles: number,
@@ -388,44 +349,38 @@ const peerHelloProvenance = (
 ): PeerHelloProvenance =>
   name === entryPeerHello ? "presentAtEntry" : "appearedAfterEntry";
 
-// How long a peer hello that was ALREADY PRESENT at entry gets to acknowledge
-// this party's hello before rendezvous fails terminally, as a fraction of the
-// operator's own remaining peer budget (with the floor below). Deriving it from
-// that budget rather than fixing a constant keeps it never longer than the
-// operator asked for and scales it with the transport they configured. An eighth
-// leaves seven eighths of the budget for the exchange proper and is still orders
-// of magnitude above any plausible rendezvous round trip: 7 m 30 s at the
-// default one-hour budget, against the full hour this replaces on every
-// invocation of an unattended re-run.
+// How long a peer hello already present at entry gets to acknowledge this
+// party's hello before rendezvous fails terminally, as a fraction of the
+// operator's remaining peer budget (with the floor below): never longer
+// than the operator asked for, and scaled to the configured transport. An
+// eighth leaves seven eighths of the budget for the exchange proper: 7 m
+// 30 s at the default one-hour budget, against the full hour this replaces
+// on an unattended re-run.
 //
-// This is the one bound the design left to be tuned. It, the cycle count below,
-// and the wall-clock floor rendezvousBoundMs applies are the only three places
-// to change it.
+// The one bound this design leaves to be tuned. It, the cycle count below,
+// and the wall-clock floor rendezvousBoundMs applies are the only three
+// places to change it.
 const ENTRY_HELLO_ACK_WINDOW_FRACTION = 1 / 8;
 
 // Floor under that window, in poll cycles, so a fast transport (or a small
-// configured budget) cannot abort inside a single round trip: this party's hello
-// must reach the peer and the peer's ack must come back, each at the configured
-// cadence. Carried through rendezvousBoundMs, so the wall-clock floor documented
-// there applies to this window too -- which is what stops it aborting a live
-// partner whose round trip outruns the poll cadence.
+// configured budget) cannot abort inside a single round trip: this party's
+// hello must reach the peer and the peer's ack must come back, each at the
+// configured cadence. Passed through rendezvousBoundMs, so the wall-clock
+// floor documented there applies here too, stopping this from aborting a
+// live partner whose round trip outruns the poll cadence.
 const ENTRY_HELLO_ACK_WINDOW_MIN_POLL_CYCLES = 6;
 
-// The instant an entry-present peer hello stops being given the benefit of the
-// doubt, or undefined when the window cannot fit strictly inside the remaining
-// budget -- the ordinary peer timeout then fires instead, with its ordinary
-// message.
+// The instant an entry-present peer hello stops getting the benefit of the
+// doubt, or undefined when the window cannot fit strictly inside the
+// remaining budget -- the ordinary peer timeout then fires instead, with
+// its ordinary message.
 //
-// The guarantee that the deadline never reaches the peer timeout is carried by
-// strict arming, not by which clock reading the window is measured from:
-// arming requires windowMs strictly less than the remaining budget, so
-// now + windowMs stays strictly inside that budget even if now were read a
-// second time -- a later reading only shrinks the remaining budget the window
-// is checked against, which tightens the bound rather than loosening it. The
-// caller passes the clock sample the deadline is measured from rather than
-// this taking its own as supporting hygiene on top of that guarantee: it keeps
-// the window and the budget it is weighed against visibly one reading, rather
-// than two a reader has to work through the strict-arming argument to trust.
+// The deadline never reaches the peer timeout because arming requires
+// windowMs strictly less than the remaining budget, so now + windowMs
+// stays strictly inside it even under a second clock reading. The caller
+// passes the clock sample the deadline is measured from, rather than this
+// taking its own, so the window and the budget it is checked against are
+// visibly one reading rather than two.
 const entryHelloAckDeadline = (
   options: RendezvousOptions,
   now: number,
@@ -440,18 +395,18 @@ const entryHelloAckDeadline = (
 
 // The longest filename the protocol's own constructors build from UUID
 // identities: a retain-mode message ack over a timestamped message at the
-// maximum frame size, with a three-digit counter. Computed by calling those two
-// constructors, so it follows a change to either name shape instead of
-// restating one. The nil UUID stands in for the two identities: only their
-// length reaches this arithmetic, and it carries the canonical UUID text length
-// without drawing randomness at module load.
+// maximum frame size, with a three-digit counter. Computed by calling
+// those two constructors, so it follows a change to either name shape
+// instead of restating one. The nil UUID stands in for the two identities:
+// only their length reaches this arithmetic, and it has the canonical UUID
+// text length without drawing randomness at module load.
 //
 // Reserved out of the detail link's budget for the enumeration before the
-// directory scope is fitted, so an operator-chosen path cannot crowd the names
-// out. A name built from a longer identity -- a configured `peer_id`, or a
-// session past message 999 -- may still not fit; it is then counted rather than
-// shown. That the reservation really does show a constructor-built name whole is
-// pinned by a test that builds the shape from those same constructors.
+// directory scope is fitted, so an operator-chosen path cannot crowd the
+// names out. A name built from a longer identity -- a configured
+// `peer_id`, or a session past message 999 -- may still not fit; it is
+// then counted rather than shown. A test pins that the reservation shows a
+// constructor-built name whole.
 const ENTRY_GUARD_NAME_BUDGET_FLOOR = renderedDisplayCost(
   ackMarkerName(
     NIL_UUID,
@@ -467,44 +422,29 @@ const ENTRY_GUARD_NAME_BUDGET_FLOOR = renderedDisplayCost(
 
 const andMoreSuffix = (count: number): string => ` (and ${count} more)`;
 
-// Composes a strict-empty entry-guard refusal: `refusalAndRecovery` -- the
-// sentence naming what is wrong and the step that clears it -- becomes the
-// error's own message, and the directory scope plus the offending filenames
-// become a `cause` link of its own. Both refusals are built here so the shape
-// they share cannot drift.
+// Composes a strict-empty entry-guard refusal: `refusalAndRecovery` becomes
+// the error's own message, and the directory scope plus offending
+// filenames become its own `cause` link. Both refusals are built here so
+// the shape they share cannot drift.
 //
-// The split is what the display boundary forces. sanitizeErrorForDisplay caps
-// EACH link of a rendered cause chain independently, and it truncates before the
-// links are joined, so one link would have to carry the refusal, the recovery
-// step, an operator-chosen directory path, and a list of filenames inside a
-// single budget -- with the path and the names, the two parts nothing here
-// bounds, competing against the two the operator has to read. Giving the detail
-// its own link gives it a second budget, and leaves the first carrying only
-// fixed text. What each message actually measures at the rendered boundary is
-// pinned by a test rather than claimed here.
+// The message and the detail are split into two cause-chain links because
+// sanitizeErrorForDisplay caps and truncates each link independently; one
+// link could not hold the refusal, the recovery step, the directory path,
+// and the filenames without competing budgets. What each message measures
+// at the rendered boundary is pinned by a test.
 //
-// The detail link is fitted to DEFAULT_MAX_DISPLAY_LENGTH rather than to the
-// wider link budget the renderer allows: what it carries is a chooser's own
-// values, and the per-value cap is the size those are budgeted at everywhere
-// else. Fitting under the renderer's cap is always safe -- it is a ceiling, not
-// a quota -- and spending the whole of it on an enumeration of partner-chosen
-// names would be the opposite of what partitioning by chooser is for.
+// The detail link is fitted to DEFAULT_MAX_DISPLAY_LENGTH, the per-value
+// budget, not the wider link cap, since it holds partner-chosen values;
+// the enumeration is bounded by that budget rather than by a count, since
+// a protocol filename runs from roughly 47 characters to
+// ENTRY_GUARD_NAME_BUDGET_FLOOR. Each name is fit-checked in listing order
+// so one long name cannot suppress shorter names behind it; a name that
+// does not fit is counted rather than shown, since a chopped name reads
+// like a whole one the operator could go delete.
 //
-// The enumeration is bounded by that budget rather than by a count: a protocol
-// filename runs from roughly 47 characters (a uuid-id hello) to
-// ENTRY_GUARD_NAME_BUDGET_FLOOR, so any fixed count either spends less of the
-// budget than it could or overruns it. Each name is fit-checked on its own and
-// in listing order; one that does not fit is skipped and the next is tested, so
-// a single long name cannot suppress the shorter ones behind it. A name that
-// does not fit is counted rather than shown, because a name the cap chopped
-// reads like a whole name the operator could go and delete.
-//
-// The names and the directory scope are partner-controlled and are redacted
-// here, so a name shaped like a PEM header is replaced where it stands instead
-// of taking the count, the scope and the names behind it with it (see
-// redactPrivateKeyMaterial). Redacting before the fit loop spends the budget on
-// what the operator is actually shown, and the replacement is shorter than the
-// shortest marker it can stand in for, so it never widens a fitted name.
+// Names and the directory scope are partner-controlled and redacted before
+// the fit loop (see redactPrivateKeyMaterial), so the budget is spent on
+// what the operator is actually shown.
 const entryGuardRefusal = (
   refusalAndRecovery: string,
   kindPlural: string,
@@ -561,10 +501,11 @@ const entryGuardRefusal = (
   });
 };
 
-// The rendezvous-relevant subset of the connection's Options, read live through
-// the deps `options` accessor. The connection's full Options is a superset, so
-// `() => this.options` satisfies this; naming only what the coordinator reads
-// keeps the seam's dependency on the connection's config explicit and narrow.
+// The rendezvous-relevant subset of the connection's Options, read live
+// through the deps `options` accessor. The connection's full Options is a
+// superset, so `() => this.options` satisfies this; naming only what the
+// coordinator reads keeps this boundary's dependency on the connection's
+// config explicit and narrow.
 /** @internal */
 export interface RendezvousOptions {
   timeToLive?: Date;
@@ -576,15 +517,15 @@ export interface RendezvousOptions {
   joinerRecoveryMs: number;
 }
 
-// The connection-owned state the coordinator reads and writes across the seam.
-// Three kinds:
+// The connection-owned state the coordinator reads and writes across this
+// boundary. Three kinds:
 //   - SHARED OBJECT REFERENCES (never copies): responsibleFiles and
 //     foreignFileSnapshot are the same Set instances poll()/cleanup()/close()
 //     hold, so every add/delete/clear/forEach here is observed there.
-//   - LIVE ACCESSORS (read fresh per call, never hoisted): signal/wait/role/id/
-//     client/outbound/log/options/peerId/handshakeRole. signal() in particular
-//     must not be cached: the connection swaps its AbortController per session,
-//     so a concurrent close() abort has to reach an in-flight rendezvous wait.
+//   - LIVE ACCESSORS (read fresh per call, never hoisted): signal/wait/role/
+//     id/client/outbound/log/options/peerId/handshakeRole. signal() must not
+//     be cached: the connection swaps its AbortController per session, so a
+//     concurrent close() abort must reach an in-flight rendezvous wait.
 //   - FIELD-BACKED SETTERS AND DELEGATES: setRole/setPeerId/setHandshakeRole
 //     commit identity in place at the current commit sites; resetSessionState,
 //     clearAbortMarker, and writeAck forward to the connection.
@@ -669,19 +610,18 @@ export class FileSyncRendezvous {
     }
   }
 
-  // Publishes this party's hello temp-then-rename, the discipline every other
-  // payload-bearing publish already follows (the message write in send(), the
-  // ack in writeAck(), and the joiner's own sentinel): the final
-  // `<id>-hello.json` appears only at the atomic rename, so no reader can ever
-  // observe it torn. A hard kill mid-write then leaves a `temp-hello-<uuid>.tmp`
-  // -- inert, and tolerated by the next entry scan -- rather than an empty or
-  // half-written hello under its final name, which the I5a read gate would
-  // retry against for its whole budget in every mode.
+  // Publishes this party's hello temp-then-rename, matching every other
+  // payload-bearing publish (send()'s message write, writeAck(), the
+  // joiner's sentinel): the final `<id>-hello.json` appears only at the
+  // atomic rename, so no reader ever observes it torn. A hard kill
+  // mid-write leaves an inert `temp-hello-<uuid>.tmp`, tolerated by the
+  // next entry scan, rather than a half-written hello under its final name
+  // that the I5a read gate would retry for its whole budget.
   //
   // The in-flight temp is swept inline on failure (best-effort safeDelete),
-  // never tracked in responsibleFiles, matching send()/writeAck(). The CALLER
-  // tracks the final name immediately after this resolves, with no throwable
-  // statement between it and the rename (I4a).
+  // never tracked in responsibleFiles, matching send()/writeAck(). The
+  // caller tracks the final name immediately after this resolves, with no
+  // throwable statement between it and the rename (I4a).
   private async publishHello(dir: string, helloPath: string): Promise<void> {
     const { deps } = this;
     const tempPath = `${dir}/${helloTempName()}`;
@@ -699,42 +639,33 @@ export class FileSyncRendezvous {
     }
   }
 
-  // Pre-sweep retain-signal inspection followed by the protocol-file sweep for
-  // --sweep-exchange-files. Deletes every protocol-grammar file (this party's
-  // and the peer's: hellos, locks, joining sentinels, acks, messages) so
-  // rendezvous can start against a clean slate -- but only after confirming the
-  // directory is not a retain-mode audit transcript. The only retain-mode
-  // deletion that reaches a hello is the terminal rendezvous failure's rollback
-  // of this party's own artifacts (I4b), and a rendezvous that failed
-  // terminally produced no exchange -- so a retain directory holding a
-  // transcript still carries the hello of the party that wrote it (signal b
-  // below), and a directory whose hello that rollback removed holds nothing the
-  // inspection has to protect. The one gap is a peer-less, self-started retain
-  // half-start whose process died before the rollback ran, re-run in delete mode
-  // under that same peer_id: the body read covers only PEER hellos, so a
-  // leftover SELF hello is caught only by local retain mode (signal:
-  // options.retainFiles) -- which a delete-mode re-run does not set. That loses
-  // only this operator's own abandoned half-start, not a two-party transcript.
-  // The inspection checks signals with DIFFERENT coverage:
-  //   (a) a retain-only message ack (isRetainMessageAck) -- a filename-only,
-  //       body-free signal. Strictly additive: it does not cover an
-  //       early-rendezvous retain peer that has written no message ack yet.
-  //   (b) the peer hello's `retain_files` flag, read through the I5a gate. This
-  //       is the load-bearing signal -- a retain party carries its hello from
-  //       the moment it writes it, so a live peer is covered mid-rendezvous,
-  //       before any message ack exists. The read is bounded
-  //       (RETAIN_INSPECTION_POLL_CYCLES, never peer_timeout_ms) so a
-  //       non-resolving body cannot stall the sweep; an unresolved or
-  //       unparseable body is retain-uncertain and refuses the bare flag.
-  // Local retain mode is a signal too. When any signal is present the bare flag
-  // refuses (exit 64); --force-retain-sweep then permits the wipe after a loud
-  // warning. The sweep uses client.delete (rejects), NOT safeDelete (swallows),
-  // so a delete failure on a transport that cannot delete surfaces as a
-  // transport error (exit 69) rather than a silent "clean slate".
+  // Pre-sweep retain-signal inspection, then the protocol-file sweep for
+  // --sweep-exchange-files: deletes every protocol-grammar file (this
+  // party's and the peer's) so rendezvous starts against a clean slate,
+  // but only after confirming the directory is not a retain-mode audit
+  // transcript. Checks two signals:
+  //   (a) a retain-only message ack (isRetainMessageAck) -- filename-only,
+  //       body-free; does not cover an early-rendezvous retain peer that
+  //       has written no ack yet.
+  //   (b) the peer hello's `retain_files` flag, read through the I5a gate,
+  //       bounded to RETAIN_INSPECTION_POLL_CYCLES (never the full peer
+  //       timeout); an unresolved or unparseable body is retain-uncertain
+  //       and refuses the bare flag.
+  // Local retain mode is a signal too. When any signal is present the bare
+  // flag refuses (exit 64); --force-retain-sweep permits the wipe after a
+  // loud warning.
   //
-  // Best-effort and non-atomic: between this scan and the deletes a live peer
-  // could write a file this never saw. Acceptable only because the operator
-  // asserted no concurrent session by passing the flag.
+  // Known gap: a peer-less, self-started retain half-start whose process
+  // died before its own rollback ran, re-run in delete mode under the same
+  // peer_id, is caught only by local retain mode -- a delete-mode re-run
+  // loses only that operator's own abandoned half-start, never a two-party
+  // transcript.
+  //
+  // Uses client.delete (rejects), not safeDelete (swallows): a delete
+  // failure is a transport error (exit 69), not a silent "clean slate".
+  // Best-effort and non-atomic -- a live peer could write between the scan
+  // and the deletes -- acceptable only because the operator asserted no
+  // concurrent session by passing the flag.
   private async sweepProtocolFiles(
     inboundPath: string,
     peerHellos: Array<FileInfo>,
@@ -753,32 +684,30 @@ export class FileSyncRendezvous {
     if (deps.options().retainFiles)
       signals.push("this party is in retain mode");
 
-    // A retain message ack matches the protocol grammar (-ack.json) and is not a
-    // peer hello, so it is already in unexpectedProtocol -- scan that set rather
-    // than the raw entry listing, keeping the retain inspection in step with the
-    // ignored-filtered classification (no orphaned temp or other ignored name
-    // can reach it). In split mode this also catches a retain transcript leftover
-    // in THIS party's outbound directory (its own consumed-message acks), since
-    // outbound leftovers are folded into the same set.
+    // A retain message ack matches the protocol grammar (-ack.json) and is
+    // not a peer hello, so it is already in unexpectedProtocol -- scan that
+    // set rather than the raw entry listing, keeping this in step with the
+    // ignored-filtered classification. In split mode this also catches a
+    // retain transcript leftover in this party's own outbound directory,
+    // since outbound leftovers are folded into the same set.
     const messageAck = unexpectedProtocol.find((e) =>
       isRetainMessageAck(e.file.name),
     );
     if (messageAck)
       signals.push(`a retain-mode message ack (${messageAck.file.name})`);
 
-    // Read peer hello bodies only when no cheaper signal has decided it already:
-    // the hello read is the load-bearing check but the only one that costs a
-    // network round trip.
+    // Read peer hello bodies only when no cheaper signal has decided it
+    // already: the hello read is the critical check, and the only one that
+    // costs a network round trip.
     if (signals.length === 0) {
-      // One deadline shared across all peer hellos: it bounds the total
-      // inspection even in the all-readable case. A readable hello returns as
-      // soon as its body resolves (the gate retries only on failure), so a
-      // delete-mode directory's hellos read quickly. The FIRST hello that cannot
-      // be read sets retainUncertain and breaks out (below): uncertainty is
-      // sticky and already forces the refuse-or-force decision, so reading the
-      // rest cannot change the outcome -- and breaking caps the work a pile of
-      // unreadable hellos (e.g. a hostile directory under --sweep-exchange-files)
-      // can impose, instead of one bounded read apiece.
+      // One deadline shared across all peer hellos, bounding the total
+      // inspection even in the all-readable case (a readable hello returns
+      // as soon as its body resolves). The first hello that cannot be read
+      // sets retainUncertain and breaks out: uncertainty is sticky and
+      // already forces the refuse-or-force decision, so reading the rest
+      // cannot change the outcome, and breaking caps the work a pile of
+      // unreadable hellos (a hostile directory under --sweep-exchange-files)
+      // can impose.
       const inspectionDeadline = new Date(
         Date.now() +
           RETAIN_INSPECTION_POLL_CYCLES * deps.options().pollingFrequency,
@@ -802,17 +731,16 @@ export class FileSyncRendezvous {
             break;
           }
         } catch (err) {
-          // A fully-synced hello that fails the schema (or an over-cap body) is a
-          // terminal UsageError (I5b) -- let it propagate. A close() during
-          // inspection aborts the gate read with the
-          // ConnectionClosedError reason (close()'s abort() invariant); propagate
-          // that as a clean shutdown (exit 69) rather than masking it as a
-          // retain-uncertain UsageError. Any other failure is an unresolved read
-          // within the bounded budget: treat it as retain-uncertain. This is
-          // sticky -- a later hello reading retain_files=false does NOT clear it,
-          // because the unreadable hello could itself be an unsynced retain
-          // hello, and wiping it without --force-retain-sweep is exactly the data
-          // loss the guard prevents. Refuse rather than risk it.
+          // A fully-synced hello that fails the schema is a terminal
+          // UsageError (I5b) -- let it propagate. A close() during
+          // inspection aborts the gate read with ConnectionClosedError;
+          // propagate that as a clean shutdown (exit 69), not a
+          // retain-uncertain UsageError. Any other failure is an unresolved
+          // read within the bounded budget: treat it as retain-uncertain,
+          // and sticky -- a later hello reading retain_files=false does not
+          // clear it, since the unreadable hello could itself be an unsynced
+          // retain hello, and wiping it without --force-retain-sweep is the
+          // data loss the guard prevents.
           if (err instanceof UsageError) throw err;
           if (deps.signal().aborted) throw err;
           // Stop at the first unreadable hello: uncertainty is sticky and
@@ -845,9 +773,9 @@ export class FileSyncRendezvous {
       );
     }
 
-    // Dir-qualified so each file is deleted from the directory it was listed in
-    // (peer hellos are inbound; unexpectedProtocol carries its own dir, which is
-    // the outbound directory for a split-mode self leftover).
+    // Dir-qualified so each file is deleted from the directory it was listed
+    // in (peer hellos are inbound; unexpectedProtocol contains its own dir,
+    // which is the outbound directory for a split-mode self leftover).
     const toDelete: Array<{ name: string; dir: string }> = [
       ...peerHellos.map((file) => ({ name: file.name, dir: inboundPath })),
       ...unexpectedProtocol.map((e) => ({ name: e.file.name, dir: e.dir })),
@@ -954,76 +882,70 @@ export class FileSyncRendezvous {
         if (!fileNames.includes(fileName))
           deps.responsibleFiles.delete(fileName);
       });
-    // Unified entry precondition (mode-agnostic, both delete and retain). At
-    // synchronize() entry the only PROTOCOL file that may legitimately predate
-    // this party's entry is at most one peer hello -- a hello whose id is not
-    // this party's own: a party writes its own hello/lock/ack only after
-    // observing the peer's hello, and messages and ack markers exist only once
-    // rendezvous has completed.
+    // Unified entry precondition (mode-agnostic): the only PROTOCOL file that
+    // may legitimately predate this party's entry is at most one peer hello
+    // (an id that is not this party's own) -- a party writes its own
+    // hello/lock/ack only after observing the peer's hello, and messages and
+    // ack markers exist only once rendezvous has completed. Any other
+    // protocol file is an error (a second peer hello, a self-hello, a lock,
+    // an ack marker, a joining sentinel, a stale message), so the directory
+    // stays strict-empty for protocol files by default, with two
+    // relaxations:
+    //   - FOREIGN files (names that fail the protocol grammar) are
+    //     snapshotted and tolerated in both modes, deleting nothing. A
+    //     message-shaped <id>-<digits>.json matches the grammar and stays a
+    //     protocol file, not foreign.
+    //   - --sweep-exchange-files clears every protocol file (this party's
+    //     and the peer's) after a retain-signal inspection that refuses to
+    //     destroy an audit transcript without --force-retain-sweep.
     //
-    // Any other protocol file is an error: a second peer hello, a self-hello (a
-    // same-id leftover from a crashed session), a lock, an ack marker, a joining
-    // sentinel, or a stale message. The directory is the state machine, so by
-    // default this stays strict-empty for protocol files, with two relaxations
-    // in the foreign and sweep branches below:
-    //   - FOREIGN files (names that FAIL the protocol grammar -- conflict copies,
-    //     partial downloads, unrelated files) are snapshotted and tolerated in
-    //     both modes, deleting nothing. A message-shaped <id>-<digits>.json is
-    //     NOT foreign (it matches the grammar) and stays a protocol file.
-    //   - --sweep-exchange-files clears the protocol files (this party's and the
-    //     peer's) and proceeds against a clean slate, after a retain-signal
-    //     inspection that refuses to destroy an audit transcript without the
-    //     --force-retain-sweep guard.
+    // The one kind that legitimately pre-exists and is not rejected is an
+    // in-flight temp-*.tmp, left by a write hard-killed between the temp
+    // put() and the rename to its final name. Both temp shapes land in
+    // `ignored` and never abort entry, but a message/ack temp
+    // (temp-<uuid>.tmp) is swept while a hello temp (temp-hello-<uuid>.tmp)
+    // is left alone (see the two blocks below). `ignored` is the extension
+    // point for kinds that may legitimately pre-exist as the protocol
+    // grows; the foreign-file snapshot is a sibling tolerance mechanism for
+    // grammar-failing names.
     //
-    // The one kind that legitimately pre-exists and is NOT rejected is an
-    // in-flight temp-*.tmp -- a write hard-killed between the temp put() and the
-    // rename to its final name. Both temp shapes land in `ignored` below and so
-    // never abort entry, but they are disposed of differently: a message or ack
-    // temp (temp-<uuid>.tmp) is swept, a hello temp (temp-hello-<uuid>.tmp) is
-    // left alone. See the two blocks below for why the sweep does not extend to
-    // the hello shape. `ignored` is the sanctioned extension point for kinds
-    // that may legitimately pre-exist as the protocol grows; the foreign-file
-    // snapshot below is a sibling tolerance mechanism for grammar-failing names.
-    // A peer hello is `<peerId>-hello.json` with a non-empty id that is not our
-    // own (isPeerHelloName). A bare `-hello.json` slices to an empty id and is
-    // therefore NOT a peer hello: it still matches the grammar
-    // (isProtocolGrammarName), so it falls into unexpectedProtocol below, is
-    // rejected at the no-flag guard, and is swept under --sweep-exchange-files,
-    // rather than being tolerated as a phantom peer. The in-flight rendezvous
-    // scans share the same predicate so a mid-flight injection is rejected too.
+    // A peer hello is `<peerId>-hello.json` with a non-empty id that is not
+    // our own (isPeerHelloName). A bare `-hello.json` slices to an empty id
+    // and is NOT a peer hello: it still matches the grammar
+    // (isProtocolGrammarName), so it falls into unexpectedProtocol, is
+    // rejected at the no-flag guard, and is swept under
+    // --sweep-exchange-files rather than tolerated as a phantom peer. The
+    // in-flight rendezvous scans share the same predicate so a mid-flight
+    // injection is rejected too.
     const ignored = new Set<string>();
 
-    // Sweep orphaned in-flight temp writes left by a prior crashed exchange.
-    // Match ONLY the protocol's own message/ack temp shape, temp-<uuidv4()>.tmp
-    // (isProtocolTempName minus isHelloTempName), which send()/writeAck()
-    // produce -- never a final <id>.json message (in retain mode the directory is
-    // intentionally full of *.json (the transcript), which can never match
-    // `.tmp`), and never a FOREIGN temp-*.tmp whose stem is not a v4 UUID (a
-    // user/sync-tool `temp-export.tmp`), which falls through to the foreign-file
-    // snapshot below and is tolerated rather than destroyed in a namespace
-    // collision. Delete each with the non-throwing safeDelete, then add its name
-    // to `ignored` so the already-taken `files` snapshot does not re-trip the
-    // guard below on a name we just removed.
+    // Sweep orphaned in-flight temp writes left by a prior crashed exchange:
+    // match only the protocol's own message/ack temp shape,
+    // temp-<uuidv4()>.tmp (isProtocolTempName minus isHelloTempName), which
+    // send()/writeAck() produce -- never a final <id>.json message, and
+    // never a foreign temp-*.tmp whose stem is not a v4 UUID (which falls
+    // through to the foreign-file snapshot and is tolerated). Delete each
+    // with the non-throwing safeDelete, then add its name to `ignored` so
+    // the already-taken `files` snapshot does not re-trip the guard below.
     //
-    // Sweeping unconditionally is licensed by these two shapes being orphaned by
-    // construction: writing either requires having already seen this party's
-    // hello, which is published only after this scan (the ordering is pinned by
-    // a test), so no live in-flight write of either can race this delete.
+    // Sweeping unconditionally is safe because both shapes are orphaned by
+    // construction: writing either requires having already seen this
+    // party's hello, published only after this scan (the ordering is
+    // pinned by a test), so no live in-flight write can race this delete.
     //
-    // The delete is best-effort and the `ignored` add is unconditional (it does
-    // not branch on the delete's outcome): a safeDelete that silently fails (a
-    // transport error, swallowed by contract) leaves the temp on disk, but entry
-    // must still proceed past it (a stale temp is benign) and the next exchange's
-    // entry re-runs this same sweep, so the litter is self-healing rather than
-    // permanent. Tracking the orphan in `responsibleFiles` would not help: its
-    // writer already died, so that process's cleanup() never runs -- which is the
-    // whole reason this rendezvous-time sweep exists.
+    // Best-effort: a safeDelete that silently fails leaves the temp on
+    // disk, but entry proceeds past it and the next exchange's entry
+    // re-runs this same sweep, so the litter is self-healing. Tracking the
+    // orphan in `responsibleFiles` would not help, since its writer already
+    // died and that process's cleanup() never runs -- the reason this sweep
+    // exists.
     const orphanedTempFiles = files.filter(
       (file) => isProtocolTempName(file.name) && !isHelloTempName(file.name),
     );
     if (orphanedTempFiles.length > 0) {
-      // Single breadcrumb: a process died mid-write here. Entry is not aborted
-      // on its account, but the prior crash is worth surfacing.
+      // Single breadcrumb: a process died mid-write here. Entry is not
+      // aborted on its account, but the prior crash should still show in
+      // the log.
       deps
         .log()
         .info(
@@ -1041,17 +963,16 @@ export class FileSyncRendezvous {
       orphanedTempFiles.forEach((file) => ignored.add(file.name));
     }
 
-    // A hello temp is tolerated in place, never swept: publishing a hello
-    // requires nothing from this party, so a peer that started at the same
-    // instant can have one in flight in this very listing, and deleting it would
-    // break that peer's rename and fail its exchange. This party's own crash
-    // residue takes the same disposition -- the two are indistinguishable by
-    // name -- so a hello temp survives entry as inert litter: it matches the
-    // grammar (so it is never counted as a foreign file), the mid-loop scan
-    // recognizes it, and no reader ever opens it. `--sweep-exchange-files` does
-    // not reach it either: the flag clears protocol files whose deletion the
-    // operator's no-concurrent-session assertion covers, and a temp is not one
-    // of the durable protocol files that assertion is about.
+    // A hello temp is tolerated in place, never swept: a peer that started
+    // at the same instant can have one in flight in this listing, and
+    // deleting it would break that peer's rename. This party's own crash
+    // residue takes the same disposition, since the two are
+    // indistinguishable by name, so a hello temp survives entry as inert
+    // litter -- it matches the grammar (never counted as foreign), the
+    // mid-loop scan recognizes it, and no reader opens it.
+    // --sweep-exchange-files does not reach it either: the flag clears the
+    // durable protocol files the operator's no-concurrent-session assertion
+    // covers, and a temp is not one of those.
     const helloTempFiles = files.filter((file) => isHelloTempName(file.name));
     if (helloTempFiles.length > 0) {
       deps
@@ -1075,48 +996,38 @@ export class FileSyncRendezvous {
         !ignored.has(file.name) && isPeerHelloName(file.name, deps.id()),
     );
 
-    // Recognize-and-sweep leftover authenticated abort markers, mirroring the
-    // orphaned-temp sweep above (safeDelete + add to `ignored` so the name never
-    // reaches the directory-clean check). Every authenticated terminal failure
-    // leaves a `<writerId>-abort.json` -- it must persist for the peer to read --
-    // so a subsequent exchange reusing the directory would otherwise find it and
-    // reject "directory not clean", turning a transient failure into a blocked
-    // directory. Both parties retry under FRESH ids, so on the case that matters
-    // the leftover is named by neither of them nor by either hello; the sweep
-    // therefore matches any WELL-FORMED marker, whichever id wrote it -- the
-    // `<id>-abort.json` grammar with a non-empty recovered id, sliced by the same
-    // peerIdFromControlName every other control-name site routes through. A bare
-    // `-abort.json` recovers no id, is attributable to no party, and stays an
-    // unexpected protocol file under the normal policy; a name that fails the
-    // grammar is foreign and is never touched here.
+    // Recognize-and-sweep leftover authenticated abort markers, mirroring
+    // the orphaned-temp sweep above. Every authenticated terminal failure
+    // leaves a `<writerId>-abort.json`, which must persist for the peer to
+    // read; a subsequent exchange reusing the directory would otherwise
+    // find it and reject "directory not clean". Both parties retry under
+    // fresh ids, so the sweep matches any well-formed marker
+    // (`<id>-abort.json` with a non-empty recovered id via
+    // peerIdFromControlName), whichever id wrote it. A bare `-abort.json`
+    // recovers no id and stays an unexpected protocol file; a
+    // grammar-failing name is foreign and is never touched here.
     //
-    // Sweeping a marker no id in this session names is safe because at entry no
-    // marker can BELONG to this session: a marker is written only post-handshake,
-    // and a party cannot reach post-handshake before its peer has passed this
-    // same entry scan, so a marker visible here is necessarily residue of a prior
-    // session, whose token cannot authenticate under this session's key. The
-    // residual is a directory a live peer is still using in violation of
-    // directory exclusivity: sweeping there costs that peer its fast-fail and
-    // drops it back to the peer-silence timeout, a limit stated in
-    // docs/spec/FILE_SYNC.md.
+    // Safe because no marker visible at entry can belong to this session:
+    // a marker is written only post-handshake, and a party cannot reach
+    // post-handshake before its peer has passed this same entry scan, so a
+    // marker seen here is residue of a prior session whose token cannot
+    // authenticate under this session's key. Sweeping it costs a still-live
+    // peer its fast-fail, dropping it to the peer-silence timeout (a limit
+    // stated in docs/spec/FILE_SYNC.md).
     //
-    // Delete mode only. In retain mode the directory is a durable audit
-    // transcript, so auto-sweeping a marker beside it would reintroduce the
-    // destruction the retain guard prevents; a retain-mode leftover instead falls
-    // through to the unexpectedProtocol guard (exit-64 refusal on the no-flag
-    // path) and to sweepProtocolFiles' existing --force-retain-sweep gate under
-    // --sweep-exchange-files. Reusing that gate rather than a parallel retain
-    // check keeps the two from drifting.
+    // Delete mode only: in retain mode the directory is a durable audit
+    // transcript, so a leftover instead falls through to the
+    // unexpectedProtocol guard and to sweepProtocolFiles' own
+    // --force-retain-sweep gate, reusing that check rather than a parallel
+    // one that could drift from it.
     //
-    // Best-effort, exactly like the orphaned-temp sweep: safeDelete swallows a
-    // transport-level delete failure and the `ignored` add is unconditional, so a
-    // marker that fails to delete is left on disk and entry proceeds past it
-    // rather than aborting on a transient hiccup. Such a leftover is benign: the
-    // next exchange's entry re-runs this sweep over it under whatever ids that
-    // exchange draws, and it cannot forge a PeerAbortError in a later session
-    // because verifyPeerAbortMarker authenticates the marker's token against that
-    // session's HKDF-derived peer token, which a stale marker from a prior
-    // session's key cannot satisfy.
+    // Best-effort, like the orphaned-temp sweep: safeDelete swallows a
+    // transport-level failure, so a marker that fails to delete is left on
+    // disk and entry proceeds past it. It is benign: the next exchange's
+    // entry re-runs this sweep, and it cannot forge a PeerAbortError in a
+    // later session, since verifyPeerAbortMarker authenticates the
+    // marker's token against that session's HKDF-derived peer token, which
+    // a stale marker cannot satisfy.
     if (!deps.options().retainFiles) {
       const leftoverAbortFiles = files.filter(
         (file) =>
@@ -1149,14 +1060,13 @@ export class FileSyncRendezvous {
     const foreignFiles = files.filter(
       (file) => !ignored.has(file.name) && !isProtocolGrammarName(file.name),
     );
-    // Protocol-grammar files that are not the tolerated peer hello: a self-hello,
-    // a lock, a joining sentinel, an ack marker, or a stale message. A SECOND
-    // peer hello is counted in peerHellos, not here: on the no-sweep path the >1
-    // guard (else branch below) rejects it; under --sweep-exchange-files it is
-    // swept along with the first, so that guard is not reached.
-    // Dir-qualified so the sweep below deletes each from the directory it was
-    // listed in and no rename/delete crosses the two directories: inbound files
-    // here, outbound leftovers appended in the split block below.
+    // Protocol-grammar files that are not the tolerated peer hello: a
+    // self-hello, a lock, a joining sentinel, an ack marker, or a stale
+    // message. A second peer hello is counted in peerHellos, not here: the
+    // no-sweep path's >1 guard rejects it, and --sweep-exchange-files
+    // sweeps it along with the first. Dir-qualified so the sweep below
+    // deletes each from the directory it was listed in: inbound files here,
+    // outbound leftovers appended in the split block below.
     const unexpectedProtocol: Array<{ file: FileInfo; dir: string }> = files
       .filter(
         (file) =>
@@ -1181,18 +1091,16 @@ export class FileSyncRendezvous {
             `${foreignFiles.map((f) => redactAndSanitizeForDisplay(f.name)).join(", ")}`,
         );
 
-    // Split mode: the OUTBOUND directory must be as fresh as the inbound one --
-    // retain mode's fresh-directory precondition applies to both halves (a stale
-    // self message or ack here would otherwise corrupt the send/ack gate). Peer
-    // files never land in outbound (the peer writes to its own outbound, which
-    // is THIS party's inbound), so every protocol-grammar file is this party's
-    // own leftover from a crashed prior session: an orphaned temp is swept
-    // (best-effort safeDelete), a foreign file is snapshotted and tolerated, and
-    // any other protocol file is collected as unexpected (rejected by the
-    // clean-start guard, or swept under --sweep-exchange-files) exactly as on the
-    // inbound side. That same "no peer file lands here" routing rule is why the
-    // sweep covers BOTH temp shapes here while the inbound one exempts the hello
-    // shape: a hello temp in this directory can only be this party's own.
+    // Split mode: the outbound directory must be as fresh as the inbound
+    // one -- retain mode's fresh-directory precondition applies to both
+    // halves. Peer files never land in outbound (the peer writes to its
+    // own outbound, which is this party's inbound), so every
+    // protocol-grammar file here is this party's own leftover: an orphaned
+    // temp is swept, a foreign file is tolerated, and any other protocol
+    // file is collected as unexpected, exactly as on the inbound side. That
+    // same routing rule is why the sweep covers both temp shapes here while
+    // the inbound side exempts the hello shape: a hello temp in this
+    // directory can only be this party's own.
     if (split) {
       const outFiles = await deps.client().list(outboundPath);
       const outOrphans = outFiles.filter((file) =>
@@ -1259,9 +1167,9 @@ export class FileSyncRendezvous {
             "confirming no other session is using this path, or re-run with " +
             "--sweep-exchange-files to clear every protocol file.",
           "unexpected protocol file(s)",
-          // dirsDisplay names both halves in split mode: unexpectedProtocol can
-          // carry outbound leftovers as well as inbound ones, so directing the
-          // operator at the inbound path alone would mislead.
+          // dirsDisplay names both halves in split mode: unexpectedProtocol
+          // can hold outbound leftovers as well as inbound ones, so
+          // directing the operator at the inbound path alone would mislead.
           dirsDisplay,
           unexpectedProtocol.map((e) => e.file.name),
         );
@@ -1280,15 +1188,16 @@ export class FileSyncRendezvous {
     return peerHellos;
   }
 
-  // Lock-mode joiner fast-path: a single peer hello is already present and this
-  // party is in lock mode, so it arrives via a `<id>-joining.json` sentinel that
-  // carries its hello body, deletes the discovered peer hello, and renames the
-  // sentinel into place. Commits role/peerId only after both writes succeed.
+  // Lock-mode joiner fast-path: a single peer hello is already present and
+  // this party is in lock mode, so it arrives via a `<id>-joining.json`
+  // sentinel that holds its hello body, deletes the discovered peer hello,
+  // and renames the sentinel into place. Commits role/peerId only after
+  // both writes succeed.
   //
   //   A list
   //   A hello
   //   B list
-  //   B joining                       (sentinel carrying B's hello body)
+  //   B joining                       (sentinel holding B's hello body)
   //   B delete A hello
   //   B rename joining -> B hello
   //   A list
@@ -1327,36 +1236,30 @@ export class FileSyncRendezvous {
       deps.signal(),
     );
 
-    // Bilateral flag check. A mismatch here means the peer runs a different
-    // rendezvous protocol than this (lock) party -- it is lockless, since
-    // only a lockless peer leaves its hello in place for a lock joiner to
-    // discover. For symmetric detection the joiner must write its own
-    // advertised hello BEFORE throwing (so the lockless peer reads it through
-    // its own peer-hello read and fails too) and must NOT delete the peer
-    // hello: both hellos are the directory's terminal state. The hello is
-    // left untracked so close()/cleanup() does not sweep it. This is
-    // detection, not negotiation -- neither side adapts to the other's mode.
+    // Bilateral flag check. A mismatch here means the peer is lockless,
+    // since only a lockless peer leaves its hello in place for a lock
+    // joiner to discover. For symmetric detection the joiner writes its
+    // own advertised hello before throwing (so the lockless peer reads it
+    // and fails too) and must not delete the peer hello: both hellos are
+    // the directory's terminal state, left untracked so close()/cleanup()
+    // does not sweep them. Detection, not negotiation -- neither side
+    // adapts to the other's mode.
     const mismatch = bilateralMismatch(peerEnvelope, deps.options());
     if (mismatch) {
       // Advertise our own hello so the lockless peer reads it and fails
-      // symmetrically. This is the one mismatch site that needs a NEW write at
-      // detection time, so it is the single point of asymmetric failure in the
-      // symmetric-detection guarantee: if the put fails at exactly this moment
-      // there is no durable advertisement for the peer to read -- whatever the
-      // write order -- and the peer degrades to the peer-timeout. Retry
-      // the write up to a small bounded budget at the polling cadence to raise
-      // the odds it lands before the peer would otherwise time out (the peer is
-      // concurrently polling, so the advertisement need not arrive on the first
-      // try). It does not change detection -- see
-      // ADVERTISE_HELLO_RETRY_ATTEMPTS.
+      // symmetrically -- the one mismatch site needing a new write at
+      // detection time, so it is the single point of asymmetric failure in
+      // the symmetric-detection guarantee: if the put fails here, the peer
+      // degrades to the peer-timeout instead. Retry the write up to
+      // ADVERTISE_HELLO_RETRY_ATTEMPTS at the polling cadence to raise the
+      // odds it lands before the peer times out; this does not change
+      // detection.
       //
-      // Only after the budget is exhausted do we fall through to the
-      // log-and-degrade path. Whatever the write's outcome, THIS party still
-      // throws the genuine mismatch it detected (a UsageError, CLI exit 64):
-      // the retry must not let a transport rejection escape the catch-less
-      // joiner fast-path and mask the mismatch as a generic Error (exit 69).
-      // The mismatch is the actionable cause; the operator must fix the
-      // diverging flag regardless of the transport.
+      // Whatever the write's outcome once the budget is exhausted, this
+      // party still throws the genuine mismatch it detected (a UsageError,
+      // exit 64): the retry must not let a transport rejection escape and
+      // mask the mismatch as a generic Error (exit 69). The operator must
+      // fix the diverging flag regardless of the transport.
       for (
         let attempt = 1;
         attempt <= ADVERTISE_HELLO_RETRY_ATTEMPTS;
@@ -1383,17 +1286,15 @@ export class FileSyncRendezvous {
             try {
               await deps.wait(deps.options().pollingFrequency);
             } catch {
-              // The only way this.wait rejects is an abort from a concurrent
-              // close() -- a plain delay never rejects -- so this catch cannot
-              // swallow a real put() failure (those are caught by the inner
-              // try and logged above). Stop retrying and fall through to the
-              // reset + `throw mismatch` below so the genuine
-              // BilateralModeMismatchError (exit 64) stays the surfaced root
-              // cause rather than the close's ConnectionClosedError (exit 69):
-              // the diverging flag is the actionable cause the operator must
-              // fix, and a close arriving inside this retry is a deliberate
-              // local shutdown -- the only rejector of deps.wait, per the
-              // reasoning above -- where neither code is the exit code.
+              // this.wait only rejects on an abort from a concurrent
+              // close() -- a plain delay never rejects -- so this catch
+              // cannot swallow a real put() failure (caught and logged
+              // above). Stop retrying and fall through to the reset plus
+              // `throw mismatch` below, so the genuine
+              // BilateralModeMismatchError (exit 64) stays the reported
+              // root cause rather than the close's ConnectionClosedError
+              // (exit 69): the diverging flag is the actionable cause the
+              // operator must fix.
               // Log the cut-short retry so a close-during-mismatch is
               // diagnosable in debug logs, mirroring the exhausted-budget
               // path's degradation message in the else branch below.
@@ -1427,19 +1328,18 @@ export class FileSyncRendezvous {
       throw mismatch;
     }
 
-    // Sentinel-mediated arrival (closes the joiner partial-failure window).
-    // A bare delete(peer hello) then put(my hello) is observable as an
+    // Sentinel-mediated arrival closes the joiner partial-failure window. A
+    // bare delete(peer hello) then put(my hello) is observable as an
     // inconsistent state: if the delete lands but the put fails, the peer's
-    // hello is gone and ours was never written, and the peer's waitForPeer
-    // cannot tell "joiner mid-write" from "joiner crashed" -- so it polls to
-    // the full peerTimeoutMs. Instead, publish a `<id>-joining.json` sentinel
-    // carrying our hello body, delete the peer hello, then rename the sentinel
-    // to our hello. The rename is atomic, so the sentinel exists across
-    // exactly the window where the peer hello may already be gone but our
-    // hello is not yet present, and the peer recognizes it as a wait signal
-    // (see waitForPeer). We never re-create the peer's hello on failure: that
-    // races the peer's next list() and can trip the two-hello collision check
-    // (I1).
+    // waitForPeer cannot tell "joiner mid-write" from "joiner crashed", so
+    // it polls to the full peerTimeoutMs. Instead, publish a
+    // `<id>-joining.json` sentinel holding our hello body, delete the peer
+    // hello, then rename the sentinel to our hello. The rename is atomic,
+    // so the sentinel exists across exactly the window where the peer
+    // hello may already be gone but ours is not yet present, and the peer
+    // recognizes it as a wait signal (see waitForPeer). We never re-create
+    // the peer's hello on failure: that races the peer's next list() and
+    // can trip the two-hello collision check (I1).
     const joiningName = `${deps.id()}${JOINING_SUFFIX}`;
     const joiningPath = `${scope.inboundPath}/${joiningName}`;
     const helloName = `${deps.id()}${HELLO_SUFFIX}`;
@@ -1448,9 +1348,10 @@ export class FileSyncRendezvous {
       // responsibleFiles idiom (every mutation is `!retainFiles`-guarded, I4a);
       // retain mode never reaches this lock joiner fast-path.
       //
-      // The sentinel carries the hello body so the rename below yields a
+      // The sentinel holds the hello body so the rename below yields a
       // fully-valid `<id>-hello.json` the peer reads through its gate; the
-      // peer itself matches the sentinel by name existence and never reads it.
+      // peer itself matches the sentinel by name existence and never reads
+      // it.
       await deps
         .client()
         .put(serializeEnvelope(helloEnvelope(deps.options())), joiningPath, {
@@ -1467,12 +1368,12 @@ export class FileSyncRendezvous {
       await deps.client().delete(otherPath);
 
       // The peer hello is now gone, so the sentinel is the peer's recovery
-      // signal and MUST survive a subsequent failure. Release it from
-      // responsibleFiles so a failure-path cleanup() (conn.close() in the
-      // caller's finally) leaves it on disk for the peer's bounded-window
-      // recovery -- and, if this process dies, for the next run's Phase 0
-      // guard to reject. A crashed joiner cannot clean up after itself; this
-      // is the "best-effort partial-state cleanup" contract.
+      // signal and must survive a subsequent failure. Release it from
+      // responsibleFiles so a failure-path cleanup() leaves it on disk for
+      // the peer's bounded-window recovery, and, if this process dies, for
+      // the next run's Phase 0 guard to reject. A crashed joiner cannot
+      // clean up after itself; this is the "best-effort partial-state
+      // cleanup" contract.
       if (!deps.options().retainFiles)
         deps.responsibleFiles.delete(joiningName);
 
@@ -1594,10 +1495,9 @@ export class FileSyncRendezvous {
                 deps.responsibleFiles.delete(fileName);
             });
 
-          // isPeerHelloName excludes our own hello and -- the defense this
-          // adds -- a bare `-hello.json` (empty id) injected after entry,
-          // which the previous endsWith-only filter would have adopted as
-          // peerId="".
+          // isPeerHelloName excludes our own hello and a bare `-hello.json`
+          // (empty id) injected after entry, which would otherwise be
+          // adopted as peerId="".
           const peerHellos = currentFiles.filter((file) =>
             isPeerHelloName(file.name, deps.id()),
           );
@@ -1636,14 +1536,14 @@ export class FileSyncRendezvous {
               deps.signal(),
             );
 
-            // Bilateral flag check before writing our ack. On mismatch throw:
-            // our hello (written before this loop) stays via the outer catch's
-            // skip-sweep, so the peer reads it through its own peer-hello read
-            // and fails too. We do not write the ack, leaving both hellos as
-            // the directory's terminal state. Covers a retain_files mismatch
-            // (both parties lockless, both in this barrier) as well as a
-            // lockless_rendezvous mismatch (peer is a lock party that read our
-            // hello at its own two-hellos branch).
+            // Bilateral flag check before writing our ack. On mismatch,
+            // throw without writing the ack: our hello (written before
+            // this loop) stays via the outer catch's skip-sweep, so the
+            // peer reads it through its own peer-hello read and fails too,
+            // leaving both hellos as the directory's terminal state.
+            // Covers a retain_files mismatch (both parties lockless) as
+            // well as a lockless_rendezvous mismatch (peer is a lock party
+            // that read our hello at its own two-hellos branch).
             const mismatch = bilateralMismatch(peerEnvelope, deps.options());
             if (mismatch) throw mismatch;
 
@@ -1663,11 +1563,10 @@ export class FileSyncRendezvous {
               );
             const ackName = await deps.writeAck(outboundPath, peerHelloStem);
             ackPath = `${outboundPath}/${ackName}`;
-            // Track after the durable rename (delete mode only; retain never
-            // sweeps) so cleanup() removes it at close(), exactly as the
-            // message write in send() does. Both publish temp-then-rename, so
-            // the final name only appears at the atomic rename and the add
-            // immediately follows it with no throwable statement between --
+            // Track after the durable rename (delete mode only) so
+            // cleanup() removes it at close(), exactly as the message write
+            // in send() does: the final name appears only at the atomic
+            // rename, with no throwable statement between it and the add --
             // unlike the lock/hello direct-writes, which pre-track because
             // createExclusive can leave the final name on a throwing call.
             // The in-flight temp-*.tmp is swept inline by writeAck.
@@ -1696,22 +1595,22 @@ export class FileSyncRendezvous {
           );
 
           if (!hasPeerAck) {
-            // Bounded recovery window, armed only when THIS hello predated the
-            // run (see run()). Its writer has already demonstrated one
-            // propagation leg, so a live peer answers within a round trip; one
-            // that has not answered within the operator's own derived window is
-            // more likely residue of an interrupted run in this directory, and
-            // waiting the remaining budget only defers the same failure. A hello
-            // that appeared after entry is an ordinary peer arriving and is
-            // never timed here. The leftover is NOT deleted: this party cannot
-            // prove it is its own, and --sweep-exchange-files remains the
-            // operator's assertion that no concurrent session is using the path.
+            // Bounded recovery window, armed only when this hello predated
+            // the run: its writer has already demonstrated one propagation
+            // leg, so a live peer answers within a round trip, and one
+            // that has not answered within the operator's own derived
+            // window is more likely residue of an interrupted run than a
+            // live peer. A hello that appeared after entry is an ordinary
+            // peer arriving and is never timed here. The leftover is not
+            // deleted: this party cannot prove it is its own, and
+            // --sweep-exchange-files remains the operator's assertion that
+            // no concurrent session is using the path.
             //
-            // "More likely", not "is": the window is wall-clock, and a partner
-            // whose transport round trip outruns it is alive and mid-answer.
-            // rendezvousBoundMs floors the window so that stays improbable, but
-            // it cannot be excluded, so the text names residue as a reading
-            // rather than a finding and puts the re-run ahead of the removal.
+            // "More likely", not "is": a partner whose round trip outruns
+            // the window is alive and mid-answer. rendezvousBoundMs floors
+            // the window so that stays improbable but not excluded, so the
+            // message names residue as a reading, not a finding, and puts
+            // the re-run ahead of the removal.
             if (
               entryHelloDeadline !== undefined &&
               peerHello.name === entryPeerHello &&
@@ -1763,9 +1662,8 @@ export class FileSyncRendezvous {
         // No role tag: this lockless timeout can fire after the peer hello
         // was seen and acked but the peer's return ack never arrived, where
         // hello-filename order may make this party the joiner. The role is
-        // genuinely indeterminate here, so emit no `[role]` prefix (unlike
-        // the lock timeout below, which is reachable only as the lone
-        // starter).
+        // indeterminate here, so emit no `[role]` prefix (unlike the lock
+        // timeout below, which is reachable only as the lone starter).
         throw markPeerWaitTimeout(new Error("synchronization has timed out"));
       }
 
@@ -1792,8 +1690,8 @@ export class FileSyncRendezvous {
           });
 
         // isPeerHelloName excludes our own hello and a bare `-hello.json`
-        // (empty id) injected after entry, which the previous endsWith-only
-        // filter would have sliced to peerId="" at the role-commit sites below.
+        // (empty id) injected after entry, which would otherwise slice to
+        // peerId="" at the role-commit sites below.
         const otherFiles = currentFiles.filter((file) =>
           isPeerHelloName(file.name, deps.id()),
         );
@@ -1804,15 +1702,14 @@ export class FileSyncRendezvous {
           file.name.endsWith(LOCK_SUFFIX),
         );
         // A `<peerId>-joining.json` sentinel marks a joiner mid-arrival: it
-        // has begun the put(sentinel) -> delete(our hello) -> rename(sentinel
-        // -> its hello) sequence the lock joiner uses in place of a bare
-        // delete-then-put. Its presence is the signal that distinguishes a
+        // has begun the put(sentinel) -> delete(our hello) ->
+        // rename(sentinel -> its hello) sequence the lock joiner uses in
+        // place of a bare delete-then-put. Its presence distinguishes a
         // live-but-incomplete joiner from a crashed one, which a bare
         // otherFiles.length === 0 cannot. isPeerJoiningName excludes a
-        // self-named sentinel (for symmetry with the hello filters, though the
-        // lock starter never writes one) and -- the defense this adds -- a bare
-        // `-joining.json` (empty id), so a planted empty-id sentinel does not
-        // start the joiner-recovery (joinerRecoveryMs) window below.
+        // self-named sentinel and a bare `-joining.json` (empty id), so a
+        // planted empty-id sentinel does not start the joiner-recovery
+        // (joinerRecoveryMs) window below.
         const joiningFiles = currentFiles.filter((file) =>
           isPeerJoiningName(file.name, deps.id()),
         );
@@ -1821,9 +1718,10 @@ export class FileSyncRendezvous {
           if (joiningFiles.length > 0) {
             // Exactly one sentinel is the only valid mid-arrival state: one
             // joiner, one starter, and the starter never writes a sentinel.
-            // A second is contamination from a third party, the same illegal
-            // state the multi-peer-hello and multi-lock guards below reject;
-            // surface it the same way rather than silently timing the first.
+            // A second is contamination from a third party, the same
+            // illegal state the multi-peer-hello and multi-lock guards
+            // below reject; report it the same way rather than silently
+            // timing the first.
             if (joiningFiles.length > 1) {
               throw new UsageError(
                 `more than one joining sentinel in ` +
@@ -1832,13 +1730,13 @@ export class FileSyncRendezvous {
               );
             }
             // Joiner is mid-arrival. Wait a bounded recovery window for the
-            // rename to land -- the joiner then appears as a normal peer hello
-            // and the branches below take over. If the sentinel persists past
-            // the window, the joiner failed mid-arrival -- after writing the
-            // sentinel but before publishing its hello, on either side of the
-            // delete; abort with a distinct transport error (a plain Error,
-            // CLI exit 69) instead of polling to the full peer timeout. We do
-            // NOT re-create our own hello: that races the joiner's rename and
+            // rename to land -- the joiner then appears as a normal peer
+            // hello and the branches below take over. If the sentinel
+            // persists past the window, the joiner failed mid-arrival
+            // (after writing the sentinel but before publishing its hello);
+            // abort with a distinct transport error (a plain Error, exit
+            // 69) instead of polling to the full peer timeout. We do not
+            // re-create our own hello: that races the joiner's rename and
             // could trip the two-hello collision check (I1).
             const joiningName = joiningFiles[0].name;
             const now = Date.now();
@@ -1864,15 +1762,14 @@ export class FileSyncRendezvous {
             } else if (now - joiningSeenAt > deps.options().joinerRecoveryMs) {
               // The window is a lower bound, not exact: the check runs once
               // per poll after a delay(), so the abort fires somewhere in
-              // (joinerRecoveryMs, joinerRecoveryMs + pollingFrequency]. That
-              // imprecision is deliberate -- this is a bounded recovery
-              // window, not a hard deadline, and one extra poll is immaterial
-              // against the 30 s default. The crash could be on either side
-              // of the joiner's delete, so the message names the bracketing
-              // operations rather than a single step. Labelled [starter]:
-              // this branch is reached only by the party that wrote its hello
-              // first and is waiting for a joiner -- the joiner takes the
-              // entry fast-path and never enters this loop -- even though
+              // (joinerRecoveryMs, joinerRecoveryMs + pollingFrequency] --
+              // one extra poll is immaterial against the 30 s default. The
+              // crash could be on either side of the joiner's delete, so the
+              // message names the bracketing operations rather than a
+              // single step. Labelled [starter]: this branch is reached
+              // only by the party that wrote its hello first and is
+              // waiting for a joiner -- the joiner takes the entry
+              // fast-path and never enters this loop -- even though
               // `this.role` is not committed until rendezvous succeeds.
               throw new Error(
                 `[starter] peer began arriving ` +
@@ -1895,24 +1792,22 @@ export class FileSyncRendezvous {
         }
 
         // A peer hello is present: the joiner's rename landed (or both
-        // parties wrote hellos), so the recovery timer is stale. A sentinel
-        // may still be visible here in exactly one benign case: the peer's
-        // own rename is mid-propagation on a sync-mediated transport, so its
+        // parties wrote hellos), so the recovery timer is stale. A
+        // sentinel may still be visible in one benign case: the peer's own
+        // rename is mid-propagation on a sync-mediated transport, so its
         // `<peerId>-joining.json` and `<peerId>-hello.json` momentarily
-        // coexist (the rename is atomic at the SFTP layer, not necessarily at
-        // the sync-tool layer). That same-id sentinel is the peer we are
-        // about to rendezvous with, so tolerate it. A sentinel whose id
-        // matches no peer hello is a third party in the directory -- the same
-        // contamination the multi-hello and multi-lock guards reject -- so
-        // surface it as a UsageError rather than completing against an
-        // inconsistent directory.
+        // coexist (the rename is atomic at the SFTP layer, not necessarily
+        // at the sync-tool layer); that same-id sentinel is the peer we
+        // are about to rendezvous with, so tolerate it. A sentinel whose id
+        // matches no peer hello is a third party in the directory -- the
+        // same contamination the multi-hello and multi-lock guards reject
+        // -- so report it as a UsageError rather than completing against
+        // an inconsistent directory.
         //
-        // No joiningFiles.length > 1 guard is needed here (unlike the
-        // otherFiles === 0 branch above): a sentinel that escapes the
-        // foreign-id check matches a present peer hello, so two such sentinels
-        // would require two distinct peer hellos -- already terminal under the
-        // otherFiles.length > 1 multi-peer-hello guard in the branches below,
-        // which fires before any role is committed.
+        // No joiningFiles.length > 1 guard is needed here: a sentinel that
+        // escapes the foreign-id check matches a present peer hello, so two
+        // such sentinels would require two distinct peer hellos, already
+        // terminal under the otherFiles.length > 1 guard below.
         const peerHelloIds = new Set(
           otherFiles.map((file) => file.name.slice(0, -HELLO_SUFFIX.length)),
         );
@@ -1968,13 +1863,13 @@ export class FileSyncRendezvous {
           const thisId = thisFile.name.slice(0, -HELLO_SUFFIX.length);
           const otherId = otherFile.name.slice(0, -HELLO_SUFFIX.length);
 
-          // Use hello filename order -- the same tiebreak the lock producer
-          // uses (I7) -- to reconstruct the expected lock name. Do NOT fall
-          // back to a raw `thisId < otherId` compare: for ids where one is a
-          // prefix of the other (e.g. "Agency" / "Agency A"), space (U+0020)
-          // sorts before "-" (U+002D), so hello-filename order and id-order
-          // can diverge, causing a false "lock does not reference this
-          // connection" throw that UUID tests would never catch.
+          // Use hello filename order -- the same tiebreak the lock
+          // producer uses (I7) -- to reconstruct the expected lock name,
+          // never a raw `thisId < otherId` compare: for ids where one is a
+          // prefix of the other (e.g. "Agency" / "Agency A"), space
+          // (U+0020) sorts before "-" (U+002D), so hello-filename order and
+          // id-order can diverge, causing a false "lock does not reference
+          // this connection" throw that UUID tests would never catch.
           const arrivedFirst = thisFile.name < otherFile.name;
           const expectedLockName = arrivedFirst
             ? `${thisId}-${otherId}${LOCK_SUFFIX}`
@@ -1990,8 +1885,9 @@ export class FileSyncRendezvous {
             throw new Error("lock file does not reference this connection");
 
           // I5: read the peer hello body through the partial-sync gate
-          // before committing roles. The hello name carries no byte-count
-          // segment, so a half-synced body cannot be caught by a size check.
+          // before committing roles. The hello name has no byte-count
+          // segment, so a half-synced body cannot be caught by a size
+          // check.
           const peerEnvelope = await readControlFileWithGate(
             deps.client(),
             `${scope.inboundPath}/${otherFile.name}`,
@@ -2003,17 +1899,15 @@ export class FileSyncRendezvous {
           );
 
           // Bilateral flag check before committing roles and before the
-          // sweep below. Defense-in-depth: a lock present in the directory
-          // implies both parties are in lock mode (lockless never creates a
-          // lock) and a lock party always has retain_files=false (retain
-          // requires lockless), so neither flag can differ and a mismatch
-          // cannot reach here for any valid pairing. If a corrupt directory
-          // somehow produced one, leave exactly the two hellos the design
-          // names as the terminal state: delete the peer-written lock first --
-          // it is a transient, not an advertisement the peer must read, and
-          // the outer catch skips every safeDelete on a mismatch. safeDelete
-          // is contractually non-throwing, so it cannot mask the mismatch. Our
-          // own hello stays via that skip-sweep for the peer to read.
+          // sweep below. Defense-in-depth: a lock present implies both
+          // parties are in lock mode (lockless never creates a lock) and a
+          // lock party always has retain_files=false, so a mismatch cannot
+          // normally reach here. If a corrupt directory somehow produced
+          // one, leave the two hellos as the terminal state: delete the
+          // peer-written lock first (a transient, not an advertisement the
+          // peer must read; safeDelete is contractually non-throwing, so it
+          // cannot mask the mismatch), and leave our own hello via the
+          // outer catch's skip-sweep for the peer to read.
           const mismatch = bilateralMismatch(peerEnvelope, deps.options());
           if (mismatch) {
             await deps
@@ -2071,9 +1965,9 @@ export class FileSyncRendezvous {
           const otherPath = `${scope.inboundPath}/${otherFile.name}`;
 
           // I5: read the joiner's hello body through the partial-sync gate
-          // before deleting it. The joiner's hello carries no byte-count
-          // segment so a half-synced body would be silently misread without
-          // this gate.
+          // before deleting it. The joiner's hello has no byte-count
+          // segment, so a half-synced body would be silently misread
+          // without this gate.
           const peerEnvelope = await readControlFileWithGate(
             deps.client(),
             otherPath,
@@ -2134,14 +2028,14 @@ export class FileSyncRendezvous {
 
           // I5 (closes the documented two-hellos gap): read the peer hello
           // body through the partial-sync gate, validating the bilateral
-          // flags, BEFORE racing a lock. A lockless peer's hello can coexist
-          // with our lock hello here, so this is a reachable
+          // flags, before racing a lock. A lockless peer's hello can
+          // coexist with our lock hello here, so this is a reachable
           // lockless_rendezvous mismatch. Running the check before
-          // createExclusive pre-empts both the createExclusive-winner and the
-          // EEXIST-loser sub-paths, so a mismatched pair never races a lock.
-          // On the throw our own hello (already present -- it is one of the
-          // two hellos) is left in place by the outer catch's skip-sweep, so
-          // the lockless peer reads it and fails too.
+          // createExclusive pre-empts both the createExclusive-winner and
+          // EEXIST-loser sub-paths, so a mismatched pair never races a
+          // lock. On the throw, our own hello is left in place by the
+          // outer catch's skip-sweep, so the lockless peer reads it and
+          // fails too.
           const peerEnvelope = await readControlFileWithGate(
             deps.client(),
             `${scope.inboundPath}/${otherFile.name}`,
@@ -2215,16 +2109,14 @@ export class FileSyncRendezvous {
 
             if (!lockAlreadyExists) {
               // The winner never deletes the lock file in its normal path
-              // (it returns from waitForPeer leaving the lock for the loser
-              // to clean up). If the lock is gone after we received EEXIST,
-              // the winner must have either crashed (their doCleanup ran
-              // during the narrow window where lockName was in
-              // responsibleFiles) or otherwise abandoned the handshake.
-              // Either way, polling for their first protocol message would
-              // stall until peerTimeoutMs. Fail fast with a clear cause so
-              // the user does not wait for a peer that is not coming.
-              // Best-effort tidy of both hellos before throwing so the
-              // directory is left clean for a retry.
+              // (it returns from waitForPeer, leaving the lock for the
+              // loser to clean up). If the lock is gone after we received
+              // EEXIST, the winner must have crashed (doCleanup ran during
+              // the narrow window where lockName was in responsibleFiles)
+              // or otherwise abandoned the handshake; polling for their
+              // first protocol message would stall until peerTimeoutMs, so
+              // fail fast instead. Best-effort tidy of both hellos before
+              // throwing so the directory is left clean for a retry.
               await deps
                 .client()
                 .safeDelete(`${scope.inboundPath}/${otherFile.name}`);
@@ -2258,20 +2150,17 @@ export class FileSyncRendezvous {
 
       // TTL expired while still waiting. Both throws below are tagged
       // [starter]: reaching here means no peer hello was ever seen (every
-      // branch that observes one commits a role and returns), so the waiter is
-      // the lone starter -- never the joiner -- even though `this.role` is not
-      // committed until rendezvous succeeds.
+      // branch that observes one commits a role and returns), so the
+      // waiter is the lone starter, never the joiner.
       //
       // If a joiner sentinel was visible on the final poll (joiningSeenAt
-      // still set), the actionable cause is a stuck mid-arrival joiner, not a
-      // bare timeout. This happens when the sentinel first appears with less
-      // than joinerRecoveryMs left on the TTL, so the outer loop exits before
-      // the recovery check (above) can fire; prefer the sentinel error so the
-      // user still gets the same diagnosis the bounded window would have.
-      // Check both: the two are set and cleared as a pair, so testing
-      // joiningSeenName as well makes that coupling type-enforced (it narrows
-      // to string inside the block) rather than relied on by convention, and
-      // degrades gracefully to the bare timeout below if they ever diverged.
+      // still set), the actionable cause is a stuck mid-arrival joiner, not
+      // a bare timeout -- this happens when the sentinel first appears with
+      // less than joinerRecoveryMs left on the TTL, so the outer loop exits
+      // before the recovery check above can fire. Check both fields: they
+      // are set and cleared as a pair, so testing joiningSeenName too keeps
+      // that coupling type-enforced and degrades gracefully to the bare
+      // timeout if they ever diverged.
       if (joiningSeenAt !== undefined && joiningSeenName !== undefined) {
         throw new Error(
           `[starter] peer began arriving ` +
@@ -2288,22 +2177,21 @@ export class FileSyncRendezvous {
     try {
       await waitForPeer();
       // No clear() here: branches that finish their own cleanup
-      // (responder, lock-detection, EEXIST loser, lockless) clear or retain
-      // explicitly before returning. The createExclusive-winner and lockless
-      // paths are the exception -- they leave hello (and lock or ack) in
-      // responsibleFiles so cleanup() can sweep them if the peer never
-      // arrives (e.g. crash before reaching the handshake files). Clearing
-      // here would lose that safety net.
+      // (responder, lock-detection, EEXIST loser, lockless) clear or
+      // retain explicitly before returning. The createExclusive-winner and
+      // lockless paths are the exception -- they leave hello (and lock or
+      // ack) in responsibleFiles so cleanup() can sweep them if the peer
+      // never arrives. Clearing here would lose that safety net.
       //
       // Both rendezvous modes have assigned this.peerId by this point.
-      // Reject an empty recovered id, then prefix-at-dash id pairs, before any
-      // message is sent; both parties evaluate these symmetrically. The hello
-      // scans above (isPeerHelloName) already exclude a bare `-hello.json`, so
-      // an empty this.peerId is unreachable for a correct scan -- this is
-      // defense in depth at the last gate before commit: a peerId="" slipping
-      // through would make poll() treat every "-"-prefixed file as a peer
-      // message and the lockless ack barrier wait on an ack no honest peer
-      // writes, so fail closed here rather than proceed.
+      // Reject an empty recovered id, then prefix-at-dash id pairs, before
+      // any message is sent; both parties evaluate these symmetrically. The
+      // hello scans above already exclude a bare `-hello.json`, so an empty
+      // this.peerId is unreachable for a correct scan -- this is defense in
+      // depth: a peerId="" slipping through would make poll() treat every
+      // "-"-prefixed file as a peer message and the lockless ack barrier
+      // wait on an ack no honest peer writes, so fail closed here rather
+      // than proceed.
       if (deps.peerId()!.length === 0)
         throw new UsageError(
           "rendezvous recovered an empty peer id; a bare " +
@@ -2321,15 +2209,16 @@ export class FileSyncRendezvous {
         );
       return;
     } catch (err: unknown) {
-      // A bilateral-mode mismatch is the one terminal failure that must NOT
+      // A bilateral-mode mismatch is the one terminal failure that must not
       // sweep the directory: this party's advertised hello (written before
       // the loop) is the directory's terminal state, left in place so the
-      // peer reads it through its own peer-hello read and fails too. Skip the
-      // on-disk safeDelete of hello/ack/lock; clearing responsibleFiles (so a
-      // later close()/cleanup() does not delete the advertised hello) and the
-      // in-memory reset still run, so the instance is not wedged. A rerun
-      // against the leftover hellos is rejected by the entry guard (I0) until
-      // the operator clears the directory and fixes the mismatched flag.
+      // peer reads it through its own peer-hello read and fails too. Skip
+      // the on-disk safeDelete of hello/ack/lock; clearing
+      // responsibleFiles (so a later close()/cleanup() does not delete the
+      // advertised hello) and the in-memory reset still run, so the
+      // instance is not wedged. A rerun against the leftover hellos is
+      // rejected by the entry guard (I0) until the operator clears the
+      // directory and fixes the mismatched flag.
       if (!(err instanceof BilateralModeMismatchError)) {
         if (lockPath) await deps.client().safeDelete(lockPath);
         if (ackPath) await deps.client().safeDelete(ackPath);

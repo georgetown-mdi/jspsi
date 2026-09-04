@@ -4,41 +4,27 @@ import { boundedArray } from "../utils/boundedArray.js";
 import { MAX_NAME_LENGTH, MAX_PAYLOAD_ENTRIES } from "./linkageTerms.js";
 
 /**
- * This party's recorded consent to its OWN outbound payload set -- the columns it
- * discloses to the partner for matched records.
+ * This party's recorded consent to its OWN outbound payload set -- the
+ * columns it discloses to the partner for matched records.
  *
- * It exists because an accepting party's outbound set is authored by nobody. An
- * invitation authors the inviter's `payload.send` and, in the common shape, no
- * `payload.receive`, so the mirror an acceptance applies
- * (`deriveAcceptedLinkageTerms`) leaves the acceptor's own `send` ABSENT and the
- * set is instead resolved from that party's own input columns -- where every
- * unrecognized column becomes `role: payload, isPayload: true` (`inferMetadata`).
- * This record is what turns that resolved set from something inferred into
- * something chosen: it distinguishes "unauthored because nobody chose" (the field
- * is absent) from "authored by this party's confirmation" (`confirmed`), which is
- * the distinction the disclosure guards could not otherwise draw -- an absent
- * `payload.send` is a deliberate exception there (see `assertPayloadSendDisclosed`),
- * so holding the dictionary itself to equality would reject every guided and
- * default exchange.
+ * An acceptor's outbound set is authored by nobody: the invitation mirror
+ * (`deriveAcceptedLinkageTerms`) leaves the acceptor's own `send` absent, so
+ * the set is instead resolved from that party's own input columns
+ * (`inferMetadata`). This record turns that resolved set from inferred into
+ * chosen, distinct from the deliberate absent-`send` exception at
+ * `assertPayloadSendDisclosed`.
  *
  * Per-party and LOCAL, like `expectedPayloadColumns` and
- * `disclosedPayloadColumns`: never exchanged, cross-validated, or folded into the
- * agreed-terms hash. The three states are distinct and none collapses into
- * another:
+ * `disclosedPayloadColumns`: never exchanged, cross-validated, or folded
+ * into the agreed-terms hash. Three states:
  *
- * - ABSENT (the field omitted) -- no consent record, so nothing is checked and
- *   transmission stays governed by metadata alone. This is every party that is not
- *   an acceptor: an inviter (whose own set it authored at mint and pinned as
- *   `disclosedPayloadColumns`), a zero-setup run, a hand-authored config.
- * - `pending` -- an acceptance that could not resolve the set (no input file was
- *   named, or its columns could not satisfy the invitation's linkage keys), so the
- *   party has consented to the invitation but not yet to its own disclosure. The
- *   set is resolved, shown, and confirmed at the first run that can (see
- *   `assertOutboundPayloadConsented`).
- * - `confirmed` -- the exact column set this party confirmed. A later run whose
- *   resolved set differs, in EITHER direction, is refused before any credential,
- *   terms, or data are sent rather than silently transmitting a different
- *   disclosure.
+ * - ABSENT -- no consent record; every party that is not an acceptor (an
+ *   inviter, a zero-setup run, a hand-authored config).
+ * - `pending` -- the set could not yet be resolved (no input file named, or
+ *   its columns could not satisfy the invitation's linkage keys).
+ * - `confirmed` -- the exact column set this party confirmed. A later run
+ *   whose resolved set differs is refused before any credential, terms, or
+ *   data are sent (`assertOutboundPayloadConsented`).
  */
 export type OutboundPayloadConsent =
   | {
