@@ -35,9 +35,9 @@ export const SFTP_SESSION_CLOSED_MESSAGE =
 
 /**
  * The abandon of a wait that has no benign value to report: a dial cannot report
- * a session it did not establish. Names the bound, and is deliberately distinct
- * from the teardown latch's "already been closed" refusal -- that connection was
- * closed on purpose, whereas this one was never opened.
+ * a session it did not establish. Names the bound, and is distinct from the
+ * teardown latch's "already been closed" refusal -- that connection was closed
+ * on purpose, whereas this one was never opened.
  *
  * @param kind - The session transition that gave up its wait, from the adapter's
  * own closed set of transition kinds; first-party text, never a server's.
@@ -88,7 +88,7 @@ export function deadSessionOperationError(
 }
 
 /**
- * The terminal error surfaced when the cumulative mid-exchange reconnection
+ * The terminal error reported when the cumulative mid-exchange reconnection
  * budget (max_reconnect_attempts) is exhausted in the default held-session mode.
  * A UsageError so every op path treats it as terminal -- the poll loop stops on a
  * UsageError, and the consume-delete retry rethrows one rather than swallowing it
@@ -98,7 +98,7 @@ export function deadSessionOperationError(
  * maximum, so this line and doCleanup's end-of-run summary read the same counter
  * and the terminal loss charged before the throw cannot put them off by one --
  * and gives the two remedies by their operator-reachable names (the flag and the
- * config field); it carries no partner-controlled text. A budget of zero gets its
+ * config field); it holds no partner-controlled text. A budget of zero gets its
  * own opening clause: there is no allowance to describe as spent, so it names the
  * first drop terminal instead.
  *
@@ -222,7 +222,7 @@ export function sessionRecoveredHeldWarning(
  * read: that state is watched through ssh2's client.on(), not available after
  * connect(), so rather than dial into a window it cannot see, every mid-exchange
  * re-dial closes the connection from this side first and waits for that close.
- * Re-verify the premises per the "Upgrading the SFTP Stack" checklist in
+ * Re-verify the assumptions per the "Upgrading the SFTP Stack" checklist in
  * docs/spec/DEPENDENCY_PINS.md.
  *
  * @param forcedCloseTimeoutMs - The wait each mid-exchange re-dial spends on the
@@ -288,7 +288,7 @@ export function idleReleaseDidNotCloseWarning(): string {
 /**
  * The partner's server ended a session at an idle boundary with nothing of this
  * side's on the wire, so no operation was torn and no recovery re-dial ran: the
- * next cycle simply dials again. Deliberately not the recovery line's wording --
+ * next cycle simply dials again. By design, not the recovery line's wording --
  * nothing was transparently re-dialed here, and the remedy differs.
  *
  * @param boundaryCount - The run tally of boundaries that met an already-ended
@@ -333,7 +333,7 @@ export function forcedIdleReleaseWarning(boundaryCount: number): string {
 
 /**
  * The cycle-start re-dial gave up its wait for the transition ahead of it: it
- * dialed nothing, so this cycle carries no session and the poll loop skips it.
+ * dialed nothing, so this cycle holds no session and the poll loop skips it.
  *
  * @param cycleCount - The run tally of cycles skipped this way, counted apart
  * from the idle release's decline and paced on its own tally.
@@ -365,7 +365,7 @@ export function cycleRedialDeclinedWarning(
  * Names the publish rather than a message, and prescribes no next step:
  * rename() is shared machinery, and the four publishes reaching it -- the
  * message loop's send(), its ack, the rendezvous joining->hello rename, and the
- * abort marker -- share no remedy, so this carries no recovery-hint tag either.
+ * abort marker -- share no remedy, so this holds no recovery-hint tag either.
  * The one caller whose remedy is established re-raises this as its own tagged
  * error holding this one as the `cause` (FileSyncMessageLoop's send()).
  *
@@ -375,7 +375,7 @@ export function cycleRedialDeclinedWarning(
  * published may now be in the peer's hands under it -- comes last, where the
  * cap costs least.
  *
- * @param error - The re-issue's own error, carried only as the `cause` so the
+ * @param error - The re-issue's own error, held only as the `cause` so the
  * SFTP status it names is rendered on its own line under its own cap rather than
  * spending this message's.
  * @param toPath - The destination, partner-derived on the ack and rendezvous

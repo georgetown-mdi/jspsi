@@ -58,7 +58,7 @@ import type { RTCDataChannel } from "werift";
  * queue, so it bounds the peer's per-step single-threaded PSI compute -- which
  * sends no keepalive while it runs -- and thus the workable dataset size.
  *
- * Deliberately a transport-local constant rather than core's file-sync
+ * By design a transport-local constant rather than core's file-sync
  * `DEFAULT_PEER_TIMEOUT_MS`: the two govern unrelated transports and only
  * coincide in value, so tuning one must not silently move the other.
  */

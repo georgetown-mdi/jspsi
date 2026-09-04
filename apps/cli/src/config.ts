@@ -450,7 +450,7 @@ export interface ReconcileDiff {
 /**
  * The two sides of one conflict line as claims on the block's budget.
  *
- * Carried BESIDE the sides rather than in place of them, and produced by the one
+ * Held BESIDE the sides rather than in place of them, and produced by the one
  * composition that produced those sides ({@link reconcileClause}), so a fitted
  * side cannot describe a different clause than the unfitted one it replaces.
  */
@@ -1074,7 +1074,7 @@ const RECONCILE_WITHHELD_NOTE =
 
 /**
  * Explains a line the block named without its values, so a bare field name
- * does not look as though nothing differs -- beside lines carrying both
+ * does not look as though nothing differs -- beside lines holding both
  * their values, or as the whole block when no line got room. Truncation
  * eats conflict detail here, which is why the recovery step is composed
  * ahead of this block (see {@link reconcileConflictMessage}).
@@ -1128,14 +1128,14 @@ export function formatReconcileDiffs(
   const nameOnly = (d: ReconcileDiff): string =>
     `${RECONCILE_LINE_PREFIX}${d.field}`;
   // Charged with the line break that follows it, which the display escape widens
-  // like any other control character rather than carrying at its own width. Its
+  // like any other control character rather than keeping its own width. Its
   // field name is what a line costs even after its values are dropped, so it is
   // taken off the top rather than shared out.
   const nameCost = diffs.reduce(
     (total, d) => total + renderedDisplayCost(`${nameOnly(d)}\n`),
     0,
   );
-  // What a line pays on top of its name for carrying values at all.
+  // What a line pays on top of its name for holding values at all.
   const valueSkeletonCost = renderedDisplayCost(
     `${RECONCILE_LINE_EXISTING}${RECONCILE_LINE_INCOMING}`,
   );
@@ -1886,8 +1886,8 @@ export type LinkageTermsStanding = "held-alone" | "accepted-with-partner";
  *   the operator can leave them and start from terms that hold no claim
  *   they cannot support.
  * - `author-fresh-terms` -- the command is minting an invitation FROM those
- *   terms, so the operator can author fresh ones instead of carrying the
- *   accepted ones onto it.
+ *   terms, so the operator can author fresh ones instead of reusing the
+ *   accepted ones for it.
  */
 export type CitationDriftAlternative =
   "decline-to-reuse" | "author-fresh-terms";

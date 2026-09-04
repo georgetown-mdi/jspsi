@@ -234,7 +234,7 @@ export function observePeerAnswer(
  * What the read established, in the form a machine consumer reads it: the two
  * {@link PeerAnswer} arms that say something about the peer, without the two
  * that say nothing (`identified` and `unobserved` compose no diagnostic at all).
- * Carried on the raised error so a caller classifies on structure rather than on
+ * Held on the raised error so a caller classifies on structure rather than on
  * the composed sentence. `excerpt` is the producer's, private-key material
  * already stripped from it, so a consumer emits it as it stands.
  */

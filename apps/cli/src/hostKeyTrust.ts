@@ -100,7 +100,7 @@ const REAL_DEPS: HostKeyTrustDeps = {
  * Not sftp, or a pin already set, is a no-op: the caller proceeds and the
  * real connect that follows still verifies the pin and fails closed on a
  * mismatch. A changed key is never handled here -- it fails closed in core
- * and is re-pinned only by a deliberate config edit.
+ * and is re-pinned only by a manual config edit.
  *
  * Mutates `connection.server.hostKeyFingerprint` in place on success so the
  * caller's subsequent open() verifies the just-confirmed key, which also

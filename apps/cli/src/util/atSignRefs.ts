@@ -240,13 +240,13 @@ export interface ResolvedConnectionCredentials {
  * The read is split from the application for a caller whose connection is
  * mutated in between -- `zero-setup`, where `establishHostKeyTrust` pins a
  * first-use host key onto the connection and the clone handed to the exchange
- * must carry that pin while the original keeps its `@path` for persistence.
+ * must hold that pin while the original keeps its `@path` for persistence.
  * Reading first is what keeps a run refused over its own credential file from
- * reaching the host-key probe's transport; cloning after the pin is what carries
+ * reaching the host-key probe's transport; cloning after the pin is what brings
  * the pin into the live connect. A caller with nothing in between uses
  * {@link resolveConnectionCredentials}, which is the two composed.
  *
- * A non-SFTP connection carries no such credential and yields an empty record.
+ * A non-SFTP connection has no such credential and yields an empty record.
  */
 export function readConnectionCredentials(
   connection: ConnectionConfig,
@@ -281,7 +281,7 @@ function readValueFor(value: string | undefined, field: string): string {
 }
 
 /**
- * Return a clone of `connection` carrying the credential values
+ * Return a clone of `connection` holding the credential values
  * {@link readConnectionCredentials} read from it. The input is NOT mutated, so
  * the caller connects with the clone while persisting the original -- whose
  * `@path` is still in place -- keeping the secret out of `psilink.yaml`. The
@@ -332,7 +332,7 @@ export function applyConnectionCredentials(
  * fields (HTTP `bearer`, `turn.credential`, `providerOptions`, ...) are reachable
  * only from a hand-authored config, which {@link resolveExchangeSpecRefs}
  * resolves at load; a future credential flag that persists must be added here.
- * Non-SFTP channels carry no such credential and pass through unchanged.
+ * Non-SFTP channels have no such credential and pass through unchanged.
  */
 export function resolveConnectionCredentials(
   connection: ConnectionConfig,

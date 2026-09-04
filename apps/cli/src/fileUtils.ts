@@ -16,7 +16,7 @@ function whoami(): string {
   if (_whoami === undefined) {
     const value = execFileSync("whoami", [], { encoding: "utf8" }).trim();
     // An empty whoami would cause icacls to receive a bare `:(M)` grant later
-    // and reject; fail loudly here so the misconfiguration surfaces with a
+    // and reject; fail loudly here so the misconfiguration shows up with a
     // clear message rather than as a downstream icacls error.
     if (value === "")
       throw new Error(
@@ -38,7 +38,7 @@ const EXEMPT_SIDS = new Set(["S-1-5-18", "S-1-5-32-544"]);
 // int32); GenericAll = 0x10000000.
 // All grant or imply read access; check each independently since they don't
 // share bits. Windows maps generic rights to object-specific rights before
-// storing in ACEs, but a stored ACE carrying an unmapped GENERIC_ALL bit
+// storing in ACEs, but a stored ACE holding an unmapped GENERIC_ALL bit
 // (malformed or from old tooling) would be missed by the other two checks.
 const GENERIC_READ = 0x80000000;
 const GENERIC_ALL = 0x10000000;
@@ -346,10 +346,10 @@ function fsyncParentDir(filePath: string): void {
       fs.closeSync(dirFd);
     } catch {
       // Swallow a close failure on either path: if fsyncSync threw, that error
-      // surfaces from the try body and must not be masked; if it succeeded, the
-      // directory is already durable and a close hiccup changes nothing. A
-      // directory-fd close failure is pathological regardless, and the fd is
-      // released at process exit.
+      // already propagates from the try body and must not be masked; if it
+      // succeeded, the directory is already durable and a close hiccup changes
+      // nothing. A directory-fd close failure is pathological regardless, and
+      // the fd is released at process exit.
     }
   }
 }
@@ -402,7 +402,7 @@ export function writeFileOwnerOnly(
       // placeholder on disk.
       const owner = whoami();
       // Create an empty placeholder and narrow its ACL before writing any
-      // sensitive content. The brief window while the empty file carries
+      // sensitive content. The brief window while the empty file has
       // inherited ACEs (e.g. BUILTIN\Users read) exposes only the file's
       // existence, not its contents.
       const fd = fs.openSync(
@@ -445,7 +445,7 @@ export function writeFileOwnerOnly(
         try {
           fs.closeSync(contentFd);
         } catch {
-          /* best-effort close; a genuine write/fsync failure surfaces above */
+          /* best-effort close; a write/fsync failure above already propagates */
         }
       }
     } else {
@@ -480,7 +480,7 @@ export function writeFileOwnerOnly(
         try {
           fs.closeSync(fd);
         } catch {
-          /* best-effort close; a genuine failure surfaces from the body above */
+          /* best-effort close; a failure in the body above already propagates */
         }
       }
     }
@@ -493,7 +493,7 @@ export function writeFileOwnerOnly(
     if (options.exclusive) {
       // Atomic create-if-absent: linkSync fails if destPath already exists,
       // closing the create-time race that renameSync (which silently overwrites)
-      // would leave open. The temp file already carries the owner-only
+      // would leave open. The temp file already has the owner-only
       // permissions/ACL, and a hard link shares them, so the destination is
       // owner-only the instant it appears.
       try {
@@ -611,7 +611,7 @@ export function writeFileAtomic(
       try {
         fs.closeSync(fd);
       } catch {
-        /* best-effort close; a genuine failure surfaces from the body above */
+        /* best-effort close; a failure in the body above already propagates */
       }
     }
     // Same narrow tmp-swap window as writeFileOwnerOnly (between the close above
@@ -645,7 +645,7 @@ export function writeFileAtomic(
  * any content is written, whether newly created or overwriting a pre-existing
  * file.
  *
- * Two deliberate differences from {@link writeFileOwnerOnly}: it streams
+ * Two differences from {@link writeFileOwnerOnly}: it streams
  * rather than buffering a whole string, and it writes `destPath` directly
  * with no temp+rename, so it is NOT atomic -- acceptable for a recomputable
  * result output, unlike a credential.

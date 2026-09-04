@@ -1298,7 +1298,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // peer's FIN has been consumed; either way the transport can hold nothing more.
   // Both flags are plain net.Socket properties, read through the one ssh2
   // internal beneath them (`client._sock`, the same property connect()'s
-  // keepalive safety check reaches). A socket reporting neither reads as
+  // keepalive safety check reaches). A socket reporting neither is treated as
   // not-ended.
   private sessionTransportEnded(internals: Ssh2SftpClientInternals): boolean {
     const socket = internals.client?._sock;

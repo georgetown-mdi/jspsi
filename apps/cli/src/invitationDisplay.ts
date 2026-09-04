@@ -819,16 +819,16 @@ export function displayInvitation(params: {
 
   // The columns the inviter declares it will transmit for matched records,
   // in the inviter's namespace -- what this party will RECEIVE. Derived
-  // from the wire's own disclosure predicate (the token's carried
+  // from the wire's own disclosure predicate (the token's held
   // `disclosedPayloadColumns`) when the invitation has one, falling back
-  // to the authored `payload.send` otherwise. A lazy send -- no carried
+  // to the authored `payload.send` otherwise. A lazy send -- no held
   // subset and nothing authored -- is omitted, since it reconciles at
   // exchange time; that omission is what leaves a bare "(none)"
   // unambiguous, since only a declared direction reaches the line at all.
   // What the declaration commits its party to is docs/CLI.md's to state.
   //
   // The two sources take different bases, so the marker is selected from
-  // which one the summary used: only the carried subset is enforced and
+  // which one the summary used: only the held subset is enforced and
   // reconciled against; the authored one is the inviter's own word.
   if (summary.payload?.sendDeclared === true) {
     const label = marked(

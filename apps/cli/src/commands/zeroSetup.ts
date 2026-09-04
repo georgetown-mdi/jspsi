@@ -679,7 +679,7 @@ export async function handler(argv: Arguments): Promise<void> {
           enabled: options.record,
           recordFile: options.recordFile,
         }),
-        // Carry this party's --save intent into the in-band bootstrap; the
+        // Pass this party's --save intent into the in-band bootstrap; the
         // exchange advertises it and, when both saved, hands the established
         // secret to the hook below. Pass the raw boolean, never `options.save ||
         // undefined`: a non-saving party must still receive a defined bootstrap so

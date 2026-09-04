@@ -88,7 +88,7 @@ export function createWorkerThreadHandle(
         onMessage(response),
       );
       worker.on("error", (error) => onError(error));
-      // A message that fails structured-clone deserialization surfaces as
+      // A message that fails structured-clone deserialization is emitted as
       // 'messageerror', NOT 'error'; with no listener it is silently dropped and the
       // pending call would hang. Route it to onError so the call fails fast. Not
       // reachable with today's cloneable payloads (byte arrays and index lists), but

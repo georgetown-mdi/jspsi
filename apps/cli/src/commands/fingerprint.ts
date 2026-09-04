@@ -172,13 +172,13 @@ export function readConfigHints(
  * route into that field is bounded and refused a control character
  * ({@link TEXT_CONTROL_CHAR_PATTERN}); the console's fingerprint route applies
  * the same two rules at its own boundary. Unchecked here, the CLI would mint
- * certificates carrying labels the terms document itself refuses -- and this one
+ * certificates holding labels the terms document itself refuses -- and this one
  * is not a transient: it is bound into a long-lived certificate, read back and
  * DISPLAYED by whoever pinned the fingerprint, long after the run that chose it.
  *
  * Applied to the value actually being bound, whichever source supplied it, the
- * binding carried forward by a `--force` re-key included: what a new certificate
- * carries is what the check is about.
+ * binding continued by a `--force` re-key included: what a new certificate
+ * holds is what the check is about.
  *
  * Neither message echoes the label. The offending value is the operator's own
  * text and naming it back adds nothing to a rule about its shape, which is the
@@ -245,7 +245,7 @@ export async function resolveSigningIdentity(
   };
 
   // A file that exists but is unreadable (malformed/inconsistent) normally
-  // surfaces as an error. With --force the user has explicitly asked to
+  // shows up as an error. With --force the user has explicitly asked to
   // regenerate, so an unreadable existing file is treated as a file to replace
   // rather than a blocker -- this makes --force a genuine recovery path.
   let existing: SigningIdentity | undefined;
@@ -294,8 +294,8 @@ export async function resolveSigningIdentity(
 
   // A genuine first creation (no file on disk at all) is exclusive, so two
   // concurrent invocations cannot both generate and silently overwrite each
-  // other. A --force regenerate (over a valid OR an unreadable file) is a
-  // deliberate overwrite.
+  // other. A --force regenerate (over a valid OR an unreadable file) is an
+  // overwrite by design.
   if (existing === undefined && !replacingUnreadable) {
     // First-time creation is an atomic create-if-absent so two concurrent
     // first-time creators cannot both win. Under a race three things can happen:
@@ -359,7 +359,7 @@ function report(
   // The regeneration warning is a diagnostic, so it goes to stderr via log.warn
   // (not an ungated write): it obeys --log-level like every other warning, so a
   // re-key at --log-level error/silent shows only the new value with no warning.
-  // That is deliberate -- --force is itself the explicit destructive gesture, and
+  // This is by design -- --force is itself the explicit destructive gesture, and
   // the resolveSigningIdentity re-key/adopt warnings are likewise log.warn;
   // singling this one out as un-silenceable would be inconsistent, and an ungated
   // stderr write would also escape --log-file capture. The stdout-purity contract
