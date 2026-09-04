@@ -131,6 +131,15 @@ describe("require-clean-tree-for-review hook", () => {
     expect(status).toBe(0);
   });
 
+  it("blocks a payload that parses to something other than an object", () => {
+    const { status, stderr } = spawnSync("node", [HOOK], {
+      input: "null",
+      encoding: "utf8",
+    });
+    expect(status).toBe(2);
+    expect(stderr).toContain("could not confirm a clean tree");
+  });
+
   it("allows a target-less Workflow call on a clean tree", () => {
     const dir = track(makeRepo());
     expect(workflowIn(dir).status).toBe(0);

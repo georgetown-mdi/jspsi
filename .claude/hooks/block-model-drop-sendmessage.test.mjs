@@ -38,6 +38,15 @@ describe("block-model-drop-sendmessage hook", () => {
     expect(status).toBe(0);
   });
 
+  it("blocks a payload that parses to something other than an object", () => {
+    const { status, stderr } = spawnSync("node", [HOOK], {
+      input: "null",
+      encoding: "utf8",
+    });
+    expect(status).toBe(2);
+    expect(stderr).toContain("could not confirm the message");
+  });
+
   it("blocks a send that continues a spawned agent", () => {
     const { status, stderr } = send({
       to: "agent-7",

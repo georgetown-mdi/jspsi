@@ -39,9 +39,21 @@ describe("readEvent", () => {
     expect(evaluate("event.readEvent()", "")).toBeNull();
   });
 
-  it("reads a JSON value that is not an object as no event", () => {
-    for (const payload of ["null", '"Bash"', "7"]) {
-      expect(evaluate("event.readEvent()", payload)).toBeNull();
+  // A payload of this shape is told apart from stdin holding no event at all,
+  // because the fail-closed hooks refuse it and allow on the other.
+  it("reads a JSON value that is not an object as NOT_AN_EVENT", () => {
+    for (const payload of ["null", '[{"tool_name":"Bash"}]', '"Bash"', "7"]) {
+      expect(
+        evaluate("event.readEvent() === event.NOT_AN_EVENT", payload),
+      ).toBe(true);
+    }
+  });
+
+  it("tells no event apart from a value that is not an event", () => {
+    for (const payload of ["not json", ""]) {
+      expect(
+        evaluate("event.readEvent() === event.NOT_AN_EVENT", payload),
+      ).toBe(false);
     }
   });
 });
@@ -59,8 +71,10 @@ describe("eventForTools", () => {
     ).toBeNull();
   });
 
-  it("returns nothing for an unreadable event", () => {
-    expect(evaluate('event.eventForTools("Bash")', "not json")).toBeNull();
+  it("returns nothing for an unreadable event of either shape", () => {
+    for (const payload of ["not json", "null", '[{"tool_name":"Bash"}]', "7"]) {
+      expect(evaluate('event.eventForTools("Bash")', payload)).toBeNull();
+    }
   });
 
   it("returns nothing for an event naming no tool", () => {

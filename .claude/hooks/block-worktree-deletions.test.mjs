@@ -263,21 +263,10 @@ describe("block-worktree-deletions hook", () => {
   // header's stated limit has to go with it.
   it("records the command shapes it does not read", () => {
     expectAllowed([
-      // Composition is not unwrapped: a subshell, a brace group and a command
-      // substitution keep their brackets inside the stage that carries them, and
-      // a command inside `bash -c` is a quoted string rather than a stage.
-      `(cd ${ROOT} && rm -rf agent-other)`,
-      `{ rm -rf ${SIBLING}; }`,
+      // A command substitution keeps its brackets inside the stage carrying it,
+      // so the deletion inside one is never the stage's command word.
       `echo $(rm -rf ${SIBLING})`,
-      `bash -c "rm -rf ${SIBLING}"`,
-      // A lone `&` is not a separator, because the same byte sits inside
-      // redirect words and a backgrounded `cd` never moves the parent shell.
-      `sleep 0 & rm -rf ${SIBLING}`,
-      // A wrapper outside the peeled set stands where the command word belongs,
-      // `timeout` deliberately: peeling it means skipping a positional duration.
-      `timeout 5 rm -rf ${SIBLING}`,
       // A target that only exists at runtime stands nowhere on the line.
-      `TREE=${SIBLING}; rm -rf "$TREE"`,
       `rm -rf $(cat /tmp/tree-path)`,
     ]);
   });

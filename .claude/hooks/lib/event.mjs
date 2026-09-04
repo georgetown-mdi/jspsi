@@ -6,12 +6,26 @@
 // fifteen edits with nothing to notice a missed one.
 //
 // Nothing here exits or blocks. What an unreadable event means is the hook's own
-// answer -- most allow the call, require-clean-tree-for-review.mjs blocks -- so
-// each states it at the call site.
+// answer -- most allow the call, require-clean-tree-for-review.mjs and
+// block-model-drop-sendmessage.mjs block -- so each states it at the call site.
+// The two unreadable shapes are reported apart for that reason: stdin holding
+// nothing parseable is null and every hook allows on it, while a JSON value that
+// is not an object is NOT_AN_EVENT, which the two that block refuse.
 
 import { readFileSync } from "node:fs";
 
-/** The event on stdin, or null when it is not readable as a JSON object. */
+/**
+ * Stands in for the event when stdin held a parseable JSON value that is not an
+ * object: null, an array, a number, a string. It names no tool, so nothing in it
+ * can rule a call out, which is why the hooks that must confirm a call before
+ * allowing it refuse this payload rather than treating it as no event at all.
+ */
+export const NOT_AN_EVENT = Symbol("not an event");
+
+/**
+ * The event on stdin: a JSON object, NOT_AN_EVENT when stdin held a JSON value
+ * of any other shape, or null when it held nothing parseable.
+ */
 export function readEvent() {
   let event;
   try {
@@ -19,17 +33,21 @@ export function readEvent() {
   } catch {
     return null;
   }
-  return typeof event === "object" && event !== null ? event : null;
+  const isObject =
+    typeof event === "object" && event !== null && !Array.isArray(event);
+  return isObject ? event : NOT_AN_EVENT;
 }
 
 /**
  * The event on stdin when it names one of these tools, or null for anything
- * else: an unreadable event, or one for a tool this hook does not gate. The
- * hooks treat those two the same way, so one test at the call site covers both.
+ * else: an unreadable event of either shape, or one for a tool this hook does
+ * not gate. The hooks that allow the call on all of those treat them the same
+ * way, so one test at the call site covers them.
  */
 export function eventForTools(...tools) {
   const event = readEvent();
-  return event !== null && tools.includes(event.tool_name) ? event : null;
+  if (event === null || event === NOT_AN_EVENT) return null;
+  return tools.includes(event.tool_name) ? event : null;
 }
 
 /** A Bash event's command line, or null when it carries none as a string. */

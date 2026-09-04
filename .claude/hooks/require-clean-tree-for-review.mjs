@@ -43,11 +43,13 @@
 // backstops a false clean, so every state where a target cannot be CONFIRMED
 // clean must block: a non-git cwd, a git error, a missing cwd, an unreadable
 // `args`, a ref that does not resolve, a dirty status, and a lock that cannot be
-// written all exit 2. Only an unparseable or non-Workflow event exits 0 -- a
-// clean-tree precondition is benign for any workflow, and committing is always
-// available, so this applies to every Workflow call rather than being scoped to
-// review scripts (scoping by script text would fail open on the scriptPath and
-// resume forms).
+// written all exit 2. So does a payload that parses to a JSON value other than an
+// object -- null, an array, a primitive -- which names no tool and so leaves
+// nothing to rule the call out. Only an event stdin held nothing parseable for, or
+// one naming a tool other than Workflow, exits 0 -- a clean-tree precondition is
+// benign for any workflow, and committing is always available, so this applies to
+// every Workflow call rather than being scoped to review scripts (scoping by
+// script text would fail open on the scriptPath and resume forms).
 //
 // Why the porcelain check is a clean signal: `scratch/` and the round artifacts
 // under it are gitignored, so a normal review round's own artifacts never appear
@@ -80,7 +82,7 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 
-import { eventCwd, eventForTools } from "./lib/event.mjs";
+import { eventCwd, NOT_AN_EVENT, readEvent } from "./lib/event.mjs";
 import { git } from "./lib/shell.mjs";
 import { worktreeRecords } from "./lib/worktrees.mjs";
 
@@ -89,6 +91,7 @@ const ROUNDS_DIR = join("scratch", "review-rounds");
 const LOCK_SUFFIX = ".lock";
 const ROUND_LOCK_TTL_MS = 90 * 60 * 1000;
 const LIGHT_REVIEW_MARKER = "light-review";
+const UNCONFIRMED = "could not confirm a clean tree; commit and retry";
 
 function block(reason) {
   // A multi-line reason (the dirty-entry list) is self-terminating; only a
@@ -242,8 +245,9 @@ function requireClean(path, subject) {
 }
 
 function main() {
-  const event = eventForTools("Workflow");
-  if (event === null) process.exit(0); // unreadable, or another tool
+  const event = readEvent();
+  if (event === NOT_AN_EVENT) block(UNCONFIRMED);
+  if (event === null || event.tool_name !== "Workflow") process.exit(0);
 
   // From here every path fails CLOSED. An event naming no directory is a
   // fail-closed case, not a crash: without a directory to inspect the tree cannot
@@ -357,5 +361,5 @@ try {
   // Structural fail-closed backstop: the two exit-0 cases (unparseable event,
   // non-Workflow tool) are decided before any throwing code, so any error that
   // reaches here is on a path that must block, not allow.
-  block("could not confirm a clean tree; commit and retry");
+  block(UNCONFIRMED);
 }
