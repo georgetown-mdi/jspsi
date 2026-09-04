@@ -2262,10 +2262,13 @@ describe("readJobRequestBody caps the read, not Content-Length", () => {
   });
 
   test("a body filling the authoring cap parses", async () => {
-    // A body filling the authoring route's byte cap exactly: the bounded parse
-    // bounds STRUCTURE (object width, array length, nesting), so a body the
-    // route's own byte cap accepts must still reach the caller parsed rather
-    // than turning into a 400.
+    // A body filling the authoring route's byte cap exactly: no realistic
+    // authored body reaches the structural bounds the bounded parse also
+    // enforces (object width, array length, nesting) within that byte cap, so
+    // this pins that the largest realistic body the cap admits still reaches
+    // the caller parsed rather than turning into a 400. The structural bound
+    // for pathological nesting is stated on JobRequestBodyResult in
+    // routeSupport.ts, and the next test exercises it directly.
     const overhead = '{"field":""}'.length;
     const filled = "a".repeat(MAX_SFTP_AUTHOR_BODY_BYTES - overhead);
     const body = `{"field":"${filled}"}`;
