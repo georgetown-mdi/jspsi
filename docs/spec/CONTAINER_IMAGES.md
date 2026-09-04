@@ -48,11 +48,11 @@ integrity hash (see
 
 The structural invariants are enforced by `scripts/dockerfile-freeze.test.mjs`
 (run by `npm run test:scripts`, a CI static check), over both `Dockerfile` and
-the FIPS variant's `Dockerfile.fips` alike: every install is `npm ci`, the
+the FIPS variant's `Dockerfile.fips` alike. Every install is `npm ci`, the
 lockfile and the root `.npmrc` are copied into the builder before the first
 install, the builder's last npm command empties `node_modules` and passes both
-`--omit=dev` and `--omit=optional`, the runtime stage runs no npm
-at all, every stage builds from the reviewed base digest or from another stage of
+`--omit=dev` and `--omit=optional`, and the runtime stage runs no npm
+at all. Every stage builds from the reviewed base digest or from another stage of
 the same file, each file's OS-package installs are exactly the reviewed set, and
 the copied layout keeps the workspace links and the PSI worker entry where the
 CLI resolves them.
@@ -602,11 +602,11 @@ contract between two things nothing else in the repository connects, so
 `image_smoke.yaml` exercises it on both sides of publication.
 
 **The set is derived, not listed.** `scripts/derive-image-dependencies.mjs`
-reads it out of the scripts: an argument vector is a run of literal tokens
+reads it out of the scripts. An argument vector is a run of literal tokens
 beginning with a word the image's own dispatchers answer to -- the words
 `docker-entrypoint.sh` routes on, and the commands `apps/cli/src/cliParser.ts`
 registers -- on a line that also names the image or an argument-vector
-parameter; a helper script is one `cmd_Setup-PsilinkFileDrop.cmd` redirects into
+parameter. A helper script is one `cmd_Setup-PsilinkFileDrop.cmd` redirects into
 a shell in the image, with the environment and mounts that call site gives it. A
 call site added to a script changes the derived set, and a derived dependency
 with nothing to exercise it fails `npm run check:image-capabilities`, which
@@ -616,11 +616,12 @@ with nothing to exercise it fails `npm run check:image-capabilities`, which
 runs the argument vector and reads back the machine-readable verdict, and pipes
 each helper script in as the `.cmd` pipes it -- so a helper's in-image tools are
 resolved by the run and are enumerated nowhere. Two fixtures decide whether a red
-result is about the image at all, and the script sets up both: a rendezvous
-directory the account the image runs as can write, because a fresh named volume
-belongs to root and the default image runs as uid 1000, and a stub peer that
-accepts and drops each connection on port 445, because both probe paths stop at
-their reachability check when nothing answers and leave `smbclient` unreached.
+result is about the image at all, and the script sets up both. The first is a
+rendezvous directory the account the image runs as can write, because a fresh
+named volume belongs to root and the default image runs as uid 1000. The second
+is a stub peer that accepts and drops each connection on port 445, because both
+probe paths stop at their reachability check when nothing answers and leave
+`smbclient` unreached.
 
 **What a run may claim is bounded by what it treats as evidence.** A doctor
 run that refuses its input exits 64 having run no check, and an image whose
@@ -658,16 +659,17 @@ Invocation is not the only cost: these libraries sit in the image that runs
 every exchange, so an advisory against any of them applies to that image whether
 or not an exchange reaches the code, and none of them is in the release SBOM
 either. Measured on the pinned base at
-`aarch64` (`apk list -I` before and after), they are the samba client libraries
-and their record stores (`samba-client-libs`, `samba-common`, `samba-libs`,
-`samba-util-libs`, `libsmbclient`, `libwbclient`, `libauth-samba`, `ldb`,
-`talloc`, `tdb-libs`, `tevent`, `lmdb`, `gdbm`), an authentication and directory
-stack (`linux-pam`, `libldap`, `libsasl`, `utmps-libs`, `skalibs-libs`), a
-TLS/crypto stack (`gnutls`, `nettle`, `gmp`, `libtasn1`, `p11-kit`, `libffi`),
-compression and archive libraries (`libarchive`, `xz-libs`, `zstd-libs`,
-`lz4-libs`, `libbz2`, `brotli-libs`), and a tail of support libraries
-(`readline`, the `ncurses` set, `popt`, `icu-libs`, `icu-data-en`, `libexpat`,
-`jansson`, `libidn2`, `libunistring`, `acl-libs`, `libcap2`). No `smbd`, `nmbd`
+`aarch64` (`apk list -I` before and after), they fall into five groups. The
+samba client libraries and their record stores are `samba-client-libs`,
+`samba-common`, `samba-libs`, `samba-util-libs`, `libsmbclient`, `libwbclient`,
+`libauth-samba`, `ldb`, `talloc`, `tdb-libs`, `tevent`, `lmdb`, and `gdbm`. The
+authentication and directory stack is `linux-pam`, `libldap`, `libsasl`,
+`utmps-libs`, and `skalibs-libs`. The TLS/crypto stack is `gnutls`, `nettle`,
+`gmp`, `libtasn1`, `p11-kit`, and `libffi`. The compression and archive
+libraries are `libarchive`, `xz-libs`, `zstd-libs`, `lz4-libs`, `libbz2`, and
+`brotli-libs`. The tail of support libraries is `readline`, the `ncurses` set,
+`popt`, `icu-libs`, `icu-data-en`, `libexpat`, `jansson`, `libidn2`,
+`libunistring`, `acl-libs`, and `libcap2`. No `smbd`, `nmbd`
 or `winbindd` is installed, so nothing added listens.
 
 `linux-pam` is where the setgid bit the runtime stage strips comes from. Measured
@@ -754,8 +756,8 @@ size run above what `Dockerfile.fips` produces. Nothing has been measured on
 
 Where the 480 MB goes: the two base rootfs are almost the same weight
 (`amazonlinux:2023` 183 MB, `node:26-alpine` 178 MB), but Amazon Linux bundles
-no Node, so the 222 MB tarball is additive, and its dependency closures are
-fatter -- glibc/libgcc/libstdc++ 67 MB, `python3` (in the base image, for `dnf`)
+no Node, so the 222 MB tarball is additive. Its dependency closures are fatter
+too -- glibc/libgcc/libstdc++ 67 MB, `python3` (in the base image, for `dnf`)
 55 MB, the samba client stack 44 MB, `systemd` (a `samba-client` dependency)
 31 MB, `dnf`/`rpm`/`libsolv`/`librepo` 11 MB. The certified `fips.so` itself is
 1.2 MB.
@@ -763,7 +765,7 @@ fatter -- glibc/libgcc/libstdc++ 67 MB, `python3` (in the base image, for `dnf`)
 **The licence consequence is wider than the default image's, and is open.** The
 GPL-3.0/LGPL-3.0 term the table above records against the Alpine image's samba
 packages reappears here on `samba-client`, `samba-client-libs`, `samba-common`,
-`samba-common-libs`, `libsmbclient` and `libwbclient`, and is joined by a GPLv3
+`samba-common-libs`, `libsmbclient` and `libwbclient`. It is joined by a GPLv3
 base userland Alpine's busybox and musl do not have: `bash`, `coreutils-single`,
 `diffutils`, `findutils`, `gawk`, `grep`, `gzip`, `sed`, `tar`, `readline`,
 `gdbm-libs`, `gnupg2-minimal`, `gnutls`, `libtasn1`, `libassuan`, plus the

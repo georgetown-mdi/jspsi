@@ -54,11 +54,11 @@ are platform-independent.
 This encoding is the single canonicalization primitive for everything that is
 hashed, committed, or signed: the agreed-terms object embedded in a receipt, the
 commitments and agreed-terms hash of the
-[self-attested record](EXCHANGE_RECORD.md) -- whose own serialized form is
-ordinary pretty-printed JSON rather than canonical bytes, since the record is
-unsigned -- the receipt itself, and the signing certificate, whose
-self-signature is computed over, and whose pinned fingerprint is a SHA-256 of,
-the **domain-separated** canonical bytes of its body, each under its own
+[self-attested record](EXCHANGE_RECORD.md), the receipt itself, and the signing
+certificate. The record's own serialized form is ordinary pretty-printed JSON
+rather than canonical bytes, since the record is unsigned. The certificate's
+self-signature is computed over the **domain-separated** canonical bytes of its
+body, and its pinned fingerprint is a SHA-256 of those bytes, each under its own
 distinct domain label (see
 [PROTOCOL.md](PROTOCOL.md#signing-identity-and-certificate-pinning)). It
 supersedes ad hoc `JSON.stringify` and key-sorting for those artifacts. Equality

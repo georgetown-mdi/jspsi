@@ -231,13 +231,13 @@ peer's in-band close sentinel, in the same call, before the channel's `closing`
 fires. Both parties closing a healthy exchange therefore each reach `closing` on
 a link of their own closing, which is the signature of a teardown on the one
 ending that lost nothing -- measured on a real pair in Chromium. What separates
-the two is whether the end was PeerJS's own doing: PeerJS clears `open` whenever
+the two is whether the end was PeerJS's own doing. PeerJS clears `open` whenever
 it itself ends the connection -- reading the peer's close sentinel, this side's
 own close call, or its own cleanup on a signaling leave naming this peer, an
 inbound OFFER echoing the live connection, ICE reaching failed or closed, or a
-send error -- so a cleared flag at `closing` means a PeerJS-mediated end and
+send error. So a cleared flag at `closing` means a PeerJS-mediated end and
 is treated as the peer's close, exactly as every close read before this
-discrimination existed; only an end that bypasses PeerJS -- this side's raw
+discrimination existed. Only an end that bypasses PeerJS -- this side's raw
 peer-connection teardown -- reports the loss. A partner who ends the link
 through signaling (a relayed leave) mid-drain is therefore also treated as the
 receipt, the same behavior staging had before this discrimination existed; the
@@ -288,7 +288,7 @@ told the operator something stronger already.
 
 A close signal is not proof the partner's application read what was behind it: a
 peer that closes without draining its inbound queue is indistinguishable from one
-that read everything, and the partner's peer connection torn down by their page
+that read everything. The partner's peer connection torn down by their page
 rather than by reading the sentinel resets its stream gracefully -- measured in
 Chromium, and pinned in `apps/web/test/browser/webrtcCloseDelivery.test.ts` -- so
 that teardown arrives here as the same close. The state of the link, read
@@ -302,9 +302,9 @@ operator cut.
 
 What no close can cover is a sender whose stack goes away before its bytes do:
 tearing the peer connection down as the close returns delivered nothing at all
--- measured at zero frames of two received, four rounds out of four -- and a
-browser tab closed the instant the results appear does the same thing to a frame
-still buffered. Waiting narrows that window to the delivery itself rather than
+-- measured at zero frames of two received, four rounds out of four. A browser
+tab closed the instant the results appear does the same thing to a frame still
+buffered. Waiting narrows that window to the delivery itself rather than
 leaving it open for the length of the transfer, and a teardown that lands inside
 it while this page keeps running is reported as the loss it is rather than as a
 delivery.

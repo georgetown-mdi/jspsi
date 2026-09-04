@@ -15,12 +15,12 @@ load-check internals. It is the implementation-level complement to the
 these files protect and states the operator-facing required permissions,
 warnings, and remediation commands; this document covers how each write is
 constructed. The same construction governs every owner-only artifact written in
-one shot -- the key file (`.psilink.key`), the signing identity, the
+one shot: the key file (`.psilink.key`), the signing identity, the
 self-attested exchange record and the private verification-keys file beside it
 (see [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md)), the dual-signed receipt, the
 operator config `psilink.yaml`, and the credentials file that holds the
-operator's SMB password to `smbclient` for `doctor probe` -- so it is specified
-once here and referenced from each. Two owner-only artifacts are written on the
+operator's SMB password to `smbclient` for `doctor probe`. It is therefore
+specified once here and referenced from each. Two owner-only artifacts are written on the
 same principle without taking that construction, and each is specified where it
 diverges: the result CSV, streamed to its destination rather than renamed onto
 it ([Result CSV output](#result-csv-output)), and the `--log-file` descriptor,
@@ -192,7 +192,7 @@ open and the installation of the sink that writes the first line -- the same
 placement, the point where the file's mode is enforced. Its content is the run's
 diagnostics, which at `debug`/`trace` hold partner identity, linkage keys, and
 data categories. That strip runs on a file the open created and one it appends
-to alike, unlike the `0600` mode, which the open applies on creation only: the
+to alike, unlike the `0600` mode, which the open applies on creation only. The
 mode an operator leaves on a file they supplied is a value they can read and set,
 while an ACE grants access the mode cannot express on a file the run is about to
 write those diagnostics into.
@@ -235,10 +235,10 @@ fed to the classifier rather than modeled there, so a runtime that reshaped them
 reddens the suite instead of silently re-routing a refusal.
 
 The split exists because only the first case puts the remedy in the operator's
-hands: a spawned `chmod -N` may have begun altering an existing destination's
+hands. A spawned `chmod -N` may have begun altering an existing destination's
 ACL before it exited, was killed, or outlived the kill, so the ACL is the
-obstacle to inspect, while sending them after `ls -le` on a host that could not
-run `chmod` at all points them at something that was never in the way. The errno
+obstacle to inspect. Sending them after `ls -le` on a host that could not run
+`chmod` at all points them at something that was never in the way. The errno
 separating the second case's causes rides in on the `cause` rather than being
 enumerated in the message.
 

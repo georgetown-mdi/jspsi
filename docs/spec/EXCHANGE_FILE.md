@@ -6,10 +6,10 @@ title: "Exchange File Artifact"
 
 This document specifies the downloadable **exchange file**: the `psilink.yaml`
 a party composes in the web application and hands to the CLI. It covers what the
-artifact is (the shared CLI config schema, not a parallel format), the
-mint-layer guarantees layered on top of it, the versioning and compatibility
-policy between a continuously-deployed web app and a pinned CLI, the
-payload-disclosure commitments its fields hold and the run-time gates that
+artifact is (the shared CLI config schema, not a parallel format) and the
+mint-layer guarantees layered on top of it. It also covers the versioning and
+compatibility policy between a continuously-deployed web app and a pinned CLI,
+the payload-disclosure commitments its fields hold and the run-time gates that
 enforce them, the channel-binding semantics an accepting tool must honor, and the
 path the shared secret takes (never the file). It is the implementation-level
 complement to the
@@ -282,7 +282,7 @@ leaves.
 The runtime enforcement above catches a partner that under- or over-delivers, but it
 fires on the *receiver*, after data has moved, and attributes the abort to the
 partner. Its proactive counterpart runs on the *committing* party at prepare
-time, before any credential, terms, or data are sent: a party that persisted the
+time, before any credential, terms, or data are sent. A party that persisted the
 disclosed set it published -- the top-level `disclosed_payload_columns`, in this
 party's own column namespace -- verifies that its current metadata still
 discloses exactly that set, and throws a `UsageError` (CLI exit 64, a local
