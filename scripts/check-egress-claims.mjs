@@ -136,7 +136,7 @@
 //
 // Deliberately outside both: the build and test configuration at each workspace
 // root and the sibling test/ trees; and apps/web/deploy, whose nginx and
-// post-deploy files configure the Elastic Beanstalk host rather than the
+// platform-hook files configure the Elastic Beanstalk host rather than the
 // application, addressing the instance itself (127.0.0.1, the EC2 metadata
 // service) and belonging to deploy review. The test trees and the deploy files
 // reach no user; build configuration does, through what it emits, which is why

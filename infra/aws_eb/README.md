@@ -21,6 +21,7 @@ before running it against an account.
 
 Not to be confused with
 [`apps/web/deploy/aws_eb/`](../../apps/web/deploy/aws_eb/), the deployment
-payload -- a `Procfile` and the `.platform` nginx configuration -- that the build
+payload -- a `Procfile`, the `.platform` nginx configuration, and the platform
+hooks that install the certificate that configuration serves -- that the build
 workflow copies into the bundle it ships. That directory is what the deploy path
 consumes; this one stands outside it.
