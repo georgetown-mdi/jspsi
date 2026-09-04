@@ -149,9 +149,9 @@ export function builder(cmd: Argv): Argv {
         "cost of disclosing your full per-key value structure to the receiver " +
         "-- a consented disclosure tradeoff, not a free speed-up. Has no " +
         "effect when linkage terms come from an existing configuration file " +
-        "(set linkage_strategy there). See https://github.com/" +
-        "georgetown-mdi/jspsi/blob/main/docs/EXCHANGE_REFERENCE.md " +
-        "(linkage_terms.linkage_strategy).",
+        "(set linkage_strategy there). See " +
+        "https://github.com/georgetown-mdi/jspsi/blob/main/docs/" +
+        "EXCHANGE_REFERENCE.md (linkage_terms.linkage_strategy).",
     });
 }
 

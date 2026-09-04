@@ -252,8 +252,9 @@ export function addCommonBootstrapOptions(
         "emit a machine-readable NDJSON event stream on file descriptor 3 for " +
         "a supervising process. Exits 64 if fd 3 is not wired. No effect on " +
         "an offline invite or accept, which runs no exchange. stdout and " +
-        "stderr are unchanged. Format: https://github.com/georgetown-mdi/" +
-        "jspsi/blob/main/docs/spec/CLI_EVENTS.md",
+        "stderr are unchanged. Format: " +
+        "https://github.com/georgetown-mdi/jspsi/blob/main/docs/" +
+        "spec/CLI_EVENTS.md",
     })
     .option("lockless-rendezvous", {
       type: "boolean",
