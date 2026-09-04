@@ -31,21 +31,15 @@ function ustarChecksum(header: Buffer): number {
 const MAX_DECOMPRESSED_BYTES = 256 * 1024 * 1024;
 
 /**
- * Minimal gzip + ustar reader returning the regular-file entries of a `.tgz`.
- * Enough to inspect the vendored @openmined/psi.js prebuild tarball's contents
- * without a tar dependency -- deliberately NOT a general extractor, and it treats
- * anything it cannot faithfully read as fatal rather than guessing. Every 512-byte
- * block must be a well-formed ustar header -- valid magic at offset 257 and a
- * valid self-checksum at 148 -- with a strictly-octal size, so a corrupt or
- * crafted archive cannot desync the walk and smuggle a 512-byte block planted
- * inside a member's data past as a phantom entry (which would let a re-vendored
- * tarball hide a mis-built prebuild behind a clean-looking decoy). It also throws
- * on GNU longname/longlink or pax records (which would override the next entry's
- * name) and on base-256 large sizes, and caps decompression against a gzip bomb.
- * The vendored tarball is plain ustar with short paths and valid checksums today,
- * so none of these fire -- but a future re-vendor that changes that breaks CI
- * loudly instead of letting the guard check a mis-named, truncated, or laundered
- * entry set.
+ * Minimal gzip + ustar reader returning the regular-file entries of a
+ * `.tgz`, enough to inspect the vendored @openmined/psi.js prebuild
+ * tarball without a tar dependency -- not a general extractor, and
+ * anything unreadable is fatal, not guessed. Every 512-byte block must be
+ * a valid ustar header (magic at 257, checksum at 148, strictly-octal
+ * size), so a corrupt or crafted archive cannot desync the walk and read
+ * data planted inside a member as a phantom entry. GNU longname/pax
+ * records and base-256 sizes are refused, and decompression is capped
+ * against a gzip bomb.
  */
 export function readTgz(tarballPath: string): TarEntry[] {
   const buf = gunzipSync(readFileSync(tarballPath), {
@@ -117,15 +111,13 @@ export function readTgz(tarballPath: string): TarEntry[] {
 
 /**
  * A conservative upper bound on the highest `GLIBC_x.y[.z]` symbol version an
- * ELF binary requires, or null when it references none -- the binary's effective
- * glibc floor (glibc refuses to load it on a host whose libc is older). This
- * scans the raw bytes for any `GLIBC_` version token rather than parsing
- * `.gnu.version_r`, so it needs no binutils and works on any host, but it is an
- * OVER-approximation: a defined or optional version elsewhere in the string
- * tables can only push the reported floor UP, never down. That direction is safe
- * for the guard -- it may spuriously fail a good build (investigate the stray
- * token) but can never pass a build whose real floor is too high. Matches
- * `objdump -T` exactly for the current vendored prebuilds.
+ * ELF binary requires, or null when it references none -- the binary's
+ * effective glibc floor (glibc refuses to load it on an older host). Scans
+ * the raw bytes for any `GLIBC_` version token rather than parsing
+ * `.gnu.version_r`, so it needs no binutils. It is an OVER-approximation: a
+ * stray version token elsewhere can only push the floor UP, never down, so
+ * the guard may spuriously fail a good build but can never pass a bad one.
+ * Matches `objdump -T` for the current vendored prebuilds.
  */
 export function maxGlibcFloor(binary: Buffer): string | null {
   const text = binary.toString("latin1");

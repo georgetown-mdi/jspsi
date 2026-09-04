@@ -19,7 +19,7 @@ import type { MessageConnection } from "../src/connection/messageConnection";
 import type { Metadata } from "../src/config/metadata";
 import type { LinkageTerms, Output } from "../src/config/linkageTerms";
 
-// The name of a transmitted column is carried, not merely used: it rides the
+// The name of a transmitted column is held, not merely used: it rides the
 // payload frame to the partner and is written into this party's exchange record,
 // and both bound it at MAX_NAME_LENGTH. Metadata inferred from a CSV header passes
 // through no schema, so this send-side gate is what keeps the partner's parse from
@@ -30,8 +30,8 @@ const atCeiling = "a".repeat(MAX_NAME_LENGTH);
 const pastCeiling = atCeiling + "a";
 
 // U+1D54F: one code POINT, two UTF-16 code units. A name of these is under the
-// ceiling on a code-point count while over it on the count both carrying bounds
-// use, which is the case a code-point cut would wave through.
+// ceiling on a code-point count while over it on the count both bounds use,
+// which is the case a code-point cut would wave through.
 const ASTRAL = "\u{1D54F}";
 const astralUnderCodePointsOverUnits = ASTRAL.repeat(MAX_NAME_LENGTH);
 const astralAtCeiling = ASTRAL.repeat(MAX_NAME_LENGTH / 2);
@@ -85,7 +85,7 @@ test("overlongDisclosedColumnPositions: one character past the ceiling is report
 });
 
 test("overlongDisclosedColumnPositions: the count is UTF-16 code units, not code points", () => {
-  // The case a code-point count would pass and both carrying bounds refuse.
+  // The case a code-point count would pass and both bounds refuse.
   expect([...astralUnderCodePointsOverUnits].length).toBe(MAX_NAME_LENGTH);
   expect(astralUnderCodePointsOverUnits.length).toBe(MAX_NAME_LENGTH * 2);
   expect(
@@ -143,7 +143,7 @@ test("assertDisclosedNamesCarriable: refuses as a UsageError naming positions, n
   const message = String(thrown);
   expect(message).toMatch(/metadata column 2 /);
   expect(message).toContain(`${MAX_NAME_LENGTH}-character limit`);
-  // The offending name is longer than any message that would carry it, so it is
+  // The offending name is longer than any message that would hold it, so it is
   // located rather than echoed.
   expect(message).not.toContain(pastCeiling);
 });
@@ -176,8 +176,8 @@ test("assertDisclosedNamesCarriable: pluralizes for several offending columns", 
 });
 
 test("assertDisclosedNamesCarriable: says nothing when the partner is entitled to no result", () => {
-  // Nothing leaves the machine whatever the metadata discloses, so there is no
-  // carried name to bound and a refusal would fail an exchange that runs. The same
+  // Nothing leaves the machine whatever the metadata discloses, so no name
+  // needs the bound, and a refusal would fail an exchange that runs. The same
   // output gate assertPayloadSendDisclosed applies to its empty case.
   expect(() =>
     assertDisclosedNamesCarriable(metadataSending(pastCeiling), SHARES_NOTHING),
@@ -215,8 +215,8 @@ test("prepareForExchange: accepts a disclosed header at the ceiling", () => {
 });
 
 test("prepareForExchange: accepts an oversized disclosed header when the partner receives no result", () => {
-  // The direction reaches the gate: with nothing transmitted, an over-long name is
-  // carried nowhere and the exchange runs.
+  // The direction reaches the gate: with nothing transmitted, an over-long name
+  // goes nowhere and the exchange runs.
   expect(() =>
     prepareForExchange(
       { linkageTerms: { ...terms, output: SHARES_NOTHING } },
@@ -244,7 +244,7 @@ test("prepareForExchange: accepts an oversized header the metadata does not tran
 // going through prepareForExchange is refused before anything reaches the
 // partner. Every collaborator the run would touch throws when used, so the
 // refusal is what the rejection can come from -- a connection frame or a PSI call
-// would surface as its own error, failing these assertions.
+// would show up as its own error, failing these assertions.
 const failIfUsed = (what: string) => (): never => {
   throw new Error(`${what} was used past the disclosed-name refusal`);
 };
@@ -276,7 +276,7 @@ test("runExchange refuses an oversized disclosed name before it connects", async
 
 test("runExchange reads the output declaration the run carries, not the one prepare gated on", async () => {
   // The other half of the bypass: an oversized name prepared under terms entitling
-  // the partner to no result -- where nothing is carried, so prepare passes it --
+  // the partner to no result -- where nothing travels, so prepare passes it --
   // then given sharing terms, which is when the name would travel.
   const prepared = prepareForExchange(
     { linkageTerms: { ...terms, output: SHARES_NOTHING } },
@@ -312,8 +312,8 @@ test("runExchange runs past the guard for a carriable disclosed name", async () 
 
 test("the send-side gate refuses exactly the names the partner's parse refuses", async () => {
   // The property the two bounds have to hold jointly: nothing the gate passes is
-  // refused after the frame is sent, and nothing it refuses would have been
-  // carried. Driven at the astral boundary, where a code-point count would put
+  // refused after the frame is sent, and nothing it refuses would have
+  // crossed. Driven at the astral boundary, where a code-point count would put
   // the two on opposite sides.
   for (const name of [atCeiling, astralAtCeiling]) {
     expect(overlongDisclosedColumnPositions(metadataSending(name))).toEqual([]);

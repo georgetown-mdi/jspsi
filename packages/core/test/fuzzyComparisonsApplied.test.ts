@@ -325,10 +325,11 @@ describe("buildKeyStrings: fuzzy fan-out guardrails", () => {
   });
 
   test("a key whose declared width exceeds the ceiling is refused", () => {
-    // Every element's candidates multiply across the key, so four elements each
-    // declaring the edit-distance ceiling declare a width no row could be
-    // assembled for. The refusal is settled from the TERMS, before any row is
-    // read, rather than dropping or refusing every row at the assembly cap.
+    // Every element's candidates multiply across the key, so four elements
+    // each declaring the edit-distance ceiling declare a width no row could
+    // be assembled for. The refusal is decided from the TERMS, before any
+    // row is read, rather than dropping or refusing every row at the
+    // assembly cap.
     const key: LinkageKey = {
       name: "wide",
       elements: ["a", "b", "c", "d"].map((field) => ({
@@ -352,11 +353,12 @@ describe("buildKeyStrings: fuzzy fan-out guardrails", () => {
   });
 
   test("a row whose expansion replicates too many bytes is refused", () => {
-    // The expansion's own input bound (MAX_FUZZY_EXPANSION_INPUT_LENGTH) reaches
-    // only the value a fuzzy element expands, never a sibling element's value --
-    // which every candidate of the product carries a copy of. The key's byte
-    // limb is what bounds those replicated bytes: this row's candidate COUNT is
-    // inside the assembly cap, and its byte total is not.
+    // The expansion's own input bound (MAX_FUZZY_EXPANSION_INPUT_LENGTH)
+    // reaches only the value a fuzzy element expands, never a sibling
+    // element's value -- which every candidate of the product holds a copy
+    // of. The key's byte limb is what bounds those replicated bytes: this
+    // row's candidate COUNT is inside the assembly cap, and its byte total
+    // is not.
     const plainFields = ["p0", "p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8"];
     const key: LinkageKey = {
       name: "wide",
@@ -545,11 +547,11 @@ describe("buildKeyStrings: the expanding side", () => {
       swap: ["a", "b"],
     };
     const dataset = datasetOf({ a: "19900115", b: "20000229" });
-    // Swapped, the receiver reads b then a, expanding each: 2000-02-29 has no
-    // counterpart in either adjacent (non-leap) year, so it contributes itself
-    // alone, while 1990-01-15 contributes both neighbours. The authored order the
-    // swap variant assembles beside it carries the same two expansions, in the
-    // other position.
+    // Swapped, the receiver reads b then a, expanding each: 2000-02-29 has
+    // no counterpart in either adjacent (non-leap) year, so it contributes
+    // itself alone, while 1990-01-15 contributes both neighbours. The
+    // authored order the swap variant assembles beside it holds the same
+    // two expansions, in the other position.
     expect(buildKeyStrings(key, dataset, 0, true)).toEqual(
       new Set([
         "2000022919900115",

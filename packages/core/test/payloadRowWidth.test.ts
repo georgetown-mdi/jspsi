@@ -12,17 +12,14 @@ import type { MessageConnection } from "../src/connection/messageConnection";
 import type { PreparedExchange } from "../src/exchange";
 import type { Output } from "../src/config/linkageTerms";
 
-// A payload frame's rows are positional against the columns it names, and the
-// exchange record commits the column names and the row values together while its
-// readable governance list carries the names alone. A frame whose rows are not one
-// value per named column would therefore commit values the record's own readable
-// form does not account for -- at its starkest, a frame naming no column while
-// carrying rows, whose every value is committed against a `payloadReceived` list
-// reading empty. These drive a full `psi` run rather than the parse alone, so the
-// refusal is shown to land before the run reaches its output or record stage, and
-// on the lazy receive path (no locked-in column set), where the received-payload
-// reconciliation has nothing to compare and so is not what refuses.
-// The parse-level cases, both refused and accepted, are in payloadExchange.test.ts.
+// A payload frame's rows are positional against the columns it names, and
+// the exchange record commits the column names and row values together
+// while its readable governance list holds the names alone. A frame whose
+// rows are not one value per named column would commit values the
+// record's readable form cannot account for. These drive a full `psi`
+// run so the refusal is shown to land before the run reaches its output
+// or record stage, on the lazy receive path where reconciliation is not
+// what refuses. Parse-level cases are in payloadExchange.test.ts.
 
 const psiLibrary = await PSI();
 
@@ -48,7 +45,7 @@ const receiverRows = [
 const receiverColumns = ["first_name"];
 
 // `diagnosis` is neither a linkage nor a PII alias, so inferMetadata marks it
-// transmitted and the honest run below carries it.
+// transmitted and the honest run below includes it.
 const senderRows = [
   { first_name: "Alice", diagnosis: "A-hypertension" },
   { first_name: "Carol", diagnosis: "C-diabetes" },
@@ -67,7 +64,7 @@ function prepared(
     rows,
     columns,
   );
-  // No payload block and no persisted lock-in: the receive side is lazy, so
+  // No payload block and no persisted commitment: the receive side is lazy, so
   // reconcileReceivedPayload takes whatever arrives and the wire schema is the
   // only thing standing between a forged frame and the record.
   expect(exchange.expectedPayloadColumns).toBeUndefined();

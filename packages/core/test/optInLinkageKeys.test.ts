@@ -28,7 +28,7 @@ const BACKBONE = [
   col("dob", "date_of_birth"),
 ];
 
-/** A file carrying the backbone and one column of every offered type. */
+/** A file holding the backbone and one column of every offered type. */
 const EVERY_TYPE = [
   ...BACKBONE,
   ...OPT_IN_LINKAGE_FIELD_TYPES.map((type) => col(type, type)),
@@ -109,9 +109,9 @@ describe("optInLinkageKeys", () => {
   });
 
   test("offers nothing when a column the compound's backbone needs is missing", () => {
-    // Satisfiability runs over EVERY element, so a file carrying the offered type
-    // but not the rest of the key is offered no key at all rather than a thinner
-    // one: the compound shape is the offer.
+    // Satisfiability runs over EVERY element, so a file holding the offered
+    // type but not the rest of the key is offered no key at all rather than a
+    // thinner one: the compound shape is the offer.
     expect(
       optInLinkageKeys([
         col("ln", "last_name"),
@@ -196,8 +196,8 @@ describe("optInLinkageKeys", () => {
 
   test("adding one to the built-in keys costs the rules their citation", () => {
     // An offered key is an addition to the built-in set, not part of it, so rules
-    // carrying one are not drawn from that set and may not cite it. This is what
-    // makes the departure legible on the acceptor's side rather than only in the
+    // holding one are not drawn from that set and may not cite it. This is what
+    // makes the departure clear on the acceptor's side rather than only in the
     // copy beside the control.
     const metadata = [...BACKBONE, col("zip", "zip_code")];
     const terms = getDefaultLinkageTerms("Inviter", metadata);

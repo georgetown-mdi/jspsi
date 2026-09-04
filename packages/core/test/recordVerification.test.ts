@@ -45,7 +45,7 @@ const termsA: LinkageTerms = {
 };
 const termsB: LinkageTerms = { ...termsA, identity: "Party B" };
 
-// The received payload carries a genuine null cell, so the null-vs-empty
+// The received payload holds a genuine null cell, so the null-vs-empty
 // re-supply guard below has something to distinguish.
 const localPayloadSent: CommittedPayload = {
   columns: ["dose"],
@@ -204,10 +204,10 @@ describe("verifyExchangeRecord", () => {
   });
 
   test("a held-no-table record does not report the absent association table", async () => {
-    // A party that received no output holds no association table, so neither the
-    // record nor the keys carries it -- a legitimate absence, not reported. The
-    // same party is not entitled to the result size either (the gate is both
-    // parties receiving output), so the record states none.
+    // A party that received no output holds no association table, so neither
+    // the record nor the keys contains it -- a legitimate absence, not
+    // reported. The same party is not entitled to the result size either
+    // (the gate is both parties receiving output), so the record states none.
     const {
       associationTable: _omitTable,
       resultSize: _omitSize,
@@ -404,10 +404,11 @@ describe("verifyExchangeRecord checks the recorded result size", () => {
   });
 
   test("a re-supplied pairing with no readable pair count is unchecked", async () => {
-    // Halves of different lengths carry no pair count -- each entry is one pair
-    // read across both -- so the figure is withheld rather than compared against
-    // a guessed one. The record commits to the shape, so reaching this needs a
-    // hand-built pair; the fail-safe contract still owes a verdict, not a throw.
+    // Halves of different lengths hold no pair count -- each entry is one
+    // pair read across both -- so the figure is withheld rather than
+    // compared against a guessed one. The record commits to the shape, so
+    // reaching this needs a hand-built pair; the fail-safe contract still
+    // owes a verdict, not a throw.
     const lopsided = [[0, 1], [0]] as unknown as CanonicalValue;
     const { record, keys } = await buildExchangeRecord({
       ...baseInputs,
@@ -500,13 +501,13 @@ describe("verifyExchangeRecord checks the recorded result size", () => {
 // --- The record-alteration verdict guard -------------------------------------
 
 // The guard both verification consumers ask before dropping the
-// altered-or-wrong-file hedge and stating flatly that the record was altered.
-// The shapes below are hand-built rather than verified out of a record: the
-// guard is exported and takes a plain report, so what it answers for a shape no
-// core-built report reaches -- an empty commitment map, a map carrying no
-// association table, a figure at fault under a verdict that did not fail -- is
-// part of its contract, and an accusation may not rest on a sweep that passes
-// because there was nothing to sweep.
+// altered-or-wrong-file hedge and stating flatly that the record was
+// altered. The shapes below are hand-built rather than verified out of a
+// record, since the guard is exported and takes a plain report: an empty
+// commitment map, a map with no association table, a figure at fault under
+// a verdict that did not fail are all shapes no core-built report reaches,
+// and an accusation may not rest on a sweep that passes because there was
+// nothing to sweep.
 describe("recordAlterationIsTheOnlyExplanation", () => {
   const onlyTheFigureAtFault: RecordVerificationReport = {
     outcome: "failed",
@@ -700,9 +701,10 @@ function reconstructFrom(
 
 describe("reproductionMismatchCauses", () => {
   test("the result writes a committed null as an empty cell", async () => {
-    // The premise the whole caveat rests on: our matched rows [0, 2] pair with
-    // partner rows [1, 0], so the first result row carries the partner's null and
-    // the second its "active" -- and the null arrives as an empty string.
+    // The assumption the whole caveat rests on: our matched rows [0, 2] pair
+    // with partner rows [1, 0], so the first result row holds the partner's
+    // null and the second its "active" -- and the null arrives as an empty
+    // string.
     const result = await retainedResultFor(partnerPayloadAsSent);
     expect(result.rows.map((row) => row[2])).toEqual(["", "active"]);
   });
@@ -725,8 +727,9 @@ describe("reproductionMismatchCauses", () => {
       localTerms: termsA,
       partnerTerms: termsB,
     });
-    // Nothing was modified, and everything reproducible reproduced: the received
-    // payload alone mismatches, on the one cell the result could not carry.
+    // Nothing was modified, and everything reproducible reproduced: the
+    // received payload alone mismatches, on the one cell the result could
+    // not hold.
     expect(warnings).toEqual([]);
     expect(report.commitments.partnerPayloadReceived).toBe("mismatch");
     expect(report.commitments.localPayloadSent).toBe("verified");
@@ -771,10 +774,11 @@ describe("reproductionMismatchCauses", () => {
   });
 
   test("an empty string in that cell opens the commitment and earns no note", async () => {
-    // The same exchange with an empty string where the null was: the result cell
-    // is identical, but this time it reproduces what was committed. An empty cell
-    // on its own must not raise the note, or every verified result carrying one
-    // would come with a caveat about a mismatch that did not happen.
+    // The same exchange with an empty string where the null was: the result
+    // cell is identical, but this time it reproduces what was committed. An
+    // empty cell on its own must not raise the note, or every verified
+    // result holding one would come with a caveat about a mismatch that did
+    // not happen.
     const emptyRatherThanNull: PartnerPayload = {
       ...partnerPayloadAsSent,
       rows: [["active"], [""]],

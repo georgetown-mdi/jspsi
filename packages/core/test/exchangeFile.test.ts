@@ -20,7 +20,7 @@ import type { LinkageTerms } from "../src/config/linkageTerms";
 import type { FileSyncOptions } from "../src/config/connection";
 
 // A minimal, valid set of linkage terms shared across cases -- the mint layer
-// carries these into the config verbatim; they are not the thing under test.
+// puts these into the config verbatim; they are not the thing under test.
 const baseTerms: LinkageTerms = {
   version: "1.0.0",
   identity: "Inviter",
@@ -93,7 +93,7 @@ test("mintExchangeFile: the serialized YAML is snake_case and carries the placeh
   const server = connection["server"] as Record<string, unknown>;
   expect(raw).toHaveProperty("linkage_terms");
   expect(raw).not.toHaveProperty("linkageTerms");
-  // The one identity field a locator cannot carry is seeded for the operator.
+  // The one identity field a locator cannot hold is seeded for the operator.
   expect(server["username"]).toBe(PLACEHOLDER_SSH_USERNAME);
   expect(server["host"]).toBe("sftp.example.org");
 });
@@ -182,9 +182,9 @@ test("mintExchangeFile: FileSyncOptions, metadata, standardization, and payload 
   expect(reparsed.standardization).toBeDefined();
   expect(reparsed.disclosedPayloadColumns).toEqual(["first_name"]);
   expect(reparsed.expectedPayloadColumns).toEqual(["last_name"]);
-  // The terms-side lock-in survives the snake_case wire form as `false` rather
-  // than as an absent key: absent would bind nothing, which is the state the
-  // acceptance is persisting to avoid.
+  // The terms-side commitment survives the snake_case wire form as `false`
+  // rather than as an absent key: absent would bind nothing, which is the
+  // state the acceptance is persisting to avoid.
   expect(parseYaml(yaml)).toHaveProperty("expected_partner_deduplicate", false);
   expect(reparsed.expectedPartnerDeduplicate).toBe(false);
 });
@@ -246,8 +246,8 @@ test("mintExchangeFile: no credential field appears anywhere in a maximal minted
 
 test("mintExchangeFile: an invalid locator fails loudly with a ZodError at mint", () => {
   // A split pair whose halves are equal is rejected by the connection schema.
-  // The mint validates before serializing, so this surfaces here, not later at
-  // the CLI's config load.
+  // The mint validates before serializing, so the failure shows here, not
+  // later at the CLI's config load.
   expect(() =>
     mintExchangeFile({
       connection: {
@@ -296,7 +296,7 @@ test("mintExchangeFile: camelize(parse(mint(x))) equals the schema parse of the 
 
 // --- WebRTC locator expansion (the managed-record composer's arm) ------------
 
-// The credential fields the webrtc connection block CAN carry but the locator
+// The credential fields the webrtc connection block CAN hold but the locator
 // arm must never emit -- the nested server credentials the flat file-sync
 // locators never had to exclude, plus the credential-bearing siblings.
 const forbiddenWebrtcKeys = [
@@ -415,7 +415,7 @@ test("mintExchangeFile: a webrtc locator is not an admissible mint input (compil
   // the suppression would go unused and typecheck would fail here, flagging the
   // silent widening the union addition must not cause.
   const input = {
-    // @ts-expect-error webrtc is deliberately outside the mint's locator input
+    // @ts-expect-error webrtc is outside the mint's locator input by design
     connection: { channel: "webrtc", host: "peer.example.org" },
     linkageTerms: baseTerms,
   } satisfies ExchangeFileInput;

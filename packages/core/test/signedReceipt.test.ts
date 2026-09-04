@@ -57,9 +57,9 @@ const identityA = await generateSigningIdentity("Party A", {
 const identityB = await generateSigningIdentity("Party B", {
   privateKey: keyB,
 });
-// The agreed-terms identity each party asserts for its partner. In these fixtures
-// the certificate identity and the agreed-terms identity coincide (a well-behaved
-// partner); the tautology-fix test below drives them apart deliberately.
+// The agreed-terms identity each party asserts for its partner. In these
+// fixtures the certificate identity and the agreed-terms identity coincide
+// (a well-behaved partner); the tautology-fix test below drives them apart.
 const partnerIdentityForA = identityB.certificate.identity;
 const partnerIdentityForB = identityA.certificate.identity;
 
@@ -391,9 +391,10 @@ describe("buildReceiptContent (session-keyed directional payload MACs)", () => {
 // --- Wire exchange over the in-memory pipe -----------------------------------
 
 /**
- * Run the two-party signature exchange over an in-memory pipe. Both parties build
- * the SAME content (as they do in a real exchange, from shared state); each side's
- * inputs carry its own identity and the pinned fingerprint of the partner.
+ * Run the two-party signature exchange over an in-memory pipe. Both parties
+ * build the SAME content (as they do in a real exchange, from shared
+ * state); each side's inputs hold its own identity and the pinned
+ * fingerprint of the partner.
  */
 async function runReceiptExchange(
   initiatorInputs: SignedReceiptExchangeInputs,
@@ -421,13 +422,13 @@ function inputsFor(
 }
 
 /**
- * Run the exchange expecting the RESPONDER to reject the initiator's frame before
- * sending its own, and return the responder's rejection reason. When the responder
- * rejects pre-send the initiator is left parked on a receive that never arrives
- * (the accepted terminate-and-restart semantics; a real transport would surface a
- * peer-silence timeout). The in-memory pipe has no inactivity deadline, so close
- * the initiator's connection once the responder settles to release its receive --
- * modeling the caller tearing the connection down on the terminated exchange.
+ * Run the exchange expecting the RESPONDER to reject the initiator's frame
+ * before sending its own, returning the responder's rejection reason. The
+ * initiator is left parked on a receive that never arrives -- the accepted
+ * terminate-and-restart semantics (a real transport would report a
+ * peer-silence timeout there). The pipe has no inactivity deadline, so
+ * close the initiator's connection once the responder settles, modeling
+ * the caller tearing down a terminated exchange.
  */
 async function expectResponderReject(
   initiatorInputs: SignedReceiptExchangeInputs,
@@ -463,10 +464,10 @@ describe("exchangeSignedReceipt (two-party over the pipe)", () => {
       inputsFor(identityA, fingerprintB, partnerIdentityForA, shared),
       inputsFor(identityB, fingerprintA, partnerIdentityForB, shared),
     );
-    // Both parties write the same artifact (roles fixed by the handshake, not by
-    // local/partner), carrying both certificates and signatures: each copies the
-    // signature the other sent rather than re-deriving it, so the two files agree
-    // byte for byte even though ECDSA signing is randomized.
+    // Both parties write the same artifact (roles fixed by the handshake,
+    // not by local/partner), holding both certificates and signatures: each
+    // copies the signature the other sent rather than re-deriving it, so the
+    // two files agree byte for byte even though ECDSA signing is randomized.
     expect(recInit).toEqual(recResp);
     expect(recInit.version).toBe(SIGNED_RECEIPT_VERSION);
     expect(recInit.content).toEqual(shared);
@@ -546,11 +547,12 @@ describe("exchangeSignedReceipt (two-party over the pipe)", () => {
   });
 
   test("a validly-pinned cert whose identity differs from the agreed terms fails closed", async () => {
-    // The responder pins the initiator's REAL certificate (fingerprintA) but asserts
-    // a DIFFERENT agreed-terms identity for it than the certificate carries. The pin
-    // and self-signature pass, but the certificate does not authorize the asserted
-    // agreed-terms identity, so the receipt is rejected with a security error --
-    // closing the tautology where the certificate's own identity was asserted.
+    // The responder pins the initiator's REAL certificate (fingerprintA) but
+    // asserts a DIFFERENT agreed-terms identity for it than the certificate
+    // holds. The pin and self-signature pass, but the certificate does not
+    // authorize the asserted agreed-terms identity, so the receipt is
+    // rejected with a security error -- closing the tautology where the
+    // certificate's own identity was asserted.
     const shared = content();
     const reason = await expectResponderReject(
       inputsFor(identityA, fingerprintB, partnerIdentityForA, shared),
@@ -660,7 +662,7 @@ describe("serialize / parse dual-signed record", () => {
   });
 
   test("rejects a record from the previous format rather than parsing it", () => {
-    // A record written under the previous signature scheme carries both the old
+    // A record written under the previous signature scheme holds both the old
     // record version and old certificates (an Ed25519 key in an RFC 8037 OKP
     // JWK). Either discriminant refuses it; neither is reinterpreted.
     const v1Certificate = {
@@ -731,23 +733,16 @@ describe("serialize / parse dual-signed record", () => {
 
 // --- Cross-implementation vectors --------------------------------------------
 
-// ECDSA signing is randomized, so the vectors are no longer
-// reproduce-the-signature known answers. They pin two things instead.
-//
-// The deterministic anchors -- the certificate fingerprint and the per-exchange
-// binder -- stay known answers: any implementation given the same key, identity,
-// session key, and role must reproduce both.
-//
-// The signature is verify-only, and the one checked in was produced by OPENSSL
-// over signed bytes the generator assembles from docs/spec/EXCHANGE_RECORD.md
-// rather than from signedReceipt.ts. Accepting it therefore proves this build
-// reconstructs the same signed bytes as an independent statement of the layout,
-// and interoperates with a signer outside this codebase. The browser suite runs
-// the same file against the web build in real Chromium, so both implementations
-// accept the same fixed signature -- which is what says their signed bytes
-// agree. A signature this build produces is checked against the same fixed key
-// and content below; sign and verify share the byte construction, so a build
-// whose bytes diverged would already have failed the fixed-signature check.
+// ECDSA signing is randomized, so these vectors pin two things instead of a
+// reproduce-the-signature known answer: the fingerprint and per-exchange
+// binder are deterministic known answers, reproduced by any implementation
+// given the same key, identity, session key, and role. The signature is
+// verify-only -- produced by OpenSSL over bytes the generator assembles
+// from docs/spec/EXCHANGE_RECORD.md, not from signedReceipt.ts -- so
+// accepting it proves this build's signed bytes match an independent
+// implementation's, and the same fixed signature verifies in the browser
+// suite's Chromium run of this file too. This build's own signature is
+// also checked below, since sign and verify share the byte construction.
 describe("cross-implementation vectors", () => {
   const vectorsPath = new URL(
     "./vectors/signed-receipt-vectors.json",

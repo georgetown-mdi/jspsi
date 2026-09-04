@@ -52,10 +52,10 @@ test("metadata and standardization are optional", () => {
 });
 
 test("expectedPayloadColumns: the local lock-in field round-trips, including the empty set", () => {
-  // The offline-accept lock-in: a top-level, per-party field (camelCase parsed,
-  // snake_case on disk). A non-empty list and the empty set are both valid -- the
-  // empty set is the strict "receive nothing" lock-in -- while the field stays
-  // optional (absent = lazy).
+  // The offline-accept commitment: a top-level, per-party field (camelCase
+  // parsed, snake_case on disk). A non-empty list and the empty set are both
+  // valid -- the empty set is the strict "receive nothing" commitment -- while
+  // the field stays optional (absent = lazy).
   expect(
     parseExchangeSpec({
       ...minimalSpec,
@@ -349,8 +349,8 @@ test("rejects a token_max_age_days above the maximum", () => {
 test("rejects a misspelled top-level enforcement key rather than dropping it", () => {
   // The three machine-managed enforcement records are optional and their absence
   // is a valid state, so a stripped typo would silently disable the control it
-  // names: an unconsented outbound payload, an unenforced receive lock-in, or an
-  // unchecked disclosure commitment, all with no signal to the operator.
+  // names: an unconsented outbound payload, an unenforced receive commitment,
+  // or an unchecked disclosure commitment, all with no signal to the operator.
   for (const misspelled of [
     "outbound_payload_consnet",
     "disclosed_payload_column",

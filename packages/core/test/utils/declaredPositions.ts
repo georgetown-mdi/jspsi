@@ -10,9 +10,9 @@ function corePath(relative: string): string {
 }
 
 /**
- * Type flags carrying no properties of their own, so a position of that type is
+ * Type flags holding no properties of their own, so a position of that type is
  * where a path ends. `VoidLike` covers the `undefined` an optional property's
- * union carries.
+ * union holds.
  */
 const STRUCTURELESS_TYPE =
   ts.TypeFlags.StringLike |
@@ -33,20 +33,19 @@ export interface DeclaredPositionsRequest {
   /** Name of the interface the walk descends from. */
   rootInterface: string;
   /**
-   * Whether an intersection carrying a string constituent ends a path. A
+   * Whether an intersection holding a string constituent ends a path. A
    * `Displayable` is `string` intersected with a phantom brand property, so a
-   * caller whose structs carry one sets this: descending into the brand would
+   * caller whose structs hold one sets this: descending into the brand would
    * invent a position no value ever holds.
    */
   stringIntersectionEndsPath?: boolean;
   /**
-   * Positions whose index-signature type IS the value the caller reasons about,
-   * rather than structure to descend through. An index signature declares no
-   * property paths, so a type carrying one contributes nothing to the walk;
-   * naming the position here is the caller stating that silence is the intended
-   * grain, and every position not named throws instead. A position named here
-   * that carries no index signature throws as well, so an exemption cannot
-   * outlive the declaration it was written for.
+   * Positions whose index-signature type IS the value the caller reasons
+   * about, rather than structure to descend through. An index signature
+   * declares no property paths, so a type holding one contributes nothing to
+   * the walk; naming a position here declares that silence intended, and
+   * every unnamed position with one throws instead. A named position holding
+   * no index signature throws too, so the exemption cannot outlive its cause.
    */
   recordValuePositions?: ReadonlyArray<string>;
 }
@@ -66,14 +65,13 @@ export interface DeclaredPositions {
 /**
  * Every property path {@link DeclaredPositionsRequest.rootInterface} and the
  * structs nested under it declare, read from those declarations with the
- * compiler API at test time, with array and tuple indices collapsed to `[]` --
- * so a path reads `linkageKeys[].elements[].transforms[].effect`.
+ * compiler API at test time, with array and tuple indices collapsed to `[]`
+ * -- so a path reads `linkageKeys[].elements[].transforms[].effect`.
  *
- * Derived rather than listed by its callers because what each of them checks
- * must fail on a field added to core, and a list only ever covers what someone
- * remembered to add to it. Throwing rather than returning less is the same
- * commitment: a walk that quietly stops short shrinks what its caller demands
- * while staying green.
+ * Derived rather than listed by its callers, so what each of them checks
+ * must fail on a field added to core rather than silently missing it.
+ * Throwing rather than returning less is the same commitment: a walk that
+ * quietly stops short shrinks what its caller demands while staying green.
  */
 export function declaredPositions({
   sourcePathFromCoreRoot,

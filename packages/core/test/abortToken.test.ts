@@ -27,7 +27,7 @@ test("deriveAbortToken is deterministic for the same session key and role", asyn
 test("deriveAbortToken yields distinct tokens per role (per-direction binding)", async () => {
   const initiator = await deriveAbortToken(sessionKeyA, "initiator");
   const responder = await deriveAbortToken(sessionKeyA, "responder");
-  // A captured marker renamed to the other party's name carries the wrong-role
+  // A captured marker renamed to the other party's name has the wrong-role
   // token, which the reader rejects -- this distinctness is what makes that safe.
   expect(bytesEqual(initiator, responder)).toBe(false);
 });

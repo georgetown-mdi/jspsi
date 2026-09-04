@@ -23,7 +23,7 @@ const col = (
   role: ColumnMetadata["role"] = "linkage",
 ): ColumnMetadata => ({ name, type, role, isPayload: false });
 
-/** The whole set, as a terms document's rules would carry it. */
+/** The whole set, as a terms document's rules would hold it. */
 const wholeSet = (): Pick<LinkageTerms, "linkageFields" | "linkageKeys"> => ({
   linkageFields: structuredClone([...DEFAULT_LINKAGE_RULE_SET.linkageFields]),
   linkageKeys: structuredClone([...DEFAULT_LINKAGE_RULE_SET.linkageKeys]),
@@ -200,8 +200,8 @@ describe("isDrawnFromLinkageRuleSet", () => {
 
   test("answers false for rules outside the canonical encoding domain", () => {
     // A transform param beyond the safe integer range cannot be canonically
-    // encoded, so it cannot be compared -- and rules carrying one are not the
-    // built-in set, which carries no such value.
+    // encoded, so it cannot be compared -- and rules holding one are not the
+    // built-in set, which holds no such value.
     const rules = wholeSet();
     const unencodable = structuredClone(rules.linkageKeys);
     unencodable[0].elements[0].transform = [
@@ -232,7 +232,7 @@ describe("linkageRuleSetReferenceFor", () => {
   test("cites nothing over rules that declare no key", () => {
     // Keyless rules are drawn from every set vacuously -- the predicate says so
     // -- so the citation is decided here instead: it asserts that the keys came
-    // from the named set, and a document declaring none carries no provenance.
+    // from the named set, and a document declaring none holds no provenance.
     const empty = { linkageFields: [], linkageKeys: [] };
     expect(isDrawnFromLinkageRuleSet(DEFAULT_LINKAGE_RULE_SET, empty)).toBe(
       true,

@@ -104,9 +104,9 @@ const both: Output = { expectsOutput: true, shareWithPartner: true };
 test("single-pass dispatch: a full runExchange yields the correct matched table and partner payload", async () => {
   const [initiator, responder] = await runBoth("single-pass", both, both);
 
-  // Carol and Elizabeth overlap. The dispatch must route single-pass and surface
-  // the same table cascade would, from each party's local perspective: client rows
-  // 0,1 <-> server rows 2,3.
+  // Carol and Elizabeth overlap. The dispatch must route single-pass and
+  // yield the same table cascade would, from each party's local
+  // perspective: client rows 0,1 <-> server rows 2,3.
   expect(initiator.associationTable).toEqual([
     [0, 1],
     [2, 3],
@@ -135,11 +135,12 @@ test("single-pass dispatch: a full runExchange yields the correct matched table 
 });
 
 /**
- * A bound on the two-party PSI round below sized as a backstop for an exchange
- * that never completes, not as an assertion about how fast a loaded machine
- * runs 600 rows a side: the round costs about a second on an idle container and
- * crosses vitest's 5 s default when the rest of the suite is competing for the
- * same cores. Nothing here waits for it to elapse on a healthy run.
+ * A bound on the two-party PSI round below sized as a safety check for an
+ * exchange that never completes, not as an assertion about how fast a
+ * loaded machine runs 600 rows a side: the round costs about a second on an
+ * idle container and crosses vitest's 5 s default when the rest of the
+ * suite is competing for the same cores. Nothing here waits for it to
+ * elapse on a healthy run.
  */
 const LARGE_DATASET_HANG_BACKSTOP_MS = 60_000;
 
@@ -147,13 +148,14 @@ test(
   "single-pass carries a larger dataset to completion under the derived cap",
   { timeout: LARGE_DATASET_HANG_BACKSTOP_MS },
   async () => {
-    // A dataset far above the toy examples above, well within the single-pass
-    // ceiling, must flow through the full runExchange path to completion without the
-    // derived frame cap rejecting it -- the regression the row-count-derived cap is
-    // meant to AVOID (single-pass now carries datasets larger than the old fixed
-    // ceiling). 600 rows per side over one key is 600 (key, record) cells per
-    // party, orders of magnitude below MAX_SINGLE_PASS_CELLS, yet large enough
-    // that the derived byte cap is far tighter than the static frame cap.
+    // A dataset far above the toy examples above, well within the
+    // single-pass ceiling, must flow through the full runExchange path to
+    // completion without the derived frame cap rejecting it -- the
+    // regression the row-count-derived cap is meant to AVOID (single-pass
+    // now handles datasets larger than the old fixed ceiling). 600 rows per
+    // side over one key is 600 (key, record) cells per party, orders of
+    // magnitude below MAX_SINGLE_PASS_CELLS, yet large enough that the
+    // derived byte cap is far tighter than the static frame cap.
     const n = 600;
     const overlap = 200;
     const bigServer = Array.from({ length: n }, (_, i) => ({
@@ -218,14 +220,15 @@ test("single-pass one-sided output: only the receiver gets the table and payload
   expect(responder.partnerPayload.columns).toEqual([]);
 });
 
-// Run a one-sided single-pass exchange (receiver expects output, helper does not)
-// end to end, capturing every frame the HELPER's process receives so a test can
-// assert -- at the wire -- whether the association-table frame (the only
-// Array-shaped frame) reaches it. `helperDiscloses` gives the helper a payload
-// column (so it is NOT blinded); `helperIsInitiator` swaps the handshake-role
-// assignment so BOTH payload-exchange orderings are exercised (resolveRole makes
-// the output party the PSI receiver regardless, so this only reorders the payload
-// phase, which is where an untested permutation could hide a frame-desync hang).
+// Run a one-sided single-pass exchange (receiver expects output, helper
+// does not) end to end, capturing every frame the HELPER's process
+// receives so a test can assert -- at the wire -- whether the
+// association-table frame (the only Array-shaped frame) reaches it.
+// `helperDiscloses` gives the helper a payload column (so it is NOT
+// blinded); `helperIsInitiator` swaps the handshake-role assignment so
+// BOTH payload-exchange orderings are exercised (resolveRole always makes
+// the output party the PSI receiver, so this only reorders the payload
+// phase, where an untested permutation could hide a frame-desync hang).
 async function runOneSidedSinglePass(opts: {
   helperDiscloses: boolean;
   helperIsInitiator: boolean;

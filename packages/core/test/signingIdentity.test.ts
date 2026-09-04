@@ -64,14 +64,14 @@ async function platformImportsKey(jwk: JsonWebKey): Promise<boolean> {
 }
 
 /** The DER SEQUENCE encoding of a raw `r || s` signature: the encoding a
- * certificate signature must never carry, built here so a test can measure it
- * against the raw one. */
+ * certificate signature must never take, built here so a test can measure
+ * it against the raw one. */
 function derEncodeSignature(raw: Uint8Array): Uint8Array {
   const derInteger = (value: Uint8Array): Array<number> => {
     let start = 0;
     while (start < value.length - 1 && value[start] === 0) start++;
     const body = [...value.subarray(start)];
-    // A leading octet at or above 0x80 would read as a negative INTEGER.
+    // A leading octet at or above 0x80 would be treated as a negative INTEGER.
     if ((body[0] ?? 0) >= 0x80) body.unshift(0);
     return [0x02, body.length, ...body];
   };
@@ -102,14 +102,13 @@ describe("generateSigningIdentity", () => {
   test("the self-signature is the fixed-length raw r||s, never DER", async () => {
     const id = await freshIdentity();
     const signature = fromBase64Url(id.certificate.signature);
-    // Length is the discriminator, not the leading byte: the first byte of a
-    // raw signature is r's top octet, uniform over the curve order, so a
-    // `signature[0] !== 0x30` check calls a correct signature DER once in 256
-    // generations. The two encodings are told apart by size instead, and the
-    // second assertion measures that separation on this very signature rather
-    // than asserting it in prose -- DER wraps the same pair in a SEQUENCE
-    // header plus a tag and length per INTEGER, and pads any integer whose top
-    // bit is set.
+    // Length is the discriminator, not the leading byte: the first byte of
+    // a raw signature is r's top octet, uniform over the curve order, so a
+    // `signature[0] !== 0x30` check calls a correct signature DER once in
+    // 256 generations. The two encodings are told apart by size instead,
+    // measured on this very signature rather than asserted in prose -- DER
+    // wraps the same pair in a SEQUENCE header plus a tag and length per
+    // INTEGER, padding any integer whose top bit is set.
     expect(signature).toHaveLength(ECDSA_P256_SIGNATURE_BYTES);
     expect(derEncodeSignature(signature).length).toBeGreaterThan(
       ECDSA_P256_SIGNATURE_BYTES,
@@ -198,10 +197,10 @@ describe("parseSigningIdentity / parseCertificate", () => {
   });
 
   test("rejects a coordinate padded to 33 bytes that importKey would admit", async () => {
-    // Measured: the platform accepts a coordinate carrying a 33rd leading zero
-    // byte and decodes it to the same point, so the fixed 32-byte length is this
-    // module's pin, not importKey's. Two encodings of one key would otherwise be
-    // two fingerprints for one key.
+    // Measured: the platform accepts a coordinate with a 33rd leading zero
+    // byte and decodes it to the same point, so the fixed 32-byte length is
+    // this module's pin, not importKey's. Two encodings of one key would
+    // otherwise be two fingerprints for one key.
     const cert = clone((await freshIdentity()).certificate);
     const padded = new Uint8Array(33);
     padded.set(fromBase64Url(cert.publicKey.x), 1);
@@ -391,7 +390,7 @@ describe("parseSigningIdentity / parseCertificate", () => {
 
 // A document written under the previous certificate format: an Ed25519 key in an
 // RFC 8037 OKP JWK. It must be refused outright, never reinterpreted under the
-// current scheme -- an OKP JWK carries no `y`, so a reader that ignored the
+// current scheme -- an OKP JWK has no `y`, so a reader that ignored the
 // version would be guessing at a coordinate.
 const V1_CERTIFICATE = {
   version: "psilink-signing-cert/v1",
@@ -575,14 +574,14 @@ describe("verifyPresentedCertificate", () => {
 // --- Cross-implementation vectors -------------------------------------------
 
 // The checked-in vectors are the cross-implementation contract. The public
-// coordinates and the fingerprint are known answers any implementation given the
-// same key must reproduce. The self-signature is not -- ECDSA signing is
-// randomized -- so it is instead verify-only, and the one checked in was
-// produced by openssl over signed bytes the generator assembles from the spec:
-// parsing it proves this implementation accepts a signature made outside the
-// codebase, over independently stated bytes. They double as the fixtures the
-// acceptance criteria require (a valid keypair + cert, plus -- via the two
-// vectors -- a mismatched identity binding and a non-matching fingerprint).
+// coordinates and the fingerprint are known answers any implementation
+// given the same key must reproduce. The self-signature is verify-only --
+// ECDSA signing is randomized -- produced by openssl over signed bytes the
+// generator assembles from the spec, so parsing it proves this
+// implementation accepts a signature made outside the codebase. They also
+// serve as the acceptance criteria's fixtures (a valid keypair + cert,
+// plus -- via the two vectors -- a mismatched identity binding and a
+// non-matching fingerprint).
 interface SigningVector {
   name: string;
   description: string;

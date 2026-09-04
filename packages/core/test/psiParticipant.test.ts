@@ -87,13 +87,13 @@ test("order doesn't matter", () => {
 });
 
 // --- association-table wire message: pathological-count bound -----------------
-// The association table is partner-controlled (the PPRL threat model treats the
-// counterparty as adversarial) and rides the ~512 MiB exchange frame. An inner
-// index array of hundreds of thousands of invalid elements overflowed Zod's call
-// stack spreading one issue per element up through the array/tuple frames
-// (RangeError). receiveParsed always surfaces a parse failure as a clean
-// ConnectionError("protocol"); the single-issue validators make the cause a
-// bounded validation error rather than that RangeError.
+// The association table is partner-controlled (the PPRL threat model
+// treats the counterparty as adversarial) and rides the ~512 MiB exchange
+// frame. An inner index array of hundreds of thousands of invalid elements
+// overflowed Zod's call stack, spreading one issue per element up through
+// the array/tuple frames (RangeError). receiveParsed always reports a
+// parse failure as a clean ConnectionError("protocol"), so the
+// single-issue validators make the cause a bounded validation error instead.
 
 test("a pathological-count association table fails cleanly, not with a RangeError", async () => {
   const [connA, connB] = createMessagePipe();
@@ -190,17 +190,16 @@ test("a legitimately large original-index frame parses", () => {
 });
 
 // --- PSI decode element-count guard: frame-bytes vs element-count amplification -
-// A malicious partner can pack a PSI setup / request / response with many minimal
-// (~2-byte) repeated encrypted-element entries -- staying within the frame byte
-// cap, yet declaring up to ~frameBytes/2 elements. deserializeBinary allocates one
-// heap object (~211 bytes, measured) per declared entry, so such a within-cap frame
-// would exhaust memory (tens of GiB) inside deserializeBinary itself. The
-// participant therefore SCANS the protobuf wire format and rejects an over-declared
-// frame BEFORE deserializeBinary is ever called (connection/psiElementScan.ts). The
-// ceiling is min(authenticated keyCount * recordCount, MAX_PSI_DECODE_ELEMENTS).
-// These craft an over-declared frame (a handful of 2-byte entries) and assert the
-// abort with the pre-scan's own message; the bound is tightened to a small value to
-// stand in for a real authenticated count.
+// A malicious partner can pack a PSI setup / request / response with many
+// minimal (~2-byte) repeated encrypted-element entries -- within the frame
+// byte cap, yet declaring up to ~frameBytes/2 elements; deserializeBinary
+// allocates one heap object per declared entry, so such a frame would
+// exhaust memory inside deserializeBinary itself. The participant instead
+// SCANS the protobuf wire format and rejects an over-declared frame BEFORE
+// deserializeBinary runs (connection/psiElementScan.ts), with a ceiling of
+// min(authenticated keyCount * recordCount, MAX_PSI_DECODE_ELEMENTS).
+// These tests craft an over-declared frame and assert the pre-scan's own
+// abort message, with the bound tightened to stand in for a real count.
 
 // A tiny encrypted-element list whose declared count far exceeds any bound the
 // tests set, in a frame of only a few dozen bytes.
@@ -209,7 +208,8 @@ const tinyElements = () =>
   Array.from({ length: OVER_DECLARED_COUNT }, () => new Uint8Array([1, 2]));
 
 test("processClientRequest rejects a request declaring more elements than the bound", async () => {
-  // Single-pass sender seam: the starter would deserialize the receiver's request.
+  // Single-pass sender boundary: the starter would deserialize the
+  // receiver's request.
   const sender = new PSIParticipant(
     "sender",
     psiLibrary,
@@ -237,8 +237,8 @@ test("processClientRequest rejects a request declaring more elements than the bo
 });
 
 test("computeValueMatches rejects a setup declaring more elements than the bound", async () => {
-  // Single-pass receiver seam (setup): the joiner would deserialize the sender's
-  // setup.
+  // Single-pass receiver boundary (setup): the joiner would deserialize
+  // the sender's setup.
   const receiver = new PSIParticipant(
     "receiver",
     psiLibrary,
@@ -260,8 +260,8 @@ test("computeValueMatches rejects a setup declaring more elements than the bound
 });
 
 test("computeValueMatches rejects a response declaring more elements than the bound", async () => {
-  // Single-pass receiver seam (response): a within-bound setup, an over-declared
-  // response, so the response check is what fires.
+  // Single-pass receiver boundary (response): a within-bound setup, an
+  // over-declared response, so the response check is what fires.
   const receiver = new PSIParticipant(
     "receiver",
     psiLibrary,
@@ -285,10 +285,10 @@ test("computeValueMatches rejects a response declaring more elements than the bo
 });
 
 test("cascade identifyIntersection (starter) rejects an over-declared request frame", async () => {
-  // Cascade decode path shares the same seam: inject an over-declared request as
-  // the frame the starter reads (its 1st receive) and assert it aborts before
-  // deserializing it. The bound stands in for the authenticated
-  // keyCount * receiverRecordCount.
+  // Cascade decode path shares the same boundary: inject an over-declared
+  // request as the frame the starter reads (its 1st receive) and assert it
+  // aborts before deserializing it. The bound stands in for the
+  // authenticated keyCount * receiverRecordCount.
   const [serverConn, clientConn] = createMessagePipe();
   const starter = new PSIParticipant(
     "starter",
@@ -312,8 +312,8 @@ test("cascade identifyIntersection (starter) rejects an over-declared request fr
 });
 
 test("cascade identifyIntersection (joiner) rejects an over-declared server setup frame", async () => {
-  // The mirror seam: the joiner reads the sender's server setup on its 1st receive.
-  // An over-declared setup aborts before it is deserialized.
+  // The mirror boundary: the joiner reads the sender's server setup on its
+  // 1st receive. An over-declared setup aborts before it is deserialized.
   const [serverConn, clientConn] = createMessagePipe();
   const joiner = new PSIParticipant(
     "joiner",
@@ -366,8 +366,8 @@ test("count-only countIntersection (joiner) rejects an over-declared response fr
     ["Carol"],
   );
   await serverConn.send(setup);
-  // Drain the joiner's request and unblock its 2nd receive; the over-declared
-  // response stands in for whatever this frame carries.
+  // Drain the joiner's request and unblock its 2nd receive; the
+  // over-declared response stands in for whatever this frame holds.
   await serverConn.receive();
   await serverConn.send(new Uint8Array([0]));
   const deserialize = vi.spyOn(psiLibrary.response, "deserializeBinary");
@@ -399,8 +399,8 @@ function nonRawServerSetupBytes(): Uint8Array {
 }
 
 test("computeValueMatches rejects a non-Raw server setup", async () => {
-  // Single-pass receiver seam: UNBOUNDED bounds, so it is the Raw check -- not the
-  // element-count bound -- that fires.
+  // Single-pass receiver boundary: UNBOUNDED bounds, so it is the Raw
+  // check -- not the element-count bound -- that fires.
   const receiver = new PSIParticipant(
     "receiver",
     psiLibrary,

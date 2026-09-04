@@ -137,7 +137,7 @@ test("the save flag rides the terms message when set", async () => {
     runSide(a, "initiator", termsA, true),
     runSide(b, "responder", termsB, true),
   ]);
-  // Message 1 is the initiator's terms; it carries save: true.
+  // Message 1 is the initiator's terms; it has save: true.
   expect(sent[0]).toMatchObject({ save: true });
 });
 
@@ -155,13 +155,11 @@ test("no save field is put on the wire when save intent is omitted", async () =>
 
 // --- runExchange bootstrap contract (end-to-end) -----------------------------
 //
-// The helpers above mirror runExchange's sequencing; these tests drive the real
-// runExchange over a pipe (real PSI) to pin the contract the CLI handler depends
-// on: a boolean saveIntent -- including `false` -- yields a DEFINED bootstrap, so
-// a non-saving party still carries partnerSaveIntent back to emit its notice;
-// `undefined` yields no bootstrap. This is the invariant a "clean up false to
-// undefined" change (see the CLI's OutputCompleteContext.bootstrap, which hands
-// the outcome to the handler) would silently break.
+// These tests drive the real runExchange over a pipe (real PSI): a boolean
+// saveIntent -- including `false` -- yields a DEFINED bootstrap, with
+// partnerSaveIntent set even for a non-saving party; `undefined` yields no
+// bootstrap. The CLI handler (OutputCompleteContext.bootstrap) depends on
+// this distinction to choose its notice.
 
 const psiLibrary = await PSI();
 

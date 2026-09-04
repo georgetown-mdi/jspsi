@@ -12,7 +12,7 @@ import type { Output } from "../src/config/linkageTerms";
 
 // Cross-party reconciliation of the SFTP host-key fingerprint. Each party
 // advertises the host key it observed in the authenticated post-handshake
-// terms exchange; a divergence is surfaced so a one-sided interception, or a
+// terms exchange; a divergence is reported so a one-sided interception, or a
 // server rekey between the two parties' setups, becomes detectable to both.
 
 // Plausible OpenSSH SHA256 fingerprints. reconcileHostKeyFingerprints compares
@@ -74,7 +74,7 @@ test("a different-type difference adds the benign multiple-host-key case", () =>
   expect(msg).toContain(KEY_RSA.fingerprint);
   expect(msg).toContain("ssh-ed25519");
   expect(msg).toContain("ssh-rsa");
-  // Different type: the benign multiple-host-key possibility is surfaced
+  // Different type: the benign multiple-host-key possibility is shown
   // alongside rekey/interception, so a routine multi-key server is not
   // mischaracterised as an attack.
   expect(msg).toMatch(/multiple host keys/);
@@ -82,14 +82,13 @@ test("a different-type difference adds the benign multiple-host-key case", () =>
 });
 
 // --- the four fragments against the sinks' own private-key pass ---------------
-// Every fragment this warning names is composed AHEAD of the explanation and the
-// re-pin instruction, and both of its sinks -- the log line and the fd-3 warning
-// event -- redact the whole composed string. That pass is fail-closed past a
-// BEGIN marker with no END, so without redaction WHERE EACH FRAGMENT IS
-// INTERPOLATED the party this warning is about could delete the warning about
-// itself. The partner's advertised values are the reachable half: the terms
-// exchange parses them under a length bound alone (100 for the fingerprint, 64
-// for the key type), and the marker is 35 characters.
+// Fragments (the partner's advertised fingerprint and key type) are composed
+// before the explanation and re-pin instruction. Both sinks -- the log line
+// and the fd-3 warning event -- redact the whole string fail-closed past a
+// BEGIN marker with no END, so a marker planted in a fragment could delete
+// everything after it, including the warning itself. The partner's values
+// are bounded only by length (100 for the fingerprint, 64 for the key
+// type) -- room enough for the 35-character marker.
 
 const PEM_MARKER = "-----BEGIN OPENSSH PRIVATE KEY-----";
 const REPIN_INSTRUCTION = "re-pin it on both sides";
@@ -123,7 +122,7 @@ test("a marker planted in the partner's fingerprint keeps the warning whole", ()
 
 test("markers planted in every fragment at once keep the warning whole", () => {
   // The same-type branch, whose two fragments are both fingerprints, with the
-  // local side carrying a marker too -- unreachable through keyTypeFromBlob's
+  // local side holding a marker too -- unreachable through keyTypeFromBlob's
   // charset bound for a key type, but nothing bounds a caller of this function.
   expectSurvivesTheSinkPass(
     reconcileHostKeyFingerprints(
@@ -135,7 +134,7 @@ test("markers planted in every fragment at once keep the warning whole", () => {
 
 test("a charset-conforming marker lookalike reaches the operator verbatim", () => {
   // `keyTypeFromBlob` admits `[A-Za-z0-9._@-]` only, so a real marker (which
-  // carries spaces) can never arrive in a LOCAL key type. Its hyphenated
+  // has spaces) can never arrive in a LOCAL key type. Its hyphenated
   // lookalike passes that bound AND matches no redaction pattern, so it renders
   // as itself. The cost is operator confusion, not disclosure; a stated limit in
   // docs/spec/CHANNEL_SECURITY.md, not a bug the patterns should widen to catch.
@@ -167,8 +166,8 @@ test("a server-controlled key type is escaped before display", () => {
 // the narrower "rekey or interception" wording. The bound each party's locally
 // observed type passes through must therefore keep two DIFFERENT rejected types
 // apart -- a single shared placeholder would make a server show one party one
-// hostile type and the other a different one, and have the warning read as if
-// both had observed the same key type.
+// hostile type and the other a different one, and have the warning display
+// as if both had observed the same key type.
 test("two different rejected key types do not collapse into a same-type warning", () => {
   const first: PresentedHostKey = {
     fingerprint: KEY_ED25519.fingerprint,
@@ -274,8 +273,8 @@ test("a party that observed no host key sees no false divergence", async () => {
 });
 
 test("a marker advertised over the wire cannot delete the re-pin instruction", async () => {
-  // Reachability settled by the real terms exchange rather than by restating the
-  // advertisement's bounds: the partner puts a BEGIN marker in both of its
+  // Reachability determined by the real terms exchange rather than by restating
+  // the advertisement's bounds: the partner puts a BEGIN marker in both of its
   // advertised fields, and what each party reconciles is what its own parse
   // admitted.
   const [initiator, responder] = await exchangeWithObservedKeys(KEY_ED25519, {
@@ -288,9 +287,9 @@ test("a marker advertised over the wire cannot delete the re-pin instruction", a
 
 test("a rejected key type survives the partner's parse of the advertisement", async () => {
   // The placeholder has to fit the bound the partner reads an advertised key
-  // type under, or the whole advertisement reads as malformed and the partner
-  // reconciles nothing -- which the real terms exchange, not a restated bound,
-  // is what settles here.
+  // type under, or the whole advertisement is treated as malformed and the
+  // partner reconciles nothing -- which the real terms exchange, not a
+  // restated bound, is what decides here.
   const observed: PresentedHostKey = {
     fingerprint: KEY_ED25519.fingerprint,
     keyType: observedKeyType("\x00".repeat(4096)),

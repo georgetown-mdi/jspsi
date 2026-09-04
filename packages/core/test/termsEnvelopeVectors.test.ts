@@ -17,22 +17,12 @@ import type { PresentedHostKey } from "../src/connection/fileSyncConnection";
 import type { TermsExchangeResult } from "../src/protocolSetup";
 
 /**
- * Conformance replay of test/vectors/terms-envelope-vectors.json: the field set,
- * field order, and values the terms-exchange envelope puts on the wire.
- *
- * Every piece of per-party, per-run role and bounds metadata rides that envelope
- * beside `linkageTerms` -- the record count, the declared effective key count,
- * the protocol version, the save intent, the payload-intent flag, and the
- * observed host key (docs/spec/PROTOCOL.md, The counts ride the terms exchange).
- * A partner reads each by name, so adding, renaming, dropping, or re-ordering one
- * is a wire-format delta. The suites around this one assert what a field MEANS;
- * this one holds the whole set each frame slot carries.
- *
- * The scenarios are replayed through the real `exchangeTerms` and `sendAbort`
- * rather than compared against a second model of the envelope, and each frame is
- * rebuilt from the file's `fields`, `envelope`, and `carriesLinkageTerms` before
- * the comparison -- so a field the file drops, renames, or re-orders fails here.
- * Regenerate with vectors/generate-terms-envelope-vectors.mjs.
+ * Conformance replay of test/vectors/terms-envelope-vectors.json: the field
+ * set, order, and values the terms-exchange envelope puts on the wire
+ * (docs/spec/PROTOCOL.md, The counts ride the terms exchange). Field name
+ * and order are part of the wire format; adding, renaming, dropping, or
+ * reordering one is a breaking change. Regenerate with
+ * vectors/generate-terms-envelope-vectors.mjs.
  */
 
 interface CapturedFrame {
@@ -105,9 +95,8 @@ function expectedFrame(frame: CapturedFrame): Record<string, unknown> {
 }
 
 /**
- * A frame comparison that fails on field ORDER as well as content: a partner
- * decoder reads by name, but the order is what a byte-level pin over the frame
- * would carry, and it is free to hold here.
+ * Checks field order in addition to content: the partner decoder reads by
+ * name, but this pins what a byte-level snapshot of the frame would show.
  */
 function expectFrame(sent: unknown, frame: CapturedFrame): void {
   const actual = sent as Record<string, unknown>;
@@ -144,9 +133,8 @@ function drive(
 
 describe("terms-exchange envelope vectors", () => {
   test("the file pins this build's protocol version", () => {
-    // The version rides every terms frame, and the reconcile admits only this
-    // build's exact value, so a file pinned to another version pins frames no
-    // conforming party would accept.
+    // The vectors must pin this build's exact protocol version: the
+    // reconcile rejects any other value.
     expect(vectors.protocolVersion).toBe(PROTOCOL_VERSION);
   });
 
@@ -172,8 +160,8 @@ describe("terms-exchange envelope vectors", () => {
         ).toBeDefined();
         expectFrame(sent, frame);
       }
-      // A frame the file does not pin is a slot that went unchecked, which is the
-      // hole this file exists to close.
+      // Catches a frame the file does not pin: an extra frame would
+      // otherwise go unchecked.
       expect(initiator.sent).toHaveLength(consumed.initiator);
       expect(responder.sent).toHaveLength(consumed.responder);
 
@@ -212,11 +200,9 @@ describe("terms-exchange envelope vectors", () => {
   });
 
   test("every field a slot admits rides some pinned frame on that slot", () => {
-    // The coverage claim as a check rather than a reader's inference: these
-    // vectors pin what exchangeTerms EMITS on the scenarios they drive, so a
-    // field added to a schema and advertised by no pinned frame would ride the
-    // wire with nothing holding it. Adding one fails here until a scenario
-    // carries it -- which is also what moves the bump guard's digest.
+    // Every admitted field must appear on some pinned frame: a schema field
+    // added with no covering frame fails here until a scenario carries it,
+    // which also moves the bump guard's digest.
     for (const [slot, admitted] of Object.entries(vectors.envelopeFields)) {
       const emitted = new Set(
         allFrames
@@ -231,11 +217,11 @@ describe("terms-exchange envelope vectors", () => {
   });
 
   test("some pinned frame advertises no optional field at all", () => {
-    // A party with nothing to advertise omits `save`, `disclosesPayload`, and
-    // `hostKey` rather than sending them as false or null, which a partner's
-    // schema would also accept. The frame comparison above is exact on the key
-    // list, so a build that started sending them fails there -- but only while
-    // the file still holds a frame that carries none of them.
+    // A party with nothing to advertise omits `save`, `disclosesPayload`,
+    // and `hostKey` rather than sending false or null (which a partner's
+    // schema would also accept). The frame comparison above is exact on
+    // keys, so a build that starts sending them fails there, but only
+    // while some pinned frame omits all three.
     const optional = ["save", "disclosesPayload", "hostKey"];
     const narrow = allFrames.filter(
       (frame) => !frame.fields.some((field) => optional.includes(field)),

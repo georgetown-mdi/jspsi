@@ -99,7 +99,7 @@ describe("RECORDED_LINKAGE_RULE_SET_CAVEAT", () => {
     // A record's citation is always paired with the writing party's verdict, so
     // the one sentence that serves all three verdicts must neither claim nothing
     // was checked nor read as verification -- and must not put the verdict's own
-    // vocabulary on a surface that does not carry the value.
+    // vocabulary on a surface that does not hold the value.
     expect(RECORDED_LINKAGE_RULE_SET_CAVEAT).toContain("exchange record");
     expect(RECORDED_LINKAGE_RULE_SET_CAVEAT).toContain("matching basis");
     expect(RECORDED_LINKAGE_RULE_SET_CAVEAT).not.toContain("has not checked");

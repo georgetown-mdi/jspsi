@@ -87,10 +87,11 @@ const overWideRows = (party: string) =>
 const overWideRowsForBothKeys = (party: string) =>
   overWideRows(party).map((row) => ({ ...row, last_name: row.first_name }));
 
-// The failure a run carries to its caller, thrown by an engine that refuses the
-// first crypto step of either role. The link phase reaches that step only once
-// both parties have built every round and taken every drop, so a run refused
-// here is a failing run whose rounds the teardown still has to close.
+// The failure thrown to a run's caller, by an engine that refuses the
+// first crypto step of either role. The link phase reaches that step only
+// once both parties have built every round and taken every drop, so a run
+// refused here is a failing run whose rounds the teardown still has to
+// close.
 const engineFailure = new Error("the psi engine refused this run");
 
 const refusingPsiEngine = (): PsiEngine => ({

@@ -13,28 +13,27 @@ import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
 
 // Resolved intersection-and-association known-answer anchor for the vendored
 // @openmined/psi.js engine. psi-intersection-vectors.json holds every scenario
-// the matching cascade has to get right -- the empty-round and empty-key cases,
-// which live here alone, alongside the projections psiParticipant.test.ts,
-// psiLink.test.ts, and psiLinkForLinkageKeys.test.ts exercise from the API side
-// -- in one portable fork-bump gate: this test replays each scenario against the
-// vendored engine and pins both the intersection membership and the
-// association/permutation mapping back to original input rows, so a fork re-roll
-// or an accidental engine swap that silently permutes or corrupts the mapping
-// fails here deterministically. This is the CORRECTNESS anchor; the byte-for-byte
-// anchor lives in psiEngineWireVectors.test.ts. Regenerate the fixture with
-// generate-psi-intersection-vectors.mjs in the vectors directory.
+// the matching cascade has to get right -- the empty-round and empty-key cases
+// live here alone; psiParticipant.test.ts, psiLink.test.ts, and
+// psiLinkForLinkageKeys.test.ts exercise the rest from the API side. This test
+// replays each scenario against the vendored engine and pins both the
+// intersection membership and the association/permutation mapping back to
+// original input rows, so a fork re-roll or an engine swap that silently
+// corrupts the mapping fails here. This is the CORRECTNESS anchor; the
+// byte-for-byte anchor lives in psiEngineWireVectors.test.ts. Regenerate the
+// fixture with generate-psi-intersection-vectors.mjs in the vectors directory.
 //
-// This gate runs against the default WASM engine only; a native-backend replay
-// is intentionally omitted because the projection is data-defined -- any correct
-// engine build reproduces it -- and the native addon is already anchored
-// byte-for-byte in psiEngineWireVectorsNative.test.ts and behaviorally (the
-// identify-intersection scenario, cross-backend) in psiParticipantNativeParity.test.ts.
+// This gate runs against the default WASM engine only. A native-backend
+// replay is omitted: the projection is data-defined, so any correct engine
+// build reproduces it, and the native addon is already anchored byte-for-byte
+// in psiEngineWireVectorsNative.test.ts and behaviorally (cross-backend, the
+// identify-intersection scenario) in psiParticipantNativeParity.test.ts.
 //
 // Scope caveat for a re-roller: a green run means the engine still computes
-// linkage CORRECTLY, not that a re-rolled or swapped engine is SECURE. It does
-// not verify no-leakage-beyond-the-intersection, malicious-security, or byte
-// interop, and does not replace the @openmined/psi.js security review
-// CONTRIBUTING.md's Cryptographic-dependencies rule requires.
+// linkage CORRECTLY, not that it is SECURE. It does not verify
+// no-leakage-beyond-the-intersection, malicious-security, or byte interop, and
+// does not replace the @openmined/psi.js security review CONTRIBUTING.md's
+// Cryptographic-dependencies rule requires.
 
 type Table = [number[], number[]];
 type Cardinality =
