@@ -22,13 +22,12 @@ import type { RunnableConnectionConfig } from "./connectionFromUrl";
 // endpoint, so the reconcile must not flag that as a divergence.
 const DEFAULT_SFTP_PORT = 22;
 
-// Two hosts are the same endpoint regardless of case (DNS is case-insensitive),
-// so compare them case-folded. Paths are compared the way the live connection
-// will treat them, so the reconcile does not abort on a difference the
-// connection would not see -- but the two channels normalize differently, so
-// each has its own comparator. FileSyncConnection.open strips at most one
-// trailing slash from an sftp remote path, while a filedrop path additionally
-// has backslashes folded to forward slashes and ALL trailing slashes stripped.
+// Two hosts are the same endpoint regardless of case (DNS is case-insensitive);
+// compare them case-folded. Paths compare the way the live connection treats
+// them: FileSyncConnection.open strips at most one trailing slash from an
+// sftp remote path, while a filedrop path additionally has backslashes
+// folded to forward slashes and ALL trailing slashes stripped -- so each
+// channel has its own comparator.
 function hostsEqual(a: string, b: string): boolean {
   return a.toLowerCase() === b.toLowerCase();
 }
@@ -41,30 +40,27 @@ function filedropPathsEqual(
   a: string | undefined,
   b: string | undefined,
 ): boolean {
-  // Normalize both sides through the connection's own normalizer, so the diff's
-  // verdict is exactly what the live filedrop connection would open (backslashes
-  // folded to forward slashes, all trailing slashes stripped, root-like paths
-  // preserved) -- no separate equality rule to drift from it. Either operand may
-  // be undefined: a split-directory config (inbound_path/outbound_path) carries
-  // no `path`, and a shared config carries no inbound/outbound, so undefined
-  // legitimately arrives. pushDirectoryConflicts calls this once per locator it
-  // compares (the single `path`, or each half of the split pair).
+  // Normalize both sides through the connection's own normalizer
+  // (normalizeFiledropPath), so the verdict matches what the live filedrop
+  // connection would open. Either operand may be undefined: a split-directory
+  // config has no `path`, and a shared config has no inbound/outbound.
+  // pushDirectoryConflicts calls this once per locator it compares (the
+  // single `path`, or each half of the split pair).
   const norm = (p: string | undefined): string | undefined =>
     p === undefined ? undefined : normalizeFiledropPath(p);
   return norm(a) === norm(b);
 }
 
 /**
- * Append the directory-locator conflicts for a file-sync channel. A directory is
- * given either as a single shared path or as the split inbound/outbound pair;
- * this compares whichever form the `target` uses, so a split target is reconciled
- * pair-wise and a shared target by its single path (matching how the live
- * connection resolves each). An existing config in the other form differs in the
- * compared field (its value is unset), so a shared-vs-split mismatch is a
- * conflict like any other. `pathsEqual` is the channel's own path comparator and
- * `field` renders a config key to its snake_case message path. Only fields the
- * target actually sets are compared, so a locator the target leaves unset is not
- * a disagreement with whatever the config holds.
+ * Append the directory-locator conflicts for a file-sync channel. A directory
+ * is a single shared path or a split inbound/outbound pair; this compares
+ * whichever form `target` uses -- pair-wise for a split target, by the
+ * single path for a shared one, matching how the live connection resolves
+ * each. An existing config in the other form differs in the compared field
+ * (its value is unset), so a shared-vs-split mismatch is a conflict like any
+ * other. `pathsEqual` is the channel's own path comparator; `field` renders
+ * a config key to its snake_case message path. Only fields `target` actually
+ * sets are compared.
  */
 function pushDirectoryConflicts(
   conflicts: ReconcileDiff[],
@@ -79,13 +75,12 @@ function pushDirectoryConflicts(
   // of the comparison is this party's own text.
   const locator = (value: string | undefined): CompatibilityMessageFragment =>
     value === undefined ? RECONCILE_UNSET : reconcileDiffValue(value);
-  // When the existing config is in the OTHER directory form than the target, the
-  // compared field is genuinely unset on the existing side -- but a bare
-  // "(unset)" hides the locator the config DOES hold in its own form, which an
-  // operator reads as "my config names no directory at all". Annotate the unset
-  // side with that locator so the conflict shows both forms. Composed only from
-  // the `haveValue === undefined` branch of `conflict` below, its one call site,
-  // so a same-form mismatch renders the existing value directly instead
+  // When the existing config is in the OTHER directory form than the target,
+  // the compared field is unset on the existing side -- but a bare "(unset)"
+  // hides the locator the config DOES hold in its own form, which displays as
+  // "my config names no directory at all". Annotate the unset side with that
+  // locator so the conflict shows both forms. Used only from the
+  // `haveValue === undefined` branch of `conflict` below, its one call site
   // (onlineBootstrap.test.ts drives both shapes: the two cross-topology cases
   // name the locator the config holds, and the split outbound_path mismatch
   // renders that value alone).
@@ -154,12 +149,10 @@ function pushDirectoryConflicts(
  * the disagreements into those that must abort the acceptance (`conflicts`) and
  * those that only warn (`warnings`).
  *
- * Comparing against that built `target` connection, rather than re-deriving the
- * effective values from the URL here, is deliberate: the diff's verdict then
- * matches what the live exchange does field for field. It cannot affirm a "match"
- * the connection later contradicts, and it inherits `connectionFromURL`'s own
- * encoding handling for free (so when that builder is taught to percent-decode
- * the path/userinfo, this comparison decodes with it).
+ * Compares against that built `target` connection rather than re-deriving the
+ * effective values from the URL here, by design: the diff's verdict then
+ * matches what the live exchange does field for field, and it inherits
+ * `connectionFromURL`'s own encoding handling for free.
  *
  * The split follows where vs how you reach the rendezvous. `host` and `path`
  * identify *which* drop you are meeting at; a mismatch there is almost always a
@@ -168,15 +161,11 @@ function pushDirectoryConflicts(
  * *how* you reach the same drop and are legitimately variable -- e.g. a file-sync
  * drop reached via `file://` by one party and `sftp://` by another, an alternate
  * SSH port or tunnel, or a different account -- so a mismatch warns and the run
- * proceeds: the live exchange uses the target, and the saved config is left
- * unchanged. Only fields the target actually sets are compared: a port, path, or
- * credential the target leaves unset (the URL omitted it and no override
- * supplied it) is not a disagreement with whatever the config holds. host is
- * compared case-insensitively and paths ignoring a trailing slash, matching how
- * DNS and FileSyncConnection treat them. Credential values are never echoed in a
- * warning -- a password or key in a log is a leak -- so those warnings report
- * only that the value differs. A channel mismatch short-circuits the per-channel
- * fields, which are not comparable across channels.
+ * proceeds on the target, leaving the saved config unchanged. Only fields the
+ * target actually sets are compared; host compares case-insensitively and
+ * paths ignore a trailing slash, matching how DNS and FileSyncConnection
+ * treat them. A credential value is never echoed in a warning, only that it
+ * differs. A channel mismatch short-circuits the per-channel fields.
  *
  * @internal exported for testing
  */

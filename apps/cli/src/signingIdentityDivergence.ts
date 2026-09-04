@@ -12,26 +12,21 @@ import type { CertificateBody } from "@psilink/core";
 // in wording or in rule.
 //
 // Why the comparison matters: a partner verifies a receipt against the identity
-// in the AGREED TERMS, not the one the presented certificate carries
+// in the AGREED TERMS, not the one the presented certificate holds
 // (verifyPresentedCertificate in @psilink/core), so a certificate bound to
 // anything other than linkage_terms.identity signs receipts the partner rejects.
 //
 // The two commands dispose of the same comparison differently, because only one
 // of them runs an exchange.
 //
-// `psilink exchange` REFUSES. Driven end to end, a diverging run cannot leave
-// both parties holding a verifiable receipt on either handshake role: the
-// exchange refuses this party's own certificate against its own agreed terms
-// (assertLocalCertificateAuthorizesAgreedIdentity in @psilink/core), at the terms
-// exchange and again at the swap, and the run ends with no result and no
-// receipt. Those refusals land only once the connection is open and this party's
-// credentials and terms have gone out, while this fault is settled while the
-// operator is still configuring, so the run is refused here before any
-// credential, terms, or data are sent -- the disposition its sibling
-// certificate-mode faults take (assertCertificateModePinsPartner and
-// assertCertificateModeNamesLocalParty in @psilink/core).
-// packages/core/test/signedReceiptEndToEnd.test.ts drives both role assignments,
-// so the premise behind this refusal is a check rather than a claim.
+// `psilink exchange` REFUSES: this party's own certificate against its own
+// agreed terms (assertLocalCertificateAuthorizesAgreedIdentity in
+// @psilink/core), refused here before any credential, terms, or data are
+// sent -- the disposition its sibling certificate-mode faults take
+// (assertCertificateModePinsPartner and assertCertificateModeNamesLocalParty
+// in @psilink/core).
+// packages/core/test/signedReceiptEndToEnd.test.ts drives both role
+// assignments, backing this refusal's assumption with a check.
 //
 // `psilink fingerprint` WARNS. It runs no exchange and sends nothing, and
 // binding a name before editing the configuration to match is an authoring order
@@ -53,10 +48,10 @@ const RECONCILE_GUIDANCE =
 /**
  * Whether `certificate` is bound to an identity other than `termsIdentity`.
  *
- * False when the two agree, and when the config carries no identity to compare
+ * False when the two agree, and when the config has no identity to compare
  * against (absent or empty) -- there is nothing the certificate could diverge
- * from. A `certificate`-mode run that names no party is unrunnable for its own
- * reason and is refused ahead of either disposition below
+ * from. A `certificate`-mode run that names no party is refused earlier, for
+ * its own reason, ahead of either disposition below
  * (`assertCertificateModeNamesLocalParty` in `@psilink/core`).
  */
 function divergesFromAgreedTerms(
@@ -71,16 +66,13 @@ function divergesFromAgreedTerms(
  * Warn when `certificate` is bound to an identity other than `termsIdentity`,
  * naming both values and the two ways to reconcile them. Silent when they agree
  * and when there is nothing to diverge from (see {@link divergesFromAgreedTerms}).
+ * `psilink fingerprint`'s disposition of the divergence.
  *
- * `psilink fingerprint`'s disposition of the divergence. The certificate may
- * equally have just been generated or been loaded off disk: what an exchange
- * refuses is the divergence itself, not the act of binding it.
- *
- * Both identities are escaped for this log sink, which is theirs: neither value
- * ever becomes an `Error` on this path, so this call site is where the single
- * escape belongs (CONTRIBUTING.md, Operator-facing escaping). They are locally
- * authored rather than partner-supplied, so this is display hygiene and the
- * per-value length bound the shared helper carries, not an injection boundary.
+ * Both identities are escaped here, the single escape site since neither
+ * value ever becomes an `Error` on this path (CONTRIBUTING.md,
+ * Operator-facing escaping). They are locally authored, not
+ * partner-supplied, so this is display hygiene -- the shared helper's own
+ * per-value length bound, not an injection boundary.
  */
 export function warnOnIdentityDivergence(
   certificate: CertificateBody,
@@ -106,36 +98,29 @@ export function warnOnIdentityDivergence(
  * Silent when they agree and when there is nothing to diverge from (see
  * {@link divergesFromAgreedTerms}).
  *
- * `psilink exchange`'s disposition, raised where the certificate is first in
- * hand and still before any credential, terms, or data are sent. That is the
- * earliest point it CAN be raised: the seam its siblings use
- * (`prepareForExchange`) reads the `signing` block, which carries only a path to
- * the identity file, so no certificate exists there to compare.
+ * `psilink exchange`'s disposition, raised as soon as the certificate is in
+ * hand, before any credential, terms, or data are sent -- the earliest point
+ * possible: `prepareForExchange`, which its siblings use, reads the
+ * `signing` block, which has only a path to the identity file, so no
+ * certificate exists there yet to compare.
  *
  * An {@link OperatorConfigError} for the reason its siblings are: both values
  * are the local operator's own -- one bound into a file this party wrote, the
- * other a field in this party's own config -- so the message is actionable to
- * them and carries nobody else's content, and the CLI classifies it as a
+ * other a field in this party's own config -- so the message is actionable
+ * to them and discloses nothing beyond their own values, classified as a
  * configuration error (exit 64).
  *
- * The two values are composed RAW and land last. Raw because a fragment
+ * The two values are composed RAW and land last: raw because a fragment
  * interpolated into an `Error` is escaped once where the chain is rendered
- * (CONTRIBUTING.md, Operator-facing escaping), and escaping here as well would
- * double every backslash the operator sees. Last because the renderer caps a
- * composed link, and `linkage_terms.identity` is bounded by the terms
- * schema's text cap, which is the same size as that link cap -- so the schema
- * cap alone can consume the entire link budget, and an over-long name spends
- * the truncation on itself rather than on the remedy the operator has to act
- * on.
- *
- * Ordering alone would still leave the values with whatever the fixed prose did
- * not spend, so the prose is kept short enough that a realistic pair renders
- * whole inside that cap. Copy is what erodes that, not code, so the budget is
- * pinned by a check on this message's length rather than by this paragraph
- * (`exchangeSigning.test.ts`).
+ * (CONTRIBUTING.md, Operator-facing escaping), and last because the schema's
+ * own text cap can consume the renderer's whole per-link budget
+ * (docs/spec/CHANNEL_SECURITY.md, "Display sanitization escape format"). The
+ * fixed prose is kept short enough that a realistic pair still renders whole
+ * inside that cap, pinned by a check on this message's length rather than by
+ * this paragraph (`exchangeSigning.test.ts`).
  *
  * @throws {OperatorConfigError} when the certificate is bound to a different
- *   identity than the run's agreed terms carry.
+ *   identity than the run's agreed terms hold.
  */
 export function assertIdentityMatchesAgreedTerms(
   certificate: CertificateBody,
