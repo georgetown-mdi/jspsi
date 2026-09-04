@@ -141,9 +141,12 @@ export default tseslint.config(
       "**/dist/**",
       "**/node_modules/**",
       "apps/web/eslint.config.js",
-      // The vendored PeerJS signaling server, kept as upstream wrote it so its
-      // security-review history stays traceable through the move.
-      "packages/peerjs-broker/src/contrib/**",
+      // The part of the vendored PeerJS signaling server this project has not
+      // edited since the vendoring -- upstream's message routing -- kept as
+      // upstream wrote it so its review history stays traceable; the rest of
+      // the directory carries this project's hardening and is linted.
+      "packages/peerjs-broker/src/contrib/messageHandler/**",
+      "packages/peerjs-broker/src/contrib/models/message.ts",
       "scratch/**",
       "research/**",
       ".claude/worktrees/**",
