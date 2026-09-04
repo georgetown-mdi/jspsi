@@ -2,7 +2,8 @@
   "files": [],
   "references": [
     { "path": "packages/core" },
+    { "path": "packages/peerjs-broker" },
     { "path": "apps/web" },
-    { "path": "apps/cli" }
+    { "path": "apps/cli/tsconfig.test.json" }
   ]
 }
