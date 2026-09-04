@@ -42,6 +42,8 @@
 
 import { readFileSync, statSync } from "node:fs";
 
+import { eventForTools } from "./lib/event.mjs";
+
 const READBACK_BYTES = 51200;
 const CANDIDATE_FIELDS = ["output", "stdout", "content"];
 
@@ -108,13 +110,8 @@ function readback(path) {
 }
 
 function main() {
-  let event;
-  try {
-    event = JSON.parse(readFileSync(0, "utf8"));
-  } catch {
-    process.exit(0); // unreadable event -- do not interfere
-  }
-  if (event.tool_name !== "Bash") process.exit(0);
+  const event = eventForTools("Bash");
+  if (event === null) process.exit(0); // unreadable, or another tool
 
   const path = savedOutputPath(event.tool_response);
   if (path === null) process.exit(0);

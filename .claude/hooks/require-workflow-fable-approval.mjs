@@ -29,7 +29,7 @@
 // require-fable-approval.mjs; a false negative here costs an unprompted Workflow
 // spawn, while a hook that wedged every Workflow call would cost far more.
 
-import { readFileSync } from "node:fs";
+import { eventForTools } from "./lib/event.mjs";
 
 // `model: 'fable'` / `"model": "claude-fable-5"` in any quote style (the key is
 // quoted when the option rides in a JSON args object), plus a quoted string that
@@ -60,13 +60,8 @@ function ask(reason) {
 }
 
 function main() {
-  let event;
-  try {
-    event = JSON.parse(readFileSync(0, "utf8"));
-  } catch {
-    process.exit(0); // unreadable event -- do not interfere
-  }
-  if (event.tool_name !== "Workflow") process.exit(0);
+  const event = eventForTools("Workflow");
+  if (event === null) process.exit(0); // unreadable, or another tool
 
   const script = event?.tool_input?.script;
   const args = event?.tool_input?.args;

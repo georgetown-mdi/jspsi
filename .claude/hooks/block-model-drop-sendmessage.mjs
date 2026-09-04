@@ -30,7 +30,7 @@
 //
 // Exit 0 allows the call; exit 2 blocks it and feeds stderr back to Claude.
 
-import { readFileSync } from "node:fs";
+import { eventForTools } from "./lib/event.mjs";
 
 const OVERRIDE_MARKER = "[accept-model-drop]";
 
@@ -42,13 +42,8 @@ function block(reason) {
 }
 
 function main() {
-  let event;
-  try {
-    event = JSON.parse(readFileSync(0, "utf8"));
-  } catch {
-    process.exit(0); // unparseable event -- do not interfere
-  }
-  if (event.tool_name !== "SendMessage") process.exit(0);
+  const event = eventForTools("SendMessage");
+  if (event === null) process.exit(0); // unreadable, or another tool
 
   // A background subagent reporting to the main conversation (to: "main") has no
   // spawned, model-pinned recipient to drop, so it is not gated.

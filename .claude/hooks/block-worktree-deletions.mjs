@@ -213,8 +213,10 @@
 // hook can never wedge every Bash command.
 
 import { spawnSync } from "node:child_process";
-import { readFileSync, readdirSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { basename, resolve } from "node:path";
+
+import { commandOf, eventCwd, eventForTools } from "./lib/event.mjs";
 
 const CLAUDE_DIR = ".claude";
 const WORKTREES_DIR = "worktrees";
@@ -933,18 +935,13 @@ function exportedAssignments(command) {
 }
 
 function main() {
-  let event;
-  try {
-    event = JSON.parse(readFileSync(0, "utf8"));
-  } catch {
-    process.exit(0); // unreadable event -- do not interfere
-  }
-  if (event.tool_name !== "Bash") process.exit(0);
-  const command = event?.tool_input?.command;
-  if (typeof command !== "string") process.exit(0);
+  const event = eventForTools("Bash");
+  if (event === null) process.exit(0); // unreadable, or another tool
+  const command = commandOf(event);
+  if (command === null) process.exit(0);
   if (!mentionsDeletion(command)) process.exit(0);
 
-  const sessionCwd = typeof event.cwd === "string" ? event.cwd : process.cwd();
+  const sessionCwd = eventCwd(event) ?? process.cwd();
   const session = worktreeContext(sessionCwd);
   const knownRoots = worktreeRoots(session?.root ?? null);
   const ownTrees = ownedTrees(event.agent_id, knownRoots);

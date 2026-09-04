@@ -83,8 +83,10 @@
 // Exit 0 allows the call; exit 2 blocks it and feeds stderr back to Claude.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
+
+import { eventCwd, eventForTools } from "./lib/event.mjs";
 
 const GUARDED_TOOLS = new Set(["Edit", "Write", "NotebookEdit"]);
 const PATH_KEYS = ["file_path", "notebook_path"];
@@ -138,10 +140,7 @@ function targetPath(toolInput, cwd) {
   for (const key of PATH_KEYS) {
     const value = toolInput?.[key];
     if (typeof value === "string" && value.length > 0) {
-      return resolve(
-        typeof cwd === "string" && cwd.length > 0 ? cwd : ".",
-        value,
-      );
+      return resolve(cwd ?? ".", value);
     }
   }
   return null;
@@ -204,7 +203,7 @@ function owningWorktree(path, paths) {
 // cannot be placed in one -- an event carrying no cwd, or one outside this
 // repository. Undefined leaves the sibling rule silent.
 function sessionWorktree(cwd, paths) {
-  if (typeof cwd !== "string" || cwd.length === 0) return undefined;
+  if (cwd === null) return undefined;
   return owningWorktree(canonical(cwd), paths);
 }
 
@@ -230,15 +229,11 @@ function isIgnored(root, path) {
 }
 
 function main() {
-  let event;
-  try {
-    event = JSON.parse(readFileSync(0, "utf8"));
-  } catch {
-    process.exit(0); // unparseable event -- do not interfere
-  }
-  if (!GUARDED_TOOLS.has(event.tool_name)) process.exit(0);
+  const event = eventForTools(...GUARDED_TOOLS);
+  if (event === null) process.exit(0); // unreadable, or another tool
 
-  const target = targetPath(event.tool_input, event.cwd);
+  const cwd = eventCwd(event);
+  const target = targetPath(event.tool_input, cwd);
   if (target === null) process.exit(0);
   const path = canonical(target);
 
@@ -251,7 +246,7 @@ function main() {
   const owner = owningWorktree(path, paths);
   if (owner === undefined) process.exit(0); // outside every checkout of this repo
 
-  const sessionTree = sessionWorktree(event.cwd, paths);
+  const sessionTree = sessionWorktree(cwd, paths);
   const writesAnotherWorktree =
     sessionTree !== undefined &&
     sessionTree !== mainRoot &&

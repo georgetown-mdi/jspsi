@@ -36,6 +36,8 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
+import { eventForTools } from "./lib/event.mjs";
+
 const TIERS = new Set(["opus", "sonnet", "haiku", "fable"]);
 
 // The subagent type whose model the platform discards; see the header's dated basis.
@@ -84,13 +86,8 @@ function leadingFrontmatter(text) {
 }
 
 function main() {
-  let event;
-  try {
-    event = JSON.parse(readFileSync(0, "utf8"));
-  } catch {
-    process.exit(0); // unreadable event -- do not interfere
-  }
-  if (event.tool_name !== "Agent") process.exit(0);
+  const event = eventForTools("Agent");
+  if (event === null) process.exit(0); // unreadable, or another tool
 
   const subagentType = event?.tool_input?.subagent_type;
   if (subagentType === INHERITING_SUBAGENT_TYPE) process.exit(0);

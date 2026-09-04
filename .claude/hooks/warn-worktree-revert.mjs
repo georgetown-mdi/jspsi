@@ -37,6 +37,8 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, normalize, resolve } from "node:path";
 
+import { eventCwd, readEvent } from "./lib/event.mjs";
+
 const MAX_TRANSCRIPT_BYTES = 64 * 1024 * 1024;
 
 // Run git, returning trimmed stdout, or null on any failure -- which is silence.
@@ -155,14 +157,10 @@ function warning(intended, current, branch) {
 }
 
 function main() {
-  let event;
-  try {
-    event = JSON.parse(readFileSync(0, "utf8"));
-  } catch {
-    process.exit(0); // unreadable event -- do not interfere
-  }
+  const event = readEvent();
+  if (event === null) process.exit(0); // unreadable event -- do not interfere
 
-  const cwd = typeof event.cwd === "string" ? event.cwd : process.cwd();
+  const cwd = eventCwd(event) ?? process.cwd();
   const transcriptPath = event.transcript_path;
   if (typeof transcriptPath !== "string") process.exit(0);
   const transcript = readTranscript(transcriptPath);

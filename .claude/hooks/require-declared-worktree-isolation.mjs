@@ -24,7 +24,7 @@
 // missed block (worst case is a collision the author will see) -- so every
 // unexpected error fails OPEN rather than wedge Agent spawns.
 
-import { readFileSync } from "node:fs";
+import { eventForTools } from "./lib/event.mjs";
 
 // Present-tense assertions that the agent's current working directory IS an
 // isolated worktree. Kept deliberately narrow: each targets a claim of STATE
@@ -45,13 +45,8 @@ function block(reason) {
 }
 
 function main() {
-  let event;
-  try {
-    event = JSON.parse(readFileSync(0, "utf8"));
-  } catch {
-    process.exit(0); // unreadable event -- do not interfere
-  }
-  if (event.tool_name !== "Agent") process.exit(0);
+  const event = eventForTools("Agent");
+  if (event === null) process.exit(0); // unreadable, or another tool
 
   // Already isolated: the flag is the only thing that matters; nothing to check.
   if (event?.tool_input?.isolation === "worktree") process.exit(0);

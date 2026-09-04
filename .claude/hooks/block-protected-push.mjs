@@ -18,8 +18,9 @@
 // in this hook can never wedge every Bash command -- branch protection backstops a
 // push this hook misses.
 
-import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+
+import { commandOf, eventCwd, eventForTools } from "./lib/event.mjs";
 
 const PROTECTED = new Set(["staging", "main"]);
 
@@ -160,16 +161,11 @@ function barePushVerdict(cwd) {
 }
 
 function main() {
-  let event;
-  try {
-    event = JSON.parse(readFileSync(0, "utf8"));
-  } catch {
-    process.exit(0); // unreadable event -- do not interfere
-  }
-  if (event.tool_name !== "Bash") process.exit(0);
-  const command = event?.tool_input?.command;
-  if (typeof command !== "string" || !command.includes("push")) process.exit(0);
-  const cwd = typeof event.cwd === "string" ? event.cwd : process.cwd();
+  const event = eventForTools("Bash");
+  if (event === null) process.exit(0); // unreadable, or another tool
+  const command = commandOf(event);
+  if (command === null || !command.includes("push")) process.exit(0);
+  const cwd = eventCwd(event) ?? process.cwd();
 
   for (const segment of splitSegments(command)) {
     const args = gitPushArgs(tokenize(segment));

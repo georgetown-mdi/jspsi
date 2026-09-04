@@ -81,6 +81,8 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 
+import { eventCwd, eventForTools } from "./lib/event.mjs";
+
 const DIRTY_ENTRIES_SHOWN = 10;
 const ROUNDS_DIR = join("scratch", "review-rounds");
 const LOCK_SUFFIX = ".lock";
@@ -278,19 +280,14 @@ function requireClean(path, subject) {
 }
 
 function main() {
-  let event;
-  try {
-    event = JSON.parse(readFileSync(0, "utf8"));
-  } catch {
-    process.exit(0); // unparseable event -- do not interfere
-  }
-  if (event.tool_name !== "Workflow") process.exit(0);
+  const event = eventForTools("Workflow");
+  if (event === null) process.exit(0); // unreadable, or another tool
 
-  // From here every path fails CLOSED. A missing or non-string cwd is a
+  // From here every path fails CLOSED. An event naming no directory is a
   // fail-closed case, not a crash: without a directory to inspect the tree cannot
   // be confirmed clean.
-  const cwd = event.cwd;
-  if (typeof cwd !== "string" || cwd.length === 0) {
+  const cwd = eventCwd(event);
+  if (cwd === null) {
     block(
       "could not locate a git repo to confirm a clean tree; commit and retry",
     );

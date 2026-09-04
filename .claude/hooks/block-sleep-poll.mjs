@@ -23,7 +23,7 @@
 // unexpected failure here falls through to exit 0 (fail open) so a bug in this
 // hook can never wedge every Bash command.
 
-import { readFileSync } from "node:fs";
+import { commandOf, eventForTools } from "./lib/event.mjs";
 
 const MINIMUM_BLOCKED_SECONDS = 5;
 
@@ -53,15 +53,10 @@ function block(seconds) {
 }
 
 function main() {
-  let event;
-  try {
-    event = JSON.parse(readFileSync(0, "utf8"));
-  } catch {
-    process.exit(0); // unreadable event -- do not interfere
-  }
-  if (event.tool_name !== "Bash") process.exit(0);
-  const command = event?.tool_input?.command;
-  if (typeof command !== "string") process.exit(0);
+  const event = eventForTools("Bash");
+  if (event === null) process.exit(0); // unreadable, or another tool
+  const command = commandOf(event);
+  if (command === null) process.exit(0);
   const seconds = nakedSleepSeconds(command);
   if (seconds !== null && seconds >= MINIMUM_BLOCKED_SECONDS) block(seconds);
   process.exit(0);
