@@ -1,20 +1,18 @@
 /**
- * The async load model behind the managed-exchange surfaces: it opens the store,
+ * Loads the home list for the managed-exchange surfaces: opens the store,
  * reads the records and their local sibling state, and derives the display rows,
- * resolving to one of three outcomes the home route and the list route each render
- * on. No React: the ordering and the failure classification are unit-testable in
- * Node with the store reads injected.
+ * resolving to one of three outcomes the home and list routes each render on. No
+ * React: the ordering and the failure classification are unit-testable in Node
+ * with the store reads injected.
  *
- * The two failure outcomes are deliberately distinct. A store whose open does not
- * succeed -- private mode with storage blocked, an engine without IndexedDB, or a
- * version-change open transiently blocked by another tab's older connection -- is
- * `"unavailable"`: the operator can still run a one-off exchange, so the home route
- * renders the quick path and the list route shows an explicit degrade. A store that
- * opens but whose read fails (a corrupted or app-upgrade-invalidated record) is
- * `"failed"`: the records exist but cannot be shown, which is not the same as no
- * store at all -- both routes surface the read failure rather than the quick path.
- * The open probe is what separates them, so the classification is a real
- * failed-open, never a user-agent guess.
+ * A store whose open does not succeed -- private mode with storage blocked,
+ * an engine without IndexedDB, or a version-change open transiently blocked by
+ * another tab's older connection -- is `"unavailable"`: the home route renders
+ * the quick path and the list route shows an explicit degrade. A store that
+ * opens but whose read fails (a corrupted or app-upgrade-invalidated record)
+ * is `"failed"`: the records exist but cannot be shown, distinct from no store
+ * at all -- both routes report the read failure rather than the quick path. The
+ * open probe alone decides the classification.
  */
 
 import { savedExchangeRows } from "./savedExchangesModel";
@@ -57,10 +55,9 @@ export async function loadSavedExchanges(
   deps: SavedExchangesLoadDeps,
 ): Promise<SavedExchangesLoad> {
   try {
-    // Close the probe connection at once: it exists only to separate an
-    // unopenable store from a post-open read failure, so holding it open would
-    // leak a live connection for the page lifetime and could block a later
-    // version-change transaction. The reads below reopen as needed.
+    // Close the probe connection at once: holding it open would leak a live
+    // connection for the page lifetime and could block a later version-change
+    // transaction. The reads below reopen as needed.
     (await deps.openStore()).close();
   } catch {
     return { kind: "unavailable" };

@@ -3,14 +3,12 @@ import { MAX_NAME_LENGTH } from "@psilink/core";
 /**
  * The 1-based positions of columns with an empty (zero-length) name, in column
  * order. Under PapaParse `header: true` a trailing comma, a blank cell, or a
- * leading delimiter in a CSV header row yields an unnamed (`""`) column; such a
- * column cannot be used for linkage, identification, or payload -- every name
- * field floors at `.min(1)`, and core's {@link inferMetadata} rejects it at intake
- * (throwing a `UsageError`). Each web intake surface calls this to refuse the file
- * EARLY -- with the clear, actionable {@link unnameableColumnsAlert} -- rather than
- * letting the throw bubble out of `inferMetadata` (a render crash in the editors)
- * or dead-end in the raw `PayloadColumnSchema.name` ZodError at invitation encode.
- * An empty result means every column is nameable.
+ * leading delimiter in a CSV header row yields an unnamed (`""`) column, which
+ * core's {@link inferMetadata} rejects at intake (`UsageError`) since every name
+ * field floors at `.min(1)`. Each web intake surface calls this to refuse the
+ * file EARLY, with the clear, actionable {@link unnameableColumnsAlert}, before
+ * that throw reaches a render crash or a raw ZodError at invitation encode. An
+ * empty result means every column is nameable.
  */
 export function emptyColumnPositions(
   columns: ReadonlyArray<string>,
@@ -21,13 +19,13 @@ export function emptyColumnPositions(
 }
 
 /**
- * The operator-facing alert for a file whose header carries unnamed column(s),
+ * The operator-facing alert for a file whose header has unnamed column(s),
  * shared by every web intake surface so the wording cannot drift: the inviter
- * bench's file entry (and its create/save gates, rendered from an
+ * console's file entry (and its create/save gates, rendered from an
  * {@link InvitationFileError} `unnameable` failure raised by the mint-time
  * re-parse) and the acceptor's file acquire. `positions` are
  * the 1-based column positions from {@link emptyColumnPositions} and are not
- * operator-controlled content, so they are surfaced directly. The return shape is
+ * operator-controlled content, so they are shown directly. The return shape is
  * the structural {@link AlertContent} (`{ title, message }`) every caller assigns
  * it to, restated inline so this leaf helper does not depend on the component layer.
  */
@@ -57,8 +55,8 @@ export function unnameableColumnsAlert(positions: ReadonlyArray<number>): {
  * boundary), and the direct-exchange confirm screen -- so the wording cannot drift.
  * `positions` are the 1-based column positions from core's
  * `overlongDisclosedColumnPositions`; like {@link unnameableColumnsAlert}'s, they
- * are not operator-controlled content and are surfaced directly, while the
- * offending NAME never is (it is longer than the message that would carry it).
+ * are not operator-controlled content and are shown directly, while the
+ * offending NAME never is (it is longer than the message that would hold it).
  *
  * Both remedies are named because the seats differ in which they offer: a seat
  * with a disclosure control clears it by unmarking the column, one without it by

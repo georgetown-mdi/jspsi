@@ -41,9 +41,9 @@ import { jobCreateIntentSchema } from "@jobs/intent";
  *
  * The unavailable rejection is EMPTY-bodied: an sftp intent with no connection
  * authored, a filedrop intent with no rendezvous directory, and a filedrop intent
- * a split-provisioned appliance cannot run without retain mode are each 400. The busy
+ * a split-provisioned console cannot run without retain mode are each 400. The busy
  * rejection is a 409 carrying only the occupying exchange's id (nothing else about
- * it), disclosed to the same-origin operator on their own loopback appliance.
+ * it), disclosed to the same-origin operator on their own loopback console.
  */
 export const Route = createFileRoute("/api/jobs/")({
   server: {
@@ -72,7 +72,7 @@ export const Route = createFileRoute("/api/jobs/")({
             return jobJsonResponse({ id: error.activeJobId }, 409);
           // A mounted input that names no regular file, a filedrop intent with no
           // rendezvous directory configured, a filedrop intent on a
-          // split-provisioned appliance without retain mode, or an sftp intent with
+          // split-provisioned console without retain mode, or an sftp intent with
           // no connection authored is a 400 (the manager left no workdir behind).
           if (
             error instanceof JobInputNotFoundError ||

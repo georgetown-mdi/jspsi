@@ -6,14 +6,14 @@ import { isSilentEmpty } from "@psi/nonEmptyAggregate";
 import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
 
 /** The default coverage pending copy: the hosted sweep runs in the browser, so it
- * reads as the near-instant local check it is. */
+ * displays as the near-instant local check it is. */
 export const COVERAGE_PENDING_LABEL =
   "Checking how many of your rows produce a value...";
 
 /** The console coverage pending copy: the sweep is a streaming pass over the whole
- * mounted file on the appliance -- honestly seconds, and tens of seconds at CLI
- * scale -- so the copy says so rather than reading as instant-local (the register of
- * the picker's profile-loading copy). */
+ * mounted file on the console -- actually seconds, and tens of seconds at CLI
+ * scale -- so the copy says so rather than displaying as instant-local (the register
+ * of the picker's profile-loading copy). */
 export const CONSOLE_COVERAGE_PENDING_LABEL =
   "Checking how many of your rows produce a value. The console reads the " +
   "whole file, so this can take a while on a large file.";
@@ -45,20 +45,19 @@ function formatRate(coverage: FieldValueCoverage): string {
 
 /**
  * The per-field full-CSV coverage readout: the visible half of the silent-empty
- * defense, computed over the WHOLE file (not the preview's row sample), so it sees a
- * collapse the sample cannot. When the field's transform drops every row
- * ({@link isSilentEmpty}) it shows a prominent alarm -- shape is satisfiable yet no
- * key is produced, byte-equivalent to a real empty intersection. Otherwise it states
- * the share of rows that yield a value, which (because the sweep observes empties)
- * rises when a `coalesce` fills blanks. An empty cleaned value counts as produced --
- * a participating key, distinct from a dropped value, consistent with the per-row
- * preview -- so an all-empty field is not mislabelled as zero coverage.
+ * defense, computed over the WHOLE file (not the preview's row sample), so it
+ * sees a collapse the sample cannot. When the field's transform drops every row
+ * ({@link isSilentEmpty}) it shows a prominent alarm -- shape satisfiable, no key
+ * produced, byte-equivalent to a real empty intersection. Otherwise it states the
+ * share of rows that yield a value, which rises when a `coalesce` fills blanks;
+ * an empty cleaned value still counts as produced, so an all-empty field is not
+ * mislabelled as zero coverage.
  *
- * The alarm is `role="presentation"`: the assistive-tech announcement is made once,
- * for the whole editor, by the host editor's coverage live region ({@link CleaningTab}
- * and {@link AcceptorCleaningStep} each own one), so N field cards do not each fire
- * their own region. An `unavailable` rate (steps left
- * mid-edit) renders nothing -- the offending step already carries its own inline error.
+ * The alarm is `role="presentation"`: the host editor's coverage live region
+ * ({@link CleaningTab}, {@link AcceptorCleaningStep}) makes the assistive-tech
+ * announcement once for the whole editor, so field cards do not each fire their
+ * own region. An `unavailable` rate renders nothing -- the offending step already
+ * has its own inline error.
  */
 export function FieldCoverage({
   rate,
@@ -70,12 +69,12 @@ export function FieldCoverage({
   /** Whether a recompute is in flight. Consulted only before the first result: it
    * drives the "Checking..." placeholder while `rate` is still `undefined`. Once a
    * rate exists it is shown across later recomputes with no staleness treatment --
-   * the background sweep is debounced precisely so the readout does not flicker on
-   * every keystroke. */
+   * the background sweep is debounced so the readout does not flicker on every
+   * keystroke. */
   pending: boolean;
   /** The pending-placeholder copy, provider-aware: the console passes
-   * {@link CONSOLE_COVERAGE_PENDING_LABEL} because its sweep is a whole-file pass on
-   * the appliance, not the near-instant local compute the default copy implies. */
+   * {@link CONSOLE_COVERAGE_PENDING_LABEL} because its sweep is a whole-file pass,
+   * not the near-instant local compute the default copy implies. */
   pendingLabel?: string;
 }) {
   if (rate === undefined)

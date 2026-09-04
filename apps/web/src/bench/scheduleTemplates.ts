@@ -3,10 +3,9 @@
  * entry and the Windows Task Scheduler registration that run a psilink
  * invocation unattended from the folder holding its files.
  *
- * One copy, used by both hand-off surfaces -- the managed exchange's
- * command-line export panel and the console's recurring hand-off -- because the
- * two show an operator the same two lines and a divergence between them would be
- * a difference nobody chose.
+ * One copy, shared by both hand-off surfaces -- the managed exchange's
+ * command-line export panel and the console's recurring hand-off -- so the two
+ * cannot diverge.
  *
  * The lines are examples the operator edits: the times are a placeholder daily
  * 2am, and the folder is machine-specific, so what travels is the invocation
@@ -39,9 +38,7 @@ export function cronScheduleLine(command: string): string {
  * The command is interpolated into the `/TR "..."` argument, so a double quote
  * inside it would end that argument early: schtasks needs each one escaped as
  * `\"` for its argv parse to preserve it for the scheduled `cmd` to re-read.
- * That escape happens here rather than at each call site, so a caller whose
- * command does carry quotes (a Direct invocation with a spaced label) and one
- * whose command cannot (the managed export's fixed verb and file names) get the
+ * That escape happens here, not at each call site, so every caller gets the
  * same treatment.
  */
 export function taskSchedulerLine(command: string): string {

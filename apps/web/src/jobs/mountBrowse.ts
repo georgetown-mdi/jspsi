@@ -7,9 +7,9 @@ import { isPathWithin } from "./pathContainment";
 /**
  * One entry in a mount listing: an admissible segment name and whether it is a
  * directory or a regular file. Classified from `statSync` (which follows a
- * symlink), so a symlink to a directory reads as `dir` and one to a file as
- * `file`; a broken or otherwise unstattable entry is dropped. No file bytes are
- * ever read.
+ * symlink), so a symlink to a directory is classified as `dir` and one to a file
+ * as `file`; a broken or otherwise unstattable entry is dropped. No file bytes
+ * are ever read.
  */
 export interface MountEntry {
   name: string;
@@ -19,9 +19,9 @@ export interface MountEntry {
 /**
  * The `listMountEntries` result. `readable` is false when the requested subpath
  * is inadmissible, escapes the mount (lexically or by realpath), or cannot be
- * enumerated -- carried as a bare boolean with an empty list, so a mis-mount or a
- * traversal attempt is indistinguishable from an empty-but-readable directory and
- * neither the errno nor the absolute path rides the wire.
+ * enumerated -- represented as a bare boolean with an empty list, so a mis-mount
+ * or a traversal attempt is indistinguishable from an empty-but-readable
+ * directory and neither the errno nor the absolute path rides the wire.
  */
 export interface MountListing {
   readable: boolean;

@@ -5,8 +5,8 @@
  * reads and the delete action live in the component, so the display derivation is
  * unit-testable in Node.
  *
- * A readable entry surfaces its label, side, and last-run date; an unreadable entry
- * surfaces a fixed "Unreadable record" label and no other detail, since nothing
+ * A readable entry shows its label, side, and last-run date; an unreadable entry
+ * shows a fixed "Unreadable record" label and no other detail, since nothing
  * about it could be parsed. Every row carries the stored key the one-step
  * delete-by-key acts on, so an unreadable record is discardable without a
  * successful parse. Secret material never reaches this model: the diagnostic
@@ -19,7 +19,7 @@ import { dateLabel } from "./inviterModel";
 import type { ManagedExchangeDiagnosticEntry } from "@psi/managedExchangeStore";
 
 /** The label a row shows for an unreadable entry: nothing about it could be
- * parsed, so it reads as an unreadable record rather than an empty or guessed
+ * parsed, so it displays as an unreadable record rather than an empty or guessed
  * name. */
 export const UNREADABLE_RECORD_LABEL = "Unreadable record";
 
@@ -50,11 +50,11 @@ export interface RecoveryRow {
   backedUp: boolean;
 }
 
-/** Derive one recovery row from a diagnostic entry. A readable entry surfaces its
- * essentials (an empty label reads as "(unnamed exchange)" for the row text, matching
- * the run list, while the delete confirm names the raw label); an unreadable entry
- * surfaces only its key and the fixed unreadable label. Both carry the entry's backup
- * custody state through to the delete confirm. */
+/** Derive one recovery row from a diagnostic entry. A readable entry shows
+ * its essentials (an empty label displays as "(unnamed exchange)" for the row
+ * text, matching the run list, while the delete confirm names the raw label);
+ * an unreadable entry shows only its key and the fixed unreadable label. Both
+ * carry the entry's backup custody state through to the delete confirm. */
 export function recoveryRow(
   entry: ManagedExchangeDiagnosticEntry,
 ): RecoveryRow {

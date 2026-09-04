@@ -6,7 +6,7 @@ import { useNarrowBench } from "./narrowViewport";
 import type { RailStep } from "./inviterModel";
 
 /**
- * The Stepper's active index for {@link RailStep} steps that carry no
+ * The Stepper's active index for {@link RailStep} steps that hold no
  * `current` entry -- the Customize tabs, where the step the operator came
  * from stays visually done rather than jumping back to current. Mirrors the
  * done-count rule except when every step is done, where the whole spine
@@ -20,11 +20,11 @@ function activeIndex(steps: ReadonlyArray<RailStep>): number {
 }
 
 /**
- * The bench's top-bar Stepper, rendered from a {@link RailStep} spine or
+ * The console's top-bar Stepper, rendered from a {@link RailStep} spine or
  * timeline without changing the pure model: a step is clickable exactly when
- * it is done and carries `onSelect` (the post-create timelines carry no
+ * it is done and has `onSelect` (the post-create timelines have no
  * `onSelect` at all, so they render zero interactive steps regardless of
- * state). Only the model-`current` step carries `aria-current="step"`. The
+ * state). Only the model-`current` step has `aria-current="step"`. The
  * three states read at a glance through Mantine's step indicators -- a filled
  * checkmark for done, an accent-ringed number for current (its label
  * emboldened as well), a muted number for pending.
@@ -58,7 +58,7 @@ function BenchStepper({ steps }: { steps: ReadonlyArray<RailStep> }) {
  * step-indicator small variant. The strip is plain text -- no step is a link
  * here -- so it never precedes the collapsible share bar as an interactive
  * element. The "N/M" badge is a decorative echo, hidden from assistive tech
- * since the sentence already carries the position.
+ * since the sentence already states the position.
  */
 function StepStrip({ steps }: { steps: ReadonlyArray<RailStep> }) {
   // activeIndex returns steps.length when every step is done, so clamp to the
@@ -78,7 +78,7 @@ function StepStrip({ steps }: { steps: ReadonlyArray<RailStep> }) {
 }
 
 /**
- * The bench's top bar: the wordmark, a `<nav>` landmark named by `navLabel`
+ * The console's top bar: the wordmark, a `<nav>` landmark named by `navLabel`
  * wrapping the required-spine or protocol-timeline Stepper, and the
  * right-aligned transport note -- pure wayfinding; the optional Customize
  * surfaces live on the disclosure ledger. See {@link BenchShell}.

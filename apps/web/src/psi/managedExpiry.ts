@@ -2,8 +2,8 @@
  * The pure, platform-free lapsed-`expires` check the managed re-run applies
  * BEFORE any connection: a record whose `expires` instant is in the past must
  * not run, and the check happens before rendezvous so the lapse is unambiguous
- * -- it surfaces as its own benign expiry state with plain re-invite copy, never
- * routed through the desync/attack framing (see docs/MANAGED_EXCHANGE.md,
+ * -- it is treated as its own benign expiry state with plain re-invite copy,
+ * never routed through the desync/attack framing (see docs/MANAGED_EXCHANGE.md,
  * "Expiry is its own state"). `now` is injected so the decision is pure and the
  * moment of evaluation is the caller's, matching the run+rotate module's clock
  * discipline.
@@ -25,8 +25,7 @@ import type { ManagedExchangeRecord } from "./managedExchangeRecord";
  * at-or-before, matching the spec's "the instant after which `sharedSecret` must
  * not be used" -- the boundary instant itself is already lapsed.
  *
- * Fails closed on a value the comparison cannot parse: the bound governs a
- * stored secret's usable lifetime, so an `expires` whose instant is unreadable
+ * Fails closed on a value the comparison cannot parse: an unreadable `expires`
  * stops the secret being used rather than letting it run unbounded. A stored
  * record cannot carry one -- the schema validates `expires` as an ISO datetime
  * on every read -- so the direction only decides what an unreachable value

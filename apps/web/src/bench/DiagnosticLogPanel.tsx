@@ -10,7 +10,7 @@ import { DownloadRow } from "./BenchRunSurface";
 import styles from "./bench.module.css";
 
 /**
- * The lead the seat shows when the appliance stopped answering about a run's
+ * The lead the seat shows when the console stopped answering about a run's
  * log. It states what happened to the asking rather than promising a log: an
  * unanswered ask never said whether this run captured one.
  */
@@ -29,24 +29,24 @@ export const DIAGNOSTIC_LOG_UNANSWERED_NOTICE =
 
 /**
  * The diagnostic log a run captured, offered on every console server-job seat
- * (invite, accept, Direct, and strand recovery) whenever the appliance holds
- * one. Renders nothing while the appliance is answering and has no log to
+ * (invite, accept, Direct, and strand recovery) whenever the console holds
+ * one. Renders nothing while the console is answering and has no log to
  * offer, so a seat mounts it unconditionally and an ordinary run -- which passes
  * no log flags at all -- shows no trace of it.
  *
- * Deliberately NOT gated on the run having succeeded: the log exists for the run
- * that misbehaved, so it is offered beside a failure exactly as beside a
- * completion, and a run still stalled can be read while it stalls.
+ * Not gated on the run having succeeded: the log is offered beside a failure
+ * exactly as beside a completion, and a stalled run's log can be read while
+ * it stalls.
  *
- * Availability comes from the appliance rather than from what this tab
- * remembers requesting, which is what lets a re-attached run offer it too. A run
- * in progress that asked for a log is asked repeatedly until the appliance holds
+ * Availability is polled from the console rather than from what this tab
+ * remembers requesting, so a re-attached run offers it too. A run
+ * in progress that asked for a log is asked repeatedly until the console holds
  * it, because the ask at mount races the CLI child's own creation of the file; a
  * run that asked for none says so on the first ask and is not asked again, and a
- * settled run is asked once, its log being either written or never captured. An
- * appliance that answers none of those asks is stated rather than waited on --
- * silence is what leaves an operator watching a stalled run with nothing. The
- * endpoint itself is the only place the file is read.
+ * settled run is asked once, its log being either written or never captured. A
+ * console that answers none of those asks resolves to the unanswered state
+ * rather than waiting indefinitely. The endpoint itself is the only place the
+ * file is read.
  */
 export function DiagnosticLogPanel({
   jobId,
@@ -54,14 +54,14 @@ export function DiagnosticLogPanel({
 }: {
   jobId: string;
   /** Whether the run has reached a terminal state; while it is false the
-   * appliance is asked again until it holds the log. */
+   * console is asked again until it holds the log. */
   settled?: boolean;
 }) {
   // The job the watch resolved for, rather than a bare outcome: a panel handed a
   // different id must ask for that run rather than show the previous one's. A
   // confirmed log is not withdrawn -- the file stays for as long as the
-  // appliance holds the job, and the endpoint answers for it either way -- and
-  // an appliance that went quiet for this run is not re-asked behind the notice
+  // console holds the job, and the endpoint answers for it either way -- and
+  // a console that went quiet for this run is not re-asked behind the notice
   // that says so.
   const [resolved, setResolved] = useState<{
     jobId: string;

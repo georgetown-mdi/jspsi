@@ -12,7 +12,7 @@ import type { ReactNode } from "react";
  * collapse. The single disclosure idiom the data-prep editors use (the inviter's rail
  * sections and the per-field cleaning cards' sample preview) so the two cannot drift.
  *
- * Three a11y properties are load-bearing:
+ * Three a11y properties are critical:
  *  - The `aria-controls` target is the ALWAYS-MOUNTED `<div id>` wrapper, not the
  *    `Collapse` panel, so the reference never dangles however Mantine mounts or hides
  *    the closed panel (it may keep the panel mounted in a hidden React Activity
@@ -60,10 +60,9 @@ export function DisclosureSection({
   const reduceMotion = useReducedMotion();
 
   const handleClick = () => {
-    // Closing: if focus is inside the panel, move it to the toggle before the panel
-    // hides, so a keyboard/SR user editing inside the section is not dropped to
-    // <body>. Fires synchronously in the click handler, ahead of the re-render that
-    // hides the panel. Opening never strands focus.
+    // Move focus to the toggle before the panel hides, synchronously in this
+    // handler and ahead of the re-render that hides it -- opening never
+    // strands focus.
     if (open) {
       const panel = panelRef.current;
       if (panel !== null && panel.contains(document.activeElement))
