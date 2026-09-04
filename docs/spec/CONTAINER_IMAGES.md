@@ -50,7 +50,7 @@ The structural invariants are enforced by `scripts/dockerfile-freeze.test.mjs`
 (run by `npm run test:scripts`, a CI static check), over both `Dockerfile` and
 the FIPS variant's `Dockerfile.fips` alike: every install is `npm ci`, the
 lockfile and the root `.npmrc` are copied into the builder before the first
-install, the builder's last npm command empties `node_modules` and carries both
+install, the builder's last npm command empties `node_modules` and passes both
 `--omit=dev` and `--omit=optional`, the runtime stage runs no npm
 at all, every stage builds from the reviewed base digest or from another stage of
 the same file, each file's OS-package installs are exactly the reviewed set, and
@@ -268,7 +268,7 @@ The `-certified` name this image uses is a different package with one published
 NVR, so a `dnf update` has nothing to move it to; the assertion is what catches
 a future one that is not certified.
 
-The security policy is the other reason that pin carries the weight, because it
+The security policy is the other reason that pin does the work, because it
 names no package this image installs and does not agree with itself about the
 one it does name. Its installation and administrator-guidance sections (11.1 and
 11.2, p. 65) name `openssl-3.0.8-1.amzn2023.0.17`; its end-of-life section
@@ -497,10 +497,10 @@ the write is the case a `stat` cannot tell apart.
 
 Refusing the write into `/app` is only half the claim, since a file the account
 can rewrite in place needs no writable directory around it. The other half is a
-walk of `/app` for any path owned by that account, owned by any group the account
-carries, or other-writable; the expected set is empty. The walk runs as uid 0, so
-no directory mode can hide a path from it -- ownership and mode read the same
-whoever asks.
+walk of `/app` for any path owned by that account, owned by any group the
+account belongs to, or other-writable; the expected set is empty. The walk runs
+as uid 0, so no directory mode can hide a path from it -- ownership and mode
+read the same whoever asks.
 
 Symlinks are outside that walk. Linux has no `chmod` for one, so a symlink's
 own mode is always 0777 and an other-writable test matches every link in the

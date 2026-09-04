@@ -315,7 +315,7 @@ hours -- plus three rules that are entry's alone:
   such a save off the runner's bookkeeping too: `nextWindow` and
   `consecutiveMisses` live in this same object and advance under a page left
   open, so a mount-time snapshot written back would rewind them to a window
-  already accounted for. The carry-through is **per field**, not all-or-nothing:
+  already accounted for. The reuse is **per field**, not all-or-nothing:
   a save that edited one cadence field takes the anchor and the width from the
   stored object verbatim while the fields displaying them are untouched, and
   writes the rebuilt schedule because the operator moved something. The fields
@@ -777,7 +777,7 @@ record, in a separate origin-local store keyed by the record `id`, and are
     migration exports read the current record, serialize the bytes they will download,
     and stamp the marker in one atomic store step (a cross-store
     read-serialize-and-mark), then download exactly those bytes, so the marker can only
-    ever attest the secret the file carries. A stale tab or a stale in-memory record
+    ever attest the secret the file holds. A stale tab or a stale in-memory record
     cannot mark a secret it did not serialize. Serializing inside the step is what binds
     the marker to bytes that exist: a step that resolved without serializing would leave
     a marker attesting bytes nothing produced, so it fails the export instead.
@@ -805,7 +805,7 @@ record, in a separate origin-local store keyed by the record `id`, and are
   `handoff` discriminator) records that an export handed this device's copy off.
   Two exports write it, and the discriminator is which one did:
   - the **migration export** ("take over on another device"), which writes
-    `spentAt` alone, so an absent `handoff` reads as a migration spend;
+    `spentAt` alone, so an absent `handoff` means a migration spend;
   - the **command-line export**'s confirmed hand-off, which writes
     `handoff: "command-line"` beside it.
 
@@ -934,7 +934,7 @@ record, in a separate origin-local store keyed by the record `id`, and are
   the backup marker's:
   - **Import stamps it.** A fresh install and a revive-in-place both stamp
     `importedAt` (alongside the backup marker) as of the import instant, so a
-    restored record carries the evidence from the moment it lands.
+    restored record holds the evidence from the moment it lands.
   - **Rotation clears it.** The persist-before-success rotation write clears the
     import marker in the **same** transaction that advances the secret. A rotation is
     driven by a completed handshake, which proves the two parties held the same
@@ -1060,7 +1060,7 @@ envelope-only parse see the same bytes, so the two readings of an accounting
 cannot disagree.
 
 **A refused value is then split by which side is behind.** A bump strands entries
-only in one direction, and the refused entries' own `version` literals -- carried
+only in one direction, and the refused entries' own `version` literals -- held
 in the same raw value the envelope parse returned -- say which one this is. Where
 an entry names a later record format than the reading build admits, the entries
 are not stranded: a build that reads them exists, and this page is running older

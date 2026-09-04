@@ -203,7 +203,7 @@ that set. A mismatch aborts the exchange as a `ConnectionError` of kind
 another. Because it runs after the payload exchange, it stops the exchange from
 completing rather than stopping the columns from crossing.
 
-The locked-in set is the acceptor's carried `disclosedPayloadColumns` (consented
+The locked-in set is the acceptor's `disclosedPayloadColumns` (consented
 at review time, threaded to `runExchange` as `prepared.expectedPayloadColumns`),
 or the config's own top-level `expected_payload_columns`, falling back to the
 negotiated `payload.receive` names for an authored recurring config. The
@@ -220,7 +220,8 @@ How a party arrives at its set, by exchange mode:
 
 - **Invite/accept.** The inviter publishes its disclosed subset on the token and
   leaves its own receive side blank, filling lazily from the acceptor's first
-  transmission. The acceptor locks in the carried subset -- known up front, with
+  transmission. The acceptor locks in the subset the token declared -- known up
+  front, with
   no observation needed -- and both an offline and an online accept persist it to
   the written config so a later `psilink exchange` enforces what was consented to
   at accept time. An acceptance that reuses a pre-existing config refreshes that
@@ -247,7 +248,7 @@ with zero matched rows are indistinguishable on the receive side, and persisting
 column name but not the count, while the persisted field is bounded on reload, so
 crystallizing it would write a config this party could no longer load, and
 truncating would false-abort every later run against the partner's full set. The
-token-carry path needs neither guard, because the invitation bounds its subset at
+token path needs neither guard, because the invitation bounds its subset at
 intake.
 
 ### Send-side mint-boundary guard (`assertPayloadSendDisclosed`)
@@ -420,7 +421,7 @@ that read the binding off its own terms would refuse the legitimate differing
 pair. The two are read from separate keys and never derived from one another.
 
 Every path that reaches an acceptance records it: the CLI's offline accept writes
-it into the config it composes, the online accept carries it on the bootstrap's
+it into the config it composes, the online accept includes it in the bootstrap's
 config write and refreshes a reused config in place, the browser's managed
 deposit persists it into the record's document, and a console server-job accept
 forwards it into the composed config. A later run restores it from the config
@@ -463,8 +464,8 @@ discipline rather than a blocklist that would admit an unvetted channel. A token
 with no endpoint, or one this build cannot drive, throws before any
 rendezvous is attempted:
 
-> This invitation does not carry a connection endpoint this build can accept, so
-> it cannot be run here.
+> This invitation does not include a connection endpoint this build can accept,
+> so it cannot be run here.
 
 Because every failure path throws, a caller that only dials on success cannot
 reach across transports.

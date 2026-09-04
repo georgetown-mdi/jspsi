@@ -232,7 +232,7 @@ form is reproducible -- but that follows from RFC 4648 section 3.5 rather than
 from the alphabet: a canonical encoding is guaranteed only where the encoder
 sets the bits padding the final character to zero, which conforming encoders
 MUST do. These strings are hashed as strings, so a producer that left those bits
-set would carry the same bytes into a different canonical encoding. A reproducer
+set would map the same bytes to a different canonical encoding. A reproducer
 must encode as that section requires.
 
 ### Final byte string

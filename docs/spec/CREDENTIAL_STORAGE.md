@@ -24,7 +24,7 @@ once here and referenced from each. Two owner-only artifacts are written on the
 same principle without taking that construction, and each is specified where it
 diverges: the result CSV, streamed to its destination rather than renamed onto
 it ([Result CSV output](#result-csv-output)), and the `--log-file` descriptor,
-opened in append mode and carrying the extended-ACL strip at that open
+opened in append mode and given the extended-ACL strip at that open
 ([macOS extended-ACL strip](#macos-extended-acl-strip)). This document does not
 cover what the files contain or the threat model (see
 [SECURITY_DESIGN.md](../SECURITY_DESIGN.md)). Intended readers are security

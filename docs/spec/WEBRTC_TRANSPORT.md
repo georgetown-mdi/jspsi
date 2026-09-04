@@ -236,10 +236,10 @@ it itself ends the connection -- reading the peer's close sentinel, this side's
 own close call, or its own cleanup on a signaling leave naming this peer, an
 inbound OFFER echoing the live connection, ICE reaching failed or closed, or a
 send error -- so a cleared flag at `closing` means a PeerJS-mediated end and
-reads as the peer's close, exactly as every close read before this
+is treated as the peer's close, exactly as every close read before this
 discrimination existed; only an end that bypasses PeerJS -- this side's raw
 peer-connection teardown -- reports the loss. A partner who ends the link
-through signaling (a relayed leave) mid-drain therefore also reads as the
+through signaling (a relayed leave) mid-drain is therefore also treated as the
 receipt, the same behavior staging had before this discrimination existed; the
 close remains no proof of delivery. So the no-live-peer exit is taken for a
 channel that starts closing on a link already gone with no peer close in hand; a
@@ -249,8 +249,8 @@ A completed `close` arriving with no `closing` before it is still read as the
 peer's, because a link state read after a close has completed no longer says
 whether the link died before the close or in answer to it, and a doubt invented
 about a healthy exchange is the worse error. The reading is therefore inert on a
-stack that never fires `closing`: every close reads as the peer's there, the
-pre-reading behavior -- the stated limit of this discrimination. The
+stack that never fires `closing`: every close is treated as the peer's there,
+the pre-reading behavior -- the stated limit of this discrimination. The
 healthy-exchange reading also assumes the engine dispatches the channel's
 `closing` as a queued task after the synchronous close call, as spec-conforming
 engines do and as Chromium, the one engine the browser suite drives, measures;
