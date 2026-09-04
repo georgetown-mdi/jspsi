@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 //
 // Two images ship from this repository and both are held to the same
 // invariants: the default `Dockerfile` on node:26-alpine, and `Dockerfile.fips`
-// on Amazon Linux 2023 carrying a CMVP-validated OpenSSL FIPS provider. What
+// on Amazon Linux 2023 with a CMVP-validated OpenSSL FIPS provider. What
 // diverges is the OS package manager and the packages each fetches, which is
 // per-file data below rather than a loosened assertion; what the FIPS variant
 // adds on top of the shared set -- its certificate pins, its provider
@@ -571,7 +571,7 @@ for (const { file, externalBases, osInstalls, image } of IMAGES) {
 //
 // Held over both published images. They differ in where the account comes from
 // -- the default image inherits it from node:26-alpine, the variant creates it,
-// Amazon Linux 2023 carrying none -- and in nothing this block reads.
+// Amazon Linux 2023 has none -- and in nothing this block reads.
 const RUNTIME_USER = "node";
 const EXPECTED_WRITABLE_SETUP =
   "RUN mkdir -p /work /run/psilink/sftp-credentials " +
@@ -599,7 +599,7 @@ const INSTALL_VERB = /\binstall\b/;
 // A package manager's `install` is that manager's own subcommand, a different
 // program's argument that reaches nothing, so the exemption below releases the
 // first non-flag token after the manager's name -- the subcommand position in
-// every shape the committed Dockerfiles use, though a global flag carrying a
+// every shape the committed Dockerfiles use, though a global flag holding a
 // separate value token that is literally `install` would take the release in
 // its place. That stays harmless: a manager-led command never executes
 // install(1), and an `install` token anywhere later is still refused. Two
@@ -611,7 +611,7 @@ const INSTALL_VERB = /\binstall\b/;
 // token anywhere else in the command is refused whatever leads the command, as
 // a proper ownership verb already is (`npm exec -- chown ...`).
 const PACKAGE_MANAGER_NAME = /^(?:apk|apt|apt-get|dnf|microdnf|yum|npm)$/;
-// The index of the released install token, or -1. A flag carrying its value as
+// The index of the released install token, or -1. A flag holding its value as
 // the next token rather than after an `=` pushes that value into the subcommand
 // position and takes the exemption with it; neither Dockerfile writes one, and
 // refusing that shape is this file's standing answer to an argv it cannot read.
@@ -807,9 +807,9 @@ for (const { file, modeChangesOutside, image } of IMAGES) {
       // arrives owned by the account it is created for, so an account command
       // hands over a path with no chown, chgrp or chmod anywhere in the stage.
       // The same two refusals stand over them -- reached other than as a
-      // command's leading word, and carrying a token the walk cannot read --
+      // command's leading word, and holding a token the walk cannot read --
       // and the builder creates no account at all, since its files cross into
-      // /app carrying whatever ownership that stage left on them.
+      // /app with whatever ownership that stage left on them.
       expect(
         image.runtimeShellCommands
           .filter(({ command }) => reachesAccountVerbOutsideTheParse(command))
