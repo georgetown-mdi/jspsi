@@ -4,7 +4,7 @@ title: "Getting Support"
 
 # Getting support
 
-PSI-Link is open-source software maintained on a best-effort basis. This page describes where to direct different kinds of questions.
+psilink is open-source software maintained on a best-effort basis. This page describes where to direct different kinds of questions.
 
 ## I think I found a security vulnerability
 
@@ -14,7 +14,7 @@ Do not open a public issue. Follow the private reporting process in [SECURITY.md
 
 Open a [GitHub issue](https://github.com/georgetown-mdi/jspsi/issues). Please include:
 
-- The PSI-Link version (the Docker image tag or `package.json` version)
+- The psilink version (the Docker image tag or `package.json` version)
 - The transport channel (`webrtc`, `sftp`, or `filedrop`)
 - The operating system and version
 - A minimal reproducing case, if possible
@@ -31,15 +31,13 @@ Start with the documentation:
 
 If your question is not answered there, open a [GitHub issue](https://github.com/georgetown-mdi/jspsi/issues) and tag it with `question`. We do not yet operate a separate discussion forum or mailing list.
 
-<!-- TODO: link a community discussion channel (GitHub Discussions, mailing list, or similar) once one is established. -->
-
-## I am evaluating PSI-Link for my agency
+## I am evaluating psilink for my agency
 
 Compliance and security reviewers should start with [docs/COMPLIANCE.md](docs/COMPLIANCE.md) and [docs/SECURITY_DESIGN.md](docs/SECURITY_DESIGN.md). The [role-based reading guide](docs/README.md#role-based-reading-guide) points each reviewer audience to the most relevant documents.
 
 For evaluation questions that the documentation does not answer, open a GitHub issue tagged `evaluation`. Maintainers will respond on a best-effort basis.
 
-<!-- TODO: document a commercial support or paid-engagement option, if one becomes available. -->
+There is no commercial support or paid-engagement option at this time.
 
 ## Contributing
 
@@ -47,4 +45,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, code conventions, 
 
 ## Response expectations
 
-PSI-Link is maintained by a small team. Bug reports and security reports are prioritized over feature requests and evaluation questions. There is no service-level agreement; the timelines in [SECURITY.md](SECURITY.md) apply only to confirmed security vulnerabilities.
+psilink is maintained by a small team. Bug reports and security reports are prioritized over feature requests and evaluation questions. There is no service-level agreement; the timelines in [SECURITY.md](SECURITY.md) apply only to confirmed security vulnerabilities.

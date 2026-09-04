@@ -1,10 +1,10 @@
 ---
-title: "PSI-Link Security Design"
-review_owner: "PSI-Link maintainers"
+title: "psilink Security Design"
+review_owner: "psilink maintainers"
 last_reviewed: "2026-08-30"
 ---
 
-# PSI-Link security
+# psilink security
 
 <!-- Adding to this doc? Keep it conceptual and operational. Constant values, byte/wire
 layouts, algorithm steps, and their rationale belong in the spec tier: see
@@ -14,11 +14,11 @@ This is the security overview for security teams and compliance officers. It cov
 
 ## Start here
 
-This is the plain-language layer: what PSI-Link does, what it protects and from whom, and what stays with the deploying agency. Everything after it is the design itself, which a reader assessing a particular control drills into from here. The regulatory framings -- the NIST SP 800-53 control mapping, the FIPS 140 position, and the sector-specific readings -- are in [COMPLIANCE.md](COMPLIANCE.md).
+This is the plain-language layer: what psilink does, what it protects and from whom, and what stays with the deploying agency. Everything after it is the design itself, which a reader assessing a particular control drills into from here. The regulatory framings -- the NIST SP 800-53 control mapping, the FIPS 140 position, and the sector-specific readings -- are in [COMPLIANCE.md](COMPLIANCE.md).
 
-### What PSI-Link does
+### What psilink does
 
-Two agencies operating under a signed data sharing agreement each hold a file of records about people. PSI-Link tells each agency which of those people appear in both files, and hands over -- for the matched people only -- the columns each agency designated in advance for disclosure. Neither agency sends the other its file, and neither learns anything about the records that did not match.
+Two agencies operating under a signed data sharing agreement each hold a file of records about people. psilink tells each agency which of those people appear in both files, and hands over -- for the matched people only -- the columns each agency designated in advance for disclosure. Neither agency sends the other its file, and neither learns anything about the records that did not match.
 
 Each agency runs the software itself, in a container on its own machine or in its own browser. There is no service in the middle holding the data: what the two parties meet over is an SFTP server, a shared folder, or a direct browser-to-browser connection, and the exchange is designed so that whoever operates that meeting point cannot read it ([SHARED_RESPONSIBILITY.md](SHARED_RESPONSIBILITY.md)).
 
@@ -53,7 +53,7 @@ The complete split, stated separately for the container deployment and the hoste
 
 | A reviewer asks | The short answer | Where it is set out |
 |-----------------|------------------|---------------------|
-| Is PSI-Link suitable for our data class? | Designed for PII; PHI and education records are conditional on the agency's own determination; CJI and FTI have not been assessed. | [COMPLIANCE.md](COMPLIANCE.md#intended-use-and-data-classification) |
+| Is psilink suitable for our data class? | Designed for PII; PHI and education records are conditional on the agency's own determination; CJI and FTI have not been assessed. | [COMPLIANCE.md](COMPLIANCE.md#intended-use-and-data-classification) |
 | Is our data encrypted at rest? | No -- the software encrypts nothing on disk. It writes its files owner-only, and at-rest confidentiality is the agency's storage or full-disk encryption. | [Key file security](#key-file-security) |
 | Is our data encrypted in transit? | On a recurring exchange, yes: application-layer AES-256-GCM on top of the channel's own encryption. A zero-setup exchange relies on the channel alone. | [Channel security](#channel-security) |
 | What is our agency still responsible for? | Everything around the exchange: at-rest confidentiality, the environment, the credentials, retention, and the decision to disclose. | [What the deploying agency is responsible for](#what-the-deploying-agency-is-responsible-for) above, and [SHARED_RESPONSIBILITY.md](SHARED_RESPONSIBILITY.md) |
@@ -78,7 +78,7 @@ What lives elsewhere:
 
 ## Overview
 
-PSI-Link protects an exchange with four layers.
+psilink protects an exchange with four layers.
 
 1. **The PSI protocol protects the data itself.** Records are matched in encrypted form: each party encrypts its own linkage keys under an ephemeral key it never shares, and the protocol combines the two parties' keys so that neither side can recover the other's underlying values. Both learn only which records they hold in common. This holds regardless of which channel carries the traffic. See [Private set intersection](#private-set-intersection).
 
@@ -96,7 +96,7 @@ Private set intersection (PSI) is the primitive the privacy guarantee rests on. 
 
 The intuition is a layered, order-independent ("commutative") encryption. Each party holds an ephemeral key, generated for the exchange and never shared. Each side encrypts its own linkage keys under its own key, and the protocol applies the other party's key as a second layer, so a record is only ever seen by the other party in a form that party cannot decrypt. Because the scheme is commutative, two values that started equal stay equal once both keys are applied, which lets the parties recognize shared records by comparing encrypted forms alone. Neither side can strip the other's key to recover a plaintext value, and records outside the intersection are never revealed.
 
-PSI-Link uses a lightly modified build of OpenMined's [PSI](https://github.com/OpenMined/PSI), which layers over Google's Private Join and Compute. The base function runs repeatedly over a sequence of linkage keys to build the association map between matched records. A cardinality-only variant, PSI-C, reports the size of the overlap and no identifier; what that claim covers is scoped under [Count-only exchanges and the pre-agreement premise](#count-only-exchanges-and-the-pre-agreement-premise) below.
+psilink uses a lightly modified build of OpenMined's [PSI](https://github.com/OpenMined/PSI), which layers over Google's Private Join and Compute. The base function runs repeatedly over a sequence of linkage keys to build the association map between matched records. A cardinality-only variant, PSI-C, reports the size of the overlap and no identifier; what that claim covers is scoped under [Count-only exchanges and the pre-agreement premise](#count-only-exchanges-and-the-pre-agreement-premise) below.
 
 Two properties of the primitive are not hidden, and both matter for the threat model that follows:
 
@@ -107,7 +107,7 @@ The algorithm itself (role assignment, the encryption and key-removal steps, the
 
 ## Threat model
 
-PSI-Link is designed for partner agencies with signed data-sharing agreements. The primary goal is to prevent either party from learning anything about the other's data beyond the mapping between shared members. The model is honest-but-curious: it assumes partners are not actively tampering with inputs, but that minimizing what is disclosed is still worthwhile.
+psilink is designed for partner agencies with signed data-sharing agreements. The primary goal is to prevent either party from learning anything about the other's data beyond the mapping between shared members. The model is honest-but-curious: it assumes partners are not actively tampering with inputs, but that minimizing what is disclosed is still worthwhile.
 
 Each use of the base PSI function reveals information to each party. For PSI, this is the linkage key of each shared member; for PSI-C, the cardinality of the overlap. Linkage keys can therefore be chosen to reveal sensitive information through a differencing attack, so both parties must review the linkage keys before agreeing to use them.
 
@@ -307,8 +307,8 @@ Separately, psilink escapes untrusted partner- and server-controlled strings at 
 
 - **Escape at display, compare raw.** Only the displayed copy is escaped; every value used for a path, equality, or hash comparison is kept byte-exact.
 - **Escape once, at the sink.** Text destined for an error message is composed raw and escaped where the error is rendered, so what an operator is shown still names the bytes it refers to. A second escape would silently rewrite a filename they are being told to act on.
-- **A private-key backstop rides the same seam.** It keeps the operator's own secret-bearing files (config, key file, signing identity, and imported terms documents) from echoing a credential into an error or log: a narrow pass strips PEM/OpenSSH private-key blocks at three renderings -- a rendered error, a diagnostic log line at either CLI sink or the browser console, and the machine-readable event stream -- so an unanticipated code path that interpolated key material into one of those is contained rather than trusted. It is defense in depth, not the primary control, which stays the secret-bearing parse chokepoint above.
-- **That backstop's reach is bounded.** The pass runs over one rendered unit at a time and over strings only, and an operator-facing sink that writes the console directly instead of through the diagnostic logger runs no pass at all. The bounds are recorded with the escape format rather than implied here.
+- **A private-key fallback uses the same mechanism.** It keeps the operator's own secret-bearing files (config, key file, signing identity, and imported terms documents) from echoing a credential into an error or log: a narrow pass strips PEM/OpenSSH private-key blocks at three renderings -- a rendered error, a diagnostic log line at either CLI sink or the browser console, and the machine-readable event stream -- so an unanticipated code path that interpolated key material into one of those is contained rather than trusted. It is defense in depth, not the primary control, which stays the secret-bearing parse chokepoint above.
+- **The private-key fallback's reach is bounded.** The pass runs over one rendered unit at a time and over strings only, and an operator-facing sink that writes the console directly instead of through the diagnostic logger runs no pass at all. The bounds are recorded with the escape format rather than implied here.
 
 First-party web console sinks that can carry raw partner bytes are gated behind the per-session diagnostic flag, so a production console carries none. The byte-level escape format is in [CHANNEL_SECURITY.md](spec/CHANNEL_SECURITY.md#display-sanitization-escape-format).
 
@@ -377,7 +377,7 @@ In the containerized roles -- the headless CLI and the console appliance -- what
 
 The control is driven rather than asserted. The image smoke workflow applies those rules on a runner that has Docker and root and asserts the documented verification: the permitted endpoint read by name, a denied port and a denied host refused, each of the three reached again off the restricted network, and the by-name probe refused once the resolver rules are taken away. So a Docker release that changed where operator rules are consulted, or a rule the document records where it is never reached, surfaces as a failed check rather than as a deployment that believes itself restricted.
 
-Its limits are the recipe's own. It is hardening the operator applies deliberately -- no exchange needs it and nothing in PSI-Link depends on it -- so a deployment that has not applied it has none of it. It works only on Linux with Docker Engine's iptables integration; Docker Desktop and rootless Docker route container traffic where these rules do not reach. It bounds one container's reach and not the machine's, leaves name resolution a permitted channel wherever a resolver is allowed, and does not govern traffic the host delivers to itself. And it is not a substitute for the controls that carry the exchange: the partner's material is untrusted whatever the container may reach, and what bounds it is the protocol (see [Channel security](#channel-security)).
+Its limits are the recipe's own. It is hardening the operator applies deliberately -- no exchange needs it and nothing in psilink depends on it -- so a deployment that has not applied it has none of it. It works only on Linux with Docker Engine's iptables integration; Docker Desktop and rootless Docker route container traffic where these rules do not reach. It bounds one container's reach and not the machine's, leaves name resolution a permitted channel wherever a resolver is allowed, and does not govern traffic the host delivers to itself. And it is not a substitute for the controls that carry the exchange: the partner's material is untrusted whatever the container may reach, and what bounds it is the protocol (see [Channel security](#channel-security)).
 
 ## Receipt signing identities
 
@@ -407,17 +407,17 @@ This decision is deferred, not foreclosed. An authority-backed mode (an agency u
 
 The self-attested record's commitments, the agreed-terms hash both parties compute, a signing certificate's fingerprint, and the signed exchange receipt are each hashed or signed over a byte string. For any of these to verify, every party that produces or checks one, including an independent third party re-deriving it later from a different implementation, must derive exactly the same bytes from the same logical object. Ordinary JSON does not guarantee that: two correct serializers can differ in key order, number formatting, or type handling, and any such difference makes a signature or commitment fail to verify against content that is in fact identical.
 
-PSI-Link closes that gap with a single canonical encoding, reused for every hashed or signed artifact, so that "these hash equal" reliably means "these are the same object". The normative byte definition, the standard it follows, the value domain, the encoding rules, and the cross-implementation test vectors are in [CANONICAL_ENCODING.md](spec/CANONICAL_ENCODING.md).
+psilink closes that gap with a single canonical encoding, reused for every hashed or signed artifact, so that "these hash equal" reliably means "these are the same object". The normative byte definition, the standard it follows, the value domain, the encoding rules, and the cross-implementation test vectors are in [CANONICAL_ENCODING.md](spec/CANONICAL_ENCODING.md).
 
 ## Data handling
 
-PSI-Link uses the identifying fields only to compute the intersection: it does not send them to the partner, write PII to logs, or retain PII outside the configured output file. After matching, each party transmits the payload columns it designated for disclosure (see **Output** below).
+psilink uses the identifying fields only to compute the intersection: it does not send them to the partner, write PII to logs, or retain PII outside the configured output file. After matching, each party transmits the payload columns it designated for disclosure (see **Output** below).
 
 **Protocol messages.** During matching, the data crossing the wire is cryptographic protocol messages (elliptic-curve points) plus non-identifying match bookkeeping (encrypted-set indices and association tables); raw identifier values never cross. On recurring (authenticated) CLI exchanges these are wrapped in AEAD ciphertext by the application-layer encryption (see [Channel security](#channel-security)); on zero-setup exchanges and the web application's application layer they cross under transport encryption only. The PSI guarantee ensures each party learns only the existence of shared members, with records outside the intersection never revealed. After matching, a payload-exchange phase transmits the raw values of the payload columns each party designated, for matched rows only; by default the identifying columns used for matching are linkage-only and are not among them.
 
 **Third parties.** No PII is transmitted to any third party. The peer-coordination server used by the web application's WebRTC channel sees only connection metadata (peer IDs) and has no visibility into data-channel traffic (see [Channel security](#channel-security)). SFTP and file-drop channels use operator-managed infrastructure.
 
-**Logging.** PSI-Link does not write PII to log output. Operational logging is limited to non-sensitive metadata: the runtime resource ceilings logged once per exchange (Node version, host memory, the V8 heap limit, and any container memory limit), exchange timing, transport errors, and protocol state transitions. Review log output before forwarding it to a third-party logging service.
+**Logging.** psilink does not write PII to log output. Operational logging is limited to non-sensitive metadata: the runtime resource ceilings logged once per exchange (Node version, host memory, the V8 heap limit, and any container memory limit), exchange timing, transport errors, and protocol state transitions. Review log output before forwarding it to a third-party logging service.
 
 **Output.** The output each party writes pairs its own row identifier (a database identifier from its input, or the row index when it has none) with the matched partner records and the payload columns the partner disclosed. The identifying fields used for linkage are not part of it. Each party joins its identifier column back against its dataset to recover the matched rows, and handles the written output under its applicable data governance policies.
 

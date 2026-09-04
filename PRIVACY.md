@@ -1,25 +1,25 @@
 ---
 title: "Privacy Statement"
-review_owner: "PSI-Link maintainers"
+review_owner: "psilink maintainers"
 last_reviewed: "2026-08-13"
 ---
 
 # Privacy statement
 
-PSI-Link is open-source software that lets two partner agencies find the records they have in common without revealing the records they do not share. This statement describes what the project itself collects, transmits, and retains, and what the supporting services an exchange relies on can observe. It is written for the agency security, compliance, and privacy reviewers who ask for a privacy policy by name.
+psilink is open-source software that lets two partner agencies find the records they have in common without revealing the records they do not share. This statement describes what the project itself collects, transmits, and retains, and what the supporting services an exchange relies on can observe. It is written for the agency security, compliance, and privacy reviewers who ask for a privacy policy by name.
 
-**Owner:** the PSI-Link maintainers. See [Review and ownership](#review-and-ownership).
+**Owner:** the psilink maintainers. See [Review and ownership](#review-and-ownership).
 
 This is not a privacy notice for your agency's own data subjects, and it is not a Privacy Impact Assessment (PIA). A PIA is completed per deployment and turns on facts only the deploying agency holds -- the system owner, the authority for collection, the populations involved, and the retention schedule. This statement and [docs/COMPLIANCE.md](docs/COMPLIANCE.md) are the source material an agency uses to complete one.
 
 ## The project's role
 
-- **PSI-Link is software you run, not a service run on your behalf.** The one exception is the hosted deployment of the web application, covered below.
+- **psilink is software you run, not a service run on your behalf.** The one exception is the hosted deployment of the web application, covered below.
 - **The deploying agency is the sole controller of the data it processes.** The project is not a controller, processor, or business associate for that data. It never receives it.
 - **The project collects, transmits, and retains no personal data on its own behalf**, in either deployment. There are no accounts, no registration, no license check, no update ping, no usage analytics, and no telemetry.
-- **What the two parties disclose to each other is governed by their data sharing agreement**, not by this project. PSI-Link enforces the protocol; the agreement decides what may be exchanged under it.
+- **What the two parties disclose to each other is governed by their data sharing agreement**, not by this project. psilink enforces the protocol; the agreement decides what may be exchanged under it.
 
-The statements in this document about what PSI-Link connects to have a mechanical backstop: a repository check (`npm run check:egress-claims`) fails the build when the shipped source trees gain a URL literal naming a host under one of the schemes it reads -- `http`, `https`, and the STUN and TURN schemes -- outside a reviewed allowlist. A content delivery network, analytics snippet, or update ping added in that form is caught before it can falsify this document. The check is a backstop rather than a proof of no egress, and it is narrower than the claims it guards: a literal under another scheme (a `wss://` beacon), one added to build configuration outside the scanned trees, a host assembled at runtime, a URL an author spelled around the check by splitting or encoding it, and a connection made inside a dependency are all outside its reach. Its limits are in [docs/SECURITY_DESIGN.md](docs/SECURITY_DESIGN.md#egress-hardening-and-its-limits).
+The statements in this document about what psilink connects to have a mechanical backstop: a repository check (`npm run check:egress-claims`) fails the build when the shipped source trees gain a URL literal naming a host under one of the schemes it reads -- `http`, `https`, and the STUN and TURN schemes -- outside a reviewed allowlist. A content delivery network, analytics snippet, or update ping added in that form is caught before it can falsify this document. The check is a backstop rather than a proof of no egress, and it is narrower than the claims it guards: a literal under another scheme (a `wss://` beacon), one added to build configuration outside the scanned trees, a host assembled at runtime, a URL an author spelled around the check by splitting or encoding it, and a connection made inside a dependency are all outside its reach. Its limits are in [docs/SECURITY_DESIGN.md](docs/SECURITY_DESIGN.md#egress-hardening-and-its-limits).
 
 ## Two deployments
 
@@ -61,7 +61,7 @@ The SFTP and file-drop case is the one that turns on how the exchange is set up:
 - **A recurring, authenticated exchange** wraps the exchange in application-layer encryption keyed from the two parties' shared secret, so the server operator sees only ciphertext and file timing.
 - **A zero-setup exchange** carries no such key and relies on the transport alone -- SSH in transit, and the server's own access controls at rest. The server operator can read the files that pass through it, which include the payload values disclosed for matched rows. Where the server is outside both parties' control, prefer an authenticated exchange.
 
-## What PSI-Link retains on your systems
+## What psilink retains on your systems
 
 - **The shared secret** in the key file is the only persistent credential; it is stored owner-only and rotates after every successful exchange (see [docs/SECURITY_DESIGN.md](docs/SECURITY_DESIGN.md#key-file-security)).
 - **The output file** pairs your own row identifiers with the matched partner records and the columns the partner disclosed. The identifiers used for matching are not part of it. Its retention and disposition are yours to govern.
@@ -81,9 +81,9 @@ The project holds no personal data and cannot respond to access, correction, or 
 
 ## Review and ownership
 
-- **Owner:** the PSI-Link maintainers. Privacy review is a maintainer responsibility rather than a named individual's; use the reporting channels above rather than contacting a person.
+- **Owner:** the psilink maintainers. Privacy review is a maintainer responsibility rather than a named individual's; use the reporting channels above rather than contacting a person.
 - **Last reviewed:** the `last_reviewed` date in the front matter at the top of this document.
-- **Cadence:** this statement is reviewed on any change that affects what PSI-Link collects, transmits, or retains, and at least annually regardless of whether anything changed. Every revision and its date are recorded in this repository's version history.
+- **Cadence:** this statement is reviewed on any change that affects what psilink collects, transmits, or retains, and at least annually regardless of whether anything changed. Every revision and its date are recorded in this repository's version history.
 
 ## See also
 
