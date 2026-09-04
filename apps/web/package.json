@@ -10,7 +10,7 @@
     "dev": "vite dev",
     "dev:console": "VITE_DEPLOYMENT_PROFILE=console vite dev",
     "build": "vite build",
-    "lint": "npx eslint src",
+    "lint": "npx eslint src server",
     "type-check": "tsc --noEmit",
     "start": "node --env-file=.env .output/server/index.mjs",
     "test": "vitest run --project unit",
