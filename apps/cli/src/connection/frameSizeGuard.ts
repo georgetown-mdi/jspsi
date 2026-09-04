@@ -9,40 +9,25 @@ import {
 } from "./sftpLivenessGuard";
 
 /**
- * Frame-size enforcement primitives shared by the file-transport adapters
+ * Frame-size enforcement shared by the file-transport adapters
  * ({@link ../connection/localFSClient.LocalFSClient | LocalFSClient} and
- * {@link ../connection/ssh2SftpAdapter.SSH2SFTPClientAdapter}). Centralizing
- * them keeps a single, unit-tested definition of the security invariant: an
- * inbound file larger than the cap is refused with a typed, terminal
- * {@link FrameSizeExceededError} before an unbounded buffer can be allocated.
- *
- * The two adapters refuse at different moments, deliberately:
- *  - LocalFSClient fstats the open handle and refuses BEFORE allocating, so it
- *    needs only {@link frameSizeExceededError} (it never streams-and-counts; a
- *    local fstat is truthful, so an up-front size check is strictly better).
- *  - SSH2SFTPClientAdapter cannot trust a remote stat, so it streams through
- *    {@link createCappedSink}, which counts bytes and aborts once the running
- *    total crosses the cap. That sink is the backstop for a server that
- *    under-reports a file's size in its directory listing; it additionally
- *    bounds the transfer's liveness (a server that withholds data without ending
- *    the stream) via the idle deadline in {@link ./sftpLivenessGuard}.
+ * {@link ../connection/ssh2SftpAdapter.SSH2SFTPClientAdapter}): an inbound
+ * file larger than the cap is refused with a {@link FrameSizeExceededError}
+ * before an unbounded buffer can be allocated. Why the two adapters differ:
+ * docs/spec/CHANNEL_SECURITY.md, "Inbound frame-size bound".
  */
 
 const INBOUND_FILE_LINK_LABEL = "inbound file: ";
 
 /**
- * Construct the canonical typed, terminal error for an over-cap inbound file.
- * Pass `observedBytes` when the exact size is known up front (LocalFSClient's
- * fstat); omit it on the streaming path, where only "crossed the cap" is known.
- *
- * `path` takes a labelled cause link of its own rather than leading the summary:
- * on a `get()` it carries the peer-supplied filename under no bounded length, and
- * on a shared link those bytes spend the budget the cap, the refusal and the next
- * step {@link FrameSizeExceededError} carries need. The link is fitted at this
- * composition site by {@link ./causeLink.fittedCauseLink}, the same discipline
- * the sibling listing and liveness guards apply, so a filename a hostile server
- * made arbitrarily wide is cut to a value's budget rather than to the renderer's
- * whole-message one.
+ * Construct the canonical typed, terminal error for an over-cap inbound
+ * file. Pass `observedBytes` when known up front (LocalFSClient's fstat);
+ * omit it on the streaming path, where only "crossed the cap" is known.
+ * `path` is fitted into its own labelled cause link via
+ * {@link ./causeLink.fittedCauseLink} rather than composed into the
+ * summary, so a hostile server's arbitrarily wide filename is bounded to a
+ * value's budget, not the renderer's whole-message one. Why: docs/spec/
+ * CHANNEL_SECURITY.md, "Display sanitization escape format".
  */
 export function frameSizeExceededError(
   path: string,
@@ -64,21 +49,17 @@ export interface CappedSink {
   /** Writable to hand to ssh2-sftp-client's `get(path, sink)`. */
   sink: Writable;
   /**
-   * Resolves with the concatenated under-cap bytes once {@link CappedSink.complete}
-   * is called (the transfer finished without crossing the cap); rejects with a
-   * {@link FrameSizeExceededError} the instant the running total crosses the cap,
-   * or with a {@link TransportOperationStalledError} if the transfer goes idle
-   * past the stall deadline (the liveness bound, for a server that withholds data
-   * without ending the stream).
+   * Resolves with the concatenated under-cap bytes once
+   * {@link CappedSink.complete} is called; rejects with a
+   * {@link FrameSizeExceededError} once the running total crosses the cap,
+   * or a {@link TransportOperationStalledError} if the transfer goes idle
+   * past the stall deadline.
    *
-   * The over-cap rejection is decided at the point of detection inside the
-   * sink, NOT reconstructed from how the underlying `get()` promise settles.
-   * ssh2-sftp-client settles a stream destination through two listeners on
-   * different streams -- it resolves via the read stream's 'end' event but
-   * rejects via the sink's 'error' event -- which race for a file that finishes
-   * in one or two chunks. Settling this `result` from within the sink removes
-   * that race: whichever way the library's promise lands, `result` already
-   * carries the typed error.
+   * Settled from within the sink itself, not from how ssh2-sftp-client's
+   * own `get()` promise resolves: that promise settles through two
+   * listeners on different streams -- the read stream's 'end' event vs.
+   * the sink's 'error' event -- which race for a file finishing in one or
+   * two chunks.
    */
   result: Promise<Buffer<ArrayBufferLike>>;
   /**
@@ -102,23 +83,13 @@ export interface CappedSink {
 }
 
 /**
- * Build a counting sink that bounds an inbound stream by SIZE and by LIVENESS.
- * Bytes past `maxBytes` are counted but never retained, so the buffer it
- * accumulates never exceeds roughly `maxBytes`. On crossing the cap it (a)
- * rejects {@link CappedSink.result} with a {@link FrameSizeExceededError} at the
- * point of detection and (b) fails the write callback so ssh2-sftp-client
- * destroys the read stream and aborts the transfer at the server.
- *
- * Separately, `stallDeadlineMs` bounds liveness. A hostile (or dead) server can
- * hold the read stream open and withhold data, or trickle under-cap bytes
- * forever without ever ending, so the transfer never completes and `result`
- * never settles -- a hang the size cap cannot catch, since no allocation grows.
- * An idle timer, armed before the first chunk and reset on each chunk, fires when
- * no data arrives within the window: it rejects `result` with a
- * {@link TransportOperationStalledError} and destroys the sink so the stalled
- * transfer is torn down. Bounding the idle gap rather than the total transfer
- * time never rejects a slow-but-progressing read of a legitimately large frame.
- * Defaults to {@link SFTP_STALL_DEADLINE_MS}.
+ * Build a counting sink that bounds an inbound stream by size and by
+ * liveness: bytes past `maxBytes` are counted but never retained, and an
+ * idle timer (armed before the first chunk, reset on each chunk) tears the
+ * transfer down after `stallDeadlineMs` of silence, defaulting to
+ * {@link SFTP_STALL_DEADLINE_MS}. Rationale for both bounds: docs/spec/
+ * CHANNEL_SECURITY.md, "Inbound frame-size bound" and "Per-operation
+ * liveness bounds".
  */
 export function createCappedSink(
   path: string,
@@ -135,10 +106,10 @@ export function createCappedSink(
     rejectResult = reject;
   });
 
-  // Idle/no-progress deadline (see the doc above). Re-armed on each chunk and
-  // cleared on every terminal path; on expiry it settles `result` and destroys
-  // the sink. `sink` is referenced only from the timer callback, which can fire
-  // only after sink construction below.
+  // Idle/no-progress deadline. Re-armed on each chunk and cleared on every
+  // terminal path; on expiry it settles `result` and destroys the sink.
+  // `sink` is referenced only from the timer callback, which can fire only
+  // after sink construction below.
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
   const armIdle = (): void => {
     clearTimeout(idleTimer);
@@ -154,18 +125,14 @@ export function createCappedSink(
         ),
       );
       chunks.length = 0;
-      // Destroy WITH an error, not bare: ssh2-sftp-client's get(path, dst) pipes
-      // the read stream into the sink and settles its own promise off the sink's
-      // 'error' event, so a bare destroy() -- which emits 'close', not 'error' --
-      // risks leaving the server-side read running until session teardown. That
-      // counterfactual is a reading of the library, not a measurement against the
-      // pinned stack, so it is the reason for the argument rather than a property
-      // claimed here; what is driven is this side, that the sink is destroyed
-      // with an Error (frameSizeGuard.test.ts, "the idle stall tears down the
-      // upstream read stream, not just the sink"). The typed terminal error is
-      // already on `result`; this plain Error exists only to abort the transfer
-      // at the server, exactly as the over-cap path's failed write callback
-      // does. The resulting get() rejection lands on the adapter's no-op `fail`.
+      // Destroy WITH an error, not bare: a bare destroy() emits 'close', not
+      // 'error', risking the server-side read left running until session
+      // teardown -- a reading of ssh2-sftp-client's behavior, not a
+      // measurement; driven instead by frameSizeGuard.test.ts, "the idle
+      // stall tears down the upstream read stream, not just the sink".
+      // This Error only aborts the transfer at the server: the typed error
+      // is already on `result`, and the resulting get() rejection lands on
+      // the no-op `fail`.
       sink.destroy(new Error("inbound transfer stalled"));
     }, stallDeadlineMs);
     // The idle timer is the safety bound, not real work: it must never keep the

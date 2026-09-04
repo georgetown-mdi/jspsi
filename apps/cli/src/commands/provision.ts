@@ -43,12 +43,10 @@ function throwIfConflicts(
   keyPath: string,
   check: ConflictTarget[] = ["config", "key"],
 ): void {
-  // Reject the same destination for both files. Without this, when neither
-  // exists the conflict check passes and saveConfig's YAML is immediately
-  // overwritten by saveKeyFile's JSON, silently producing a key file at the
-  // config path. Resolve first so `./x` and `x` are recognized as the same path.
-  // Always run this guard, even when only one target's existence is checked: the
-  // accept/invite callers that narrow `check` still write both files.
+  // Config and key paths must differ, or saveKeyFile's write would silently
+  // overwrite saveConfig's. Resolve first so `./x` and `x` compare equal.
+  // Always runs, even when only one target is checked: a narrowed caller still
+  // writes both files.
   if (path.resolve(configPath) === path.resolve(keyPath))
     throw new UsageError(
       `config file and key file must be different paths; both resolve to ` +
@@ -69,16 +67,14 @@ function throwIfConflicts(
 }
 
 /**
- * Throw a {@link UsageError} if a config or key file already exists at a target
- * path, naming the conflicting path(s). Writes nothing and opens no connection,
- * so a command can call this up front -- before any network activity -- to abort
- * a bootstrap that would otherwise clobber an existing configuration partway
- * through an exchange.
+ * Throw a {@link UsageError} if a config or key file already exists at a
+ * target path, naming the conflicting path(s). Writes nothing, so a command
+ * can call this before any network activity to abort a bootstrap that would
+ * otherwise clobber an existing configuration.
  *
- * This is a check, not a lock: a file appearing between this check and the
- * subsequent write would still be overwritten. That race is immaterial for an
- * interactive single-user CLI bootstrap; the gate's purpose is to catch a
- * pre-existing config, not to serialize concurrent provisioners.
+ * A check, not a lock: a file created between this check and the subsequent
+ * write is still overwritten. It catches a pre-existing config; it does not
+ * serialize concurrent provisioners.
  */
 export function assertNoProvisionConflicts(
   targets: ProvisionTargets = {},
@@ -102,12 +98,11 @@ export interface ProvisionOptions {
 }
 
 /**
- * The {@link provisionConfigAndKey} failures whose rollback did not remove the
- * config that call had already written. Membership is keyed on the propagating
- * error object rather than written onto it as a property: that error comes from
- * the key writer or the filesystem, so it is not this module's to mutate, and a
- * non-extensible one would turn the marking into a second failure replacing the
- * one worth reporting.
+ * The {@link provisionConfigAndKey} failures whose rollback left an
+ * already-written config on disk. Keyed on the propagating error object
+ * rather than a property on it: that error comes from the key writer or the
+ * filesystem, not this module, and a non-extensible object would turn the
+ * marking itself into the failure reported.
  */
 const failuresLeavingConfigOnDisk = new WeakSet<object>();
 
@@ -123,34 +118,29 @@ export function provisionLeftConfigOnDisk(error: unknown): boolean {
 }
 
 /**
- * Provision a config and key pair, refusing to clobber existing files. Re-runs
- * the conflict gate (so it is safe to call even if the caller skipped the
- * up-front {@link assertNoProvisionConflicts}) and writes nothing if a gated
- * target exists. `keyData.expires` is written when set and omitted otherwise.
+ * Provision a config and key pair, refusing to clobber existing files.
+ * Re-runs the conflict gate (safe to call even if the caller skipped
+ * {@link assertNoProvisionConflicts}) and writes nothing if a gated target
+ * exists. `keyData.expires` is written when set and omitted otherwise.
  *
- * With `options.reuseExistingConfig`, the config write is skipped and only the
- * key file is written and gated: for the accept path, where a pre-existing
- * config has already been reconciled against the invitation and is kept as-is.
- * The user's config is never written or deleted in that case. Before writing the
- * key, the config's continued presence is re-gated -- if it was removed since the
- * caller reconciled it, this throws rather than orphaning a key with no matching
- * config.
+ * With `options.reuseExistingConfig` (see {@link ProvisionOptions}), the
+ * config write is skipped and only the key is written and gated. Before
+ * writing the key, the config's presence is re-checked: if it was removed
+ * since the caller reconciled it, this throws rather than orphaning a key
+ * with no matching config.
  *
- * Both writers are atomic (temp file + rename) and clean up their own temp on
- * failure, so a failed write leaves nothing at its destination. The config is
- * written first; only if the key write then fails is there a residue -- the
- * already-written config -- which is removed before the error propagates (but
- * never when reusing an existing config: that file is the user's, not this
- * call's). A removal that itself fails leaves that config on disk and records it
- * on the propagating error, so a caller's report can name the file's real state
- * ({@link provisionLeftConfigOnDisk}). The key path is never deleted on failure:
- * saveKeyFile guarantees nothing was written there, so removing it could only
- * ever delete a file this call did not write (e.g. one that appeared in the
- * conflict gate's TOCTOU window). Parent directories created for a nested target
- * path are left in place.
+ * Both writers are atomic (temp file + rename; see
+ * docs/spec/CREDENTIAL_STORAGE.md#posix-write-discipline) and clean up their
+ * own temp file on failure. The config is written first, so a key-write
+ * failure leaves it behind; this removes it before the error propagates,
+ * except when reusing an existing config, which is the user's file. A failed
+ * removal leaves the config on disk and marks the propagating error
+ * ({@link provisionLeftConfigOnDisk}). The key path itself is never deleted
+ * on failure, since saveKeyFile writes nothing there to remove. Parent
+ * directories created for a nested target path are left in place.
  *
- * @returns the resolved paths (the key always written; the config written only
- *   when not reusing an existing one).
+ * @returns the resolved paths (the key always written; the config only when
+ *   not reusing an existing one).
  */
 export function provisionConfigAndKey(
   spec: ExchangeSpec,
@@ -159,25 +149,23 @@ export function provisionConfigAndKey(
   options: ProvisionOptions = {},
 ): { configPath: string; keyPath: string } {
   const resolved = resolveTargets(targets);
-  // When reusing the existing config, gate only the key path: the config is
-  // expected to be present (that is the whole point), so checking it would
-  // wrongly abort. The same-path guard inside throwIfConflicts still runs.
+  // Reusing an existing config gates only the key path; the config is
+  // expected to be present. The same-path guard inside throwIfConflicts still
+  // runs.
   throwIfConflicts(
     resolved.configPath,
     resolved.keyPath,
     options.reuseExistingConfig ? ["key"] : ["config", "key"],
   );
-  // Outside the try: a saveConfig failure is atomic, so nothing was written and
-  // there is nothing to roll back -- let it propagate before the key is touched.
+  // Outside the try: a saveConfig failure is atomic (nothing written), so it
+  // propagates before the key is touched.
   if (options.reuseExistingConfig) {
-    // Re-gate the config's presence right before writing the key. Reuse means
-    // "keep the existing config and add only the key", so if that config was
-    // removed after the caller reconciled it (a delete in the TOCTOU window
-    // between reconcile and here), writing the key would orphan it -- a key with
-    // no matching config. Abort cleanly instead: nothing has been written yet,
-    // so there is no residue. This mirrors the online hook's pre-write re-gate
-    // and keeps this function's "never leave inconsistent on-disk state"
-    // guarantee. The same-path guard already ran in throwIfConflicts above.
+    // Re-check the config's presence right before writing the key: if it was
+    // removed since the caller reconciled it (the TOCTOU window between
+    // reconcile and here), writing the key would orphan it. Nothing has been
+    // written yet, so aborting here leaves no residue. Mirrors the online
+    // hook's pre-write re-gate; the same-path guard already ran in
+    // throwIfConflicts above.
     if (detectFileConflicts([resolved.configPath]).length === 0)
       throw new UsageError(
         `the configuration file at ${resolved.configPath} no longer exists; ` +
@@ -196,10 +184,10 @@ export function provisionConfigAndKey(
       try {
         fs.rmSync(resolved.configPath, { force: true });
       } catch {
-        // Best-effort rollback; the key-write error below stays the one
-        // surfaced. Record the outcome on it, though: which files are on disk
-        // differs by it, and a caller that reported the config as unsaved would
-        // misstate what the operator has to clean up before re-provisioning.
+        // Best-effort rollback; the key-write error below is still the one
+        // reported. Record the outcome on it: a caller that reported the
+        // config as unsaved would misstate what the operator has to clean up
+        // before re-provisioning.
         if (typeof err === "object" && err !== null)
           failuresLeavingConfigOnDisk.add(err);
       }

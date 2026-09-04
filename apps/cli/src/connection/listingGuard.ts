@@ -9,91 +9,43 @@ import { fittedCauseLink } from "./causeLink";
 import { transportOperationStalledError } from "./sftpLivenessGuard";
 
 /**
- * Directory-listing enforcement primitives shared by the file-transport adapters
+ * Directory-listing enforcement shared by the file-transport adapters
  * ({@link ../connection/localFSClient.LocalFSClient | LocalFSClient} and
- * {@link ../connection/ssh2SftpAdapter.SSH2SFTPClientAdapter}). Centralizing
- * them keeps a single, unit-tested definition of the security invariant: a
- * rendezvous directory with more entries than {@link MAX_DIRECTORY_ENTRIES}, or
- * an entry whose name exceeds {@link MAX_FILENAME_LENGTH}, is refused with a
- * typed, terminal {@link DirectoryListingBoundsError} before the listing is
- * materialized -- so a hostile filedrop/SFTP directory cannot exhaust memory
- * through directory enumeration. This is the directory-enumeration sibling of
- * the per-frame bound in {@link ./frameSizeGuard}: that one caps the per-file
- * body read; this one caps the listing that precedes it.
- *
- * Both adapters enforce these bounds while streaming the directory entry by
- * entry (LocalFSClient via `fs.opendir`; the SFTP adapter via the low-level
- * `opendir`/`readdir`/`close` batch loop), never via `fs.readdir`/the library's
- * `list()` -- which would already have allocated an array proportional to the
- * attacker-chosen entry count before any check could run.
+ * {@link ../connection/ssh2SftpAdapter.SSH2SFTPClientAdapter}): a directory
+ * over {@link MAX_DIRECTORY_ENTRIES} entries, or an entry name over
+ * {@link MAX_FILENAME_LENGTH}, is refused with a
+ * {@link DirectoryListingBoundsError} before the listing is materialized.
+ * Rationale: docs/spec/CHANNEL_SECURITY.md, "Directory-listing bound".
  */
 
 /**
- * Maximum number of entries a transport directory listing will enumerate before
- * it is refused. Enforced at the transport `list()` layer in both adapters,
- * counting every directory entry (file or otherwise -- the attacker controls the
- * entry count regardless of type), so an oversized directory is refused before
- * an array and per-entry metadata proportional to the attacker-chosen entry
- * count can be allocated. See docs/spec/CHANNEL_SECURITY.md.
- *
- * Value: 8192. Derived from a memory envelope rather than chosen as a round
- * number. The worst-case bounded allocation when refusing is the entries
- * retained up to the cap, each carrying a name string of up to
- * {@link MAX_FILENAME_LENGTH} characters plus per-entry object overhead (~600
- * bytes total, conservatively), so 8192 entries bound the listing allocation to
- * roughly 5 MiB. That is about two orders of magnitude below the 512 MiB
- * single-frame budget the sibling frame-size bound already governs, so directory
- * enumeration cannot become the dominant memory vector, yet it exceeds the
- * order-of-ten files a legitimate exchange produces (the rendezvous protocol's
- * two `-hello.json` files, at most one `-lock.json` or the `-ack.json` markers,
- * transient `-joining.json` sentinels and `temp-*.tmp` writes, and the bounded
- * set of PSI message frames) by roughly three orders of magnitude. It remains
- * generous for a retain-mode directory that accumulates message and ack files
- * across many sequential exchanges before the operator rotates it (retention is
- * an out-of-band operator responsibility; see fileSyncConnection's poll()).
- *
- * Fixed, not operator-configurable -- mirroring the frame-size bound: a
- * configurable cap risks an operator raising it high enough to reintroduce the
- * denial of service.
+ * Maximum number of entries a transport directory listing enumerates
+ * before it is refused, counting every entry regardless of type. Fixed,
+ * not operator-configurable. Derivation (roughly 5 MiB worst-case
+ * allocation) and enforcement point: docs/spec/CHANNEL_SECURITY.md,
+ * "Directory-listing bound".
  */
 export const MAX_DIRECTORY_ENTRIES = 8192;
 
 /**
- * Maximum length, in characters, of a single directory entry's filename.
- * Enforced per entry at the transport `list()` layer in both adapters so an
- * adversary cannot exhaust memory with very long names. See
- * docs/spec/CHANNEL_SECURITY.md.
- *
- * Value: 255, the POSIX `NAME_MAX` -- the maximum length of a single path
- * component that every mainstream filesystem accepts (ext4, XFS, APFS, and NTFS
- * all cap a name component at 255 bytes / UTF-16 code units). A derived platform
- * limit, not a round constant: the longest filename a legitimate exchange writes
- * is the ack marker of a timestamped message
- * (`<writerId>-<id>-<timestamp>-<counter>-<byteCount>-ack.json`), on the order of
- * 120 characters with the default UUID peer ids, so 255 leaves comfortable
- * headroom. A name longer than 255 cannot exist on a conformant filesystem, so
- * for the local adapter it is unreachable; the SFTP protocol imposes no name
- * length limit, so a hostile server can synthesize arbitrarily long names in a
- * READDIR response, and 255 is exactly the boundary above which such a name is
- * necessarily synthetic. Fixed for the same reason as
- * {@link MAX_DIRECTORY_ENTRIES}.
+ * Maximum length, in characters, of a single directory entry's filename;
+ * enforced per entry at the transport `list()` layer in both adapters.
+ * Fixed, for the same reason as {@link MAX_DIRECTORY_ENTRIES}. Value is
+ * the POSIX `NAME_MAX`; derivation: docs/spec/CHANNEL_SECURITY.md,
+ * "Directory-listing bound".
  */
 export const MAX_FILENAME_LENGTH = 255;
 
 const DIRECTORY_LINK_LABEL = "directory: ";
 
 /**
- * Compose the labelled `directory:` cause link both refusals below carry, fitted
- * at this composition site by {@link ./causeLink.fittedCauseLink}.
- *
- * The path is bounded there rather than at the display boundary because it is
- * bounded nowhere upstream: it is operator-configured, but on an offline-accept
- * config it can be seeded from a partner invitation endpoint that is
- * charset-unconstrained and 4096 characters wide. A real rendezvous path is an
- * order of magnitude inside the budget, so the clip only ever bites a path that
- * is itself the anomaly, and fitting it is the same discipline the sibling
- * entry-name preview applies -- so neither fragment somebody else chose relays
- * an attacker-sized string onward.
+ * Compose the labelled `directory:` cause link both refusals below hold,
+ * fitted at this composition site by {@link ./causeLink.fittedCauseLink}:
+ * `dirPath` is bounded nowhere upstream -- on an offline-accept config it
+ * can be seeded from a partner invitation endpoint field that is
+ * charset-unconstrained and 4096 characters wide. Why fitting happens
+ * here rather than at the display boundary: docs/spec/CHANNEL_SECURITY.md,
+ * "Display sanitization escape format".
  */
 function directoryLink(dirPath: string): string {
   return fittedCauseLink(DIRECTORY_LINK_LABEL, dirPath);
@@ -104,7 +56,7 @@ function directoryLink(dirPath: string): string {
  * {@link MAX_DIRECTORY_ENTRIES}. `dirPath` takes a labelled cause link of its
  * own ({@link directoryLink}) rather than leading the summary, where it would
  * spend the budget the bound, the refusal and the next step
- * {@link DirectoryListingBoundsError} carries need.
+ * {@link DirectoryListingBoundsError} holds need.
  */
 export function directoryTooLargeError(
   dirPath: string,
@@ -119,20 +71,17 @@ export function directoryTooLargeError(
 
 /**
  * Construct the typed, terminal error for a directory entry whose filename
- * exceeds {@link MAX_FILENAME_LENGTH}. Only a leading slice of the offending
- * name is interpolated: a hostile server can synthesize a name of any length in
- * a READDIR response, so the error must not relay an attacker-sized string into
- * memory. The slice is a plain leading one rather than the directory's
- * rendered-cost fit, because what bounds it is that memory rather than a display
- * budget, and it is far inside the budget either way. It is raw -- escaping is
- * the display boundary's job, and it renders a split surrogate pair as a visible
- * escape rather than mojibake. The true length is reported separately: it is a
- * number, not partner text.
+ * exceeds {@link MAX_FILENAME_LENGTH}. Only a leading 64-character slice
+ * of the offending name is interpolated -- a memory bound, not the display
+ * budget {@link directoryLink} fits to -- raw and unescaped (escaping is
+ * the display boundary's job; a split surrogate pair still renders as a
+ * visible escape, not mojibake). The true length is reported separately,
+ * as a number, never partner text.
  *
- * The server chose the name and the operator (or, on an offline-accept config,
- * the partner's endpoint) chose the directory, so each takes a labelled cause
- * link of its own: on one shared link either chooser's bytes would delete the
- * other's disclosure, and both would delete the refusal and the next step.
+ * `dirPath` and `name` are chosen by different parties (operator/partner
+ * endpoint vs. server), so each takes a labelled cause link of its own: a
+ * shared link would let either chooser's bytes delete the other's
+ * disclosure, or delete the refusal and the next step.
  */
 export function filenameTooLongError(
   dirPath: string,
@@ -158,32 +107,14 @@ export function filenameTooLongError(
 }
 
 /**
- * Maximum number of `readdir` round-trips (server batches) a single transport
- * `list()` will issue before it is refused. Enforced in the SFTP adapter's
- * streamed read loop. This is the LIVENESS sibling of the memory-size bounds
- * above: those cap what a hostile directory can allocate; this one caps the
- * round-trips a hostile server can make the listing consume. The size bounds do
- * not cover this vector -- a server that keeps returning empty, non-EOF readdir
- * batches advances neither {@link MAX_DIRECTORY_ENTRIES} (no entry accumulates)
- * nor {@link MAX_FILENAME_LENGTH} (no name to measure) and never signals
- * end-of-directory, so without this cap the batch loop recurses forever. See
- * docs/spec/CHANNEL_SECURITY.md.
- *
- * Value: `2 * MAX_DIRECTORY_ENTRIES` (16,384). Derived from the size bounds, not
- * chosen as a round number, so the two move together. Every compliant non-EOF
- * READDIR response carries at least one name (an empty, non-EOF `SSH_FXP_NAME` is
- * not protocol-conformant; a server with no more names sends `SSH_FX_EOF`), so a
- * legitimate listing makes at most {@link MAX_DIRECTORY_ENTRIES} batches before
- * the entry-count bound refuses it -- and only in the pathological-but-legal case
- * of one entry per batch; an honest server packs many entries per packet and
- * finishes in a single batch for a normal rendezvous directory. Setting the cap
- * to twice that worst case leaves an honest one-entry-per-batch server full
- * headroom over the point at which the entry-count bound would already have
- * refused it, so this cap only ever bites a progress-free (empty-batch) flood.
- *
- * Fixed, not operator-configurable, for the same reason as the size bounds: a
- * configurable cap risks an operator raising it high enough to reintroduce the
- * denial of service.
+ * Maximum number of `readdir` round-trips (server batches) a single
+ * transport `list()` will issue before it is refused, enforced in the
+ * SFTP adapter's streamed read loop. The liveness sibling of the
+ * memory-size bounds above: a server returning empty, non-EOF readdir
+ * batches advances neither bound, so without this cap the read loop
+ * recurses forever. Fixed, not operator-configurable. Value and
+ * derivation: docs/spec/CHANNEL_SECURITY.md, "Per-operation liveness
+ * bounds".
  */
 export const MAX_LISTING_READDIR_BATCHES = 2 * MAX_DIRECTORY_ENTRIES;
 

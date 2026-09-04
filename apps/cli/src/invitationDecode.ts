@@ -10,13 +10,14 @@ import type { InvitationToken } from "@psilink/core";
 import { resolveAtSignRefs } from "./util/atSignRefs";
 
 /**
- * Resolve an `@path` reference, strip the whitespace a hard-wrapped paste or a
- * wrapped `@`-file leaves inside the token, decode the invitation (verifying the
- * 4-byte checksum and the Zod schema), and reject an expired token by name. All
- * failures are raised as {@link UsageError} (so the CLI exits 64). Shared by the
- * `accept` command's pre-prompt gate and by `exchange --invitation`'s
- * key-file provisioning, so the two decode a partner-supplied invitation through
- * one implementation rather than independent copies of a security-sensitive
+ * Resolve an `@path` reference, strip whitespace a hard-wrapped paste or a
+ * wrapped `@`-file leaves inside the token, decode the invitation (verifying
+ * the 4-byte checksum and the Zod schema), and reject an expired token by
+ * name. All failures raise {@link UsageError} (CLI exit 64).
+ *
+ * Shared by `accept`'s pre-prompt gate and `exchange --invitation`'s
+ * key-file provisioning, so both decode a partner-supplied invitation through
+ * one implementation rather than separate copies of a security-sensitive
  * decode path.
  */
 export async function decodeAndValidateInvitation(
