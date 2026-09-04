@@ -92,7 +92,7 @@ const ledgerFor = (sets) =>
     Object.values(sets).map((set) => [set.name, { [set.version]: set.digest }]),
   );
 
-/** A tree carrying only what the check reads: the two sets and the ledger. */
+/** A tree holding only what the check reads: the two sets and the ledger. */
 function fixtureTree({
   fieldSetVersion = "1.0.0",
   keySetVersion = "1.0.0",
@@ -183,7 +183,7 @@ describe("the rule over a recorded pin", () => {
     expect(pinViolations({ sets, pins: ledgerFor(sets) })).toEqual([]);
   });
 
-  it("fails moved key content carrying no bump, naming the note", () => {
+  it("fails moved key content containing no bump, naming the note", () => {
     const sets = declaredSets();
     const moved = declaredSets({ keys: [...KEYS, { name: "LN + SSN" }] });
     const violations = pinViolations({ sets: moved, pins: ledgerFor(sets) });
@@ -281,7 +281,7 @@ describe("the rule over a recorded pin", () => {
     expect(violations[0].message).toContain('"hmis-keys-legacy"');
   });
 
-  it("asks for a pin for a set the ledger does not carry at all", () => {
+  it("asks for a pin for a set the ledger does not hold at all", () => {
     const sets = declaredSets();
     const violations = pinViolations({ sets, pins: {} });
     expect(violations.map(({ kind, set }) => [kind, set])).toEqual([
@@ -378,7 +378,7 @@ describe("the check driven end to end", () => {
     expect(status).toBe(2);
   });
 
-  it("states the pin each set carries on a passing run", () => {
+  it("states the pin each set holds on a passing run", () => {
     expect(pinReport(declaredSets())).toEqual([
       `  baseline-pii 1.0.0 -- ${contentDigest(FIELDS)}`,
       `  hmis-keys 1.0.0 -- ${contentDigest(KEYS)}`,
@@ -400,7 +400,7 @@ describe("the check's registration", () => {
     );
   });
 
-  it("ships a pin for each declared set, the rule binding now", () => {
+  it("ships a pin for each declared set the rule binds", () => {
     const pins = JSON.parse(readRoot(PINS_FILE)).pins;
     expect(Object.keys(pins).sort()).toEqual(["baseline-pii", "hmis-keys"]);
     for (const entry of Object.values(pins)) {

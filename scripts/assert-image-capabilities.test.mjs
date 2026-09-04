@@ -36,8 +36,8 @@ import {
 // asserted as Docker would receive and answer them.
 //
 // What it cannot reach: the image, and therefore every verdict the gate exists
-// to reach. Only a run with a daemon settles whether an image answers the set
-// below.
+// to reach. Only a run with a daemon determines whether an image answers the
+// set below.
 
 const derived = deriveImageDependencies(repositoryRoot());
 const GATE = resolve(repositoryRoot(), "scripts/assert-image-capabilities.mjs");
@@ -131,7 +131,7 @@ describe("recipe coverage of the derived set", () => {
 });
 
 describe("what an exit code is taken as evidence of", () => {
-  it("accepts the two codes a battery that ran reaches", () => {
+  it("accepts the two codes a run reaches", () => {
     expect(batteryRan(0)).toBe(true);
     expect(batteryRan(78)).toBe(true);
   });
@@ -140,7 +140,7 @@ describe("what an exit code is taken as evidence of", () => {
     expect(batteryRan(64)).toBe(false);
   });
 
-  it("refuses the code a battery gives when a dependency was missing", () => {
+  it("refuses the code a run gives when a dependency was missing", () => {
     expect(batteryRan(69)).toBe(false);
   });
 
@@ -165,7 +165,7 @@ describe("reading a verdict out of what a container printed", () => {
     });
   });
 
-  it("finds nothing in a stream carrying no document", () => {
+  it("finds nothing in a stream containing no document", () => {
     expect(readVerdict("mount_readable: ok\nmarker: skipped\n")).toBeNull();
   });
 
@@ -181,7 +181,7 @@ describe("reading a verdict out of what a container printed", () => {
 // A container engine that records the argument vector it was handed and answers
 // on its own streams. Every branch answers the shape the real engine answers,
 // and an argument vector it does not recognise fails loudly rather than
-// returning a success the gate would read as a capability.
+// returning a success the gate would treat as a capability.
 const STUB_ENGINE = `#!/bin/sh
 printf '%s\\n' "$*" >>"$STUB_LOG"
 case "$*" in
@@ -303,7 +303,7 @@ describe("the gate driven against a stub engine", () => {
     expect(result.stdout).not.toContain(FIXTURE_ENVIRONMENT.SMB_PASS);
   });
 
-  it("mounts a directory the image's own account can write at the battery's path", () => {
+  it("mounts a directory the image's own account can write at the checks' path", () => {
     const { invocations } = drive();
     const mounted = invocations.filter((line) =>
       line.includes("doctor mount /rz --json"),
@@ -364,7 +364,7 @@ describe("the gate driven against a stub engine", () => {
     expect(result.stdout).toContain("64 is a refused input");
   });
 
-  it("fails when the battery could not reach smbclient", () => {
+  it("fails when the run could not reach smbclient", () => {
     const { result } = drive({
       STUB_PROBE_VERDICT: JSON.stringify({
         version: 1,

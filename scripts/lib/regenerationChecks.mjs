@@ -80,8 +80,8 @@ export const END_OF_FILE = "<end of file>";
  * The 1-based number of the first line at which `committed` and `produced`
  * differ, with both sides of it, or null when they are identical. The sides are
  * named for what a regeneration check compares: the copy that is checked in
- * against what the generator produced. A side that has run out of lines reads as
- * {@link END_OF_FILE}.
+ * against what the generator produced. A side that has run out of lines displays
+ * as {@link END_OF_FILE}.
  */
 export function firstDifference(committed, produced) {
   const left = committed.split("\n");

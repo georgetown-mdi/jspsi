@@ -21,7 +21,7 @@ import { CHECKS } from "./run-checks.mjs";
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
 
-// Nothing here drives the REAL codegen, deliberately. That invocation pegs every
+// Nothing here drives the REAL codegen, by design. That invocation pegs every
 // core for ~8s, and from inside this suite it runs beside the repo-wide egress
 // scan in a parallel worker: on a two-core CI runner it starved the scan's
 // comment-strip pass past its timeout (measured, run 30683166508). The real run
@@ -101,7 +101,7 @@ describe("freshness against an injected codegen", () => {
     expect(readFileSync(file, "utf8")).toBe(GENERATED);
   });
 
-  it("fails closed when the command errors, carrying its output", () => {
+  it("fails closed when the command errors, including its output", () => {
     const result = checkRouteTreeFreshness({
       root,
       regenerate: () => {

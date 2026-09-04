@@ -5,7 +5,7 @@
 // the ceiling must relocate its own weight into the file that owns the mechanism
 // it describes.
 //
-// Why a length gate here, when check-contributing-scope.mjs deliberately refuses
+// Why a length gate here, when check-contributing-scope.mjs refuses, by design,
 // to be one: the two files fail differently. CONTRIBUTING.md degrades by growing
 // the WRONG KIND of section, which a heading allowlist names directly, so a
 // length threshold there would reward padding a permitted section while a

@@ -97,7 +97,7 @@ describe("the verdict", () => {
     expect(message).toContain("docs/spec/DEPENDENCY_PINS.md");
   });
 
-  it("fires when the two copies carry the same version", () => {
+  it("fires when the two copies have the same version", () => {
     const verdict = assess(
       lockfile({
         packages: {
@@ -112,7 +112,7 @@ describe("the verdict", () => {
     );
   });
 
-  it("passes over a workspace copy the root does not carry", () => {
+  it("passes over a workspace copy the root does not hold", () => {
     const verdict = assess(
       lockfile({
         workspaces: ["apps/cli", "apps/web"],
@@ -182,7 +182,7 @@ describe("the verdict", () => {
     );
   });
 
-  it("still names a copy whose entry carries neither version nor link", () => {
+  it("still names a copy whose entry has neither version nor link", () => {
     expect(
       linesOf(
         lockfile({
@@ -232,7 +232,7 @@ describe("the allowlist", () => {
     expect(message).not.toContain("apps/web/node_modules/ws installs 7.5.10");
   });
 
-  it("fails on an entry naming no split the lockfile carries", () => {
+  it("fails on an entry naming no split the lockfile holds", () => {
     const verdict = assess(lockfile(), {
       "apps/web/node_modules/ws": "long since re-resolved",
     });
@@ -243,7 +243,7 @@ describe("the allowlist", () => {
     expect(message).toContain("scripts/check-nested-root-package.mjs");
   });
 
-  it("refuses an entry carrying no reason", () => {
+  it("refuses an entry holding no reason", () => {
     for (const reason of ["", "   ", true, undefined]) {
       const verdict = assess(split, { "apps/web/node_modules/ws": reason });
       expect(verdict.ok, String(reason)).toBe(false);
@@ -275,7 +275,7 @@ describe("what it refuses to answer for", () => {
     expect(message).toContain("scripts/check-nested-root-package.mjs");
   });
 
-  it("refuses a lockfile carrying no packages map", () => {
+  it("refuses a lockfile containing no packages map", () => {
     const verdict = assess({ lockfileVersion: 1 });
     expect(verdict.ok).toBe(false);
     expect(verdict.lines.join("\n")).toContain("no `packages` map");
@@ -283,7 +283,7 @@ describe("what it refuses to answer for", () => {
 });
 
 describe("the real repository", () => {
-  it("carries no package split across the workspace boundary", () => {
+  it("has no package split across the workspace boundary", () => {
     const verdict = assess(readRootJson("package-lock.json"));
     expect(verdict.ok, verdict.lines.join("\n")).toBe(true);
   });

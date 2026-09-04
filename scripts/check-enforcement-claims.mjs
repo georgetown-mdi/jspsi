@@ -4,18 +4,18 @@
 // CLAUDE.md tells agents a convention is "Enforced by `<hook>.mjs`". That is a
 // claim about what the harness does, and prose cannot assert it reliably: a hook
 // can be renamed, dropped from .claude/settings.json, or registered on a matcher
-// that never covers the tool the convention is about, and the sentence still
-// reads as a guarantee. An agent that believes an ungated rule is gated stops
+// that never covers the tool the convention is about, and the sentence is still
+// treated as a guarantee. An agent that believes an ungated rule is gated stops
 // holding it itself. So the claim is encoded as a check.
 //
-// A claim is honest when the named hook exists in .claude/hooks/, is registered
+// A claim is accurate when the named hook exists in .claude/hooks/, is registered
 // in .claude/settings.json, and the claiming line names at least one tool the
-// registration actually matches -- "Enforced by X" with no tool named reads as
+// registration actually matches -- "Enforced by X" with no tool named is treated as
 // enforcement everywhere, which no single matcher delivers. The naming
 // convention this leans on: an enforcement claim citing a `.mjs` file means a
 // hook; a CI check is cited by its `npm run` name instead.
 //
-// Two structural claims ride along: every hook script carries a colocated test
+// Two structural claims ride along: every hook script has a colocated test
 // (a hook is the repo's only unreviewed executable, and a broken one fails
 // silent), and every registration in settings.json points at a file that exists.
 
@@ -29,7 +29,7 @@ const HOOKS_DIR = ".claude/hooks";
 
 /**
  * Enforcement claims in CLAUDE.md prose: each `Enforced by \`<file>.mjs\`` with
- * the line that carries it, so the tool-naming rule can read the surrounding
+ * the line that holds it, so the tool-naming rule can read the surrounding
  * sentence.
  */
 export function enforcementClaims(source) {

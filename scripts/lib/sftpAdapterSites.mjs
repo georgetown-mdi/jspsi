@@ -27,9 +27,9 @@ import { descendants, parseFile } from "./typeScriptSources.mjs";
 //
 // That is the whole reach, and the reach is the claim: a callee or a receiver
 // written some other way is not decided here. No enumeration of those other forms
-// is kept, deliberately. A list of what an analysis cannot see is a second claim
-// about the analysis that nothing checks, and a wrong entry in it reads as a
-// guarantee -- take the rules above as exhaustive instead, and anything they do
+// is kept, by design. A list of what an analysis cannot see is a second claim
+// about the analysis that nothing checks, and a wrong entry in it is treated as
+// a guarantee -- take the rules above as exhaustive instead, and anything they do
 // not name as unseen.
 //
 // Where the reach errs it errs toward over-reporting: the wrapper name match is
@@ -61,7 +61,7 @@ export function parseAdapter() {
   return parseFile(ADAPTER);
 }
 
-/** Strip the wrappers that carry a value through unchanged. */
+/** Strip the wrappers that leave a value unchanged. */
 export function unwrap(node) {
   let current = node;
   for (;;) {
@@ -103,7 +103,7 @@ export function enclosingMethodName(node) {
 
 /**
  * The variable declaration binding `name` in the nearest enclosing scope of
- * `from`, or undefined. A scope here is any ancestor carrying statements, which
+ * `from`, or undefined. A scope here is any ancestor holding statements, which
  * is enough for the adapter's `const` plumbing.
  */
 export function declarationOf(name, from) {

@@ -398,7 +398,7 @@ describe("a group-named package another group would swallow", () => {
     expect(violations[0]).toContain('npm group "web-non-critical"');
   });
 
-  it("throws on a group pattern carrying a glob beyond the bare * default", () => {
+  it("throws on a group pattern containing a glob beyond the bare * default", () => {
     expect(() =>
       groupExclusionViolations([
         group("scoped", ["@openmined/*"]),
@@ -461,7 +461,7 @@ describe("reading the declarations out of the manifests", () => {
     },
   ];
 
-  it("takes every dependency field, carrying the manifest and field", () => {
+  it("takes every dependency field, including the manifest and field", () => {
     expect(packageDeclarations(["ssh2", "werift"], manifests)).toEqual([
       {
         path: "apps/cli/package.json",

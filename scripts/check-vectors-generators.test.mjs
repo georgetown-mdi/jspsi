@@ -27,7 +27,7 @@ import { CHECKS } from "./run-checks.mjs";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 
-// Nothing here runs the REAL generators, deliberately: the whole set of them is
+// Nothing here runs the REAL generators, by design: the whole set of them is
 // ~1.7s of WASM, openssl, and core-dist work per invocation, and running them
 // inside a parallel vitest worker would put that beside every other repo-script
 // suite for no signal this file cannot get from an injected runner. Their real
@@ -293,7 +293,7 @@ describe("the check against injected generators", () => {
     expect(readFileSync(target(printedEntry.vectors), "utf8")).toBe(PRINTED);
   });
 
-  it("fails carrying the generator's own output when it exits non-zero", async () => {
+  it("fails with the generator's own output when it exits non-zero", async () => {
     const result = await run({
       runGenerator: () => {
         const error = new Error("Command failed");
@@ -434,7 +434,7 @@ describe("excused values", () => {
     expect(result.results[0].detail).toContain("ECDSA");
   });
 
-  it("fails closed when the two sides carry different numbers of excused values", async () => {
+  it("fails closed when the two sides have different numbers of excused values", async () => {
     const result = await run(`{\n  "fingerprint": "pinned"\n}\n`);
     expect(result.ok).toBe(false);
     expect(result.results[0].status).toBe("excuse-inert");

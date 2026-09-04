@@ -24,7 +24,7 @@ import {
 // embeds apps/web's blocks (scoped under apps/web/, see scopeToDir there), so one
 // config covers every tree this file lints -- with one transform: the
 // type-aware layer is stripped off before it is used (withoutTypeAwareLayer,
-// imported from ./eslint-strip-type-aware-layer.mjs). The blocks that carry the
+// imported from ./eslint-strip-type-aware-layer.mjs). The blocks that hold the
 // ban are transformed by nothing, so the selector, the per-tree `files`
 // scoping, and flat config's replace-semantics across the five blocks are the
 // real ones.
@@ -51,7 +51,7 @@ async function boundaryHits(filePath, source) {
 }
 
 // A src path and a path outside src per workspace: the src files are the ones
-// whose blocks re-carry the groups alongside another rule's options, and the
+// whose blocks repeat the groups alongside another rule's options, and the
 // test and build-config files are covered only by the broad boundary blocks.
 const CORE_SRC = resolve(repoRoot, "packages/core/src/boundaryFixture.ts");
 const CORE_TEST = resolve(repoRoot, "packages/core/test/boundaryFixture.ts");
@@ -141,7 +141,7 @@ describe("the cross-workspace import ban", { timeout: 60_000 }, () => {
     }
   });
 
-  it("carries the ban to every path it lints, with no type-aware rule", async () => {
+  it("applies the ban to every path it lints, with no type-aware rule", async () => {
     for (const [tree, filePath, expectedPatterns] of [
       ["packages/core/src", CORE_SRC, crossWorkspaceImportBans.packages],
       ["packages/core/test", CORE_TEST, crossWorkspaceImportBans.packages],

@@ -22,7 +22,7 @@ import { join, relative } from "node:path";
 /** The rebuild a stale dist needs, as the operator would type it. */
 export const CORE_BUILD_COMMAND = "npm run build -w packages/core";
 
-/** Opt-out for a deliberate run against the dist as it stands. */
+/** Opt-out to run against the dist as it stands. */
 export const ALLOW_STALE_ENV = "PSILINK_ALLOW_STALE_CORE_DIST";
 
 /** `packages/core` of the repository this module is checked out in. */
@@ -31,7 +31,7 @@ export const CORE_DIR = fileURLToPath(
 );
 
 // Sources rollup reads (rollup.config.ts names src/main.ts and src/testing.ts as
-// its inputs). package.json is deliberately absent: npm rewrites it during some
+// its inputs). package.json is absent by design: npm rewrites it during some
 // install flows, which would report staleness the build cannot resolve.
 const SOURCE_PATHS = ["src", "rollup.config.ts"];
 
