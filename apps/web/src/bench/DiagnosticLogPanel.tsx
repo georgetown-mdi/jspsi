@@ -15,7 +15,7 @@ import styles from "./bench.module.css";
  * unanswered ask never said whether this run captured one.
  */
 export const DIAGNOSTIC_LOG_UNANSWERED_LEAD =
-  "This appliance stopped answering about this run's log.";
+  "This console stopped answering about this run's log.";
 
 /**
  * What the seat says under that lead. It names the one thing the operator can do
@@ -25,7 +25,7 @@ export const DIAGNOSTIC_LOG_UNANSWERED_LEAD =
 export const DIAGNOSTIC_LOG_UNANSWERED_NOTICE =
   "This page asked several times whether this run recorded a diagnostic log " +
   "and got no answer back, so it has stopped asking. If this was a diagnostic " +
-  "run, its log may still be on the appliance -- reload this page to ask again.";
+  "run, its log may still be on the console -- reload this page to ask again.";
 
 /**
  * The diagnostic log a run captured, offered on every console server-job seat

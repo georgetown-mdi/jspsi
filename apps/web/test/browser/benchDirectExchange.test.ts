@@ -561,7 +561,7 @@ describe("direct exchange confirm and run", () => {
     // The preview is the terms the run uses, so the terms panel surfaces the
     // strategy too rather than showing the cascade the run does not use.
     expect(app.container.textContent).toContain(
-      "This exchange uses single-pass linkage",
+      "This exchange matches in a single pass",
     );
 
     await page.getByRole("checkbox").click();
@@ -619,13 +619,13 @@ describe("console direct re-attaches on a busy create", () => {
     await expect
       .element(
         page.getByText(
-          "You are back on an exchange this appliance already holds.",
+          "You are back on an exchange this console already holds.",
         ),
       )
       .toBeInTheDocument();
     expect(
       page
-        .getByText("This appliance is already running an exchange", {
+        .getByText("This console is already running an exchange", {
           exact: false,
         })
         .query(),
@@ -695,7 +695,7 @@ describe("console direct re-attaches on a busy create", () => {
         document.querySelectorAll('[role="status"]'),
       ).find((el) =>
         el.textContent.includes(
-          "Reconnecting to the exchange this appliance already holds",
+          "Reconnecting to the exchange this console already holds",
         ),
       );
       expect(region).toBeDefined();
@@ -733,13 +733,13 @@ describe("console direct re-attaches on a busy create", () => {
     await page.getByRole("button", { name: "Run the exchange" }).click();
 
     await expect
-      .element(page.getByText("This appliance is already running an exchange"))
+      .element(page.getByText("This console is already running an exchange"))
       .toBeInTheDocument();
     // No recovery framing: the fallback is the plain busy alert, not the re-attach
     // view.
     expect(
       page
-        .getByText("You are back on an exchange this appliance already holds.")
+        .getByText("You are back on an exchange this console already holds.")
         .query(),
     ).toBeNull();
   });

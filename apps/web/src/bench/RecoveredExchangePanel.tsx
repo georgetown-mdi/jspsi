@@ -100,10 +100,10 @@ function recoveryLead(
     ? "an exchange started here"
     : "an exchange you started here";
   return state === "running"
-    ? `This appliance is still running ${origin}. Watch it finish, stop it, or discard it and its files.`
+    ? `This console is still running ${origin}. Watch it finish, stop it, or discard it and its files.`
     : state === "finished"
-      ? `This appliance finished ${origin}. Download its results below, or discard it to remove its files from this appliance.`
-      : `This appliance stopped ${origin} before it finished, so there are no results to download. The reason is shown below; discard it to remove its files from this appliance.`;
+      ? `This console finished ${origin}. Download its results below, or discard it to remove its files from this console.`
+      : `This console stopped ${origin} before it finished, so there are no results to download. The reason is shown below; discard it to remove its files from this console.`;
 }
 
 /** The title over the panel's discard confirm where nothing beyond the exchange
@@ -115,7 +115,7 @@ export const DISCARD_CONFIRM_TITLE = "Discard this exchange?";
  * a record standing on this panel takes {@link untakenRecordConfirm}'s copy
  * instead. */
 export const DISCARD_CONFIRM_BODY =
-  "Discarding removes this exchange and any results from this appliance, and " +
+  "Discarding removes this exchange and any results from this console, and " +
   "stops it if it is still running. This cannot be undone -- download anything " +
   "you need first.";
 

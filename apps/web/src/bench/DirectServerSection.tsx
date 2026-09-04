@@ -153,8 +153,8 @@ export function DirectServerSection({
             disabled={!rendezvousConfigured}
             label={
               rendezvousConfigured
-                ? "A shared directory on this appliance"
-                : "A shared directory (no directory is mounted on this appliance)"
+                ? "A shared directory on this console"
+                : "A shared directory (no directory is mounted on this console)"
             }
           />
         </Stack>
@@ -177,7 +177,7 @@ export function DirectServerSection({
               operator, it names the launcher's layout, not their folder. */}
           {rendezvous.split === true ? (
             <>
-              Runs through the two shared folders mounted on this appliance: it
+              Runs through the two shared folders mounted on this console: it
               reads your partner&apos;s files out of one and writes yours into
               the other.{" "}
               {rendezvous.folderName !== undefined &&
@@ -198,14 +198,12 @@ export function DirectServerSection({
           ) : (
             <>
               {rendezvous.folderName === undefined ? (
-                <>
-                  Runs through the shared directory mounted on this appliance.
-                </>
+                <>Runs through the shared directory mounted on this console.</>
               ) : (
                 <>
                   Runs through the shared directory{" "}
                   <span className={styles.mono}>{rendezvous.folderName}</span>{" "}
-                  on this appliance.
+                  on this console.
                 </>
               )}{" "}
               Point your partner&apos;s console at the same synced folder.
@@ -223,7 +221,7 @@ export function DirectServerSection({
               sentence would send an operator who already mounted two folders to
               add a third. */}
           {rendezvous?.problem ??
-            "This appliance has no rendezvous directory mounted, so a shared-directory exchange cannot run here. Choose SFTP, or mount a rendezvous directory and restart the appliance."}
+            "This console has no rendezvous directory mounted, so a shared-directory exchange cannot run here. Choose SFTP, or mount a rendezvous directory and restart the console."}
         </Alert>
       )}
 

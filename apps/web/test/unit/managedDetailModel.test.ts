@@ -441,7 +441,7 @@ describe("scheduleView", () => {
     expect(twice?.coordination?.misses).toBe(2);
     // Both checks, and no pause taken on the operator's behalf.
     expect(twice?.coordination?.prompt).toMatch(/partner/i);
-    expect(twice?.coordination?.prompt).toMatch(/this device's own clock/i);
-    expect(twice?.coordination?.prompt).toMatch(/agreed cadence stands/i);
+    expect(twice?.coordination?.prompt).toMatch(/this device's clock/i);
+    expect(twice?.coordination?.prompt).toMatch(/the schedule stands/i);
   });
 });

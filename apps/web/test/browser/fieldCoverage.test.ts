@@ -41,7 +41,7 @@ describe("FieldCoverage pending copy", () => {
     );
     await expect
       .element(
-        page.getByText("The appliance reads the whole file", { exact: false }),
+        page.getByText("The console reads the whole file", { exact: false }),
       )
       .toBeInTheDocument();
   });

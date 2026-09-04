@@ -102,8 +102,8 @@ function HandoffBody({ handoff }: { handoff: JobHandoff }) {
       <p className={styles.small}>
         This exchange runs here as a prototype. To run the recurring production
         version, run it from the command line with cron (Linux/macOS) or Task
-        Scheduler (Windows). What carried over from this run is filled in below;
-        set the file paths for the machine that will run the schedule.
+        Scheduler (Windows). The settings from this run are filled in below; set
+        the file paths for the machine that will run the schedule.
       </p>
 
       {handoff.template.kind === "config" ? (
@@ -235,11 +235,10 @@ function CommandSteps({ command }: { command: string }) {
         ariaLabel="recurring Direct exchange command"
       />
       <p className={styles.small}>
-        A Direct exchange carries no shared secret -- trust rests on the
-        transport -- and re-infers the linkage terms from your file each run, so
-        there is no key file to copy. To persist a configuration and host-key
-        pin for later plain psilink exchange runs, add --save the first time you
-        run it.
+        A Direct exchange has no shared secret -- trust rests on the transport
+        -- and re-infers the linkage terms from your file each run, so there is
+        no key file to copy. To persist a configuration and host-key pin for
+        later plain psilink exchange runs, add --save the first time you run it.
       </p>
     </>
   );

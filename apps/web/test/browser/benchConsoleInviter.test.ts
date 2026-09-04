@@ -825,9 +825,8 @@ describe("console inviter mint and run", () => {
     await expect
       .element(
         page.getByText(
-          "This appliance is running the exchange. If you leave this page the " +
-            "run continues here; return to this console to pick it up or discard " +
-            "it.",
+          "This console is running the exchange. If you leave this page the " +
+            "run keeps going; come back here to pick it up or discard it.",
         ),
       )
       .toBeInTheDocument();
@@ -883,9 +882,8 @@ describe("console inviter mint and run", () => {
     await expect
       .element(
         page.getByText(
-          "This appliance is running the exchange. If you leave this page the " +
-            "run continues here; return to this console to pick it up or discard " +
-            "it.",
+          "This console is running the exchange. If you leave this page the " +
+            "run keeps going; come back here to pick it up or discard it.",
         ),
       )
       .toBeInTheDocument();
@@ -1332,13 +1330,13 @@ describe("console inviter re-attaches on a busy create", () => {
     await expect
       .element(
         page.getByText(
-          "You are back on an exchange this appliance already holds.",
+          "You are back on an exchange this console already holds.",
         ),
       )
       .toBeInTheDocument();
     expect(
       page
-        .getByText("This appliance already holds an exchange", { exact: false })
+        .getByText("This console already holds an exchange", { exact: false })
         .query(),
     ).toBeNull();
 
@@ -1417,7 +1415,7 @@ describe("console inviter re-attaches on a busy create", () => {
         document.querySelectorAll('[role="status"]'),
       ).find((el) =>
         el.textContent.includes(
-          "Reconnecting to the exchange this appliance already holds",
+          "Reconnecting to the exchange this console already holds",
         ),
       );
       expect(region).toBeDefined();

@@ -766,7 +766,7 @@ describe("console acceptor re-attaches on a busy create", () => {
     await expect
       .element(
         page.getByText(
-          "You are back on an exchange this appliance already holds.",
+          "You are back on an exchange this console already holds.",
         ),
       )
       .toBeInTheDocument();
@@ -832,7 +832,7 @@ describe("console acceptor re-attaches on a busy create", () => {
         document.querySelectorAll('[role="status"]'),
       ).find((el) =>
         el.textContent.includes(
-          "Reconnecting to the exchange this appliance already holds",
+          "Reconnecting to the exchange this console already holds",
         ),
       );
       expect(region).toBeDefined();

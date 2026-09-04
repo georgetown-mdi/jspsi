@@ -278,7 +278,7 @@ export const RETENTION_NOTE_PROBLEM =
 export const RETENTION_NOTE_CONTROL_CHAR_PROBLEM =
   "The retention note must not contain a control character (a NUL or an ESC, " +
   "for instance). A tab, a line break, or a carriage return is fine -- the " +
-  "appliance refuses any other one before the run starts.";
+  "console refuses any other one before the run starts.";
 
 /**
  * Everything wrong with the draft, as messages to show beside the card -- empty
@@ -383,7 +383,7 @@ export const IDENTITY_AT_REST_NOTICE =
  * flatly that they are not.
  */
 export const IDENTITY_SHARED_MOUNT_ADVISORY =
-  "This appliance rendezvouses out of the folder you mounted, so a " +
+  "This console rendezvouses out of the folder you mounted, so a " +
   "shared-folder exchange here syncs the very folder your signing key sits in. " +
   "On a run like that your long-lived private key sits where your partner " +
   "writes, and whoever reads it can sign receipts in your name -- for every " +
@@ -401,7 +401,7 @@ export const IDENTITY_SHARED_MOUNT_ADVISORY =
  * are not.
  */
 export const IDENTITY_SHARED_MOUNT_ADVISORY_UNCERTAIN =
-  "psilink cannot rule out that this appliance rendezvouses out of the folder " +
+  "psilink cannot rule out that this console rendezvouses out of the folder " +
   "you mounted, and on that layout a shared-folder exchange syncs the very " +
   "folder your signing key sits in. On a run like that your long-lived private " +
   "key sits where your partner writes, and whoever reads it can sign receipts " +

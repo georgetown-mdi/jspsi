@@ -422,7 +422,7 @@ describe("acceptor bench: review terms", () => {
       "PII for linkage is encrypted locally before leaving your machine.",
     );
 
-    // The top bar walks the acceptor spine with Review configuration current;
+    // The top bar walks the acceptor spine with Review the terms current;
     // the step indicators share the button's text, so read the label node.
     const rail = document.querySelector(
       'nav[aria-label="Accept an invitation"]',
@@ -432,7 +432,7 @@ describe("acceptor bench: review terms", () => {
       (rail as Element).querySelector(
         '[aria-current="step"] .mantine-Stepper-stepLabel',
       )?.textContent,
-    ).toBe("Review configuration");
+    ).toBe("Review the terms");
   });
 
   test("Continue advances to the consent step", async () => {

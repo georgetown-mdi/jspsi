@@ -237,9 +237,12 @@ function ConfigurationView({
       {canReinvite ? (
         <>
           {reinviteFailed && (
-            <Alert color="red" title="That could not be completed" mb="sm">
-              The fresh invitation could not be created. Nothing changed here;
-              try again.
+            <Alert
+              color="red"
+              title="Could not create a fresh invitation"
+              mb="sm"
+            >
+              Nothing changed here; try again.
             </Alert>
           )}
           <Button

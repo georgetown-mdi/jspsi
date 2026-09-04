@@ -18,7 +18,7 @@ describe("BROWSER_ONLY_FILE_ASSURANCE", () => {
 describe("APPLIANCE_FILE_ASSURANCE", () => {
   test("is the truthful console copy for a mounted-directory intake", () => {
     expect(APPLIANCE_FILE_ASSURANCE).toBe(
-      "Files are read from this appliance's mounted work directory; your browser does not upload them.",
+      "Files are read from this console's mounted work directory; your browser does not upload them.",
     );
   });
 });

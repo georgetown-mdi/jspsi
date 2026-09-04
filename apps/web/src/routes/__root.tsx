@@ -42,9 +42,9 @@ export const Route = createRootRoute({
         content: "#f6f5f1",
       },
       ...seo({
-        title: "Secure Online PSI",
+        title: "psilink - private record linkage",
         description:
-          "Conduct a data sharing session using a private-set-intersection protocol over a peer-to-peer connection.",
+          "Find the records you both hold - without either of you seeing the other's data.",
       }),
     ],
     links: [

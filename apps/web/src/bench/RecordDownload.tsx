@@ -26,7 +26,7 @@ export const TERMINATED_RECORD_NOTICE =
   "over what categories of data, and how many of your records went into it -- " +
   "which is what a disclosure accounting is written from. Download it now: " +
   "every way on from a stopped run, whether that is trying again, starting " +
-  "over, or discarding it, removes this run's files from this appliance and the " +
+  "over, or discarding it, removes this run's files from this console and the " +
   "record with them, while the disclosure it records still happened.";
 
 /**
@@ -49,14 +49,14 @@ export const TERMINATED_RECORD_KEYS_NOTICE =
 /** The lead the seat shows over a completed run's record it is offering here --
  * the run finished, and its own results block did not carry the pair. */
 export const COMPLETED_RECORD_LEAD =
-  "This appliance holds the exchange record for this run.";
+  "This console holds the exchange record for this run.";
 
 /** What the seat says under that lead: the same keeping instruction the results
  * block's own record rows carry, said here because this is where the download is. */
 export const COMPLETED_RECORD_NOTICE =
   "It states what this run disclosed and is what a disclosure accounting is " +
   "written from. Download it before you move on: removing this run takes the " +
-  "record from this appliance along with the results.";
+  "record from this console along with the results.";
 
 /**
  * The lead the seat shows over a record file the appliance holds and cannot read
@@ -64,7 +64,7 @@ export const COMPLETED_RECORD_NOTICE =
  * established, and not what it says, which is the part that is not.
  */
 export const UNDESCRIBABLE_RECORD_LEAD =
-  "This appliance holds a file for this run that it cannot read as an exchange " +
+  "This console holds a file for this run that it cannot read as an exchange " +
   "record.";
 
 /**
@@ -83,7 +83,7 @@ export const UNDESCRIBABLE_RECORD_NOTICE =
   "download is offered here, because this page cannot say what the file " +
   "records. The file itself is untouched where it sits, and a psilink build " +
   "that recognizes it can read it. Keep this run until you have it -- every way " +
-  "on from here removes this run's files from this appliance, that one included.";
+  "on from here removes this run's files from this console, that one included.";
 
 /**
  * The lead the seat shows when the appliance stopped answering about a run's
@@ -91,7 +91,7 @@ export const UNDESCRIBABLE_RECORD_NOTICE =
  * unanswered ask never said whether this run has one.
  */
 export const RECORD_UNANSWERED_LEAD =
-  "This appliance stopped answering about this run's exchange record.";
+  "This console stopped answering about this run's exchange record.";
 
 /**
  * What the seat says under that lead. It states the condition under which a record
@@ -103,7 +103,7 @@ export const RECORD_UNANSWERED_NOTICE =
   "This page asked several times whether this run wrote an exchange record and " +
   "got no answer back, so it has stopped asking. If this run got as far as " +
   "exchanging data, the record of that disclosure is with the run's files on " +
-  "this appliance -- reload this page to ask again, and keep the run until you " +
+  "this console -- reload this page to ask again, and keep the run until you " +
   "have the file, because every way on from here removes it.";
 
 /** The states this panel renders: the ones an ask can end in that leave the seat

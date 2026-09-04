@@ -208,7 +208,7 @@ describe("console inputs disabled state", () => {
     // links the deployment guide, so that link alone would not disambiguate).
     await expect
       .element(
-        page.getByText("The job API is disabled on this appliance", {
+        page.getByText("The job API is disabled on this console", {
           exact: true,
         }),
       )

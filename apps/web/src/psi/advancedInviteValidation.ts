@@ -131,7 +131,7 @@ const FAN_OUT_MESSAGE_BODY =
  * field, and the element editor marks the offending input where the operator fixes
  * it. */
 const UNENCODABLE_KEY_TRANSFORM_MESSAGE =
-  "A linkage key's transform carries a parameter that cannot be recorded in the " +
+  "A linkage key's transform has a parameter that cannot be recorded in the " +
   "exact form both parties agree on, such as a number too large to store " +
   "precisely. Open that key and correct that transform's parameters, or remove " +
   "the step.";
@@ -165,7 +165,7 @@ const SWAP_TRANSFORM_MISMATCH_MESSAGE =
  * Deliberately not "reset to defaults": the fault is one value, and discarding the
  * operator's whole authored draft is not a remedy for it. */
 const UNENCODABLE_TERMS_MESSAGE =
-  "These terms carry a value that cannot be recorded in the exact form both " +
+  "These terms include a value that cannot be recorded in the exact form both " +
   "parties agree on. Import them again from a corrected document, or rebuild the " +
   "key list from your columns.";
 
@@ -798,11 +798,11 @@ const CITATION_DROP_NOTICES: Record<ImportedCitationDropCause, string> = {
   "no-keys":
     "A rule-set citation says which set the linkage keys came from, and these " +
     "terms enable none, so the citation your imported document made is left out " +
-    "of the terms you create. Turn a linkage key back on to carry it.",
+    "of the terms you create. Turn a linkage key back on to keep the citation.",
   "rules-not-drawn":
     "The keys and fields these terms declare are no longer drawn from the rule " +
     "set your imported document cites, so that citation is left out of the terms " +
-    `you create. ${CITATION_DROP_CONSEQUENCE} Undo the key edits to carry the ` +
+    `you create. ${CITATION_DROP_CONSEQUENCE} Undo the key edits to keep the ` +
     "citation, or create the invitation without it.",
 };
 
@@ -817,7 +817,7 @@ const CITATION_DROP_NO_SUPPLYABLE_KEY =
   "A rule-set citation says which set the linkage keys came from, but none of the " +
   "linkage keys your imported document declares can be supplied by your file's " +
   "columns, so the citation it made is left out of the terms you create. Add a " +
-  "column of the type a linkage key needs to carry it.";
+  "column of the type a linkage key needs to keep it.";
 
 /**
  * The notice for an imported rule-set citation the rebuilt document will not carry,

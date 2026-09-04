@@ -68,9 +68,9 @@ export function credentialAlertCopy(transport: CliTransport): string {
   return transport === "sftp"
     ? "Credentials are never stored in this file. You fill in the SSH " +
         "username and point the config at your key or password (an @file " +
-        "reference) before running - the psilink key file carries only the " +
+        "reference) before running - the psilink key file holds only the " +
         "exchange secret, provisioned by the command below."
-    : "A shared-directory exchange carries no credentials at all. The file " +
+    : "A shared-directory exchange has no credentials at all. The file " +
         "names only the directory both parties can reach.";
 }
 

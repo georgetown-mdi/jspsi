@@ -258,7 +258,7 @@ describe("managed exchange detail configuration", () => {
     // The failure surfaces beside the button, in the file's existing error voice.
     await expect
       .element(
-        page.getByText("The fresh invitation could not be created", {
+        page.getByText("Could not create a fresh invitation", {
           exact: false,
         }),
       )
@@ -924,10 +924,10 @@ describe("managed exchange detail run schedule", () => {
       .element(page.getByText("still running this exchange", { exact: false }))
       .toBeInTheDocument();
     await expect
-      .element(page.getByText("this device's own clock", { exact: false }))
+      .element(page.getByText("this device's clock", { exact: false }))
       .toBeInTheDocument();
     await expect
-      .element(page.getByText("the agreed cadence stands", { exact: false }))
+      .element(page.getByText("the schedule stands", { exact: false }))
       .toBeInTheDocument();
   });
 });

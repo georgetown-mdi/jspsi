@@ -943,7 +943,7 @@ describe("transport chooser copy by deployment", () => {
     // The Browser card names its in-tab exchange as out of scope on the appliance.
     expect(copy.browserDescription).toContain("out of scope");
     expect(copy.capabilityNote).toContain("shared-directory exchanges here");
-    expect(copy.capabilityNote).toContain("out of scope on this appliance");
+    expect(copy.capabilityNote).toContain("out of scope on this console");
   });
 
   test("a console build without a rendezvous mount names JOB_RENDEZVOUS_DIR", () => {
@@ -990,7 +990,7 @@ describe("transport chooser copy by deployment", () => {
     const copy = transportChooserCopy(true, false, false);
     expect(copy.sftpLabel).toBe("Over SFTP, run here");
     expect(copy.sftpDescription).toContain("set up below");
-    expect(copy.sftpDescription).toContain("read on this appliance");
+    expect(copy.sftpDescription).toContain("read on this console");
   });
 
   test("the deliberate save-a-file choice returns SFTP to the CLI copy", () => {
@@ -1008,8 +1008,8 @@ describe("transport chooser copy by deployment", () => {
       "SFTP connection set up on this machine",
     );
     // The console SFTP card states the file is read on the appliance.
-    expect(copy.sftpDescription).toContain("read on this appliance");
-    expect(copy.capabilityNote).toContain("out of scope on this appliance");
+    expect(copy.sftpDescription).toContain("read on this console");
+    expect(copy.capabilityNote).toContain("out of scope on this console");
   });
 });
 

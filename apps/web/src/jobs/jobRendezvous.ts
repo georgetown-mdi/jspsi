@@ -386,7 +386,7 @@ function describeUnresolvedLegs(
   if (inbound.canonicalized && outbound.canonicalized) return undefined;
   const recovery =
     "Give the console read access to every folder on the way to the mount " +
-    "and restart the appliance.";
+    "and restart the console.";
   if (!inbound.canonicalized && !outbound.canonicalized)
     return (
       `The real path of ${JOB_RENDEZVOUS_DIR_ENV} and ${JOB_RENDEZVOUS_OUTBOUND_DIR_ENV} ` +
@@ -429,23 +429,23 @@ function splitPairProblem(
   if (pathFormsOverlap(inbound, outbound))
     return (
       "The inbound and outbound rendezvous directories are the same directory, " +
-      "or one is inside the other, so this appliance would read its own writes " +
+      "or one is inside the other, so this console would read its own writes " +
       `as your partner's. Mount ${JOB_RENDEZVOUS_OUTBOUND_DIR_ENV} outside ` +
-      `${JOB_RENDEZVOUS_DIR_ENV} and restart the appliance.`
+      `${JOB_RENDEZVOUS_DIR_ENV} and restart the console.`
     );
   if (locator === undefined || outboundLocator === undefined)
     return (
-      "This appliance cannot name both rendezvous folders, so an invitation " +
+      "This console cannot name both rendezvous folders, so an invitation " +
       `minted here would carry no locator for one of them. Set ${JOB_RENDEZVOUS_NAME_ENV} ` +
       `and ${JOB_RENDEZVOUS_OUTBOUND_NAME_ENV} to the two folders' own names and ` +
-      "restart the appliance."
+      "restart the console."
     );
   if (pathsResolveToSameDir(locator, outboundLocator))
     return (
       "The inbound and outbound rendezvous folders resolve to the same name, so " +
       "an invitation minted here could not tell your partner which is which. Set " +
       `${JOB_RENDEZVOUS_NAME_ENV} and ${JOB_RENDEZVOUS_OUTBOUND_NAME_ENV} to ` +
-      "distinct names and restart the appliance."
+      "distinct names and restart the console."
     );
   return undefined;
 }
@@ -492,9 +492,9 @@ export function rendezvousSplitFaults(
     return {
       problem:
         `${JOB_RENDEZVOUS_OUTBOUND_DIR_ENV} is set but ${JOB_RENDEZVOUS_DIR_ENV} ` +
-        "is not, so this appliance has only one leg of a split rendezvous. Set " +
+        "is not, so this console has only one leg of a split rendezvous. Set " +
         `${JOB_RENDEZVOUS_DIR_ENV} to the folder your partner writes into and ` +
-        "restart the appliance.",
+        "restart the console.",
     };
   const inbound = resolvePathForms(dir);
   const outbound = resolvePathForms(outboundDir);

@@ -1320,14 +1320,13 @@ export function InvitationTerms({
             // double up for screen readers and visual scanning alike.
             <Term label="Linkage strategy">
               <Text size="sm">
-                This exchange uses single-pass linkage. To run the match in one
-                batched round -- fewer network round trips -- one party hands
-                the other its full per-key value structure, so that party also
-                sees matches on less precise keys that cascade would have
-                filtered out first. Which party that is gets settled at exchange
-                time, so it may be you. Both parties must agree to single-pass.
-                The matched result is unchanged -- only what is observed along
-                the way.
+                This exchange matches in a single pass. That means one of you
+                sends the other everything it prepared for every linkage key at
+                once, so that party also sees matches on the weaker keys, not
+                only the strongest. Which of you sends is decided when the
+                exchange runs, so it may be you. Both parties must agree to
+                single-pass. The matched result is the same either way; what
+                differs is how much your partner can observe while it runs.
               </Text>
             </Term>
           )}

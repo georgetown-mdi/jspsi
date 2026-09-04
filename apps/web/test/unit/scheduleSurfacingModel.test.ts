@@ -186,7 +186,7 @@ describe("repeated-miss coordination", () => {
   test("the second consecutive miss escalates, naming its count", () => {
     const coordination = repeatedMissCoordination(withMisses(2));
     expect(coordination?.misses).toBe(2);
-    expect(coordination?.line).toMatch(/^2 agreed run windows/);
+    expect(coordination?.line).toMatch(/^2 scheduled runs in a row/);
   });
 
   test("both phrasings name both checks: the partner and this device's clock", () => {
@@ -210,8 +210,9 @@ describe("repeated-miss coordination", () => {
     // Surface-only, no auto-pause: the copy must not read as the app having
     // stopped attempting on the operator's behalf.
     const { prompt } = repeatedMissCoordination(withMisses(2)) ?? {};
-    expect(prompt).toMatch(/the agreed cadence stands/i);
-    expect(prompt).not.toMatch(/has been paused|stopped attempting|paused it/i);
+    expect(prompt).toMatch(/nothing has been paused/i);
+    expect(prompt).toMatch(/the schedule stands/i);
+    expect(prompt).not.toMatch(/stopped attempting|paused it|is paused/i);
   });
 
   test("the count a success leaves behind clears the escalation", () => {

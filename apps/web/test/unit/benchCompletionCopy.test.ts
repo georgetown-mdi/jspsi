@@ -195,12 +195,11 @@ describe("the exchange-record copy", () => {
     // answer.
     expect(UNKNOWN_RECORD_CONFIRM_TITLE).toContain("possible exchange record");
     expect(UNKNOWN_RECORD_CONFIRM_BODY).toContain("stopped answering");
-    expect(UNKNOWN_RECORD_CONFIRM_BODY).toContain("cannot say whether");
     expect(UNKNOWN_RECORD_CONFIRM_BODY).toContain(
       "neither party can recreate it",
     );
     expect(UNKNOWN_RECORD_CONFIRM_BODY).toContain("Reload this page");
-    expect(UNKNOWN_RECORD_CONFIRM_BODY).not.toContain("this appliance holds");
+    expect(UNKNOWN_RECORD_CONFIRM_BODY).not.toContain("this console holds");
   });
 
   test("the undescribable confirm points at the file, having no download to point at", () => {
@@ -222,15 +221,14 @@ describe("the exchange-record copy", () => {
     // on its way to this page: the copy must not borrow the exhausted ask's
     // account of the silence, nor send the operator to a reload that would only
     // start the asking over.
-    expect(PENDING_RECORD_CONFIRM_BODY).toContain("still asking");
-    expect(PENDING_RECORD_CONFIRM_BODY).toContain("cannot yet say whether");
+    expect(PENDING_RECORD_CONFIRM_BODY).toContain("has not yet answered");
     expect(PENDING_RECORD_CONFIRM_BODY).toContain(
       "neither party can recreate it",
     );
     expect(PENDING_RECORD_CONFIRM_BODY).toContain("Wait for the answer");
     expect(PENDING_RECORD_CONFIRM_BODY).not.toContain("stopped answering");
     expect(PENDING_RECORD_CONFIRM_BODY).not.toContain("Reload this page");
-    expect(PENDING_RECORD_CONFIRM_BODY).not.toContain("this appliance holds");
+    expect(PENDING_RECORD_CONFIRM_BODY).not.toContain("this console holds");
   });
 });
 

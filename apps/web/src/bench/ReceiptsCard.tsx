@@ -72,14 +72,13 @@ function fingerprintFailureMessage(
       return (
         "Your signing identity could not be created or read in the folder you " +
         "mounted. Check that the folder is writable, that any signing identity " +
-        "already in it is intact, and that any psilink.yaml sitting there is " +
-        "valid YAML -- a malformed one stops this request on its own. If that " +
-        "folder is also the one your partner syncs into, that psilink.yaml may " +
-        "be theirs rather than yours, so read it before assuming your own " +
-        "mistake; it cannot move where your key is written or change whose name " +
-        "it binds, because both are passed explicitly here. Fix what you find " +
-        "and try again -- running 'psilink fingerprint' against the same folder " +
-        "prints the reason."
+        "already in it is intact, and that any psilink.yaml there is valid " +
+        "YAML. If that folder is also the one your partner syncs into, the " +
+        "psilink.yaml may be theirs, so read it before changing your own " +
+        "setup. A psilink.yaml your partner wrote cannot move where your " +
+        "key is written or change whose name it binds, because both are " +
+        "passed explicitly here. Fix what you find and try again -- running " +
+        "'psilink fingerprint' against the same folder prints the reason."
       );
     case "invalid":
       return outcome.message;

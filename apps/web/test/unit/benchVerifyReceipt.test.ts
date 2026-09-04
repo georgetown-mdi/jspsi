@@ -459,7 +459,7 @@ describe("verdictViewModel: the recorded result size", () => {
     expect(view.headline.detail).toContain("cannot be told apart");
   });
 
-  test("a pairing that opened but is not a pairing carries no count to recount", async () => {
+  test("a pairing that opened but is not a pairing has no count to recount", async () => {
     // The fifth state behind a not-checked figure: the committed value opened,
     // so no row above it names a cause, and it is not shaped as a pairing, so
     // there is no pair count to compare. Reaching it takes a hand-built record.
@@ -486,7 +486,7 @@ describe("verdictViewModel: the recorded result size", () => {
     expect(view.headline.title).toBe("Incomplete");
     expect(view.resultSize?.status).toBe("Not checked");
     expect(view.resultSize?.explanation).toContain(
-      "is not shaped as a pairing carries no count to recount",
+      "is not shaped as a pairing has no count to recount",
     );
     const table = view.commitments.find(
       (row) => row.label === "The matched-pairs table",
@@ -815,7 +815,7 @@ describe("verifySignedRecord: both certificates anchored", () => {
     expect(report.runBinding).toBe("unpaired");
     expect(report.outcome).toBe("failed");
     const view = signedVerdictViewModel(report);
-    expect(view.runBinding.status).toBe("The record carries no run binder");
+    expect(view.runBinding.status).toBe("The record holds no run binder");
     expect(view.runBinding.explanation).toContain("no signed receipt");
     // Earned here as much as by a cross-run pairing: both are answered by the
     // record written beside this receipt.

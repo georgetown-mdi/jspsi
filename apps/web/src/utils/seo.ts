@@ -8,9 +8,9 @@ export const seo = ({
   const tags = [
     { title },
     { name: "description", content: description },
-    { name: "og:type", content: "website" },
-    { name: "og:title", content: title },
-    { name: "og:description", content: description },
+    { property: "og:type", content: "website" },
+    { property: "og:title", content: title },
+    { property: "og:description", content: description },
   ];
 
   return tags;

@@ -1197,14 +1197,14 @@ export function AcceptorBench() {
             <p className={`${styles.small} ${styles.sub}`}>
               This invitation should have reached you over a trusted channel.
               {consoleBuild
-                ? " This appliance runs the exchange from its mounted work directory."
+                ? " This console runs the exchange from its mounted work directory."
                 : " Your browser connects directly to your partner."}
             </p>
             <Checkbox
               mt="md"
               checked={consented}
               onChange={(event) => setConsented(event.currentTarget.checked)}
-              label="I have reviewed my partner's proposed configuration and consent to this exchange"
+              label="I have reviewed the terms my partner proposed and I consent to this exchange"
             />
             <TextInput
               mt="md"
@@ -1318,8 +1318,8 @@ export function AcceptorBench() {
                 {rendezvous?.split === true ? (
                   <>
                     This exchange runs through the two shared folders mounted on
-                    this appliance: it reads your partner&apos;s files out of
-                    one and writes yours into the other.{" "}
+                    this console: it reads your partner&apos;s files out of one
+                    and writes yours into the other.{" "}
                     {rendezvous.folderName !== undefined &&
                     rendezvous.outboundFolderName !== undefined ? (
                       <>
@@ -1352,7 +1352,7 @@ export function AcceptorBench() {
                         , the shared folder mounted on
                       </>
                     )}{" "}
-                    this appliance. Check with your partner that you are both
+                    this console. Check with your partner that you are both
                     using the same synced folder.
                   </>
                 )}

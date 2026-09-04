@@ -106,7 +106,7 @@ export async function prepareAcceptedInvitation(
   const endpoint = token.connectionEndpoint;
   if (endpoint === undefined || !endpointDrivableHere(endpoint, profile)) {
     throw new Error(
-      "This invitation does not carry a connection endpoint this build can " +
+      "This invitation does not include a connection endpoint this build can " +
         "accept, so it cannot be run here.",
     );
   }

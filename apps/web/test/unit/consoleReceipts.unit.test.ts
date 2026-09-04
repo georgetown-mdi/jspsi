@@ -1169,7 +1169,7 @@ describe("the receipts card's model", () => {
     // did not find.
     expect(IDENTITY_SHARED_MOUNT_ADVISORY).not.toMatch(/cannot rule out/);
     expect(IDENTITY_SHARED_MOUNT_ADVISORY).toMatch(
-      /This appliance rendezvouses out of the folder you mounted/,
+      /This console rendezvouses out of the folder you mounted/,
     );
   });
 

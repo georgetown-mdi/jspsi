@@ -15,10 +15,10 @@ describe("SERVER_JOB_PEER_WINDOW_BODY", () => {
       peerWindowDurationPhrase(DEFAULT_PEER_TIMEOUT_MS),
     );
     expect(SERVER_JOB_PEER_WINDOW_BODY).toBe(
-      "Your partner's console must run its half while yours is running. This " +
-        `appliance waits about ${peerWindowDurationPhrase(DEFAULT_PEER_TIMEOUT_MS)} ` +
-        "for the partner before the exchange stops; if it stops, coordinate a " +
-        "time and run it again.",
+      "Your partner's console must run its half while yours is running. Yours " +
+        `waits about ${peerWindowDurationPhrase(DEFAULT_PEER_TIMEOUT_MS)} for the ` +
+        "partner before the exchange stops; if it stops, coordinate a time and " +
+        "run it again.",
     );
   });
 

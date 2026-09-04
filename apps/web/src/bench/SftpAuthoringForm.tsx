@@ -155,7 +155,7 @@ export function SftpAuthoringForm({
         ? result.message
         : result.kind === "tooLarge"
           ? "The connection details are too large."
-          : "The connection could not be saved. Check that the appliance is reachable, then try again.",
+          : "The connection could not be saved. Check that the console is reachable, then try again.",
     );
   }
 
@@ -575,7 +575,7 @@ function CredentialField({
         <Collapse expanded={pasteOpen}>
           <PasswordInput
             label="Paste value"
-            description="Discouraged. A pasted secret is written to a file on this appliance to run the exchange. Prefer a file reference above."
+            description="Discouraged. A pasted secret is written to a file on this console to run the exchange. Prefer a file reference above."
             classNames={{ input: styles.mono }}
             autoComplete="new-password"
             value={pastedValue}

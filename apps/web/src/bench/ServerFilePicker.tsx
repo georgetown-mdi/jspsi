@@ -51,11 +51,11 @@ const PROFILE_UNAVAILABLE_COPY: Record<
   },
   parse_failed: {
     title: "Could not read this file as a CSV",
-    body: "The appliance could not parse it. Check that it is a valid CSV, then try another.",
+    body: "The console could not parse it. Check that it is a valid CSV, then try another.",
   },
   unknown: {
     title: "Could not profile this file",
-    body: "The appliance could not read this file. Refresh the file list and try again.",
+    body: "The console could not read this file. Refresh the file list and try again.",
   },
 };
 
@@ -63,10 +63,10 @@ const PROFILE_UNAVAILABLE_COPY: Record<
 function listingLiveMessage(listing: JobInputsResult | "loading"): string {
   if (listing === "loading") return "";
   if (listing.kind === "disabled")
-    return "The job API is disabled on this appliance.";
+    return "The job API is disabled on this console.";
   if (listing.kind === "error") return "The file listing could not be loaded.";
   const { files, configured, readable } = listing.listing;
-  if (!configured) return "No work directory is configured on this appliance.";
+  if (!configured) return "No work directory is configured on this console.";
   if (!readable) return "The work directory could not be read.";
   if (files.length === 0) return "No usable files in the work directory.";
   return `Loaded ${files.length} ${files.length === 1 ? "file" : "files"} from the work directory.`;
@@ -77,7 +77,7 @@ function profileLiveMessage(
   profile: JobInputProfileResult | "loading" | undefined,
 ): string {
   if (profile === undefined) return "";
-  if (profile === "loading") return "Profiling the file on the appliance.";
+  if (profile === "loading") return "Profiling the file on the console.";
   if (profile.kind !== "profile")
     return PROFILE_UNAVAILABLE_COPY[profile.reason].title + ".";
   return "File profile ready. Confirm the file before using it.";
@@ -233,7 +233,7 @@ function ListingView({
   const refreshButton = <RefreshButton onRefresh={onRefresh} />;
 
   if (listing === "loading")
-    return <MountLoading message="Loading files from the appliance..." />;
+    return <MountLoading message="Loading files from the console..." />;
 
   // The job API is deliberately off (JOB_DATA_ROOT unset), a stable config state
   // -- so it reads as informational and names the variable to set, distinct from
@@ -242,12 +242,12 @@ function ListingView({
     return (
       <MountStateNotice
         color="blue"
-        title="The job API is disabled on this appliance"
+        title="The job API is disabled on this console"
         action={refreshButton}
       >
-        The job API is off because JOB_DATA_ROOT is not set, so this appliance
+        The job API is off because JOB_DATA_ROOT is not set, so this console
         cannot list or run files. Set it to the mounted data root and restart
-        the appliance -- see the{" "}
+        the console -- see the{" "}
         <Anchor
           inherit
           href="https://github.com/georgetown-mdi/jspsi/blob/main/docs/DEPLOYMENT.md"
@@ -267,7 +267,7 @@ function ListingView({
         title="Could not list the work directory"
         action={refreshButton}
       >
-        The appliance did not return a file listing. Check that the job API is
+        The console did not return a file listing. Check that the job API is
         reachable, then try again.
       </MountStateNotice>
     );
@@ -284,7 +284,7 @@ function ListingView({
         title="No work directory configured"
         action={refreshButton}
       >
-        No work directory is configured on this appliance. Set JOB_INPUT_DIR to
+        No work directory is configured on this console. Set JOB_INPUT_DIR to
         the mounted input directory.
       </MountStateNotice>
     );
@@ -300,7 +300,7 @@ function ListingView({
         action={refreshButton}
       >
         The mounted work directory could not be read. Check that it is mounted
-        and readable on this appliance, then refresh.
+        and readable on this console, then refresh.
       </MountStateNotice>
     );
 
@@ -311,7 +311,7 @@ function ListingView({
         title="No usable files in the work directory"
         action={refreshButton}
       >
-        Place your input CSV in this appliance's mounted work directory, then
+        Place your input CSV in this console's mounted work directory, then
         refresh. Directories and dot-prefixed files are not listed.
       </MountStateNotice>
     );
@@ -473,8 +473,8 @@ function ConfirmPanel({
           </Text>
         </Group>
         <Text size="sm" c="dimmed">
-          The appliance reads the whole file to count rows and sample columns.
-          For a large file this can take several seconds.
+          The console reads the whole file to count rows and sample columns. For
+          a large file this can take several seconds.
         </Text>
         <Group>
           <Button variant="default" size="xs" onClick={onCancel}>

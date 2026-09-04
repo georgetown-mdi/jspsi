@@ -2597,11 +2597,11 @@ describe("InvitationTerms: the linkage strategy is surfaced at the consent point
     // On screen without expanding any disclosure -- the acceptor sees the added
     // disclosure before consenting.
     expect(app.container.textContent).toContain(
-      "This exchange uses single-pass linkage.",
+      "This exchange matches in a single pass.",
     );
     // ... and OUTSIDE the "Other details" panel (structure, not styling).
     expect((await readyPanel("Other details")).textContent).not.toContain(
-      "This exchange uses single-pass linkage.",
+      "This exchange matches in a single pass.",
     );
     // Stated viewer-neutrally: the acceptor itself could be the disclosing party.
     expect(app.container.textContent).toContain("so it may be you");
@@ -2610,7 +2610,7 @@ describe("InvitationTerms: the linkage strategy is surfaced at the consent point
   test("cascade (the baseline) surfaces no strategy note", async () => {
     render("cascade");
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    expect(app.container.textContent).not.toContain("single-pass linkage");
+    expect(app.container.textContent).not.toContain("matches in a single pass");
   });
 
   test("the note also appears in the inviter's own proposing preview", async () => {
@@ -2622,7 +2622,7 @@ describe("InvitationTerms: the linkage strategy is surfaced at the consent point
     render("single-pass", "proposing");
     await expect.element(toggle("Other details")).toBeInTheDocument();
     expect(app.container.textContent).toContain(
-      "This exchange uses single-pass linkage.",
+      "This exchange matches in a single pass.",
     );
   });
 });

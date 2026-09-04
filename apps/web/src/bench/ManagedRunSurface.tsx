@@ -693,13 +693,8 @@ export function ManagedRunSurface({ id }: { id: string }) {
                   over an unencrypted channel.
                 </p>
                 {exportFailed && (
-                  <Alert
-                    color="red"
-                    title="That export could not be completed"
-                    mb="sm"
-                  >
-                    The backup could not be saved. Nothing changed here; try
-                    again.
+                  <Alert color="red" title="Could not save the backup" mb="sm">
+                    Nothing changed here; try again.
                   </Alert>
                 )}
                 <Button
@@ -748,7 +743,11 @@ export function ManagedRunSurface({ id }: { id: string }) {
               device to run it there.
             </p>
             {exportFailed && (
-              <Alert color="red" title="That could not be completed" mb="md">
+              <Alert
+                color="red"
+                title="Could not hand off this exchange"
+                mb="md"
+              >
                 This device&apos;s copy could not be handed off. It is still
                 live here; try again.
               </Alert>
@@ -1032,9 +1031,12 @@ function ReinviteRecovery({
       {canReinviteFromRecord(record) && (
         <>
           {reinviteFailed && (
-            <Alert color="red" title="That could not be completed" mb="sm">
-              The fresh invitation could not be created. Nothing changed here;
-              try again.
+            <Alert
+              color="red"
+              title="Could not create a fresh invitation"
+              mb="sm"
+            >
+              Nothing changed here; try again.
             </Alert>
           )}
           <Button mt="sm" onClick={onReinvite} loading={reinviting}>
@@ -1220,8 +1222,8 @@ function BackupPanel({
         unencrypted channel.
       </p>
       {failed && (
-        <Alert color="red" title="That export could not be completed" mb="sm">
-          The backup could not be saved. Nothing changed here; try again.
+        <Alert color="red" title="Could not save the backup" mb="sm">
+          Nothing changed here; try again.
         </Alert>
       )}
       <Button mt="sm" variant="default" onClick={onBackUp} loading={busy}>
