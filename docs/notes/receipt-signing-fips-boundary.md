@@ -21,11 +21,11 @@ measurements and certificate readings underneath the reasoning are in
 
 With FIPS 140-3 as the target standard, Ed25519 sits outside the boundary on
 both certificates in play here. Certificate 4985 places it in Table 8,
-Non-Approved and Not Allowed, and carries ECDSA on its approved-algorithm list.
-Certificate 5021, the module the FIPS variant image carries, names Ed25519 in no
+Non-Approved and Not Allowed, and includes ECDSA on its approved-algorithm list.
+Certificate 5021, the module the FIPS variant image embeds, names Ed25519 in no
 table at all and states its non-approved-but-allowed category empty, so there is
 no status the algorithm could hold there -- and the certified module does not
-carry the primitive to begin with
+include the primitive to begin with
 ([CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#what-certificate-5021-attests),
 [fips-variant-image.md](fips-variant-image.md)). ECDSA is on that certificate's
 approved-algorithm table as well, over P-256 and with SHA2-256 among its hashes,
@@ -66,7 +66,7 @@ body, the EC JWK public key, the pinned signature encoding, and the load-time
 rejections -- are specified in
 [PROTOCOL.md](../spec/PROTOCOL.md#signing-identity-and-certificate-pinning) and
 [EXCHANGE_RECORD.md](../spec/EXCHANGE_RECORD.md#signed-receipt); this record
-keeps the reasoning and the two design choices the migration was left to settle
+keeps the reasoning and the two design choices the migration was left to decide
 (below).
 
 ## Why migrate rather than disclose
@@ -78,7 +78,7 @@ non-approved status is undiluted.** The signed-receipt step runs at the
 conclusion of a successful exchange, after the payload exchange -- it is evidence
 collection over a completed exchange, not a gate
 ([PROTOCOL.md](../spec/PROTOCOL.md#the-signed-receipt-step)). The data has
-already moved before any signature exists. The receipt carries no payload
+already moved before any signature exists. The receipt contains no payload
 contents and no key material, and the exchange's authentication anchor is the
 pre-shared secret in the handshake, not the signing identity. A reviewer asking
 what happens to their data learns nothing from this algorithm choice. That is the
@@ -113,8 +113,7 @@ version bump rather than a migration, and it will not be this cheap again.
 Ed25519 is present in every FIPS provider build measured -- 3.0.8, 3.0.9, 3.0.21
 and 3.5.7 alike ([fips-provider-surface.md](fips-provider-surface.md), Question
 2). That measurement inverted an unverified assumption that it was absent, and
-the inversion is worth naming because the correction is easy to over-read in the
-other direction.
+the correction is easy to over-read in the other direction.
 
 **Presence is not permission.** The measurement establishes that the builds it
 was taken on can perform the algorithm. It says nothing about whether performing
@@ -128,14 +127,14 @@ the module entirely is strictly better than routing it in, and that holds under
 the disclosure option as much as under the migration.
 
 Under certificate 5021 the option is not there to take at all. The certified
-Amazon Linux module carries no Ed25519 -- `openssl list` reports it absent while
+Amazon Linux module has no Ed25519 -- `openssl list` reports it absent while
 the provider is active, measured in the variant image
 ([fips-variant-image.md](fips-variant-image.md)) -- so presence is a property of
 the OpenSSL Project builds measured here rather than of the module the image
 ships.
 
 The same reasoning forecloses an obvious-looking shortcut. Node's WebCrypto in
-this runtime does carry Ed25519 -- measured deterministic, 64-byte signatures,
+this runtime does include Ed25519 -- measured deterministic, 64-byte signatures,
 and the same RFC 8037 OKP JWK shape the certificate already stores -- so swapping
 `@noble/curves` for `crypto.subtle` without changing the scheme is nearly free in
 code terms and surrenders none of the properties the next section weighs. It is
@@ -161,8 +160,8 @@ latitude that makes ECDSA signatures a canonicalization hazard elsewhere does
 not arise through this call surface. The
 signature is also the same 64 bytes as Ed25519, so the receipt format's
 base64url field bound is unaffected and the signature field does not change
-size. The certificate body does grow: a P-256 public key carries both `x` and
-`y` where the Ed25519 OKP JWK carries `x` alone.
+size. The certificate body does grow: a P-256 public key has both `x` and `y`
+where the Ed25519 OKP JWK has `x` alone.
 
 **Determinism is surrendered, and it is the real cost.** Two signatures over
 identical input under the same key differ; WebCrypto exposes no RFC 6979
@@ -176,18 +175,18 @@ The seed goes with the signature, and this is a second loss rather than a
 restatement of the first: `crypto.subtle.generateKey` takes no seed and two
 calls yield different keys, so a vector cannot derive its keypair the way the
 current fixtures do. Measured: a fixed private-key JWK imported through
-`importKey` round-trips exactly, which is what a vector must carry instead. From
+`importKey` round-trips exactly, which is what a vector must hold instead. From
 such a fixed key the certificate fingerprint, the binder, and the canonical
 signed bytes all still reproduce byte for byte; the pinned signature field does
 not, and becomes a verify-only vector. Re-shaping those fixtures was the largest
 single piece of the migration, driven by the platform's key generation as much as
-by the algorithm's randomness; what replaced reproduce-the-signature is settled
+by the algorithm's randomness; what replaced reproduce-the-signature is decided
 below.
 
-**Non-malleability is surrendered, with a measured blast radius.** A third party
-holding a receipt can transform `s` into `-s mod n` and produce a different
+**Non-malleability is surrendered, with a measured scope of impact.** A third
+party holding a receipt can transform `s` into `-s mod n` and produce a different
 64-byte signature that still verifies: measured against WebCrypto's own verify,
-which accepts the transformed signature. The blast radius is narrow because
+which accepts the transformed signature. The scope of impact is narrow because
 nothing in this project treats a signature as an identifier -- the receipt
 signature is never hashed, committed to, deduped, or used as a key anywhere in
 the tree, and the exchange record's commitments do not cover it. The one claim it
@@ -200,9 +199,9 @@ party could break in a copy without invalidating anything the artifact attests.
 **May say**, where a validated module is actually present in the environment:
 the signature and verification operations of receipt signing are performed by
 the module, using ECDSA over P-256 with SHA2-256. Certificate 5021, the module
-the FIPS variant image embeds, carries the algorithm at those parameters on its
+the FIPS variant image embeds, includes the algorithm at those parameters on its
 approved-algorithm table -- `KeyGen`, `KeyVer`, `SigGen` and `SigVer`, all
-FIPS 186-5 -- and carries signature generation and signature verification with
+FIPS 186-5 -- and includes signature generation and signature verification with
 ECDSA on its approved-services table. The rows, the full curve and hash lists,
 the service's approved indicator, and the CAVP certificate ids are in
 [CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#the-ecdsa-rows-which-no-probe-leg-covers).
@@ -212,7 +211,7 @@ it names for the tested parameter set at the time the claim is made, rather than
 inferring either from the algorithm name.
 
 **Table membership is not the whole answer, and the gap is a service rather than
-an algorithm.** Certificate 5021 also carries `RSA and ECDSA (pre-hashed
+an algorithm.** Certificate 5021 also includes `RSA and ECDSA (pre-hashed
 message)` signature generation and verification among its non-approved
 algorithms and services, so a module driven that way is performing a
 non-approved service with an approved algorithm. Which of the two services a
@@ -221,9 +220,9 @@ rather than by the approved-algorithm table, and nothing in this repository
 reads that indicator back. The AEAD's externally supplied IV has that shape on
 the same certificate, with the difference that decides it
 ([fips-variant-image.md](fips-variant-image.md)): WebCrypto supplies an external
-IV on every AES-GCM call, so the policy's own text settles which service the
+IV on every AES-GCM call, so the policy's own text determines which service the
 AEAD requests, while a `crypto.subtle` ECDSA call passes the message and the
-hash algorithm together and nothing in that shape settles which of the two
+hash algorithm together and nothing in that shape determines which of the two
 signature services the module performs. So the security function is available to
 name, and the service the call lands on is not established here.
 
@@ -237,7 +236,7 @@ name, and the service the call lands on is not established here.
 - That an EdDSA build of receipt signing would be FIPS-approved. It is not on
   any OpenSSL Project certificate; under certificate 4985 Ed25519 is
   Non-Approved and Not Allowed, and certificate 5021 names it in no table at all
-  while the module it certifies does not carry the primitive. Two of the forty
+  while the module it certifies does not include the primitive. Two of the forty
   active certificates do approve EdDSA, and neither yields a verifiable certified
   module for a freely redistributable image -- see
   [fips-provider-surface.md](fips-provider-surface.md). This is why the algorithm
@@ -248,7 +247,7 @@ name, and the service the call lands on is not established here.
   pin-before-signature check are an application composition above them that no
   certificate covers.
 - That signing is module-backed wherever the code runs. The browser build of
-  `@psilink/core` carries the same signing path, and there is no module beneath
+  `@psilink/core` uses the same signing path, and there is no module beneath
   it at all, whatever the algorithm.
 - That the shipped image is validated, or that it runs in a validated module's
   operational environment. No certificate covers the default image's base, and
@@ -256,7 +255,7 @@ name, and the service the call lands on is not established here.
   every one is bare metal, none is a container or a virtual machine, and the
   policy states no vendor affirmation reaching past them
   ([CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#what-certificate-5021-attests)).
-  The flat denial 4985's policy carries belongs to that document and is not
+  The flat denial 4985's policy states belongs to that document and is not
   5021's to quote. What the variant image may say instead is in
   [fips-variant-image.md](fips-variant-image.md), and is independent of
   everything decided here.
@@ -265,12 +264,12 @@ name, and the service the call lands on is not established here.
   primitive, and that boundary is stated in
   [PROTOCOL.md](../spec/PROTOCOL.md#signing-identity-and-certificate-pinning).
 
-## The two questions the migration settled
+## The two questions the migration decided
 
 ### Malleability: narrow the claim rather than enforce a canonical `s`
 
-This decision deliberately left open whether the implementation should reject a
-non-canonical (high-`s`) signature. It does not.
+This decision left open whether the implementation should reject a non-canonical
+(high-`s`) signature. It does not.
 
 Re-measured on the target runtime: WebCrypto verifies both `s` and `-s mod n`,
 and its sign operation gives the caller no control over which it emits. Enforcing
@@ -279,10 +278,10 @@ a canonical `s` therefore means a check in application code above
 more composition of exactly the kind this note's claim language is careful to
 disclaim, and one that would sit on the receipt-verification path forever.
 
-What it would buy is nothing the tree uses. The measured blast radius above holds:
-no signature is hashed, committed to, deduped, or used as an identifier anywhere,
-and the exchange record's commitments do not cover one. The single claim resting
-on non-malleability was
+What it would buy is nothing the tree uses. The measured scope of impact above
+holds: no signature is hashed, committed to, deduped, or used as an identifier
+anywhere, and the exchange record's commitments do not cover one. The single
+claim resting on non-malleability was
 [EXCHANGE_RECORD.md](../spec/EXCHANGE_RECORD.md#dual-signed-record-file)'s
 statement that both parties write a byte-identical artifact, and that statement
 was narrowed instead: the two parties' files agree because each copies the
@@ -319,7 +318,7 @@ because each covers something the others do not:
    test is what makes it evidence about something outside this codebase; the
    generator assembles the signed bytes from the spec rather than importing them
    from `signedReceipt.ts`, so a drift between the specification and the
-   implementation surfaces as a vector that stops verifying.
+   implementation shows up as a vector that stops verifying.
 3. **Both directions are covered without a live cross-process round trip.**
    Signing and verification share one construction of the signed bytes within a
    build, and layer 2 establishes that a build's bytes are the ones the fixed
@@ -327,7 +326,7 @@ because each covers something the others do not:
    The Node suite and the browser suite each assert both halves against the same
    checked-in file, which is what makes "the CLI signs, the web app verifies"
    hold in both directions. A live browser-to-Node round trip would need test
-   plumbing to carry bytes across the process boundary and would prove strictly
+   plumbing to send bytes across the process boundary and would prove strictly
    less: it would exercise one signature rather than the layout.
 4. **Negative twins accompany every positive.** A flipped signature bit, the
    opposite signer role, and mutated content are each asserted to fail, on both
@@ -360,7 +359,7 @@ before it is relied on again.
 - [EXCHANGE_RECORD.md](../spec/EXCHANGE_RECORD.md#signed-receipt) -- the receipt
   byte layout, the signed bytes, and the dual-signed record file.
 - [fips-provider-surface.md](fips-provider-surface.md) -- what a FIPS provider
-  carries and reaches in the shipped image, and what the certificates approve.
+  has and reaches in the shipped image, and what the certificates approve.
 - [key-establishment-fips-boundary.md](key-establishment-fips-boundary.md) -- the
   sibling decision, whose composition-disclosure reasoning applies here unchanged.
 - [COMPLIANCE.md](../COMPLIANCE.md#fips-140) -- the FIPS claims an agency

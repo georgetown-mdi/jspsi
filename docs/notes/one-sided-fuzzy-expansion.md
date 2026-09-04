@@ -28,9 +28,9 @@ None of this applies to the deletion neighbourhood, where the second party's exp
 
 ## Which party, and why that does not have to be agreed
 
-The expanding party is the resolved PSI receiver -- the role both parties already settle from the record counts they exchanged, with no new negotiation, no term, and no wire byte. The `swap` directive has been keyed on that same role since it was specified, so this extends a precedent rather than setting one.
+The expanding party is the resolved PSI receiver -- the role both parties already determine from the record counts they exchanged, with no new negotiation, no term, and no wire byte. The `swap` directive has been keyed on that same role since it was specified, so this extends a precedent rather than setting one.
 
-It is deliberately NOT an agreed term. A term naming the expanding party would have to be authored, consented to, hashed into the agreed terms, and kept consistent with a role the two parties resolve per run from data neither authored -- and it would buy nothing, because the classification is a function of the kind alone and both parties compute it identically from terms they already hold.
+It is NOT an agreed term, by design. A term naming the expanding party would have to be authored, consented to, hashed into the agreed terms, and kept consistent with a role the two parties resolve per run from data neither authored -- and it would buy nothing, because the classification is a function of the kind alone and both parties compute it identically from terms they already hold.
 
 ## Why the role may flip between runs, and why that is harmless
 
@@ -40,12 +40,12 @@ That is why nothing here holds the role steady across runs. Pinning it would nee
 
 ## The swap is a full variant
 
-A key's `swap` names two elements whose values may have been entered the wrong way round at one agency. Exchanging them on the receiver alone matches the reversed record and LOSES the record that agrees -- the arrangement most of the data is in. The fix is the same shape as the transposition one: the receiver assembles both orders, the sender assembles the authored one, and the pair meets in either arrangement. Two orders are the whole set the pair admits, so the involution and the one-sidedness carry over unchanged, and the consent surface's claim that a swap matches the two elements in either order becomes true rather than aspirational.
+A key's `swap` names two elements whose values may have been entered the wrong way round at one agency. Exchanging them on the receiver alone matches the reversed record and LOSES the record that agrees -- the arrangement most of the data is in. The fix is the same shape as the transposition one: the receiver assembles both orders, the sender assembles the authored one, and the pair meets in either arrangement. Two orders are the whole set the pair admits, so the involution and the one-sidedness hold unchanged, and the consent surface's claim that a swap matches the two elements in either order becomes true rather than aspirational.
 
 It is delivered at the key-read layer rather than as a fuzzy kind because the expansion sees one element's value at a time and cannot reach a sibling's, and because a swap REPLACES a key's arrangement where a fuzzy kind widens one element.
 
 ## What the asymmetry costs, stated rather than closed
 
-Both parties declare the RECEIVER-case width for every key, because the width is fixed by the agreed terms before either party holds the other's record count. A party that turns out to be the sender therefore declares slots it does not fill. The cost is permissiveness and frame size -- an exchange can be refused at a party's own single-pass ceiling that would in fact have fit -- and never a wrong match. Sizing the declaration to the resolved role instead would make the width depend on data the terms do not carry, which is the property the whole width derivation exists to avoid.
+Both parties declare the RECEIVER-case width for every key, because the width is fixed by the agreed terms before either party holds the other's record count. A party that turns out to be the sender therefore declares slots it does not fill. The cost is permissiveness and frame size -- an exchange can be refused at a party's own single-pass ceiling that would in fact have fit -- and never a wrong match. Sizing the declaration to the resolved role instead would make the width depend on data the terms do not include, which is the property the whole width derivation exists to avoid.
 
 The all-pairs transposition enumeration is quadratic in the value's width, so declaring it means bounding that width with a transform. The refusals that enforce that, and the arithmetic of stacking two of them in one key, are normative and live in the spec.

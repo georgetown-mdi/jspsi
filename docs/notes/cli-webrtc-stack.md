@@ -7,7 +7,7 @@ title: "The CLI WebRTC Stack"
 *Status: decided and built. This note records the Node WebRTC library and the
 integration architecture chosen for the CLI's WebRTC transport, the validation
 spike that settled them, the alternatives weighed and declined, and the
-constraints and known costs the transport carries. Nothing here is normative:
+constraints and known costs the transport holds. Nothing here is normative:
 the wire the transport speaks is specified in
 [WEBRTC_TRANSPORT.md](../spec/WEBRTC_TRANSPORT.md), the rendezvous derivation in
 [PROTOCOL.md](../spec/PROTOCOL.md#webrtc-rendezvous-peer-id-derivation), and the
@@ -17,21 +17,21 @@ delivery guarantee its close must honor in
 
 The web application conducts peer-to-peer WebRTC exchanges through PeerJS.
 Letting the CLI take part in those exchanges needs a Node WebRTC library, and
-both the library and the way it is wired underneath PeerJS are load-bearing
+both the library and the way it is wired underneath PeerJS are critical
 enough that a hands-on spike was scoped to settle them rather than research
 alone. That spike ran, and the transport it settled is built. This note is the
 decision record: what was chosen, what the evidence showed, and what the
-transport carries.
+transport holds.
 
 ## The decision
 
 - **Library: werift, exact-pinned, as the published package.** Version 0.24.4
   was current when the decision was taken. Installs run with
   `--ignore-scripts`; nothing in werift's tree needs an install script, and the
-  tree carries no native or compiled content at all. The exact pin and its
-  internal premises sit with the other reached-past-their-API stacks in
+  tree contains no native or compiled content at all. The exact pin and its
+  internal assumptions sit with the other reached-past-their-API stacks in
   [DEPENDENCY_PINS.md](../spec/DEPENDENCY_PINS.md#why-these-are-exact-pinned),
-  which carries the per-bump re-verification checklist.
+  which holds the per-bump re-verification checklist.
 - **Architecture: drive werift's native API directly.** No PeerJS runs in Node.
   The CLI speaks the PeerJS broker's WebSocket protocol through a hand-written
   signaling client, and speaks PeerJS-compatible DataConnection framing on the
@@ -62,10 +62,10 @@ end. The saving PeerJS-in-Node offers is real but small next to what it takes
 back.
 
 **Rejected: the `json` serialization as a way to skip BinaryPack.** It
-negotiates and round-trips small frames, so it is genuinely available for
-control messages -- but PeerJS's JSON DataConnection refuses to send past
-16300 bytes rather than chunking it, in both directions, so it cannot carry a
-PSI frame at all. The cost it was meant to avoid turned out not to exist:
+negotiates and round-trips small frames, so it is available for control messages
+-- but PeerJS's JSON DataConnection refuses to send past 16300 bytes rather than
+chunking it, in both directions, so it cannot hold a PSI frame at all. The cost
+it was meant to avoid turned out not to exist:
 `peerjs-js-binarypack` is published standalone, MIT, with zero dependencies, and
 runs unmodified in Node, where `pack` and `unpack` are synchronous for the
 `Buffer` and `Uint8Array` payloads Node produces. Only the chunk envelope around
@@ -122,7 +122,7 @@ library. werift's install portability is a convenience, not the reason it wins.
 27 to the next human contributor, and that is the risk that does not go away.
 The activity numbers around it are healthy: eight releases in the last twelve
 months, three open pull requests against fifty-two merged in ninety days, and
-the current release carrying real new capability. High velocity from a single
+the current release holding real new capability. High velocity from a single
 author is not the same risk profile as a maintained project, though, and a
 cleared backlog is a property of solo maintenance rather than a mitigation of
 it. The posture that follows is pin-a-version-and-be-ready-to-vendor, for
@@ -153,14 +153,14 @@ regardless of platform cost.
 
 The spike ran the real libraries end to end against the repository's own
 vendored PeerServer, with a stock browser `peerjs@1.5.5` peer -- the exact pin
-the web app carries -- driven headless in Chromium, and werift in Node on the
+the web app holds -- driven headless in Chromium, and werift in Node on the
 other side. Every third-party package involved was installed with
 `--ignore-scripts`, and every milestone ran against that tree.
 
 - **Interop.** A stock browser PeerJS peer completed a DataConnection with
   werift-in-Node through the vendored broker and exchanged hash-verified frames
   in both directions, in both roles -- browser dialing and werift dialing --
-  with `label`, `metadata`, and `reliable` all carried across the negotiation.
+  with `label`, `metadata`, and `reliable` all preserved across the negotiation.
 - **Chunking past the SCTP ceiling.** Both peers advertised a 65536-byte maximum
   message size, so chunking is mandatory rather than optional. 512 KiB, 4 MiB,
   and 32 MiB frames moved in each direction with SHA-256-identical results, the
@@ -185,13 +185,13 @@ other side. Every third-party package involved was installed with
 
 The framing and signaling the spike hand-wrote came to 456 non-comment lines
 across a broker client, a wire/framing module, and the peer negotiation -- an
-honest measure of the shape, not of the work. What the spike left out is most of
-what the shipped transport (`apps/cli/src/connection/webrtc/`) had to carry:
-`LEAVE`/`EXPIRE` handling, the dial retry for a peer that has not registered
-yet, peer-id redaction in logs, the inbound bounds, and an error taxonomy that
-names a cause -- a symmetric role misconfiguration reads as one, rather than as
-a rendezvous that never completes. A spike's line count is a floor on a
-transport, not an estimate of one.
+accurate measure of the shape, not of the work. What the spike left out is most
+of what the shipped transport (`apps/cli/src/connection/webrtc/`) had to
+include: `LEAVE`/`EXPIRE` handling, the dial retry for a peer that has not
+registered yet, peer-id redaction in logs, the inbound bounds, and an error
+taxonomy that names a cause -- a symmetric role misconfiguration is treated as
+one, rather than as a rendezvous that never completes. A spike's line count is a
+floor on a transport, not an estimate of one.
 
 ## The PeerJS wire the CLI speaks
 
@@ -229,14 +229,14 @@ The maintainer has ruled the default acceptable as the fallback for an
 operator who configures no servers of their own: it is what lets an exchange
 traverse NAT for operators without the means to run their own STUN server, and
 what it discloses is connection metadata -- the host's public IP and the fact
-of a WebRTC session -- never exchange content. The narrower property the transport
-owed on top of that -- that a deliberately configured server list is the list
+of a WebRTC session -- never exchange content. The narrower property the
+transport owed on top of that -- that a configured server list is the list
 actually used -- was measured after this note was written: a non-empty list
 REPLACES the built-in default rather than adding to it, so nothing further was
-needed (the premise and its check are in
+needed (the assumption and its check are in
 [DEPENDENCY_PINS.md](../spec/DEPENDENCY_PINS.md)). Separately and optionally, an
 upstream issue proposing that an empty or undefined list mean "no STUN" (an
-honest host-candidates-only mode for VPN or LAN deployments) is worth opening
+accurate host-candidates-only mode for VPN or LAN deployments) is worth opening
 only if a compelling case for that mode emerges; the transport documents the
 unreachable-entry idiom in the meantime.
 
@@ -270,7 +270,7 @@ the comparison point to measure against before the pick is revisited.
 
 **TURN is not verified against a real relay.** The relay transports are present
 in the published API and the URL parser resolves the port-443 TLS case, but no
-relay was driven. If TURN over TLS is load-bearing for a deployment, drive it
+relay was driven. If TURN over TLS is required for a deployment, drive it
 first; upstream ships a TURN loopback example as a starting point.
 
 ## Supply chain and the vendoring fallback
@@ -282,7 +282,7 @@ here rather than a novel one -- the project already maintains
 earlier on that road: psi.js needed local patches from day one, while werift
 has no known defect that a pin does not cover.
 
-What a werift-only install carries: 43 packages, 26 MB on disk, no
+What a werift-only install has: 43 packages, 26 MB on disk, no
 `preinstall`/`install`/`postinstall` script anywhere in the tree, and no `.node`,
 `.wasm`, `.so`, `.dylib`, `.dll`, or `binding.gyp` -- nothing compiles at
 install. `npm audit` on that runtime tree reports no vulnerability at any

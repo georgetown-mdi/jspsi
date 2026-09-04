@@ -17,7 +17,7 @@ here. The artifacts are [`infra/relay/`](../../infra/relay/README.md). See
 ## The rescope
 
 The measurement ran coturn as a user-space build on the always-on box that also
-carries the demo SFTP server, behind a self-signed certificate. That was a
+hosts the demo SFTP server, behind a self-signed certificate. That was a
 measurement fixture and is not the deployment.
 
 **The relay gets a dedicated instance, provisioned from a version-controlled
@@ -47,16 +47,16 @@ ratified by the owner.
   The Dockerfile is the digest's only home: everything else names the locally
   built tag, so a base move is exactly one edit and there is no second copy to
   drift. The dissent was the supply-chain dependence on a community image, and it
-  is answered by writing the fallback into the file that would carry it -- if the
+  is answered by writing the fallback into the file that would hold it -- if the
   image stops publishing, that Dockerfile grows a build from a pinned source tag
   rather than floating onto another publisher. The pinning convention itself is
   the repository's existing one; see
   [CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md).
 - **A container under systemd, which is the only supervisor.** That puts the
   relay under the same supervisor as its certificate timer and its verification
-  timer. The runtime beneath it is whichever one the host carries: daemonless
+  timer. The runtime beneath it is whichever one the host provides: daemonless
   podman with a Quadlet unit where podman exists, docker otherwise. The AL2023
-  AMI this reference prescribes publishes no podman package and carries no EPEL
+  AMI this reference prescribes publishes no podman package and includes no EPEL
   while taking docker from `dnf`, so `install.sh` detects the runtime and
   installs the matching unit; both are tracked
   (`infra/relay/psilink-relay.container` and
@@ -66,18 +66,18 @@ ratified by the owner.
 - **Host networking**, which is a requirement of the protocol rather than a
   preference: TURN hands out a relayed transport address that bridge networking
   or published ports would rewrite.
-- **Configuration rendered at start, not at install.** The rendered file carries
+- **Configuration rendered at start, not at install.** The rendered file holds
   the static secret, so it is written at mode 600 and is untracked; the template
   is what is tracked. Rendering on every start rather than once is what keeps the
   advertised external address true across a stop and start.
 - **Certificates by ACME DNS-01 on a timer**, DNS-01 because the relay already
   terminates TLS on 443 and an HTTP-01 challenge would need a second listener
   whose only job is to answer it. The deploy hook re-owns the key to the
-  container's account, which the measurement makes load-bearing: coturn was
+  container's account, which the measurement makes critical: coturn was
   observed falling back to its defaults on a key it could not read, so a renewal
-  landing a root-owned key would take the relay out silently at renewal time. The
-  hook restarts rather than reloads, because whether a signal makes coturn
-  re-read its certificate has not been driven against the real server.
+  that wrote a root-owned key would take the relay out silently at renewal
+  time. The hook restarts rather than reloads, because whether a signal makes
+  coturn re-read its certificate has not been driven against the real server.
 - **A verification script that drives the deployed relay**, rather than a
   checklist. It runs a real handshake, a real allocation, and a probe that an
   allocation toward an internal address is refused -- and it passes that last one
@@ -87,7 +87,7 @@ ratified by the owner.
   between exchanges and nothing else notices it stopped working until a partner
   is waiting.
 
-## What is deliberately not here
+## What is not here
 
 - **No infrastructure-as-code for the relay instance.** One instance, launched
   once, from a stock AMI with cloud-init user-data that runs the install script.
@@ -115,7 +115,7 @@ behaviour rather than documented exit statuses. Then a relayed exchange was
 driven through it: a CLI party with UDP blocked outright completed a
 mutually-authenticated exchange whose entire data-channel traffic the relay carried, with the
 credential minted per exchange by `mint-credential.sh`. The byte evidence and the
-two operational findings the bring-up surfaced are in
+two operational findings the bring-up revealed are in
 [webrtc-relay-deployment.md](webrtc-relay-deployment.md), not restated here.
 
 What the deployment does not yet cover is the field: the driven exchange ran

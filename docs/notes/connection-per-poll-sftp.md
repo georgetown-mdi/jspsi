@@ -6,10 +6,10 @@ title: "Connection-per-poll SFTP, and the reconnect posture beneath it"
 
 *Status: shipped. This note records the direction chosen for a slow-peer SFTP
 transport mode and, underneath it, the mid-exchange reconnect posture the mode
-depends on. The direction was reached by an independent four-lens expert panel
-and its load-bearing claims were adversarially verified against the tree; see
-[How this was decided](#how-this-was-decided). The normative mechanism is
-specified in [FILE_SYNC.md](../spec/FILE_SYNC.md) and
+depends on. The direction was reached by an independent four-lens expert panel and
+its critical claims were adversarially verified against the tree; see [How this was
+decided](#how-this-was-decided). The normative mechanism is specified in
+[FILE_SYNC.md](../spec/FILE_SYNC.md) and
 [CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md), and the operator-facing
 description lives in [EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md); this note
 is kept for the reasoning behind that direction. See
@@ -48,7 +48,7 @@ except against a session the transport has already ended under (see
 For the scenario above this means the exchange **survives** each drop rather than
 aborting on it: the session dies in each idle gap, and the next poll's first op
 silently re-dials. That is a genuine robustness floor. But held-session recovery
-must not be *infinite*: it is bounded by a cumulative budget, and it stays honest
+must not be *infinite*: it is bounded by a cumulative budget, and it stays accurate
 about the difference between a transiently flaky link and a server that
 structurally caps session lifetime.
 
@@ -64,10 +64,10 @@ connection-per-poll (below), which does not hold a session across the idle gap a
 so is not subject to the count.
 
 **Genuine failures already terminate on their own bounds, too.** A re-dial against
-a genuinely gone or credential-rotated endpoint exhausts the per-connect dialing
-budget -- whose operative default is **three** retries (a fast-fail in seconds),
-not the seven-day sanity ceiling that bounds only the config field -- and the op
-then rejects, poll's catch emits an error, and the connection bridge makes that
+a gone or credential-rotated endpoint exhausts the per-connect dialing budget --
+whose operative default is **three** retries (a fast-fail in seconds), not the
+seven-day sanity ceiling that bounds only the config field -- and the op then
+rejects, poll's catch emits an error, and the connection bridge makes that
 terminal. A vanished or silent peer trips the receive-inactivity deadline, which is
 set to `peer_timeout_ms` (default one hour). A stalled send is bounded by the same
 peer-inactivity budget, armed afresh for each send's wait on the peer (see
@@ -96,9 +96,9 @@ from thrashing indefinitely in the meantime.
 Beyond observability, the `max_reconnect_attempts` field (default three) is what
 bounds this recovery. Its value sizes a cumulative mid-exchange-reconnection budget
 -- a counter separate from, but the same size as, the dialing-retry loop inside a
-single `connect()` -- so the one knob whose name implies a reconnect ceiling
-genuinely bounds the reconnecting an operator would want to bound, on top of each
-connect's own dialing retries.
+single `connect()` -- so the one setting whose name implies a reconnect ceiling
+bounds the reconnecting an operator would want to bound, on top of each connect's
+own dialing retries.
 
 ## The reconnect posture
 
@@ -112,11 +112,11 @@ observable. Three properties define the default:
   exhausted budget, and gives the two remedies. The budget is strictly cumulative
   and does not reset on progress -- a session-capping server makes progress every
   cycle, so a reset-on-progress budget would never bound it. This is the "not
-  infinite by default" lever, expressed as the one knob whose name already promises
-  it rather than a new field.
+  infinite by default" lever, expressed as the one setting whose name already
+  promises it rather than a new field.
 - **Make it observable.** Emit an operator-facing warning on the first mid-exchange
   re-dial that names the likely cause and the remedy, and escalate by rate so a
-  chronic capper is loud without spamming a one-off. Surface the live reconnect
+  chronic capper is loud without spamming a one-off. Report the live reconnect
   count on the normal log, not only on the event stream. This makes the exchange's
   degradation visible to the operator before the budget is spent, rather than
   leaving it un-judgeable.
@@ -126,7 +126,7 @@ observable. Three properties define the default:
   structural fix is connection-per-poll (below): its poll loop holds no session
   across the idle gap, so the loop ordinarily does not reach the cap, and its
   recovery re-dials are uncapped in every phase -- bounded instead by the
-  peer-inactivity ceiling -- which is what carries a rendezvous the cap does cut.
+  peer-inactivity ceiling -- which is what completes a rendezvous the cap does cut.
 
 The recoverable-versus-terminal taxonomy stays exactly as it is: it keys on the
 session's post-drop state, not on message matching, and it is sound. This posture
@@ -139,18 +139,18 @@ first.
 For the slow-asymmetric-peer case, the structural fix is to stop holding a session
 across the idle gap at all. In the mode, each poll cycle dials a fresh SFTP
 connection, runs that cycle's batch of ops, and releases the connection before the
-loop goes idle again. A cycle's session then need only survive that cycle's seconds,
-so the poll loop ordinarily does not reach the server's duration or idle cap; there
-is no held-but-secretly-dead window and no heartbeat to churn keepalives against a
-corpse. The failure it does have -- a dial that fails -- fails loudly at one
-well-understood seam and is handled by the ordinary connect-error path, rather than
-silently on the next op against a cleared session.
+loop goes idle again. A cycle's session then need only survive that cycle's
+seconds, so the poll loop ordinarily does not reach the server's duration or idle
+cap; there is no held-but-secretly-dead window and no heartbeat to churn keepalives
+against a corpse. The failure it does have -- a dial that fails -- fails loudly at
+one well-understood call site and is handled by the ordinary connect-error path,
+rather than silently on the next op against a cleared session.
 
 The per-cycle lifetime is the **poll loop's** property, not the mode's as a whole.
 The rendezvous that runs before the loop -- this party waiting for the partner to
 join the exchange -- holds a single un-heartbeated session across its wait, so a
-server cap cuts it there on a wait long enough to outlive the cap. What carries the
-exchange through is the mode's uncapped recovery re-dial: the cumulative
+server cap cuts it there on a wait long enough to outlive the cap. What completes
+the exchange is the mode's uncapped recovery re-dial: the cumulative
 `max_reconnect_attempts` budget is exempted in this mode, so a rendezvous that
 outlives the cap re-dials as often as the cap cuts it and the exchange completes,
 where the held-session default in the same scenario exhausts that budget and fails
@@ -161,13 +161,13 @@ maximum-session-lifetime cap this mode exists for.
 The mode is a **hybrid**, not a replacement. The held-session default (with the
 bounded, observable recovery above) stays right for fast and symmetric exchanges: a
 full SSH handshake per cycle is negligible at a minutes-scale poll interval and
-wasteful at the five-second default, so per-cycle dialing is only sane paired with a
-long interval. Transparent recovery is retained underneath the mode as its safety
+wasteful at the five-second default, so per-cycle dialing is only sane paired with
+a long interval. Transparent recovery is retained underneath the mode as its safety
 net -- a drop *inside* a batch, and one that cuts the rendezvous, are both still
 re-dialed -- but it is demoted from the primary mechanism to a floor, because
-per-poll has already removed the between-cycles drop it was carrying.
+per-poll has already removed the between-cycles drop it was handling.
 
-## The seam: an adapter-owned ephemeral session
+## The placement: an adapter-owned ephemeral session
 
 The connect/disconnect bracket lives **inside the SFTP adapter**, as an ephemeral-
 session mode driven by a cycle-boundary signal from the core loop -- not as a
@@ -179,15 +179,15 @@ the only real question is whether core *drives* connect and disconnect per cycle
 merely *notifies* a boundary and lets the adapter own the mechanism. Notifying is
 the smaller change and the safer one:
 
-- **Blast radius.** The adapter already owns connect and disconnect, host-key
+- **Scope of impact.** The adapter already owns connect and disconnect, host-key
   re-pinning, the heartbeat, retained connect options, credentials, and -- the key
   reuse -- a proven, already-security-reviewed re-dial-from-a-cleared-session path.
   An idle-release at a cycle boundary reuses that machinery; the delta is small.
   Driving the bracket from core would instead land connect/disconnect logic in the
   poll loop, the rendezvous coordinator, the send path, and the delicate `close()`
   teardown -- the most security-sensitive, most-recently-decomposed surface -- and
-  would force core to re-supply and re-verify SFTP connect options it deliberately
-  discards after `open()`.
+  would force core to re-supply and re-verify SFTP connect options it discards by
+  design after `open()`.
 - **Invariant ownership stays put.** The adapter's serialization of `end()`
   against an in-flight re-dial covers the session transitions themselves, not the
   operations riding on them, and needs nothing from how those operations are
@@ -203,7 +203,7 @@ the smaller change and the safer one:
   mechanism.
 - **Testability.** The mode is unit-testable at the adapter boundary against the
   same surface the recovery path already grew, with no live server; the boundary
-  signal is a single seam.
+  signal is a single call site.
 
 The boundary signal is modeled on the existing optional-capability pattern (the
 inbound-frame-cap method core calls only when the transport implements it): core
@@ -230,7 +230,7 @@ transport ever appears, generalize then.
 ## Config surface
 
 The mode is a **local, non-bilateral, explicit opt-in**. Three properties, each
-load-bearing:
+critical:
 
 - **Local, not bilateral.** How one party dials changes nothing on the wire or in
   the shared directory state machine; the peer cannot observe or care. So the mode
@@ -277,16 +277,16 @@ adapter's tests assert rather than what its prose claims:
   transition -- so anything queued behind teardown is skipped, and anything
   already running is waited out by teardown's own position in the queue.
   Teardown has no privileged entry and pre-empts nothing.
-- **The acquire is bounded by one fixed adapter-owned ceiling.** One number for
-  all five kinds, and it bounds the WAIT rather than the transition being waited
-  on -- so it owes nothing to the sibling's settings, nor to any premise about
-  when ssh2 arms a connect deadline. A ceiling on the dial instead would put a
+- **The acquire is bounded by one fixed adapter-owned ceiling.** One number for all
+  five kinds, and it bounds the WAIT rather than the transition being waited on --
+  so it owes nothing to the sibling's settings, nor to any assumption about when
+  ssh2 arms a connect deadline. A ceiling on the dial instead would put a
   teardown's wait at the dial's whole budget, around two minutes at the defaults
-  and without a practical limit as the operator raises the connect timeout:
-  neither teardown-scale nor a bound the wait owns. The transition being waited
-  on stays unbounded here, because its ceiling is its caller's: core wraps a
-  data-plane operation in the peer-inactivity budget and `close()` in its own
-  shorter teardown budget, and forwards the two cycle-boundary signals unwrapped.
+  and without a practical limit as the operator raises the connect timeout: neither
+  teardown-scale nor a bound the wait owns. The transition being waited on stays
+  unbounded here, because its ceiling is its caller's: core wraps a data-plane
+  operation in the peer-inactivity budget and `close()` in its own shorter teardown
+  budget, and forwards the two cycle-boundary signals unwrapped.
 - **A waiter whose bound expires never proceeds into its own session action.** Not
   the dial, not the ssh2 client's `end()`, not the socket destroy: the transition
   it gave up on still holds the client, so proceeding would trade a bounded park
@@ -307,8 +307,7 @@ adapter's tests assert rather than what its prose claims:
   harmlessness: every transition behind the teardown skips its body, so the holder
   ahead of it is the only one that can be running.
 
-Uniformity has three consequences worth stating rather than leaving to be
-discovered.
+Uniformity has three consequences.
 
 **A cycle-boundary signal issued after teardown is latched waits the teardown out
 before returning its "nothing to do" value.** It does not short-circuit on the
@@ -351,35 +350,35 @@ faster failure on a path nothing in the tree takes -- core's `open()` and
 not park at all: the queue is drained, so it enters its critical section in the
 same tick and the refusal is immediate.
 
-**The boundary itself: the release owns the end state, not the partner.** Closing
-a connection is nominally a two-party act -- this side disconnects, the server
-closes the connection -- and a server that accepts the disconnect and then goes
-quiet never completes it. The transport is ended on this side while the session
-stands in name only: it can carry nothing, yet a cycle that reads it as live would
-skip its dial and ride its first operation to the per-operation liveness deadline,
-which ends the exchange. That is exactly the slow, idiosyncratic partner the mode
-exists for, so the mode does not depend on the partner's cooperation to finish a
-release. Past its bound the release closes the transport from this side, so every
-idle boundary ends with the session gone and every cycle begins by dialing a fresh
-one. Inside the poll loop that silence costs one release bound per cycle, an
-operator warning on the same rate-escalated cadence a chronic mid-exchange re-dial
-gets, and a total in the end-of-run summary -- rather than the exchange. Forcing
-says how the boundary concluded, not who ended the transport beneath it, so it
-does not by itself make the loss this side's: a boundary forced over a partner
-drop this side had already observed is still counted and warned as that drop,
-while one forced over an ordinary deliberate release is exempt as any release is
+**The boundary itself: the release owns the end state, not the partner.** Closing a
+connection is nominally a two-party act -- this side disconnects, the server closes
+the connection -- and a server that accepts the disconnect and then goes quiet
+never completes it. The transport is ended on this side while the session stands in
+name only: it can hold nothing, yet a cycle that treats it as live would skip its
+dial and ride its first operation to the per-operation liveness deadline, which
+ends the exchange. That is exactly the slow, idiosyncratic partner the mode exists
+for, so the mode does not depend on the partner's cooperation to finish a release.
+Past its bound the release closes the transport from this side, so every idle
+boundary ends with the session gone and every cycle begins by dialing a fresh one.
+Inside the poll loop that silence costs one release bound per cycle, an operator
+warning on the same rate-escalated cadence a chronic mid-exchange re-dial gets, and
+a total in the end-of-run summary -- rather than the exchange. Forcing says how the
+boundary concluded, not who ended the transport beneath it, so it does not by
+itself make the loss this side's: a boundary forced over a partner drop this side
+had already observed is still counted and warned as that drop, while one forced
+over an ordinary deliberate release is exempt as any release is
 ([CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md#sftp-mid-exchange-session-recovery)
-carries the per-outcome rule).
+states the per-outcome rule).
 
 The same partner silence at TEARDOWN is a defect of the SFTP transport itself,
-which this mode neither causes nor escapes, so it is bounded where it lives
-rather than here. `close()` ends the connection for good through
-ssh2-sftp-client's own `end()`, which settles only from a close this partner does
-not send; that wait carries its own short bound, and past it the adapter closes
-the connection from this side, so a completed exchange finishes teardown and the
-process exits. The bound is mode-independent -- it holds in the default
-held-session mode exactly as it does here -- and the mode's contribution is only
-that its own per-cycle releases never END in that state.
+which this mode neither causes nor escapes, so it is bounded where it lives rather
+than here. `close()` ends the connection for good through ssh2-sftp-client's own
+`end()`, which settles only from a close this partner does not send; that wait has
+its own short bound, and past it the adapter closes the connection from this side,
+so a completed exchange finishes teardown and the process exits. The bound is
+mode-independent -- it holds in the default held-session mode exactly as it does
+here -- and the mode's contribution is only that its own per-cycle releases never
+END in that state.
 
 **Rendezvous handshake -- test-hardening, given two placement rules.** The hello,
 the zero-length ack, the lock-path joining sentinel, and the lock are committed
@@ -391,30 +390,29 @@ guard and directory sweep must run exactly once, never re-entered on a later cyc
 unclean, or a re-run sweep would delete the party's own just-written files); and no
 reconnect may reset the in-memory session state.
 
-Where the boundary and a publish meet, the poll loop's own publishes are safe and
-a concurrent send's are not. Each publish is a
-contiguous run of ops with no idle wait in the middle -- a message is a temp write
-then an atomic rename; an ack is a zero-length put then a rename; the joiner
-sentinel is a put, a delete, then a rename; the hello is written directly to its
-final name and relies on the reader's partial-sync gate rather than a rename; a
-lock is a single atomic exclusive create at the transport seam. None of them
-straddles an idle wait, so a publish the POLL LOOP itself performs cannot be torn
-by the boundary that follows it. The boundary is not a global idle point, though:
-`send()` has no mutual exclusion with `poll()`, so a release can fall while a
-send's publish is in flight. An op that reaches the transport at or after the
-release is serialized against it at the adapter's recovery chokepoint, which
-re-establishes the session before the op's first attempt -- queued behind the
-release on the transition lock, so it runs on the far side of the close rather
-than racing it. An op already on the wire is covered by the release's own
-precondition rather than by any gate at op entry: a boundary reached with a counted
-operation outstanding closes nothing, so the op completes on the session it was
-issued against and the first boundary past its settlement releases as usual. Each
-boundary a held op straddles costs the mode one idle gap, draws no warning -- a
-concurrent send straddling a boundary is ordinary -- and adds no wait anywhere:
-the release returns rather than draining the operation. The run's totals are kept
-and stated once at the end, as the forced and declined releases' are. What the
-count covers, how that set differs from what is on the wire, what bounds the hold,
-the ops for which nothing does, and what the totals measure, are in
+Where the boundary and a publish meet, the poll loop's own publishes are safe and a
+concurrent send's are not. Each publish is a contiguous run of ops with no idle
+wait in the middle -- a message is a temp write then an atomic rename; an ack is a
+zero-length put then a rename; the joiner sentinel is a put, a delete, then a
+rename; the hello is written directly to its final name and relies on the reader's
+partial-sync gate rather than a rename; a lock is a single atomic exclusive create
+call to the transport. None of them straddles an idle wait, so a publish the POLL
+LOOP itself performs cannot be torn by the boundary that follows it. The boundary
+is not a global idle point, though: `send()` has no mutual exclusion with `poll()`,
+so a release can fall while a send's publish is in flight. An op that reaches the
+transport at or after the release is serialized against it at the adapter's
+recovery chokepoint, which re-establishes the session before the op's first attempt
+-- queued behind the release on the transition lock, so it runs on the far side of
+the close rather than racing it. An op already on the wire is covered by the
+release's own precondition rather than by any gate at op entry: a boundary reached
+with a counted operation outstanding closes nothing, so the op completes on the
+session it was issued against and the first boundary past its settlement releases
+as usual. Each boundary a held op straddles costs the mode one idle gap, draws no
+warning -- a concurrent send straddling a boundary is ordinary -- and adds no wait
+anywhere: the release returns rather than draining the operation. The run's totals
+are kept and stated once at the end, as the forced and declined releases' are. What
+the count covers, how that set differs from what is on the wire, what bounds the
+hold, the ops for which nothing does, and what the totals measure, are in
 [CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md).
 
 One op is outside both of those, and it is the cleanup delete a torn send sweeps
@@ -529,45 +527,44 @@ withheld), not reading the library:
   does not clear on a withheld close; the gate admits the ENDED transport rather
   than the cleared session, which is what makes this path reachable at all.
 
-Two barriers hold it there, and the forced close is load-bearing in both -- the
-first barrier's recovery arm reaches its dial only after one, and the second is
-about the state they leave:
+Two barriers hold it there, and the forced close is required in both -- the first
+barrier's recovery arm reaches its dial only after one, and the second is about the
+state they leave:
 
 1. **No dial gate puts a dial on a live transport.** `ensureConnected` returns
    early on a set session (measured returning true in 0 ms with the transport
    live), and `shouldRecoverFromSessionLoss` refuses a set session unless its
-   transport has ended. The session is not set exactly while the transport is
-   live: the withheld-close partner this note describes throughout leaves it set
-   over an ENDED one. That is the one set-session loss the gates admit to a dial,
-   and what carries the conclusion there is the re-dial's own ordering --
-   `redialForRecovery` retires the torn transport before it dials, so that dial
-   too is issued over a destroyed socket rather than a writable one.
-   ssh2-sftp-client's own "An existing SFTP connection is already defined" guard
-   rejects any dial that reaches it with the session still set, a redundant
-   backstop behind both.
+   transport has ended. The session is not set exactly while the transport is live:
+   the withheld-close partner this note describes throughout leaves it set over an
+   ENDED one. That is the one set-session loss the gates admit to a dial, and what
+   supports the conclusion there is the re-dial's own ordering --
+   `redialForRecovery` retires the torn transport before it dials, so that dial too
+   is issued over a destroyed socket rather than a writable one. ssh2-sftp-client's
+   own "An existing SFTP connection is already defined" guard rejects any dial that
+   reaches it with the session still set, a redundant safety check behind both.
 2. **Neither state a withheld close can leave defers.** A withheld close leaves
    an ENDED transport, which the forced closes destroy -- and a dial on
    `writableEnded: true, destroyed: false` completes in ~220 ms, as does one on a
    destroyed socket. "Ended but still writable" is not a deferring state.
 
-The library mechanism itself still exists, which is the part to carry forward
-rather than discard: a second `connect()` on a live socket does not settle, and
-its precondition is narrower than "an open connection". The measured figures and
-the exact precondition are a normative pin row in
+The library mechanism itself still exists, which is the part to keep rather than
+discard: a second `connect()` on a live socket does not settle, and its
+precondition is narrower than "an open connection". The measured figures and the
+exact precondition are a normative pin row in
 [DEPENDENCY_PINS.md](../spec/DEPENDENCY_PINS.md#upgrading-the-sftp-stack-ssh2--ssh2-sftp-client),
 which defers to this note for the two barriers above and the caveats below.
 
-What the verdict, and the check that carries it, do not cover:
+What the verdict, and the check that backs it, do not cover:
 
 - **Scope.** Three named paths plus one real-exchange census were driven, and the
   check drives the same three. "No path can" is not proven in general, so a new
   dial path needs a case of its own.
-- **The session-lifetime premise.** The dial gates rest on ssh2-sftp-client never
-  clearing its session property while the transport is live. The evidence is
-  positive (the property stayed set on a half-open transport for 20 s) but is not
-  a proof. The check reaches it only indirectly: a version that cleared the
-  property over a live transport would put a dial on a writable socket, which the
-  census fails on.
+- **The session-lifetime assumption.** The dial gates rest on ssh2-sftp-client
+  never clearing its session property while the transport is live. The evidence is
+  positive (the property stayed set on a half-open transport for 20 s) but is not a
+  proof. The check reaches it only indirectly: a version that cleared the property
+  over a live transport would put a dial on a writable socket, which the census
+  fails on.
 - **A true half-close server.** A server that sends its FIN and then never
   completes the close is not reproducible with this harness: the withheld-close
   control silences both `end` and `destroy` on the server socket, so it cannot
@@ -600,11 +597,11 @@ residue below.
   its own -- in particular not the "ssh2 client error outside an operation" line.
   What it does produce is the settled sibling's rejection, and whether that reaches
   the operator is the adapter's own doing: the cycle-start re-dial riding it reads
-  the teardown latch before it warns, and a recovery re-dial's caller surfaces the
-  loss it was recovering from instead of that rejection, so the only operator-facing
-  line on this path is the deliberate one. The cycle-start half is asserted against
-  the real stack at the CLI's default log level, because a mocked dial that stays
-  parked through the destroy never reaches the line at all.
+  the teardown latch before it warns, and a recovery re-dial's caller exposes the
+  loss it was recovering from instead of that rejection, so the only
+  operator-facing line on this path is the deliberate one. The cycle-start half is
+  asserted against the real stack at the CLI's default log level, because a mocked
+  dial that stays parked through the destroy never reaches the line at all.
 
 The bound itself rests on none of this: it is a fixed ceiling on the wait, so
 whether ssh2 arms its connect deadline per attempt changes when the sibling gives
@@ -619,17 +616,17 @@ told to stall its handshake.
 
 ## How this was decided
 
-The seam, scope, config shape, and reconnect posture were settled by an independent
-panel of four expert-model lenses reasoning from first principles with no seeded
-answer -- reliability and failure-mode, distributed-systems and protocol
+The placement, scope, config shape, and reconnect posture were settled by an
+independent panel of four expert-model lenses reasoning from first principles with
+no seeded answer -- reliability and failure-mode, distributed-systems and protocol
 correctness, transport and systems architecture, and operator experience and config
-surface. They converged on the posture (observable and bounded so a held session cannot
-reconnect forever), on connection-per-poll as the structural fix kept
-as a hybrid, on the local non-bilateral explicit opt-in, and -- three of four,
-including the architecture and reliability leads -- on the adapter-owned seam; the
-lone dissent for a core-owned seam rested on a concern (invariants live in core)
-that the adapter seam satisfies by keeping the teardown ordering in `close()`. The
-load-bearing factual claims underneath the decision -- the operative dialing-retry
+surface. They converged on the posture (observable and bounded so a held session
+cannot reconnect forever), on connection-per-poll as the structural fix kept as a
+hybrid, on the local non-bilateral explicit opt-in, and -- three of four, including
+the architecture and reliability leads -- on the adapter-owned placement; the lone
+dissent for a core-owned placement rested on a concern (invariants live in core)
+that the adapter placement satisfies by keeping the teardown ordering in `close()`.
+The critical factual claims underneath the decision -- the operative dialing-retry
 default of three, the surrounding bounds that terminate genuine failures, the
 recovery's then-absent default-verbosity signal, the sticky `closing` latch, the
 drain-budget exposure, and the publish-shape safety of an idle-aligned boundary --
@@ -647,4 +644,4 @@ were then adversarially verified against the tree as it stood.
   clean-close versus local-close classification.
 - [EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md) -- the operator-facing
   configuration reference where the mode and the corrected reconnect behavior are
-  surfaced.
+  shown.

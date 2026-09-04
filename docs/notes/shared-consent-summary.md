@@ -39,20 +39,20 @@ progressive disclosure and accessibility structure, the CLI's indented outline.
 ## What the coverage check pins, and what it cannot
 
 A shared classification table (`linkageTermConsentCoverage.ts`) records, per
-`LinkageTerms` field, whether an acceptor's consent turns on it, and carries a
+`LinkageTerms` field, whether an acceptor's consent turns on it, and includes a
 variant that differs from a base document at that field alone. A surface
 _represents_ a field when it renders the two differently. Each surface runs that
 probe set against its own output, in both directions: a field the surface does
 not represent has to be recorded as a gap, and closing a gap without striking its
 entry fails too.
 
-The limit is worth naming, because it is what makes sharing the summarizer load-
-bearing rather than merely tidy. The check pins REPRESENTATION -- does the field
-move the output -- and never FIDELITY -- does the output say the same thing on
+The limit matters, because it is what makes sharing the summarizer critical
+rather than merely tidy. The check pins REPRESENTATION -- does the field move
+the output -- and never FIDELITY -- does the output say the same thing on
 both surfaces. A second implementation of the judgment above would satisfy the
-check while describing a transform's effect differently, or attaching a caveat to
-the wrong term. One summarizer makes that class of drift unrepresentable instead
-of merely detectable.
+check while describing a transform's effect differently, or attaching a caveat
+to the wrong term. One summarizer makes that class of drift unrepresentable
+instead of merely detectable.
 
 That reasoning generalizes past the summarizer, and the classification below is
 where it was applied a second time. A sentence a surface authors for itself is a
@@ -69,7 +69,7 @@ standards a field commits to. Presenting the two alike invites the acceptor to
 read a cooperative undertaking as a cryptographic guarantee, which is the error
 worth spending screen space to prevent.
 
-So each fact carries a basis, `enforced` or `trust-contingent`, and the caveat
+So each fact has a basis, `enforced` or `trust-contingent`, and the caveat
 sentence that explains it. Both live in core beside the summary
 (`consentFacts.ts`), keyed by a fact identifier; a surface looks the pair up
 rather than stating one of its own.
@@ -80,18 +80,18 @@ the set with no basis beside it. The two surfaces do not disagree there -- one o
 them declines to state the fact rather than stating it differently -- and the
 silence understates, which is the safe direction.
 
-That silence is deliberate rather than pending. The clause the web's line carried
+That silence is deliberate rather than pending. The clause the web's line held
 before -- that any payload column would abort the exchange -- overstates on the
-line it sat on: the commitment holds only where the invitation carries the column
+line it sat on: the commitment holds only where the invitation includes the column
 set, so an empty set reads truer bare than qualified by a promise that does not
 cover it. A fact's classification binds the surface that states the fact, not
 every surface that shows the value.
 
 That the classification is a KEYED TABLE, rather than a field on
-`InvitationSummary`, follows from two properties a per-field flag cannot carry.
+`InvitationSummary`, follows from two properties a per-field flag cannot hold.
 Not every classified fact is a summary field: the acceptor's own outbound columns
 come from its own resolved metadata, never from the partner's token. And one
-underlying field carries two classifications at once -- the viewer's own
+underlying field has two classifications at once -- the viewer's own
 non-receipt is enforced, while the partner's non-receipt on the same
 `output` pair rests on the partner's word. The shared consent-coverage
 classification is the repo's existing precedent for the shape.
@@ -102,7 +102,7 @@ parties' output directions are compared as a mirror before data moves, and the
 run then delivers the result to the party those agreed terms entitle to it, so
 the disclosure is one the exchange makes rather than one the partner elects. What
 the partner does with the result once it holds it is a limit on its USE and not on
-whether the disclosure happens, so the fact's caveat sentence carries that limit
+whether the disclosure happens, so the fact's caveat sentence states that limit
 rather than its marker. A `no` -- a result withheld from a partner -- stays
 trust-contingent, because one-sided PSI gives this side nothing to impose it
 with. Marking the disclosure that certainly happens as merely the partner's word
@@ -110,7 +110,7 @@ would be the same error as presenting the withholding as a guarantee, facing the
 other way.
 
 The caveat sentence is one shared string, not two agreeing ones. The web's copy
-was the material to promote: every line carrying this classification there is
+was the material to promote: every line holding this classification there is
 markup-free text in a single element, so nothing about the markup forced a
 per-surface wording, and the web's had already been reviewed. What stays
 per-surface is only the fact line itself -- its label and value -- and the
@@ -131,7 +131,7 @@ structurally rather than in words. The line renders only for a DECLARED
 direction; a direction the invitation leaves open prints no line at all and is
 reconciled against the sender's own disclosure when the exchange runs. A reader
 meeting `(none)` is therefore already looking at an explicit declaration, and a
-clause saying so restates what the structure carries.
+clause saying so restates what the structure holds.
 
 What such a clause adds beyond that restatement is worse than redundant. Payloads
 are exchanged before either side reconciles what it received, so a violated
@@ -142,9 +142,9 @@ machine.
 
 So the line states what crosses, and whether the exchange holds that fact or the
 inviting party merely declared it is the basis marker's job -- the division of
-labour the classification above sets up. The lock-in mechanics, which party aborts
+labour the classification above sets up. The enforcement mechanics, which party aborts
 and that the abort follows transmission, are the operator's to know and are
-carried in [CLI.md](../CLI.md#offline-acceptance), which has room to state them.
+stated in [CLI.md](../CLI.md#offline-acceptance), which has room to state them.
 
 ## One line, two bases: carried against declared
 
@@ -155,7 +155,7 @@ bytes that flow. Where it carries none -- an older or metadata-unknown mint, or 
 inviter's own pre-mint preview of terms it has authored but not yet minted -- the
 line falls back to the `payload.send` the inviter wrote.
 
-Both are declarations; only one of them is a lock-in. An acceptance records the
+Both are declarations; only one of them is enforced. An acceptance records the
 CARRIED subset as what it will receive and the received payload is reconciled
 against it, while the authored fallback records nothing -- and an absent
 expectation is the lazy reconciliation path, whose absent-versus-empty semantics
@@ -167,7 +167,7 @@ the declaration lets a partner earn the `enforced` marker without earning the
 check behind it.
 
 So the fact splits in two, one entry per basis, selected on the provenance the
-summary already knows. This is the second line to carry two classifications at
+summary already knows. This is the second line to hold two classifications at
 once, and it does so on a different axis than the first: the partner's result
 receipt splits by the fact's VALUE, this one by where the displayed set came from.
 The keyed table absorbs both without a conditional-basis mechanism, which is the
@@ -184,12 +184,12 @@ The classification keys on the invitation, and the invitation is the same on bot
 acceptance paths. The enforcement is not. An offline acceptance writes a
 configuration whose terms mirror the inviter's `payload.send` into this party's own
 `payload.receive`, and the later `psilink exchange` falls back to that mirror as
-its received-column lock-in where no carried subset was recorded. The
+its received-column commitment where no carried subset was recorded. The
 authored-declaration case is therefore enforced on that path, and the line marks it
 as the partner's word regardless.
 
 That understatement is deliberate. The display is rendered at consent time, before
-the run that follows is settled, and one marking serves both paths, so one of the
+the run that follows is decided, and one marking serves both paths, so one of the
 two is wrong in one of the two cases. Only one of those errors costs the operator
 anything. An operator told psilink will stop a violation it will not stop plans
 around a check that never runs -- the failure this classification exists to
@@ -251,7 +251,7 @@ send is misinformed, while one who reads nothing where a disclosure happens is
 misinformed and unaware there is anything to check.
 
 Because the fact is viewer-relative, so is the sentence that states it -- "your
-partner", "your file" -- and one wording therefore serves either seat. It is carried
+partner", "your file" -- and one wording therefore serves either seat. It is held
 once beside the classification and rendered by each place that states it in prose:
 the web consent screen's outbound block, the inviter's preview, and the acceptor's
 column-picking step, which is the screen where the operator is actively marking what
@@ -289,17 +289,17 @@ only where this party's `output.shareWithPartner` says the partner receives the
 matched result, the same entitlement the outbound-send gate reads. Where it does
 not, nothing crosses whatever the metadata discloses, the line reads that no
 payload is sent, and no warning is stated against it. `docs/spec/FILE_SYNC.md`
-carries the normative rule and `docs/CLI.md` the per-path account of what
+holds the normative rule and `docs/CLI.md` the per-path account of what
 acceptance does after it states the conflict.
 
 ## Proposed is not applied
 
 One setting an inviter may declare is not honored by today's exchange: the
 per-element fuzzy-comparison expansion. `APPLIED_SETTINGS` is the single source of
-truth for which, and the summary carries the resulting flags alongside each term
+truth for which, and the summary includes the resulting flags alongside each term
 rather than leaving each renderer to consult it. A surface therefore cannot state
 a matching behavior the run does not perform, and cannot forget the caveat for one
-setting while carrying it for another.
+setting while stating it for another.
 
 It does not change what is disclosed -- it changes match breadth -- so its caveat
 sits one expand down with the headline it qualifies. A setting that stated a
@@ -315,7 +315,7 @@ must not be swapped: a caveat saying the run proceeds and reveals more than the
 headline promised describes a run that does not happen, which is what one surface
 once said about a count-only invitation while the other said the opposite.
 
-The caveat copy is carried once, beside the classification, and rendered twice --
+The caveat copy is held once, beside the classification, and rendered twice --
 for the same reason the classification is. Two surfaces authoring their own
 account of the same unimplemented setting is how they came to say opposite things
 about a proposed count-only exchange in the first place.
@@ -334,7 +334,7 @@ declaring party's own declaration rather than a figure any check binds.
 The last of those is the one a surface would be tempted to drop, and dropping it
 would state a guarantee no check makes. So it is not left to either surface's
 discretion: the sentence is one string in core, and the consent-coverage
-classification carries it as the copy BOTH surfaces must render for a
+classification holds it as the copy BOTH surfaces must render for a
 deduplicating document. The representation check alone could not catch its loss --
 a surface that renders only "duplicate matches: yes" still moves when the term
 moves -- which is exactly why the pin sits beside the classification rather than
@@ -381,10 +381,10 @@ is the same reason every other caveat in the table is an entry rather than prose
 in a renderer.
 
 The split is also what keeps the duplicate-matches marker where it belongs. That
-marker carries its headline's own fact, match multiplicity, which the run does
+marker states its headline's own fact, match multiplicity, which the run does
 hold; the limit sitting past what the marker holds is a classified fact beside
 it, in the other register, rather than something the headline's marker could be
-read as covering. Reclassifying the headline instead would understate a
+treated as covering. Reclassifying the headline instead would understate a
 multiplicity the exchange enforces in order to qualify a display fact standing
 beside it -- the same division the partner's result receipt takes above and the
 retain-mode line takes below.
@@ -393,8 +393,8 @@ That forced the pin to grow a shape axis of its own. It names copy a surface mus
 render for a variant document, so a term with two truthful sentences could
 otherwise pin only what both shapes share -- which is neither sentence -- or pin
 one and let the other shape render it. The classification names the shapes
-instead, and each carries both the copy its variant owes and the copy it must not
-carry, so a surface rendering one sentence under every shape fails on the shape
+instead, and each holds both the copy its variant owes and the copy it must not
+include, so a surface rendering one sentence under every shape fails on the shape
 whose run does not make that disclosure. Both surfaces are measured against the
 same two pairs. The display limit rides those pairs too: the sole-receiver shape
 owes it beside its statement, and the both-receive shape forbids it, since a
@@ -406,7 +406,7 @@ status: the duplicate-matches headline states match multiplicity, so it sits
 inside a disclosure, and the sentence sits with it.
 
 A direction note sits beside whichever statement the shape selects, and the pin
-carries both, because what the setting discloses and whose records are grouped to
+holds both, because what the setting discloses and whose records are grouped to
 disclose it are separate facts a reader needs together. Acceptance derives the
 accepting party's own `deduplicate` as false rather than adopting the
 invitation's, so the pair an accepted deduplicating invitation resolves to is
@@ -415,12 +415,12 @@ have no way to tell whether their own file is the one being grouped -- and the
 invitation offers no control for the other direction, so the sentence names the
 per-party configuration path that does.
 
-That note carries a second fact for the same reason it carries the first: what
+That note states a second fact for the same reason it states the first: what
 the derivation closes is the grouping, not the acceptor's own outbound
 disclosure. More of the accepting party's records can match than in a one-to-one
 run of the same two files -- disclosing their membership and any payload columns
 that party sends -- on the inviting party's declaration alone. A note stating
-only that the accepting party's records are not grouped would read as the setting
+only that the accepting party's records are not grouped would be treated as the setting
 costing that party nothing, which is the reading the run does not support.
 
 It states that outcome rather than the mechanism behind it. The mechanism -- a
@@ -441,7 +441,7 @@ algorithm away. The algorithm alone is what reaches the tier: no second flag can
 hold half of it back, and none can be left set while the other clears.
 
 The count-only disclosure statement itself is shared wording rather than a shared
-placement. The web screen carries it as the matching-method headline; the CLI
+placement. The web screen has it as the matching-method headline; the CLI
 accept prompt names the algorithm there and prints the statement beneath it. Each
 surface's render test pins the tier's own wording and placement, and the absence
 of every one of its sentences from a `psi` invitation, so the presence is the
@@ -468,7 +468,7 @@ guarantee and what an acceptor is told it guarantees.
   refusing a mismatched round; neither asks for the partner's cooperation.
 - **What the rounds still disclose** -- enforced. The record and element counts
   above are disclosed however either party behaves, the same register as the
-  own-membership disclosure a one-sided `psi` exchange carries.
+  own-membership disclosure a one-sided `psi` exchange has.
 - **How the count reaches a party that did not compute it** -- trust-contingent.
   It arrives as the receiver's report, and psilink does not check it, exactly as
   the `psi` association-table return leg does not.
@@ -487,7 +487,7 @@ bounds a setting the run does honor.
 
 The outbound-send slot's existing sentence reasons from output entitlement -- the
 partner receives no result, so nothing is transmitted to it. Under `psi-c` that
-reasoning does not reach the fact: the algorithm carries no payload in either
+reasoning does not reach the fact: the algorithm includes no payload in either
 direction whichever party the terms entitle to the count, and the refusal of a
 terms document declaring one is fail-closed at three points
 ([PROTOCOL.md](../spec/PROTOCOL.md#psi-c)). So the slot states the algorithm as
@@ -497,9 +497,9 @@ leaves their machine is also where the specification puts it -- at the choice, n
 as a surprise once the run aborts.
 
 Each surface backs that sentence with a render-side refusal rather than printing
-it over a contradiction: a `psi-c` whose viewer-side outbound set carries a
+it over a contradiction: a `psi-c` whose viewer-side outbound set contains a
 column, or whose invitation declares payload in either direction, throws instead
-of rendering the guarantee. Those throws are a backstop and not the remedy. The
+of rendering the guarantee. Those throws are a safety check and not the remedy. The
 remedy is the actionable refusal ahead of them: a payload-declaring `psi-c`
 document is refused wherever it is parsed, and an input-metadata payload column
 wherever a surface holds this party's own metadata beside the agreed algorithm --
@@ -514,7 +514,7 @@ the result note denies any record-by-record pairing -- and `deduplicate` is
 refused by the count-only rule, a count-only run reporting a size rather than a
 pairing for any multiplicity to widen. None of those
 three -- more than one linkage key, single-pass, and deduplicate -- has a render
-backstop, by decision rather than omission: the refusals reach them where the
+safety check, by decision rather than omission: the refusals reach them where the
 terms are authored, at parse, and at accept, which is where a document that
 breaks one is stopped.
 
@@ -523,7 +523,7 @@ beside the algorithm it prints there, is the same judgment read from
 the other end: under `psi-c` what the run discloses IS the decision, so
 these are the facts an operator answering the prompt has to have in front
 of them rather than the terms they qualify. It costs length -- the block
-below carries a fixed budget of four lines plus the acceptor's own columns,
+below has a fixed budget of four lines plus the acceptor's own columns,
 a retain disclosure adds roughly two wrapped lines to each printing for the
 repeated fact plus a one-time ten-line caveat printed once in the outline
 after the first printing, and a count-only exchange adds its tier to that --
@@ -556,7 +556,7 @@ party a pairing.
 
 ## A fact that outlives the run, and the negative it does not state
 
-The retain declaration is the first entry keyed on something the token carries
+The retain declaration is the first entry keyed on something the token holds
 rather than on a term of the exchange: the inviting party's `retain_files`, which
 makes the rendezvous location a permanent transcript instead of emptying it as each
 message is consumed. Its wire form, the mint paths that stamp it, and why a
@@ -564,21 +564,21 @@ declared-but-never-applied flag stays inside the transport's detect-and-fail sta
 are the spec's ([FILE_SYNC.md](../spec/FILE_SYNC.md#retain-mode-declaration-on-the-token)).
 What is this table's is the classification and the copy.
 
-The basis splits, and the split is the reason the entry carries a caveat sentence
+The basis splits, and the split is the reason the entry has a caveat sentence
 rather than only a marker. The mode AGREEMENT is the run's: both parties advertise
 their setting in the hello and a disagreement aborts both sides before any data
 moves, so an exchange that runs at all is one both parties ran in the declared mode
 -- an acceptor cannot be walked into a transcript they did not consent to. What
 becomes of that transcript once the run ends is not the run's at all: retain mode
 deletes nothing, the location is the inviting party's, and psilink is not in the
-decision. Marking the whole line `enforced` would let the second half read as the
+decision. Marking the whole line `enforced` would let the second half be treated as the
 first; splitting it into two entries would put two markers on one fact and invite a
 reader to weigh them against each other. So the marker states the half the run
-holds and the note carries the half it does not, which is the shape
+holds and the note states the half it does not, which is the shape
 `partnerReceivesResult` already uses for a disclosure that happens and a use that
 is not this tool's to govern.
 
-**The negative is deliberately unstated.** A surface renders the fact where
+**The negative is unstated by design.** A surface renders the fact where
 retention is disclosed and nothing where it is not. An invitation declaring delete
 mode, and one declaring nothing at all, render alike -- nothing -- and the two are
 alike for different reasons that land in the same place. An absent declaration has
@@ -590,18 +590,18 @@ partner deletes the files" would be the same error the enforced marker exists to
 prevent, facing the other way -- a reassurance stated as a guarantee no check
 backs.
 
-That is why the summary carries `disclosesRetainedFiles`, a one-way flag, rather
+That is why the summary includes `disclosesRetainedFiles`, a one-way flag, rather
 than the token's three-valued field. The narrowing happens once, at the summary,
 where the reasoning is recorded; a renderer handed the raw value could reach the
 `false` and word a cleanup promise around it, and no test over one surface would
 notice the other had not. Naming the flag for the disclosure rather than for the
-mode is the second half of the same move: `disclosesRetainedFiles === false` reads
+mode is the second half of the same move: `disclosesRetainedFiles === false` is treated
 as "the invitation discloses no retention", which is true of every case it covers,
-where an `inviterRetainsFiles === false` on the display model would read as the
+where an `inviterRetainsFiles === false` on the display model would be treated as the
 claim itself.
 
 **The declaration is not the only ground.** The same flag is true where the
-invitation's connection endpoint carries a split inbound/outbound directory pair,
+invitation's connection endpoint has a split inbound/outbound directory pair,
 whose shape the accepting side's own connection is seeded from -- and a split
 directory cannot be configured without retain mode, so that acceptor runs in retain
 mode whether or not the token said so. Deriving the display from the shape as well
@@ -623,7 +623,7 @@ implementation the representation check cannot tell apart from the first.
 
 **Reclassify the inviter's authored payload declaration as consent-irrelevant,
 on the grounds that the received-columns line is better derived from the token's
-carried disclosure predicate.** The premise is right and the summary already acts
+carried disclosure predicate.** The assumption is right and the summary already acts
 on it: the line derives from the carried `disclosedPayloadColumns` where the
 invitation carries one, falling back to the authored declaration otherwise. That
 makes reclassification unnecessary, and it would have cost measurement -- an
@@ -634,7 +634,7 @@ a field they do represent.
 
 Two obligations do not transfer with the model.
 
-A value the summary does not carry is that renderer's own responsibility. The
+A value the summary does not include is that renderer's own responsibility. The
 CLI prompt leads with the acceptor's OWN outbound columns, read from the
 operator's input file rather than from the partner's token; those reach no
 display boundary of their own and are escaped where the renderer emits them,
@@ -642,7 +642,7 @@ which is their sink.
 
 Joining is a renderer's decision and a renderer's hazard. The display sanitizer
 neutralizes control, bidi, and non-ASCII code points but leaves a printable ASCII
-comma intact, so a comma-joined list lets one partner-controlled name read as
+comma intact, so a comma-joined list lets one partner-controlled name display as
 two. Both surfaces render every such list one entry per line.
 
 The basis markers inherit the same limit, and it is accepted rather than closed.
@@ -657,7 +657,7 @@ no printable-ASCII value can imitate, which the terminal has no budget for; a
 third surface inheriting this vocabulary inherits the limit with it.
 
 Putting a fact back in front of the operator is also a renderer's decision, and
-the shape it takes is the load-bearing part. A terminal has no scrollback the
+the shape it takes is the critical part. A terminal has no scrollback the
 prompt can rely on: a default-terms invitation renders far past what a terminal
 shows, so the operator answering the CLI prompt is reading the tail of the key
 list, and the facts the decision turns on left the screen long before. The CLI
@@ -676,7 +676,7 @@ to have, rather than restating them: each partner-controlled value stays behind
 its fixed first-party label, on its own line, where it can neither begin a line
 nor manufacture one.
 
-What the repetition carries is a deliberate selection, and what it leaves out is
+What the repetition includes is a deliberate selection, and what it leaves out is
 chosen rather than overlooked. The linkage strategy and, under single-pass, its
 disclosure note are not among the repeated facts, though that note describes a
 real disclosure the acceptor consents to. The note is 423 characters, about six
@@ -695,7 +695,7 @@ repetition is seven lines at three disclosed columns, forty-four at forty, and a
 hundred and twenty-four at a hundred and twenty; past roughly nineteen columns it
 scrolls on an eighty-by-twenty-four terminal, and the first thing to go is the
 outbound-send list, which is the acceptor's hardest-to-undo consent. Where the
-invitation also discloses retained files the block carries one line more, about
+invitation also discloses retained files the block has one line more, about
 two more wrapped, and the scroll point moves in to roughly seventeen. That count
 comes from the operator's own file and not from the partner, so it is a limit of
 the mitigation rather than something a partner can drive. No check holds a bound
@@ -725,7 +725,7 @@ screen.
 The block's budget and the length of a classified fact's caveat were weighed
 against each other at the retain declaration, the one entry whose caveat is long
 enough to decide the question. That sentence is 726 characters, ten wrapped lines
-beneath the line it explains, so carrying it at both printings spends twenty
+beneath the line it explains, so including it at both printings spends twenty
 wrapped lines on a single fact -- enough on its own to move the scroll point from
 roughly nineteen disclosed columns to seven, with the outbound-send list the
 first thing over the edge. So the block repeats the FACT, at the one line that
@@ -749,7 +749,7 @@ repeats is the fact's own label and value and nothing new: one wording, at both
 printings, with no abridgement for it to drift from.
 
 The retain line is last in the block so the caveat lands under the line it
-explains. Printed under whatever else the block reached, it would read as the
+explains. Printed under whatever else the block reached, it would display as the
 count-only tier's or the disproved citation's. That adjacency is a check rather
 than a sentence here.
 
@@ -757,9 +757,9 @@ The single-pass disclosure note lands where it does under the same rule, and
 lands differently because its two halves are not the retain entry's two halves.
 Its fact is the linkage strategy, and `linkage strategy: single-pass` states no
 disclosure on its own -- what the acceptor consents to is entirely in the 423
-characters under it. There is no one-line half to repeat: a block carrying the
+characters under it. There is no one-line half to repeat: a block including the
 label alone would put a word in front of the operator that says nothing, and one
-carrying the note would be back to lengthening the block. So both halves stay in
+including the note would be back to lengthening the block. So both halves stay in
 the outline, and the limit that leaves -- an operator who reads only the
 repetition has not seen every disclosure-affecting term -- is stated in
 [CLI.md](../CLI.md#offline-acceptance) rather than closed here.

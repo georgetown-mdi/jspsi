@@ -4,9 +4,9 @@ title: "What a FIPS Provider Offers in the Shipped Image"
 
 # What a FIPS provider offers in the shipped image
 
-*Status: measurement, plus two decisions taken on it. This note records what an OpenSSL FIPS provider carries and reaches inside the container image PSI-Link ships, and what the CMVP certificates approve, so the container, compliance, and crypto items can cite a measurement instead of a belief. The owner has since set FIPS 140-3 as the target standard and accepted that the Alpine base will likely give way. Which certificate and base pair is now settled -- AWS's certificate 5021, a 140-3 validation, on `amazonlinux:2023`, shipped as a separate variant image -- and whether to pursue a FIPS claim at all remains open. See [docs/notes/README.md](README.md).*
+*Status: measurement, plus two decisions taken on it. This note records what an OpenSSL FIPS provider holds and reaches inside the container image psilink ships, and what the CMVP certificates approve, so the container, compliance, and crypto items can cite a measurement instead of a belief. The owner has since set FIPS 140-3 as the target standard and accepted that the Alpine base will likely give way. Which certificate and base pair is now decided -- AWS's certificate 5021, a 140-3 validation, on `amazonlinux:2023`, shipped as a separate variant image -- and whether to pursue a FIPS claim at all remains open. See [docs/notes/README.md](README.md).*
 
-Three unverified facts gated the whole FIPS thread: whether the provider we would ship carries X25519 key agreement, whether it carries Ed25519 signing, and whether Node's WebCrypto in the shipped image engages a configured FIPS provider at all. All three are now measured by running the real tool in an image built on this repo's `Dockerfile` runtime base. Two of the answers invert the assumption they replace.
+Three unverified facts gated the whole FIPS thread: whether the provider we would ship has X25519 key agreement, whether it has Ed25519 signing, and whether Node's WebCrypto in the shipped image engages a configured FIPS provider at all. All three are now measured by running the real tool in an image built on this repo's `Dockerfile` runtime base. Two of the answers invert the assumption they replace.
 
 Nothing measured here changes any shipped code. The harness is `support/fips-probe/`, driven by `.github/workflows/fips_provider_probe.yaml`; it builds a throwaway image and the runtime stage of `Dockerfile` is untouched.
 
@@ -48,7 +48,7 @@ The prior belief recorded on the board was "believed absent -- unverified". That
 Two traps around this answer, both of which produce a confident wrong result:
 
 - X25519 does appear in 3.5.7's **KEM** list, inside the hybrid `X25519MLKEM768`. That is a TLS hybrid group, not standalone X25519 key agreement. Any check that greps the combined output for the substring reports X25519 present in 3.5.7. The harness matches whole algorithm names per listing for this reason.
-- A provider that fails to load lists nothing, which reads exactly like a provider that carries nothing. The harness reads the provider's `status:` back from `openssl list -providers` first and reports UNSETTLED rather than ABSENT when it is not active.
+- A provider that fails to load lists nothing, which reads exactly like a provider that holds nothing. The harness reads the provider's `status:` back from `openssl list -providers` first and reports UNSETTLED rather than ABSENT when it is not active.
 
 ## Question 2: is Ed25519 among the provider's signature algorithms?
 
@@ -56,7 +56,7 @@ Two traps around this answer, both of which produce a confident wrong result:
 
     { 1.3.101.112, ED25519 } @ fips      # 3.0.21 and 3.5.7 alike
 
-3.5.7 additionally carries ED448, ED25519ph and ED448ph. This also inverts the recorded belief ("believed absent -- unverified"), and it inverts for both candidate builds rather than splitting between them.
+3.5.7 additionally has ED448, ED25519ph and ED448ph. This also inverts the recorded belief ("believed absent -- unverified"), and it inverts for both candidate builds rather than splitting between them.
 
 ## Question 3: does `crypto.subtle` engage the configured provider for AES-256-GCM?
 
@@ -65,11 +65,11 @@ Two traps around this answer, both of which produce a confident wrong result:
 The acceptance criterion here was to distinguish "the call succeeded" from "the call ran inside the provider". A call that returns proves nothing on its own: with no provider loaded at all, the same AES-256-GCM round trip succeeds through the default provider and looks identical. So the verdict is computed from four legs, and ENGAGED requires all of them:
 
 1. **The module is in the process.** `fips.so` appears in `/proc/self/maps`, checked after the crypto call because provider loading can be lazy.
-2. **The call succeeds while FIPS properties are required.** AES-256-GCM encrypt and decrypt at the product's call shape -- a raw-imported 256-bit key and a 12-byte IV, matching the envelope in `packages/core/src/connection/encryptedMessageConnection.ts` -- under a configuration that activates fips and base and deliberately does not activate default.
+2. **The call succeeds while FIPS properties are required.** AES-256-GCM encrypt and decrypt at the product's call shape -- a raw-imported 256-bit key and a 12-byte IV, matching the envelope in `packages/core/src/connection/encryptedMessageConnection.ts` -- under a configuration that activates fips and base and, by design, does not activate default.
 3. **Operations no FIPS provider serves fail in that same process.** An MD5 digest and an RSA keygen below the FIPS minimum modulus both fail. Had either survived, the default provider would still be reachable and leg 2 would be unattributable.
 4. **Breaking the provider stops the call.** With the `module-mac` in `fipsmodule.cnf` corrupted, and again with `fips.so` truncated, the AES call no longer runs.
 
-Leg 4 is worth reading closely, because what happens is stronger than a failed call: Node **aborts during startup**.
+What happens on leg 4 is stronger than a failed call: Node **aborts during startup**.
 
     Assertion failed: ncrypto::CSPRNG(nullptr, 0)
 
@@ -99,22 +99,22 @@ Engagement is necessary but not sufficient: a provider only covers operations th
 
 The last row needed its own measurement, because "WebCrypto engages" says nothing about `node:crypto`. It does dispatch through the provider: MD5 fails under a fips-only configuration on both builds, and `generateKeyPairSync('x25519')` fails under 3.5.7 while succeeding under 3.0.21 -- independently reproducing the question-1 answer through a completely different API surface.
 
-That has a deployment consequence worth carrying to the SFTP profile item: in a fips-only container with a 3.5.x provider, `ssh2` loses X25519 keypair generation, and with it the `curve25519-sha256` SSH key exchange, plus MD5 for key fingerprints. Under a 3.0.x provider X25519 survives. Which SSH algorithms remain available is therefore a function of the provider build, and it is not something the WebCrypto answer would have surfaced.
+That has a deployment consequence for the SFTP profile item: in a fips-only container with a 3.5.x provider, `ssh2` loses X25519 keypair generation, and with it the `curve25519-sha256` SSH key exchange, plus MD5 for key fingerprints. Under a 3.0.x provider X25519 survives. Which SSH algorithms remain available is therefore a function of the provider build, and it is not something the WebCrypto answer would have shown.
 
 The ceiling this table implies is the important part. Every operation psilink performs itself -- the AEAD, the key-schedule primitives, key establishment, and receipt signing -- can sit inside a provider boundary, because each is a `crypto.subtle` call. The PSI masking cannot, and it is the one that no move to WebCrypto fixes: it is BoringSSL inside a vendored module, not OpenSSL.
 
 ## What the certificates say
 
-Everything above describes a provider's algorithm surface. A FIPS claim rests on a certificate, and the two are not the same thing: a module can carry an algorithm its certificate does not approve. This section was added after the certificates were read from a network-capable host, and it answers what this note originally recorded as unsettled.
+Everything above describes a provider's algorithm surface. A FIPS claim rests on a certificate, and the two are not the same thing: a module can have an algorithm its certificate does not approve. This section was added after the certificates were read from a network-capable host, and it answers what this note originally recorded as unresolved.
 
-The OpenSSL Project holds three active certificates under the module name "OpenSSL FIPS Provider": **4282** and **4811** (FIPS 140-2, module versions 3.0.8 and 3.0.9), and **4985** (FIPS 140-3, module version 3.1.2). The certified surface is therefore not one series. The variant image pairs with a vendor certificate rather than any of them -- AWS's **5021**, FIPS 140-3, module version `3.0.8-d694bfa693b76001` -- whose tables are read in [CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#what-certificate-5021-attests) and carried in the last column below for comparison.
+The OpenSSL Project holds three active certificates under the module name "OpenSSL FIPS Provider": **4282** and **4811** (FIPS 140-2, module versions 3.0.8 and 3.0.9), and **4985** (FIPS 140-3, module version 3.1.2). The certified surface is therefore not one series. The variant image pairs with a vendor certificate rather than any of them -- AWS's **5021**, FIPS 140-3, module version `3.0.8-d694bfa693b76001` -- whose tables are read in [CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#what-certificate-5021-attests) and shown in the last column below for comparison.
 
 The two algorithms this spike measured land differently on each certificate, and that difference is the whole answer:
 
 | Algorithm | 4282 / 4811 (140-2) | 4985 (140-3) | 5021 (140-3) |
 |---|---|---|---|
-| X25519 | Table 7, **Allowed** | Table 8, **Non-Approved, Not Allowed** | In **no table**; module carries no X25519 |
-| Ed25519 | Table 8, **Non-Approved** | Table 8, **Non-Approved, Not Allowed** | In **no table**; module carries no Ed25519 |
+| X25519 | Table 7, **Allowed** | Table 8, **Non-Approved, Not Allowed** | In **no table**; module has no X25519 |
+| Ed25519 | Table 8, **Non-Approved** | Table 8, **Non-Approved, Not Allowed** | In **no table**; module has no Ed25519 |
 
 Neither appears in the approved-algorithm table of any of the four. The 140-2 policy states the rule rather than leaving it to be inferred from table membership: use of the approved algorithms "and allowed algorithms listed in table 7" places the module in the Approved mode, while use of a Table 8 algorithm "will place the module in the non-Approved mode of operation". The EdDSA placement is deliberate -- the policy revision history records "Updated to move EdDSA to the non-Approved mode" at version 1.2, 26 January 2023.
 
@@ -130,14 +130,14 @@ The middle category is where the taxonomy is certificate-specific rather than st
 
 The direction of travel tightens. A newer certified provider withdraws X25519's reprieve rather than extending it, so "wait for a newer certificate" is not a strategy that helps here.
 
-The runtime measurements agree with the tables, which is a useful cross-check that the intended module was loaded: under a fips-only configuration on 3.0.8 and 3.0.9, an X25519 `deriveBits` succeeds while the below-minimum RSA keygen and the MD5 digest fail beside it -- exactly the behaviour of an algorithm the module serves without approving. Those are the OpenSSL Project's from-source builds of those versions, and the version number is not what decides it: AWS's certified module is 3.0.8 too, and carries no X25519 at all.
+The runtime measurements agree with the tables, which is a useful cross-check that the intended module was loaded: under a fips-only configuration on 3.0.8 and 3.0.9, an X25519 `deriveBits` succeeds while the below-minimum RSA keygen and the MD5 digest fail beside it -- exactly the behaviour of an algorithm the module serves without approving. Those are the OpenSSL Project's from-source builds of those versions, and the version number is not what decides it: AWS's certified module is 3.0.8 too, and has no X25519 at all.
 
 ### A Table 13 row that does not say what it appears to say
 
-Certificate 4985's Table 13 (Non-Approved Services) carries a **Key Derivation** row, "Derive keys (key derivation key passed in by the calling process)", over `X942KDF-CONCAT`, `X963KDF`, `HKDF` and `OneStep KDF`. Read on its own it says that HKDF with a caller-supplied key is a non-approved service -- which would put PSI-Link's whole key schedule, and the collapsed `deriveBits` call that
-[key-establishment-fips-boundary.md](key-establishment-fips-boundary.md) lands on an approved `KDA HKDF` row, outside the approved set. It does not say that, and the reading is worth landing here because it will otherwise be met cold by whoever reads the certificate next.
+Certificate 4985's Table 13 (Non-Approved Services) has a **Key Derivation** row, "Derive keys (key derivation key passed in by the calling process)", over `X942KDF-CONCAT`, `X963KDF`, `HKDF` and `OneStep KDF`. Read on its own it says that HKDF with a caller-supplied key is a non-approved service -- which would put psilink's whole key schedule, and the collapsed `deriveBits` call that
+[key-establishment-fips-boundary.md](key-establishment-fips-boundary.md) lands on an approved `KDA HKDF` row, outside the approved set. It does not say that, and the reading is recorded here because it will otherwise be met cold by whoever reads the certificate next.
 
-**Table 13 is the service view of Table 8, and each row carries Table 8's qualification with it.** The correspondence was checked entry for entry: every algorithm named across Table 13's eight rows appears in Table 8 (Non-Approved, Not Allowed Algorithms), and Table 8 names none that Table 13 omits. So the Key Derivation row's four algorithms each arrive with the condition Table 8 states for them, and none of those conditions is "when the caller supplies the key":
+**Table 13 is the service view of Table 8, and each row includes Table 8's qualification.** The correspondence was checked entry for entry: every algorithm named across Table 13's eight rows appears in Table 8 (Non-Approved, Not Allowed Algorithms), and Table 8 names none that Table 13 omits. So the Key Derivation row's four algorithms each arrive with the condition Table 8 states for them, and none of those conditions is "when the caller supplies the key":
 
 | Table 8 entry | The stated condition |
 |---|---|
@@ -146,16 +146,16 @@ Certificate 4985's Table 13 (Non-Approved Services) carries a **Key Derivation**
 | `X942KDF-CONCAT` | usage with PRF SHA-1, the truncated SHA-2 variants, the SHA-3 family, SHAKE, or KECCAK-KMAC |
 | `X963KDF` | the same PRF list |
 
-PSI-Link derives with HKDF-SHA-256 from 256-bit key-derivation keys to 256-bit outputs, so neither end of the derivation approaches the 112-bit threshold that row states and the row does not reach it.
+psilink derives with HKDF-SHA-256 from 256-bit key-derivation keys to 256-bit outputs, so neither end of the derivation approaches the 112-bit threshold that row states and the row does not reach it.
 
-Two corroborations, from the same policy. `KDA HKDF SP800-56Cr2` is in **Table 5 (Approved Algorithms)**, and **Table 12 (Approved Services)** carries a "Key derivation (Perform approved security functions)" service whose indicator list includes `[HKDF: HKDF, MAC: HMAC, (SHA1, SHA2-224, SHA2-256, ...)]`. An algorithm cannot be both blanket non-approved and an approved service; the Table 8 qualification is what makes the two tables consistent.
+Two corroborations, from the same policy. `KDA HKDF SP800-56Cr2` is in **Table 5 (Approved Algorithms)**, and **Table 12 (Approved Services)** has a "Key derivation (Perform approved security functions)" service whose indicator list includes `[HKDF: HKDF, MAC: HMAC, (SHA1, SHA2-224, SHA2-256, ...)]`. An algorithm cannot be both blanket non-approved and an approved service; the Table 8 qualification is what makes the two tables consistent.
 
 **Why the misreading is easy, stated so it is not made twice.** Table 13's rows are not uniformly self-contained. Its **Keyed Hash** row spells its condition out inline -- "Generate HMAC using key length less than 112 bits" -- and its **Random** row names the specific non-approved DRBG PRFs, while the Key Derivation row states only the caller-supplies-the-key condition and leaves the algorithm-level qualification to Table 8. A reader who takes each Table 13 row as complete in itself gets the HMAC answer right and the HKDF answer wrong.
 
-What this settles is the algorithm's approval status on certificate 4985, and no more. Whether the module accepts a caller-supplied byte string as the shared-secret input to a given derivation service is a separate question, recorded as open in
-[key-establishment-fips-boundary.md](key-establishment-fips-boundary.md) and settled by driving the module rather than by reading further policy text.
+What this determines is the algorithm's approval status on certificate 4985, and no more. Whether the module accepts a caller-supplied byte string as the shared-secret input to a given derivation service is a separate question, recorded as open in
+[key-establishment-fips-boundary.md](key-establishment-fips-boundary.md) and determined by driving the module rather than by reading further policy text.
 
-The reading is 4985's alone, and certificate 5021 reaches the same answer through a differently arranged policy. Its non-approved *services* table is **Table 14**, whose "Key derivation" row carries KBKDF, `KDA OneStep`, `KDA TwoStep`, HKDF, ANS X9.42 KDF and ANS X9.63 KDF at "< 112-bit keys", with further entries conditioning `KDA OneStep`, `KDA TwoStep` and ANS X9.42 KDF on the SHAKE PRFs, ANS X9.63 KDF on those plus SHA-1, and the SSH, TLS 1.2 and TLS 1.3 KDFs each on a named hash list. Two things separate it from 4985's row. Its condition is a parameter condition stated inline rather than 4985's "key derivation key passed in by the calling process" description with the qualification deferred to another table, so the misreading above does not arise on that certificate at all; and its approved-services table carries a key-derivation service for HKDF from a shared secret, which is the same corroboration 4985's Table 12 gives. PSI-Link's HKDF-SHA-256 from a 256-bit key-derivation key sits outside every condition either row states.
+The reading is 4985's alone, and certificate 5021 reaches the same answer through a differently arranged policy. Its non-approved *services* table is **Table 14**, whose "Key derivation" row contains KBKDF, `KDA OneStep`, `KDA TwoStep`, HKDF, ANS X9.42 KDF and ANS X9.63 KDF at "< 112-bit keys", with further entries conditioning `KDA OneStep`, `KDA TwoStep` and ANS X9.42 KDF on the SHAKE PRFs, ANS X9.63 KDF on those plus SHA-1, and the SSH, TLS 1.2 and TLS 1.3 KDFs each on a named hash list. Two things separate it from 4985's row. Its condition is a parameter condition stated inline rather than 4985's "key derivation key passed in by the calling process" description with the qualification deferred to another table, so the misreading above does not arise on that certificate at all; and its approved-services table has a key-derivation service for HKDF from a shared secret, which is the same corroboration 4985's Table 12 gives. psilink's HKDF-SHA-256 from a 256-bit key-derivation key sits outside every condition either row states.
 
 The table numbers do not travel with the reading, in either direction. 5021's non-approved *algorithms* table -- where `AES GCM (external IV)` sits -- is **Table 7** against 4985's Table 8, while its non-approved *services* table is Table 14 against 4985's Table 13. Part of that offset is 5021 stating both of its non-approved-but-allowed categories empty in prose ("N/A for this module") instead of carrying a table for each. So a row cited by table number alone names a different table on the other policy, and every citation here names the certificate first. What 5021 states about the module's HKDF beyond these placements is a use-context restriction, recorded in [fips-variant-image.md](fips-variant-image.md).
 
@@ -165,7 +165,7 @@ All 40 active certificates carrying this module name were read: 15 from their ce
 
 The stronger form of that argument does not depend on the search at all. A tested operational environment binds to the hardware and OS it was tested on, not to a libc family: even a certificate whose firmware turned out to be musl would name something like "Linux 5.10 on an HP DesignJet Cortex-A7", and an Alpine container on generic x86-64 would still not be a covered environment. Alpine does not become reachable by finding a musl entry.
 
-Certificate 4985's policy closes the usual escape hatch explicitly. Its operational-environment section states: **"No operational environments are vendor affirmed."** So that certificate covers its 12 tested configurations and nothing else, and each of those names hardware as well as an OS -- Ubuntu 22.04.1 Server and Debian 11.5 on a Dell Inspiron with an Intel i7, FreeBSD 13.1 and Windows 10 Pro on the same machine, macOS 11.5.2 on Apple M1 and Intel Mac minis. Matching the distribution is therefore necessary but not sufficient, and there is no affirmation route that extends the certificate to a container on arbitrary hardware.
+Certificate 4985's policy closes the usual documented exception explicitly. Its operational-environment section states: **"No operational environments are vendor affirmed."** So that certificate covers its 12 tested configurations and nothing else, and each of those names hardware as well as an OS -- Ubuntu 22.04.1 Server and Debian 11.5 on a Dell Inspiron with an Intel i7, FreeBSD 13.1 and Windows 10 Pro on the same machine, macOS 11.5.2 on Apple M1 and Intel Mac minis. Matching the distribution is therefore necessary but not sufficient, and there is no affirmation route that extends the certificate to a container on arbitrary hardware.
 
 That points at the other shape of an answer: a distribution vendor's own certificate, where the tested environments are that vendor's OS on machines closer to how a container is actually deployed. Red Hat's covers RHEL 9 on Dell PowerEdge and IBM POWER10; AlmaLinux's covers 9.2 on AWS `a1.metal` and `m5.metal` instances. Which of the vendor certificates are FIPS 140-3 rather than 140-2 is not established here and has to be read per certificate.
 
@@ -173,12 +173,12 @@ That route was taken, and it moves the environment question rather than closing 
 
 ### Two of the forty approve EdDSA, and none approves X25519
 
-Reading all 40 policies for algorithm placement -- not only the three above -- gives an answer the OpenSSL Project's certificates alone would get wrong. **Two certificates carry EdDSA in their approved-algorithm tables**, both FIPS 140-3:
+Reading all 40 policies for algorithm placement -- not only the three above -- gives an answer the OpenSSL Project's certificates alone would get wrong. **Two certificates have EdDSA in their approved-algorithm tables**, both FIPS 140-3:
 
 - **5116** (Ctrl IQ, Rocky Linux 9, module version `Rocky9.20250210`) -- `EDDSA KeyGen`, `SigGen` and `SigVer` against CAVP certificate A6328, FIPS 186-5, with Ed25519 and Ed448 named in the SSP tables and an EdDSA SigGen known-answer test at power-on.
 - **5373** (TuxCare, module `3.2.2-f9f9d133a30b6eb5`) -- the same three services against CAVP certificate A7098, PreHash and Pure both approved.
 
-Three further certificates match on the string and are not counterexamples: 4282 and 4811 carry it only in a revision-history line recording EdDSA's move *to* the non-approved mode, and 4506 lists it under non-approved services. **X25519 has no such exception.** Across all 40 it sits in an Allowed table under 140-2 or a Not Allowed one under 140-3, never an approved one, and the two certificates that approve EdDSA do not mention it at all.
+Three further certificates match on the string and are not counterexamples: 4282 and 4811 have it only in a revision-history line recording EdDSA's move *to* the non-approved mode, and 4506 lists it under non-approved services. **X25519 has no such exception.** Across all 40 it sits in an Allowed table under 140-2 or a Not Allowed one under 140-3, never an approved one, and the two certificates that approve EdDSA do not mention it at all.
 
 Table membership is read from the caption that *follows* each table body, which is where these policies place it. Attributing a row to the caption above it names the previous table and inverts the answer -- it reports X25519 as approved on the 140-2 certificates, which it is not.
 
@@ -192,7 +192,7 @@ What remains open is recorded in [fips-variant-image.md](fips-variant-image.md),
 Settled by measurement, in the image, on the base that ships:
 
 - X25519 is in the key-exchange algorithms of the OpenSSL Project builds of 3.0.8, 3.0.9 and 3.0.21, and is not in 3.5.7's.
-- Ed25519 is in every measured provider's signature algorithms. Every one of them is a from-source OpenSSL Project build; the vendor module the variant image carries has neither primitive.
+- Ed25519 is in every measured provider's signature algorithms. Every one of them is a from-source OpenSSL Project build; the vendor module the variant image includes has neither primitive.
 - `crypto.subtle` AES-256-GCM, and `node:crypto`, both dispatch into a configured FIPS provider in this image, by the four-leg attribution above.
 - A 3.0.x provider cross-loads into the 3.5.7 libcrypto Node links, and serves.
 - A module that fails its integrity check stops the process from starting.
@@ -205,11 +205,11 @@ Settled by reading the certificates:
 
 Decided since, by the owner, and recorded here because it changes how the rows above should be read:
 
-- **FIPS 140-3 is the target standard**, on the grounds that 140-2 is being retired. That forecloses X25519 inside the module twice over: under 4985 it is Non-Approved and Not Allowed, and the certificate the variant image pairs with, 5021, neither names it nor certifies a module that carries it. Its "allowed" status under 140-2 is not something to build on.
+- **FIPS 140-3 is the target standard**, on the grounds that 140-2 is being retired. That forecloses X25519 inside the module twice over: under 4985 it is Non-Approved and Not Allowed, and the certificate the variant image pairs with, 5021, neither names it nor certifies a module that has it. Its "allowed" status under 140-2 is not something to build on.
 - **The Alpine base is expected to give way**, dropping musl, since no certificate reaches it.
 
 Which certificate pairs with which base, and which standard revision that
-certificate carries, are settled in
+certificate states, are answered in
 [fips-variant-image.md](fips-variant-image.md), the normative home for the
 shipped variant.
 
@@ -219,6 +219,6 @@ shipped variant.
 
 ## Reproducing this
 
-`.github/workflows/fips_provider_probe.yaml` builds `support/fips-probe/` on the `Dockerfile` runtime base and runs both scripts against a provider build named by an OpenSSL release tag; `support/fips-probe/README.md` gives the local `docker` invocation, which is how 3.0.8 and 3.0.9 were measured. Both scripts print every command, its raw output, and its exit status, and derive their verdicts from those same captured bytes, so a transcript carries the evidence as well as the conclusion. The 3.0.21 and 3.5.7 measurements came from workflow run 31046265222.
+`.github/workflows/fips_provider_probe.yaml` builds `support/fips-probe/` on the `Dockerfile` runtime base and runs both scripts against a provider build named by an OpenSSL release tag; `support/fips-probe/README.md` gives the local `docker` invocation, which is how 3.0.8 and 3.0.9 were measured. Both scripts print every command, its raw output, and its exit status, and derive their verdicts from those same captured bytes, so a transcript holds the evidence as well as the conclusion. The 3.0.21 and 3.5.7 measurements came from workflow run 31046265222.
 
 The certificate findings come from the CMVP validated-modules search and the security policies it links, read from a network-capable host because the dev container cannot reach CMVP. Each certificate's security policy is the authority for its tables; the rendered certificate pages omit those sections for most certificates, and an extraction that finds nothing there is an unread page rather than a negative result.

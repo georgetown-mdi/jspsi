@@ -5,7 +5,7 @@ title: "The FIPS Variant Container Image"
 # The FIPS variant container image: a second artifact, a vendor's validated module, and a host the operator provides
 
 *Status: decided, built, and published. This note records the choice to ship a separate
-`Dockerfile.fips` image on Amazon Linux 2023 carrying the CMVP-validated OpenSSL
+`Dockerfile.fips` image on Amazon Linux 2023 holding the CMVP-validated OpenSSL
 FIPS provider AWS publishes for that distribution, the alternatives weighed
 against it and rejected, what the arrangement does and does not support a claim
 of, and what stops working inside it. The measurements underneath it are in
@@ -56,14 +56,14 @@ HKDF.
   [COMPLIANCE.md](../COMPLIANCE.md#fips-140); the pull-and-verify mechanics are
   in [RELEASES.md](../RELEASES.md#which-image-carries-which-posture).
 - **Unprivileged, as the default image is.** Both drop to `node` at uid 1000 and
-  gid 1000, and both strip every setuid and setgid bit their OS closure carries.
+  gid 1000, and both strip every setuid and setgid bit their OS closure holds.
   Amazon Linux 2023 has no `node` account, the Node runtime here coming from a
   tarball rather than a package, so the variant creates one at the same uid and
   gid an operator is told to chown a bind mount to.
 - **The base moves by hand, not by Dependabot**, which the default image's does
   not: its digest, its release snapshot and the certified provider's NVR pins
   have to name one Amazon Linux release together, and a move obliges
-  re-measurement -- neither of which a mechanical bump can carry
+  re-measurement -- neither of which a mechanical bump can handle
   ([below](#why-the-base-is-held-out-of-dependabot)).
 
 ## What was rejected, and why
@@ -73,7 +73,7 @@ an older NVR.** It has 14 months more nominal runway (sunset 2031-07-26 against
 5021's 2030-05-25) and avoids a cross-version module/libcrypto pairing question
 entirely, since its module and libcrypto are both 3.2.2. It was rejected on
 measurement. Scanned side by side against the same vulnerability database, the
-5438 image carries 145 more OS-layer findings and 56 more CVEs than the 5021
+5438 image has 145 more OS-layer findings and 56 more CVEs than the 5021
 image, and AWS has published a fix for every one of those 56; the pin is what
 forbids taking them. Thirty-three of them land on `openssl`, `openssl-libs` and
 the provider package itself, which is the one component a FIPS variant exists to
@@ -87,11 +87,11 @@ not incrementally patchable and does not say so. 5021's certified module is a
 still loads module `3.0.8-d694bfa693b76001`.
 
 **Replacing the default image rather than adding a variant.** No certificate
-reaches musl or Alpine, so the default image cannot carry this claim -- but the
-variant does not come free either. By default **SFTP does not work in it at
+reaches musl or Alpine, so the default image cannot support this claim -- but
+the variant does not come free either. By default **SFTP does not work in it at
 all** (below), so every SFTP configuration in the field would need a new key and
 any Ed25519 host-key pin would need replacing; and the image is 1.84x the size
-with a userland carrying GPL-3.0 terms Alpine's does not. That is an
+with a userland holding GPL-3.0 terms Alpine's does not. That is an
 operator-burden argument for a second artifact, not an impossibility argument
 against one image, and it is how the field resolves the same question: vendors
 who ship the crypto inside their artifact ship a variant (Chainguard, HashiCorp
@@ -182,15 +182,14 @@ That reading rests on two sources. The CMVP certificate page for 5021 agrees
 with the policy on every field it renders: `Standard: FIPS 140-3`,
 `Overall Level 1`, `Status: Active`, `Sunset Date: 5/25/2030`, vendor Amazon Web
 Services, Inc., and an initial validation on 5/26/2025 by atsec. The status and
-the sunset date are the two the page alone carries -- the policy PDF states
+the sunset date are the two the page alone holds -- the policy PDF states
 neither -- so the sentence above naming them is the certificate page's, not the
 policy's.
 
-The limit is narrower than the reading, and worth stating exactly. The page
-renders no module-version field, no tested-configuration section and no
-approved-algorithm section, so the module version string, the operational
-environments and the algorithm tables are corroborated by nothing beyond the
-policy. Those are in
+The limit is narrower than the reading. The page renders no module-version
+field, no tested-configuration section and no approved-algorithm section, so
+the module version string, the operational environments and the algorithm
+tables are corroborated by nothing beyond the policy. Those are in
 [CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#what-certificate-5021-attests),
 single-sourced and marked as such.
 
@@ -247,7 +246,7 @@ absence, the entry separates the two.
 
 - **SFTP against a server that offers only `curve25519` key exchange.**
   Permanent, with no client-side fix. The measured part is the primitive: the
-  certified module carries no X25519, so `crypto.generateKeyPairSync('x25519')`
+  certified module has no X25519, so `crypto.generateKeyPairSync('x25519')`
   throws in this image. What that produces at the handshake is psilink's own
   behaviour rather than a second measurement taken here -- it withholds from its
   offer every key exchange built on a primitive the running process cannot
@@ -276,7 +275,7 @@ absence, the entry separates the two.
   fingerprint.
 - **SFTP against a server that accepts only the `chacha20-poly1305@openssh.com`
   cipher.** The measured part is the offer: the default client `SSH_MSG_KEXINIT`
-  from inside this image carries no such cipher, where an ordinary runtime's
+  from inside this image contains no such cipher, where an ordinary runtime's
   does
   ([FIPS_SFTP_PROFILE.md](../FIPS_SFTP_PROFILE.md#the-default-offer-measured-inside-the-image)).
   A server with nothing else to accept therefore shares no cipher with that
@@ -289,10 +288,10 @@ absence, the entry separates the two.
   is unmeasured. A FIPS deployment would not name it: it is not an approved
   algorithm.
 - **MD5.** Never an approved algorithm, refused by the provider, and used
-  outside security contexts often enough elsewhere that its absence is worth
-  naming. `crypto.createHash("md5")` throws `ERR_OSSL_EVP_UNSUPPORTED`.
+  outside security contexts often enough elsewhere that its absence belongs on
+  this list. `crypto.createHash("md5")` throws `ERR_OSSL_EVP_UNSUPPORTED`.
 - **X25519 and Ed25519 through `node:crypto` or `crypto.subtle`.** The certified
-  Amazon Linux module carries neither; `openssl list` reports both ABSENT while
+  Amazon Linux module has neither; `openssl list` reports both ABSENT while
   the provider is `status: active` and the default-configuration control lists
   both, so the absence is the provider's rather than the listing's. No psilink
   path needs either primitive: key establishment agrees over P-256 ECDH and
@@ -307,9 +306,9 @@ absence, the entry separates the two.
   WebAssembly module is outside any OpenSSL provider in principle. See the top
   of this note.
 
-## How the certificate claim is kept honest
+## How the certificate claim is kept accurate
 
-Ten NVRs share the `openssl-fips-provider-latest` package name and carry ten
+Ten NVRs share the `openssl-fips-provider-latest` package name and have ten
 different modules with ten different `fips.so` hashes; exactly one of them is
 the build certificate 5438 names. A package name proves nothing, so the image
 asserts rather than assumes, and the assertions fail the build:
@@ -341,7 +340,7 @@ entrypoint runs it before dispatching: a Node process under the image's own
 configuration, making psilink's five call shapes and requiring `fips.so` mapped
 into that process beside an MD5 digest and a below-minimum RSA keygen that both
 fail. The preamble reads the probe's exit status and nothing else, and parses no
-text at all. That is deliberate rather than incidental. Reading `openssl list
+text at all. That is by design rather than incidental. Reading `openssl list
 -providers` back with awk is the obvious way to write this line and it is wrong
 twice over: `openssl` on this base is the Amazon Linux CLI, a **different
 libcrypto** from the one inside the `node` binary that runs psilink, so it
@@ -358,7 +357,7 @@ the exact comparison against the pin makes a misread shape fail the build. The
 harness in `support/fips-probe/list-algorithms.sh` parses that command too, and
 ships nowhere.
 
-CI carries the rest, because a static parser cannot observe a process.
+CI covers the rest, because a static parser cannot observe a process.
 `image_smoke.yaml` builds the variant and then asserts that the provider is
 **engaged** rather than merely present -- `crypto.getFips()` returning 1 proves
 nothing, since it returns 1 with no module loaded at all. Three legs. The first
@@ -394,9 +393,9 @@ parameters psilink uses; the rows and the CAVP certificate ids are in
 [CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#what-certificate-5021-attests).
 Table membership is not the whole answer for three of them, because the policy
 states a condition on each somewhere other than that table. No measurement
-settles any of the three: each is read off the policy's own text against what
-the code does, and each carries a recorded posture below. They are recorded
-because a claim written from Table 5 alone would not carry them.
+determines any of the three: each is read off the policy's own text against
+what the code does, and each has a recorded posture below. They are recorded
+because a claim written from Table 5 alone would not include them.
 
 **AES-GCM with an externally supplied IV is a non-approved service, and the
 application AEAD requests that service.** Table 7 (Non-Approved, Not Allowed
@@ -408,8 +407,8 @@ external IVs from the operator", requested "by invoking the
 set a non-approved service indicator". WebCrypto exposes no internal-IV mode --
 `AesGcmParams.iv` is a required member -- so every `crypto.subtle` AES-GCM call
 supplies an IV by construction, on any platform. psilink's is a deterministic
-12-byte value carrying the sender's sequence number, built in application code
-in `packages/core/src/connection/encryptedMessageConnection.ts` and carried in
+12-byte value holding the sender's sequence number, built in application code
+in `packages/core/src/connection/encryptedMessageConnection.ts` and included in
 the envelope so the receiver reconstructs the same bytes
 ([CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md#application-layer-aead)).
 There is no shape of the call under which the IV originates anywhere else.
@@ -438,7 +437,7 @@ public key is validated inside the module either way. So the
 `KAS-ECC-SSC Sp800-56Ar3` security function is available to name; the section
 5.6.2 assurances are not, on this certificate's own terms. Whether
 that sentence bounds the algorithm's approved status or only the assurance claim
-under IG D.F is a policy reading this note cannot settle, and the posture taken
+under IG D.F is a policy reading this note cannot decide, and the posture taken
 is the narrow one rather than a deferral of the question: name the security
 function, claim none of the section 5.6.2 assurances, and write no sentence
 whose truth turns on which way that reading falls. That is why the claim
@@ -479,7 +478,7 @@ A probe leg could make the product-shaped external-IV call inside the image and
 read the provider's approved-service indicator back. None is built, and the
 absence is a decision rather than a gap. The certificate's security policy is
 the governing document, it answers the question in its own text, and a leg that
-agreed with it would corroborate a conclusion rather than settle one. A leg
+agreed with it would corroborate a conclusion rather than determine one. A leg
 earns its cost when there is a positive approved-service claim to verify -- a
 design that reached an approved AES-GCM route would need one, because the claim
 would then rest on the module's behaviour instead of on the policy's text.
@@ -495,7 +494,7 @@ sufficient on its own:
   off the wire whatever produced it, so only encryption could reach an
   internal-IV service -- and only in the containerized CLI, since the browser
   runs the same code with no module beneath it at all.
-- **The IV is load-bearing in the protocol.** The sequence number it carries is
+- **The IV is critical in the protocol.** The sequence number it holds is
   the channel's replay and reorder guard, so taking a module-generated IV
   instead is a breaking wire-format change rather than a parameter swap
   ([CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md#inbound-integrity-replay-and-ordering-checks)).
@@ -519,7 +518,7 @@ mirrored literal reconciled on the same branch, is a complete change and lands
 as one. The variant's Amazon Linux base is not a single value. Its digest, the
 release snapshot every `dnf` transaction resolves against, and the certified
 provider's NVR pins have to name one release between them, and the tool that
-would open the pull request compares tag components -- which carry neither that
+would open the pull request compares tag components -- which hold neither that
 coupling nor the chronology behind it, so a mechanically filed bump can name an
 *older* release than the one already pinned and still read as an upgrade.
 
@@ -538,7 +537,7 @@ Three things make that the cheap posture rather than an expensive one:
   and `openssl list` assertions. The coordinated bump is what a green build
   requires, so automating the first step of it buys nothing a person then has to
   finish.
-- **A base move carries a re-measurement obligation a pull request cannot
+- **A base move brings a re-measurement obligation a pull request cannot
   discharge.** The figures this note and
   [CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#the-fips-reference-builds-inventory)
   state about the package closure -- its size, its count, its GPL-3.0 breadth,
@@ -548,18 +547,18 @@ Three things make that the cheap posture rather than an expensive one:
   reddens when they go stale, so the obligation travels with whoever takes the
   bump. Which measurements a move disturbs is enumerated in the same procedure.
 
-The cost is that nothing files a reminder. The signals that do surface a base
+The cost is that nothing files a reminder. The signals that do show a base
 worth moving to are listed in
 [the procedure in DEPENDENCY_PINS.md](../spec/DEPENDENCY_PINS.md#bumping-the-fips-base-image);
 the variant leg's pull-request-time scan is scoped out while its pinned rootfs
-carries findings no pin movement can reach, so that gate is at release rather
+has findings no pin movement can reach, so that gate is at release rather
 than continuous.
 
 ## What it costs
 
 Measured on the reference build of this image, against the Alpine image built
 the same day: **576 MB to 1056 MB (+480 MB, 1.84x)** and **63 to 167 OS
-packages**. Of those 167, **39 carry a GPL-3.0 or LGPL-3.0 term** -- the samba
+packages**. Of those 167, **39 have a GPL-3.0 or LGPL-3.0 term** -- the samba
 client stack that the default image already pays for, plus a GPLv3 base userland
 Alpine's busybox and musl do not have (`bash`, `coreutils-single`, `diffutils`,
 `findutils`, `gawk`, `grep`, `gzip`, `sed`, `tar`, `readline`, `gnupg2-minimal`,
@@ -584,9 +583,9 @@ build does, and the values are in
 what vouches for the tarball is
 then this repository rather than the host that served it. The provider does not
 share this gap either way: `dnf` verifies the vendor's RPM signatures against the
-key the base image carries.
+key the base image holds.
 
-**The provenance act behind those two hashes.** A committed hash carries whatever
+**The provenance act behind those two hashes.** A committed hash holds whatever
 trust was placed in the bytes at pin time, so the signature was checked once,
 by hand, when the values were resolved on 2026-08-06. No build runs any of this.
 The v26.7.0 `SHASUMS256.txt.sig` is an EdDSA signature made 2026-08-05 by
@@ -605,15 +604,15 @@ than merely a key is corroborated by the same fingerprint appearing under
 key file entering `nodejs/release-keys` on 2025-07-18, roughly twelve months
 before the release it signed.
 
-The limit is worth stating exactly, because it is easy to overstate. This is
-independent of the *host* that served the tarball: neither github.com nor
-keys.openpgp.org is nodejs.org, and a compromise of nodejs.org alone cannot forge
-the signature. It is not independent of the *project*: `nodejs/release-keys` and
-the `nodejs/node` README are Node-controlled, and keys.openpgp.org attests
-control of an email address, never releaser status. The Node project is the right
-trust anchor for a Node runtime, so this is the correct shape of answer rather
-than a weak one -- but it is a provenance record, not a runtime claim, and
-nothing re-checks it on a rebuild.
+The limit is easy to overstate. This is independent of the *host* that served
+the tarball: neither github.com nor keys.openpgp.org is nodejs.org, and a
+compromise of nodejs.org alone cannot forge the signature. It is not
+independent of the *project*: `nodejs/release-keys` and the `nodejs/node`
+README are Node-controlled, and keys.openpgp.org attests control of an email
+address, never releaser status. The Node project is the right trust anchor for
+a Node runtime, so this is the correct shape of answer rather than a weak one
+-- but it is a provenance record, not a runtime claim, and nothing re-checks it
+on a rebuild.
 
 Both committed hashes were confirmed a second time on 2026-08-06, from a
 different machine than the one that resolved them, against the same signed
@@ -638,7 +637,7 @@ reading -- Docker Hub is not reachable from the development container and no
   vehicle rather than a required host libcrypto, at two NVRs that disagree with
   each other
   ([CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#what-certificate-5021-attests)),
-  and carries no porting clause and no user-affirmation clause. That is a policy
+  and has no porting clause and no user-affirmation clause. That is a policy
   question, not a measurable one, and there is no policy text that narrows it in
   either direction.
 - **Whether the GPL-3.0 breadth changes the distribution posture.** Measured and
@@ -654,7 +653,7 @@ reading -- Docker Hub is not reachable from the development container and no
 ## See also
 
 - [fips-provider-surface.md](fips-provider-surface.md) -- what a FIPS provider
-  carries and reaches in a psilink image, the four-leg engagement attribution,
+  holds and reaches in a psilink image, the four-leg engagement attribution,
   and what the OpenSSL Project's own certificates approve.
 - [key-establishment-fips-boundary.md](key-establishment-fips-boundary.md) and
   [receipt-signing-fips-boundary.md](receipt-signing-fips-boundary.md) -- the two

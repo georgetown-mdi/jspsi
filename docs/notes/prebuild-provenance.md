@@ -79,7 +79,7 @@ rather than leaving a reader to infer that a committed hash proves origin.
 ## Why the check is armed, not unconditional
 
 Attestation coverage is a property of the run that packed a given tarball, not
-of the fork: one packed before the producing workflow attested carries nothing
+of the fork: one packed before the producing workflow attested has nothing
 to verify. A check that unconditionally demanded an attestation would redden CI
 over such an artifact, and the pressure would then be to weaken or revert it --
 the wrong direction for a control that is meant to tighten. So the enforcement
@@ -106,7 +106,7 @@ move rather than a silent one.
 
 This does not make the repository resistant to a maintainer who intends harm and
 can merge; nothing in the repository can. It makes the removal of the control
-legible instead of invisible, which is the achievable property.
+plain instead of invisible, which is the achievable property.
 
 ## Enforcement points
 
@@ -117,15 +117,15 @@ baked into a published artifact. The `native_alpine` and `image_smoke` legs keep
 the sidecar alone; they consume a tarball a CI run already verified rather than
 introducing it.
 
-The local `npm install` path is deliberately left out. Making it depend on the
+The local `npm install` path is left out by design. Making it depend on the
 attestation would make a plain install require a GitHub token, and a developer
-without one would get a failure that reads as tampering. Local installs keep the
+without one would get a failure that looks like tampering. Local installs keep the
 sidecar, which is what they had.
 
 ## What is not settled
 
 An attestation binds bytes to a workflow run; it does not establish that the run
-built honest source. Tying `source_digest` to reviewable fork source stays a
+built reviewed source. Tying `source_digest` to reviewable fork source stays a
 step the reviewer performs, not one the tool performs -- the one part of this
 chain no tool closes.
 
@@ -140,5 +140,5 @@ so a run minted on a branch fails a `refs/heads/master` verification even once
 that branch has fast-forwarded onto it. Where that pass can be observed is
 bounded by egress the verifier needs beyond `api.github.com`: an environment
 fenced from the Sigstore bundle host or the TUF CDN fails closed and cannot
-re-establish it, which is why CI's own run is where it stands. The spec carries
+re-establish it, which is why CI's own run is where it stands. The spec states
 that limit.
