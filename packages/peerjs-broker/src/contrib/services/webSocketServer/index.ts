@@ -471,7 +471,9 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
       // refuses a structurally pathological body before the parser can reach an
       // uncatchable engine abort, which on a broker every peer shares would end
       // rendezvous for all of them. The `ws` maxPayload cap above is the byte
-      // half of the same bound (docs/spec/CHANNEL_SECURITY.md).
+      // half of the same bound (docs/spec/CHANNEL_SECURITY.md). This is the
+      // chokepoint's string arm: `data.toString()` decodes ahead of the scan,
+      // so invalid UTF-8 is replaced here rather than refused.
       let message: Writable<IMessage>;
       try {
         message = parseBoundedJson(data.toString()) as Writable<IMessage>;
