@@ -28,13 +28,16 @@ log() { printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*" >&2; }
 # shellcheck disable=SC1090
 . "$ENV_FILE"
 [ -f "$ACME_ENV" ] || die "no $ACME_ENV; copy certs/env.example there, chmod 600, and fill in the provider credential"
-# The provider credential must reach the ACME client's process environment:
-# a plain `.` sets shell variables the client never sees, so export-all
-# around the sourcing. Measured live 2026-09-03 (lego saw no token).
-set -a
+# Plain (non-exporting) source for this script's own reads below (EMAIL,
+# PROVIDER, CLIENT): a `set +a` after an export-all source does not un-export
+# variables already exported, so the DNS provider credential would otherwise
+# stay in the environment of everything that runs after this point, including
+# deploy-hook.sh, which needs no credential. Measured 2026-09-03: a subshell
+# opened after `set -a; . "$ACME_ENV"; set +a` still sees the credential. The
+# export-all sourcing below is scoped to a subshell around only the ACME
+# client invocation instead, so the credential never outlives that command.
 # shellcheck disable=SC1090
 . "$ACME_ENV"
-set +a
 
 REALM="${PSILINK_RELAY_REALM:-}"
 [ -n "$REALM" ] || die "PSILINK_RELAY_REALM is unset in $ENV_FILE"
@@ -58,15 +61,32 @@ case "$CLIENT" in
     else
       log "issuing a first certificate for $REALM through $PROVIDER"
     fi
-    lego run --accept-tos --email "$EMAIL" --dns "$PROVIDER" --domains "$REALM" \
-      --path "$ACME_HOME" --renew-days 30
+    # The provider credential must reach lego's process environment: a plain
+    # `.` sets shell variables the client never sees, so export-all around a
+    # second sourcing -- scoped to this subshell, which is the client
+    # invocation and nothing else, so the export does not outlive it.
+    # Measured 2026-09-03 (lego saw no token without it).
+    (
+      set -a
+      # shellcheck disable=SC1090
+      . "$ACME_ENV"
+      set +a
+      lego run --accept-tos --email "$EMAIL" --dns "$PROVIDER" --domains "$REALM" \
+        --path "$ACME_HOME" --renew-days 30
+    )
     SRC_CRT="$ACME_HOME/certificates/$REALM.crt"
     SRC_KEY="$ACME_HOME/certificates/$REALM.key"
     ;;
   acme.sh)
     command -v acme.sh >/dev/null 2>&1 || die "acme.sh is not installed; see Certificates in infra/relay/README.md"
-    acme.sh --home "$ACME_HOME" --issue --dns "dns_$PROVIDER" -d "$REALM" \
-      --accountemail "$EMAIL" || [ $? -eq 2 ] # 2 is acme.sh for "not due for renewal"
+    (
+      set -a
+      # shellcheck disable=SC1090
+      . "$ACME_ENV"
+      set +a
+      acme.sh --home "$ACME_HOME" --issue --dns "dns_$PROVIDER" -d "$REALM" \
+        --accountemail "$EMAIL"
+    ) || [ $? -eq 2 ] # 2 is acme.sh for "not due for renewal"
     SRC_CRT="$ACME_HOME/$REALM/fullchain.cer"
     SRC_KEY="$ACME_HOME/$REALM/$REALM.key"
     ;;

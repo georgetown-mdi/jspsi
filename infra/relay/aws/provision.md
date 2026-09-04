@@ -5,11 +5,18 @@ in [the parent directory](../README.md) rather than configured by hand. This
 file is the AWS half: what to launch, what to open, and what the owner does once.
 
 One instance has been launched from this document, on the stock Amazon Linux 2023
-arm64 AMI, and it got as far as the package step. Two things it found are fixed
-in what is below: the clone took the repository's default branch, which predates
-`infra/relay` and so had nothing to install, and the install asked for a podman
-package AL2023 does not publish. Nothing past that step has been driven -- no
-image built, no certificate issued, no allocation carried.
+arm64 AMI, and driven end to end on 2026-09-03/04 on the docker path: the image
+built from the pinned digest, a real Let's Encrypt certificate was issued by
+DNS-01 through Cloudflare and deployed, TURNS bound on 443, an outside TLS
+handshake was verified from a third network against the public name,
+allocations were driven with `turnutils_uclient`, internal-peer denials were
+confirmed, and `verify.sh` finished 6 pass / 0 fail / 0 unclear from
+`install.sh`'s own end-of-install run. Two things an earlier attempt found are
+fixed in what is below: the clone took the repository's default branch, which
+predates `infra/relay` and so had nothing to install, and the install asked for
+a podman package AL2023 does not publish. The podman/Quadlet path remains
+undriven, and the data leg to a responsive peer plus a real relayed exchange
+between two parties have not been exercised.
 
 ## The instance
 

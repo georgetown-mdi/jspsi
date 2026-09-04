@@ -205,6 +205,12 @@ fi
 if [ -e "$STALE_UNIT" ]; then
   log "removing $STALE_UNIT, left by an install on the other runtime"
   systemctl stop psilink-relay.service || true
+  # A plain unit (the docker shape) was `systemctl enable`d at install time and
+  # so left a multi-user.target.wants symlink; a Quadlet unit (the podman
+  # shape) is generator-provided and was never enabled this way, so disabling
+  # it fails with nothing to disable. Tolerated the same way either shape
+  # answers, so a docker-to-podman switch does not leave that symlink dangling.
+  systemctl disable psilink-relay.service 2>/dev/null || true
   rm -f "$STALE_UNIT"
 fi
 install -m 644 "$HERE/certs/psilink-relay-cert.service" "$HERE/certs/psilink-relay-cert.timer" "$UNIT_DIR/"

@@ -33,25 +33,32 @@ managed option.
 ## Provenance
 
 Agent-authored, and a proposal rather than ratified infrastructure: read every
-claim here as something to check. **No relay has been stood up from it.** One
-instance has been launched and the install attempted on it, which is where the
-runtime section's AL2023 package facts come from; it got no further than the
-package step. No image has been built, no certificate issued, and no allocation
-driven. `verify.sh` is the script that turns this from a proposal into a working
-relay, and it has itself never been run -- its probes key on coturn's documented
-exit statuses and message strings rather than measured ones. Fix what the first
-real run gets wrong rather than loosening a probe until it passes.
+claim here as something to check. **A relay has been stood up from it, on the
+docker path.** One instance -- the stock AL2023 arm64 AMI
+[`aws/provision.md`](aws/provision.md) prescribes -- was driven end to end on
+2026-09-03/04: the image built from the pinned digest, the container's uid was
+probed (65534), a real Let's Encrypt certificate was issued by DNS-01 through
+Cloudflare and deployed, the configuration rendered, TURNS bound on 443, an
+outside TLS handshake was verified from a third network against the public
+name, allocations were driven with `turnutils_uclient`, an allocation toward an
+internal address was confirmed refused, and `verify.sh` finished 6 pass / 0
+fail / 0 unclear from `install.sh`'s own end-of-install run.
 
-Three pieces were driven locally against a fixture, and only those three:
-`render-config.sh` renders the template, writes at mode 600, and refuses a
-leftover placeholder, a placeholder named in a comment, and a secret whose
-alphabet its substitution would not survive; `mint-credential.sh` produces a
-credential that matches an independent HMAC-SHA1 computation of the same
-username; `verify.sh`'s handshake probe was run against a local `openssl
-s_server` holding first a self-signed certificate and then a leaf under a locally
-trusted CA, which is a TLS endpoint and not a relay -- the allocation and refusal
-probes have still been asked of nothing. Whether coturn accepts that credential,
-and every other claim in this directory, is unverified.
+**The podman/Quadlet path remains undriven** -- everything measured above went
+through `psilink-relay-docker.service`, and nothing has exercised
+`psilink-relay.container` or its generator. The data leg to a responsive peer
+(`PSILINK_RELAY_VERIFY_PEER`) and a real relayed exchange between two parties
+have also not been exercised: the allocation and refusal probes were driven,
+not the exchange traffic itself. Fix what the next real run against those gets
+wrong rather than loosening a probe until it passes.
+
+`render-config.sh` and `mint-credential.sh` were also driven locally against a
+fixture before the live run: `render-config.sh` renders the template, writes
+at mode 600, and refuses a leftover placeholder, a placeholder named in a
+comment, and a secret whose alphabet its substitution would not survive;
+`mint-credential.sh` produces a credential that matches an independent
+HMAC-SHA1 computation of the same username, which the live run confirmed
+coturn itself accepts.
 
 The measurement this reference implements, and the shapes it rules out, are in
 [`docs/notes/webrtc-relay-deployment.md`](../../docs/notes/webrtc-relay-deployment.md);
@@ -98,7 +105,7 @@ or the Dockerfile and it converges.
 | `psilink-relay-docker.service` | The same container on a docker host: a plain systemd unit running `docker run` in the foreground, installed as `/etc/systemd/system/psilink-relay.service`. Same image, mounts, and flags as the Quadlet unit -- the two are edited together |
 | `psilink-relay-verify.service`, `.timer` | The daily verification. A standing relay is idle between exchanges, so nothing else notices it stopped carrying allocations until a partner is waiting on one |
 | `install.sh` | The whole install, idempotent |
-| `verify.sh` | Drives a real TURNS handshake, a real allocation, and a probe that an allocation toward an internal address is refused. Passes only on an observed refusal: a question that could not be asked reports UNCLEAR and fails. Connects to the realm's name by default; `PSILINK_RELAY_VERIFY_CONNECT` overrides the TCP connect target while the realm still names the SNI and TURN realm -- `install.sh` sets it to the instance's private address for the end-of-install run, because EC2 does not hairpin an instance's traffic back to its own Elastic IP, while the daily timer stays on the public name so it fails if that path breaks |
+| `verify.sh` | Drives a real TURNS handshake, a real allocation, and a probe that an allocation toward an internal address is refused. Passes only on an observed refusal: a question that could not be asked reports UNCLEAR and fails. Connects to the realm's name by default; `PSILINK_RELAY_VERIFY_CONNECT` overrides the TCP connect target while the realm still names the SNI and TURN realm -- `install.sh` sets it to the instance's private address for the end-of-install run, because EC2 does not hairpin an instance's traffic back to its own Elastic IP, while the daily timer stays on the public name so it fails if that path breaks. `PSILINK_RELAY_VERIFY_WAIT` sets how many seconds it retries a bare TCP connect before its first probe, waiting for a just-(re)started listener to come up; 30 by default |
 | `mint-credential.sh` | One time-limited credential: `<expiry>:<name>` as the username, the base64 HMAC-SHA1 of it as the password |
 | `relay.env.example` | The host's one configuration file, copied to `/etc/psilink-relay/relay.env` |
 | `certs/` | ACME DNS-01 renewal: the timer and its unit, the client-neutral `renew.sh`, the deploy hook, and the provider credential's example |

@@ -71,6 +71,18 @@ fi
 [ -n "$RUNTIME" ] || die "no container runtime on this host and PSILINK_RELAY_RUNTIME is unset in $ENV_FILE; the allocation probes run the relay's image"
 command -v "$RUNTIME" >/dev/null 2>&1 || die "PSILINK_RELAY_RUNTIME names $RUNTIME, which is not on PATH"
 
+# The wait budget the listener retry below spends, validated up front and not
+# where it is read: under `set -uo pipefail` (no -e), a non-numeric value
+# makes the `[ -ge ]` comparison in that loop error and evaluate false on every
+# iteration rather than halting the script, so the loop would retry forever
+# instead of reporting a bound failure. Measured 2026-09-03. Mirrors the
+# case-statement validation this reference already uses for its other knobs
+# (PSILINK_RELAY_RUNTIME in install.sh).
+WAIT="${PSILINK_RELAY_VERIFY_WAIT:-30}"
+case "$WAIT" in
+  ''|*[!0-9]*) die "PSILINK_RELAY_VERIFY_WAIT is '$WAIT'; set it to a non-negative integer of seconds" ;;
+esac
+
 PASS=0; FAIL=0; UNCLEAR=0
 report() {
   case "$1" in
@@ -94,7 +106,6 @@ printf '\n'
 # TCP connect against the same target/port the probes below use, once per
 # second, before running the first probe -- an install-time run should not
 # fail a relay that is merely still starting.
-WAIT="${PSILINK_RELAY_VERIFY_WAIT:-30}"
 waited=0
 until timeout 1 bash -c "exec 3<>\"/dev/tcp/$CONNECT/443\"" 2>/dev/null; do
   waited=$((waited + 1))
