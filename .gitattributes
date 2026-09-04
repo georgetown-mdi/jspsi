@@ -23,3 +23,11 @@
 # bash refuses a script whose shebang line ends in a carriage return. It has no
 # run-time strip to fall back on, so the stored bytes are the whole of it.
 /support/windows-network-filedrop/start-psilink.sh -text
+
+# nightly_platform.yaml's Windows leg checks out with Git for Windows'
+# core.autocrlf=true default, which would rewrite this sidecar's LF to CRLF; the
+# shared setup action's "Verify vendored native tarball integrity" step then
+# reads the checked-out filename with `sha256sum -c`, which treats a trailing
+# carriage return as part of the filename and fails with "No such file or
+# directory" instead of verifying it.
+/lib/*.tgz.sha256 -text
