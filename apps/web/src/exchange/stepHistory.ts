@@ -26,7 +26,10 @@
  * entry the console did not create (an unrelated app route, or the
  * pre-console entry Back from the first step lands on) is distinguishable
  * from an in-console step move. */
-export const STEP_STATE_KEY = "psilinkExchangeStep";
+// The value is a persisted compatibility key, like the /bench/* route segments:
+// entries the deployed build wrote outlive an app-shell update, and a popstate
+// into one reads as leaving the console if the marker no longer matches.
+export const STEP_STATE_KEY = "psilinkBenchStep";
 
 /** The router history's entry-index field (see the module header). */
 const ROUTER_INDEX_KEY = "__TSR_index";
