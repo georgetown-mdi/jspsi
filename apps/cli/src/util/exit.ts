@@ -45,8 +45,8 @@ export const RECEIPT_VERIFICATION_FAILED_EXIT_CODE = 65;
  * {@link UsageError} or a {@link ConnectionError} of kind `usage`,
  * {@link INTERNAL_FAULT_EXIT_CODE} (70) for an {@link InternalConsistencyError},
  * otherwise the error's own numeric `exitCode` when it has one, else
- * EX_UNAVAILABLE (69). The single classification every error->exit boundary of
- * an exchange-running command reads.
+ * EX_UNAVAILABLE (69). The single classification every command's error->exit
+ * boundary reads.
  *
  * A {@link ConnectionError}'s taxonomy is a FIELD (`kind`) rather than a
  * subclass, so it is read here rather than left to the 69 default: a `usage`
@@ -76,7 +76,7 @@ export function exitCodeForError(err: unknown): number {
  * route a caught error through, so the error-level routing and the sanitized
  * formatting cannot drift between call sites. `code` is supplied by the caller
  * because the classification is site-specific: a command whose errors are all
- * local usage faults passes 64 outright, while an exchange-running command
+ * local usage faults passes 64 outright, while a command whose errors vary
  * resolves the code through {@link exitCodeForError}. Typed `never` so a
  * caller's definite-assignment narrowing treats it like `process.exit`.
  */
