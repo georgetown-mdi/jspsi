@@ -3,14 +3,14 @@ import { FINGERPRINT_REGEX } from "@psilink/core";
 import { isRecord, readJsonOrNull } from "./jobApiBody";
 
 /**
- * The browser-side client for the console appliance's signing-identity surface
+ * The browser-side client for the console's signing-identity surface
  * (`POST /api/jobs/signing/fingerprint`). One same-origin fetch to a
- * `gateJobRoute`-protected endpoint; off the console appliance it answers 404, so
+ * `gateJobRoute`-protected endpoint; off the console it answers 404, so
  * a hosted build never reaches it.
  *
- * The response is validated defensively -- the appliance is trusted, but a
- * malformed body degrades to an honest error state rather than filling a shareable
- * fingerprint with a bad value.
+ * The response is validated defensively -- the console is trusted, but a
+ * malformed body degrades to an accurate error state rather than filling a
+ * shareable fingerprint with a bad value.
  */
 
 /**
@@ -20,15 +20,15 @@ import { isRecord, readJsonOrNull } from "./jobApiBody";
  *   this call minted it, so the card can distinguish "here is your fingerprint"
  *   from "your signing identity was just created". The file names are the mount's,
  *   for copy that tells the operator what to look for and what to send.
- * - `refused`: the appliance's own `fingerprint` run refused the request (the
+ * - `refused`: the console's own `fingerprint` run refused the request (the
  *   CLI's exit 64). Every cause reachable through this endpoint lives in the
- *   operator's mounted folder and none is distinguishable from the appliance
+ *   operator's mounted folder and none is distinguishable from the console
  *   (`SigningFingerprintResult` states which and why), so it is named apart from a
- *   generic error to carry copy that points at that folder.
+ *   generic error to hold copy that points at that folder.
  * - `invalid`: a `400` -- the label was malformed; `message` is the server's
- *   field-path-only reason, safe to surface.
+ *   field-path-only reason, safe to show.
  * - `busy`: a `409` -- a request is already running; the operator can retry.
- * - `timeout`: the appliance's own budget was exceeded.
+ * - `timeout`: the console's own budget was exceeded.
  * - `disabled`: a `404` -- the job API is off (a hosted build).
  * - `error`: another non-2xx, a network fault, or a malformed body.
  */
@@ -76,7 +76,7 @@ function fingerprintOutcomeOf(body: unknown): SigningFingerprintOutcome {
   };
 }
 
-/** Whether a value is a bare file name: a non-empty single segment carrying no
+/** Whether a value is a bare file name: a non-empty single segment containing no
  * separator and no `..`, so what is rendered names a file in one directory rather
  * than describing a location. */
 function isPlainFileName(value: unknown): value is string {
@@ -101,9 +101,9 @@ function validationMessage(body: unknown): string {
 }
 
 /**
- * Create-or-reuse this party's signing identity on the appliance and read its
- * fingerprint, through `POST /api/jobs/signing/fingerprint`. Carries the operator's
- * identity label and the export toggle ONLY.
+ * Create-or-reuse this party's signing identity on the console and read its
+ * fingerprint, through `POST /api/jobs/signing/fingerprint`. Sends only the
+ * operator's identity label and the export toggle.
  *
  * There is no regenerate call, here or on the server: re-keying invalidates every
  * fingerprint a partner has pinned, so it stays a command-line action.

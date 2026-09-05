@@ -1,11 +1,11 @@
 /**
- * The browser half of the unattended runner: it builds the platform seams the
+ * The browser half of the unattended runner: it builds the platform boundary the
  * pure tick in {@link ./managedScheduleRunner.ts} decides on -- the store reads
  * and the conditioned schedule write, the clock, an abort-aware delay, and the
  * run itself -- and wakes the tick on an interval for as long as the runtime
  * that started it lives.
  *
- * The run seam is {@link runManagedExchangeInBrowser}, the same entry the
+ * The run boundary is {@link runManagedExchangeInBrowser}, the same entry the
  * attended surface calls, so a scheduled run takes the identical single-writer
  * lock, input guard, and persist-before-success critical section. Two things
  * differ, and only these two: the input is read through the persisted handle
@@ -56,7 +56,7 @@ import type {
  */
 export const SCHEDULE_TICK_INTERVAL_MS = 60_000;
 
-/** The diagnostic-log prefix an unattended run's notices carry, so a line in the
+/** The diagnostic-log prefix an unattended run's notices have, so a line in the
  * console names the run that raised it. */
 export const UNATTENDED_RUN_NOTICE_PREFIX =
   "scheduled managed exchange run notice:";
@@ -64,13 +64,11 @@ export const UNATTENDED_RUN_NOTICE_PREFIX =
 /**
  * The notices an unattended run drops: the close-outcome family, which tells an
  * operator watching the run that their partner may never have taken the final
- * frame. There is no operator watching, and the driver already drops these for a
- * caller that offers no notice surface at all.
+ * frame. There is no operator watching, and the driver already drops these for
+ * any caller offering no notice surface.
  *
- * The set is matched POSITIVELY, so dropping is the exception a notice has to be
- * named into: a notice this module has never seen -- the disclosure that could
- * not be filed, or one added later -- reaches the diagnostic log instead of
- * being swallowed by a broad rule.
+ * The set is matched POSITIVELY: a notice this module has never seen reaches
+ * the diagnostic log instead of being swallowed by a broad rule.
  */
 const DROPPED_UNATTENDED_NOTICES: ReadonlySet<string> = new Set(
   Object.values(CLOSE_OUTCOME_WARNINGS).filter(
@@ -84,7 +82,7 @@ export function droppableUnattendedNotice(message: string): boolean {
   return DROPPED_UNATTENDED_NOTICES.has(message);
 }
 
-/** How the runtime is started. The seams and the tick are injectable so the
+/** How the runtime is started. The boundary and the tick are injectable so the
  * host's own behavior -- the interval, the re-entrancy guard, the stop -- is
  * testable without a store, a broker, or a real clock. */
 export interface ManagedScheduleRuntimeOptions {
@@ -98,7 +96,7 @@ export interface ManagedScheduleRuntimeOptions {
     seams: ManagedScheduleTickSeams,
     inFlight: Set<string>,
   ) => Promise<Array<ManagedScheduleTickEntry>>;
-  /** Overrides the platform seams. Defaults to the store, the clock, and the
+  /** Overrides the platform boundary. Defaults to the store, the clock, and the
    * browser run driver. */
   seams?: ManagedScheduleTickSeams;
 }
@@ -109,13 +107,11 @@ export interface ManagedScheduleRuntimeOptions {
  * this runtime was not running -- and the rest are on the interval. A signal
  * that has already aborted starts nothing at all.
  *
- * Every wake takes a fresh snapshot and runs, however long the wakes before it
- * are still taking. What is held back is per RECORD, in the one registry this
- * runtime carries across its wakes: a record whose tick is still running is
- * passed over, and every other due record is dispatched. A guard over the whole
- * tick instead would make a second exchange, whose window opens while the first
- * is legitimately occupying its own for hours, invisible until the first one
- * finished -- and then only as a miss the runner inflicted on it.
+ * Held-back state is per RECORD, in the one registry this runtime holds across
+ * its wakes, not per tick: a record whose tick is still running is passed over
+ * while every other due record is dispatched, so one record legitimately
+ * occupying its own window for hours does not hide a second exchange's due
+ * window behind it.
  */
 export function startManagedScheduleRuntime(
   options: ManagedScheduleRuntimeOptions,
@@ -151,7 +147,7 @@ export function startManagedScheduleRuntime(
   void wake();
 }
 
-/** The platform seams: the store, the clock, an abort-aware delay, and the
+/** The platform boundary: the store, the clock, an abort-aware delay, and the
  * browser run driver. The record read is the store's per-entry one, never the
  * strict list the attended surfaces take: an unattended wake has nobody present
  * to meet the read-failed recovery surface a wholesale rejection routes to. */
@@ -198,14 +194,13 @@ async function runUnattendedAttempt(
         onDataExchangeStart: attempt.onDataExchangeStart,
       },
       onWarning: (message) => {
-        // Four notices reach this sink and are not one thing. The close-outcome
-        // notice speaks to an operator watching the run and is dropped. Every
-        // other notice -- the resolved-cardinality notice and the pair-table
-        // advisory, both raised at the post-terms, pre-round seam and composed
-        // by core, plus the disclosure that could not be filed, whose remedy an
-        // unattended run has no way to offer -- goes to the diagnostic log,
-        // folded through the same display boundary a seat's surface uses so it
-        // is escaped exactly once.
+        // Four notices reach this sink, not one kind: the close-outcome notice
+        // speaks to an operator watching the run and is dropped. The rest --
+        // the resolved-cardinality notice and pair-table advisory (raised at
+        // core's post-terms, pre-round boundary), plus the disclosure that
+        // could not be filed, which an unattended run has no way to remedy --
+        // go to the diagnostic log, folded through the same display boundary
+        // a seat's surface uses so each is escaped exactly once.
         if (droppableUnattendedNotice(message)) return;
         for (const notice of appendSanitizedRunWarning([], message))
           log.warn(UNATTENDED_RUN_NOTICE_PREFIX, notice);

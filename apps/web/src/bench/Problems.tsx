@@ -3,9 +3,8 @@ import styles from "./bench.module.css";
 import type { RailProblem } from "./inviterModel";
 
 /**
- * The work column's Problems block -- the design's error summary: it appears
- * only when something actually needs attention, at the top of the work
- * column, and each entry links into the surface that can fix it.
+ * The work column's error summary: it appears only when something needs
+ * attention, and each entry links to the surface that can fix it.
  */
 export function Problems({
   problems,

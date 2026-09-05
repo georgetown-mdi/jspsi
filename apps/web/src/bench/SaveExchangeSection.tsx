@@ -27,15 +27,14 @@ export interface SavedExchange {
 }
 
 /**
- * The save-exchange-file surface a command-line transport routes Create to
- * (mockup screen `bench-sftp`, extrapolated for shared-directory). The operator
- * authors the locator, presses Save, and the handler mints the invitation code
- * and the CLI config YAML together and triggers the download. Before a save the
- * surface shows the fields and the Save button; after one it adds the file card,
- * the invitation-code copy row, the expiry, and the operator instructions. The
- * linkage terms are sealed exactly as the browser path seals them; only the
- * transport differs, so this surface authors WHERE the exchange runs and nothing
- * about WHAT is disclosed.
+ * The save-exchange-file surface a command-line transport routes Create to. The
+ * operator authors the locator, presses Save, and the handler mints the
+ * invitation code and the CLI config YAML together and triggers the download.
+ * Before a save the surface shows the fields and the Save button; after one it
+ * adds the file card, the invitation-code copy row, the expiry, and the operator
+ * instructions. The linkage terms are sealed exactly as the browser path seals
+ * them, so this surface authors WHERE the exchange runs and nothing about WHAT
+ * is disclosed.
  */
 export function SaveExchangeSection({
   transport,

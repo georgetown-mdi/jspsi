@@ -33,7 +33,7 @@ export interface NonEmptyRatesState {
  * recomputed for each standardization edit, and torn down on dispose. The hosted
  * default ({@link rowsCoverageProvider}) wraps {@link NonEmptyRateController} over the
  * browser's parsed rows; the console provider ({@link consoleCoverageProvider}) fetches
- * the server-side coverage sweep through this same seam.
+ * the server-side coverage sweep through this same boundary.
  */
 export interface CoverageProvider {
   /** Resolve the per-field rates for `standardization`. A compute the hook
@@ -61,15 +61,15 @@ export const rowsCoverageProvider: CoverageProviderFactory<
 
 /**
  * The console coverage provider: each `compute` POSTs the file's name and the
- * standardization to the appliance's streaming coverage sweep
+ * standardization to the console's streaming coverage sweep
  * ({@link postJobInputCoverage}).
  *
  * The outcome decides the readout. A deterministic failure (a `4xx` other than `429`,
- * or a malformed body) REJECTS, so the hook settles to an explicit "coverage
+ * or a malformed body) REJECTS, so the hook reaches an explicit "coverage
  * unavailable" state rather than hanging -- the same input will not succeed on retry.
  * A transient failure (`429`, a `5xx`, or a network error) never settles, so the hook
- * holds its honest "Checking..." until the next debounced edit supersedes it. An abort
- * (a superseded sweep) never settles either.
+ * does not overstate it and holds "Checking..." until the next debounced edit
+ * supersedes it. An abort (a superseded sweep) never settles either.
  *
  * Each `compute` gets its own {@link AbortController}, and starting one aborts the
  * previous still-in-flight sweep, so a superseded sweep's fetch is cancelled -- which
@@ -104,13 +104,13 @@ export const consoleCoverageProvider: CoverageProviderFactory<
   };
 };
 
-/** The bench's coverage input, unifying the hosted browser rows and the console's
+/** The coverage input, unifying the hosted browser rows and the console's
  * mounted-file reference so one {@link useNonEmptyRates} call serves both builds. */
 export type BenchCoverageInput =
   | { kind: "rows"; rows: ReadonlyArray<CSVRow> }
   | { kind: "workFile"; reference: WorkInputReference };
 
-/** The unified bench coverage provider: dispatches a `rows` input to the hosted
+/** The unified coverage provider: dispatches a `rows` input to the hosted
  * worker-backed provider and a `workFile` input to the console fetch-backed sweep.
  * A stable module-level factory so the hook rebuilds the provider only when the
  * coverage input identity changes. */
@@ -128,7 +128,7 @@ export const benchCoverageProvider: CoverageProviderFactory<
  * standardization for a recompute. The result is keyed by field name for the host to
  * read per card.
  *
- * `makeProvider` is the injectable seam: the hosted host passes
+ * `makeProvider` is the injectable boundary: the hosted host passes
  * {@link rowsCoverageProvider}, and the console host passes a fetch-backed provider.
  */
 export function useNonEmptyRates<TInput>(

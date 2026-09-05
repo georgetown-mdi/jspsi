@@ -18,7 +18,7 @@
  * instant.
  *
  * These surfaces DISPLAY the schedule; they never advance it. The bookkeeping
- * fields are read verbatim -- `consecutiveMisses` as the record carries it -- so
+ * fields are read verbatim -- `consecutiveMisses` as the record holds it -- so
  * nothing shown here anticipates a write the runner has not made.
  *
  * `now` is injected rather than read, matching the clock discipline of the managed
@@ -42,14 +42,14 @@ import type { ManagedExchangeSchedule } from "@psi/managedExchangeRecord";
 
 /**
  * The consecutive-miss count at which a surface escalates from naming the last
- * run's outcome to the coordination prompt. Normative value and the reasoning it
- * carries: docs/spec/MANAGED_EXCHANGE_RECORD.md, the `consecutiveMisses` row, and
- * docs/MANAGED_EXCHANGE.md, "Retry and repeated misses".
+ * run's outcome to the coordination prompt. Normative value and the reasoning
+ * behind it: docs/spec/MANAGED_EXCHANGE_RECORD.md, the `consecutiveMisses` row,
+ * and docs/MANAGED_EXCHANGE.md, "Retry and repeated misses".
  */
 export const REPEATED_MISS_ESCALATION = 2;
 
 /** Where the recurrence stands at an instant: a window open right now, or the
- * next one ahead. Both carry their instants phrased in the operator's local
+ * next one ahead. Both hold their instants phrased in the operator's local
  * display format. */
 export type ScheduleDueness =
   | {
@@ -76,23 +76,18 @@ const MAX_WINDOW_REACH_MS =
   MAX_SCHEDULE_INTERVAL_DAYS * 86_400_000 + MAX_SCHEDULE_WINDOW_SECONDS * 1000;
 
 /**
- * Where `schedule` stands at `now`, read off the recurrence lattice rather than
- * off the record's planned `nextWindow`: the plan is bookkeeping the runner
- * advances, so a browser that has not been running the schedule carries a stale
- * one, while the lattice states where the agreed windows really fall.
+ * Where `schedule` stands at `now`, read off the recurrence lattice rather
+ * than the record's planned `nextWindow` (bookkeeping the runner advances,
+ * which a browser that has not run the schedule holds stale). Every instant
+ * returned is renderable: the record schema's `intervalDays` and
+ * `windowSeconds` bound how far a window can fall past `now`, and the guard
+ * below bounds `now` itself; scheduleSurfacingModel.test.ts sweeps both at
+ * the schema's own ceilings.
  *
- * Every instant returned is renderable, so neither surface carries a fallback for
- * a schedule whose windows no calendar has: the record schema caps `intervalDays`
- * and `windowSeconds`, which bounds how far past `now` a window can fall, and the
- * guard below bounds `now` itself. Both halves are driven rather than asserted:
- * scheduleSurfacingModel.test.ts sweeps the schema's own ceilings at the extremes
- * of the instant range, where an under-counted reach reaches `Intl` as an invalid
- * date and throws.
- *
- * @throws {RangeError} if the schedule's lattice is unusable -- an anchor that is
- *   not a UTC instant, or a period or width outside the record schema's bounds
- *   (see {@link managedScheduleWindow}) -- or if `now` sits so near the end of the
- *   representable instant range that the window it names falls past it.
+ * @throws {RangeError} if the schedule's lattice is unusable (an anchor not a
+ *   UTC instant, or a period/width outside the record schema's bounds; see
+ *   {@link managedScheduleWindow}), or if `now` sits too near the end of the
+ *   representable instant range for the window it names to fall inside it.
  */
 export function scheduleDueness(
   schedule: ManagedExchangeSchedule,
@@ -125,7 +120,7 @@ export function scheduleDueness(
       };
 }
 
-/** The one-line phrasing of {@link scheduleDueness} both surfaces carry. It
+/** The one-line phrasing of {@link scheduleDueness} both surfaces hold. It
  * states where the window is and promises no run: whether anything runs is the
  * operator's own visit or this runtime's own attendance, and the notes beside
  * this line say which. */
@@ -148,7 +143,7 @@ export function scheduleCadenceLine(schedule: ManagedExchangeSchedule): string {
 /** The escalated coordination state, phrased for both surfaces: the list's quiet
  * line and the detail view's prompt. */
 export interface RepeatedMissCoordination {
-  /** The consecutive-miss count the record carries, at or above
+  /** The consecutive-miss count the record holds, at or above
    * {@link REPEATED_MISS_ESCALATION}. */
   misses: number;
   /** The list's one-line form: the state and both checks, deferring the rest to
@@ -163,16 +158,13 @@ export interface RepeatedMissCoordination {
 export const REPEATED_MISS_TITLE = "Runs are not happening on schedule";
 
 /**
- * The coordination state a run of missed windows earns, or `undefined` below the
- * escalation threshold -- a single miss is a laptop closed for the evening and
- * demands nothing, so nothing is said beyond the last run's own outcome.
- *
- * Both phrasings name BOTH checks, the partner and this device's own clock: a
- * clock that has drifted far enough produces exactly this pattern, and an
- * operator pointed only at their partner would never look at their own machine.
- * Neither phrasing offers to pause anything -- the surfaces escalate and the
- * agreed cadence stands (docs/MANAGED_EXCHANGE.md, "Repeated misses surface, they
- * do not auto-pause").
+ * The coordination state a run of missed windows earns, or `undefined` below
+ * the escalation threshold (a single miss demands nothing beyond the last
+ * run's own outcome). Both phrasings name BOTH checks, the partner and this
+ * device's own clock, since a drifted clock produces exactly this pattern;
+ * neither offers to pause anything -- the agreed cadence stands
+ * (docs/MANAGED_EXCHANGE.md, "Repeated misses surface, they do not
+ * auto-pause").
  */
 export function repeatedMissCoordination(
   schedule: ManagedExchangeSchedule,
@@ -197,13 +189,11 @@ export const SCHEDULE_ATTENDANCE_NOTE_INSTALLED =
   "This app is installed, so it runs this exchange itself at each agreed window while it is open, with nobody present. A window that opens while the app is closed passes without a run, so leave it running (or launch it at sign-in) if you want the schedule met unattended.";
 
 /**
- * What an ORDINARY browser tab does with an agreed schedule: nothing on its own.
- *
- * It states the limit and the operator's move, and promises no run: a window that
- * arrives while nothing is open here is simply a window that passes, and the copy
- * must not read as an assurance that something attended to it. It names the
- * installed app as the way out, which is the honest degradation rather than a
- * capability this tab is withholding.
+ * What an ORDINARY browser tab does with an agreed schedule: nothing on its
+ * own. States the limit and the operator's move -- a window that arrives
+ * while nothing is open here simply passes, and the copy must not read as an
+ * assurance that something attended to it -- and names the installed app as
+ * the way out: stating a limit, not withholding a capability.
  */
 export const SCHEDULE_ATTENDANCE_NOTE_TAB =
   "This is an ordinary browser tab, which never runs this exchange on its own: a window that opens passes without a run unless you run it here. Come back during a window and run this exchange, or install this app and leave it running to have it meet the windows for you.";
@@ -212,7 +202,7 @@ export const SCHEDULE_ATTENDANCE_NOTE_TAB =
  * The attendance note for the runtime the operator is actually looking at. The
  * two readings are different facts rather than different wordings of one -- the
  * unattended runner starts in the installed app and in nothing else -- so the
- * surfaces branch on the runtime rather than carrying one hedged line for both
+ * surfaces branch on the runtime rather than holding one hedged line for both
  * (docs/MANAGED_EXCHANGE.md, "The automation goal and its platform envelope").
  */
 export function scheduleAttendanceNote(installedRuntime: boolean): string {

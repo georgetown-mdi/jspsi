@@ -40,7 +40,7 @@ export type ConfirmationOutcome =
 
 /** Where the gate routes each outcome: a confirmed partner-side failure proceeds to
  * fast re-invite; anything that does not add up is treated as compromise and routed to
- * the settled compromise response (notify the partner out-of-band, re-invite),
+ * the fixed compromise response (notify the partner out-of-band, re-invite),
  * NOT a quiet re-invite. The two share the re-invite ACT but differ in framing and in
  * what the operator does first, so they are distinct routes. */
 export type ConfirmationRoute = "reinvite" | "compromise-response";
@@ -119,9 +119,8 @@ export function composeManagedFailureConfirmation(
 /**
  * Route the partner's reply through the two-outcome gate: a confirmed real
  * partner-side failure proceeds to fast re-invite; anything that does not add up is
- * treated as compromise and routed to the compromise response. This is the whole gate
- * -- there is deliberately no third "maybe" outcome, because the honest posture is
- * that an unconfirmed reply is a compromise until proven otherwise.
+ * treated as compromise and routed to the compromise response. There is no third
+ * "maybe" outcome: an unconfirmed reply always routes as compromise.
  */
 export function routeConfirmationReply(
   outcome: ConfirmationOutcome,
@@ -132,7 +131,7 @@ export function routeConfirmationReply(
 }
 
 /** The compromise-response copy the "something does not add up" leg shows: it names
- * the settled compromise response -- stop, do not re-invite on this channel, treat the
+ * the fixed compromise response -- stop, do not re-invite on this channel, treat the
  * exchange's secret as exposed -- and points at the operator's usual security process.
  * It invents no new security guidance; it states the doc's framing for a suspected
  * compromise and stops. Owner-reviewed copy. */

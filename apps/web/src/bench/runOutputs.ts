@@ -8,13 +8,13 @@ import {
 import type { ExchangeResult, PreparedExchange } from "@psilink/core";
 import type { ExchangeOutputs } from "@psi/exchangeLifecycle";
 
-/** The bench run's downloadable artifacts: the lifecycle's outputs widened with
+/** The console run's downloadable artifacts: the lifecycle's outputs widened with
  * the matched-record count the completion header states. It counts the ROWS of a
  * matched result table, so it is meaningful for the `matched` case alone -- a
  * count-only run's intersection size is its own field on its own case, and copying
  * it here would put the same number in two places on one screen. It stays optional
- * because the console's server-job path holds the result on the appliance and never
- * counts its rows. */
+ * because the server-job path holds the result on the console and never counts
+ * its rows. */
 export type RunOutputs = ExchangeOutputs & {
   matchedRecordCount?: number;
 };
@@ -38,11 +38,10 @@ export interface ObjectUrls {
 /**
  * The filesystem-safe stamp for a record's download filenames, derived from the
  * record's own `createdAt` (colons and the fractional-second dot replaced with
- * hyphens). This matches the CLI's default record path (`keysPathFor` /
- * `defaultRecordPath` in apps/cli), so the console and in-browser paths produce
- * byte-identical download names for the same `createdAt`; a unit test pins that
- * parity. The web app cannot import apps/cli, so the rule is replicated here as
- * the single source both browser drivers share.
+ * hyphens). Matches the CLI's default record path (`keysPathFor` /
+ * `defaultRecordPath` in apps/cli) byte-for-byte; a unit test pins the parity.
+ * The web app cannot import apps/cli, so the rule is replicated here as the
+ * single source both browser drivers share.
  */
 export function recordFileStamp(createdAt: string): string {
   return createdAt.replace(/[:.]/g, "-");
@@ -70,18 +69,16 @@ export function buildRunOutputs(
   const jsonUrl = (text: string): string =>
     trackedUrl(new Blob([text], { type: "application/json" }));
   try {
-    // A count-only (psi-c) run produces no matched pairing at all, so there is no
-    // results file to write and nothing was withheld from this party: its whole
-    // result is the count, carried through with the provenance its surface needs to
-    // state (a sender seat's count is the partner's report). Checked before the
-    // withheld case, which a count-only receiver would otherwise fall into and be
-    // reported as having received nothing.
+    // A count-only (psi-c) run produces no matched pairing, so there is no results
+    // file to write and nothing was withheld: its whole result is the count, paired
+    // with the provenance its surface states (a sender seat's count is the
+    // partner's report). Checked before the withheld case, or a count-only receiver
+    // would report as having received nothing.
     //
     // Otherwise the exchange withholds the result table from a party whose agreed
-    // terms give it no output (a one-sided exchange where this party is the
-    // PSI sender/helper): produce no results file -- the completion panel
-    // shows it contributed but receives no result -- while still offering
-    // the record downloads below.
+    // terms give it no output (a one-sided exchange where this party is the PSI
+    // sender/helper): the completion panel shows it contributed but received no
+    // result, while still offering the record downloads below.
     const generated: RunOutputs =
       result.intersectionCount !== undefined
         ? {

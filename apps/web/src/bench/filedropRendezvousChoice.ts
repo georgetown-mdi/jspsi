@@ -4,30 +4,30 @@ import type { JobRendezvousConfig } from "@psi/workInputClient";
 
 /**
  * The pure model behind the console's filedrop rendezvous: what an invitation minted
- * on this appliance says about where the two parties meet, and why the appliance's
+ * on this console says about where the two parties meet, and why the console's
  * mounts and the exchange's file-handling choices can disagree. No React, no I/O --
- * the tested boundary for "the code points where the appliance will actually
+ * the tested boundary for "the code points where the console will actually
  * rendezvous".
  *
  * Unlike the SFTP connection, the operator authors no directory here: the mounts are
- * the appliance's own provisioning ({@link JobRendezvousConfig}), so a split filedrop
+ * the console's own provisioning ({@link JobRendezvousConfig}), so a split filedrop
  * is a fact about the machine rather than a form the operator fills. What is still
  * the operator's, and so still able to disagree with it, is the retain-mode choice a
  * split rendezvous requires.
  */
 
 /**
- * The invitation endpoint for this appliance's rendezvous: the advisory locator the
- * console minted names for, in whichever form the appliance is provisioned -- the
- * single shared folder, or the split pair. Undefined when the appliance names no
+ * The invitation endpoint for this console's rendezvous: the advisory locator the
+ * console minted names for, in whichever form the console is provisioned -- the
+ * single shared folder, or the split pair. Undefined when the console names no
  * locator, which is the state that withholds the filedrop card entirely.
  *
- * The pair is carried as THIS party authored it, not mirrored: a
- * {@link FileDropEndpoint}'s pair is defined from the inviter's side and the
+ * The pair is kept as THIS party authored it, not mirrored: a
+ * {@link FileDropEndpoint}'s pair is defined from the inviter's side, and the
  * mirror swap belongs to the single consumer that builds a connection from an
- * endpoint, exactly as it does for an SFTP endpoint. Never the absolute mount path:
- * the appliance's own paths mean nothing on the partner's machine, and the route
- * that reports the provisioning does not carry them to the browser at all.
+ * endpoint. Never the absolute mount path: the console's own paths mean nothing
+ * on the partner's machine, and the route that reports the provisioning does not
+ * send them to the browser at all.
  */
 export function filedropEndpointForRendezvous(
   rendezvous: JobRendezvousConfig | undefined,
@@ -51,8 +51,8 @@ export function filedropEndpointForRendezvous(
  * launcher bound the folder at, the sheet says nothing rather than asking the partner
  * to match a name that is not the folder's.
  *
- * On a split appliance the sheet needs both names or neither: a sheet naming one
- * folder of a two-folder rendezvous would read as though the other did not exist.
+ * On a split console the sheet needs both names or neither: a sheet naming one
+ * folder of a two-folder rendezvous would look as though the other did not exist.
  */
 export function acceptKitEndpointForRendezvous(
   rendezvous: JobRendezvousConfig | undefined,
@@ -83,9 +83,8 @@ export function acceptKitEndpointForRendezvous(
  * than on the config field.
  *
  * It offers no "clear the outbound directory" alternative, unlike its SFTP
- * counterpart: the two mounts are the appliance's provisioning, not a form field the
- * operator can empty, so retain mode is the only end of this disagreement they can
- * move from here.
+ * counterpart: the two mounts are the console's provisioning, not a form field
+ * the operator can empty, so retain mode is the only way out of this disagreement.
  */
 export const SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT =
   "This console rendezvouses through separate inbound and outbound folders, " +
@@ -94,11 +93,11 @@ export const SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT =
   'files are handled" to run a shared-folder exchange here.';
 
 /**
- * Why this appliance's rendezvous cannot be used with the exchange's file-handling
+ * Why this console's rendezvous cannot be used with the exchange's file-handling
  * choices as they stand -- a split rendezvous needs retain mode -- or undefined when
  * the two agree.
  *
- * The mounts and the retain choice are settled in different places and change
+ * The mounts and the retain choice are decided in different places and change
  * independently, so the precondition is re-asked wherever the two are known together:
  * at both Create gates, ahead of the invitation mint, and at the acceptor's launch.
  * Without that, retain mode left off reaches the run as a refused job, and on the

@@ -57,13 +57,10 @@ const MODE_CHOICES: ReadonlyArray<{
 
 /** What the operator is told about a fingerprint attempt that did not produce a
  * value. Each names the remedy, since every one of them is recoverable. The
- * `refused` message carries the whole of the CLI's exit-64 class, which the
- * discarded stderr leaves unsplittable at the boundary (`runSigningFingerprint`
- * in `jobs/signingIdentity.ts`); one member of it -- a malformed `psilink.yaml`
- * in the mount, which the pinned child cwd makes the only config read -- is a
- * file the partner can write when the mount is also the synced folder, so the
- * copy sends the operator to read that file rather than to suspect only
- * themselves. */
+ * `refused` message holds the whole CLI exit-64 class, unsplittable once stderr
+ * is discarded (`runSigningFingerprint` in `jobs/signingIdentity.ts`); one member
+ * is a malformed `psilink.yaml` a partner can write when the mount is also the
+ * synced folder, so the copy sends the operator to read that file too. */
 function fingerprintFailureMessage(
   outcome: Exclude<SigningFingerprintOutcome, { kind: "ok" }>,
 ): string {
@@ -96,23 +93,19 @@ function fingerprintFailureMessage(
 /**
  * The console's "Receipts and record keeping" card: whether this exchange
  * produces a third-party-verifiable signed receipt beside its ordinary record,
- * whose certificate it trusts, and the retention note filed with this party's own
- * record. Offered as a closed disclosure beside the other run cards, since an
- * unsigned record is right for a first run and a signed receipt is what an
- * operator reaches for deliberately, for a partnered deployment that must be able
- * to prove the exchange happened.
+ * whose certificate it trusts, and the retention note filed with this party's
+ * own record. Offered as a closed disclosure since an unsigned record fits a
+ * first run and a signed receipt is for a partnered deployment that must prove
+ * the exchange happened.
  *
- * The load-bearing behaviour lives in {@link receiptsModel}, not here: what a
- * draft emits, what the run itself would refuse, and the advisories. This
- * component owns one piece of state of its own -- the in-flight fingerprint
- * request and its failure message -- because it is about this visit to the card
- * rather than about the exchange.
+ * The critical behavior lives in {@link receiptsModel}, not here; this
+ * component owns only the in-flight fingerprint request and its failure
+ * message, since those belong to this visit to the card, not to the exchange.
  *
- * Creating the signing identity is an EXPLICIT action here, not a side effect of
- * the run: the operator must be able to share their fingerprint before the
- * exchange, because the partner pins it out-of-band first. The button drives the
- * CLI's own `fingerprint` command on the appliance, which is create-or-reuse, so
- * pressing it twice shows the same value rather than minting a second key.
+ * Creating the signing identity is an explicit action, not a side effect of the
+ * run, since the operator must share their fingerprint before the exchange runs.
+ * The button drives the CLI's own `fingerprint` command on the console, which is
+ * create-or-reuse, so pressing it twice shows the same value.
  */
 export function ReceiptsCard({
   draft,
@@ -128,7 +121,7 @@ export function ReceiptsCard({
    * the certificate against. Blank until the operator states it, which the
    * fingerprint request then reports rather than binding an empty identity. */
   identity: string;
-  /** The appliance's rendezvous report, or undefined before it resolves (or off a
+  /** The console's rendezvous report, or undefined before it resolves (or off a
    * console build). It decides whether the identity-location advisory applies to
    * this deployment: see {@link receiptsAdvisories}. */
   rendezvous: JobRendezvousConfig | undefined;
@@ -144,24 +137,23 @@ export function ReceiptsCard({
   const [identityFileName, setIdentityFileName] = useState<string>();
   const [justCreated, setJustCreated] = useState(false);
   // The draft as of this render, so a resolved fingerprint merges into whatever
-  // the operator has by the time it lands rather than into the draft captured
-  // when they pressed the button: `onChange` replaces the whole draft, and the
-  // request spawns a real process on the appliance, so an edit made while it
-  // runs would otherwise be undone by the resolution. The synchronous handlers
-  // below read the closure instead, which holds the same value there and does
-  // not depend on when this assignment ran.
+  // the operator has by the time it lands, not the draft captured at the button
+  // press: `onChange` replaces the whole draft, and the request spawns a real
+  // process on the console, so an edit made while it runs would otherwise be
+  // undone by the resolution. The handlers below read this closure instead,
+  // which holds the same value without depending on when it ran.
   const draftRef = useRef(draft);
   draftRef.current = draft;
   // Bumped on every new request AND on every mode change, so a fingerprint that
   // resolves after the operator left certificate mode is discarded: leaving the
   // mode drops the resolved fingerprint (`receiptsWithField`) precisely so a
-  // return re-asks the appliance, and a late resolution must not put one back.
+  // return re-asks the console, and a late resolution must not put one back.
   // The host-key probe's staleness guard has the same shape (`runProbe` in
   // `SftpAuthoringForm.tsx`).
   const seqRef = useRef(0);
   // Defence in depth for a non-secure origin, where the clipboard API is absent
   // and the value is still selectable by hand. The typings promise it is always
-  // there, which is why the check is deliberate rather than redundant.
+  // there, which is why this check exists by design rather than as redundancy.
   const clipboardAvailable =
     typeof navigator !== "undefined" && Boolean(navigator.clipboard);
   const problems = receiptsProblems(draft, identity);
@@ -179,7 +171,7 @@ export function ReceiptsCard({
   // The request state is about one visit to certificate mode, so leaving the
   // mode ends it: a failure the operator left behind must not re-render as news
   // on their next visit, and a request still in flight is disowned here rather
-  // than left to settle a button into a permanent loading state.
+  // than left to strand a button in a permanent loading state.
   useEffect(() => {
     seqRef.current += 1;
     setResolving(false);

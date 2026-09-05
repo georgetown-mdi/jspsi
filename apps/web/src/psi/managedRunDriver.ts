@@ -1,16 +1,17 @@
 /**
  * The browser wiring of a managed (recurring) exchange re-run: it builds the
- * platform seams the pure orchestration in {@link ./managedRun.ts} gates, out of
- * the same building blocks the one-shot flows compose -- the rendezvous, the peer
- * message connection, the authenticated handshake, core's `runExchange`, and the
- * run-outputs builder -- with the durable rotate-and-persist interposed between
- * the handshake and the data exchange (the persist-before-success ordering
- * {@link runManagedRerun} inherits from {@link runManagedExchange}).
+ * platform boundary the pure orchestration in {@link ./managedRun.ts} gates,
+ * out of the same building blocks the one-shot flows compose -- the
+ * rendezvous, the peer message connection, the authenticated handshake,
+ * core's `runExchange`, and the run-outputs builder -- with the durable
+ * rotate-and-persist interposed between the handshake and the data exchange
+ * (the persist-before-success ordering {@link runManagedRerun} inherits from
+ * {@link runManagedExchange}).
  *
  * It reuses the one-shot flows' primitives rather than their hooks: the one-shot
  * `runExchangeLifecycle` bundles the handshake and the data exchange into one
- * unit with no seam to persist the rotated secret between them, so a managed
- * re-run cannot drive it directly. The shared primitives it composes
+ * unit with no call site to persist the rotated secret between them, so a
+ * managed re-run cannot drive it directly. The shared primitives it composes
  * ({@link openPeerMessageConnection}, {@link authenticateExchange},
  * {@link runExchange}, {@link buildRunOutputs}) are standalone, so this composes
  * them with the rotation interposed and the one-shot flows are untouched.
@@ -67,7 +68,7 @@ interface ManagedRerunInput {
   prepared: ReturnType<typeof prepareManagedRerunExchange>;
 }
 
-/** The carried value the handshake phase hands the data exchange through the lock:
+/** The held value the handshake phase hands the data exchange through the lock:
  * the open message connection, the resolved PSI library, the prepared exchange, and
  * the live peer/channel for teardown. */
 interface ManagedRerunCarried {
@@ -99,7 +100,7 @@ export interface ManagedRunDriverConfig {
    * app, a recording fake in tests. */
   urls: ObjectUrls;
   /** Injected clock and lock discipline (the attended path sets `lock.ifAvailable`
-   * so a run already in progress elsewhere surfaces the benign state), plus the
+   * so a run already in progress elsewhere shows the benign state), plus the
    * `onDataExchangeStart` phase-boundary report a caller classifying the failure
    * for display reads. */
   options?: ManagedRerunOptions;
@@ -111,40 +112,27 @@ export interface ManagedRunDriverConfig {
    * instead ({@link ./managedRun.ts}, `rerunFailureLastRun`). Absent, both flows
    * keep their default budget. */
   peerWaitTimeoutMs?: number;
-  /** A non-fatal, operator-relevant notice raised mid-run. Three sources, and a
-   * caller that treats them as one thing gets some of them wrong: what the agreed
-   * terms resolved to, raised at the post-terms, pre-round seam and composed by
-   * core ({@link describeResolvedRunShape}); the clean close ending on an exit
-   * that carries no delivery signal rather than on the peer's close
-   * ({@link CLOSE_OUTCOME_WARNINGS}), which speaks to whoever is watching the run;
-   * and {@link DISCLOSURE_NOT_FILED_WARNING}, which reports that this browser
-   * holds no record of what the run disclosed. Optional: a caller with no notice
-   * surface omits it and all are dropped. Never a terminal -- the run still
-   * settles exactly once, and a notice raised by the teardown's close arrives
-   * after it, since neither teardown is awaited. */
+  /** A non-fatal, operator-relevant notice raised mid-run, from three sources: what
+   * the agreed terms resolved to ({@link describeResolvedRunShape}); the clean
+   * close ending on an exit with no delivery signal ({@link CLOSE_OUTCOME_WARNINGS});
+   * and {@link DISCLOSURE_NOT_FILED_WARNING}. Optional: a caller with no notice
+   * surface omits it and all are dropped. Never a terminal -- the run still settles
+   * exactly once, and a notice from the teardown's close can arrive after it. */
   onWarning?: (message: string) => void;
 }
 
 /**
- * Run a managed exchange re-run to completion in the browser, returning the
- * exchange result (the run outputs) and the `succeeded` `lastRun` this run
- * stamped. Composes the pre-connection checks, the side-dispatched rendezvous, the
- * authenticated handshake, the durable rotation persist, the PSI exchange, and the
- * outputs into {@link runManagedRerun}.
+ * Run a managed exchange re-run to completion in the browser, returning the run
+ * outputs and the `succeeded` `lastRun` this run stamped. Composes the
+ * pre-connection checks, the side-dispatched rendezvous, the authenticated
+ * handshake, the durable rotation persist, the PSI exchange, and the outputs
+ * into {@link runManagedRerun}.
  *
- * The benign pre-run states (a lapsed `expires`, an input problem, a run already in
- * progress elsewhere) and the storage tier reject before or without a completed
- * exchange; the caller classifies them through {@link benignRerunOutcome}. A
- * handshake or data-exchange failure propagates unchanged for the caller's generic
- * failure path.
- *
- * A clean close whose wait for the peer ends on an exit carrying no delivery
- * signal raises the matching notice through `onWarning`, so a re-run's operator
- * learns their partner may never have taken the final frame -- the same notice
- * vocabulary the one-shot lifecycle raises, behind this wiring's own emit gate.
- * What the agreed terms resolved to takes the same slot from the other end of the
- * run, at the pre-round seam, so a re-run whose standing terms resolve to a
- * deduplicating cardinality names it wherever this seat's notices land.
+ * The benign pre-run states (a lapsed `expires`, an input problem, a run already
+ * in progress elsewhere) and the storage tier reject before or without a
+ * completed exchange; the caller classifies them through
+ * {@link benignRerunOutcome}. A handshake or data-exchange failure propagates
+ * unchanged for the caller's generic failure path.
  */
 export function runManagedExchangeInBrowser(
   config: ManagedRunDriverConfig,
@@ -153,12 +141,11 @@ export function runManagedExchangeInBrowser(
   const exchangeRole = HANDSHAKE_ROLE_FOR_SIDE[record.side];
 
   // Two gates on the notices this run's close can raise. This run's own outputs
-  // must be built, because both notices speak for a completed exchange ("Your own
-  // results are complete") and the failed handshake's teardown drains a close
-  // whose wait ends exactly the same way, on a run that has already surfaced
-  // something stronger. And the run must still be live: a cancelled run's
-  // teardown ends its close without a delivery signal too, and a partner notice
-  // on a run the operator stopped is noise.
+  // must be built: both notices speak for a completed exchange, and the failed
+  // handshake's teardown drains a close whose wait ends the same way, on a run
+  // that has already shown something stronger. And the run must still be live:
+  // a cancelled run's teardown ends its close the same way too, and a partner
+  // notice on a run the operator stopped is noise.
   let builtOutputs = false;
   const emitCloseWarning = (outcome: PeerCloseOutcome) => {
     const warning = CLOSE_OUTCOME_WARNINGS[outcome];
@@ -196,7 +183,7 @@ export function runManagedExchangeInBrowser(
         return { prepared };
       },
       // Inside the lock: open the side-dispatched rendezvous, authenticate the
-      // partner, and yield the rotated secret plus the carried exchange resources.
+      // partner, and yield the rotated secret plus the held exchange resources.
       handshake: async (input) => {
         const psiPromise = loadPsiBackend(
           { loadWasm: () => PSI() as Promise<PSILibrary> },
@@ -204,7 +191,7 @@ export function runManagedExchangeInBrowser(
         ).then((selection) => selection.library);
         // The responder (inviter) attaches its inbound listener before the library
         // resolves, so keep the promise pending and await it after the channel
-        // opens; a rejecting load on a torn-down run must not surface unhandled.
+        // opens; a rejecting load on a torn-down run must not go unhandled.
         void psiPromise.catch(() => undefined);
 
         const acquisition = await beginManagedRendezvous(
@@ -273,22 +260,10 @@ export function runManagedExchangeInBrowser(
         } catch (error) {
           // The handshake failed after the channel opened but before the data
           // exchange: tear down so a failed run never leaks a registered peer or
-          // an open channel.
-          //
-          // Started, not awaited, for the reason the data exchange's teardown is,
-          // sharpened by where this phase runs: the clean close inside it waits
-          // for the peer to take the final frame, and this catch is inside the
-          // single-writer lock, which releases only when this phase settles.
-          // Awaiting the drain here would hold that lock -- and with it every
-          // other context's run of this record -- for a duration the partner
-          // picks, up to the close ceiling. The drain still runs to completion,
-          // and swallows its own faults, so the failure below is what the run
-          // surfaces. Teardown issues the disconnect's socket close synchronously
-          // before this throw, but the broker frees the registration only in its
-          // own socket-close handler one round trip later, so the collision
-          // window this throw leaves behind is that round trip -- milliseconds
-          // against a retry that arrives no sooner than the operator's or
-          // scheduler's next attempt.
+          // an open channel. Started, not awaited: awaiting the drain here would
+          // hold the single-writer lock over this record for a duration the
+          // partner picks (see {@link teardown}), so the failure below is what
+          // the run reports; the drain still runs to completion on its own.
           void teardown(peer, conn, mc);
           throw error;
         }
@@ -306,15 +281,13 @@ export function runManagedExchangeInBrowser(
               psiEngineFactory: createBrowserPsiEngineFactory(
                 defaultSpawnPsiCryptoWorker,
               ),
-              // What the agreed terms resolved to, raised for this seat as it is
-              // for every other: an unattended re-run is where an unnoticed
-              // widening of the match matters most, since nobody is watching the
-              // run and the terms it resolves from are a standing record rather
-              // than something authored this morning. Core composes both strings
-              // and raises neither, the advisory being a front end's discretion
-              // (docs/spec/PROTOCOL.md, The both-sided expansion has no ceiling
-              // of its own), so they take this wiring's own notice slot and the
-              // caller decides what an unattended run does with them.
+              // What the agreed terms resolved to, raised here as for every other
+              // seat: an unattended re-run is where an unnoticed widening of the
+              // match matters most, since nobody is watching and the terms are a
+              // standing record. Core composes both strings and raises neither --
+              // that is a front end's discretion (docs/spec/PROTOCOL.md, "The
+              // both-sided expansion has no ceiling of its own") -- so they take
+              // this wiring's own notice slot.
               onProtocolConfirmed: (_partnerTerms, _resolvedRole, runShape) => {
                 const { cardinalityNotice, pairTableAdvisory } =
                   describeResolvedRunShape(runShape);
@@ -334,13 +307,11 @@ export function runManagedExchangeInBrowser(
           await appendDisclosure(record.id, result.audit, onWarning);
           return outputs;
         } finally {
-          // Started, not awaited: the clean close inside it waits for the peer to
-          // take the final frame, and a peer that keeps the link up without
-          // reading the close sentinel holds that wait to its ceiling. Awaiting it
-          // would withhold this run's outputs -- and the success bookkeeping
-          // behind them -- for a duration the partner picks, so the drain runs on
-          // its own while the outputs go to the caller, exactly as the one-shot
-          // lifecycle reports its result before its own teardown.
+          // Started, not awaited: the clean close inside it waits for the peer
+          // to take the final frame, up to its ceiling. Awaiting it would
+          // withhold this run's outputs -- and the success bookkeeping behind
+          // them -- for a duration the partner picks, so the drain runs on its
+          // own while the outputs go to the caller.
           void teardown(carried.peer, carried.conn, carried.mc);
         }
       },
@@ -362,15 +333,14 @@ export const DISCLOSURE_NOT_FILED_WARNING =
   "This run's disclosure record could not be saved to this exchange's accounting of disclosures. Your results are complete. Download the record file below if you need to keep an account of this disclosure.";
 
 /**
- * Append this run's self-attested exchange record to the exchange's accounting of
- * disclosures. Best-effort by design: the exchange has already happened, so a
+ * Append this run's self-attested exchange record to the exchange's accounting
+ * of disclosures. Best-effort by design: the exchange has already happened, so a
  * failed append can neither undo it nor make the run a failure -- it raises the
- * notice instead, which is the operator's cue to take the completion download
- * while it is still offered.
+ * notice instead.
  *
- * A result with no audit appends nothing: core omits the audit only when building
- * the record threw after the exchange already succeeded (see `ExchangeResult`), and
- * there is nothing to file. That case reaches the operator through the completion
+ * A result with no audit appends nothing: core omits the audit only when
+ * building the record threw after the exchange already succeeded (see
+ * `ExchangeResult`), and that case reaches the operator through the completion
  * surface, which offers no record download either.
  */
 async function appendDisclosure(
@@ -390,29 +360,23 @@ async function appendDisclosure(
 /**
  * Tear down the run's live resources: free the broker id, then drain and close
  * the message connection (or hard-close the raw channel when the wrapper never
- * materialized). It never throws -- a teardown fault must not clobber a more
- * accurate outcome, which is also what lets both the failed handshake and the
- * data exchange start it without awaiting it.
+ * materialized). Never throws -- a teardown fault must not clobber a more
+ * accurate outcome -- which is what lets both the failed handshake and the data
+ * exchange start it without awaiting it.
  *
- * The disconnect is issued FIRST because neither call site awaits this: the
- * run's outcome surfaces -- and with it the single-writer lock over this
- * record releases -- while the drain is still parked on a wait the partner
- * holds, up to the close ceiling. Issuing it does not itself free the
- * registration; the broker frees it in its own socket-close handler one round
- * trip later, so ordering the disconnect first bounds, rather than removes,
- * that window. A failed handshake rotates nothing, and the rendezvous peer id
- * is a pure function of the stored secret, so the record's own next attempt
- * derives the same id, and a registration still standing across that round
- * trip makes the broker refuse the attempt as taken
- * (docs/spec/WEBRTC_TRANSPORT.md) rather than let it connect -- milliseconds
- * against a retry that arrives no sooner than the operator's or scheduler's
- * next attempt. Issuing the disconnect costs the drain nothing:
- * `disconnect()` drops the signaling socket and deliberately leaves the data
- * channel standing, so the close behind it still waits for the peer to take the
- * final frame (pinned against the real stack in
- * test/browser/webrtcCloseDelivery.test.ts). Do NOT reach for `peer.destroy()`
- * here: it routes through the abrupt `RTCPeerConnection.close()`, which discards
- * buffered outbound data and would drop that frame.
+ * The disconnect is issued FIRST: neither call site awaits this, so the run's
+ * outcome resolves and the single-writer lock releases while the drain is still
+ * parked on the close ceiling. Disconnecting first only bounds, not removes, the
+ * resulting window: the broker frees the registration in its own socket-close
+ * handler one round trip later, and a retry inside that window is refused as
+ * taken (docs/spec/WEBRTC_TRANSPORT.md). `disconnect()` drops only the signaling
+ * socket and leaves the data channel standing, so the close behind it still
+ * waits for the peer to take the final frame (pinned in
+ * test/browser/webrtcCloseDelivery.test.ts).
+ *
+ * Do NOT reach for `peer.destroy()` here: it routes through the abrupt
+ * `RTCPeerConnection.close()`, which discards buffered outbound data and would
+ * drop that frame.
  */
 async function teardown(
   peer: Peer,

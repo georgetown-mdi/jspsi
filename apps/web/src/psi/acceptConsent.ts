@@ -4,10 +4,9 @@
  * BOTH explicitly consented to the displayed linkage terms and supplied a
  * non-empty name; otherwise it returns `undefined` and nothing starts.
  *
- * Centralizing the decision here -- rather than relying on a button's `disabled`
- * state alone -- means the security-relevant invariant ("no rendezvous, key
- * exchange, or PSI frame before explicit consent") is enforced in one place that
- * is unit-tested, independent of the UI wiring.
+ * The invariant -- no rendezvous, key exchange, or PSI frame before explicit
+ * consent -- is enforced here rather than by a button's `disabled` state, so it
+ * holds independently of the UI wiring.
  *
  * @returns the trimmed name to record, or `undefined` if acceptance is not yet
  *          permitted.

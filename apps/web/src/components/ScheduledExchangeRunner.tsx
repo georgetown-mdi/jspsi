@@ -7,13 +7,13 @@ import { isInstalledRuntime as installedRuntime } from "@utils/installedRuntime"
 
 import type { ManagedScheduleRuntimeOptions } from "@psi/managedScheduleRuntime";
 
-/** The seams the mount reads its environment through, so a test can drive the
- * gate and the runtime it guards without an installed app. */
+/** The call sites the mount reads its environment through, so a test can drive
+ * the gate and the runtime it guards without an installed app. */
 export interface ScheduledExchangeRunnerProps {
   /** Whether this page is an installed app runtime. Defaults to
    * {@link isInstalledRuntime}. */
   isInstalledRuntime?: () => boolean;
-  /** Whether this build is the console appliance. Defaults to
+  /** Whether this is a console build. Defaults to
    * {@link isConsoleBuild}. */
   isConsoleBuild?: () => boolean;
   /** Starts the runner. Defaults to {@link startInstalledRuntimeRunner}. */
@@ -41,7 +41,7 @@ export const RUNNER_LOAD_FAILURE_NOTICE =
  * A load that fails -- a first launch with no network and nothing precached, a
  * cached shell asking a deployment for a chunk it no longer serves -- takes the
  * runner out for this whole app runtime, so it is logged rather than left as a
- * rejection nobody handles. The retry unit is the MOUNT, deliberately: the loop
+ * rejection nobody handles. The retry unit is the MOUNT: the loop
  * that would retry on a later wake lives inside the very chunk that did not
  * arrive, so there is nothing here to retry from short of a second timer with
  * its own policy. The next launch of the installed runtime mounts again and
@@ -65,7 +65,7 @@ export function startInstalledRuntimeRunner(
 
 /**
  * The runtime-wide mount of the unattended scheduled runner. It renders nothing:
- * a due window's surfacing belongs to the exchange's own surfaces, and this
+ * showing a due window belongs to the exchange's own surfaces, and this
  * component exists only so the runner is bound to the app runtime's lifetime
  * rather than to whichever route happens to be open.
  *
@@ -78,7 +78,7 @@ export function startInstalledRuntimeRunner(
  * a run stays operator-initiated (docs/MANAGED_EXCHANGE.md, "The automation
  * goal and its platform envelope").
  *
- * The console appliance shares this app's code but not that capability: it is a
+ * The console shares this app's code but not that capability: it is a
  * single-exchange, author-and-run surface for one operator, whose recurring
  * production form is the CLI on the host's own scheduler (docs/DEPLOYMENT.md,
  * "The web application can run as a console appliance"). Recurrence there is

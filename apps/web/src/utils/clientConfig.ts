@@ -7,8 +7,8 @@ import type { LogLevel } from "loglevel";
 /**
  * The deployment this build targets. `hosted` is the public browser-only
  * deployment: the server never receives a file and only coordinates peers.
- * `console` is the single-party appliance, whose same-origin job API runs a
- * filedrop exchange server-side. The value is fixed at build time from
+ * `console` is the single-party console build, whose same-origin job API runs
+ * a filedrop exchange server-side. The value is fixed at build time from
  * `VITE_DEPLOYMENT_PROFILE`; it decides the file-assurance copy, the transport
  * chooser's filedrop copy, and whether a filedrop channel routes to the
  * server-job driver.
@@ -44,9 +44,9 @@ const schema: JSONSchemaType<Env> = {
       // `hosted` (the default) is the public browser-only deployment: the
       // server never receives a file, so the browser-only file-assurance copy
       // holds and every filedrop/sftp transport saves an exchange file. A
-      // deployment whose server legitimately runs exchanges (the console
-      // appliance) opts in via VITE_DEPLOYMENT_PROFILE=console, which drops
-      // that assurance copy and routes a filedrop channel to the server-job
+      // deployment whose server legitimately runs exchanges (the console)
+      // opts in via VITE_DEPLOYMENT_PROFILE=console, which drops that
+      // assurance copy and routes a filedrop channel to the server-job
       // driver.
       type: "string",
       enum: ["hosted", "console"],
@@ -59,7 +59,7 @@ const schema: JSONSchemaType<Env> = {
       // deployed hosted build and in any web build outside the image build,
       // which pass no value. A docker build of the repo bakes whatever version
       // the manifest holds -- on a non-release tree, the last published
-      // release -- so a value here names the release the manifest carried at
+      // release -- so a value here names the release the manifest held at
       // build time, not a promise that this build is that release.
       type: "string",
       default: "",
@@ -95,14 +95,14 @@ export function deploymentProfile(): DeploymentProfile {
   return config.DEPLOYMENT_PROFILE;
 }
 
-/** Whether this build targets the console appliance ({@link DeploymentProfile}
+/** Whether this build targets the console ({@link DeploymentProfile}
  * `console`), whose server runs a filedrop exchange rather than the browser. */
 export function isConsoleBuild(): boolean {
   return deploymentProfile() === "console";
 }
 
 /** The release version of the image this build ships in, or undefined when it
- * carries none. A released console image is the one build that carries one; it
+ * has none. A released console image is the one build that has one; it
  * is what the partner accept kit names its `docker run` image by, so the
  * partner runs the version that minted their invitation. */
 export function psilinkVersion(): string | undefined {

@@ -26,7 +26,7 @@ import type {
   StandardizationStep,
 } from "@psilink/core";
 
-/** Render one cleaned value as a chip with any warn-not-enforce constraint badges
+/** Render one cleaned value as a chip with any advisory constraint badges
  * beside it. The value is the operator's own data (local CSV), shown sanitized for
  * uniformity with the rest of the app's value display. */
 function CleanedValue({
@@ -132,8 +132,8 @@ function Outcome({
  * row's outcome distinctly by its three pipeline shapes -- a cleaned value, a
  * "dropped" (null) chip, or a fan-out into several candidates (a Set) -- so the
  * operator sees exactly what each step does to real rows, in pipeline order. A value
- * that does not meet the field's declared constraints is flagged with a
- * warn-not-enforce badge ({@link checkValueConstraints}); the badge surfaces the
+ * that does not meet the field's declared constraints is flagged with an
+ * advisory badge ({@link checkValueConstraints}); the badge reports the
  * violation without blocking.
  *
  * The sample is passed in, not derived from rows, so the console (which never holds
@@ -170,7 +170,7 @@ export function StandardizationPreview({
   // super-linear-in-length compile cost the cap exists to bound, on the main thread
   // per keystroke. Gating on `isStepValid` keeps that paste off the compile path
   // (the throw-catch alone would not, since an oversized pattern does not throw).
-  // Both cases show the same guidance; the offending step carries its own inline error.
+  // Both cases show the same guidance; the offending step has its own inline error.
   const rows = useMemo<Array<{
     raw: string;
     result: FieldValue;

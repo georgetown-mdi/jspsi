@@ -14,9 +14,8 @@ import type { ExchangeRun } from "./exchangeRun";
  * the stage label persists and each stage change (including the final "Done")
  * is announced -- a region replaced with its phase would announce nothing.
  * At completion (`done`) the panel drops its frame and history and keeps just
- * the label and the filled bar, per the design; while `halted` (the run
- * failed) the spinner stops presenting the open stage as in flight and the
- * adjacent alert carries the state.
+ * the label and the filled bar; while `halted` (the run failed) the spinner
+ * stops showing the open stage as in flight and the adjacent alert states it.
  */
 export function StatusPanel({
   run,

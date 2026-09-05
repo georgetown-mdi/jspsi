@@ -19,24 +19,22 @@ import type { SftpConnectionFormValues } from "./sftpConnectionForm";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
 
 /**
- * The console's SFTP connection surface under the SFTP transport card: it shows
- * whichever connection is effective and, when the operator may author one, drives
- * `PUT /api/jobs/sftp` from a credential source.
+ * The console's SFTP connection surface under the SFTP transport card: shows
+ * whichever connection is effective and, when the operator may author one,
+ * drives `PUT /api/jobs/sftp` from a credential source.
  *
- * Two states:
- * - authored: an in-app connection -- shown with edit/clear affordances and the
- *   honest "Ready to try" label (authored, not yet verified against a real run),
- *   plus any non-blocking credential warnings. A split-directory connection
- *   whose retain mode has since been turned off is labelled as needing it back
- *   instead, since the exchange it belongs to cannot run in that state.
- * - authoring required: no connection yet -- the empty state invites authoring, or
- *   a deliberate switch to save-a-file for the operator's own command-line tool.
+ * With a connection: edit/clear affordances and the accurate "Ready to try"
+ * label (authored, not yet verified), plus any non-blocking credential
+ * warnings; a split-directory connection whose retain mode has since been
+ * turned off is labelled as needing it back instead. Without one: the empty
+ * state invites authoring, or a switch to save-a-file for the operator's own
+ * command-line tool.
  *
- * The credential is a FILE by default -- one the operator picks from the secrets
- * mount (a locator the server resolves) or a typed `@path`; no absolute container
- * path is shown for a picker selection, only `secrets / <relative subPath>`. A
- * de-emphasized fallback pastes the value, held in component state only (never
- * persisted) and the server materializes it to a file on the appliance.
+ * The credential is a FILE by default -- picked from the secrets mount or a
+ * typed `@path`; a picker selection shows only `secrets / <relative
+ * subPath>`, never the absolute container path. A de-emphasized fallback
+ * pastes the value, held in component state only (never persisted), and the
+ * server materializes it to a file on the console.
  */
 export function SftpConnectionCard({
   connection,
@@ -62,7 +60,7 @@ export function SftpConnectionCard({
   probeCeremony?: ProbeCeremony;
   /** Whether to offer the save-a-file alternative at all. True (the default) on the
    * inviter path, which can mint an exchange file for the command-line tool. False
-   * on the direct-exchange path, which always runs here on the appliance -- there
+   * on the direct-exchange path, which always runs here on the console -- there
    * the empty state offers only authoring, and the save-a-file state is never
    * reachable. */
   offerSaveFile?: boolean;
@@ -178,7 +176,7 @@ export function SftpConnectionCard({
 }
 
 /** Seed the form from an existing connection's locator (host, port, and whichever
- * remote-directory form it carries -- the shared `path`, or the split pair, whose
+ * remote-directory form it holds -- the shared `path`, or the split pair, whose
  * inbound half seeds the remote-directory field); the username and credential are
  * not recoverable from the credential-free projection, so an edit re-enters them. */
 function initialFormFor(

@@ -92,7 +92,7 @@ export function subscribeAppShellUpdate(listener: () => void): () => void {
   };
 }
 
-/** The seams `registerAppShell` reads the environment through, so a test can
+/** The environment `registerAppShell` reads through, injectable so a test can
  * drive both without a browser. */
 export interface RegisterAppShellOptions {
   /** Reload onto newly activated code. Defaults to the page's own reload. */
@@ -108,22 +108,19 @@ export interface RegisterAppShellOptions {
 }
 
 /**
- * Register the worker, watch for a newer one, and -- in an installed app -- have
- * it cache every route's code. Resolves whether or not the registration
+ * Register the worker, watch for a newer one, and -- in an installed app --
+ * have it cache every route's code. Resolves whether or not the registration
  * succeeded, so the call site can fire it and move on.
  *
  * `updateViaCache: "none"` keeps the browser's HTTP cache out of the worker
- * script's own update check, so a redeployed worker is seen on the next check
- * rather than after an intermediary's freshness lifetime.
+ * script's own update check, so a redeployed worker is seen on the next check.
  *
  * A newly `installed` worker is only an UPDATE when a controller is already
- * running this page; without one it is the first install, which activates by
- * itself and has nothing to prompt about.
+ * running this page; without one it is the first install.
  *
- * The route warm is asked for from an installed app alone, and asked for again
- * on a controller change so a first install (which claims this page after
- * registration returns) is not missed. What it costs, and why an ordinary tab is
- * left to fill its cache in by use, is in the worker's `SHELL_ROUTES`.
+ * The route warm runs from an installed app alone, and again on a controller
+ * change so a first install is not missed. Cost and rationale: the worker's
+ * `SHELL_ROUTES`.
  */
 export async function registerAppShell(
   container: ShellContainer,
@@ -180,9 +177,8 @@ export async function registerAppShell(
     // register() rejects on a network failure -- a first load that is already
     // offline, the case this feature exists for -- and on a script or security
     // error. What is lost is the offline shell, not a capability: an
-    // uncontrolled page fetches everything from the network and works. So this
-    // degrades in silence, the way the worker's own precache does, rather than
-    // rejecting into a caller that has nothing to do about it.
+    // uncontrolled page fetches everything from the network and works. This
+    // degrades in silence, the way the worker's own precache does.
     return;
   }
   warmRoutes();
@@ -201,22 +197,18 @@ export async function registerAppShell(
 }
 
 /**
- * Apply the waiting update: reload the page, and tell the waiting worker to take
- * over as that page unloads. The order is what makes the apply recoverable --
- * the reload can still be stopped, by the confirmation a live exchange arms
- * (`apps/web/src/bench/useUnloadGuard.ts`), and a stopped one leaves the update
- * waiting and this function ready to run again.
+ * Apply the waiting update: reload the page, and tell the waiting worker to
+ * take over as that page unloads. The order is what makes the apply
+ * recoverable -- the reload can still be stopped, by the confirmation a live
+ * exchange arms (`apps/web/src/bench/useUnloadGuard.ts`), and a stopped one
+ * leaves the update waiting and this function ready to run again.
  *
  * The takeover is armed once and stays armed: an operator who declines the
- * reload and later closes the page has still asked for the update, and letting
- * it take over as that page goes is the cold start it would have waited for
- * anyway.
+ * reload and later closes the page has still asked for the update.
  *
  * When an update was announced but no worker is waiting -- another tab applied
- * it, and its takeover claimed this page -- there is nothing to post and the
- * apply is a plain reload onto the activated code. A worker waiting at the press
- * takes the message path ahead of that fallback, so a newer update supersedes
- * rather than being skipped past.
+ * it, and its takeover claimed this page -- the apply is a plain reload onto
+ * the activated code.
  *
  * Does nothing before `registerAppShell` has a registration, or when no update
  * has been announced and no worker is waiting.

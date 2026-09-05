@@ -26,7 +26,7 @@ import { resolveMountFile } from "./mountBrowse";
  * (`password`, `privateKey`, `privateKeyPassphrase`) hold only `@path` file
  * references; validation rejects inline values, so no secret byte ever lives in
  * server memory -- the reference is resolved by the CLI child at exchange time.
- * `hostKeyFingerprint` is mandatory: an appliance-driven SFTP connection always
+ * `hostKeyFingerprint` is mandatory: a console-driven SFTP connection always
  * pins the server host key.
  */
 export interface JobSftpServerEntry {
@@ -49,20 +49,17 @@ export interface JobSftpServerEntry {
 }
 
 /**
- * The strict allowlist of fields the server block may carry. Deliberately
- * STRICTER than core's SFTP server schema, which is non-strict and admits
- * blocks the appliance must never see: `provision` (whose auth block carries
- * inline HTTP credentials) and the detected-but-rejected
- * `certificate`/`known_hosts`. Any key outside this list fails validation with
- * an error naming the key, so an operator cannot smuggle -- or typo -- a field
- * into the composed connection.
+ * The strict allowlist of fields the server block may hold -- stricter than
+ * core's SFTP server schema, which is non-strict and admits blocks the console
+ * must never see: `provision` (whose auth block holds inline HTTP credentials)
+ * and the detected-but-rejected `certificate`/`known_hosts`. Any key outside
+ * this list fails validation naming the key, so an operator cannot smuggle -- or
+ * typo -- a field into the composed connection.
  *
- * The split `inbound_path`/`outbound_path` pair IS admitted: it is a remote
- * directory layout on the partner's SFTP host, the same class of value as
- * `path`, and it carries no credential and drives no pre-connect egress. Which
- * of the two directory forms is coherent stays core's call -- the pair must be
- * set together, must differ, and must not accompany `path` -- decided by the
- * composition check below rather than restated here.
+ * The split `inbound_path`/`outbound_path` pair IS admitted: a remote directory
+ * layout on the partner's SFTP host, the same class of value as `path`, holding
+ * no credential and driving no pre-connect egress. Which of the two directory
+ * forms is coherent stays core's call, decided by the composition check below.
  */
 const jobSftpServerEntrySchema: z.ZodType<JobSftpServerEntry> = z.strictObject({
   host: z.string().min(1),
@@ -95,8 +92,8 @@ export type SftpCredType = "password" | "private_key";
 
 /**
  * A file-reference credential given as a typed `@path` (never an inline value):
- * the escape hatch for a credential that lives outside any listable mount. Tagged
- * with which primary auth method it feeds.
+ * the documented exception for a credential that lives outside any listable
+ * mount. Tagged with which primary auth method it feeds.
  */
 export interface AuthoredCredentialRef {
   kind: "ref";
@@ -120,7 +117,7 @@ export interface AuthoredMountRefCredential {
 
 /**
  * A pasted credential value: the de-emphasized fallback for a credential that
- * exists nowhere on the appliance as a file. Under the single-party-appliance
+ * exists nowhere on the console as a file. Under the single-party-console
  * trust model (a loopback-only browser on the operator's own machine) the value
  * crossing loopback is on-host, so this is acceptable -- but the server never
  * composes it as a value: it materializes it ONCE to a server-owned 0600 file at
@@ -135,7 +132,7 @@ export interface AuthoredRawCredential {
 }
 
 /**
- * The credential an authoring request carries: a typed `@path` reference, a
+ * The credential an authoring request holds: a typed `@path` reference, a
  * secrets-mount locator, or a pasted value. All resolve to an `@path` reference
  * (the pasted value only after materialization to a server-owned file) validated
  * by the authoring containment chain; no inline value ever reaches a composed
@@ -152,7 +149,7 @@ export type AuthoredCredential =
  * reference, never a pasted value.
  *
  * The remote directory arrives in one of the two forms core's connection config
- * carries: the single shared `path`, or the split `inboundPath`/`outboundPath`
+ * holds: the single shared `path`, or the split `inboundPath`/`outboundPath`
  * pair for a server with distinct drop and pickup folders. The three are
  * modelled as optional siblings, exactly as core's `SFTPServer` models them, so
  * the body stays a strict allowlist and the coherence rules over them stay
@@ -234,7 +231,7 @@ interface CredentialRefExclusion {
  * The directories a credential `@path` reference must not resolve under: the job
  * data root (client-written per job) and every configured rendezvous mount
  * (partner-reachable through folder sync) -- one on a single-mount console, both
- * legs on a split-provisioned appliance, since either leg is a folder the partner
+ * legs on a split-provisioned console, since either leg is a folder the partner
  * syncs. Each is added both as its lexical resolve and -- when it exists -- its
  * realpath, so a symlinked exclusion dir is caught too. Duplicates are dropped.
  */
@@ -273,11 +270,11 @@ function canonicalizeIfPresent(dir: string): string {
 
 /**
  * Validate a raw SFTP server block into a {@link JobSftpServerEntry} against the
- * appliance's rules -- strict field allowlist, mandatory literal fingerprint,
+ * console's rules -- strict field allowlist, mandatory literal fingerprint,
  * credential-must-be-an-existing-`@path`, core-schema compose. Used by the
  * request-sourced authoring path. A credential that resolves inside an excluded
  * directory is a non-blocking warning, not a hard error, so the returned
- * `credentialWarnings` carries one entry per offending credential field (empty
+ * `credentialWarnings` contains one entry per offending credential field (empty
  * when every credential resolves safely outside).
  */
 function validateServerEntry(
@@ -329,18 +326,17 @@ export interface ValidatedAuthoredSftpServer {
  * Validate a request-sourced authoring body ({@link AuthoredSftpServerRequest})
  * into a {@link JobSftpServerEntry} -- the strict field allowlist, mandatory
  * literal fingerprint, credential-must-be-an-existing-`@path`, and core-schema
- * compose -- by folding the resolved credential into a server block and running it
- * through {@link validateServerEntry}. The credential is a typed
- * `@path` reference, a secrets-mount locator resolved server-side against
- * `secretsDir`, or a pasted value materialized to a server-owned 0600 file under
- * `scratchDir`; all land as an `@path` that runs the same checks. A credential
- * that resolves inside the data root or rendezvous mount is a non-blocking warning
- * (returned in `credentialWarnings`, naming the field and the directory only), not
- * a rejection: a single-mount prototyping operator may reference a credential in
- * their one folder. A validation failure AFTER materialization deletes the
- * just-written file before it throws, so a rejected paste leaves nothing at rest.
- * Every failure is a {@link JobApiConfigError} whose message names a field path,
- * never a submitted value, a resolved path, or a secret.
+ * compose -- by folding the resolved credential into a server block and running
+ * it through {@link validateServerEntry}. The credential (a typed `@path`, a
+ * secrets-mount locator resolved against `secretsDir`, or a pasted value
+ * materialized under `scratchDir`) always lands as an `@path` that runs the same
+ * checks. A credential resolving inside the data root or rendezvous mount is a
+ * non-blocking warning (naming the field and directory only), not a rejection: a
+ * single-mount prototyping operator may reference a credential in their one
+ * folder. A validation failure AFTER materialization deletes the just-written
+ * file, so a rejected paste leaves nothing at rest. Every failure is a
+ * {@link JobApiConfigError} naming a field path only -- never a submitted value,
+ * a resolved path, or a secret.
  */
 export function validateAuthoredSftpServer(
   rawBody: unknown,
@@ -424,21 +420,20 @@ interface ResolvedAuthoredCredential {
 }
 
 /**
- * Resolve an authoring body's credential to an `@path` file reference, whichever
- * form it arrived in:
- * - `kind: "ref"` -- a typed `@path`, passed through verbatim (the escape hatch
- *   for a credential outside any listable mount).
- * - `kind: "mountRef"` -- a locator the operator picked in the secrets browser,
- *   resolved server-side against `secretsDir` and rewritten to `@<realpath>`.
- * - `kind: "raw"` -- a pasted value, materialized ONCE to a server-owned 0600 file
- *   under `scratchDir` and rewritten to `@<that file>`; the value is written and
- *   dropped, never returned, logged, or placed in argv/env.
- * The rewritten reference then runs the SAME `collectCredentialRefWarnings` checks
- * the typed form does (the hard @path/absolute/existence errors, plus the
- * non-blocking outside-data-root/rendezvous warning on the realpath). The scratch
- * dir is asserted outside those dirs at boot, so a materialized paste never warns.
- * Every failure names the credential field only -- never a subPath value, a
- * resolved absolute path, or a secret.
+ * Resolve an authoring body's credential to an `@path` file reference,
+ * whichever form it arrived in:
+ * - `kind: "ref"` -- a typed `@path`, passed through verbatim (the documented
+ *   exception for a credential outside any listable mount).
+ * - `kind: "mountRef"` -- a locator resolved server-side against `secretsDir`
+ *   and rewritten to `@<realpath>`.
+ * - `kind: "raw"` -- a pasted value, materialized ONCE to a server-owned 0600
+ *   file under `scratchDir` and rewritten to `@<that file>`; the value is
+ *   written and dropped, never returned, logged, or placed in argv/env.
+ * The rewritten reference then runs the SAME `collectCredentialRefWarnings`
+ * checks the typed form does. The scratch dir is asserted outside the excluded
+ * directories at boot, so a materialized paste never warns. Every failure names
+ * the credential field only -- never a subPath value, a resolved path, or a
+ * secret.
  */
 function resolveAuthoredCredential(
   rawCredential: unknown,
@@ -483,10 +478,10 @@ function resolveAuthoredCredential(
 
 /**
  * Materialize a pasted credential to a server-owned 0600 file under the scratch
- * directory and rewrite it to an `@path`. The scratch directory is required: an
- * appliance without it (the API disabled, or boot setup skipped) refuses a paste
+ * directory and rewrite it to an `@path`. The scratch directory is required: a
+ * console without it (the API disabled, or boot setup skipped) refuses a paste
  * rather than composing an inline value. A write failure is swallowed into a
- * generic error carrying neither the value nor the path.
+ * generic error holding neither the value nor the path.
  */
 function materializeRawCredential(
   credential: z.infer<typeof rawCredentialSchema>,
@@ -569,10 +564,10 @@ function camelizeEntryKeys(
 
 /**
  * The host must be a bare server address: no userinfo (`@`), no scheme or path
- * (`/`, which also rules out `://`), and no ASCII whitespace. It backstops the
- * client form so a crafted request cannot smuggle a userinfo- or path-bearing
- * value into the partner-facing invitation endpoint, which mints the host
- * verbatim. Names the field only, never the submitted value.
+ * (`/`, which also rules out `://`), and no ASCII whitespace. It is a safety
+ * check on the client form, so a crafted request cannot smuggle a userinfo- or
+ * path-bearing value into the partner-facing invitation endpoint, which mints
+ * the host verbatim. Names the field only, never the submitted value.
  */
 function assertBareHost(host: string): void {
   if (!isBareSftpHost(host))
@@ -585,7 +580,7 @@ function assertBareHost(host: string): void {
 /**
  * Every fingerprint entry must be a LITERAL in canonical OpenSSH SHA256 form.
  * An `@path` reference -- which the CLI's own loader would accept and resolve
- * -- is rejected here: the appliance pins host keys with values audited when
+ * -- is rejected here: the console pins host keys with values audited when
  * authored, not indirected through a file a later process resolves.
  */
 function assertLiteralFingerprints(fingerprint: string | Array<string>): void {
@@ -609,16 +604,15 @@ function assertLiteralFingerprints(fingerprint: string | Array<string>): void {
 /**
  * A credential field must be an `@path` reference to an ABSOLUTE path, and the
  * referenced file must exist at validation time -- all three are hard errors.
- * Existence and canonicalization go through `realpathSync` only -- the secret bytes
- * are never read into the server; the CLI child resolves the reference at exchange
- * time. A reference resolving inside an exclusion (the client-written data root or
- * the partner-reachable rendezvous mount) is a NON-BLOCKING warning, not a
- * rejection: the console is a single-owner prototyping tool, so a credential in the
- * operator's one mounted folder is guided-against, not forbidden. The reference is
- * checked BOTH lexically (so an absent-but-lexically-inside file still warns) and
- * by its realpath (so a symlink cannot resolve into an excluded dir undetected);
- * at most one warning per field. Messages name the field path and the directory
- * label only, never the reference value.
+ * Existence and canonicalization go through `realpathSync` only -- the secret
+ * bytes are never read into the server; the CLI child resolves the reference at
+ * exchange time. A reference resolving inside an exclusion (the data root or a
+ * rendezvous mount) is a NON-BLOCKING warning, not a rejection: the console is a
+ * single-owner prototyping tool, so a credential in the operator's one mounted
+ * folder is guided against, not forbidden. Checked BOTH lexically and by
+ * realpath (so a symlink cannot resolve into an excluded dir undetected); at
+ * most one warning per field. Messages name the field path and directory label
+ * only, never the reference value.
  */
 function collectCredentialRefWarnings(
   field: (typeof CREDENTIAL_REF_FIELDS)[number],
@@ -704,22 +698,18 @@ function credentialContainmentWarning(
 
 /**
  * Run the entry through core's connection schema as `{channel: "sftp", server}`
- * so core's cross-field refines (one primary auth method, passphrase requires
- * a key, keyboard-interactive requires a password, fingerprint canonical form,
- * and the directory-mode rules -- `path` xor the pair, both halves together, the
- * two directories distinct) hold when the connection is authored, not first at
+ * so core's cross-field refines (one primary auth method, passphrase requires a
+ * key, keyboard-interactive requires a password, fingerprint canonical form, and
+ * the directory-mode rules) hold when the connection is authored, not first at
  * exchange time inside the CLI child.
  *
- * A split entry is composed WITH the retain-mode options block, because core's
- * remaining directory refine -- a split requires `retain_files` -- is a rule over
- * the JOB's tuning options, which an authored connection does not carry and this
- * endpoint cannot know: the operator sets retain mode on the exchange, not on the
- * connection. Composing without it would make every split connection
- * unauthorable. The precondition itself is not dropped, it is enforced where the
- * two are known together: the console's authoring form states it while the
- * operator is still at the controls, `composeSftpConfigDocument` re-parses the
- * whole spec (so a split job composed without retain mode is refused at create),
- * and a zero-setup run meets the CLI's own `--outbound-path` guard.
+ * A split entry is composed WITH the retain-mode options block: core's directory
+ * refine requires `retain_files` for a split, which an authored connection does
+ * not hold and this endpoint cannot know (the operator sets retain mode on the
+ * exchange, not the connection). The precondition is enforced where the two are
+ * known together instead: the console's authoring form states it,
+ * `composeSftpConfigDocument` re-parses the whole spec at create, and a
+ * zero-setup run meets the CLI's own `--outbound-path` guard.
  */
 function assertComposesThroughCoreSchema(entry: JobSftpServerEntry): void {
   const split =

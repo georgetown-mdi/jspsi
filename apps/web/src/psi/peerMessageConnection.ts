@@ -21,70 +21,43 @@ import type { PeerCloseOutcome } from "./waitForPeerClose";
 /**
  * Parked-receive inactivity budget for the WebRTC transport. Hour-scale: the
  * timer arms only while a receive waits on an empty queue, so it bounds the
- * peer's per-step single-threaded WASM compute time (which sends no keepalive
- * while running), and thus the workable dataset size.
- *
- * Deliberately a transport-local constant rather than core's file-sync
- * `DEFAULT_PEER_TIMEOUT_MS`: the two govern unrelated transports (a file
- * rendezvous TTL vs. a data-channel inactivity deadline) and only coincide in
- * value today, so tuning one must not silently move the other.
+ * peer's per-step single-threaded WASM compute time (no keepalive while
+ * running), and thus the workable dataset size. A transport-local constant by
+ * design, not core's file-sync `DEFAULT_PEER_TIMEOUT_MS`: the two govern
+ * unrelated transports and only coincide in value today.
  */
 const DEFAULT_WEBRTC_INACTIVITY_TIMEOUT_MS = 60 * 60 * 1000;
 
 /**
  * Returns a {@link MessageConnection} backed by the PeerJS data channel `conn`.
- * The inbound `data` listener is attached synchronously, before the open
- * handshake is awaited, so a frame the peer sends the instant the channel opens
- * is queued rather than dropped: PeerJS does not replay events to a listener
- * attached later, and the initiator sends its first frame unprompted - possibly
- * before this side has finished loading its PSI WASM. A remote `error` or
- * `close` both surface a `transport` {@link ConnectionError}; either way an
- * already-buffered frame is drained by `receive` before the error surfaces
- * (`close` is a clean half-close, `error` an abnormal drop). `send` writes to
- * the channel; and `close` detaches the listeners and closes the channel,
- * waiting on a clean close for the peer to take the final frame (see
- * {@link waitForPeerClose}), so a resolved close means delivered rather than
- * buffered -- except on the wait's ceiling, dead-peer, already-not-open, and
- * cancelled paths, where the frame can still be in flight (see
- * {@link waitForPeerClose}).
- * How the wait ended goes up whole through `onCloseOutcome`, unjudged: this
- * layer knows which exits carry a delivery signal, but which of them a run tells
- * its operator about, and in what words, belongs to the layer that owns the
- * run's vocabulary (`exchangeLifecycle.ts`).
+ * The `data` listener attaches before the open handshake is awaited, since
+ * PeerJS does not replay events to a listener attached later and the
+ * initiator can send its first frame unprompted. A remote `error` or `close`
+ * both expose a `transport` {@link ConnectionError}, draining any
+ * already-buffered frame via `receive` first. `close` waits on
+ * {@link waitForPeerClose} for the peer to take the final frame before
+ * resolving, except on that wait's ceiling, dead-peer, already-not-open, and
+ * cancelled paths, where the frame can still be in flight; how the wait ended
+ * is reported unjudged through `onCloseOutcome`.
  *
- * The inbound path is byte-bounded against a hostile or buggy peer: PeerJS chunk
- * reassembly is capped so an oversized PSI set frame or a flood of
- * never-completed partial reassemblies fails closed rather than allocating
- * proportional to what the peer sends (see {@link boundChunkReassembly}), and a
- * delivered frame is re-checked at this stable layer (see
- * {@link checkDeliveredFrameBound}). This is the WebRTC transport's own bound:
- * core's AEAD frame-size envelope is out of scope on the web path, which runs
- * the data channel under DTLS and declines the AEAD wrap.
+ * The inbound path is byte-bounded against a hostile or buggy peer
+ * ({@link boundChunkReassembly}, re-checked at delivery by
+ * {@link checkDeliveredFrameBound}) -- the WebRTC transport's own bound, since
+ * core's AEAD frame-size envelope does not apply on the DTLS-wrapped web path.
  *
- * If the channel never opens (timeout, or a pre-open `error`/`close`), the
- * returned promise rejects and the half-open channel is torn down before the
- * rejection propagates, since `peer.disconnect()` alone would not close it.
+ * If the channel never opens, the returned promise rejects and the half-open
+ * channel is torn down first, since `peer.disconnect()` alone would not
+ * close it.
  *
  * @param conn     A PeerJS data connection, open or not yet open.
- * @param options  `openTimeoutMs` bounds how long to wait for the channel to
- *                 open (see {@link waitForConnectionOpen}); `inactivityTimeoutMs`
- *                 overrides the {@link DEFAULT_WEBRTC_INACTIVITY_TIMEOUT_MS}
- *                 parked-receive budget. `maxFrameBytes` /
- *                 `maxConcurrentReassemblies` override the fixed inbound bounds
- *                 (default {@link MAX_WEBRTC_FRAME_BYTES} and the concurrent
- *                 reassembly cap) and `closeDrainTimeoutMs` the ceiling on the
- *                 clean close's wait for the peer (see {@link waitForPeerClose}),
- *                 for tests only -- none of them is an operator-facing knob.
- *                 `onCloseOutcome` reports how a clean close's wait for the peer
- *                 ended ({@link PeerCloseOutcome}), once per connection at most,
- *                 leaving both the reporting decision and the operator-facing
- *                 wording to the caller; omitting it discards the outcome. A
- *                 close that does not flush runs no wait and reports nothing.
- *                 `signal` is the run's, and is the route by which a cancel cuts
- *                 that wait short (core's `MessageConnection.close()` takes no
- *                 arguments, so the signal is handed in here rather than at the
- *                 close); omitting it leaves the wait bounded only by the peer
- *                 and the ceiling.
+ * @param options  `openTimeoutMs`, `inactivityTimeoutMs`, `maxFrameBytes`,
+ *                 `maxConcurrentReassemblies`, and `closeDrainTimeoutMs`
+ *                 override the fixed defaults; test-only, none is an
+ *                 operator-facing setting. `onCloseOutcome` reports
+ *                 {@link PeerCloseOutcome} once per connection, left unwritten
+ *                 to the operator here; a non-flushing close reports nothing.
+ *                 `signal` cuts the close-drain wait short, since core's
+ *                 `MessageConnection.close()` takes no arguments of its own.
  */
 export async function openPeerMessageConnection(
   conn: DataConnection,
@@ -99,11 +72,11 @@ export async function openPeerMessageConnection(
   },
 ): Promise<MessageConnection> {
   const maxFrameBytes = options?.maxFrameBytes ?? MAX_WEBRTC_FRAME_BYTES;
-  // Validate the PeerJS chunk-reassembly premise before attaching any listener or
-  // constructing the connection: if it is broken, throwing here leaves nothing to
-  // tear down, whereas throwing from the constructor callback below would strand
-  // the half-wired channel (the QueuedMessageConnection is never returned, so its
-  // catch-driven close cannot run).
+  // Validate the PeerJS chunk-reassembly assumption before attaching any
+  // listener or constructing the connection: throwing here leaves nothing to
+  // tear down, whereas throwing from the constructor callback below would
+  // strand the half-wired channel (the QueuedMessageConnection is never
+  // returned, so its catch-driven close cannot run).
   assertChunkReassemblySupported(conn);
   const opened = waitForConnectionOpen(conn, options?.openTimeoutMs);
   const mc = new QueuedMessageConnection(
@@ -111,14 +84,14 @@ export async function openPeerMessageConnection(
       // Bound PeerJS chunk reassembly before any chunk arrives, so an oversized
       // frame or a partial-reassembly flood fails closed (via controls.fail)
       // rather than allocating proportional to the peer-chosen size. The over-cap
-      // error carries no peer id, so it needs no redaction.
+      // error holds no peer id, so it needs no redaction.
       boundChunkReassembly(conn, controls.fail, {
         maxFrameBytes,
         maxConcurrentReassemblies: options?.maxConcurrentReassemblies,
       });
-      // Re-check a fully delivered frame at this stable layer: a backstop for the
-      // chunk-layer bound above (which reaches into PeerJS internals) that refuses
-      // an over-cap binary frame as delivered, however it was assembled.
+      // Re-check a fully delivered frame at this stable layer: a safety check
+      // for the chunk-layer bound above (which reaches into PeerJS internals)
+      // that refuses an over-cap binary frame as delivered, however assembled.
       const onData = (data: unknown) => {
         const overCap = checkDeliveredFrameBound(data, maxFrameBytes);
         if (overCap) {
@@ -130,16 +103,16 @@ export async function openPeerMessageConnection(
       // PeerJS interpolates the remote id (`conn.peer`, a derived rendezvous id)
       // into the errors it emits on a mid-exchange failure; redact it before
       // `asConnectionError` wraps, so neither the wrapped message nor the
-      // attached `.cause` carries the id to the lifecycle's console/alert sinks.
+      // attached `.cause` passes the id to the lifecycle's console/alert sinks.
       const onError = (err: unknown) =>
         controls.fail(
           asConnectionError(redactErrorIds(err, [conn.peer]), "transport"),
         );
-      // A clean remote close can carry the peer's final frame still queued, so
+      // A clean remote close can hold the peer's final frame still queued, so
       // it uses finish(): receive() drains that frame before the close error
-      // surfaces. A genuine error (onError) uses fail(), the abnormal
+      // shows. A genuine error (onError) uses fail(), the abnormal
       // counterpart; receive() still drains an already-queued frame ahead of
-      // the error, but fail() carries no clean-close semantics. The kind stays
+      // the error, but fail() holds no clean-close semantics. The kind stays
       // `transport` (not a dedicated peer-closed kind) by decision; see
       // docs/COMMUNICATION.md ("Error handling").
       const onClose = () =>
@@ -155,19 +128,14 @@ export async function openPeerMessageConnection(
           conn.off("data", onData);
           conn.off("error", onError);
           conn.off("close", onClose);
-          // A flushing close is the delivery guarantee, not hygiene. PeerJS's
-          // flush is only the in-band close sentinel: it queues the sentinel
-          // and returns with the final frame still in the browser's outbound
-          // buffer, so returning here would report delivery for a frame that
-          // has not left. Wait for the peer to close the channel instead --
-          // it does that on reading the sentinel, which the ordered channel
-          // places behind every frame already sent. The listener goes on
-          // before the sentinel does, so an instant peer cannot outrun it.
-          //
-          // Only an open channel: PeerJS's flush path is a no-op on a channel
-          // that never opened (it queues the sentinel and returns without
-          // tearing down the RTCPeerConnection), so an unopened channel needs
-          // the hard close or it leaks.
+          // A flushing close is the delivery guarantee, not hygiene: PeerJS's
+          // flush queues the in-band close sentinel and returns while the
+          // final frame is still in the browser's outbound buffer, so this
+          // waits for the peer to close the channel instead (it does that on
+          // reading the sentinel, ordered behind every frame already sent;
+          // the listener attaches before the sentinel is queued). PeerJS's
+          // flush is a no-op on a channel that never opened, so an unopened
+          // channel needs the hard close below or it leaks.
           if (closeOptions?.flush && conn.open) {
             const peerClosed = waitForPeerClose(
               conn,
@@ -203,7 +171,7 @@ export async function openPeerMessageConnection(
     // otherwise a consumer that branches on ConnectionError.kind cannot classify
     // an open-time failure (F5). asConnectionError passes an existing
     // ConnectionError through unchanged. Redact first: a pre-open PeerJS error
-    // can carry the remote derived id (`conn.peer`).
+    // can hold the remote derived id (`conn.peer`).
     throw asConnectionError(redactErrorIds(err, [conn.peer]), "transport");
   }
   return mc;

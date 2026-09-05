@@ -59,9 +59,7 @@ import type { SigningFingerprintResult } from "./signingIdentity";
 
 /**
  * Thrown by {@link JobManager.createJob} when an sftp intent arrives but no
- * SFTP connection is authored. The console UI falls back to the save-a-file
- * surface in that state, so this is the server-side backstop for an intent that
- * reached the API anyway; the route maps it to a 400, mirroring
+ * SFTP connection is authored. The route maps it to a 400, mirroring
  * {@link JobRendezvousUnavailableError}.
  */
 export class SftpUnavailableError extends Error {
@@ -72,19 +70,13 @@ export class SftpUnavailableError extends Error {
 }
 
 /**
- * Thrown by {@link JobManager.createJob} when an exchange is already occupying
- * the single slot. The console facilitates one exchange at a time, so a second
- * create -- of either channel -- is refused with a 409 until the running exchange
- * is deleted. Channel is irrelevant: a running filedrop job blocks an sftp create
- * and vice versa. The slot frees only when the exchange was deleted AND its
- * child's exit was observed (or no child was ever spawned), so a successor can
- * never rendezvous with a still-dying child.
+ * Thrown by {@link JobManager.createJob} when an exchange already occupies
+ * the single slot: a second create of either channel is refused with a 409
+ * until the running exchange is deleted and its child's exit is observed.
  *
- * Carries {@link activeJobId}, the id of the exchange occupying the slot, so the
- * route can emit it in the 409 body and the browser can re-attach to the running
- * exchange rather than dead-end on the "already running" alert. The id is not a
- * secret (access rides the loopback-only origin), so returning it widens no
- * exposure.
+ * Holds {@link activeJobId}, the occupying exchange's id (not a secret; access
+ * rides the loopback-only origin), so the route can emit it in the 409 body
+ * and the browser can re-attach to the running exchange.
  */
 export class ExchangeBusyError extends Error {
   constructor(readonly activeJobId: string) {
@@ -95,10 +87,8 @@ export class ExchangeBusyError extends Error {
 
 /**
  * Thrown by {@link JobManager.probeSftpHostKey} when a probe child is already
- * running. The probe is single-flight -- one child at a time -- so a concurrent
- * request is refused with a 409, the busy convention `POST /api/jobs` uses. It is
- * independent of the exchange slot: a probe is a read-only host-key observation
- * that authors nothing.
+ * running: the probe is single-flight, so a concurrent request is refused
+ * with a 409. Independent of the exchange slot -- a probe authors nothing.
  */
 export class SftpProbeBusyError extends Error {
   constructor() {
@@ -108,13 +98,11 @@ export class SftpProbeBusyError extends Error {
 }
 
 /**
- * Thrown by {@link JobManager.resolveSigningFingerprint} when a fingerprint child
- * is already running. Single-flight for a reason the probe's flag is not: two
- * concurrent runs would both create-or-load the same identity file, and the CLI's
- * first-time create is exclusive precisely so a race cannot silently discard one
- * generated key. Refusing the second here keeps the operator from seeing the
- * losing run's confusing outcome at all. Independent of the exchange slot: this
- * authors an identity, not a run.
+ * Thrown by {@link JobManager.resolveSigningFingerprint} when a fingerprint
+ * child is already running. Single-flight because two concurrent runs would
+ * both create-or-load the same identity file, and the CLI's first-time create
+ * is exclusive. Independent of the exchange slot: this authors an identity,
+ * not a run.
  */
 export class SigningFingerprintBusyError extends Error {
   constructor() {
@@ -124,13 +112,11 @@ export class SigningFingerprintBusyError extends Error {
 }
 
 /**
- * Thrown by {@link JobManager.createJob} when a filedrop intent arrives but this
- * appliance cannot rendezvous one: no rendezvous directory is resolved (neither
- * `JOB_RENDEZVOUS_DIR` nor its `JOB_DATA_ROOT` fallback is set), or the split pair a
- * second mount provisions is incoherent (see `rendezvousSplitFaults`). The console
- * UI disables the filedrop transport in either state and states the remedy, so this
- * is the server-side backstop for an intent that reached the API anyway; the route
- * maps it to a 400.
+ * Thrown by {@link JobManager.createJob} when a filedrop intent arrives but
+ * this console cannot rendezvous one: no rendezvous directory is resolved
+ * (neither `JOB_RENDEZVOUS_DIR` nor its `JOB_DATA_ROOT` fallback is set), or
+ * the split pair a second mount provisions is incoherent (see
+ * `rendezvousSplitFaults`). The route maps it to a 400.
  */
 export class JobRendezvousUnavailableError extends Error {
   constructor() {
@@ -141,13 +127,11 @@ export class JobRendezvousUnavailableError extends Error {
 
 /**
  * Thrown by {@link JobManager.createJob} when a filedrop intent reaches a
- * split-provisioned appliance without retain mode. A separate outbound directory
- * requires `retain_files` -- core's connection schema and the CLI both refuse the
- * pair without it -- and on a split appliance EVERY filedrop exchange carries the
- * pair, so the file-handling choice is a precondition of running one at all rather
- * than of a connection the operator authored. The console states the requirement in
- * its own words at every gate that knows both; this is the server-side backstop,
- * mapped by the route to a 400 rather than reaching core's compose as a 500.
+ * split-provisioned console without retain mode. A separate outbound
+ * directory requires `retain_files` -- core's connection schema and the CLI
+ * both refuse the pair without it, and on a split console every filedrop
+ * exchange has the pair. Mapped by the route to a 400 rather than reaching
+ * core's compose as a 500.
  */
 export class JobRendezvousRetainRequiredError extends Error {
   constructor() {
@@ -159,9 +143,9 @@ export class JobRendezvousRetainRequiredError extends Error {
 }
 
 /**
- * A single buffered event with its monotonic id. The full event list is retained
- * for the job's lifetime so every SSE connect can replay from the start (or from
- * a Last-Event-ID offset), per the full-history-replay design.
+ * A single buffered event with its monotonic id. The full event list is
+ * retained for the job's lifetime so every SSE connect can replay from the
+ * start (or from a Last-Event-ID offset).
  */
 export interface BufferedEvent {
   id: number;
@@ -172,18 +156,13 @@ export interface BufferedEvent {
 export type JobStatus = "running" | "succeeded" | "failed" | "cancelled";
 
 /**
- * Why the exchange-record pair is not being offered for a job, stated rather than
- * left to a bare negative.
- *
- * The three are not one answer, because what a client may safely do with them
- * differs. `no-record` is the appliance's DEFINITIVE denial -- nothing is at the
- * record path -- and it is the only one that licenses a console control to destroy
- * the workdir without asking. `undescribable-record` is a record file sitting in
- * the workdir that this bundle cannot offer: its `outcome` is not one this bundle
- * knows (a data root a differently-versioned CLI wrote), it does not parse into a
- * `createdAt` and an `outcome` at all, or the verification-keys half beside it is
- * missing, so the pair cannot be served whole. `not-settled` is a run still going,
- * whose pair the CLI writes near the end.
+ * Why the exchange-record pair is withheld for a job, distinguished because a
+ * client may act on each differently: `no-record` is the console's definitive
+ * denial (nothing at the record path), the only one that licenses destroying
+ * the workdir without asking; `undescribable-record` is a record file present
+ * but not one this bundle can parse (unknown `outcome`, malformed, or missing
+ * its keys half); `not-settled` is a run still going, whose pair the CLI
+ * writes near the end.
  */
 export type RecordUnavailableReason =
   "not-settled" | "no-record" | "undescribable-record";
@@ -206,13 +185,12 @@ export interface JobView {
   /** What the available record says became of the run that wrote it, present
    * exactly when {@link recordAvailable} is true. A terminated run's record
    * attests the same disclosure a completed run's does but has no result file
-   * behind its commitments, so a surface reads this to say what it is offering
-   * rather than presenting the two alike. */
+   * behind its commitments. */
   recordOutcome?: ExchangeRecordOutcome;
   /** Why the pair is withheld, present exactly when {@link recordAvailable} is
-   * false. A client reads it to tell the appliance's definitive denial from a
-   * record it holds and cannot describe, which are the same negative to a reader
-   * of the boolean alone. */
+   * false: distinguishes the console's definitive denial from a record on disk
+   * this bundle cannot describe -- the same negative to a reader of the boolean
+   * alone. */
   recordUnavailableReason?: RecordUnavailableReason;
   /** Whether this run's intent asked for a diagnostic log, whether or not the
    * CLI has opened the file yet. It is what separates a run that will never have
@@ -292,9 +270,10 @@ type ExchangeSlot =
   | { phase: "active"; record: JobRecord; deleted: boolean };
 
 /**
- * The hard cap on buffered events. The CLI stream is dozens of lines by design;
- * this is a runaway backstop. On overflow the job is failed rather than dropping
- * events silently, so a supervisor never observes a truncated history.
+ * The hard cap on buffered events: a safety check well above the CLI stream's
+ * normal dozens-of-lines volume. On overflow the job is failed rather than
+ * dropping events silently, so a supervisor never observes a truncated
+ * history.
  */
 export const EVENT_BUFFER_CAP = 10000;
 
@@ -325,31 +304,31 @@ export interface JobManagerOptions {
    * a filedrop exchange reads and writes, which falls back to the data root when
    * `JOB_RENDEZVOUS_DIR` is unset. Absent only when neither resolves; a filedrop intent
    * then fails with {@link JobRendezvousUnavailableError}. On a split-provisioned
-   * appliance it is the INBOUND (peer-written) leg. Never derived from a request.
+   * console it is the INBOUND (peer-written) leg. Never derived from a request.
    */
   jobRendezvousDir?: string;
   /**
    * The resolved outbound (self-written) rendezvous leg (from
    * {@link JobRendezvousProvisioning.outboundDir}), present only when
-   * `JOB_RENDEZVOUS_OUTBOUND_DIR` names one. Its presence is what makes every
-   * filedrop exchange this appliance runs a split one: the composed config carries
-   * `inbound_path`/`outbound_path` instead of a single `path`, and the zero-setup
-   * argv gains `--outbound-path`. Never derived from a request.
+   * `JOB_RENDEZVOUS_OUTBOUND_DIR` names one. Its presence makes every filedrop
+   * exchange this console runs a split one: the composed config has
+   * `inbound_path`/`outbound_path` instead of a single `path`, and the
+   * zero-setup argv gains `--outbound-path`. Never derived from a request.
    */
   jobRendezvousOutboundDir?: string;
   /**
-   * Why a filedrop exchange cannot run as this appliance is provisioned (from
-   * {@link JobRendezvousProvisioning.problem}) -- an incoherent split pair. Present
-   * only in that state, and a filedrop intent then fails with
-   * {@link JobRendezvousUnavailableError} rather than running against half a layout.
+   * Why a filedrop exchange cannot run as this console is provisioned (from
+   * {@link JobRendezvousProvisioning.problem}) -- an incoherent split pair.
+   * Present only in that state; a filedrop intent then fails with
+   * {@link JobRendezvousUnavailableError}.
    */
   jobRendezvousProblem?: string;
   /**
-   * The resolved secrets mount (from {@link useJobSecretsDir}) the operator browses
-   * for an authored connection's file-reference credential -- with NO data-root
-   * fallback, so absent when `JOB_SECRETS_DIR` is unset. Used only to resolve a
-   * `mountRef` credential locator to its `@path` during {@link authorSftpServer};
-   * an unset mount refuses a `mountRef` authoring. Never derived from a request.
+   * The resolved secrets mount (from {@link useJobSecretsDir}) the operator
+   * browses for an authored connection's file-reference credential -- no
+   * data-root fallback, so absent when `JOB_SECRETS_DIR` is unset. Used only
+   * to resolve a `mountRef` credential locator to its `@path` during
+   * {@link authorSftpServer}; an unset mount refuses that authoring.
    */
   jobSecretsDir?: string;
   /**
@@ -369,12 +348,11 @@ export interface JobManagerOptions {
 }
 
 /**
- * The public, credential-free projection of the authored SFTP connection served
- * by `GET /api/jobs/sftp`: the locator fields an operator needs to recognize it
- * and the client needs to author an invitation endpoint from, plus any non-blocking
- * credential warnings (each naming a field and a directory only, never a secret).
- * Constructed field-by-field from the entry -- never by spreading it -- so no
- * credential reference, fingerprint, or future field can ride along.
+ * The public, credential-free projection of the authored SFTP connection
+ * served by `GET /api/jobs/sftp`: the locator fields plus any non-blocking
+ * credential warnings (each naming a field and a directory only, never a
+ * secret). Constructed field-by-field from the entry -- never by spreading it
+ * -- so no credential reference, fingerprint, or future field can ride along.
  */
 export interface SftpConnectionProjection {
   host: string;
@@ -418,10 +396,11 @@ export class JobManager {
    */
   private authoredSftpServer: JobSftpServerEntry | undefined;
   /**
-   * The non-blocking credential warnings for the authored connection (each naming a
-   * field and a directory only), held alongside it and surfaced in the projection so
-   * both the PUT response and a later GET (console reload) carry them. Empty when no
-   * connection is authored or every credential resolves safely.
+   * The non-blocking credential warnings for the authored connection (each
+   * naming a field and a directory only), held alongside it and exposed in
+   * the projection so both the PUT response and a later GET (console reload)
+   * include them. Empty when no connection is authored or every credential
+   * resolves safely.
    */
   private authoredCredentialWarnings: Array<string> = [];
   /**
@@ -464,21 +443,14 @@ export class JobManager {
   }
 
   /**
-   * Create and start a job from a validated intent. The server generates the id,
-   * builds the workdir, writes the composed config, key, and input CSV under
-   * fixed names, and spawns the CLI. Returns the new job's id.
-   *
-   * The channel's connection resource is resolved synchronously first -- an sftp
-   * intent the authored connection, a filedrop intent a configured
-   * rendezvous directory -- so an unconfigured target is rejected before
-   * the slot is claimed and with nothing on disk. The single slot is then claimed
-   * with no await between the null check and the assignment, so two concurrent
-   * POSTs cannot both pass: a second create while an exchange occupies the slot is
-   * {@link ExchangeBusyError} -- regardless of mode, so a zero-setup create blocks a
-   * running exchange and vice versa. An `inputFile` intent resolves its mounted path
-   * inside the try (mirroring the unknown-remote flow): a name that resolves to no
-   * regular file is rejected and the slot freed with nothing on disk. The CLI reads
-   * the mounted file in place, so nothing is copied into the workdir.
+   * Create and start a job from a validated intent: generates the id, builds
+   * the workdir, writes the composed config, key, and input CSV, and spawns
+   * the CLI. The connection resource is resolved before the slot is claimed
+   * (so an unconfigured target is rejected with nothing on disk), and the
+   * slot itself is claimed with no await between the null check and the
+   * assignment, so two concurrent POSTs cannot both pass. An `inputFile`
+   * intent resolves its mounted path inside the try; the CLI reads it in
+   * place, so nothing is copied into the workdir.
    */
   async createJob(intent: JobCreateIntent): Promise<string> {
     const id = generateJobId();
@@ -495,7 +467,7 @@ export class JobManager {
         this.jobRendezvousProblem !== undefined
       )
         throw new JobRendezvousUnavailableError();
-      // Every filedrop exchange on a split-provisioned appliance carries the
+      // Every filedrop exchange on a split-provisioned console has the
       // inbound/outbound pair, which core refuses without retain mode. Refused
       // here, before the slot is claimed, so the operator meets a 400 the console
       // can explain rather than a compose failure after a workdir exists.
@@ -508,7 +480,7 @@ export class JobManager {
 
     // Claim the slot with no await between the null check and the assignment, so
     // two concurrent POSTs cannot both observe a free slot. The busy rejection
-    // carries the occupying exchange's id so the caller can re-attach to it.
+    // holds the occupying exchange's id so the caller can re-attach to it.
     if (this.slot !== null) throw new ExchangeBusyError(this.slotId()!);
     this.slot = { phase: "starting", id };
 
@@ -530,11 +502,10 @@ export class JobManager {
         mountedInputPath,
       );
     } catch (error) {
-      // spawnExchangeJob is the final fallible step of startJobInWorkdir, so this
-      // catch is reachable only before any child was spawned. A slot record whose
-      // handle is already set would mean a live child, and freeing the slot here
-      // would strand it -- assert that never happens rather than trust the
-      // ordering.
+      // spawnExchangeJob is the final fallible step of startJobInWorkdir, so
+      // this catch is reachable only before any child was spawned. A slot
+      // record whose handle is already set would mean a live child; freeing
+      // the slot here would strand it, so that state is asserted unreachable.
       const active = this.activeSlotRecord();
       if (active !== null && active.handle !== null)
         throw new Error(
@@ -547,10 +518,10 @@ export class JobManager {
   }
 
   /**
-   * The rendezvous mounts a filedrop job preflights and a credential `@path` is
-   * excluded from, each paired with the leg it is. Routed through the shared
-   * enumeration so the manager and the boot-time containment surfaces cannot state
-   * different rules about which mounts this appliance has.
+   * The rendezvous mounts a filedrop job preflights and a credential `@path`
+   * is excluded from, each paired with the leg it is. Routed through the
+   * shared enumeration so the manager and the boot-time containment surfaces
+   * cannot state different rules about which mounts this console has.
    */
   private rendezvousLegs(): Array<[string, RendezvousLeg]> {
     return jobRendezvousLegs(
@@ -582,15 +553,12 @@ export class JobManager {
   }
 
   /**
-   * Validate and hold an in-app authored SFTP connection for the single exchange.
-   * Validation runs {@link validateAuthoredSftpServer}, so a request-sourced
-   * connection is held to strict rules -- literal fingerprint, credential-`@path`
-   * that resolves, strict allowlist, core-schema compose. A validation failure
+   * Validate and hold an in-app authored SFTP connection for the single
+   * exchange, via {@link validateAuthoredSftpServer}. A validation failure
    * throws before the slot is touched, so a rejected body never replaces a
-   * previously authored connection. A `mountRef` credential locator is resolved
-   * against the secrets mount here, and a `raw` (pasted) credential is
-   * materialized to the server-owned scratch file, so the browser sends only the
-   * picked segments or the value and never a container-absolute path. Returns the
+   * previously authored connection. A `mountRef` credential locator is
+   * resolved against the secrets mount here, and a `raw` (pasted) credential
+   * is materialized to the server-owned scratch file. Returns the
    * credential-free projection of the now-effective connection.
    */
   authorSftpServer(rawBody: unknown): SftpConnectionProjection {
@@ -632,7 +600,7 @@ export class JobManager {
    * The credential-free projection of the authored SFTP connection for
    * `GET /api/jobs/sftp`, or null when none is authored. Explicitly mapped
    * field-by-field (never a spread) so only the locator fields {host, port, and
-   * whichever remote-directory form the entry carries} can ever cross the
+   * whichever remote-directory form the entry holds} can ever cross the
    * response boundary.
    */
   sftpProjection(): SftpConnectionProjection | null {
@@ -650,14 +618,12 @@ export class JobManager {
   }
 
   /**
-   * Read the host-key fingerprint an SFTP server at `host[:port]` presents, by
-   * spawning the CLI's `probe-host-key` subcommand. STATELESS by construction: it
-   * touches no authored connection, records nothing, and returns the observation
-   * for the caller to forget -- the console offers it beside the paste field for a
-   * comparison, never trusting it. SINGLE-FLIGHT: the flag is claimed
-   * synchronously (no await before the assignment), so a concurrent probe is
-   * {@link SftpProbeBusyError} (a 409) rather than a second child. The manager owns
-   * the binary path and child env, so a test can point the probe at the stub CLI.
+   * Read the host-key fingerprint an SFTP server at `host[:port]` presents,
+   * by spawning the CLI's `probe-host-key` subcommand. Stateless: touches no
+   * authored connection and records nothing -- the console offers the
+   * observation beside the paste field for comparison, never trusting it.
+   * Single-flight: the flag is claimed synchronously (no await before the
+   * assignment), so a concurrent probe is {@link SftpProbeBusyError} (a 409).
    */
   async probeSftpHostKey(args: {
     host: string;
@@ -678,14 +644,13 @@ export class JobManager {
   }
 
   /**
-   * The absolute paths a `certificate`-mode job's composed `signing` block names.
-   * Both are server constants: the long-lived identity in the appliance's mounted
-   * data root (durable across jobs, and a file the operator has on their host --
-   * see {@link signingIdentityPath}), and the receipt pinned to a fixed name in
-   * THIS job's workdir so the appliance can serve it afterwards. Each is composed
-   * through its directory's own containment check rather than joined, so a
-   * constant that stopped resolving inside that directory is refused instead of
-   * naming a file the receipt endpoint would then serve from outside the workdir.
+   * The absolute paths a `certificate`-mode job's composed `signing` block
+   * names: the long-lived identity in the console's mounted data root
+   * (durable across jobs; see {@link signingIdentityPath}), and the receipt
+   * pinned to a fixed name in this job's workdir. Each is composed through
+   * its directory's own containment check rather than joined, so a constant
+   * that stopped resolving inside that directory is refused rather than
+   * naming a file served from outside the workdir.
    */
   private signingPathsFor(
     workdir: string,
@@ -697,22 +662,19 @@ export class JobManager {
   }
 
   /**
-   * Create-or-reuse this party's signing identity and return its fingerprint, by
-   * spawning the CLI's `fingerprint` subcommand against the mounted identity file.
-   * The one path the operator's partner needs before a signed exchange can be
-   * verified, so it is anchored where the CLI anchors it -- at the fingerprint
-   * command -- rather than being generated behind an exchange that has already
-   * started.
+   * Create-or-reuse this party's signing identity and return its
+   * fingerprint, by spawning the CLI's `fingerprint` subcommand against the
+   * mounted identity file.
    *
-   * `identityLabel` is the operator's own `linkage_terms.identity`, bound into a
-   * NEW identity and ignored (with the CLI's own warning) when one already exists;
-   * `exportCertificate` additionally writes the PUBLIC certificate to a second
-   * fixed name in the same mount. The manager owns both paths and the binary, so
-   * no request value is ever a path.
+   * `identityLabel` is the operator's `linkage_terms.identity`, bound into a
+   * new identity and ignored (with the CLI's own warning) when one already
+   * exists; `exportCertificate` additionally writes the public certificate to
+   * a second fixed name in the same mount. The manager owns both paths, so no
+   * request value is ever a path.
    *
-   * SINGLE-FLIGHT: the flag is claimed synchronously (no await before the
-   * assignment), so a concurrent request is {@link SigningFingerprintBusyError}
-   * (a 409) rather than a second child racing the same file.
+   * Single-flight: the flag is claimed synchronously, so a concurrent
+   * request is {@link SigningFingerprintBusyError} (a 409) rather than a
+   * second child racing the same file.
    */
   async resolveSigningFingerprint(args: {
     identityLabel: string;
@@ -743,7 +705,7 @@ export class JobManager {
     mountedInputPath: string | undefined,
   ): Promise<string> {
     // Exchange composes a config document and a key file into the workdir;
-    // zero-setup writes NEITHER -- its connection rides argv and it carries no
+    // zero-setup writes NEITHER -- its connection rides argv and it has no
     // shared secret, so the workdir holds only input (when inline), output, and
     // the record pair.
     const exchangeDocuments =
@@ -764,7 +726,7 @@ export class JobManager {
         ? workdirArtifactPath(workdir, JOB_FILE_NAMES.log)
         : null;
     // Only a certificate-mode exchange writes one. A zero-setup run composes no
-    // config at all, so it carries no signing block and never signs.
+    // config at all, so it has no signing block and never signs.
     const receiptPath =
       intent.mode !== "zeroSetup" && intent.signing?.mode === "certificate"
         ? this.signingPathsFor(workdir).receiptOutput
@@ -796,10 +758,10 @@ export class JobManager {
 
     // One value for the preflight's recovery copy and for what the child is told
     // to do, so the notice cannot send the operator to a control this very launch
-    // already carries.
+    // already has.
     const sweepExchangeFiles = intent.sweepExchangeFiles === true;
 
-    // Each leg preflights independently and names itself, so a split appliance's
+    // Each leg preflights independently and names itself, so a split console's
     // two mounts raise their own notices rather than one set the operator cannot
     // attribute to a folder.
     if (intent.channel === "filedrop" && this.jobRendezvousDir !== undefined)
@@ -847,7 +809,7 @@ export class JobManager {
   /**
    * Compose and write the exchange mode's config and key files into the workdir,
    * returning their paths. The connection block is drawn only from the server-side
-   * resources ({@link composeDocumentByChannel}); the key file carries the shared
+   * resources ({@link composeDocumentByChannel}); the key file holds the shared
    * secret. Not reached on the zero-setup path, which writes neither.
    */
   private async writeExchangeDocuments(
@@ -877,13 +839,13 @@ export class JobManager {
   }
 
   /**
-   * Spawn the CLI for the intent's mode: an exchange run driven by the composed
-   * config and key files, or a zero-setup run driven by the literal positional
-   * `$0` form (URL plus, for sftp, `--server-*` flags), with no `--config-file`,
-   * no `--key-file`, and never `--save`. The connection argv for a zero-setup run
-   * is built here from the same server-side resources the exchange config draws on
-   * -- the authored SFTP connection, or the configured rendezvous directory -- so a
-   * missing one is a caller bug surfaced as a hard error, not a silent fallback.
+   * Spawn the CLI for the intent's mode: an exchange run driven by the
+   * composed config and key files, or a zero-setup run driven by the literal
+   * positional `$0` form (URL plus, for sftp, `--server-*` flags), with no
+   * `--config-file`, no `--key-file`, and never `--save`. The zero-setup
+   * connection argv is built here from the same server-side resources the
+   * exchange config draws on, so a missing one is a caller bug reported as a
+   * hard error, not a silent fallback.
    */
   private spawnForMode(
     intent: JobCreateIntent,
@@ -940,7 +902,7 @@ export class JobManager {
    * The connection portion of a zero-setup CLI argv for the intent's channel: the
    * `sftp://` URL and `--server-*` flags from the authored connection, or the
    * `file://` rendezvous locator. Each arm requires the resource `createJob`
-   * already resolved, so a missing one is a caller bug surfaced as a hard error.
+   * already resolved, so a missing one is a caller bug reported as a hard error.
    */
   private zeroSetupConnectionArgs(
     intent: JobCreateIntent,
@@ -980,8 +942,9 @@ export class JobManager {
   }
 
   /**
-   * The active record when the slot holds one matching this id and it has not been
-   * deleted, else undefined. A deleted (but not-yet-freed) slot surfaces 404 here.
+   * The active record when the slot holds one matching this id and it has not
+   * been deleted, else undefined. A deleted (but not-yet-freed) slot shows
+   * 404 here.
    */
   getJob(id: string): JobRecord | undefined {
     const slot = this.slot;
@@ -1002,12 +965,12 @@ export class JobManager {
   }
 
   /**
-   * The id of the exchange occupying the single slot, or null when it is free.
-   * Occupied is exactly the states in which a create refuses with
-   * {@link ExchangeBusyError} -- a starting or active exchange, including one
-   * deleted whose child is still dying -- so `GET /api/jobs/slot` and the busy
-   * create disclose the same occupant. Delegates to {@link slotId}, the same value
-   * `createJob` puts in the busy error, so the two signals cannot drift.
+   * The id of the exchange occupying the single slot, or null when free.
+   * Occupied is exactly the states {@link ExchangeBusyError} refuses on -- a
+   * starting or active exchange, including one deleted whose child is still
+   * dying -- so `GET /api/jobs/slot` and the busy create disclose the same
+   * occupant. Delegates to {@link slotId}, the same value `createJob` puts in
+   * the busy error.
    */
   occupiedSlotId(): string | null {
     return this.slotId();
@@ -1090,34 +1053,22 @@ export class JobManager {
   }
 
   /**
-   * Reconcile the child's exit into the job's terminal state. If the CLI already
-   * emitted its own terminal fd-3 event, that stands; otherwise the client is
-   * still guaranteed a terminal event by synthesizing one that matches the exit:
-   * - a cancelled outcome (interrupt) legitimately carries no terminal event, so
-   *   synthesize a `cancelled`-flavored error terminal;
-   * - a succeeded exit with no terminal event (the CLI normally emits a `result`;
-   *   this covers a supervisor that missed it) synthesizes a `result`;
-   * - a persistence-loss exit with no terminal event synthesizes an `output`
-   *   terminal, the category whose seat rendering offers no way to run again:
-   *   the exchange completed, so the one response the exit code exists to
-   *   prevent is a re-run, and the retryable `exchange` terminal below invites
-   *   exactly that;
-   * - any other exit without a terminal event means the stream broke, so
-   *   synthesize a failure terminal.
+   * Reconcile the child's exit into the job's terminal state. An
+   * already-emitted CLI terminal event stands; otherwise one is synthesized
+   * to match the exit: cancelled -> a `cancelled`-flavored error, succeeded
+   * -> a `result`, persistence loss -> a non-retryable `output`-category
+   * error, anything else -> a stream-broke `exchange`-category error.
    *
-   * The exit decides the OUTCOME; the terminal event decides the STATUS, which is
-   * what the result route gates on -- the record and keys routes read it only for
-   * the settled-versus-running distinction {@link liveRecordAvailability} draws.
-   * A persistence loss with the CLI's own `result` terminal is therefore
-   * `succeeded` and serves its result -- the exchange completed and the file is on
-   * disk -- while the loss is carried on `terminal.outcome` and named by the run's
-   * warnings. With no terminal event at all the console saw no result announced,
-   * so the status stays `failed` and none is offered, exactly as for any other
-   * broken stream; a record pair that run wrote is offered on its own existence.
+   * The exit decides the outcome; the terminal event's type decides the
+   * status the result route gates on. A persistence loss with the CLI's own
+   * `result` terminal is therefore `succeeded` and serves its result, with
+   * the loss named on `terminal.outcome`; with no terminal event at all the
+   * status is `failed` and nothing is offered.
    *
-   * This is the only slot-release point besides the pre-spawn create failure: it
-   * fires on the child's `close` (or a spawn `error`), so a killed child is
-   * confirmed dead before {@link maybeFreeSlot} can free the slot for a successor.
+   * The only slot-release point besides the pre-spawn create failure: fires
+   * on the child's `close` (or a spawn `error`), so a killed child is
+   * confirmed dead before {@link maybeFreeSlot} frees the slot for a
+   * successor.
    */
   private reconcileTerminal(record: JobRecord, state: JobTerminalState): void {
     record.terminal = state;
@@ -1175,13 +1126,13 @@ export class JobManager {
   }
 
   /**
-   * Free the slot exactly when it is active for this record, the exchange was
-   * deleted, and the child's exit has been observed (`record.terminal !== null`,
-   * set only here in {@link reconcileTerminal}). Keying on `terminal` -- not
-   * `terminalEmitted`, which the overflow path sets while a SIGKILLed child may
-   * still be running -- is the encoded rendezvous-safety invariant: no path frees
-   * the slot while a killed child might still touch the shared rendezvous or remote
-   * directory.
+   * Free the slot exactly when it is active for this record, the exchange
+   * was deleted, and the child's exit has been observed
+   * (`record.terminal !== null`, set only in {@link reconcileTerminal}).
+   * Keyed on `terminal` rather than `terminalEmitted` (which the overflow
+   * path sets while a SIGKILLed child may still be running): no path frees
+   * the slot while a killed child might still touch the shared rendezvous or
+   * remote directory.
    */
   private maybeFreeSlot(record: JobRecord): void {
     const slot = this.slot;
@@ -1260,18 +1211,16 @@ export class JobManager {
   }
 
   /**
-   * Delete a job: mark the slot deleted and remove the workdir on disk. Signals a
-   * still-running child SIGKILL first so the delete does not leave an orphan. The
-   * slot is not freed here when the child was still running: a SIGKILL is
-   * asynchronous, so the child may still be touching the rendezvous after this
-   * returns; {@link reconcileTerminal} frees the slot on the child's `close`, which
-   * keeps a successor job from rendezvousing with the dying child.
+   * Delete a job: mark the slot deleted and remove the workdir on disk,
+   * signaling a still-running child SIGKILL first. The slot is not freed
+   * here when the child was still running -- a SIGKILL is asynchronous, so
+   * the child may still be touching the rendezvous after this returns;
+   * {@link reconcileTerminal} frees the slot on the child's `close`.
    *
    * When no live record matches the id, the disk-only arm removes a
-   * restart-orphaned workdir named by a valid id -- reading no artifacts and
-   * serving nothing, so an explicit DELETE can still bound the at-rest exposure of
-   * a workdir the server forgot on restart. It refuses the slot's own id (a
-   * starting or already-deleted id whose directory a live or dying child owns).
+   * restart-orphaned workdir named by a valid id, refusing the slot's own id
+   * (a starting or already-deleted id whose directory a live or dying child
+   * owns).
    */
   async deleteJob(id: string): Promise<boolean> {
     const slot = this.slot;
@@ -1300,12 +1249,12 @@ export class JobManager {
   }
 
   /**
-   * Remove a restart-orphaned workdir named by a valid id: a disk-only removal
-   * that touches no in-memory state and serves nothing. Refuses the slot's own id
-   * (its directory is owned by a live or still-dying child), then applies the
-   * containment check ({@link resolveWorkdir}) and the real-directory guard
-   * ({@link workdirDirectoryExists}, which lstats so a symlinked leaf is refused
-   * rather than followed). Returns false when nothing resolves.
+   * Remove a restart-orphaned workdir named by a valid id: a disk-only
+   * removal touching no in-memory state. Refuses the slot's own id (owned by
+   * a live or still-dying child), then applies the containment check
+   * ({@link resolveWorkdir}) and the real-directory guard
+   * ({@link workdirDirectoryExists}, which lstats so a symlinked leaf is
+   * refused rather than followed).
    */
   private async deleteOrphanWorkdir(id: string): Promise<boolean> {
     if (this.slotId() === id) return false;
@@ -1336,35 +1285,21 @@ export class JobManager {
 }
 
 /**
- * The record pair's availability for a live record, offered all-or-nothing: the
- * run has settled, both the record and keys files exist, and the record parses
- * into a `createdAt` and an `outcome`.
+ * The record pair's availability for a live record, offered all-or-nothing:
+ * the run has settled, both the record and keys files exist, and the record
+ * parses into a `createdAt` and an `outcome`.
  *
- * The gate is the record's own EXISTENCE rather than the run having succeeded,
- * because that is what tracks the question the record answers. A record is owed
- * from the moment the payload exchange returns, so a run that disclosed and then
- * terminated writes one to the same destination a completed run's takes
- * (docs/spec/EXCHANGE_RECORD.md, When a record is owed) -- and it is exactly the
- * disclosure-accounting artifact the operator of that run needs. A failure BEFORE
- * that point owes none and writes none, so it still offers nothing here, without a
- * status test standing in for the fact.
+ * Gated on the record's own existence rather than the run having succeeded:
+ * a record is owed from the moment the payload exchange returns
+ * (docs/spec/EXCHANGE_RECORD.md, When a record is owed), so a run that
+ * disclosed and then terminated writes one too. Settling is read separately
+ * because the CLI writes the pair near the end of a run, so a mid-run ask
+ * could read a half-written state.
  *
- * Settling is a separate claim from the file being there, and it is why the run
- * status is still read: the CLI writes the pair near the end of a run, so an ask
- * mid-run could read a half-written state as the run's answer. Once the run is
- * terminal the pair is on disk or it never will be.
- *
- * `recordOutcome` travels with the availability so a surface can say what the
- * record it is offering is for. A terminated record attests the same disclosure a
- * completed one does, but its commitments re-supply from a result file the run
- * never wrote, so nothing beside it can be opened; a surface that offered the two
- * identically would make a claim the record does not.
- *
- * A withheld pair carries {@link RecordUnavailableReason}, which is what separates
- * the absence of a record from a record on disk this bundle cannot describe. The
- * appliance's own answer is the only definitive denial a client has, and a client
- * that read the two alike would destroy a disclosure record on the strength of an
- * outcome value it could not name.
+ * `recordOutcome` travels with the availability so a client can tell a
+ * terminated record (no result file behind it) from a completed one.
+ * `RecordUnavailableReason` separates the console's definitive denial from a
+ * record on disk this bundle cannot describe.
  */
 function liveRecordAvailability(record: JobRecord):
   | { recordAvailable: false; recordUnavailableReason: RecordUnavailableReason }
@@ -1391,10 +1326,10 @@ function liveRecordAvailability(record: JobRecord):
 
 /**
  * A fixed-name artifact's path inside a job workdir, resolved through the
- * containment check {@link resolveWorkdirFile} applies rather than joined
- * directly. Every name is a server constant, so a null resolution is a caller bug
- * -- a name that stopped resolving inside the workdir -- surfaced as a hard error
- * instead of a path outside it the artifact's endpoint would then serve.
+ * containment check {@link resolveWorkdirFile} rather than joined directly.
+ * Every name is a server constant, so a null resolution is a caller bug --
+ * reported as a hard error rather than a path outside the workdir the
+ * artifact's endpoint would then serve.
  */
 function workdirArtifactPath(workdir: string, name: string): string {
   const artifactPath = resolveWorkdirFile(workdir, name);
@@ -1414,8 +1349,8 @@ function liveJobView(record: JobRecord): JobView {
     resultAvailable: record.status === "succeeded",
     ...liveRecordAvailability(record),
     // Both answer from the log path set at creation from the intent, so what a
-    // client is told about this run's log comes from what the appliance
-    // launched rather than from anything the reading request carries.
+    // client is told about this run's log comes from what the console
+    // launched rather than from anything the reading request holds.
     logRequested: record.logPath !== null,
     // Not gated on the run having finished: a diagnostic log's whole point is a
     // run that misbehaved, including one still stalled, so it is offered as soon
@@ -1423,7 +1358,7 @@ function liveJobView(record: JobRecord): JobView {
     logAvailable: record.logPath !== null && jobFileExists(record.logPath),
     // Answered from the receipt path set at creation from the intent, exactly as
     // the log pair above is: what a client is told about this run's receipt comes
-    // from what the appliance launched.
+    // from what the console launched.
     receiptRequested: record.receiptPath !== null,
     receiptAvailable:
       record.receiptPath !== null && jobFileExists(record.receiptPath),
@@ -1436,11 +1371,11 @@ function liveJobView(record: JobRecord): JobView {
 }
 
 /**
- * Compose the CLI config document for the intent's channel: filedrop rendezvous in
- * the operator-configured rendezvous mount; sftp rendezvous at the
- * operator-authored connection. Each arm requires the resource `createJob` already
- * resolved -- the sftp server entry, the filedrop rendezvous directory -- so a
- * missing one here is a caller bug surfaced as a hard error, not a silent fallback.
+ * Compose the CLI config document for the intent's channel: filedrop
+ * rendezvous in the operator-configured rendezvous mount; sftp rendezvous at
+ * the operator-authored connection. Each arm requires the resource `createJob`
+ * already resolved, so a missing one here is a caller bug reported as a hard
+ * error, not a silent fallback.
  */
 function composeDocumentByChannel(
   intent: JobExchangeIntent,

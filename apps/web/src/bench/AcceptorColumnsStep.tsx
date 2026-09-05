@@ -57,7 +57,7 @@ import type { ReactNode } from "react";
  * The operator's OWN CSV headers as the declaration notice lists them: through the
  * same ColumnName every column-name surface on this screen uses, so a name here
  * reads exactly as it does in the grid row the operator has to change, and one per
- * line so a name carrying a list separator cannot read as two.
+ * line so a name containing a list separator cannot read as two.
  */
 function MarkedColumnList({ names }: { names: Array<string> }) {
   return (
@@ -72,17 +72,17 @@ function MarkedColumnList({ names }: { names: Array<string> }) {
 }
 
 /**
- * The acceptor's "Confirm your columns" work surface (step 3 of 3): a port of the
- * hardened legacy column editor's primary column, reseated in the bench
- * furniture. Presentational over the shared column-step state the bench owns -- the
- * verdict, mapper, and gate view-models come in derived from
- * {@link acceptorColumnsModel}, and edits go up through the callbacks; the pure logic
- * and the launch payload live in the bench and the model, not here.
+ * The acceptor's "Confirm your columns" work surface (step 3 of 3). Presentational
+ * over the shared column-step state the console owns -- the verdict, mapper, and
+ * gate view-models come in derived from {@link acceptorColumnsModel}, and edits go
+ * up through the callbacks; the pure logic and the launch payload live in the
+ * console and the model, not here.
  *
- * The verdict and the launch consume the SAME `editorState`, so the visible gate and
- * the exchange that runs cannot disagree. The mapper appears only when a required
- * field type is still missing; a remap re-roles the chosen column for matching (it
- * calls the bench's `onRemap`, which forces role linkage), never a bare retype.
+ * The verdict and the launch consume the SAME `editorState`, so the visible gate
+ * and the exchange that runs cannot disagree. The mapper appears only when a
+ * required field type is still missing; a remap re-roles the chosen column for
+ * matching (it calls the console's `onRemap`, which forces role linkage), never a
+ * bare retype.
  */
 export function AcceptorColumnsStep({
   linkageTerms,
@@ -124,15 +124,15 @@ export function AcceptorColumnsStep({
    * with no connection authored yet). ORs into the column-verdict gate so "Start
    * the exchange" cannot mint a run with nowhere to connect. */
   connectionBlocked?: boolean;
-  /** The console's file-handling card for a run the appliance conducts (retain
-   * mode and the toggles that travel with it). Absent on a browser accept, which
-   * has no shared directory to tune. */
+  /** The file-handling card for a run the console conducts (retain mode and the
+   * toggles that travel with it). Absent on a browser accept, which has no
+   * shared directory to tune. */
   exchangeFilesSection?: ReactNode;
   /** Whether the file-handling choices are a combination core refuses. ORs into
    * the launch gate exactly as {@link connectionBlocked} does, so an unusable
    * combination is a form problem here rather than a job that fails later. */
   exchangeFilesBlocked?: boolean;
-  /** Whether the connection-tuning choices carry a value the run would refuse.
+  /** Whether the connection-tuning choices hold a value the run would refuse.
    * Gates launch as {@link exchangeFilesBlocked} does, but separately: the two
    * are separate cards in {@link exchangeFilesSection}, and the blocked reason
    * names the one to open. */
@@ -160,7 +160,7 @@ export function AcceptorColumnsStep({
 }) {
   // Focus the heading on entry so a keyboard/screen-reader user who pressed
   // "Accept and continue" lands on this step rather than an unmounted button. The
-  // bench also drives step-heading focus, but this step owns the verdict focus
+  // console also drives step-heading focus, but this step owns the verdict focus
   // target below, so it manages its own heading too.
   const headingRef = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
@@ -184,16 +184,14 @@ export function AcceptorColumnsStep({
     editorState,
   );
   const disclosed = acceptorDisclosedColumns(editorState.metadata);
-  // Whether the payload step transmits anything at all from this machine. It sends
-  // only to a partner entitled to the result, putting an empty message on the wire
-  // otherwise, so an invitation that gives the inviting party no result sends no
-  // column whatever this operator marks below -- and this screen, where the operator
-  // is actively choosing what to disclose, is the worst place to be told otherwise.
-  // The acceptor's partner IS the inviting party, so the fact is the invitation's own
-  // `expectsOutput`; the mirrored acceptor-side field would be the wrong one, naming
-  // this party's receipt rather than its partner's. The consent screen's outbound
-  // block resolves the same fact for the same viewer, and both render the sentence
-  // core carries.
+  // Whether the payload step transmits anything at all from this machine: it
+  // sends only to a partner entitled to the result, so an invitation giving the
+  // inviting party no result sends no column regardless of what is marked below.
+  // The acceptor's partner IS the inviting party, so the fact is the
+  // invitation's own `expectsOutput` -- the mirrored acceptor-side field would
+  // name this party's own receipt instead. The consent screen's outbound block
+  // resolves the same fact for the same viewer, with the same sentence core
+  // provides.
   const partnerReceivesResult = linkageTerms.output.expectsOutput;
   // How the marks below disagree with the payload set the invitation declares for
   // this party: the exchange refuses to run on that pair, and every input the
@@ -204,7 +202,7 @@ export function AcceptorColumnsStep({
     editorState.metadata,
   );
   // Which remedies the declared-but-unsent half even has: a column this file does
-  // not carry cannot be marked at all, so only the columns it does carry get the
+  // not hold cannot be marked at all, so only the columns it does hold get the
   // offer to widen the disclosure, and only the ones it lacks get "choose another
   // file".
   const expectedInFile =
@@ -381,7 +379,7 @@ export function AcceptorColumnsStep({
               {unsatisfiedTypes.map(({ type, label }) => (
                 // A native <select> (like the inviter's Matching & sharing table),
                 // not a Mantine portal dropdown: the mockup shows a native select
-                // here, and the bench's responsive grid drives a ResizeObserver loop
+                // here, and the console's responsive grid drives a ResizeObserver loop
                 // that mispositions a portalled dropdown. The first option is a
                 // disabled placeholder so no column is preselected.
                 <NativeSelect
@@ -430,11 +428,10 @@ export function AcceptorColumnsStep({
                     ColumnName every column-name surface on this screen uses, so
                     the name here reads exactly as it does in the grid row the
                     operator marked. This sentence puts copy in one text block
-                    with the names -- the separators and the full stop -- so the
-                    isolate class's residual reaches something here: what the
-                    isolation does not contain is stated on ColumnName, and this
-                    sentence's reordering is driven in benchAccept's panel
-                    measurement. */}
+                    with the names -- separators and full stop -- so the isolate
+                    class's residual reaches something here (what the isolation
+                    does not contain is stated on ColumnName); the reordering is
+                    driven in benchAccept's panel measurement. */}
                 For each matched row:{" "}
                 {disclosed.map((column, index) => (
                   <Fragment key={column}>
@@ -449,14 +446,12 @@ export function AcceptorColumnsStep({
         )}
 
         {/* The marks below and the payload set the invitation declares for this
-            party disagree: the exchange refuses that pair before any data moves, so
-            it is stated beside the marks that decide it and directly above the
-            control that clears it. Both directions are stated at once -- core
-            refuses them in one message -- so clearing one does not reveal the other
-            on the next attempt. Not a live region -- the marks are the operator's
-            own edits, the grid below already voices the disclosed set, and the
-            launch button's blocked-reason line speaks for the gate; a third channel
-            on the same fact would announce over both. */}
+            party disagree: the exchange refuses that pair before any data moves,
+            so it is stated beside the marks that decide it. Both directions are
+            stated at once -- core refuses them in one message -- so clearing one
+            does not reveal the other on the next attempt. Not a live region: the
+            grid below already voices the disclosed set, and the launch button's
+            blocked-reason line speaks for the gate. */}
         {declarationConflict !== undefined && (
           <Alert
             role="note"
@@ -559,14 +554,12 @@ export function AcceptorColumnsStep({
           </Alert>
         )}
 
-        {/* A marked column whose name is too long to carry: the exchange refuses
+        {/* A marked column whose name is too long to include: the exchange refuses
             it before any data moves, so it is stated beside the marks that decide
-            it and directly above the grid whose rows are the file's columns in the
-            order these positions count. Located by position rather than named --
-            an offending name is longer than a notice can show -- and worded by the
-            shared alert every seat that gates on this ceiling uses. Not a live
-            region, for the reason the declaration conflict above is not: the
-            blocked-reason line beside the launch button speaks for the gate. */}
+            it and directly above the grid whose rows are the file's columns.
+            Located by position rather than named -- an offending name is longer
+            than a notice can show. Not a live region: the blocked-reason line
+            beside the launch button speaks for the gate. */}
         {overlongAlert !== undefined && (
           <Alert
             role="note"

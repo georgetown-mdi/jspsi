@@ -1,6 +1,6 @@
 // Only `stringify` is imported from `yaml`: the raw parsers are ESLint-banned in
 // the web app (they leak source into errors), so import routes through core's
-// shared sensitive-file chokepoint instead. `stringify` carries no such channel.
+// shared sensitive-file chokepoint instead. `stringify` has no such channel.
 import { stringify as stringifyYaml } from "yaml";
 
 import {
@@ -16,31 +16,20 @@ import type { LinkageTerms } from "@psilink/core";
 import type { ZodError } from "zod";
 
 /**
- * The JSON/YAML escape hatch for the expert linkage-terms editor: serialize the
- * authored terms to a portable document, and parse one back. Pure (string in,
- * string/result out) and React-free, so the round-trip contract is the single
- * tested boundary the editor drives rather than the UI.
+ * The JSON/YAML authoring path for the expert linkage-terms editor: serialize
+ * the authored terms to a portable document, and parse one back. Pure and
+ * React-free, so the round-trip is the tested boundary.
  *
- * Export emits the snake_case on-disk form (via {@link snakeizeKeys}) -- the same
- * shape `psilink.yaml` and the `docs/EXCHANGE_REFERENCE.md` snippets use -- so an
- * exported file is the "exported from the GUI" reference that doc points at, and
- * re-imports cleanly: {@link safeParseLinkageTerms} camelizes before validating,
- * so export -> import round-trips equal.
+ * Export emits the snake_case on-disk form ({@link snakeizeKeys}), the same
+ * shape `psilink.yaml` uses, and re-imports cleanly through
+ * {@link safeParseLinkageTerms}. Import is the only path by which
+ * authored-elsewhere terms reach the editor, and it is the single validation
+ * source; there is no verbatim-embed path, by design.
  *
- * Import is the ONLY way authored-elsewhere terms reach the editor, and it routes
- * every document through {@link safeParseLinkageTerms} -- the single validation
- * source, which applies the referential-integrity refines and the linear-time
- * transform-regex dialect check. There is deliberately no verbatim-embed path: a
- * document that does not parse cleanly never becomes a draft, so import cannot
- * smuggle terms past the gate the GUI authoring surface enforces by construction
- * (a test pins this).
- *
- * The raw JSON/YAML parse goes through core's shared sensitive-file chokepoint
- * ({@link parseSensitiveJson} / {@link parseSensitiveYaml}), not a raw parser: an
- * imported document is untrusted free text an operator could have pasted a secret
- * into by mistake, and a raw parser leaks a span of the source into its error
- * message. The chokepoint reports path-only and is the sanctioned parse entry
- * point the web app's ESLint ban on raw `yaml` parsers points at.
+ * The raw parse goes through core's sensitive-file chokepoint
+ * ({@link parseSensitiveJson} / {@link parseSensitiveYaml}), not a raw parser:
+ * an imported document is untrusted free text that could hold a pasted
+ * secret, and a raw parser leaks a span of source into its error message.
  */
 
 /** A document format the editor can write. Import auto-detects, so it needs no
@@ -48,15 +37,12 @@ import type { ZodError } from "zod";
 export type LinkageTermsFormat = "json" | "yaml";
 
 /**
- * Upper bound on an imported document, in characters (UTF-16 code units). A hard
- * ceiling applied BEFORE the JSON/YAML parse, so a pasted or dropped pathological
- * document cannot drive the parser before the schema's own structural bounds (the
- * camelize depth/node-count caps {@link safeParseLinkageTerms} applies) can bite.
- *
- * Generous on purpose: far above any real linkage-terms file -- the invitation
- * TOKEN path caps at 64 KiB, and a GUI-exported document carrying every key,
- * transform, and description is still well under this -- and sized for an operator
- * workstation, not a constrained tab. Tunable.
+ * Upper bound on an imported document, in characters (UTF-16 code units): a
+ * hard ceiling applied before the JSON/YAML parse, so a pathological document
+ * cannot drive the parser before the schema's own structural bounds can bite.
+ * Generous on purpose -- the invitation token path caps at 64 KiB, and a
+ * GUI-exported document holding every key, transform, and description is
+ * still well under this -- and sized for an operator workstation. Tunable.
  */
 export const MAX_IMPORT_CHARS = 1_000_000;
 
@@ -95,21 +81,13 @@ export function exportLinkageTerms(
 }
 
 /**
- * The linkage-terms value inside a parsed document: the whole document when it IS
- * a terms document, or its `linkage_terms` block when it is an exchange
- * configuration wrapping one.
- *
- * The unwrap mirrors the CLI's `readConfigLinkageSource`, both spellings included,
- * so `--config-file` and this importer read the same file the same way: an
- * operator holding a `psilink.yaml` -- which is exactly what the console hands
- * them to graduate with -- pastes it whole rather than hand-extracting a block.
- * Only that one key is looked at; nothing else in a configuration is parsed here,
- * so a still-placeholder connection or an unfinished credential neither validates
- * nor fails.
- *
- * A document carrying no such key is passed through unchanged, so a bare terms
- * document -- and a malformed one, which must still fail with the terms schema's
- * own message -- is unaffected.
+ * The linkage-terms value inside a parsed document: the whole document when
+ * it IS a terms document, or its `linkage_terms` block when it is an exchange
+ * configuration wrapping one. Mirrors the CLI's `readConfigLinkageSource`
+ * (both spellings), so a pasted `psilink.yaml` reads the same as
+ * `--config-file`; only that one key is read, so nothing else in the
+ * configuration is parsed or validated here. A document holding no such key
+ * passes through unchanged.
  */
 function linkageTermsWithin(raw: unknown): unknown {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return raw;
@@ -119,20 +97,14 @@ function linkageTermsWithin(raw: unknown): unknown {
 }
 
 /**
- * Parse a JSON or YAML document into validated {@link LinkageTerms}, or return a
- * readable rejection. Accepts either an exported terms document or an exchange
- * configuration that defines `linkage_terms` (see {@link linkageTermsWithin}).
- * Format is auto-detected: JSON is tried first (it is the stricter, cheaper
- * parse), then YAML (a superset that also accepts the JSON that slipped through).
- * The parsed value is validated by {@link safeParseLinkageTerms} -- the single
- * source -- which camelizes the snake_case input first, so a document produced by
- * {@link exportLinkageTerms} round-trips.
- *
- * Bounds, applied before the schema's own: the input is length-capped at
- * {@link MAX_IMPORT_CHARS}; YAML alias expansion is bounded by the `yaml` parser's
- * built-in `maxAliasCount` default (the sensitive-file chokepoint does not raise
- * it), which caps a billion-laughs alias blow-up before the schema's own bounds.
- * The unwrap runs after those bounds and reads one key, so it widens neither.
+ * Parse a JSON or YAML document into validated {@link LinkageTerms}, or
+ * return a readable rejection. Accepts either an exported terms document or
+ * an exchange configuration defining `linkage_terms` (see
+ * {@link linkageTermsWithin}). Format is auto-detected: JSON first (stricter,
+ * cheaper), then YAML. Validated by {@link safeParseLinkageTerms}, which
+ * camelizes first, so a document from {@link exportLinkageTerms} round-trips.
+ * Length-capped at {@link MAX_IMPORT_CHARS} before either parse; YAML alias
+ * expansion is bounded by the `yaml` parser's default `maxAliasCount`.
  */
 export function importLinkageTerms(text: string): LinkageTermsImportResult {
   if (text.length > MAX_IMPORT_CHARS)
@@ -143,12 +115,8 @@ export function importLinkageTerms(text: string): LinkageTermsImportResult {
         "than this; check that you pasted the right file.",
     };
 
-  // Route both formats through the shared sensitive-file chokepoint so a parse
-  // error never echoes the document's bytes. JSON is tried first (stricter,
-  // cheaper); each chokepoint throws a path-only UsageError on failure, which we
-  // discard in favor of our own value-free message. The chokepoint bounds YAML
-  // alias expansion via the parser's default, and the length cap above bounds the
-  // input before either parse runs.
+  // Each chokepoint throws a path-only UsageError on failure; discarded in
+  // favor of our own value-free message below.
   const label = "the imported document";
   let raw: unknown;
   try {
@@ -174,14 +142,14 @@ export function importLinkageTerms(text: string): LinkageTermsImportResult {
 }
 
 /**
- * Reduce a linkage-terms {@link ZodError} to one readable line that locates the
- * first problem WITHOUT echoing any parsed value. Built-in Zod messages can quote
- * the offending value (an enum mismatch repeats what it received), so this never
- * forwards `issue.message` for a built-in code; it maps the code to fixed copy and
- * shows only the structural `path`. The schema's own referential-integrity /
- * dialect refines (`custom` code) carry deliberately value-free static messages,
- * so those are surfaced verbatim -- they are the useful, safe ones. The whole line
- * is run through {@link sanitizeForDisplay} as a backstop.
+ * Reduce a linkage-terms {@link ZodError} to one readable line that locates
+ * the first problem without echoing any parsed value. Built-in Zod messages
+ * can quote the offending value, so this never forwards `issue.message` for a
+ * built-in code -- it maps the code to fixed copy and shows only the
+ * structural `path`. The schema's own referential-integrity / dialect
+ * refines (`custom` code) hold value-free static messages by design, so
+ * those show verbatim. The whole line runs through
+ * {@link sanitizeForDisplay} as a fallback.
  */
 function readableTermsError(error: ZodError): string {
   if (error.issues.length === 0)
@@ -189,11 +157,10 @@ function readableTermsError(error: ZodError): string {
   const issue = error.issues[0];
 
   // Locate the problem by its structural path (schema field names and array
-  // indices), but never echo a parsed value. The one partner-controlled segment a
-  // path can carry is a transform `params` record KEY (params is a `z.record` over
-  // arbitrary keys); truncate the path at `params` so that key cannot leak into the
-  // message -- everything before it is fixed schema structure. (The line is
-  // sanitized too, but the contract is value-free, so this closes it at the source.)
+  // indices), never a parsed value. The one partner-controlled segment a path
+  // can hold is a transform `params` record key (`params` is a `z.record` over
+  // arbitrary keys); truncate the path at `params` so that key cannot leak into
+  // the message -- everything before it is fixed schema structure.
   //
   // Each segment is named in the snake_case the document writes it in:
   // {@link safeParseLinkageTerms} camelizes before validating, so an issue path

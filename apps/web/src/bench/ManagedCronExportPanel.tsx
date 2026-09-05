@@ -39,10 +39,10 @@ import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
 const KEY_FILE_SECURITY_DOC_URL =
   "https://github.com/georgetown-mdi/jspsi/blob/main/docs/SECURITY_DESIGN.md#key-file-security";
 
-/** The platform seams the export drives: a read of the record by id (never this
- * component's mounted record, whose secret a concurrent rotation may already have
- * superseded) that stamps no backup marker, the blob download, and the atomic spend
- * the confirmation measures the operator's attestation against. */
+/** The platform call sites the export drives: a read of the record by id (never
+ * this component's mounted record, whose secret a concurrent rotation may already
+ * have superseded) that stamps no backup marker, the blob download, and the atomic
+ * spend the confirmation measures the operator's attestation against. */
 const cronExportDeps = {
   readRecord: getManagedExchange,
   download: triggerBlobDownload,
@@ -53,31 +53,18 @@ const cronExportDeps = {
  * The command-line export panel on a managed exchange's detail surface, beside the
  * backup panel and collapsed until the operator opens it: the graduation path from
  * a browser-run recurring exchange to `psilink exchange` under the host's own
- * scheduler (see docs/MANAGED_EXCHANGE.md, "Exporting to the command line").
+ * scheduler (docs/MANAGED_EXCHANGE.md, "Exporting to the command line").
  *
- * It downloads TWO files rather than one archive, because the two are handled
- * differently once they land: `psilink.yaml` carries no secret, and `.psilink.key`
- * is a plaintext credential. A zip would hide that split behind one save.
+ * Downloads `psilink.yaml` (no secret) and `.psilink.key` (a plaintext credential)
+ * as two separate files rather than one archive, and marks no backup marker --
+ * neither file is a backup this browser restores from; taking it, confirming the
+ * hand-off, or dismissing it leaves the backup panel's state unchanged.
  *
- * Neither file is a backup this browser restores from, so this export marks no backup
- * marker and the panel says which kind of file it hands over. Taking it, confirming
- * the hand-off, and dismissing the confirmation all leave the backup panel above
- * reading exactly what it read before.
- *
- * The spend is operator-attested, exactly as the device migration's is: two
- * `anchor.click()` calls give two chances to fail with no landing signal, so this
- * browser's copy stays live and runnable until the operator says both files landed.
- * On that attestation the source is spent -- handing the secret to a scheduler and
- * leaving this copy live would fork a linear secret between two owners.
- *
- * That attestation can arrive long after the download, so the spend re-reads the
- * record and refuses files a run has rotated past, and refuses outright while a run
- * holds the run+rotate lock ({@link ManagedHandoffRefusedError} for both). The
- * panel's own withholding of the download and the confirmation runs off a poll of
- * that lock, so the refusal is rarely the operator's first news of a run; but the
- * refusal is what makes the guarantee, the two being separated by however long the
- * operator takes to answer. A run the poll missed is shown in the poll's own words:
- * the wait is the same wait, arriving from the spend rather than from the reading.
+ * The spend is operator-attested: this browser's copy stays live and runnable
+ * until the operator confirms both files landed. The spend then re-reads the
+ * record and refuses via {@link ManagedHandoffRefusedError} if a run has rotated
+ * the files past or holds the run+rotate lock; the panel's poll of that lock only
+ * withholds the button early -- the refusal at spend time is what enforces it.
  */
 export function ManagedCronExportPanel({
   record,
@@ -95,7 +82,7 @@ export function ManagedCronExportPanel({
    * at the click, since {@link runInFlight} is a poll's last reading. */
   recheckRunInFlight: () => Promise<boolean>;
   /** The operator attested the files landed and the source is spent, so the host
-   * takes down the run affordances. Carries the invocation to run instead. */
+   * takes down the run affordances. Passes the command to run instead. */
   onHandedOff: (command: string) => void;
 }) {
   const [open, setOpen] = useState(false);

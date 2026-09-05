@@ -5,7 +5,7 @@
  * never moves `expires` later, the anchor reconstruction, the four cases, and the
  * decoupling consequence -- is in docs/spec/MANAGED_EXCHANGE_RECORD.md,
  * "Edit-time re-derivation of `expires`". This module implements it; the checks
- * below carry only the constraints the code shows.
+ * below hold only the constraints the code shows.
  *
  * `now` is injected so the derivation is pure and the moment of evaluation is the
  * caller's, matching the run+rotate module's clock discipline.

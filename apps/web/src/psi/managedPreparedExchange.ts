@@ -5,18 +5,19 @@
  * linkage terms, metadata, standardization, and payload commitments composed at
  * deposit time (the inviter's minted terms, or the acceptor's derived
  * perspective) -- so a re-run binds those persisted terms to the freshly-read
- * rows and columns and locks in the received-payload set exactly as the one-shot
- * accept path does.
+ * rows and columns and commits to the received-payload set exactly as the
+ * one-shot accept path does.
  *
- * The received-payload lock-in is the security-relevant part, and it mirrors the
- * one-shot flows: {@link PreparedExchange.expectedPayloadColumns} is set to the
- * record's persisted `expectedPayloadColumns` (the partner's committed send set,
- * locked in at accept and carried in the document), so a re-run fails CLOSED if
- * the partner transmits a different set than was consented to -- the same lock-in
- * `prepareAcceptorExchange` applies from the invitation's disclosed set. An absent
- * persisted set (a lazy token) stays undefined and the party reconciles lazily.
+ * The received-payload enforcement is the security-relevant part, and it mirrors
+ * the one-shot flows: {@link PreparedExchange.expectedPayloadColumns} is set to
+ * the record's persisted `expectedPayloadColumns` (the partner's committed send
+ * set, pinned at accept and recorded in the document), so a re-run fails CLOSED
+ * if the partner transmits a different set than was consented to -- the same
+ * enforcement `prepareAcceptorExchange` applies from the invitation's disclosed
+ * set. An absent persisted set (a lazy token) stays undefined and the party
+ * reconciles lazily.
  *
- * The terms-side lock-in beside it is the acceptor's persisted
+ * The terms-side enforcement beside it is the acceptor's persisted
  * `expectedPartnerDeduplicate` -- the `deduplicate` the invitation declared for
  * the inviter's own side -- threaded onto
  * {@link PreparedExchange.expectedPartnerDeduplicate} so a re-run refuses an
@@ -31,8 +32,8 @@
  * (`assertOutboundPayloadConsented`). Absent on every other party, where it is a
  * no-op.
  *
- * Pure and exported so the terms binding and the lock-in are the tested boundary,
- * pinned without a connection.
+ * Pure and exported so the terms binding and the enforcement are the tested
+ * boundary, pinned without a connection.
  */
 
 import { prepareForExchange } from "@psilink/core";
@@ -41,13 +42,13 @@ import type { CSVRow, ExchangeSpec, PreparedExchange } from "@psilink/core";
 
 /**
  * Build the re-run's prepared exchange. `identity` is read from the persisted
- * terms' own identity (this party's, composed at deposit), so the run carries the
+ * terms' own identity (this party's, composed at deposit), so the run holds the
  * same identity the exchange record commits to. The metadata and standardization
  * ride the persisted document when authored, otherwise core infers them from the
  * columns exactly as the quick path does. The persisted `expectedPayloadColumns`
  * and the persisted `expectedPartnerDeduplicate` are threaded onto the prepared
- * object after `prepareForExchange` (the same seam the accept path uses), never
- * inferred here.
+ * object after `prepareForExchange` (the same call site the accept path uses),
+ * never inferred here.
  */
 export function prepareManagedRerunExchange(
   exchangeFile: ExchangeSpec,
@@ -74,16 +75,16 @@ export function prepareManagedRerunExchange(
     rawRows,
     columns,
   );
-  // The received-payload lock-in, mirrored from the persisted document exactly as
-  // the accept path mirrors it from the invitation's disclosed set: passed AS-IS,
-  // so an absent set (lazy) stays undefined and an empty set is a strict "receive
-  // nothing" lock-in. runExchange prefers this explicit lock-in over the
-  // payload.receive fallback.
+  // The received-payload enforcement, mirrored from the persisted document exactly
+  // as the accept path mirrors it from the invitation's disclosed set: passed
+  // AS-IS, so an absent set (lazy) stays undefined and an empty set is a strict
+  // "receive nothing" commitment. runExchange prefers this explicit commitment
+  // over the payload.receive fallback.
   prepared.expectedPayloadColumns = exchangeFile.expectedPayloadColumns;
-  // The terms-side lock-in, mirrored from the persisted document exactly as the
-  // accept path mirrors it from the invitation's declared terms: passed AS-IS, so
-  // an absent declaration (an inviter's record, or a document no acceptance
-  // composed) stays undefined and binds nothing.
+  // The terms-side enforcement, mirrored from the persisted document exactly as
+  // the accept path mirrors it from the invitation's declared terms: passed
+  // AS-IS, so an absent declaration (an inviter's record, or a document no
+  // acceptance composed) stays undefined and binds nothing.
   prepared.expectedPartnerDeduplicate = exchangeFile.expectedPartnerDeduplicate;
   return prepared;
 }

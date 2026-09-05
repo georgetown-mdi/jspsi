@@ -1,27 +1,16 @@
 /**
  * The managed exchange's schedule arithmetic: where a recurrence's run windows
  * fall, which window an instant sits in, and the catch-up and advance rules that
- * move `nextWindow` and `consecutiveMisses`. The normative rules -- the field
- * layout, the catch-up rule, and the `consecutiveMisses` outcome table -- are in
+ * move `nextWindow` and `consecutiveMisses`. The normative rules are in
  * docs/spec/MANAGED_EXCHANGE_RECORD.md, "The schedule object" and "Catch-up on
- * wake"; this module implements them and the checks below carry only the
- * constraints the code shows.
+ * wake"; this module implements them.
  *
- * Every instant here is UTC milliseconds computed from the record's stored-UTC
- * `anchor` and its whole-day integer period, so window n opens at `anchor + n *
- * intervalDays` in fixed milliseconds and never by a local-calendar date add. A
- * calendar add shifts the instant by the offset change across a daylight-saving
- * transition, which would move an unattended window by an hour on one machine
- * and not the other -- two runners that no longer overlap, recorded as mutual
- * misses. No rule below reads the host zone: the operator's local wall-clock
- * cadence is resolved to the UTC anchor exactly once, by
- * {@link resolveLocalCadenceAnchor} at save and again only when the operator
- * edits the schedule, and read back by {@link localCadenceFromAnchor} for the
- * entry surface alone. Those two are the whole zone-reading surface of this
- * module. Every other instant must carry the UTC designator to be
- * read at all -- {@link ./managedExchangeRecord.ts}'s `parseStoredInstant`
- * requires it rather than assuming it -- so the claim holds for a hand-edited or
- * tampered record too, not only for one the record schema validated.
+ * Every instant is UTC milliseconds computed by fixed arithmetic from the
+ * record's stored-UTC `anchor` and its whole-day integer period, never by a
+ * local-calendar date add. The host zone is read only by
+ * {@link resolveLocalCadenceAnchor} and {@link localCadenceFromAnchor}; every
+ * other instant must include the UTC designator, enforced by
+ * {@link ./managedExchangeRecord.ts}'s `parseStoredInstant`.
  *
  * `now` is injected rather than read, matching the clock discipline of the rest
  * of the managed modules, so every rule here is a pure function of its inputs.
@@ -49,23 +38,17 @@ const MS_PER_SECOND = 1000;
  * not a clock reading at all. */
 export const MAX_TIME_VALUE = 8.64e15;
 
-/** The instants a stored UTC instant carries: the record's validator admits a
- * four-digit year alone, so anything before year 0 or after year 9999 has only
- * the expanded-year ISO rendering (`+010000-01-01T00:00:00.000Z`) the schema
- * refuses (see {@link ./managedExchangeRecord.ts}'s `scheduleSchema`). An
- * instant this module computes is destined for `anchor` or `nextWindow`, so one
- * outside the pair is refused where it would be rendered rather than surfacing
- * as a validation failure at the write. */
+/** The range a stored UTC instant admits: the record's validator accepts only a
+ * four-digit year (see {@link ./managedExchangeRecord.ts}'s `scheduleSchema`),
+ * so an instant destined for `anchor` or `nextWindow` outside that range is
+ * refused here, before it would be rendered, rather than at write validation. */
 const MIN_STORED_INSTANT_MS = -62_167_219_200_000;
 const MAX_STORED_INSTANT_MS = 253_402_300_799_999;
 
-/** The most windows one catch-up walks before refusing the record. The walk
- * crosses one window per elapsed period, so the daily cadence -- the shortest
- * the schema admits -- reaches this only after some 2,700 years dormant: no
- * cadence an operator entered arrives here, while an anchor a hand edit or a
- * tampered artifact placed at the far end of the representable range does. The
- * bound keeps a wake's cost tied to how long the runner really slept rather than
- * to the anchor the record carries. */
+/** The most windows one catch-up walks before refusing the record: it bounds a
+ * wake's cost to how long the runner really slept rather than to an anchor a
+ * hand edit or tampered artifact placed at the far end of the representable
+ * range. No cadence an operator enters reaches this bound. */
 const MAX_CATCH_UP_WINDOWS = 1_000_000;
 
 /** A single run window on the recurrence lattice, in UTC milliseconds. */
@@ -88,7 +71,7 @@ export type ManagedScheduleWindowState = "before" | "open" | "elapsed";
 /**
  * What a window's occupancy produced, as the advance rules read it. The run
  * outcomes are the record's own closed enum; `"unattempted"` is the extra case
- * the record deliberately cannot hold -- a window this runner never attempted,
+ * the record cannot hold by design -- a window this runner never attempted,
  * because the single-writer lock was held elsewhere -- which advances the
  * schedule past the window while recording neither an attempt nor a miss.
  */
@@ -99,7 +82,7 @@ export type ManagedScheduleWindowDisposition =
 export interface ManagedScheduleCatchUp {
   /** The schedule with `nextWindow` advanced to the first window not yet closed
    * (past a window a recorded success already satisfied) and
-   * `consecutiveMisses` carrying each window's verdict, applied in order. */
+   * `consecutiveMisses` holding each window's verdict, applied in order. */
   schedule: ManagedExchangeSchedule;
   /** The `nextWindow` this walk read, echoed verbatim: the bookkeeping write
    * applies the result only while the record still plans that window, so a walk
@@ -120,11 +103,10 @@ export interface ManagedScheduleCatchUp {
   dueWindow?: ManagedScheduleWindow;
   /** The `"missed"` bookkeeping the most recent elapsed window earns, stamped at
    * that window's close. Absent when no window elapsed, or when the most recent
-   * elapsed one carries a recorded run whose own bookkeeping stands. A run
-   * recorded in a LATER window that is still open leaves the stamp in place --
-   * the elapsed window really was missed -- and the write path holds `lastRun`
-   * monotonic on `at` rather than the wake second-guessing which entry is newer
-   * (see `applyManagedExchangeScheduleAdvance`). */
+   * elapsed one already has a recorded run whose own bookkeeping stands. A run
+   * recorded in a LATER window that is still open leaves this stamp in place:
+   * the write path holds `lastRun` monotonic on `at` rather than resolving
+   * which entry is newer (see `applyManagedExchangeScheduleAdvance`). */
   missedLastRun?: ManagedExchangeLastRun;
 }
 
@@ -132,7 +114,7 @@ export interface ManagedScheduleCatchUp {
  * An operator's cadence as they enter it: a calendar date and wall-clock time of
  * day in the host's own zone, which {@link resolveLocalCadenceAnchor} resolves to
  * the stored UTC anchor. A weekly "09:00 Tuesdays" is a Tuesday's date here plus
- * an `intervalDays` of 7 -- the recurrence carries no weekday of its own.
+ * an `intervalDays` of 7 -- the recurrence has no weekday of its own.
  */
 export interface LocalWallClockCadence {
   /** Local calendar year of the first agreed window (1 through 9999). */
@@ -179,13 +161,12 @@ function toScheduleInstant(ms: number): string {
 
 /**
  * Reduce a schedule to its lattice, rejecting a period or width the record's
- * schema would not admit. The schema is the first line of defense (both integers,
- * `intervalDays` from 1 to {@link MAX_SCHEDULE_INTERVAL_DAYS}, `windowSeconds`
- * from 1 to {@link MAX_SCHEDULE_WINDOW_SECONDS}), so this repeats it where the
- * division happens: a zero period would divide to `Infinity` and an unparseable
- * anchor to `NaN`, either of which would silently carry a nonsense instant into
- * the bookkeeping write instead of aborting it, and a period or width past the
- * ceiling would place a window past every calendar a surface can render it on.
+ * schema would not admit (both integers, `intervalDays` from 1 to
+ * {@link MAX_SCHEDULE_INTERVAL_DAYS}, `windowSeconds` from 1 to
+ * {@link MAX_SCHEDULE_WINDOW_SECONDS}). This repeats the schema's own bounds at
+ * the division: a zero period divides to `Infinity` and an unparseable anchor to
+ * `NaN`, either of which would place a nonsense instant into the bookkeeping
+ * write instead of aborting it.
  */
 function readScheduleGeometry(
   schedule: ManagedExchangeSchedule,
@@ -321,15 +302,15 @@ export function nextConsecutiveMisses(
  * Advance the schedule past a window the runner has finished with: `nextWindow`
  * becomes the following window's open, and `consecutiveMisses` takes the
  * disposition's verdict (see {@link nextConsecutiveMisses}). The anchor, period,
- * and width are carried through untouched -- an advance is bookkeeping, never a
- * reschedule -- and the input schedule is not mutated.
+ * and width stay untouched -- an advance is bookkeeping, never a reschedule --
+ * and the input schedule is not mutated.
  *
  * The occupied window positions the advance by its `index` alone, so the instant
  * written is re-derived on the schedule's own lattice rather than measured off
  * the window handed in.
  *
  * @throws {RangeError} if the schedule's lattice is unusable or the following
- *   window falls outside the range a stored UTC instant carries.
+ *   window falls outside the range a stored UTC instant admits.
  */
 export function advanceManagedScheduleAfterWindow(
   schedule: ManagedExchangeSchedule,
@@ -350,40 +331,27 @@ export function advanceManagedScheduleAfterWindow(
 }
 
 /**
- * Apply the catch-up rule at a wake: walk forward from the window the stored
- * `nextWindow` plans, one window at a time, until the walk stands on a window
- * still live; advance `nextWindow` onto that window and report whether it is
- * open right now. This is the rule a runtime applies before attempting anything
- * -- on the ordinary wake and, with a restored backup's stale `nextWindow`, on
- * the first wake after an import.
+ * Apply the catch-up rule at a wake (see docs/spec/MANAGED_EXCHANGE_RECORD.md,
+ * "Catch-up on wake"): walk forward from the window `nextWindow` plans, one
+ * window at a time, until the walk lands on a window still live; advance
+ * `nextWindow` there and report whether it is open now. Runs on the ordinary
+ * wake and, with a restored backup's stale `nextWindow`, on the first wake
+ * after an import.
  *
- * Every window is read the same way, and `consecutiveMisses` takes its verdict
- * through {@link nextConsecutiveMisses} once per window, in order: an elapsed
- * window with no run recorded inside it is one miss, an elapsed window that
- * carries one takes that run's own outcome, and a window still open whose run
- * SUCCEEDED is satisfied -- advanced past without an attempt, so an attended run
- * inside an agreed window is not re-run by the schedule -- while a window still
- * open that no success discharged is the one to attempt, leaving the rest of it
- * available. Applying the rule per window rather than to the whole span at once
- * is what keeps a success anywhere in the run resetting the count the windows
- * before it built, wherever that success sits -- including the one window the
- * walk itself does not visit, the one immediately before `nextWindow`, whose
- * recorded success is credited before the walk starts. That window is where a
- * concurrent run's outcome lands after the plan has already advanced past it.
+ * Each window's verdict passes through {@link nextConsecutiveMisses} in order:
+ * an elapsed window with no recorded run is one miss; an elapsed window with one
+ * takes that run's own outcome; an open window with a `"succeeded"` run is
+ * satisfied and advanced past without an attempt; an open window with no success
+ * is the one to attempt. The window immediately before `nextWindow`, which the
+ * walk itself does not visit, is read the same way before the walk starts,
+ * crediting a concurrent run's outcome recorded there.
  *
- * The walk is as long as the run of windows real time crossed since the last
- * wake, one cheap iteration each; a span longer than `MAX_CATCH_UP_WINDOWS` is
- * refused rather than walked.
+ * The walk is bounded by {@link MAX_CATCH_UP_WINDOWS}.
  *
- * `lastRun` is read as evidence, never validated: an entry whose `at` is not a
- * UTC instant -- unparseable, or carrying no designator to read it against -- is
- * treated as no recorded run at all, the conservative direction (an extra miss
- * counted, never a miss suppressed). An entry stamped AHEAD of the wake instant
- * is read the same way and discharges nothing: a stamp in the future is a
- * forward-skewed clock or an edited record rather than a window met, so the
- * window it names stays planned, and stays due once open. That defers the
- * verdict to a later wake instead of counting a miss on the spot -- the walk
- * never suppresses a window's accounting on evidence it cannot stand behind.
+ * `lastRun` is read as evidence, not validated: an entry whose `at` is not a
+ * usable UTC instant, or that is stamped ahead of `nowMs`, is treated as no
+ * recorded run -- the conservative direction, since it counts an extra miss
+ * rather than suppressing one.
  *
  * @param schedule The stored schedule, whose `nextWindow` is the first window
  *   not yet accounted for.
@@ -391,7 +359,7 @@ export function advanceManagedScheduleAfterWindow(
  * @param nowMs The wake instant, UTC milliseconds.
  * @throws {RangeError} if the schedule's lattice is unusable, if the wake
  *   instant is not a representable one, if the resumed window falls outside the
- *   range a stored UTC instant carries, or if the span from `nextWindow` to the
+ *   range a stored UTC instant admits, or if the span from `nextWindow` to the
  *   wake exceeds the walk's bound.
  */
 export function catchUpManagedSchedule(
@@ -428,13 +396,9 @@ export function catchUpManagedSchedule(
       : windowIndexContaining(geometry, recordedMs);
 
   // A completed run inside the window the plan last advanced PAST still ends the
-  // miss run. The advance can pass over a window whose run is still in flight:
-  // the single-writer lock refuses a second context while the first holds it,
-  // and that run's own bookkeeping lands after the window was accounted for, so
-  // the walk below -- which starts at `firstUnaccounted` -- would never read it.
-  // `consecutiveMisses` counts a run of consecutive windows the two runners did
-  // not meet in, and one they demonstrably did meet in ends that run wherever
-  // the bookkeeping stood when the evidence landed.
+  // miss run: the advance can pass over a window whose run is still in flight
+  // (the single-writer lock held elsewhere), so the walk below, which starts at
+  // `firstUnaccounted`, never reads it directly.
   let consecutiveMisses =
     recordedIndex === firstUnaccounted - 1 && lastRun?.outcome === "succeeded"
       ? 0
@@ -494,12 +458,10 @@ export function catchUpManagedSchedule(
 
 /**
  * Resolve an operator's local wall-clock cadence to the UTC anchor the record
- * stores. This is the ONE place the host's zone is read: it runs at save and
- * again only when the operator edits the schedule, so a daylight-saving shift
- * between two windows moves neither of them -- the stored anchor fixes the
- * instant, and a cadence entered as "09:00" reads an hour differently on the
- * local clock after a transition rather than silently sliding the agreed window
- * away from the partner's.
+ * stores. This is the ONE place the host's zone is read, along with the
+ * read-back in {@link localCadenceFromAnchor}: it runs at save and again only
+ * when the operator edits the schedule (see docs/spec/MANAGED_EXCHANGE_RECORD.md,
+ * "The schedule object", for why).
  *
  * A wall-clock time the local zone skips (the hour a spring-forward transition
  * removes) has no instant to resolve to; the platform maps it forward into the
@@ -510,7 +472,7 @@ export function catchUpManagedSchedule(
  *
  * @throws {RangeError} if a component is out of range, if it names a date the
  *   calendar does not have, or if the local resolution falls outside the range a
- *   stored UTC instant carries: a late-December year-9999 cadence in a zone
+ *   stored UTC instant admits: a late-December year-9999 cadence in a zone
  *   behind UTC resolves into year 10000, which has only the expanded-year ISO
  *   form the record's validator refuses.
  */
@@ -547,15 +509,12 @@ export function resolveLocalCadenceAnchor(
 /**
  * Read a stored UTC anchor back as the local wall-clock cadence an entry surface
  * shows the operator -- the inverse of {@link resolveLocalCadenceAnchor}, and the
- * OTHER place the host zone is read. An entry form re-opened on a stored schedule
- * must show the cadence the operator agreed on their own clock rather than the
- * UTC instant it was resolved to, and a save that changes nothing must resolve
+ * OTHER place the host zone is read. A save that changes nothing must resolve
  * back to the same anchor.
  *
- * The round trip holds in both directions except across a daylight-saving
- * transition the zone itself makes ambiguous: a wall-clock time the zone skips or
- * repeats resolves to an instant whose read-back names a different wall clock,
- * which is the zone's own doing rather than this pair's (see
+ * The round trip holds except across a daylight-saving transition the zone
+ * itself makes ambiguous: a wall-clock time the zone skips or repeats resolves
+ * to an instant whose read-back names a different wall clock (see
  * {@link resolveLocalCadenceAnchor}).
  *
  * @throws {RangeError} if `anchor` is not a usable stored UTC instant.

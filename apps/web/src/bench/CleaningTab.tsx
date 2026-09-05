@@ -23,9 +23,9 @@ import type { InviterEditor } from "./inviterModel";
 
 /**
  * The Cleaning tab: per-field pipelines with previews and whole-file coverage,
- * mounted from the shared standardization workbench over the bench's draft.
- * Add/remove same-typed fields is the expert affordance, gated with the keys
- * tab's expert switch.
+ * mounted from the shared standardization workbench over the console's draft.
+ * Add/remove same-typed fields is the expert control, gated with the keys tab's
+ * expert switch.
  */
 export function CleaningTab({
   editor,
@@ -47,12 +47,12 @@ export function CleaningTab({
   /** The per-column preview samples the before/after preview reads: computed from
    * the rows on the hosted build, read from the server-side profile on the console
    * (which never holds the rows). Supplied by the host so this tab never touches
-   * `csv.rawRows`, which the console acquired shape does not carry. */
+   * `csv.rawRows`, which the console acquired shape does not have. */
   columnSamples: ColumnSamples;
   expertMode: boolean;
-  /** The full-CSV per-field coverage, swept once at the bench and shared with the
+  /** The full-CSV per-field coverage, swept once at the console and shared with the
    * Customize fact and the coverage Problems entry (`null` before the first sweep
-   * settles). Lifted so the fact and the create gate render regardless of the
+   * finishes). Lifted so the fact and the create gate render regardless of the
    * active section. */
   rates: ReadonlyMap<string, FieldValueCoverage> | null;
   /** Whether a coverage recompute is in flight (drives the per-card "Checking..."
@@ -67,10 +67,10 @@ export function CleaningTab({
   onFieldRemoved: (output: string) => void;
   onResetCleaning: () => void;
   /** The validation message for the cleaning, rendered inline (the work
-   * column's Problems block carries it too). */
+   * column's Problems block shows it too). */
   cleaningError: string | undefined;
-  /** Provider-aware coverage pending copy (the console sweep is a whole-file pass on
-   * the appliance); the hosted build leaves it undefined to keep the default. */
+  /** Provider-aware coverage pending copy (the console sweep is a whole-file pass
+   * on the console); the hosted build leaves it undefined to keep the default. */
   coveragePendingLabel?: string;
   onBack: () => void;
 }) {

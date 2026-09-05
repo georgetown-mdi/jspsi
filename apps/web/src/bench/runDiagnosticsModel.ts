@@ -10,13 +10,13 @@
  *
  * Both controls are per-run and nothing about either survives the run: the
  * console authors and runs ONE exchange and then graduates to the command line,
- * so a console-wide diagnostics setting would be state this appliance has no
+ * so a console-wide diagnostics setting would be state this console has no
  * business keeping.
  */
 
 /** The operator's per-run diagnostic and recovery choices for one exchange. */
 export interface RunDiagnosticsDraft {
-  /** Run at debug verbosity and capture the CLI's log on the appliance. */
+  /** Run at debug verbosity and capture the CLI's log on the console. */
   diagnosticRun: boolean;
   /** Sweep the rendezvous directory's leftover protocol files before the run. */
   sweepExchangeFiles: boolean;
@@ -36,7 +36,7 @@ export const RUN_DIAGNOSTICS_DEFAULT: RunDiagnosticsDraft = {
 /**
  * The sweep control's visible label. Named here because the rendezvous
  * preflight's not-empty warning sends the operator to this control, and a
- * warning quoting a label the card no longer carries sends them nowhere.
+ * warning quoting a label the card does not hold sends them nowhere.
  */
 export const SWEEP_CONTROL_LABEL =
   "Clear leftover exchange files before starting";
@@ -67,8 +67,8 @@ export const SWEEP_CONFIRMATION_LABEL =
  * directory holding an audit transcript refuses the sweep, and the way past that
  * is the command line's.
  *
- * The escalation is named, not offered: the console deliberately carries no
- * one-click way to delete an audit transcript, and the command line -- where the
+ * The escalation is named, not offered: the console has no one-click way to
+ * delete an audit transcript, and the command line -- where the
  * flag is spelled out and the run is the operator's own -- stays open. It is
  * stated from the operator's own draft, so no run output decides whether they
  * see it.
@@ -86,7 +86,7 @@ export const SWEEP_UNCONFIRMED_PROBLEM =
 /**
  * What the console says about a debug-level log before the operator asks for
  * one. The CLI creates the file owner-only for the same reason (see
- * `configureLogFile`), and the appliance serves it only through the job's own
+ * `configureLogFile`), and the console serves it only through the job's own
  * endpoint, but the operator still ends up with a copy in their downloads.
  */
 export const DIAGNOSTIC_LOG_NOTICE =
@@ -98,7 +98,7 @@ export const DIAGNOSTIC_LOG_NOTICE =
 /**
  * The draft with one control set to a new value, which is the only way a surface
  * changes it: the confirmation belongs to a sweep that is ON, so a draft whose
- * sweep is off carries no confirmation.
+ * sweep is off holds no confirmation.
  *
  * The draft outlives any one visit to the card -- it is the whole form's, and
  * the directory the sweep would run against can be re-targeted between visits --
@@ -121,7 +121,7 @@ export function runDiagnosticsWithControl<
 }
 
 /**
- * The draft carried across a RE-TARGET of the directory a sweep would run
+ * The draft's state after a RE-TARGET of the directory a sweep would run
  * against -- a transport switch, or an SFTP connection authored afresh. The
  * confirmation attests ONE directory, so it does not survive that directory
  * changing; the operator's other choices are about the run rather than the

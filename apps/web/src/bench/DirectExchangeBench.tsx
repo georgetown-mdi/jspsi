@@ -67,15 +67,15 @@ const TRANSPORT_NOTES: Record<DirectTransport, string> = {
 };
 
 /**
- * The console "Direct exchange" bench: a symmetric, single-column spine for the
+ * The "Direct exchange" console: a symmetric, single-column spine for the
  * CLI's zero-setup exchange -- no invitation minted or accepted, terms inferred from
  * each party's own file, both parties running against the same out-of-band-agreed
  * server. Choose the mounted input CSV, author the agreed server (SFTP free-hand or
  * the filedrop rendezvous), confirm the inferred terms and affirm the transport-only
- * trust model, then run on the appliance.
+ * trust model, then run on the console.
  *
  * Console-only: on a hosted build the flow renders a not-available notice, since it
- * drives the appliance's job API (which a hosted deployment does not run). The
+ * drives the console's job API (which a hosted deployment does not run). The
  * lobby's third card and this route are both gated the same way.
  */
 export function DirectExchangeBench() {
@@ -114,10 +114,10 @@ export function DirectExchangeBench() {
   );
   const [runDiagnosticsOpen, setRunDiagnosticsOpen] = useState(false);
 
-  // Fetch the appliance's authored SFTP connection once on a console build; one
-  // fetch per bench serves the session. The helper resolves to a null connection on
-  // any failure or when none is authored, so the SFTP step then offers free-hand
-  // authoring.
+  // Fetch the console's authored SFTP connection once on a console build; one
+  // fetch per console serves the session. The helper resolves to a null connection
+  // on any failure or when none is authored, so the SFTP step then offers
+  // free-hand authoring.
   useEffect(() => {
     if (!consoleBuild || sftpInfo !== undefined) return;
     let cancelled = false;
@@ -129,10 +129,10 @@ export function DirectExchangeBench() {
     };
   }, [consoleBuild, sftpInfo]);
 
-  // Fetch the appliance's rendezvous mount once on a console build; the mount is
-  // boot-static, so one fetch per bench serves the session. The helper fails safe to
-  // `{ configured: false }`, so the filedrop transport stays disabled unless the
-  // appliance confirms a mounted directory.
+  // Fetch the console's rendezvous mount once on a console build; the mount is
+  // boot-static, so one fetch per console serves the session. The helper fails
+  // safe to `{ configured: false }`, so the filedrop transport stays disabled
+  // unless the console confirms a mounted directory.
   useEffect(() => {
     if (!consoleBuild || rendezvous !== undefined) return;
     let cancelled = false;
@@ -146,7 +146,7 @@ export function DirectExchangeBench() {
 
   const sftpConnection = sftpInfo === undefined ? null : sftpInfo.connection;
 
-  // The appliance reads the mounted file in place, so a run carries only a REFERENCE
+  // The console reads the mounted file in place, so a run holds only a REFERENCE
   // (the opaque name), never the content.
   const inputSource: JobInputSource | undefined =
     consoleSource !== undefined
@@ -271,7 +271,7 @@ export function DirectExchangeBench() {
     const state =
       entry === step ? "current" : position < currentIndex ? "done" : "pending";
     // Earlier done steps are navigable until a run starts; once it has, the stepper
-    // locks (the run has the appliance's single slot, and its own surface is the way
+    // locks (the run has the console's single slot, and its own surface is the way
     // forward -- try again, start over, or set up another).
     const selectable = state === "done" && !started;
     return {

@@ -21,7 +21,7 @@ import type { ChildProcess } from "node:child_process";
  * `spawn` with an argv ARRAY and `shell: false` is the same allowlisted-argv
  * discipline `runCliChild` uses, so no value a caller composes is ever an
  * interpretable token. stderr is drained and DISCARDED: it can name filesystem
- * paths inside the container and can carry bytes an untrusted server chose, so
+ * paths inside the container and can contain bytes an untrusted server chose, so
  * nothing this boundary returns is derived from it, while draining keeps a chatty
  * child's pipe from filling and blocking it.
  */
@@ -53,16 +53,14 @@ export type CapturedChildOutcome =
  * {@link CAPTURED_STDOUT_CAP}, and settle once its stdio has closed or the
  * watchdog kills it.
  *
- * The watchdog SIGTERMs at `sigtermMs` and escalates to SIGKILL after
- * `sigkillGraceMs`, mirroring the cancel-escalation chain in `jobManager.ts`. Both
- * budgets are the caller's: what a child spends is its own subcommand's business
- * (a local key write, or a network dial with its own connect timeout), while the
- * escalation shape is not. Every timer is unref'd and cleared on settle, so a
- * pending watchdog never holds the process open and never fires after the result
- * is out.
+ * The watchdog SIGTERMs at `sigtermMs`, escalating to SIGKILL after
+ * `sigkillGraceMs` -- mirroring `jobManager.ts`'s cancel-escalation chain. Every
+ * timer is unref'd and cleared on settle, so a pending watchdog never holds the
+ * process open or fires after the result is out. Both budgets are the caller's;
+ * what the child itself spends is its own subcommand's business.
  *
- * `cwd` is omitted to inherit the server's working directory; a caller whose
- * child resolves anything relative to it pins its own and creates it first.
+ * `cwd` is omitted to inherit the server's working directory; a caller resolving
+ * paths relative to it pins its own and creates it first.
  */
 export function runCapturedCliChild(args: {
   argv: Array<string>;

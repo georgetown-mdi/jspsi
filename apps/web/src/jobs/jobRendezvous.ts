@@ -12,79 +12,52 @@ import { browseSegment } from "./workInputName";
 import { isPathWithin } from "./pathContainment";
 
 /**
- * The environment variable naming the operator-mounted rendezvous directory a
- * filedrop exchange reads and writes, symmetric with `JOB_INPUT_DIR`. When unset or
- * empty the rendezvous directory falls back to `JOB_DATA_ROOT`, so a single-folder
- * console -- one mount, only `JOB_DATA_ROOT` set -- rendezvouses out of the data
- * root. The filedrop transport is unavailable only when both are unset: the invite
- * chooser then disables its card and the accept flow reports the unavailable state.
- * The directory is server-side configuration, never a browser-sent path; it feeds
- * the CLI config the child reads, so nothing about it reaches argv.
+ * Names the operator-mounted rendezvous directory a filedrop exchange reads and
+ * writes. Falls back to `JOB_DATA_ROOT` when unset or empty; filedrop is
+ * unavailable only when both are unset. Server-side configuration, never a
+ * browser-sent path.
  *
- * On an appliance that also sets {@link JOB_RENDEZVOUS_OUTBOUND_DIR_ENV} this names
- * the INBOUND (peer-written) leg of a split rendezvous rather than a directory both
- * parties write.
+ * With {@link JOB_RENDEZVOUS_OUTBOUND_DIR_ENV} also set, this names the INBOUND
+ * (peer-written) leg of a split rendezvous, not a directory both parties write.
  */
 export const JOB_RENDEZVOUS_DIR_ENV = "JOB_RENDEZVOUS_DIR";
 
 /**
- * The environment variable naming the OUTBOUND (self-written) rendezvous directory
- * of a split filedrop exchange, the companion to {@link JOB_RENDEZVOUS_DIR_ENV}'s
- * inbound leg. Set it on an appliance whose partner-shared mailbox is two folders
- * -- this party writes into one and reads the peer's files out of the other -- and
- * every filedrop exchange the console runs carries the CLI's
- * `inbound_path`/`outbound_path` pair instead of a single shared `path`.
+ * Names the OUTBOUND (self-written) rendezvous directory of a split filedrop
+ * exchange, the companion to {@link JOB_RENDEZVOUS_DIR_ENV}'s inbound leg. Set it
+ * when the partner-shared mailbox is two folders; every filedrop exchange the
+ * console runs then uses the CLI's `inbound_path`/`outbound_path` pair instead of
+ * a single shared `path`.
  *
- * Deliberately WITHOUT a {@link JOB_DATA_ROOT_ENV} fallback, unlike the inbound leg:
- * the variable being set is the one and only signal that this appliance provisions a
- * split rendezvous, and a fallback would turn every filedrop exchange on a plain
- * single-mount console into a split one. Setting it alone provisions no split
- * either: a split takes both legs from their own variables, so an inbound leg that
- * arrived through the data-root fallback is refused (see
- * {@link rendezvousSplitFaults}) rather than synced to the partner.
- *
+ * No {@link JOB_DATA_ROOT_ENV} fallback: this variable being set is the only signal
+ * that a split is provisioned. An inbound leg that arrived through the data-root
+ * fallback is refused rather than synced (see {@link rendezvousSplitFaults}).
  * Server-side configuration, never a browser-sent path.
  */
 export const JOB_RENDEZVOUS_OUTBOUND_DIR_ENV = "JOB_RENDEZVOUS_OUTBOUND_DIR";
 
 /**
- * The environment variable naming the SHARED FOLDER the rendezvous mount stands
- * for -- the folder the operator picked, as they and their partner know it --
- * rather than the container mount point it is bound to. It exists because the
- * mount point is not always the operator's to name: a launcher that picks the
- * mount point itself binds every operator's folder at the same fixed path, so
- * the mount point's own last segment names the launcher's layout instead of the
- * folder. Set it, and the invitation's advisory locator carries this name.
+ * Names the SHARED FOLDER the rendezvous mount stands for, for when a launcher
+ * fixes the container mount point and its last segment cannot name the folder.
+ * Unset, the mount point's last segment is the name. A value that is not a bare
+ * folder name ({@link browseSegment}) leaves the console with no name rather than
+ * falling back to the mount point.
  *
- * Unset is the operator-authored mount, where the mount point IS the operator's
- * naming and its last segment is the folder's name. A value that is not a bare
- * folder name -- empty, `.`/`..`, or carrying a path separator, a control
- * character, or more than the shared segment rule's 255 characters
- * ({@link browseSegment}) -- leaves the console with no name rather than falling back to the mount
- * point, because a caller that set this variable has already said the mount
- * point does not name the folder.
- *
- * Server-side configuration, never a browser-sent value: it reaches the partner
- * in the invitation's locator and on the accept kit.
+ * Server-side configuration; reaches the partner in the invitation's locator and
+ * accept kit.
  */
 export const JOB_RENDEZVOUS_NAME_ENV = "JOB_RENDEZVOUS_NAME";
 
 /**
- * The environment variable naming the SHARED FOLDER the OUTBOUND mount of a split
- * rendezvous stands for, the companion to {@link JOB_RENDEZVOUS_NAME_ENV}. It
- * exists for the same reason that one does -- a launcher that picks the mount point
- * names its own layout, not the operator's folder -- and follows the same rules: a
- * value that is not a bare folder name leaves the console with no name for the
- * outbound leg rather than falling back to the mount point.
+ * Names the SHARED FOLDER the OUTBOUND mount of a split rendezvous stands for, the
+ * companion to {@link JOB_RENDEZVOUS_NAME_ENV} and governed by the same rules.
  *
- * A split appliance needs BOTH legs named distinctly to mint an invitation, because
- * the invitation's endpoint carries a name per leg and core refuses a filedrop
- * endpoint whose two halves resolve alike. Two mounts whose last segments coincide
- * (`/mnt/in/psilink` and `/mnt/out/psilink`) are exactly the case this variable
- * resolves.
+ * Both legs need distinct names to mint an invitation: core refuses a filedrop
+ * endpoint whose two halves resolve alike, so two mounts whose last segments
+ * coincide (e.g. `/mnt/in/psilink` and `/mnt/out/psilink`) need this variable set.
  *
- * Server-side configuration, never a browser-sent value: it reaches the partner in
- * the invitation's locator and on the accept kit.
+ * Server-side configuration; reaches the partner in the invitation's locator and
+ * accept kit.
  */
 export const JOB_RENDEZVOUS_OUTBOUND_NAME_ENV = "JOB_RENDEZVOUS_OUTBOUND_NAME";
 
@@ -93,64 +66,47 @@ declare global {
 }
 
 /**
- * How this appliance is provisioned to rendezvous a filedrop exchange, resolved once
- * from the environment. Either a single shared mount (`outboundDir` absent, the
- * console's original shape) or the split pair a second mount provisions, plus the
- * names and locators an invitation minted here may carry for each leg.
+ * How this console is provisioned to rendezvous a filedrop exchange, resolved once
+ * from the environment: a single shared mount (`outboundDir` absent) or a split
+ * pair, plus each leg's name and locator.
  *
  * `problem` is why a filedrop exchange CANNOT run as provisioned, in the operator's
- * own terms and naming the variable to fix. It is a refusal rather than a warning:
- * the faults it reports -- two legs that are one directory, two legs the console
- * cannot name apart, or one leg of a split nobody named -- are configurations under
- * which the exchange would read its own writes as the partner's, could not mint an
- * invitation at all, or would sync a folder the operator never offered, none of
- * which the operator's own directory-layout latitude covers. When it is set, no
- * filedrop exchange is offered or created.
+ * own terms and naming the variable to fix. When set, no filedrop exchange is
+ * offered or created.
  */
 export interface JobRendezvousProvisioning {
   /** The inbound (peer-written) leg, or the single shared mount when no outbound leg
    * is provisioned. Undefined when no rendezvous mount resolves at all. */
   dir?: string;
-  /** The outbound (self-written) leg; present only on a split appliance. */
+  /** The outbound (self-written) leg; present only on a split console. */
   outboundDir?: string;
   folderName?: string;
   outboundFolderName?: string;
-  /** The advisory locator an invitation minted here carries for {@link dir}. */
+  /** The advisory locator an invitation minted here states for {@link dir}. */
   locator?: string;
-  /** The advisory locator for {@link outboundDir}, on a split appliance. */
+  /** The advisory locator for {@link outboundDir}, on a split console. */
   outboundLocator?: string;
   problem?: string;
   /**
-   * Why the split pair's containment refusal was decided on the configured paths
-   * alone: the console could not read one leg's real path, so a symlink joining
-   * the two legs could not be seen. A warning rather than a refusal -- a
-   * filesystem that cannot answer is not a reason to stop an exchange whose legs
-   * may well be distinct -- and logged at startup beside {@link problem}, which it
-   * qualifies rather than replaces.
+   * Why the split pair's containment check was decided on the configured paths
+   * alone: one leg's real path could not be read, so a symlink joining the two
+   * legs could not be seen. A warning, not a refusal, logged at startup beside
+   * {@link problem}, which it qualifies rather than replaces.
    */
   unresolvedLegWarning?: string;
   /**
    * Whether a rendezvous leg HOLDS the job data root -- the mounted working
-   * directory this party's long-lived signing key, config, input, and results live
-   * in. True on the single-mount console, where the inbound leg falls back to the
-   * data root, and true for any leg an operator pointed at the data root or at a
-   * folder containing it.
-   *
-   * Set only when it is true, so an appliance whose rendezvous is separately
-   * provisioned carries nothing. It is the one fact the console needs to tell the
-   * two layouts apart: where it holds, whatever the partner syncs into that folder
-   * they can also read out of it, so the signing key is a file they reach.
-   * See {@link rendezvousHoldsDataRoot} for how it is decided.
+   * directory holding this party's signing key, config, input, and results. Set
+   * only when true, so a separately-provisioned console holds nothing: where
+   * it holds, anything the partner syncs into that folder is also readable there,
+   * so the signing key is a file they reach. See {@link rendezvousHoldsDataRoot}.
    */
   sharesDataRoot?: boolean;
   /**
-   * Whether {@link sharesDataRoot} reflects a verdict the walk could not rule out
-   * -- an unresolved real path somewhere in the comparison -- rather than one it
-   * positively established by a lexical containment or filesystem identity match.
-   * Present only alongside `sharesDataRoot: true`; withheld when the match was
-   * established, on the same "set only when it applies" rule. The console reads
-   * it to choose between stating the shared layout as fact and hedging it (see
-   * `receiptsModel.ts`).
+   * Whether {@link sharesDataRoot} is a default from an unresolved real path
+   * rather than a positively established match. Present only alongside
+   * `sharesDataRoot: true`. The console reads it to choose between stating the
+   * shared layout as fact and hedging it (see `receiptsModel.ts`).
    */
   sharesDataRootUncertain?: boolean;
 }
@@ -179,7 +135,7 @@ function resolveInboundRendezvousMount(env: NodeJS.ProcessEnv): {
 
 /** Resolve the outbound rendezvous leg from
  * {@link JOB_RENDEZVOUS_OUTBOUND_DIR_ENV}, or undefined when it is unset or empty --
- * the appliance is then provisioned for a single shared mount. No data-root
+ * the console is then provisioned for a single shared mount. No data-root
  * fallback: see the variable's own documentation.
  *
  * @internal exported for testing */
@@ -198,13 +154,11 @@ function lastPathSegment(dirPath: string): string {
   return segments.length > 0 ? segments[segments.length - 1] : "";
 }
 
-/** A bare folder name, or undefined when the value cannot be one. Nothing here
- * is a security boundary -- the value is the operator's own -- but a name that
- * carries a separator would put a path fragment in the partner's invitation,
- * and one that is empty or a relative-path segment names no folder at all.
- * The shape rule is {@link browseSegment}, the single-segment predicate the
- * job surfaces share so their callers cannot drift; a folder name keeps its
- * leading dot, exactly as a browse segment does. */
+/** A bare folder name, or undefined when the value cannot be one. Not a security
+ * boundary -- the value is the operator's own -- but a separator would put a path
+ * fragment in the partner's invitation. The shape rule is {@link browseSegment},
+ * shared with the job surfaces so callers cannot drift; a folder name keeps its
+ * leading dot, as a browse segment does. */
 function usableFolderName(value: string): string | undefined {
   const name = value.trim();
   return browseSegment(name) ? name : undefined;
@@ -231,15 +185,11 @@ export function resolveJobRendezvousFolderName(
 }
 
 /**
- * The outbound leg's own folder name on a split appliance, resolved from
+ * The outbound leg's own folder name on a split console: resolved from
  * {@link JOB_RENDEZVOUS_OUTBOUND_NAME_ENV} exactly as
- * {@link resolveJobRendezvousFolderName} resolves the inbound one, else from the
- * outbound mount's last segment.
- *
- * The mount decides first, so an appliance with no outbound leg has no outbound name
- * whatever the name variable says: the name belongs to a folder, and a single-mount
- * console that carries a stale {@link JOB_RENDEZVOUS_OUTBOUND_NAME_ENV} would
- * otherwise report the outbound half of a split rendezvous it does not have.
+ * {@link resolveJobRendezvousFolderName} resolves the inbound leg, else from the
+ * outbound mount's last segment. The mount decides first, so a console with no
+ * outbound leg reports no outbound name regardless of the variable.
  */
 function resolveJobRendezvousOutboundFolderName(
   env: NodeJS.ProcessEnv,
@@ -252,17 +202,14 @@ function resolveJobRendezvousOutboundFolderName(
 }
 
 /**
- * The advisory locator a filedrop invitation minted on this console carries: the
- * shared folder's name where the console can name it, else the rendezvous
- * mount's own last segment, which names nothing about the host machine and is
- * what the partner's CLI remaps anyway. Undefined when no rendezvous directory
- * is configured, and for the one configured mount that reduces to no segment at
- * all (the filesystem root).
+ * The advisory locator a filedrop invitation minted here states: the shared
+ * folder's name where the console can name it, else the rendezvous mount's own
+ * last segment (the partner's CLI remaps it anyway). Undefined when no rendezvous
+ * directory is configured or it reduces to no segment (the filesystem root).
  *
- * The two are separate because only the first is safe to PRINT as the shared
- * folder's name: the accept kit and the console's own confirm line take the
- * folder name and say nothing where there is none, while the token always needs
- * a locator (core's endpoint schema requires a filedrop directory).
+ * Separate from the folder name because only the name is safe to PRINT: the
+ * accept kit and confirm line say nothing where there is none, while the token
+ * always needs a locator (core's endpoint schema requires a filedrop directory).
  */
 function resolveJobRendezvousLocator(
   rendezvousDir: string | undefined,
@@ -287,7 +234,7 @@ interface ResolvedPathForms {
   resolved: string;
   forms: Array<string>;
   /** False when a path component could not be READ (as opposed to not being
-   * there), so {@link forms} carries the configured path alone. */
+   * there), so {@link forms} contains the configured path alone. */
   canonicalized: boolean;
 }
 
@@ -303,13 +250,10 @@ function isMissingPathError(error: unknown): boolean {
  * Resolve a directory to the forms {@link pathFormsOverlap} compares.
  *
  * The real path is read through the directory's nearest EXISTING ancestor with the
- * missing tail re-appended, so a mount the operator has not created yet is still
- * compared through a symlinked parent: a component that does not exist cannot be
- * the symlink that joins two directories, while its parent can. A component the
- * process cannot read (a permission or I/O failure on the way to the mount) is a
- * different matter -- the symlink could be exactly there -- so the directory falls
- * back to its configured path alone and says so through `canonicalized`, because a
- * filesystem that cannot answer must not become a verdict of its own.
+ * missing tail re-appended, so a mount not yet created is still compared through a
+ * symlinked parent. A component the process cannot read is different -- the
+ * symlink could be exactly there -- so the directory falls back to its configured
+ * path alone and reports that through `canonicalized`.
  */
 function resolvePathForms(dir: string): ResolvedPathForms {
   const resolved = path.resolve(dir);
@@ -357,7 +301,7 @@ function pathFormsContain(
 
 /**
  * Whether two directories are one directory, or one is nested inside the other, in
- * ANY pairing of the forms they resolve to. Comparing across forms is what carries
+ * ANY pairing of the forms they resolve to. Comparing across forms is what extends
  * the verdict to a symlinked directory without letting an unresolvable one out of
  * it: the configured paths are always among the forms compared, so the lexical
  * verdict still stands on its own.
@@ -371,13 +315,11 @@ function pathFormsOverlap(
 
 /**
  * The warning for a pair compared without one or both legs' real paths, naming the
- * variable(s) whose mounts could not be resolved, or undefined when both resolved.
- * It reports a check that ran narrower than it means to rather than a fault in the
- * operator's layout, so it names the recovery for the resolution itself.
+ * variable(s) that could not be resolved, or undefined when both resolved. Reports
+ * a check that ran narrower than intended, not a fault in the operator's layout.
  *
- * A single unresolved leg is worded narrower than a pair of them: the other leg's
- * real path still took part in the comparison, so only a symlink sitting on the
- * unresolved side would go uncaught, not a symlink anywhere in the pair.
+ * A single unresolved leg is worded narrower than a pair: the other leg's real
+ * path still took part, so only a symlink on the unresolved side goes uncaught.
  */
 function describeUnresolvedLegs(
   inbound: ResolvedPathForms,
@@ -406,19 +348,15 @@ function describeUnresolvedLegs(
 }
 
 /**
- * Why a split pair with both legs of its own cannot run a filedrop exchange, or
- * undefined when it is coherent. The half-provisioned case is decided before this,
- * where the legs are not yet a pair.
+ * Why a split pair cannot run a filedrop exchange, or undefined when it is
+ * coherent. (The half-provisioned case is decided earlier.)
  *
- * - Two legs that are one directory, or one nested inside the other, would have
- *   this party read its own writes as the partner's. Core's `pathsResolveToSameDir`
- *   refine catches only textual same-directory equality on the composed config, so
- *   the nesting half is checked here, where the appliance's own mounts are known.
- * - A leg the console cannot name, or two legs whose derived names coincide, cannot
- *   be minted into an invitation at all: the endpoint carries one name per leg and
- *   core refuses a filedrop endpoint whose halves resolve alike. Reporting that here
- *   is what turns core's refusal at mint -- with nothing an operator can act on --
- *   into the name variable to set.
+ * - Two legs that are one directory, or nested, would have this party read its
+ *   own writes as the partner's; core's `pathsResolveToSameDir` catches only
+ *   textual equality on the composed config, so nesting is checked here.
+ * - A leg the console cannot name, or two legs whose names coincide, cannot be
+ *   minted into an invitation: core refuses a filedrop endpoint whose halves
+ *   resolve alike.
  */
 function splitPairProblem(
   provisioning: JobRendezvousProvisioning,
@@ -450,7 +388,7 @@ function splitPairProblem(
   return undefined;
 }
 
-/** What a split-provisioned appliance's two mounts are faulted for: the refusal
+/** What a split-provisioned console's two mounts are faulted for: the refusal
  * that stops every filedrop exchange, and the warning that the containment half of
  * it was decided without a leg's real path. Either or both may be absent. */
 export interface RendezvousSplitFaults {
@@ -459,26 +397,17 @@ export interface RendezvousSplitFaults {
 }
 
 /**
- * Fault a split-provisioned appliance's rendezvous pair, or return nothing where
- * there is no split or the pair is coherent. A `problem` is a refusal with the
- * variable to set named in it, because none of the faults is a layout choice the
- * operator can be left to make -- the pair faults {@link splitPairProblem} decides,
- * and, first, an outbound leg beside an inbound one that nobody named: the
- * data-root fallback resolves on every console that runs at all, so an operator who
- * sets only the outbound variable, or mistypes the inbound one, would otherwise get
- * a split whose partner-synced INBOUND folder is the data root, holding every job
- * workdir's config, key, input, and results. A split takes both legs from their own
- * variables; the fallback stays what it is for an unsplit appliance.
+ * Fault a split-provisioned console's rendezvous pair, or return nothing when
+ * there is no split or the pair is coherent. An outbound leg beside an inbound one
+ * that arrived only through the data-root fallback is faulted first -- a split
+ * takes both legs from their own variables -- then the pair faults
+ * {@link splitPairProblem} decides.
  *
- * The containment half is decided over the configured paths AND the real paths
- * symlinks resolve them to (see {@link resolvePathForms}), so an outbound leg
- * symlinked onto the inbound one meets the same refusal a lexically nested one
- * does. It is the inbound leg the partner writes, and a pair provisioned as two
- * folders that silently reorients onto one is what the refusal exists for, however
- * the reorientation is spelled. A leg whose real path cannot be READ narrows the
- * comparison back to the configured paths and reports `unresolvedLegWarning`, never
- * a refusal of its own. The paths are read once, so a symlink repointed while the
- * appliance runs is not seen; the exchange's own entry guard remains the backstop.
+ * Containment is checked over the configured paths and their real paths (see
+ * {@link resolvePathForms}); a leg whose real path cannot be read narrows to the
+ * configured comparison and reports `unresolvedLegWarning` instead of a refusal.
+ * Paths are read once, so a symlink repointed while the console runs is not
+ * seen -- the exchange's own entry guard is the safety check.
  *
  * @internal exported for testing
  */
@@ -544,31 +473,17 @@ interface DataRootHoldVerdict {
 }
 
 /**
- * Whether `leg` IS the data root, or a directory holding it, as the FILESYSTEM
- * knows the three rather than as their paths spell them.
+ * Whether `leg` IS the data root, or holds it, by FILESYSTEM identity rather than
+ * by path spelling -- catching aliasing a symlink does not express, such as one
+ * host directory bind-mounted at two container paths, which `realpath` cannot see.
  *
- * Aliasing the filesystem does not express as a symlink is invisible to every path
- * comparison, `realpath` included: the same host directory bind-mounted at two
- * container paths (`-v /host/psilink:/data` beside `-v /host/psilink:/mnt/share`)
- * resolves to two distinct real paths, and both name the one directory a partner's
- * sync writes into. The identity pair is what the two paths still share.
+ * The whole ancestor chain is walked, directional like {@link pathFormsContain}: a
+ * leg aliasing a directory that holds the data root reaches the key too. A
+ * directory the process could not stat counts as holding, `uncertain` (warn-and-
+ * guide default); one simply absent counts as nothing.
  *
- * The data root's whole ancestor chain is walked, not the data root alone, because a
- * leg aliasing a directory that HOLDS the data root reaches this party's key exactly
- * as one aliasing the data root does -- the same direction {@link pathFormsContain}
- * tests, so the aliased comparison stays directional too. Each ancestor is statted
- * lexically, which needs no realpath of its own: `stat` follows a symlinked ancestor
- * to the directory it names before reporting the pair.
- *
- * A directory the process could not stat counts as holding, the direction an
- * unreadable real path already fails in: what could not be read is precisely where
- * the aliasing would sit, and the verdict decides a warn-and-guide advisory -- and
- * that default counts as `uncertain`, since nothing was actually matched. A
- * directory that is simply absent aliases nothing and counts as nothing.
- *
- * What remains invisible is aliasing that neither `realpath` nor this identity walk
- * can see -- a leg bound onto some directory whose own contents reach the data root
- * by a route the ancestor chain does not pass through.
+ * Aliasing outside the ancestor chain -- a leg bound onto a directory whose own
+ * contents reach the data root by another route -- remains invisible.
  */
 function legAliasesDataRootChain(
   leg: string,
@@ -596,33 +511,21 @@ function legAliasesDataRootChain(
 }
 
 /**
- * Whether any rendezvous leg holds the job data root, the fact
- * {@link JobRendezvousProvisioning.sharesDataRoot} carries, and whether that
- * verdict was positively established rather than defaulted
+ * Whether any rendezvous leg holds the job data root
+ * ({@link JobRendezvousProvisioning.sharesDataRoot}), and whether that verdict was
+ * positively established rather than defaulted
  * ({@link JobRendezvousProvisioning.sharesDataRootUncertain}).
  *
- * Every leg is asked, through the shared enumeration ({@link jobRendezvousDirs}),
- * because a partner writes into one leg of a split as readily as into the single
- * shared mount. The test is DIRECTIONAL: a leg that holds the data root puts this
- * party's files where the partner syncs, while a leg mounted INSIDE the data root
- * does not -- the sync reaches that subfolder, not the key beside it. Each leg is
- * compared as configured and as its real path (see {@link resolvePathForms}), so a
- * leg symlinked onto the data root counts exactly as one configured at it does, and
- * then by filesystem identity (see {@link legAliasesDataRootChain}), which is what
- * carries the verdict to aliasing no path expresses -- one host directory
- * bind-mounted at two container paths.
+ * Every leg ({@link jobRendezvousDirs}) is tested DIRECTIONALLY: a leg that holds
+ * the data root puts this party's files where the partner syncs; a leg mounted
+ * INSIDE the data root does not. Each leg is compared as configured, as its real
+ * path ({@link resolvePathForms}), and by filesystem identity
+ * ({@link legAliasesDataRootChain}).
  *
- * A leg or a data root whose real path cannot be READ counts as holding: the
- * symlink that would join them is precisely what could not be resolved, and this
- * decides whether a warn-and-guide advisory is raised, so what cannot be ruled out
- * is reported rather than dropped -- as `uncertain`, since it is a default rather
- * than a match. The lexical comparison -- including the data-root fallback, where
- * the leg IS the data root -- runs only once both sides canonicalize, so it
- * shares the same gate: an unreadable data-root real path skips it and reports
- * `uncertain` for that leg exactly as an unreadable leg does. Every leg is checked
- * rather than stopping at the first that holds, so one leg's unresolved comparison
- * does not shadow another leg's lexical or filesystem match: a positive match on
- * any leg makes the whole verdict established.
+ * A leg or the data root whose real path cannot be read counts as holding and
+ * `uncertain`, since what cannot be resolved is exactly where a joining symlink
+ * would sit. Every leg is checked rather than stopping at the first that holds, so
+ * one leg's unresolved comparison cannot shadow another's positive match.
  */
 function rendezvousHoldsDataRoot(
   provisioning: JobRendezvousProvisioning,
@@ -648,13 +551,11 @@ function rendezvousHoldsDataRoot(
 }
 
 /**
- * Resolve this appliance's whole rendezvous provisioning from the environment: both
- * legs, their names and locators, the reason a filedrop exchange cannot run when the
- * pair is incoherent, and whether a leg holds the data root. Reads the filesystem --
- * each leg's real path, the data root's, and the identity of the data root's
- * ancestors where the paths alone leave the layout open -- for the whole appliance
- * rather than per exchange; the memoized entry point is
- * {@link useJobRendezvousProvisioning}.
+ * Resolve this console's whole rendezvous provisioning from the environment: both
+ * legs, their names and locators, the reason a filedrop exchange cannot run when
+ * the pair is incoherent, and whether a leg holds the data root. Reads the
+ * filesystem for the whole console rather than per exchange; the memoized entry
+ * point is {@link useJobRendezvousProvisioning}.
  */
 export function resolveJobRendezvousProvisioning(
   env: NodeJS.ProcessEnv,
@@ -712,23 +613,19 @@ export function useJobRendezvousProvisioning(
 
 /**
  * Which mount of a filedrop rendezvous a preflight notice is about: the single
- * shared directory of a one-mount console, or one leg of a split appliance's pair.
- * A split appliance preflights each leg independently, so every notice has to say
+ * shared directory of a one-mount console, or one leg of a split console's pair.
+ * A split console preflights each leg independently, so every notice has to say
  * which of the two it means.
  */
 export type RendezvousLeg = "shared" | "inbound" | "outbound";
 
 /**
- * Every rendezvous mount this appliance runs a filedrop exchange over, paired with
- * the leg it is: one shared directory on a single-mount console, both legs on a
- * split one, and none when no mount resolves.
- *
- * The single enumeration of "every rendezvous mount", so the preflight that names
- * each leg and the containment surfaces that exclude each cannot come to different
- * answers about which mounts exist. Each leg joins independently: a mount missing
- * from the list is a partner-synced folder a credential could be referenced out of
- * unnoticed, so an outbound leg is enumerated even in the half-provisioned state
- * that no exchange runs in.
+ * Every rendezvous mount this console runs a filedrop exchange over, paired with
+ * the leg it is. The single enumeration of "every rendezvous mount", so the
+ * preflight and the containment surfaces cannot disagree about which mounts exist.
+ * An outbound leg is enumerated even half-provisioned: a mount missing from the
+ * list is a partner-synced folder a credential could be referenced out of
+ * unnoticed.
  */
 export function jobRendezvousLegs(
   dir: string | undefined,
@@ -765,10 +662,9 @@ export const MAX_NAMED_RENDEZVOUS_ENTRIES = 10;
 
 /**
  * Every preflight notice below is fitted to this budget where it is composed,
- * rather than to the wider whole-warning cap the seat that renders it applies.
- * Fitting at composition is what keeps the clause a notice ENDS on -- its recovery
- * step, or the reason the overlap matters -- from being the part a cap eats, and
- * the tighter of the two budgets is the one that makes the fit hold at either.
+ * rather than to the wider whole-warning cap the seat that renders it applies:
+ * fitting at composition keeps the clause a notice ENDS on -- its recovery step --
+ * from being the part that cap eats.
  *
  * @internal exported for testing
  */
@@ -779,12 +675,9 @@ export const RENDEZVOUS_NOTICE_BUDGET = DEFAULT_MAX_DISPLAY_LENGTH;
  * first does not fit {@link RENDEZVOUS_NOTICE_BUDGET} once rendered.
  *
  * All-or-nothing rather than clipped: a clipped path reads like a whole path the
- * operator could go and look at, and the paths are the only unbounded part of
- * every notice here -- the operator's own server-side configuration for the
- * console's single rendezvous mount, which they can read off their own launcher.
- * The sentence around them is what they cannot reconstruct, so the sentence is what
- * survives. A notice whose pathless wording is itself over budget is a first-party
- * copy overrun rather than a fit failure, and the checks fail on it.
+ * operator could go and look at. The sentence around the paths is what the
+ * operator cannot reconstruct, so it is what survives; pathless wording that is
+ * itself over budget is a copy overrun the checks fail on.
  */
 function fitNotice(withPaths: string, withoutPaths: string): string {
   return renderedDisplayCost(withPaths) <= RENDEZVOUS_NOTICE_BUDGET
@@ -806,19 +699,15 @@ function legNoun(leg: RendezvousLeg, noun: "directory" | "path"): string {
 }
 
 /**
- * The notice a directory of the overlap comparison raises when its OWN real path
- * could not be READ: the comparison narrowed back to the configured paths, so a
- * symlink joining it to the other directory goes unseen. It reports a check that
- * ran narrower than it means to rather than a fault in the operator's layout, so
- * what it names is the read access to restore -- and it stays a warning whichever
- * side could not be read, since a filesystem that cannot answer decides which
- * notice to raise and never whether the exchange runs.
+ * The notice raised when a directory in the overlap comparison could not have its
+ * OWN real path READ: the comparison narrowed to the configured paths, so a
+ * symlink joining it to the other directory goes unseen. Always a warning, never a
+ * refusal -- a filesystem that cannot answer decides which notice to raise, never
+ * whether the exchange runs.
  *
- * `comparedWith` names the other directory, which is what attributes the notice on
- * a split appliance: the data root and the work-input directory are compared once
- * per leg, so an unqualified sentence would reach the operator twice over with
- * nothing to tell the two apart. The mount's own notice passes none, being the side
- * every other one is compared against rather than one of them.
+ * `comparedWith` names the other directory, needed on a split console where the
+ * data root and work-input directory are each compared once per leg. The mount's
+ * own notice passes none, being the side every other one is compared against.
  */
 function unresolvedRealPathNotice(
   subject: string,
@@ -844,35 +733,18 @@ function unresolvedRealPathNotice(
 const QUOTED_SWEEP_CONTROL = "Clear leftover exchange files";
 
 /**
- * The lead of a non-empty rendezvous directory's warning: what is wrong, what an
- * exchange does about it, the control that clears it, and the files the operator
- * must NOT be read as being told to delete.
+ * The lead of a non-empty rendezvous directory's warning: what is wrong, the
+ * console's own sweep control that clears it (never a host-side deletion), and
+ * that the operator's own input and results are not what it deletes.
  *
- * The recovery is the console's own sweep rather than a host-side deletion: the
- * operator is reading this inside the GUI, and the run form carries a control that
- * does exactly this job.
+ * Wording follows `sweepExchangeFiles`, the launch's own sweep intent: a launch
+ * that already turned the control on is told its state, not told to turn on what
+ * is already on.
  *
- * Which recovery it carries follows `sweepExchangeFiles`, the launch's own sweep
- * intent -- the same value the run's controls carry to the child. A launch that
- * already turned the control on is told the control's state and the order it runs
- * in instead of being told to turn on what it turned on, and the clause about the
- * operator's own files states what the sweep spares rather than what the entry
- * guard refuses over, because a run about to delete files is read for what it
- * deletes.
- *
- * That form states that the sweep runs, never that it clears: the CLI's sweep
- * refuses a retain-mode transcript unless the run escalates past that guard, and
- * the console does not compose the escalation (`--force-retain-sweep` is
- * unrepresentable in the job intent). A retained transcript is the headline case
- * this warning fires on, so a promised clear would be a promise the operator is
- * handed a refusal against. What that refusal costs and the command line that
- * overrules it are stated beside the control itself, where a launch carrying the
- * sweep has already read them, rather than spent from the budget this notice
- * shares with the mount path.
- *
- * The sink escapes and CAPS what it renders, so the whole sentence has to fit
- * {@link RENDEZVOUS_NOTICE_BUDGET} or the clause that keeps this from reading as
- * "empty the folder" is what falls off the end.
+ * States that the sweep runs, never that it clears: the CLI's sweep refuses a
+ * retain-mode transcript unless the run escalates past that guard, which the
+ * console does not compose. The whole sentence must fit
+ * {@link RENDEZVOUS_NOTICE_BUDGET}.
  *
  * @internal exported for testing
  */
@@ -897,17 +769,14 @@ export function notEmptyLead(
 
 /**
  * What a non-empty rendezvous directory holds, as its own warning message. Sorted,
- * because readdir order is the filesystem's and not a promise, so the same directory
- * reads the same way twice.
+ * because readdir order is not a promise, so the same directory reads the same way
+ * twice.
  *
- * Entry names are partner-chosen -- the partner syncs its own files into this
- * directory -- and reach the operator through the display sink that escapes the
- * message, so they are composed raw and fitted by their RENDERED cost. A name is
- * shown only when it fits whole: a name the cap chopped reads like a whole name the
- * operator could go and delete, so one that does not fit is counted instead, and
- * every later name is still tested rather than suppressed behind it. The count is
- * then the only part that can still grow, and each iteration reserves the width it
- * could reach.
+ * Entry names are partner-chosen and reach the operator through the display sink
+ * raw, fitted by RENDERED cost. A name is shown only when it fits whole -- a
+ * chopped name reads like a whole one the operator could go and delete -- so one
+ * that does not fit is counted instead, and later names are still tested rather
+ * than suppressed behind it.
  */
 function describeRendezvousEntries(
   entries: Array<string>,
@@ -944,58 +813,19 @@ function describeRendezvousEntries(
 }
 
 /**
- * The preflight warnings for a filedrop job's rendezvous directory, surfaced through
- * the job's warning channel at start. Defensive, never fatal: a synced mount may
- * populate lazily and the CLI child is the runtime backstop for a truly-broken path,
- * so a missing, non-directory, non-writable, or unlistable mount only warns. An
- * overlap with the input directory or the data root also warns -- a partner with sync
- * write access to an overlapping mount could reach the operator's `.psilink.key`,
- * input, or results -- but the operator's own directory layout is theirs to choose, so
- * it is not refused.
+ * The preflight warnings for a filedrop job's rendezvous directory, reported
+ * through the job's warning channel at start. Defensive, never fatal: a missing,
+ * non-directory, non-writable, unlistable, or non-empty mount only warns, and an
+ * overlap with the input directory or data root warns rather than refuses -- the
+ * operator's own directory layout is theirs to choose.
  *
- * The overlap is decided over each path as configured AND as the real path symlinks
- * resolve it to (see {@link resolvePathForms}), so a mount symlinked onto the data
- * root raises the same notice a nested one does: what a partner's sync writes reach
- * is the directory at the far end of the link, not the path that names it. A
- * directory on EITHER side of that comparison whose own real path cannot be READ --
- * the mount, the data root, or the work-input directory -- falls back to the
- * configured comparison and says so in a further notice naming the side that could
- * not be resolved ({@link unresolvedRealPathNotice}), so a narrowed check is never
- * silent about which side narrowed it; one that simply does not exist yet is
- * resolved through its nearest existing ancestor and raises no notice about
- * resolution at all.
+ * Overlap and real-path checks run over each path as configured and as symlinks
+ * resolve it ({@link resolvePathForms}); an unreadable side falls back to the
+ * configured comparison and says so ({@link unresolvedRealPathNotice}).
  *
- * A directory that is not empty warns for a different reason: the console rendezvouses
- * every filedrop job out of the same mounts, so a completed retain-mode run leaves its
- * whole transcript where the next run's entry guard refuses it, with no crash anywhere
- * in the story. It takes two warnings in order -- the recovery, then what the mount
- * holds -- because the display sink caps each message it renders, and one message
- * carrying both would spend the recovery's budget on the listing. Which recovery the
- * lead carries follows this launch's own sweep intent (see {@link notEmptyLead}), so
- * a launch already carrying the sweep is not sent to a control it is already using.
- * The listing leaves out one entry: the workdir this launch itself just created,
- * which in the single-folder layout (rendezvous directory equal to the data root)
- * always sits inside the mount by the time this preflight runs. It names what
- * remains and leaves the launch to the operator, whose own input and results may sit
- * in that listing too and are not what the guard objects to. It deliberately does not
- * sort protocol files from foreign ones: that grammar is the exchange's, and
- * predicting the guard's verdict here would be a second implementation of it.
- *
- * A split appliance runs this over EACH leg independently, which is why every notice
- * takes `leg` and names the mount it is about: an outbound directory that is missing
- * and an inbound one that is not empty are separate facts with separate recoveries,
- * and one set of notices covering "the rendezvous directory" would leave the operator
- * to guess which of their two folders to go and look at.
- *
- * Every notice raised here is fitted to {@link RENDEZVOUS_NOTICE_BUDGET} where it is
- * composed, so no clause an operator acts on can be the part the seat's cap eats;
- * what gives way is an interpolated path (see {@link fitNotice}), and the entry
- * listing gives way by name (see {@link describeRendezvousEntries}). What the whole
- * set measures at the rendered boundary is pinned by tests.
- *
- * This does not create the directory, enforce a mode, or reject a symlinked mount:
- * the real paths it reads decide which warning to raise, never whether the exchange
- * runs.
+ * A split console runs this per leg, so every notice names which mount it is
+ * about. This only decides which warning to raise -- it does not create the
+ * directory, enforce a mode, or reject a symlinked mount.
  */
 export function rendezvousStartupWarnings(
   rendezvousDir: string,

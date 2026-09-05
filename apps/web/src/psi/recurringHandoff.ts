@@ -29,7 +29,7 @@ export async function fetchRecurringHandoff(
  * Validate a hand-off response body into a {@link JobHandoff}, or null when it is
  * not a well-formed hand-off -- a partial or ill-formed body renders nothing
  * rather than a half-built panel. The template is discriminated on `kind`: a
- * `config` carries a `yaml` string, a `command` carries an `argv` array of
+ * `config` holds a `yaml` string, a `command` holds an `argv` array of
  * strings.
  *
  * @internal exported for the unit test.
@@ -87,7 +87,7 @@ function parseTemplate(value: unknown): JobHandoffTemplate | null {
 
 /**
  * Join a command's argv tokens into one copy-pasteable line, single-quoting any
- * token that carries a space or a shell metacharacter so a value like a
+ * token with a space or a shell metacharacter so a value like a
  * multi-word `--identity=` label survives the copy intact. A token with no such
  * character is emitted bare. The tokens are server-composed and secret-free (the
  * connection URL, portable flags, and placeholders), so this is display shaping,
@@ -107,7 +107,7 @@ function shellQuoteToken(token: string): string {
 /**
  * Join a command's argv tokens into one line quoted for cmd.exe, for the Windows
  * Task Scheduler example. cmd.exe does not honor the POSIX single quotes {@link
- * shellJoinCommand} emits, so a token carrying a space or a cmd metacharacter is
+ * shellJoinCommand} emits, so a token with a space or a cmd metacharacter is
  * wrapped in double quotes (any internal `"` doubled) and a token with none is
  * emitted bare. Display shaping for the same server-composed, secret-free tokens,
  * not a security boundary.

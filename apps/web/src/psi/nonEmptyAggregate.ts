@@ -15,17 +15,14 @@ import type { CSVRow, Standardization } from "@psilink/core";
  * preview's row sample) and reports the share of rows that produce a key, so the
  * operator sees an all-null collapse before launch.
  *
- * An empty string `""` is counted as PRODUCED, not as "no value": it is a real,
- * participating key element, distinct from a dropped `null` (and convertible to one
- * with `null_if`), so conflating the two would contradict the per-row preview and
- * misreport a deliberately-blank field as a coverage failure. A field whose keys all
- * collapse to one constant (including `""`) is NOT flagged: the linkage procedure
- * already drops any key value that is duplicated within a dataset before the PSI
- * round (`removeDuplicatesAndUndefineds` in core's `link.ts` keeps only values seen
- * exactly once -- a constant key thus contributes no matches and those records fall
- * through to later keys), so a low-cardinality or constant key is benign rather than
- * a disclosure hazard, and warning on it would cry wolf on legitimate repeated-key
- * designs.
+ * An empty string `""` counts as PRODUCED: a real, participating key element,
+ * distinct from a dropped `null` (convertible to one with `null_if`), matching
+ * the per-row preview and not misreporting a field that is blank by design as
+ * a coverage failure. A field whose keys all collapse to one constant
+ * (including `""`) is NOT flagged: `removeDuplicatesAndUndefineds` (core's
+ * `link.ts`) already drops any key value duplicated within a dataset before
+ * the PSI round, so a low-cardinality or constant key is benign rather than a
+ * disclosure hazard.
  *
  * Pure and React-free -- the single tested boundary; the off-main-thread plumbing
  * lives in {@link ./nonEmptyAggregateController} and calls exactly
@@ -34,33 +31,32 @@ import type { CSVRow, Standardization } from "@psilink/core";
 
 /**
  * Row count beyond which the aggregate is moved off the main thread (see
- * {@link ./nonEmptyAggregateController}). The per-row work is N_fields pipeline runs
- * per row, so a few thousand rows is where the synchronous sweep starts to drop a
- * frame; below it the inline cost is negligible and a worker's structured-clone
- * setup buys nothing. Settled empirically and coordinated with the preview sample
- * size ({@link PREVIEW_SAMPLE_SIZE}); tunable as the execution-target profile is
- * measured, the same way {@link MAX_CSV_FILE_BYTES} is.
+ * {@link ./nonEmptyAggregateController}). The per-row work is N_fields pipeline
+ * runs per row, so a few thousand rows is where the synchronous sweep starts
+ * to drop a frame; below it a worker's structured-clone setup buys nothing.
+ * Settled empirically, coordinated with {@link PREVIEW_SAMPLE_SIZE}; tunable
+ * the same way {@link MAX_CSV_FILE_BYTES} is.
  */
 export const NON_EMPTY_WORKER_ROW_THRESHOLD = 5000;
 
 /**
- * Total cell-text budget (characters) above which the sweep moves off the main thread
- * regardless of row count. Row count alone under-estimates the work: the sweep cost is
- * rows x fields x per-cell, so a file with a few very large cells (many bytes, few
- * rows) -- or wide rows across many fields' columns -- can block the main thread well
- * below {@link NON_EMPTY_WORKER_ROW_THRESHOLD}. Settled empirically alongside the row
- * threshold and tunable the same way.
+ * Total cell-text budget (characters) above which the sweep moves off the main
+ * thread regardless of row count. Row count alone under-estimates the work
+ * (cost is rows x fields x per-cell), so a file with a few very large cells,
+ * or wide rows across many fields' columns, can block the main thread well
+ * below {@link NON_EMPTY_WORKER_ROW_THRESHOLD}. Settled empirically alongside
+ * the row threshold, tunable the same way.
  */
 export const NON_EMPTY_WORKER_CHAR_THRESHOLD = 2_000_000;
 
 /**
- * Whether a CSV should have its coverage swept off the main thread: above the row
- * threshold, or once its total cell text crosses {@link NON_EMPTY_WORKER_CHAR_THRESHOLD}
- * (the size scan short-circuits as soon as the budget is passed, so it stays cheap even
- * for a huge file -- a many-row file returns on the row check before scanning, and a
- * few-huge-cells file trips the budget within the first cells). Field count is not known
- * here, so a degenerate terms set with very many linkage fields all bound to one narrow
- * column could still sweep inline; that is an out-of-shape, partner-bounded config.
+ * Whether a CSV should have its coverage swept off the main thread: above the
+ * row threshold, or once its total cell text crosses
+ * {@link NON_EMPTY_WORKER_CHAR_THRESHOLD} (the scan short-circuits once the
+ * budget is passed, so it stays cheap even for a huge file). Field count is
+ * not known here, so a degenerate terms set with very many linkage fields
+ * all bound to one narrow column could still sweep inline -- an out-of-shape,
+ * partner-bounded config.
  */
 export function shouldComputeOffThread(
   rawRows: ReadonlyArray<CSVRow>,
@@ -92,61 +88,55 @@ export interface FieldValueCoverage {
   /** Rows examined -- the full parsed row count. */
   total: number;
   /**
-   * Rows whose pipeline yields at least one matchable key. `null` and an empty `Set`
-   * (value set `[]`) are not a key; an empty STRING is -- it is a participating key
-   * element distinct from a dropped value, so an all-`""` field is fully PRODUCED, not
-   * zero coverage. A fan-out `Set` of two or more values counts ONCE, as the single row
-   * it is (so the tally stays bounded by {@link total}): its values cross into the key's
-   * candidate set that the single-pass strategy matches on, so the row is matchable
-   * rather than dropped. A fan-out under any other strategy is refused where the fault
-   * is fixable -- core's `assertFanOutImplemented`, at authoring, at the mint, and at
-   * prepare -- so this readout does not pre-warn for it; counting the row as no
-   * coverage would cry wolf on a field that matches.
+   * Rows whose pipeline yields at least one matchable key. `null` and an empty
+   * `Set` are not a key; an empty STRING is -- a participating key element
+   * distinct from a dropped value, so an all-`""` field is fully PRODUCED, not
+   * zero coverage. A fan-out `Set` of two or more values counts ONCE, as the
+   * single row it is (bounding the tally by {@link total}): its values enter
+   * the key's candidate set the single-pass strategy matches on. A fan-out
+   * under any other strategy is refused where the fault is fixable -- core's
+   * `assertFanOutImplemented`, at authoring, at the mint, and at prepare --
+   * so this readout does not pre-warn for it.
    */
   produced: number;
   /** {@link produced} / {@link total} in [0, 1]; 0 when {@link total} is 0. */
   rate: number;
   /**
-   * True when the field's coverage is not computed. Three cases reach it: a step left
-   * mid-edit (e.g. a `pad_left` with no length yet), an in-dialect but over-length
-   * regex source (rejected by the length cap) -- both caught by {@link isStepValid}
-   * BEFORE the pipeline is compiled, so a malformed step never throws at compile and a
-   * pathological-length pattern never reaches the compiler on the (inline,
-   * below-threshold) main-thread sweep -- and a pipeline that compiles yet throws on a
-   * specific row's value, which degrades the field here rather than aborting the
-   * whole sweep (see {@link FieldCoverageAccumulator.add}). Coverage is then not
-   * computable, so it MUST NOT be read as a 0% collapse: the host already gates launch
-   * on a malformed pipeline, and a false alarm would be noise on top of that step's
-   * own inline error.
+   * True when the field's coverage is not computed. Three cases reach it: a
+   * step left mid-edit (e.g. a `pad_left` with no length yet); an in-dialect
+   * but over-length regex source, rejected by the length cap (both caught by
+   * {@link isStepValid} before the pipeline compiles); and a pipeline that
+   * compiles yet throws on a specific row's value, degrading the field rather
+   * than aborting the whole sweep (see {@link FieldCoverageAccumulator.add}).
+   * MUST NOT be read as a 0% collapse: the host already gates launch on a
+   * malformed pipeline, and a false alarm would only add noise.
    */
   unavailable: boolean;
 }
 
 /**
- * A per-field coverage tally fed one row at a time, so the sweep can run over a
- * STREAM that retains no rows: the whole-file batch entry point
- * ({@link computeFieldCoverage}) and the server-side streaming pass over a mounted
- * CLI-scale file share this one accumulator, so the two drivers count identically
- * (equivalence pinned by test).
+ * A per-field coverage tally fed one row at a time, so the sweep can run over
+ * a STREAM that retains no rows: the whole-file batch entry point
+ * ({@link computeFieldCoverage}) and the server-side streaming pass over a
+ * mounted CLI-scale file share this one accumulator, so the two drivers
+ * count identically (equivalence pinned by test).
  *
  * Each field's {@link StandardizedField} pipeline is compiled ONCE in
- * {@link createFieldCoverageAccumulator} (over an empty backing row set, since rows
- * arrive through {@link FieldCoverageAccumulator.add}, not by index), so a
- * regex/`parse_date` pipeline is not recompiled per row. A field whose steps are
- * not all valid ({@link isStepValid}), or whose compile throws, is marked
- * `unavailable` WITHOUT compiling on the sweep path -- so one mid-edit step does
- * not blank the whole aggregate, and an in-dialect but over-length regex source
- * never reaches the compiler (the super-linear-in-length compile the length cap
- * exists to bound stays off the main thread / off the server event loop).
+ * {@link createFieldCoverageAccumulator}, so a regex/`parse_date` pipeline is
+ * not recompiled per row. A field whose steps are not all valid
+ * ({@link isStepValid}), or whose compile throws, is marked `unavailable`
+ * without compiling on the sweep path, so one mid-edit step does not blank
+ * the whole aggregate and an over-length regex never reaches the compiler.
  */
 export interface FieldCoverageAccumulator {
   /**
-   * Fold one row into every field's tally: for each available field, count the row
-   * as produced iff its pipeline yields at least one matchable key (an empty STRING
-   * counts, and a multi-value fan-out Set counts once; a dropped null/empty-Set does
-   * not). Increments the shared row total. A field whose
-   * pipeline THROWS on a row degrades to `unavailable` and is no longer evaluated,
-   * so one bad row never aborts the sweep (nor, server-side, 400s the whole request).
+   * Fold one row into every field's tally: for each available field, count
+   * the row as produced iff its pipeline yields at least one matchable key
+   * (an empty STRING counts, a multi-value fan-out Set counts once; a
+   * dropped null/empty-Set does not). Increments the shared row total. A
+   * field whose pipeline THROWS on a row degrades to `unavailable` and stops
+   * being evaluated, so one bad row never aborts the sweep (nor,
+   * server-side, 400s the whole request).
    */
   add: (row: CSVRow) => void;
   /** The per-field coverage after every fed row, in the standardization's order. */
@@ -164,7 +154,7 @@ export function createFieldCoverageAccumulator(
 ): FieldCoverageAccumulator {
   // Each field compiles once here (over an empty backing array -- rows come through
   // add(), never by index) and its produced counter is folded per row. A field that
-  // is not all-valid, or whose compile throws, carries no StandardizedField and is
+  // is not all-valid, or whose compile throws, holds no StandardizedField and is
   // reported unavailable; the compile is wrapped so a step that slips past the
   // validity gate yet throws is caught rather than blanking the aggregate.
   const fields = standardization.map((transformation) => {
@@ -194,10 +184,10 @@ export function createFieldCoverageAccumulator(
         if (entry.field === null) continue;
         // A step that passes the validity gate and compiles can still throw on a
         // specific row's value. Degrade that field to unavailable (and stop
-        // evaluating it) rather than aborting the whole sweep, matching the old
-        // whole-file computeFieldCoverage: server-side one bad row would otherwise
-        // 400 the entire coverage request. A matchable key iff the value set is
-        // non-empty, a fan-out counting once -- see FieldValueCoverage.produced.
+        // evaluating it) rather than aborting the whole sweep -- server-side,
+        // one bad row would otherwise 400 the entire coverage request. A
+        // matchable key iff the value set is non-empty, a fan-out counting
+        // once -- see FieldValueCoverage.produced.
         try {
           if (entry.field.evaluateRow(row).length > 0) entry.produced++;
         } catch {
@@ -220,23 +210,24 @@ export function createFieldCoverageAccumulator(
 }
 
 /**
- * Compute per-field value coverage over the WHOLE row set. For each transformation,
- * runs its pipeline over every row's input column and counts the rows that yield at
- * least one matchable key (an empty STRING counts, and a fan-out into several
- * candidates counts once as the row it is; a dropped null/empty-Set does not).
+ * Compute per-field value coverage over the WHOLE row set: for each
+ * transformation, runs its pipeline over every row's input column and counts
+ * the rows that yield at least one matchable key (an empty STRING counts, a
+ * fan-out counts once; a dropped null/empty-Set does not).
  *
- * This is a per-field proxy: it measures the field's own standardization pipeline, not
- * a linkage key's element transforms or its cross-field (composite-key) collapse.
+ * A per-field proxy: measures the field's own standardization pipeline, not
+ * a linkage key's element transforms or its cross-field (composite-key)
+ * collapse.
  *
- * The sweep observes empties: a row whose input column is blank (or absent) is run
- * through the pipeline too, so a `coalesce` that substitutes a default for an empty
- * value RAISES coverage -- making demonstrable here the one transform the row-sample
- * preview cannot show. A field whose transform drops every row reports `produced: 0`
+ * The sweep observes empties: a blank or absent input column still runs
+ * through the pipeline, so a `coalesce` that substitutes a default RAISES
+ * coverage -- the one transform the row-sample preview cannot show. A field
+ * whose transform drops every row reports `produced: 0`
  * ({@link isSilentEmpty}).
  *
- * The whole-file batch driver over {@link createFieldCoverageAccumulator}: it feeds
- * every row and reads the result, so it and the server's streaming pass are one
- * computation. See that accumulator for the compile-once and `unavailable` handling.
+ * The whole-file batch driver over {@link createFieldCoverageAccumulator}:
+ * feeds every row and reads the result, so it and the server's streaming
+ * pass are one computation.
  */
 export function computeFieldCoverage(
   rawRows: ReadonlyArray<CSVRow>,

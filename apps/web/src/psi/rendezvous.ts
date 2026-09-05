@@ -31,17 +31,11 @@ const defaultPeerFactory: PeerFactory = (id, options) => new Peer(id, options);
 
 /**
  * The WebSocket heartbeat cadence the PeerJS client sends, pinned here rather
- * than left to the `peerjs` default. `peerjs` is a caret range (`^1.5.5`) whose
- * default `pingInterval` (5,000 ms in 1.5.x) is a default parameter inside a
- * bundled file -- not exported -- so a minor bump could silently change it. The
+ * than left to the `peerjs` default: that default lives in a bundled,
+ * unexported file, so a minor version bump could silently change it. The
  * signaling server's "unconfirmed" reap window (`unconfirmed_timeout` in the
- * vendored peerjs-server reaper) is justified as a multiple of this cadence: a
- * real peer graduates to the generous `alive_timeout` window the moment its
- * first heartbeat lands, so the reap window only ever cuts a socket that
- * registers and stays silent. Setting the cadence to a psilink-owned value keeps
- * that safety margin pinned to something we control instead of a transitive
- * default. The reap-window-vs-cadence margin itself is enforced as a check in
- * `test/unit/signalingReaping.test.ts`, not asserted in prose here.
+ * vendored peerjs-server reaper) is a multiple of this cadence, enforced by
+ * `test/unit/signalingReaping.test.ts`.
  */
 export const PEER_PING_INTERVAL_MS = 5_000;
 
@@ -71,18 +65,13 @@ interface SignalingLocation {
 }
 
 /**
- * Build the PeerJS options for a signaling location. The ICE configuration is
- * public STUN only, no TURN -- a TURN relay forwards data, and while all traffic
- * is relayed across the Internet regardless, we do not route through a
- * third-party relay by default (a self-hosted TURN server is a future option).
+ * Build the PeerJS options for a signaling location. ICE is public STUN
+ * only, no TURN by default (a self-hosted TURN server is a future option).
  *
  * `redactableIds` are the session's derived rendezvous ids; the installed
- * `logFunction` strips them from PeerJS output so the per-session diagnostic
- * toggle can raise the debug level (see {@link resolvePeerDebugLevel}) without
- * any derived id reaching the console. It is installed at every level, not only
- * when diagnosing, so even the default errors-only output is redacted (PeerJS
- * error logs can carry an `Error` whose message embeds an id); the only effect
- * in non-diagnostic mode is the console prefix.
+ * `logFunction` strips them from PeerJS output at every debug level, not
+ * only when diagnosing -- PeerJS error logs can embed an id even at the
+ * default errors-only level.
  */
 function buildPeerOptions(
   loc: SignalingLocation,
@@ -176,9 +165,10 @@ function waitForPeerOpen(
 /**
  * Connect to the signaling server and listen on the inviter's derived id,
  * resolving the registered {@link Peer}. The caller then awaits the inbound
- * connection (see {@link waitForIncomingConnection}). The Peer only surfaces on
- * success: a pre-open failure destroys it (freeing the broker id) before
- * rejecting, rather than leaking a registered peer the caller never receives.
+ * connection (see {@link waitForIncomingConnection}). The Peer is returned
+ * only on success: a pre-open failure destroys it (freeing the broker id)
+ * before rejecting, rather than leaking a registered peer the caller never
+ * receives.
  *
  * @param sharedSecret  The invitation's shared secret; the inviter id is derived
  *                      from it.
@@ -200,14 +190,13 @@ export async function listenAsInviter(
     deriveRendezvousPeerId(sharedSecret, "acceptor"),
   ]);
   const loc = inviterLocationFromWindow();
-  // Short-circuit before any broker contact -- placed after the (fast) async
-  // derivation above so an abort that lands during it is caught here too -- so
-  // when the caller has already aborted (e.g. the component unmounted before this
-  // ran) no peer is constructed and no derived id is registered with the broker.
+  // Short-circuit before any broker contact. Placed after the (fast) async
+  // derivation above so an abort during it is still caught: no peer is
+  // constructed and no derived id registered when the caller already aborted.
   if (signal?.aborted)
     throw new Error("connecting to the signaling server was aborted");
   // The derived id is a rendezvous address that correlates exchanges, so keep it
-  // out of default (info) logs; surface it only at debug for connection triage.
+  // out of default (info) logs; show it only at debug for connection triage.
   log.info(`listening as inviter at ${loc.host}:${loc.port}`);
   log.debug(`derived inviter peer id ${inviterId}`);
   const peer = makePeer(
@@ -265,24 +254,19 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 /**
- * Dial `inviterId`, retrying while the broker reports it `peer-unavailable` (the
- * inviter has not started listening yet), until the channel opens or the total
- * budget is spent. Each attempt is bounded by {@link
- * DEFAULT_DIAL_ATTEMPT_TIMEOUT_MS}; the retry budget is the human-timescale
- * {@link DEFAULT_PEER_WAIT_TIMEOUT_MS}, the same ceiling the inviter's inbound
- * wait uses, so neither side hangs forever waiting on the other.
+ * Dial `inviterId`, retrying on `peer-unavailable` until the channel opens
+ * or the total budget -- {@link DEFAULT_PEER_WAIT_TIMEOUT_MS}, matching the
+ * inviter's own inbound-wait ceiling -- is spent; each attempt is bounded by
+ * {@link DEFAULT_DIAL_ATTEMPT_TIMEOUT_MS}.
  *
- * A single peer-level `error` listener spans the whole loop -- every attempt and
- * every backoff delay between them. A `peer-unavailable` resolves the in-flight
- * attempt as a retry; any other peer error is fatal and rejects the dial. A
- * per-attempt listener would leave the backoff windows uncovered, silently
- * dropping a fatal broker error that fired between attempts.
+ * One peer-level `error` listener spans the whole loop, including backoff
+ * delays, so a fatal broker error between attempts is never dropped;
+ * `peer-unavailable` retries, anything else is fatal.
  *
- * A spent budget is the {@link PartnerNoShowError} no-show condition: every attempt
- * it made was answered `peer-unavailable`, so the inviter never registered its
- * derived id at all. The per-attempt open timeout is held apart from it and stays a
- * plain error, because reaching that one means the inviter's id IS registered and
- * the channel will not open -- a transport fault, not an absent partner.
+ * A spent budget throws {@link PartnerNoShowError} (every attempt was
+ * `peer-unavailable`: the inviter never registered); the per-attempt open
+ * timeout is a plain error instead, since reaching it means the id IS
+ * registered but the channel will not open.
  */
 async function dialInviterWithRetry(
   peer: Peer,
@@ -433,12 +417,12 @@ export async function dialAsAcceptor(
     deriveRendezvousPeerId(sharedSecret, "acceptor"),
   ]);
   const loc = acceptorLocationFromEndpoint(endpoint);
-  // Derived ids are rendezvous addresses that correlate exchanges; keep them out
-  // of default (info) logs and surface them only at debug for connection triage.
-  // The host/port come from the partner's invitation endpoint
-  // (`acceptorLocationFromEndpoint`), so dev-gate this line: a production console
-  // carries no partner-influenced bytes, while a developer or a diagnosing
-  // tester still gets the dial target.
+  // Derived ids are rendezvous addresses that correlate exchanges; keep them
+  // out of default (info) logs and show them only at debug for connection
+  // triage. The host/port come from the partner's invitation endpoint
+  // (`acceptorLocationFromEndpoint`), so dev-gate this line: a production
+  // console contains no partner-influenced bytes, while a developer or a
+  // diagnosing tester still gets the dial target.
   whenDiagnostic(() =>
     log.info(`dialing the inviter at ${loc.host}:${loc.port}`),
   );

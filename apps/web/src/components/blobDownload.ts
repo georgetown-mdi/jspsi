@@ -2,18 +2,16 @@
  * The one client-side blob-download helper: build a Blob, click a synthetic
  * anchor, and revoke the object URL on a deferred timer. Every surface that
  * writes a document to the user's disk from in-browser bytes (the linkage-terms
- * export, the exchange-file save, the sample CSVs) routes through this so the
- * download discipline -- the in-document anchor and the deferred revoke, both
- * load-bearing on some browsers -- lives in one place.
+ * export, the exchange-file save, the sample CSVs) routes through this, so the
+ * two steps some browsers require -- the in-document anchor and the deferred
+ * revoke -- live in one place.
  */
 
 /** How long to keep a download's object URL alive after the click before
  * revoking it. The browser may copy the blob asynchronously, so revoking too
  * soon (even on the next task) can abort the save; a generous fixed delay
  * outlives the transfer while still freeing the URL rather than leaking it for
- * the document lifetime. A fixed multi-second delay in the same spirit as the
- * long-used file-saver approach (which defers its own revoke by tens of
- * seconds). */
+ * the document lifetime. */
 const REVOKE_DELAY_MS = 60_000;
 
 /** Trigger a client-side download of `content` as `fileName`. Nothing is

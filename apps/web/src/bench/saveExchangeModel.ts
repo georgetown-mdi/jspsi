@@ -27,7 +27,7 @@ export type CliTransport = Exclude<Transport, "browser">;
  * The fields the operator authors on the save surface. SFTP needs a host and a
  * remote directory; a shared-directory exchange needs only the directory both
  * parties can reach. Both are held here so the surface's single form model
- * carries whichever the transport uses; the validators read only the fields
+ * holds whichever the transport uses; the validators read only the fields
  * their transport requires.
  */
 export interface SaveExchangeFields {
@@ -61,8 +61,8 @@ export function saveLeadCopy(transport: CliTransport): string {
 /** The info-alert copy about credentials: SFTP credentials are never stored in
  * this file -- the operator fills in the SSH username and points the config at
  * a key or password (an `@file` reference) before running; the psilink key
- * file the printed command provisions carries only the exchange's shared
- * secret. A shared-directory exchange carries no credentials at all, only the
+ * file the printed command provisions holds only the exchange's shared
+ * secret. A shared-directory exchange has no credentials at all, only the
  * directory both parties can reach. */
 export function credentialAlertCopy(transport: CliTransport): string {
   return transport === "sftp"
@@ -195,7 +195,7 @@ function isAbsolutePath(path: string): boolean {
 /** The download filename `psilink-exchange-<date>.yaml`, the date the local
  * calendar day of `at` (the moment the invitation and file are minted). Mirrors
  * the record-filename timestamp discipline: the stamp comes from the artifact's
- * own creation instant, so repeated saves after edits carry distinct dates. */
+ * own creation instant, so repeated saves after edits have distinct dates. */
 export function exchangeFileName(at: Date): string {
   const year = at.getFullYear();
   const month = String(at.getMonth() + 1).padStart(2, "0");
@@ -205,7 +205,7 @@ export function exchangeFileName(at: Date): string {
 
 /**
  * The invitation endpoint request the authored locator maps to -- the same
- * sftp/filedrop locator fields the exchange file's connection carries, so the
+ * sftp/filedrop locator fields the exchange file's connection holds, so the
  * code and the YAML point at one rendezvous. An empty optional directory is
  * omitted (the CLI defaults it) rather than sent as an empty string the
  * endpoint schema would reject.
@@ -227,7 +227,7 @@ export function endpointRequestFor(
 
 /**
  * Assemble the exchange-file input from the minted invitation and the authored
- * locator. The connection carries the SAME host/path {@link endpointRequestFor}
+ * locator. The connection holds the SAME host/path {@link endpointRequestFor}
  * put in the token; the linkage terms, metadata, standardization, and disclosed
  * payload columns are read off the invitation the code was minted from, so the
  * config and the token agree by derivation rather than by a parallel rebuild.
@@ -253,7 +253,7 @@ export function exchangeFileInputFor(
       ? { standardization: invitation.standardization }
       : {}),
     // The token's own published set (including the strict empty set), so the
-    // persisted send-side commitment is the one the token carries -- never a
+    // persisted send-side commitment is the one the token holds -- never a
     // re-derivation that could drift from it.
     disclosedPayloadColumns: invitation.disclosedPayloadColumns,
   };

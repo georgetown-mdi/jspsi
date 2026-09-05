@@ -49,19 +49,19 @@ import type {
 } from "@psilink/core";
 
 /**
- * The pure model behind the "Verify a receipt" bench: it turns each supplied JSON
+ * The pure model behind the "Verify a receipt" console: it turns each supplied JSON
  * document into either a named parse failure or a parsed artifact, and each of
  * core's two verification reports -- the unsigned {@link RecordVerificationReport}
  * and the {@link DualSignedRecordVerificationReport} -- into a plain-language
  * verdict view-model. It is React-free and free of any I/O, so the copy discipline
- * the bench requires -- the honest ambiguity of a failed verdict, the "supply your
+ * the console requires -- the accurate ambiguity of a failed verdict, the "supply your
  * files" framing of an unopened commitment, the wrong-keys signal distinct from
  * tamper, and the anchoring sentences an unanchored certificate does and does not
  * support -- is tested here directly rather than through the DOM.
  *
  * Both verdicts come from `@psilink/core` as-is. Neither the assignment of
  * anchoring values over the dual-signed record's two certificate slots nor the
- * verdict decided over it -- the tier each row carries, the clauses an unanchored
+ * verdict decided over it -- the tier each row holds, the clauses an unanchored
  * slot supports, the remediation a run has earned -- is re-derived here: this
  * model supplies what the verifier holds and puts this page's words to the
  * decision core returns, which is the same decision the CLI renders.
@@ -84,7 +84,7 @@ import type {
 // --- Input parse -------------------------------------------------------------
 
 /** A parsed JSON document that is either the recognized artifact or a named
- * reason it is not. `kind: "ok"` carries the parsed value; every other kind is a
+ * reason it is not. `kind: "ok"` holds the parsed value; every other kind is a
  * pre-verification outcome the page renders as a designed alert state. */
 export type RecordParseResult =
   | { kind: "ok"; record: ExchangeRecord }
@@ -117,7 +117,7 @@ export type CertificateParseResult =
 
 // The parse label handed to parseSensitiveJson: it reports path-only, so this
 // fixed string is all that ever reaches an error message -- never the file's
-// bytes. The web app's JSON is non-secret here (a receipt carries no values), but
+// bytes. The web app's JSON is non-secret here (a receipt holds no values), but
 // the chokepoint is used regardless so a syntax error cannot echo source.
 const RECORD_LABEL = "the record file";
 const KEYS_LABEL = "the verification-keys file";
@@ -328,7 +328,7 @@ export function pinnedFingerprintProblem(value: string): string | undefined {
  * icon in the view. */
 export type VerdictTone = "verified" | "failed" | "incomplete";
 
-/** The headline for the verdict, honest about what a failure can and cannot
+/** The headline for the verdict, accurate about what a failure can and cannot
  * distinguish (a commitment mismatch never asserts tamper alone) and never
  * reporting a not-checked artifact as verified. */
 export interface VerdictHeadline {
@@ -338,7 +338,7 @@ export interface VerdictHeadline {
 }
 
 /** One plain-language row: a commitment, the result size, or the terms hash, with
- * a status label and the tone that colors it. `explanation` carries the "supply
+ * a status label and the tone that colors it. `explanation` holds the "supply
  * your files" framing for a not-opened commitment. */
 export interface VerdictRow {
   label: string;
@@ -351,7 +351,7 @@ export interface VerdictRow {
 export interface VerdictViewModel {
   headline: VerdictHeadline;
   commitments: Array<VerdictRow>;
-  /** The recorded result size's row, absent when the record carries no result
+  /** The recorded result size's row, absent when the record has no result
    * size (only a both-output exchange records one, and that absence is not a
    * gap to show the reader). */
   resultSize?: VerdictRow;
@@ -363,11 +363,11 @@ export interface VerdictViewModel {
   signatureNote: string;
 }
 
-// The verbatim headline copy per outcome. The failed headline states the honest
+// The verbatim headline copy per outcome. The failed headline states the accurate
 // ambiguity core's own type docs require (recordVerification.ts): a commitment
 // mismatch means the record was altered OR the keys/input/result do not belong to
 // this exchange -- cryptographically indistinguishable -- so it never asserts
-// "tampered" alone. A failure carrying no commitment mismatch at all takes
+// "tampered" alone. A failure holding no commitment mismatch at all takes
 // RESULT_SIZE_ONLY_HEADLINE below, where there is nothing to be ambiguous about.
 const HEADLINES: Record<RecordVerificationReport["outcome"], VerdictHeadline> =
   {
@@ -446,7 +446,7 @@ const COMMITMENT_ROWS: Record<
 
 // The recorded result size counts the matched-pairs table, and no commitment
 // covers it, so the row reports a recount of the table that did open. Its
-// mismatch copy carries no altered-or-wrong-file hedge: a file that did not
+// mismatch copy has no altered-or-wrong-file hedge: a file that did not
 // belong to this exchange fails the table's own row instead, leaving this one
 // not checked.
 const RESULT_SIZE_ROWS: Record<
@@ -517,7 +517,7 @@ const SIGNATURE_NOTE =
 
 // The record is self-attested either way, so this section says nothing about the
 // partner; what changes when a dual-signed record was verified in the same run is
-// where the evidence against the partner is, not whether this section carries it.
+// where the evidence against the partner is, not whether this section holds it.
 // The note names the document the reader supplied rather than "this exchange's
 // receipt": whether the two artifacts are one run is the signed verdict's pairing
 // row, which may equally report that they are not, so this sentence must not
@@ -530,7 +530,7 @@ const SIGNATURE_NOTE_WITH_SIGNED_RECORD =
  * Build the verdict view-model from a {@link RecordVerificationReport} and any
  * reconstruction warnings. Each warning is sanitized here (it interpolates a
  * supplied column name), so the caller passes the raw warnings straight from
- * {@link reconstructCommittedData}. Only the commitments the report carries are
+ * {@link reconstructCommittedData}. Only the commitments the report holds are
  * shown; the mandatory pair is always present in a parsed record, and the
  * association table appears only when the record holds it. The result-size row
  * follows the same rule -- shown only where the record records a size.
@@ -607,7 +607,7 @@ export interface SignedRecordAnchors {
 
 /**
  * Where the two identities the certificates must authorize, the agreed-terms hash
- * the receipt content must carry, and the run binder that pairs the receipt to one
+ * the receipt content must contain, and the run binder that pairs the receipt to one
  * exchange come from. The exchange record holds all three already, so a party
  * checking its own exchange supplies them by loading it; a verifier without the
  * record restates the first two from both parties' linkage terms, and pairs
@@ -634,7 +634,7 @@ async function signedRecordExpectations(
     return {
       ...namedPair(record.localIdentity, record.partnerIdentity),
       expectedTermsHash: record.termsHash,
-      // An explicit null for a record that carries no run binder, so a record of
+      // An explicit null for a record that holds no run binder, so a record of
       // an exchange that produced no receipt is reported as contradicting the
       // receipt loaded beside it rather than as a pairing nobody could check.
       recordReceiptBinder: record.receiptBinder ?? null,
@@ -711,7 +711,7 @@ export async function verifySignedRecord(
 export interface SignedPartyViewModel {
   /** The handshake role whose slot this is. */
   label: string;
-  /** The identity the certificate carries -- free text its holder chose,
+  /** The identity the certificate holds -- free text its holder chose,
    * sanitized for display here. */
   identity: string;
   /** The fingerprint recomputed from the record, or a stated stand-in for a
@@ -748,9 +748,9 @@ const SIGNED_ROLE_LABELS: Record<SignedReceiptVerdictParty["role"], string> = {
 const UNCOMPUTABLE_FINGERPRINT = "could not be computed";
 
 /**
- * The label and any explanation one decided row carries. The tone is deliberately
- * absent: core's verdict grades every row, so a table here cannot colour two rows
- * reporting the same status differently from the CLI's.
+ * The label and any explanation one decided row holds. The tone is absent by
+ * design: core's verdict grades every row, so a table here cannot colour two
+ * rows reporting the same status differently from the CLI's.
  */
 interface RowCopy {
   status: string;
@@ -803,7 +803,7 @@ const ASSERTED_IDENTITY_COPY: Record<AssertedIdentityStatus, RowCopy> = {
   // Two states reach this row, and the copy has to hold for both: nothing was
   // loaded to state who the exchange was between, or something was and it names
   // fewer than two parties -- `linkage_terms.identity` is optional, so a loaded
-  // record or terms document legitimately carries none (see `namedPair`). Naming
+  // record or terms document legitimately holds none (see `namedPair`). Naming
   // only the first would send an operator who already loaded their files back
   // after them.
   "not-checked": {
@@ -897,7 +897,7 @@ const UNANCHORED_CLAUSE_COPY: Record<UnanchoredCertificateClause, string> = {
     "it is not the certificate you supplied as your own",
 };
 
-// How the verified verdict's sentence names each anchor. That verdict carries
+// How the verified verdict's sentence names each anchor. That verdict holds
 // only slots something anchored, so there is no unanchored case to leave unnamed.
 const ANCHOR_SOURCE_PHRASES: Record<AnchoredCertificateStatus, string> = {
   "partner-pin": "a fingerprint you pinned out-of-band",
@@ -980,7 +980,7 @@ function signedHeadline(
       detail:
         "Nothing contradicted the dual-signed record, but not everything could " +
         "be checked. See the rows below for what is still open." +
-        // The record carries two certificates and a verdict speaks for both, so
+        // The record holds two certificates and a verdict speaks for both, so
         // the headline names the slot nothing outside the record reaches rather
         // than leaving the reader to find it in the rows.
         headline.unanchoredRoles
@@ -1050,7 +1050,7 @@ function guidanceLine(guidance: SignedReceiptVerdictGuidance): string {
 
 /**
  * Build the signed verdict view-model over core's decided verdict: which tier
- * every row carries, which sentences an unanchored slot supports, and what
+ * every row holds, which sentences an unanchored slot supports, and what
  * remediation the run has earned are decided there and rendered here, so this
  * page and the CLI cannot reach different verdicts on one receipt. What this
  * model owns is the words.
@@ -1071,7 +1071,7 @@ export function signedVerdictViewModel(
     guidance: verdict.guidance.map(guidanceLine),
     // Never RECOMPUTED: deriving the binder needs the exchange session key. What
     // is checked against it is the pairing row above -- that it is the value the
-    // run's own record carries.
+    // run's own record holds.
     binderNote:
       `The per-exchange binder ${sanitizeForDisplay(verdict.binder)} is ` +
       "covered by both signatures and is never recomputed here: deriving it " +

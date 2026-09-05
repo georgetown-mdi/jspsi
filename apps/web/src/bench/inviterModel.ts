@@ -57,7 +57,7 @@ import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
 import type { RunOutputs } from "./runOutputs";
 
 /**
- * Where a step stands in the exchange's progression, rendered by the bench's
+ * Where a step stands in the exchange's progression, rendered by the console's
  * top-bar Stepper. `current` is announced to assistive tech via
  * `aria-current="step"`; the other two are conveyed by the Stepper's own
  * completed/inactive styling.
@@ -165,22 +165,14 @@ const TRANSPORT_ORDER: ReadonlyArray<Transport> = [
 ];
 
 /**
- * The transport matrix for a build: which cards are offered, which render
- * disabled, how each would run, and the default. Hosted offers all three live in
- * the browser or saved for the CLI, defaulting to the live browser exchange. The
- * console appliance offers the same three cards but disables the Browser card (its
- * in-tab WebRTC exchange is out of scope on the appliance) and runs its filedrop
- * card here as a server job against the mounted rendezvous directory -- disabled
- * when `JOB_RENDEZVOUS_DIR` is unset. The console default is SFTP when the appliance
- * has an authored connection, else the filedrop card when a rendezvous directory is
- * mounted, else SFTP (where the card offers authoring).
+ * The transport matrix for a build ({@link AvailableTransports}). Hosted offers
+ * all three, defaulting to browser. The console disables Browser, runs filedrop
+ * here as a server job when `JOB_RENDEZVOUS_DIR` is set, and defaults to SFTP,
+ * else filedrop when mounted, else SFTP for its own authoring.
  *
- * `sftpConfigured` is "authored-and-complete"; an unconfigured console SFTP is
- * offered to run here with `authoringRequired` set (the card reveals the authoring
- * form) rather than silently degrading to save-a-file.
- * `sftpSaveFilePreferred` is the operator's deliberate choice to run SFTP through
- * their own command-line tool instead, which flips the SFTP run mode to
- * save-a-file and clears `authoringRequired`.
+ * `sftpConfigured` means authored-and-complete; an unconfigured SFTP card still
+ * offers to run here with `authoringRequired` set. `sftpSaveFilePreferred` runs
+ * SFTP through the operator's own command-line tool instead.
  */
 export function availableTransports(
   consoleBuild: boolean,
@@ -276,18 +268,13 @@ function capabilityNoteFor(
   return `${parts.join("; ")}.`;
 }
 
-/** The Review & create transport-chooser copy that changes with the deployment.
- * The hosted build keeps the browser-only phrasing and saves the two command-line
- * exchanges for the CLI. On the console appliance (`consoleBuild`) the Browser card
- * is disabled as out of scope, the filedrop card runs here against the mounted
- * rendezvous directory when one is configured (`rendezvousConfigured`, else it is
- * disabled), and the SFTP card offers to run here: with a configured connection
- * (`sftpConfigured`) it reads the file on the appliance; with none it invites the
- * operator to author one, unless they chose the save-a-file alternative
- * (`sftpSaveFilePreferred`). The SFTP copy is derived from the
- * {@link availableTransports} option so it tracks the run mode and the third
- * (authoring-required) state, and the capability note is regenerated from the same
- * matrix, so neither drifts from behavior. */
+/** The Review & create transport-chooser copy for the deployment. Hosted keeps
+ * browser-only phrasing and saves the two command-line exchanges for the CLI.
+ * On the console (`consoleBuild`) Browser is disabled as out of scope; filedrop
+ * runs here when `rendezvousConfigured`; SFTP runs here reading the file on the
+ * console when `sftpConfigured`, else inviting the operator to author a
+ * connection unless `sftpSaveFilePreferred`. Both the SFTP copy and the
+ * capability note derive from {@link availableTransports}. */
 export interface TransportChooserCopy {
   browserLabel: string;
   browserDescription: string;
@@ -299,16 +286,13 @@ export interface TransportChooserCopy {
 }
 
 /**
- * What the appliance's rendezvous mounts add to the filedrop card's copy beyond
- * "configured or not": whether they are a split inbound/outbound pair, and the
- * reason a configured pair still cannot run. Both come from the appliance's own
- * provisioning, so both are absent off a console build.
+ * What the console's rendezvous mounts add to the filedrop card's copy: whether
+ * they are a split inbound/outbound pair, and why a configured pair still cannot
+ * run. Both are absent off a console build.
  *
- * Separate from `rendezvousConfigured` rather than folded into it because neither
- * changes which cards are OFFERED -- an appliance whose pair is incoherent reports
- * itself unconfigured, and the filedrop card is disabled by that alone. They change
- * only what the card SAYS, which is where an operator with two mounts and one
- * unusable card needs the difference.
+ * Kept separate from `rendezvousConfigured`: neither changes which cards are
+ * OFFERED (an incoherent pair reports itself unconfigured, disabling the card
+ * by that alone) -- they change only what the card SAYS.
  */
 export interface RendezvousShape {
   split?: boolean;
@@ -347,10 +331,10 @@ export function transportChooserCopy(
         ? 'Runs the exchange here against the two shared folders mounted on this console: it reads your partner\'s files out of one and writes yours into the other. That needs retain mode -- turn on "Keep every exchange file" below. Your file is read on this console, not uploaded from your browser. Your partner accepts with the same invitation code and runs their half against the same two folders.'
         : "Runs the exchange here against the shared directory mounted on this console. Your file is read on this console, not uploaded from your browser. Your partner accepts with the same invitation code and runs their half against the same synced folder."
       : consoleBuild
-        ? // The appliance's own reason wins where it has one: an incoherent pair
+        ? // The console's own reason wins where it has one: an incoherent pair
           // reports itself unconfigured, and the generic mount-a-directory
-          // sentence would send an operator who already mounted two to add a
-          // third.
+          // message would otherwise tell an operator who already mounted two
+          // to add a third.
           (rendezvousShape.problem ??
           "Unavailable: mount a rendezvous directory and set JOB_RENDEZVOUS_DIR to run a shared-directory exchange here.")
         : "Saves an exchange file the command-line tool runs against a directory both parties can reach.",
@@ -367,23 +351,22 @@ export function transportChooserCopy(
 }
 
 /**
- * The pure model behind the inviter bench's required spine: seeding the draft
- * from the read file, applying the two column edits step 2 offers, and the
- * view-model builders the Customize facts and the disclosure ledger render from.
- * No React, no I/O -- the tested boundary for "default terms derive from the
- * file" and "the ledger tracks term edits". The draft itself is the AdvancedInvite
- * model's ({@link AdvancedInviteDraft}); the bench re-surfaces that model, so
+ * The pure model behind the inviter console's spine: seeding the draft from the
+ * read file, applying the column edits step 2 offers, and the view-model
+ * builders the Customize facts and disclosure ledger render from. No React, no
+ * I/O. The draft is the AdvancedInvite model's ({@link AdvancedInviteDraft});
  * every derivation and edit goes through the same seed/reconcile helpers that
  * model is tested on.
  */
 
 /** The read file the spine works over: identity for the file card plus the
  * parsed rows and columns every derivation binds to. `rowCount` is the file's
- * row total, held explicitly so the display surfaces do not read `rawRows.length`
- * (the console acquires only a server-side profile, not the rows). `dateInputFormat`
- * is a pre-inferred date-of-birth layout ({@link dateInputFormatForColumns}), set
- * only by sources that profile it without rows (the console); when absent, each
- * derivation infers it from the rows as before. */
+ * row total, held explicitly so display surfaces do not read `rawRows.length`
+ * (the console acquires only a server-side profile, not the rows).
+ * `dateInputFormat` is a pre-inferred date-of-birth layout
+ * ({@link dateInputFormatForColumns}), set only by sources that profile
+ * without rows (the console); absent, each derivation infers it from the
+ * rows. */
 export interface AcquiredCsv {
   fileName: string;
   sizeBytes: number;
@@ -391,7 +374,7 @@ export interface AcquiredCsv {
   columns: Array<string>;
   rowCount: number;
   dateInputFormat?: string;
-  /** True when this shape carries no rows -- the console acquires a server-side
+  /** True when this shape holds no rows -- the console acquires a server-side
    * profile, not the file, so `rawRows` is a throwing getter there. The draft
    * reconciliations read rows only to infer the date-of-birth format, which the
    * console supplies as `dateInputFormat`, so a rows-withheld shape contributes an
@@ -401,25 +384,22 @@ export interface AcquiredCsv {
 }
 
 /** The rows the draft reconciliations feed to the seed/standardization helpers,
- * whose only use of rows is date-of-birth format inference. A rows-withheld console
- * shape ({@link AcquiredCsv.rowsWithheld}) contributes an empty set -- its
- * `dateInputFormat` was already profiled, so the inference has no rows to draw on
- * and needs none -- while a hosted shape contributes its parsed rows. Keeping the
- * access here means the throwing `rawRows` getter is never touched on the console.
- * Exported so the one remaining `rawRows` consumer that lives outside this module
- * (the expert-mode terms import/export) reads rows through the same guard. */
+ * whose only use of rows is date-of-birth format inference. A rows-withheld
+ * console shape ({@link AcquiredCsv.rowsWithheld}) contributes an empty set,
+ * since its `dateInputFormat` was already profiled; a hosted shape contributes
+ * its parsed rows. Exported so the expert-mode terms import/export -- the one
+ * other `rawRows` consumer -- reads through the same guard. */
 export function seedRows(csv: AcquiredCsv): Array<CSVRow> {
   return csv.rowsWithheld === true ? [] : csv.rawRows;
 }
 
 /** An editing session over the read file: the live draft and the fixed seed it
- * derived from ({@link seedAdvancedInvite}). Once `sealed` (the invitation was
- * created), every mutator in this module returns the session unchanged -- the
- * terms a partner is consenting to can never drift from what was minted.
- * `keysAuthored` marks the key set as author-controlled (an expert edit or an
- * import): a later column edit then reconciles the metadata and standardization
- * but leaves the keys untouched, because the template-driven key reconciliation
- * would silently drop authored keys. */
+ * derived from ({@link seedAdvancedInvite}). Once `sealed`, every mutator in
+ * this module returns the session unchanged -- the terms a partner is
+ * consenting to can never drift from what was minted. `keysAuthored` marks
+ * the key set as author-controlled (an expert edit or an import): a later
+ * column edit reconciles the metadata and standardization but leaves the
+ * keys untouched. */
 export interface InviterEditor {
   draft: AdvancedInviteDraft;
   seed: AdvancedInviteSeed;
@@ -446,8 +426,8 @@ export function unsealEditor(editor: InviterEditor): InviterEditor {
   return unsealed;
 }
 
-/** Seed the editing session from the read file -- the "default terms derive
- * from the file the moment it is read" moment of the design. */
+/** Seed the editing session from the read file: default terms derive from
+ * the file as soon as it is read. */
 export function editorFromCsv(
   inviterName: string,
   csv: AcquiredCsv,
@@ -460,7 +440,7 @@ export function editorFromCsv(
   );
 }
 
-/** Carry a later name edit into the draft without disturbing the derived
+/** Fold a later name edit into the draft without disturbing the derived
  * terms; the identity only labels the terms, it never changes which keys the
  * columns can produce. */
 export function editorWithIdentity(
@@ -511,8 +491,8 @@ export function editorWithAuthoredDraft(
   return { ...editor, draft, keysAuthored: true };
 }
 
-/** Enable or disable the key at `index` in the guided list, carrying an opt-in
- * type's cleaning with its key (see {@link draftWithKeyEnabled}). */
+/** Enable or disable the key at `index` in the guided list, keeping an opt-in
+ * type's cleaning attached to its key (see {@link draftWithKeyEnabled}). */
 export function editorWithKeyEnabled(
   editor: InviterEditor,
   index: number,
@@ -649,7 +629,7 @@ export function editorWithFieldAdded(
 }
 
 /** Set the matching algorithm. Ungated -- the exchange honors both members -- so
- * the built terms carry it as authored; a count-only draft outside the shape a
+ * the built terms hold it as authored; a count-only draft outside the shape a
  * count-only run admits blocks generation at {@link validateAdvancedInvite}. */
 export function editorWithAlgorithm(
   editor: InviterEditor,
@@ -837,13 +817,11 @@ export function editorWithColumnDisclosure(
 /**
  * What step 2's polite region says about a {@link ColumnEditResult}'s demoted
  * identifiers. The names are the operator's own CSV headers going into a string
- * sink, so they carry the isolation as characters, the treatment every other
- * column-name sink on the step gives them. The rule can displace more than one
- * column at once, so this notice puts literal copy in one text block with the
- * names -- the separators and the sentence after them -- which is the shape the
- * isolate class's residual reaches: what the isolation does not contain there is
- * stated on `@components/ColumnName` and driven in
- * test/browser/benchInviterSharing.test.ts.
+ * sink, so they hold the isolation as characters, the treatment every other
+ * column-name sink on the step gives them. Displacing more than one column puts
+ * the names in one text block with the separators and the sentence after them;
+ * what the isolation does not contain there is stated on `@components/ColumnName`
+ * and driven in test/browser/benchInviterSharing.test.ts.
  */
 export function demotionNotice(demoted: ReadonlyArray<string>): string {
   if (demoted.length === 0) return "";
@@ -980,7 +958,7 @@ export interface InviterLedgerRow {
  * is consumed (its expiry no longer means anything), and the receive row can
  * state what actually arrived -- the matched-row count, the size of the overlap a
  * count-only exchange reported, or that the agreed terms withheld the result table
- * from this party. Discriminated on the same `kind` the run's outputs carry
+ * from this party. Discriminated on the same `kind` the run's outputs hold
  * ({@link RunOutputs}), so the three outcomes cannot be read as one another and a
  * ledger that stops handling one is a compile error. */
 export type LedgerOutcome =
@@ -989,10 +967,9 @@ export type LedgerOutcome =
   | {
       kind: "counted";
       intersectionCount: number;
-      /** Whether the count arrived as the PARTNER's report rather than as a figure
-       * this party computed, carried from {@link RunOutputs} rather than dropped:
-       * the ledger states the count in its own words, so a ledger without it would
-       * repeat the number stripped of the one fact that qualifies it. */
+      /** Whether the count arrived as the PARTNER's report rather than a figure
+       * this party computed, taken from {@link RunOutputs} so the ledger states
+       * the count with the one fact that qualifies it. */
       countReportedByPartner: boolean;
     };
 
@@ -1018,20 +995,12 @@ export function ledgerOutcomeOf(outputs: RunOutputs): LedgerOutcome {
 }
 
 /**
- * The receive row's value for a count-only exchange, shared by both seats' ledgers
- * so one wording covers the outcome. It answers the row's question in the row's own
- * vocabulary: the count is what arrived, and the matched rows and shared columns the
- * other outcomes name are what did not -- a run that reports the size of the overlap
- * produces neither, for either party.
- *
- * A count this party did not compute closes with the provenance clause, so the
- * ledger -- the condensed summary an operator skims or screenshots, away from the
- * result inset carrying the full caveat -- does not state a partner's figure and a
- * locally computed one in the same words. The clause is the row-sized form of the
- * inset's vocabulary rather than a second wording of it: this row states who
- * produced the number, and the inset states what that means. The seat that computed
- * its own count takes the sentence unchanged, since a provenance note there would
- * be false.
+ * The receive row's value for a count-only exchange, shared by both seats'
+ * ledgers. States the size of the overlap only, with no matched rows or
+ * shared columns. When the count arrived as the partner's report rather than
+ * a figure this party computed, the value closes with a provenance clause
+ * naming that; the seat that computed its own count takes the sentence
+ * unchanged.
  */
 export function countOnlyLedgerValue(
   intersectionCount: number,
@@ -1073,15 +1042,12 @@ export function settledReceiveValue(
  * The disclosure ledger for the spine, filling in as the exchange takes shape:
  * before a file is read every value is the em-dash placeholder; once a session
  * exists the send list, matched-on keys, expiry, and result direction are read
- * live from the draft. Once the invitation is minted its absolute `expires`
- * moment replaces the relative lifetime phrase, and once the exchange
- * completes `outcome` replaces the forward-looking rows with what happened.
+ * live from the draft. Once minted, `expires` replaces the relative lifetime
+ * phrase; once complete, `outcome` replaces the forward-looking rows.
  *
  * The send row names the operator's OWN disclosed CSV headers, so they take the
  * isolation their column-name surfaces show them with ({@link isolatedColumnName})
- * rather than the escape partner-controlled text takes: this row sits beside the
- * step that sets the disclosure, and a header reading two ways across the two would
- * be a disagreement about what leaves the machine.
+ * rather than the escape partner-controlled text takes.
  */
 export function inviterLedgerRows(
   editor: InviterEditor | undefined,
@@ -1182,11 +1148,10 @@ function plural(count: number, noun: string): string {
  * The Cleaning tab's Customize-menu attention state, from the effective
  * standardization and the full-CSV coverage. A field is "failing" when its
  * transform drops every row ({@link isSilentEmpty}); the count de-duplicates
- * by field name. Invalid authored steps are NOT counted here -- they are
- * {@link validateAdvancedInvite}'s to surface, so counting them would
- * double-report in the work column's Problems block. `rates` is null before the
- * first sweep settles; a pending sweep contributes no failing fields, so
- * attention is computed only from a resolved map.
+ * by field name. Invalid authored steps are NOT counted here -- {@link
+ * validateAdvancedInvite} reports those, so counting them here would
+ * double-report. `rates` is null before the first sweep settles, contributing
+ * no failing fields.
  */
 export interface InviterCleaningAttention {
   /** Whether the Cleaning tab needs attention (any failing field present). */
@@ -1203,12 +1168,10 @@ export interface InviterCleaningAttention {
 /**
  * Derive the Cleaning tab's attention state from the session's standardization,
  * the full-CSV coverage, and whether the coverage sweep failed for good. A
- * silent-empty field ({@link isSilentEmpty}) is a failing field; the count
- * de-duplicates by field name. No file (`editor` undefined) or a null (pending)
- * rate map raises nothing -- coverage is not yet known, not a collapse. A
- * `coverageUnavailable` sweep (a deterministic coverage failure) over a loaded
- * file raises attention with no field count, so the rail flags that the check
- * could not run instead of showing the plain field count as if it had.
+ * silent-empty field ({@link isSilentEmpty}) is failing; the count de-duplicates
+ * by field name. No file, or a null (pending) rate map, raises nothing --
+ * coverage is not yet known, not a collapse. A `coverageUnavailable` sweep over
+ * a loaded file raises attention with no field count.
  */
 export function inviterCleaningAttention(
   editor: InviterEditor | undefined,
@@ -1251,11 +1214,9 @@ export function keysFact(draft: AdvancedInviteDraft): string {
 /**
  * The Customize group's quiet facts, read live from the draft: cleaning
  * pipeline count, authored key count, and the agreement reference. Undefined
- * facts render as the em-dash "nothing yet" mark. When the cleaning coverage
- * is failing ({@link inviterCleaningAttention}), the Cleaning fact turns amber
- * and names the failing-field count instead of the plain field count, matching
- * the acceptor. `attention` is undefined before a file is read or a sweep
- * settles, where the Cleaning row shows its plain count.
+ * facts render as the em-dash "nothing yet" mark. When cleaning coverage is
+ * failing ({@link inviterCleaningAttention}), the Cleaning fact turns amber
+ * and names the failing-field count instead, matching the acceptor.
  */
 export function inviterRailFacts(
   editor: InviterEditor | undefined,
@@ -1288,7 +1249,7 @@ export function inviterRailFacts(
   ];
 }
 
-/** A bench section a Problems entry or a Change link can navigate to: a spine
+/** A console section a Problems entry or a Change link can navigate to: a spine
  * step or a Customize tab. */
 export type SpineTarget =
   "file" | "columns" | "review" | "cleaning" | "keys" | "agreement";
@@ -1318,7 +1279,7 @@ export interface SpineProblem {
 }
 
 /** Validate the draft for the create gate -- the AdvancedInvite model's own
- * validation over the bench's session. */
+ * validation over the console's session. */
 export function reviewValidation(
   editor: InviterEditor,
   now: Date = new Date(),
@@ -1331,17 +1292,13 @@ export function reviewValidation(
  * field whose transform produces no value in any row of the loaded file
  * ({@link isSilentEmpty}), de-duplicated by field name (the same key
  * {@link inviterCleaningAttention} counts by, so the rail count and the entry
- * count agree), each naming the field's safe semantic-type label (never the
- * partner-controlled field name) and linking into the Cleaning tab. When the
- * draft authors more than one field of a type (the expert add-field
- * affordance), the label alone cannot tell them apart, so the entry also names
- * the field's input column -- the operator's own header, shown raw as the
- * ledger's send row does. This is file-dependent, not draft-dependent
- * (it needs the full-CSV coverage), so it lives beside {@link spineProblems}
- * rather than inside {@link validateAdvancedInvite}; the bench merges the two at
- * every consumption point. Empty before a file is read, before the first sweep
- * settles (`rates` null), or when no field collapses -- so it never fires while
- * coverage is still being computed.
+ * count agree). Each entry names the field's safe semantic-type label -- never
+ * the partner-controlled field name -- plus the input column when the draft
+ * authors more than one field of that type. File-dependent (needs the
+ * full-CSV coverage), so it lives beside {@link spineProblems} rather than
+ * inside {@link validateAdvancedInvite}; the console merges the two. Empty
+ * before a file is read, before the first sweep settles, or when nothing
+ * collapses.
  */
 export function cleaningCoverageProblems(
   editor: InviterEditor | undefined,
@@ -1415,8 +1372,7 @@ export interface InviterCreateGates {
   /** An SFTP exchange chosen to run here has no connection authored yet. */
   connectionIncomplete: boolean;
   /** Why the split rendezvous and the retain choice disagree, `undefined` when
-   * they do not. Already a whole sentence naming its own remedy, so it is stated
-   * as it stands rather than restated per surface. */
+   * they do not. Already a complete, remedy-naming sentence, used as-is. */
   splitDirectoryProblem: string | undefined;
   /** Whether the file-handling card holds a combination core refuses. */
   exchangeFilesBlocked: boolean;
@@ -1426,7 +1382,7 @@ export interface InviterCreateGates {
   runDiagnosticsBlocked: boolean;
   /** Whether the receipts card holds a combination the run would refuse. */
   receiptsBlocked: boolean;
-  /** How many spine problems the draft carries; they are named last because the
+  /** How many spine problems the draft holds; they are named last because the
    * cards above are collapsed disclosures whose own notice is invisible until
    * opened, while a spine problem is already listed in the work column. */
   problemCount: number;
@@ -1452,16 +1408,16 @@ function heldCreate(
 }
 
 /**
- * The review step's create gate with both of its sentences, derived together so
- * that the button's enabled state, the line beside it, and the announcement
+ * The review step's create gate with both of its sentences, derived together
+ * so the button's enabled state, the line beside it, and the announcement
  * cannot disagree -- a gate reachable by only one of the three is
- * unrepresentable here rather than merely tested against. The visible line and
- * the announcement differ in wording alone: the line sits beside an action that
- * names itself, and the announcement is read on its own.
+ * unrepresentable here. The visible line and the announcement differ in
+ * wording alone: the line sits beside an action that names itself, the
+ * announcement is read on its own.
  *
- * The chain follows the screen's reading order, so an operator working down it is
- * sent to the first unresolved surface they meet, and each sentence names the
- * card to open. Every gate but the offline one is cleared on this step.
+ * The chain follows the screen's reading order: an operator working down it
+ * meets the first unresolved card first. Every gate but the offline one is
+ * cleared on this step.
  */
 export function inviterCreateStatus(
   gates: InviterCreateGates,

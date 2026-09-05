@@ -5,13 +5,11 @@ import { unloadGuardArmed } from "./stepHistory";
 /**
  * Arm a browser `beforeunload` confirmation prompt while a real participant file
  * is loaded and the exchange has not been created/sent (see
- * {@link unloadGuardArmed}). It catches only the navigation paths the bench's
+ * {@link unloadGuardArmed}). It catches only the navigation paths the console's
  * History integration cannot handle gracefully -- closing the tab, reloading,
- * typing a URL, or following an external link -- so an operator does not lose a
- * loaded file and in-progress terms to an off-hand navigation. The in-bench
- * Back/Forward that {@link useStepHistory} integrates keeps the component mounted
- * and never triggers this prompt. The synthetic sample never arms it
- * (`demoActive`), since nothing is lost by leaving it.
+ * typing a URL, or an external link. The in-console Back/Forward that
+ * {@link useStepHistory} integrates keeps the component mounted and never
+ * triggers this prompt, nor does the synthetic sample (`demoActive`).
  */
 export function useUnloadGuard({
   hasFile,
@@ -28,15 +26,11 @@ export function useUnloadGuard({
 /**
  * Ask the browser to confirm before it unloads the page, while `armed`.
  *
- * The primitive {@link useUnloadGuard} arms from the bench's own loss condition,
- * exposed on its own for a surface whose loss condition is a different one:
- * every surface that hosts a live exchange -- the managed re-run and the two
- * bench seats -- arms it for the length of the run, which an unload (a tab
- * close, a typed URL, or the app-shell update's Reload button, which renders
- * above every route) would otherwise end for both parties with nothing
- * intercepting it.
- * Disarming is the effect's own cleanup, so a finished run or an unmount leaves
- * no listener behind.
+ * {@link useUnloadGuard} arms from the console's own loss condition; every
+ * other surface that hosts a live exchange -- the managed re-run and the two
+ * console seats -- arms this primitive for the run's length, since an unload
+ * (a tab close, typed URL, or the app-shell's Reload button) would otherwise
+ * end it for both parties unnoticed. Disarming is the effect's own cleanup.
  */
 export function useBeforeUnloadPrompt(armed: boolean): void {
   useEffect(() => {

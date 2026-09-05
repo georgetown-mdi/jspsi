@@ -16,9 +16,9 @@ const DEFAULT_OPEN_TIMEOUT_MS = 30_000;
  * already `true`. The three event listeners are torn down whichever branch
  * runs - including the timeout - so nothing outlives the handshake.
  *
- * The timeout bounds connection setup: WebRTC negotiation does not always
- * surface a stall as an `"error"` or `"close"`, so without it a peer stuck in
- * ICE negotiation would hang this promise (and the exchange) indefinitely.
+ * The timeout bounds connection setup: WebRTC negotiation does not always report
+ * a stall as an `"error"` or `"close"`, so without it a peer stuck in ICE
+ * negotiation would hang this promise (and the exchange) indefinitely.
  */
 export function waitForConnectionOpen(
   conn: DataConnection,

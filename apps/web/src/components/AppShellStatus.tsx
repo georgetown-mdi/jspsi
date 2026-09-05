@@ -20,15 +20,15 @@ function useAppShellUpdateReady(): boolean {
 }
 
 /**
- * The shell-wide status strip: the honest statement of what the app cannot do
- * right now, above whatever route is rendering.
+ * The shell-wide status strip: what the app cannot do right now, above whatever
+ * route is rendering.
  *
  * OFFLINE. The app shell and the recurring-exchange list are served from the
  * service worker's cache and read the browser's own store, so they render with
- * no network -- but an exchange is a live two-party session and cannot. Saying
- * so once, at the shell, is what keeps the offline degradation honest: the
- * surfaces that still work carry no warning, and the action that cannot is named
- * rather than left to fail opaquely when the operator presses it.
+ * no network -- but an exchange is a live two-party session and cannot. Stating
+ * it once at the shell keeps the warning off the surfaces that still work and
+ * names the action that cannot run, rather than letting it fail when the
+ * operator presses it.
  *
  * UPDATE READY. A new deployment's worker waits rather than swapping code under
  * a running page, so applying it is an explicit reload. See

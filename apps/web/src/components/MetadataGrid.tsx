@@ -45,19 +45,14 @@ const SINGLE_IDENTIFIER_MESSAGE =
   "Only one column can be the record identifier. Choose a single column that you can use to import the data back into your system.";
 
 /**
- * The error-association props for a Type control that is one of the offenders in a
- * single-identifier conflict: `aria-invalid` as the control-level error signal and
- * `aria-describedby` anchored to the visible error (`errorId`), so a reader landing
- * on the control hears the error as its own context.
- *
- * `withAria: false` because Mantine's Select otherwise runs its own accessibility
- * pass over the input, which drives `aria-invalid` off the `error` prop and
- * `aria-describedby` off the Input.Wrapper context -- overriding the two attributes
- * set here. Its own docs sanction disabling it for custom accessibility handling.
- * The `error` prop is not the alternative: it would also paint a red border, an
- * appearance change this control must not make. `withAria` is a real Input prop
- * that Select forwards at runtime but omits from its narrower public prop type,
- * hence the assertion.
+ * The error-association props for a Type control offending a single-identifier
+ * conflict: `aria-invalid` plus `aria-describedby` anchored to the visible
+ * error (`errorId`). `withAria: false` because Mantine's Select otherwise
+ * drives both attributes itself off its `error`/context props, overriding
+ * these; `error` is not the alternative since it also paints a red border,
+ * an appearance change this control must not make. `withAria` is a real
+ * Input prop Select forwards but omits from its public type, hence the
+ * assertion.
  */
 function conflictTypeControlAria(
   errorId: string,
@@ -70,34 +65,20 @@ function conflictTypeControlAria(
 }
 
 /**
- * The shared metadata grid: a real table mapping each input column to a semantic
- * type and a single consequence-labeled disclosure choice. Presentational -- it
- * holds no metadata state of its own; it renders `metadata` and emits the next
- * array through {@link onChange}, so the host (the acceptor's Confirm-your-columns
- * step) owns the model and decides what
- * the edit means.
+ * The shared metadata grid: a real table mapping each input column to a
+ * semantic type and a single consequence-labeled disclosure choice.
+ * Presentational -- holds no metadata state; renders `metadata` and emits the
+ * next array through {@link onChange}, so the host owns the model.
  *
- * The grid does not paint the disclosed-columns list itself: the host already
- * shows it visibly as the "What you will send to your partner" chips beside the
- * agreed terms, so a second text copy here would be a same-screen duplicate. What
- * the grid keeps is the aria-live ANNOUNCEMENT of that list -- computed
- * synchronously from {@link disclosedColumnNames}, the same predicate
- * `preparePayload` transmits on, so it cannot over- or under-state what leaves the
- * machine -- debounced and voiced right at the disclosure control the static chips
- * cannot speak for.
+ * The grid does not paint the disclosed-columns list itself (the host shows
+ * it visibly beside the agreed terms); it keeps only the aria-live
+ * announcement of that list, computed from {@link disclosedColumnNames} (the
+ * same predicate `preparePayload` transmits on) and gated by
+ * {@link partnerReceivesResult}, since a live region and the visible panel
+ * beside it must state the same account.
  *
- * That predicate bounds the set only where the payload step transmits at all, which
- * is what {@link partnerReceivesResult} carries: where it does not, the region
- * voices the fact the host's visible panel states, read from the same string in
- * `@psilink/core`. One screen states one account -- a live region gated apart from
- * the panel beside it speaks a disclosure the screen denies, to the reader least
- * placed to check the other channel.
- *
- * Every column name the grid emits -- the row header, both control labels, and both
- * live regions -- goes through {@link ColumnName} / {@link isolatedColumnName},
- * which is also what the host's own column-name surfaces use, so a name reads the
- * same in the row as in the notices beside it. That module carries what the
- * isolation does and does not contain.
+ * Every column name the grid emits goes through {@link ColumnName} /
+ * {@link isolatedColumnName}, matching the host's own column-name surfaces.
  */
 export function MetadataGrid({
   metadata,
@@ -110,16 +91,12 @@ export function MetadataGrid({
   /** A visually-hidden table caption naming this grid for assistive tech (e.g.
    * "Your columns and how each is used"). */
   caption: string;
-  /** Whether the viewer's partner receives a result, which is whether the payload
-   * step transmits anything at all from this machine: it sends only to a partner
-   * entitled to the result, putting an empty message on the wire otherwise, so no
-   * column leaves whatever the operator marks here. The grid holds no linkage
-   * terms, so the host resolves the fact for its own viewer and passes it.
-   *
-   * Defaults to a partner that receives: a caller that does not resolve the
-   * direction keeps announcing the disclosed set, since a set announced where none
-   * is sent misinforms the operator while a silence where a disclosure happens
-   * leaves them unaware there is anything to check. */
+  /** Whether the viewer's partner receives a result, i.e. whether the payload
+   * step transmits anything from this machine at all: it sends only to a
+   * partner entitled to the result, so no column leaves regardless of what is
+   * marked here otherwise. The grid holds no linkage terms, so the host
+   * resolves this for its own viewer. Defaults to a partner that receives,
+   * since announcing the disclosed set is the safer default over silence. */
   partnerReceivesResult?: boolean;
 }) {
   const disclosed = disclosedColumnNames(metadata);
@@ -148,17 +125,15 @@ export function MetadataGrid({
 
   // A separate, immediate live region for the single-identifier demotion:
   // landing a column on the identifier role displaces any prior identifier to
-  // `ignored` (no longer sent), a state change a sighted user sees in the
-  // displaced row but assistive tech would otherwise miss. It is its own region
-  // (not folded into the debounced summary) deliberately: the demotion is set
-  // synchronously here while the summary updates 600ms later, so the two never
-  // write in the same render tick -- which is what avoids two polite regions
-  // coalescing. Cleared on a non-demoting edit so it does not linger.
+  // `ignored` (no longer sent), a change assistive tech would otherwise miss.
+  // Kept apart from the debounced summary by design -- the demotion is set
+  // synchronously while the summary updates 600ms later, avoiding two polite
+  // regions coalescing in one tick. Cleared on a non-demoting edit.
   const [actionAnnouncement, setActionAnnouncement] = useState("");
 
-  // Both mutators can demote now: a type change that lands a column on the
-  // identifier role displaces the others just as a disclosure change does, so both
-  // route through here to announce it.
+  // Both mutators can demote: a type change that lands a column on the
+  // identifier role displaces the others just as a disclosure change does, so
+  // both route through here to announce it.
   const applyEdit = (result: {
     metadata: Metadata;
     demotedIdentifiers: Array<string>;
@@ -255,18 +230,14 @@ export function MetadataGrid({
         </Table.Tbody>
       </Table>
 
-      {/* The single-identifier conflict is conveyed on two decoupled surfaces. The
-          VISIBLE red error renders immediately for sighted users and carries no
-          ARIA role of its own -- it is not the live region, so it neither
-          announces on mount (fighting focus) nor double-announces with the region
-          below, and being conditional it adds no empty in-flow box when there is
-          no conflict. The deferred polite region (last child, visually hidden) is
-          what reaches assistive tech: see the conflictAnnouncement note above for
-          why it is deferred. Both read the same message constant so they cannot
-          drift; tests query the visible error by its data-testid (the announcement
-          carries the same text, so a getByText would be ambiguous). Its id also
-          anchors the offending Type controls' aria-describedby (see
-          conflictTypeControlAria). */}
+      {/* The single-identifier conflict is conveyed on two decoupled surfaces:
+          the VISIBLE red error (immediate, no ARIA role of its own, not the
+          live region) and the deferred polite region (last child, visually
+          hidden) that reaches assistive tech -- see the conflictAnnouncement
+          note above for why it is deferred. Both read the same message
+          constant; tests query the visible error by its data-testid since the
+          announcement holds the same text. Its id also anchors the offending
+          Type controls' aria-describedby (see conflictTypeControlAria). */}
       {multipleIdentifiers && (
         <Text
           size="sm"
@@ -278,16 +249,13 @@ export function MetadataGrid({
         </Text>
       )}
 
-      {/* The disclosure readout is shown VISIBLY by the host's column chips
-          (the "What you will send to your partner" list beside the agreed
-          terms). What stays here is the announcement: a screen-reader user
-          toggling a disclosure Select above gets no spoken feedback from the
-          static chips, so this single debounced live region -- computed from the
-          same disclosedColumnNames predicate the run transmits on, under the
-          direction that decides whether it transmits at all -- voices the set as
-          it changes, right at the control. The testid is how a
-          test tells this region's copy from the identical sentence the host
-          renders visibly. */}
+      {/* The disclosure readout is shown VISIBLY by the host's column chips;
+          what stays here is the announcement, since toggling a disclosure
+          Select gets no spoken feedback from the static chips otherwise. This
+          debounced live region is computed from the same
+          disclosedColumnNames predicate the run transmits on. The testid
+          distinguishes this region's copy from the host's identical visible
+          sentence. */}
       <VisuallyHidden
         role="status"
         aria-live="polite"

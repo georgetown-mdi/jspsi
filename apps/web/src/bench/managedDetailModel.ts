@@ -3,7 +3,7 @@
  * home at `/saved/$id`): the read-only configuration a compliance user inspects
  * (the agreed terms, the channel and partner endpoint), this party's side label,
  * the agreed schedule's due-ness where one exists, the most-recent-run history
- * entry, and the honest framing of the self-attested record view. No React, no
+ * entry, and the accurate framing of the self-attested record view. No React, no
  * IndexedDB -- the derivations and copy are unit-testable in Node, and the
  * components stay thin over this model.
  *
@@ -51,15 +51,11 @@ export const SIDE_LABELS: Record<ManagedExchangeSide, string> = {
  * `values` list renders as a list; a `muted` value renders in the empty-state
  * voice ("None").
  *
- * The value fields are {@link Displayable} rather than `string`, so a row built
- * from a value somebody else chose -- a linkage-key name, a legal-agreement
- * reference, a rendezvous locator, all of them partner-authored in the accepted
- * document -- does not typecheck until it has passed the display boundary. This
- * view is where a compliance user confirms the agreed terms, and the class that
- * matters here is the one JSX escaping does not touch: a bidi override, a
- * zero-width joiner, or a homoglyph renders as the term the reader expects while
- * being another string entirely. `label`, `muted`, and `note` stay plain `string`
- * because all three are this app's own fixed copy.
+ * The value fields are {@link Displayable}, not `string`: a row built from a
+ * partner-authored value (a linkage-key name, a legal-agreement reference, a
+ * rendezvous locator) must pass the display boundary first, since JSX escaping
+ * alone does not stop a bidi override, zero-width joiner, or homoglyph. `label`,
+ * `muted`, and `note` stay plain `string` -- this app's own fixed copy.
  */
 export interface ConfigRow {
   label: string;
@@ -72,12 +68,10 @@ export interface ConfigRow {
 
 /**
  * The read-only linkage-terms rows for the configuration view, derived from this
- * party's persisted exchange-file document. It surfaces the agreed terms a
- * compliance user reads -- the matched-on keys, what this party sends, whether it
- * receives the result, and the legal agreement -- from the party's own document
- * perspective. It renders names and categories only, never a row value, exactly as
- * the document itself carries (see docs/spec/MANAGED_EXCHANGE_RECORD.md, the
- * `exchangeFile` row).
+ * party's persisted exchange-file document: the matched-on keys, what this party
+ * sends, whether it receives the result, and the legal agreement. Renders names
+ * and categories only, never a row value, exactly as the document states (see
+ * docs/spec/MANAGED_EXCHANGE_RECORD.md, the `exchangeFile` row).
  */
 export function linkageTermsRows(exchangeFile: ExchangeSpec): Array<ConfigRow> {
   const terms = exchangeFile.linkageTerms;
@@ -146,14 +140,13 @@ export function connectionRows(exchangeFile: ExchangeSpec): Array<ConfigRow> {
 
 /**
  * The read-only run-schedule section: the agreed cadence, where the recurrence
- * stands right now, and the states this browser must be honest about around it.
- * Everything here is derived at render time from the record's own schedule and the
- * instant it is read at (see {@link ./scheduleSurfacingModel.ts}); nothing is
- * persisted, advanced, or promised.
+ * stands right now, and the states this browser must represent accurately.
+ * Derived at render time from the record's schedule and the instant read (see
+ * {@link ./scheduleSurfacingModel.ts}); nothing is persisted, advanced, or
+ * promised.
  *
  * The section READS the schedule; the operator sets and clears it in the
- * local-fields editor beside it (see {@link ./ManagedExchangeDetail.tsx}), which
- * owns the entry form and the one store write that carries it.
+ * local-fields editor beside it (see {@link ./ManagedExchangeDetail.tsx}).
  */
 export interface ScheduleView {
   /** The agreed cadence in words. */
@@ -175,13 +168,12 @@ export interface ScheduleView {
 
 /**
  * The run-schedule section for a record, or `undefined` for one with no agreed
- * schedule -- an attended-only exchange, which is what an operator who has not
- * entered a cadence has -- so the section renders nothing rather than an empty
- * state duplicating the entry form beside it.
+ * schedule (an attended-only exchange), so the section renders nothing rather
+ * than an empty state.
  *
  * Both platform readings are the caller's, kept out of this model so the
  * derivation stays pure: `hasInputHandle` is a stored handle AND the File System
- * Access API to use it with, and `installedRuntime` is whether this page is the
+ * Access API to use it with; `installedRuntime` is whether this page is the
  * installed app the unattended runner starts in.
  *
  * @throws {RangeError} if the schedule's lattice is unusable (see
@@ -222,9 +214,9 @@ export interface RunHistoryEntry {
   when: string;
   /** The outcome phrased for display, e.g. "Succeeded", "Partner did not arrive". */
   outcome: string;
-  /** The plain, honest disclosure line for this entry. The run bookkeeping carries
+  /** The plain, accurate disclosure line for this entry. The run bookkeeping holds
    * no match result, count, or row value (it is closed enums and a timestamp), so
-   * this states what the record can honestly say, not a fabricated disclosure. */
+   * this states what the record can accurately say, not a fabricated disclosure. */
   disclosure: string;
 }
 
@@ -255,35 +247,17 @@ const OUTCOME_UNCERTAIN =
 
 /**
  * Whether a failed run's bookkeeping proves it stopped before the data exchange
- * began -- so "nothing was disclosed" is honest. The run lifecycle is: input guard,
- * then the authenticated handshake, then the durable rotation persist, then the data
- * exchange (the first peer-visible payload; see
- * {@link ../psi/managedExchangeRun.ts}). A failure whose recorded `failureKind` fires
- * at or before the persist provably precedes any data leaving this party:
- *
- * - `"handed-off"` -- the run+rotate lock's own first act, refusing a copy an
- *   export handed off before the input guard runs and before any connection.
- * - `"custody-unreadable"` -- that same first act failing to read the entry it
- *   refuses on, which stops the run in the same place for the same reason.
- * - `"input"` -- the pre-connection input guard, before any connection.
- * - `"terms-shortfall"` -- the same guard, or core's own refusal inside the
- *   pre-connection prepare, on an input that cannot satisfy the agreed linkage
- *   keys: likewise before any connection.
- * - `"consent"` -- a send-side disclosure gate refusing inside the pre-connection
- *   prepare, likewise before any connection.
- * - `"auth"` -- a `security`-kind failure the classifier stamps ONLY before the data
- *   exchange begins ({@link ../psi/managedRun.ts}, `rerunFailureLastRun` reads the
- *   phase boundary), so an `"auth"` kind provably predates any payload -- a
- *   security-kind error once payload flow could have started records `"transport"`
- *   instead, not `"auth"`.
- * - `"storage"` -- the rotation persist failed after the handshake but before the data
- *   exchange (persist-before-success).
- *
- * The remaining kinds cannot prove it: `"transport"` is the catch-all bucket that a
- * data-exchange drop and a mid-exchange trust failure both land in
- * ({@link ../psi/managedRun.ts}, `rerunFailureLastRun`), and `"cancelled"` covers a
- * teardown that can land mid-data-exchange. A missing kind (a defensive fall-through)
- * is treated the same -- not proven precedent -- so the copy never over-claims.
+ * began. The run lifecycle is: input guard, authenticated handshake, durable
+ * rotation persist, then the data exchange (first peer-visible payload; see
+ * {@link ../psi/managedExchangeRun.ts}). A `failureKind` that fires at or before
+ * the persist precedes any data leaving this party: `"handed-off"` and
+ * `"custody-unreadable"` (the run+rotate lock's first act, before any
+ * connection), `"input"`, `"terms-shortfall"`, and `"consent"` (all
+ * pre-connection), `"auth"` (a `security`-kind failure the classifier stamps
+ * only before the data exchange begins; see {@link ../psi/managedRun.ts},
+ * `rerunFailureLastRun`), and `"storage"` (persist-before-success). The
+ * remaining kinds -- `"transport"` (the catch-all a mid-exchange failure also
+ * lands in), `"cancelled"`, and a missing kind -- cannot prove it.
  */
 function disclosurePrecedesExchange(
   failureKind: ManagedExchangeLastRun["failureKind"],
@@ -300,15 +274,11 @@ function disclosurePrecedesExchange(
 }
 
 /**
- * The disclosure line for a non-succeeded run, mapped conservatively from the run's
- * outcome and `failureKind`. A run that never completed a handshake (`"missed"`,
- * `"desynced"`) or failed at or before the rotation persist (`"handed-off"`,
- * `"custody-unreadable"`, `"input"`, `"terms-shortfall"`, `"consent"`, `"auth"`,
- * `"storage"`) provably disclosed
- * nothing -- no payload had left this party. A run that failed after the handshake
- * (`"transport"`, `"cancelled"`, or an unrecorded kind) may have failed
- * mid-data-exchange, so the line asserts neither way and points at the record file
- * offered at run completion as the authoritative account.
+ * The disclosure line for a non-succeeded run, from the outcome and
+ * `failureKind`: no handshake (`"missed"`, `"desynced"`) or a failure at or
+ * before the persist ({@link disclosurePrecedesExchange}) means nothing was
+ * disclosed; otherwise the line asserts neither way and points at the record
+ * file offered at run completion.
  */
 function nonSucceededDisclosure(lastRun: ManagedExchangeLastRun): string {
   // A no-show and a rotation-desync both mean no handshake completed, so no data was
@@ -321,15 +291,11 @@ function nonSucceededDisclosure(lastRun: ManagedExchangeLastRun): string {
 }
 
 /**
- * The run-history entries for the detail view, derived from the record's `lastRun`
- * bookkeeping. An empty list when no run has been recorded (a saved-but-never-run
- * exchange); otherwise a single entry for the most recent run. The disclosure line
- * is honest to what the bookkeeping holds: a succeeded run disclosed the agreed
- * terms (which the configuration view above names); a run that stopped before the
- * data exchange disclosed nothing; and a run that failed after the handshake, where
- * the record cannot prove whether data reached the partner, asserts neither way (see
- * {@link nonSucceededDisclosure}). This renders the one run the bookkeeping knows
- * about; every completed run's disclosure is in the accounting of disclosures.
+ * The run-history entries for the detail view, derived from the record's
+ * `lastRun` bookkeeping: an empty list when no run has been recorded, otherwise
+ * a single entry for the most recent run (see {@link nonSucceededDisclosure} for
+ * the disclosure line). Every completed run's own disclosure is in the
+ * accounting of disclosures, not here.
  */
 export function runHistoryEntries(
   record: Pick<ManagedExchangeRecord, "lastRun">,
@@ -352,20 +318,17 @@ export function runHistoryEntries(
 
 /**
  * Whether the record's own bookkeeping records a run that COMPLETED -- the only
- * kind that files an entry in the accounting of disclosures, since a run that
- * stopped earlier has no disclosure to file (see {@link runHistoryEntries}).
+ * kind that files an entry in the accounting of disclosures (see
+ * {@link runHistoryEntries}).
  *
- * The accounting view reads this to keep its empty state honest. An accounting
- * holding nothing is not evidence that nothing was disclosed: the accounting-scoped
- * reset destroys the stored entries and leaves the record standing, and the
- * export/import artifact carries the runnable exchange without its accounting. So
- * where the record itself remembers a completed run, "no run has completed" is a
- * claim the record beside it refutes, and the copy names the emptiness and its
- * causes instead.
+ * The accounting view reads this to keep its empty state accurate: an empty
+ * accounting is not evidence nothing was disclosed, since a reset clears stored
+ * entries without touching the record, and export/import moves the exchange
+ * without its accounting.
  *
  * ONE-WAY: the record keeps only the most recent run (see
- * docs/spec/MANAGED_EXCHANGE_RECORD.md, the `lastRun` row), so `true` means a run
- * completed while `false` means only that the retained run is not a completed one.
+ * docs/spec/MANAGED_EXCHANGE_RECORD.md, the `lastRun` row), so `false` means only
+ * that the retained run is not a completed one.
  */
 export function completedRunRecorded(
   record: Pick<ManagedExchangeRecord, "lastRun">,

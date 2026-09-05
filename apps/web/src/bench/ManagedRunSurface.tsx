@@ -95,26 +95,24 @@ import type { RunOutputs } from "./runOutputs";
  * per-run input (the persisted handle, or a re-selection where none is held), and
  * folds the outcome into the completion surface.
  *
- * Deliberately minimal: it is the run affordance, not the management surface.
- * Deleting, editing, and per-exchange detail are separate items.
+ * It is the run affordance only, not the management surface -- deleting,
+ * editing, and per-exchange detail are separate items.
  */
 export function ManagedRunSurface({ id }: { id: string }) {
   const [record, setRecord] = useState<ManagedExchangeRecord>();
-  // The load states with distinct recoveries: a MISSING record (the store resolves
-  // undefined -- deleted or cleared); an UNLOADABLE one (the read rejects: a stored
-  // record this app version can no longer load, the documented app-upgrade case,
-  // whose recovery is re-invite -- see docs/spec/MANAGED_EXCHANGE_RECORD.md,
-  // "Versioning"); and SPENT (an export handed this device's copy off, so it has no
-  // Run affordance, and what runs in its place depends on which export did it).
-  // Spent is a load state, not a disabled button: no code path from a spent record
-  // reaches the run controls or run(), the structural guard the migration invariant
-  // needs. A run refused by the hand-off it met inside the run+rotate lock settles
-  // into that same state rather than waiting for the next load, so the surface a
-  // hand-off confirmed elsewhere left behind is the one the operator is looking at.
+  // Three load states, each with its own recovery: MISSING (the store resolves
+  // undefined -- deleted or cleared); UNLOADABLE (the read rejects: a stored record
+  // this app version can no longer load, the documented app-upgrade case, whose
+  // recovery is re-invite -- see docs/spec/MANAGED_EXCHANGE_RECORD.md, "Versioning");
+  // and SPENT (an export handed this device's copy off, so it has no Run affordance,
+  // and what runs in its place depends on which export did it). Spent is a load
+  // state, not a disabled button: no code path from a spent record reaches the run
+  // controls or run(). A run refused by the hand-off it met inside the run+rotate
+  // lock moves into that same state directly, rather than waiting for the next load.
   const [loadFailure, setLoadFailure] = useState<
     "missing" | "unloadable" | "spent"
   >();
-  // The stored spent state behind that load state, carried whole: its date and the
+  // The stored spent state behind that load state, held whole: its date and the
   // hand-off that wrote it are what the spent surface reads, and a migration's
   // recovery (import the artifact back) is not a command-line hand-off's.
   const [spent, setSpent] = useState<ManagedSpentState>();
@@ -125,7 +123,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
   const [backupMarker, setBackupMarker] = useState<ManagedBackupMarker>();
   // This exchange's accounting of disclosures as its own read classified it, one
   // value rather than an accounting beside flags: an unreadable accounting must
-  // not render as an empty one (which would read as "nothing was disclosed"), and
+  // not render as an empty one (which would be treated as "nothing was disclosed"), and
   // a store that did not answer must not render as either. `undefined` while the
   // read is in flight.
   const [accountingRead, setAccountingRead] =
@@ -176,8 +174,8 @@ export function ManagedRunSurface({ id }: { id: string }) {
     migrationRefusal !== undefined && migrationRefusal !== "run-in-flight";
   const [outputs, setOutputs] = useState<RunOutputs>();
   const [finishedAt, setFinishedAt] = useState<Date>();
-  // The alert states alone: the hand-off state carries no copy and never lands here,
-  // because reaching it settles the surface onto the spent state below.
+  // This holds alert copy alone: the hand-off state has no copy of its own and
+  // never lands here, because reaching it moves the surface to the spent state below.
   const [failure, setFailure] = useState<ManagedRunFailureAlert>();
   // The run's non-fatal notices, in arrival order. The driver raises one only for
   // a run that produced its outputs, and its close resolves after those outputs
@@ -257,7 +255,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
         if (live) setAccountingRead(read);
       })
       // The read classifies every failure rather than rejecting, so this is the
-      // backstop for that contract lapsing rather than a second failure path.
+      // safety check for that contract lapsing rather than a second failure path.
       // Unavailable is the safe landing: it claims nothing about what is stored
       // and offers no destructive arm, where an unhandled rejection would strand
       // the section on its spinner.
@@ -329,7 +327,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
     setReinvite(undefined);
     setReinviteFailed(false);
     // This run's phase boundary, read by the failure classification below: a state
-    // whose copy says nothing left this device is only honest before it, and the
+    // whose copy says nothing left this device is only accurate before it, and the
     // record's own bookkeeping cannot stand in (its write is best-effort, and the
     // fallback path below classifies against a pre-run record). Local to this run,
     // not React state -- nothing renders from it, and a later run starts fresh.
@@ -374,23 +372,23 @@ export function ManagedRunSurface({ id }: { id: string }) {
         setFinishedAt(new Date());
       } catch (error) {
         if (controller.signal.aborted) return;
-        // The raw error can embed partner-/server-controlled bytes and reads as an
+        // The raw error can embed partner-/server-controlled bytes and displays as an
         // internal message, so it stays in the dev-gated console; the surface shows
         // the classified, sanitized copy.
         whenDiagnostic(() => console.error(error));
         // The tier is derived from the record's OWN bookkeeping, which the run path
         // just stamped (the auth/transport/storage/input/consent/cancelled
         // failureKind), so the record and its import marker are reloaded before
-        // classifying -- an unattended run's failure would surface through the same
+        // classifying -- an unattended run's failure would show through the same
         // tiers at the next visit. A corrupted record or sibling entry makes the
         // reload reject (a ZodError); rather than skip setFailure entirely (spinner
         // clears, no error UI, unhandled rejection), fall back to the launch
-        // reading and no sibling state, so the original error still surfaces
+        // reading and no sibling state, so the original error still shows
         // through the generic tier.
         //
         // The classification also gets the record as the store held it at this
         // launch, read before the run so this run's own stamp is not in it. A
-        // no-show's stamp replaces `lastRun` and carries no failureKind, so the
+        // no-show's stamp replaces `lastRun` and has no failureKind, so the
         // reloaded record alone cannot say whether a standing desync signal was
         // there to outrank the benign no-show reading.
         const [reloaded, local] = await Promise.all([
@@ -414,11 +412,11 @@ export function ManagedRunSurface({ id }: { id: string }) {
           Date.now(),
           dataExchangeStarted,
         );
-        // A run the hand-off refused settles the surface into the spent state here,
+        // A run the hand-off refused moves the surface into the spent state here,
         // rather than leaving the run controls standing over a copy this device no
         // longer owns until the operator reloads. It is taken from the CLASSIFIED
         // state rather than the raw error, so the phase-boundary guard the
-        // classification carries decides it: a refusal that somehow arrived past
+        // classification holds decides it: a refusal that somehow arrived past
         // the first peer-visible payload is not this benign state and keeps the
         // generic failure surface. The reload beside it supplies the date and the
         // hand-off the spent surface names, and a reload that did not answer costs
@@ -452,8 +450,8 @@ export function ManagedRunSurface({ id }: { id: string }) {
   // A backup export leaves the source live; a migration export hands the secret off
   // and spends this device's copy -- but only once the operator attests the file is
   // saved (a dismissed save leaves the source live). Both read the current record and
-  // mark backed-up atomically, so the source reads green after a backup and a spent
-  // copy carries a current artifact -- the ordering managedExchangeExport.test.ts
+  // mark backed-up atomically, so the source displays green after a backup and a spent
+  // copy holds a current artifact -- the ordering managedExchangeExport.test.ts
   // drives, marking before a spend is possible and refusing a superseded artifact.
   function backUp() {
     if (record === undefined || exportBusy) return;
@@ -531,7 +529,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
         });
 
   // Drive the completion surface's refreshed backup with the shared busy/failure
-  // state, so a failed export surfaces without claiming the backup was taken.
+  // state, so a failed export shows without claiming the backup was taken.
   function downloadUpdatedBackup() {
     if (completion.backupHook === undefined || exportBusy) return;
     setExportBusy(true);
@@ -547,7 +545,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
   // shareable artifacts to forward out-of-band. The operator re-authors nothing. The
   // driver returns the rotated record; adopting it drops the stale in-memory secret so
   // a subsequent run derives the rendezvous from the fresh one, and clearing the
-  // consumed failure surfaces "fresh invitation sent" rather than the recovered tier.
+  // consumed failure shows "fresh invitation sent" rather than the recovered tier.
   function reinviteNow(source: "recovery" | "detail") {
     if (record === undefined || reinviting) return;
     setReinviteSource(source);
@@ -586,8 +584,8 @@ export function ManagedRunSurface({ id }: { id: string }) {
   // Persist an in-place edit to the local fields (label, max-token-age policy)
   // through the single-transaction store path, then adopt the returned record so
   // the surface reflects the edit -- including the conservatively re-derived
-  // `expires` an age-policy edit produces. The detail editor surfaces the failure;
-  // rethrowing keeps its form and its "not saved" message honest.
+  // `expires` an age-policy edit produces. The detail editor shows the failure;
+  // rethrowing keeps its form and its "not saved" message accurate.
   async function saveLocalFields(
     edits: ManagedExchangeLocalEdits,
   ): Promise<void> {
@@ -599,7 +597,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
   // Queue a fresh read of the accounting, dropping the standing verdict as it
   // goes: the section returns to its in-flight state rather than rendering the
   // previous verdict and its buttons under a click that has already been taken --
-  // which reads as an inert control, beside an irreversible one.
+  // which displays as an inert control, beside an irreversible one.
   function readAccountingAgain(): void {
     setAccountingRead(undefined);
     setAccountingReads((reads) => reads + 1);
@@ -1051,7 +1049,7 @@ function ReinviteRecovery({
 /** A forwardable, multi-paragraph message the operator must READ before sending: the
  * whole prose is shown in a visible, wrapped, readonly area with a copy action --
  * unlike {@link CopyRow}, which collapses a secret to a one-line head/tail preview. The
- * message carries no secret (it interpolates only this record's own label and failure
+ * message has no secret (it interpolates only this record's own label and failure
  * time), so showing it in full is correct, not a leak. */
 function ForwardableMessage({
   label,
@@ -1136,8 +1134,8 @@ function ConfirmationPanel({
   );
 }
 
-/** The composed re-invite artifacts the operator forwards: the link and code carrying
- * the fresh setup secret, and the honest ongoing cost -- every re-invite puts a fresh
+/** The composed re-invite artifacts the operator forwards: the link and code holding
+ * the fresh setup secret, and the accurate ongoing cost -- every re-invite puts a fresh
  * live secret on the out-of-band channel, so the confidentiality requirement is
  * ongoing, not one-time. */
 function ReinvitePanel({

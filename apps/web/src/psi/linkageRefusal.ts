@@ -27,17 +27,17 @@ import type { LinkageField, LinkageTermsVerdict } from "@psilink/core";
  *   linkage key at all. Reached where the terms are DERIVED from the operator's
  *   own columns (the direct spine and the quick mint, which narrow the built-in
  *   rule set to the keys the columns support and can narrow all the way to none),
- *   so the remedy is a file carrying the field types the built-in keys need.
+ *   so the remedy is a file holding the field types the built-in keys need.
  * - `"shortfall"` -- keys are declared, and this input falls short of at least one
  *   of them: a key whose fields the columns cannot produce, or one whose declared
- *   cleaning drops every record. The remedy is a conforming input or terms settled
+ *   cleaning drops every record. The remedy is a conforming input or terms fixed
  *   with the partner out of band.
  */
 export type LinkageRefusal =
   | {
       kind: "no-linkable-key";
       /** The linkage fields to name as missing, so the copy can say which field
-       * types a conforming file carries. */
+       * types a conforming file holds. */
       missingFields: ReadonlyArray<LinkageField>;
     }
   | {
@@ -48,14 +48,13 @@ export type LinkageRefusal =
     };
 
 /**
- * The refusal a verdict carries, or `undefined` when it permits the run.
+ * The refusal a verdict holds, or `undefined` when it permits the run.
  *
- * `missingFields` is the list the `"no-linkable-key"` copy names, which is not
- * always the verdict's own `unsatisfiedFields`: a seat whose terms are narrowed to
- * the keys its columns support declares no field it cannot produce, so the verdict
- * reports none and the seat passes the fields the UNNARROWED rule set declares --
- * the field types a conforming file would carry. A seat grading terms it did not
- * derive passes `verdict.unsatisfiedFields`.
+ * `missingFields` is not always the verdict's own `unsatisfiedFields`: a seat
+ * whose terms are narrowed to the keys its columns support declares no field it
+ * cannot produce, so the verdict reports none, and the seat passes the fields the
+ * UNNARROWED rule set declares -- the field types a conforming file would hold.
+ * A seat grading terms it did not derive passes `verdict.unsatisfiedFields`.
  */
 export function linkageRefusalFor(
   verdict: LinkageTermsVerdict,

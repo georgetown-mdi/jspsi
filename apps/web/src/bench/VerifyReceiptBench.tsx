@@ -54,14 +54,14 @@ import type { FileRejection } from "@mantine/dropzone";
 import type { ReactNode } from "react";
 
 /**
- * The bench's "Verify a receipt" surface: a read-only, browser-only check of the
+ * The console's "Verify a receipt" surface: a read-only, browser-only check of the
  * artifacts an exchange leaves behind. The user loads the exchange record and its
  * keys, and optionally re-supplies their retained input, result, and both parties'
  * linkage terms to open the commitments and re-derive the agreed-terms hash. When
  * the exchange was signed, the dual-signed record is checked in the same run,
  * anchored by the partner's pinned fingerprint and by this party's own EXPORTED
  * certificate -- no private signing key is accepted, required, or used here. The
- * verdicts are honest -- a mismatch is stated as "altered or the wrong file",
+ * verdicts are accurate -- a mismatch is stated as "altered or the wrong file",
  * never as tamper alone, and an unanchored certificate holds the signed verdict
  * short of verified (see {@link verifyReceiptModel}) -- and nothing is uploaded.
  *
@@ -82,7 +82,7 @@ const CSV_MAX_MB = MAX_CSV_FILE_BYTES / 1024 ** 2;
 
 // What a dropzone shows for the file it holds: its name, and nothing else. The
 // impossible `text` member is the enforcement -- a document's own text is read,
-// parsed, and dropped inside the handler, and this makes the shape that carried
+// parsed, and dropped inside the handler, and this makes the shape that held
 // it alongside the name unassignable to any slot on this page rather than
 // merely unused. It does not stop a future author declaring a new member.
 interface ChosenFile {
@@ -111,7 +111,7 @@ interface ParsedSignedRecordState {
 // Only the fingerprint recomputed from the certificate is retained: it is the
 // whole of what anchors the verifier's own slot, so neither the parsed
 // certificate nor the document it came from is held past the parse. The file
-// dropped here can be a signing identity file, which carries a private key
+// dropped here can be a signing identity file, which holds a private key
 // beside the certificate and is refused -- keeping only the name means a
 // refused one leaves no key material in component state.
 interface ParsedCertificateState {
@@ -143,7 +143,7 @@ function toneIcon(tone: VerdictTone): ReactNode {
   return <IconAlertTriangle aria-hidden />;
 }
 
-/** A labelled JSON dropzone: a parameterized copy of the bench's CSV intake
+/** A labelled JSON dropzone: a parameterized copy of the console's CSV intake
  * furniture, for a single .json input with a filename-convention hint. */
 function JsonDropzone({
   label,
@@ -316,11 +316,9 @@ export function VerifyReceiptBench() {
   // linkage terms.
   const [resupplyOpen, setResupplyOpen] = useState(false);
   // The original File, never its contents: unlike the JSON record and keys
-  // (parsed on load, so their text is read at that moment and dropped there), a
-  // re-supplied CSV is only parsed at verify time and the run can repeat, so
-  // holding the File itself -- rather than reading it to text now and
-  // re-wrapping it into a fresh File at each run -- avoids reading its content
-  // twice for no benefit.
+  // (parsed and dropped on load), a re-supplied CSV is only parsed at verify
+  // time and the run can repeat, so the File itself is held rather than read
+  // to text now and rewrapped into a fresh File at each run.
   const [inputCsv, setInputCsv] = useState<File>();
   const [resultCsv, setResultCsv] = useState<File>();
   const [localTerms, setLocalTerms] = useState<LinkageTerms>();
@@ -360,11 +358,11 @@ export function VerifyReceiptBench() {
 
   // Every input event withdraws both verdicts and any fault alert, so nothing
   // rendered is derived from an input the page no longer holds. Both verdicts
-  // go on any edit: the record verdict's standing note points at the signed
-  // panel beside it, so it must not outlive the panel a signed-leg edit
-  // removes. The bump supersedes any run already in flight; the async
-  // handlers bump again after their state writes land, so a run captured
-  // between a handler's first bump and its awaited parse is superseded too.
+  // go on any edit, since the record verdict's standing note points at the
+  // signed panel beside it and must not outlive it. The bump also supersedes
+  // any run already in flight -- including one captured between a handler's
+  // first bump and its awaited parse, since the handlers bump again after
+  // their state writes land.
   function invalidateVerdicts() {
     runToken.current += 1;
     setVerdict(undefined);
@@ -373,16 +371,15 @@ export function VerifyReceiptBench() {
   }
 
   // A newly loaded record or keys file starts a possibly different exchange, so
-  // every input belonging to the previous one goes: the re-supplied files and
-  // pasted terms, which open that record's commitments, and the dual-signed
-  // record. The receipt is the case that needs stating -- everything its
-  // verification consults (both identities, the agreed-terms hash) repeats
-  // across every run of the same partnership, and the values that do not repeat
-  // are reported rather than compared, so a carried-over receipt is the one that
-  // would be consumed beside the wrong record without saying so. The two
-  // anchoring values stay: the operator reuses them across a partner's
-  // exchanges, and one belonging elsewhere reaches neither certificate in the
-  // record, which the verdict states as an unmatched anchor.
+  // every input belonging to the previous one is cleared: the re-supplied files
+  // and pasted terms (which open that record's commitments), and the
+  // dual-signed record -- its verification consults values that repeat across
+  // every run of the same partnership and are reported rather than compared,
+  // so a stale receipt would otherwise be consumed beside the wrong record
+  // without saying so. The two anchoring values stay: the operator reuses them
+  // across a partner's exchanges, and one belonging elsewhere reaches neither
+  // certificate in the record, which the verdict reports as an unmatched
+  // anchor.
   function clearExchangeScopedInputs() {
     setInputCsv(undefined);
     setResultCsv(undefined);
@@ -535,7 +532,7 @@ export function VerifyReceiptBench() {
       if (signedView !== undefined) setSignedVerdict(signedView);
     } catch (error) {
       // The verify path is fail-safe in core (every check yields a status), so a
-      // throw here is an unexpected fault -- surface it sanitized, never raw,
+      // throw here is an unexpected fault -- show it sanitized, never raw,
       // and only while it is still this run's inputs that faulted.
       if (token === runToken.current)
         setVerifyError(sanitizeErrorForDisplay(error));
@@ -877,7 +874,7 @@ function VerdictCheckRow({ row }: { row: VerdictRow }) {
 
 /** A CSV dropzone for the re-supply section: the same furniture as the JSON one
  * but accepting the CSV type list. Kept local (not the inviter's YourFileSection,
- * which carries a name field and terms callout this page does not want). */
+ * which holds a name field and terms callout this page does not want). */
 function JsonOrCsvDropzone({
   label,
   hint,

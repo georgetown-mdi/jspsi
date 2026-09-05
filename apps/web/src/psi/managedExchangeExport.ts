@@ -1,63 +1,36 @@
 /**
- * The managed-exchange export intents, wired over the pure artifact encoder, the
- * blob download, and the local sibling-state writes. Two of them share one
- * artifact format (see docs/MANAGED_EXCHANGE.md, "Export/import is migration, not
- * sync"):
+ * The managed-exchange export intents, wired over the pure artifact encoder,
+ * the blob download, and the local sibling-state writes. Backup and
+ * migration share one artifact format (docs/MANAGED_EXCHANGE.md,
+ * "Export/import is migration, not sync").
  *
- * - A BACKUP export leaves the source live. It reads the current record, serializes
- *   the bytes it will download, and stamps the backup marker in one atomic store
- *   step ({@link readRecordAndMarkBackedUp}), then downloads exactly those bytes, so
- *   the marker attests the secret the file carries. Binding the fresh read and the
- *   marker together is what makes a stale-tab or stale-React-state export unable to
- *   mark green over a newer rotation: the marker can only ever attest the bytes just
- *   read, and a rotation clears the marker in its own transaction. Nothing about the
- *   source changes.
- * - A MIGRATION export ("take over on another device") spends the source, but the
- *   spend is OPERATOR-ATTESTED. `anchor.click()` gives no landing signal, so a
- *   cancelled or failed save dialog must not spend the source. The dispatch downloads
- *   the artifact (again bound to a fresh read and marker) and returns a confirm
- *   handle; only when the operator confirms "the file is saved" does
- *   {@link confirmManagedMigration} write `spentAt`, transitioning this device's copy
- *   to its visible spent state. A dismissed dialog leaves the source live and
- *   recoverable.
+ * - A BACKUP export reads the current record, serializes it, and stamps the
+ *   backup marker in one atomic store step, then downloads exactly those
+ *   bytes. The source is left live.
+ * - A MIGRATION export ("take over on another device") downloads the
+ *   artifact the same way, then spends the source only on the operator's
+ *   attestation that the file is saved: `anchor.click()` gives no landing
+ *   signal, so a cancelled or failed save must not spend the source. A
+ *   dismissed dialog leaves the source live.
+ * - A COMMAND-LINE export downloads the CLI's own two files
+ *   ({@link composeManagedCronExport}) instead of the artifact, and spends
+ *   the source on the same attestation the migration uses. It stamps no
+ *   backup marker: what it downloads is not an artifact this app's import
+ *   accepts.
  *
- * The third intent exports the exchange to the COMMAND LINE instead of to another
- * browser: it downloads the CLI's own two files ({@link composeManagedCronExport})
- * rather than the artifact, and spends the source on the same operator attestation
- * the migration uses. It is a migration by another route -- the secret is handed to
- * a scheduler on some machine -- so it takes the same read-then-attest shape, and
- * differs in what lands on disk and in marking NOTHING: what it downloads is not an
- * artifact this app's import accepts, so a backup marker stamped for it would present
- * the record as restorable from files nothing here restores from. It reads the record
- * by id like every other intent, and leaves the backup marker where it stands whether
- * the hand-off is confirmed or dismissed.
+ * The two marking intents compose what they download INSIDE the
+ * read-and-mark step: the marker can never attest bytes nothing produced.
  *
- * The two marking intents compose what they will download INSIDE the read-and-mark
- * step rather than after it. That is what keeps the marker bound to bytes that exist:
- * a step that resolved without composing would leave a marker attesting bytes nothing
- * produced, so it fails the export instead.
+ * Both spending intents' confirm step re-reads the record by id, and spends
+ * only while no run of it is in flight and the downloaded artifact still
+ * has the record's current secret
+ * ({@link ManagedHandoffRefusedError} otherwise). A run in flight is
+ * excluded on the run's own lock rather than checked directly (see
+ * {@link ./managedExchangeStore.ts}, `spendManagedExchangeIfCurrent`).
  *
- * Both spending intents defer their spend to an operator attestation that can arrive
- * arbitrarily later, so each spends through one store step that re-reads the record
- * by id at CONFIRM time and writes the spent state only while no run of it is in
- * flight and the artifact it downloaded still carries the exchange's current secret
- * ({@link ManagedHandoffRefusedError} otherwise, carrying which refusal it was).
- * A run rotates that secret at its handshake, and a run in any context -- this
- * surface, a second tab, the scheduled runtime -- can start and finish between the
- * download and the attestation, which leaves the operator attesting to an artifact
- * whose secret the partnership has moved past. Spending on that attestation would
- * hand the new owner a copy whose first run meets a partner that has moved on. The
- * check is the same read-fresh-by-id the export step takes, for the same reason:
- * what a caller holds in hand is never what decides, and it is bound to the write
- * for the reason the export's mark is bound to its read -- a check the write can
- * outrun decides nothing. A run still in flight is the ordering that check cannot
- * see (it has rotated nothing yet), so the step excludes it on the run's own lock
- * instead of checking it: see {@link ./managedExchangeStore.ts},
- * `spendManagedExchangeIfCurrent`.
- *
- * The seams (the marking intents' fresh read-serialize-and-mark, the command-line
- * export's non-marking read by id, the download, the currency-checked spend) are
- * injected so the intents are testable without a real download or database.
+ * The boundaries (read-and-mark, the non-marking read by id, the download, the
+ * currency-checked spend) are injected so the intents are testable without
+ * a real download or database.
  */
 
 import {
@@ -75,7 +48,7 @@ import type { ManagedExchangeRecord } from "./managedExchangeRecord";
 
 /** The download filename `psilink-managed-backup-<date>.json`, the date the local
  * calendar day of `at`, mirroring the exchange-file filename discipline so repeated
- * exports carry distinct dates. */
+ * exports have distinct dates. */
 export function managedBackupFileName(at: Date): string {
   const year = at.getFullYear();
   const month = String(at.getMonth() + 1).padStart(2, "0");
@@ -83,14 +56,12 @@ export function managedBackupFileName(at: Date): string {
   return `psilink-managed-backup-${year}-${month}-${day}.json`;
 }
 
-/** The platform seams a backup export drives, injected so the intent stays pure and
- * testable. */
+/** The platform boundaries a backup export drives, injected so the intent stays
+ * pure and testable. */
 export interface ManagedExportDeps {
   /** Read the current stored record for `id`, run `composeExport` on it, and stamp
    * its backup marker as of `backedUpAt` in one atomic step, returning the record
-   * read: the export downloads exactly what `composeExport` produced, so the marker
-   * attests the secret the file carries. `composeExport` throwing aborts the whole
-   * step, writing no marker. */
+   * read. `composeExport` throwing aborts the whole step, writing no marker. */
   readAndMark: (
     id: string,
     backedUpAt: string,
@@ -103,16 +74,15 @@ export interface ManagedExportDeps {
   now: () => Date;
 }
 
-/** The platform seams a migration export drives: the backup seams, and the
- * currency-checked spend that transitions the source to its visible spent state. */
+/** The platform boundaries a migration export drives: the backup boundaries, and
+ * the currency-checked spend that transitions the source to its visible spent
+ * state. */
 export interface ManagedMigrationDeps extends ManagedExportDeps {
   /** Spend the record for `id` as of `spentAt` (the handoff date), but only while no
-   * run of it is in flight and the stored record still carries
-   * `expectedSharedSecret` -- the run exclusion, the check, and the write are one
-   * store step, which writes nothing and names the refusal when either condition
-   * fails. Run at confirm time, never at dispatch: the attestation is measured
-   * against the record the store holds then, not against the dispatch's own snapshot
-   * of it. */
+   * run of it is in flight and the stored record still has
+   * `expectedSharedSecret` -- the exclusion, the check, and the write are one
+   * store step, writing nothing and naming the refusal when either fails. Run at
+   * confirm time, never at dispatch, against the record the store holds then. */
   spendIfCurrent: (
     id: string,
     expectedSharedSecret: string,
@@ -120,12 +90,10 @@ export interface ManagedMigrationDeps extends ManagedExportDeps {
   ) => Promise<ManagedSpendOutcome>;
 }
 
-/** Why a hand-off confirmation was refused. The three are carried apart because the
- * operator's way out of them differs: `"run-in-flight"` is over when the run is,
- * `"superseded"` leaves a live record here to download again, while `"record-gone"`
- * leaves nothing here at all -- a surface that folded them would tell an operator to
- * wait out a run that never ends, or send them after a download nothing can
- * produce. */
+/** Why a hand-off confirmation was refused. The operator's remedy differs per
+ * value: `"run-in-flight"` is over when the run is, `"superseded"` leaves a
+ * live record to download again, and `"record-gone"` leaves nothing here at
+ * all. */
 export type ManagedHandoffRefusal =
   "run-in-flight" | "superseded" | "record-gone";
 
@@ -143,22 +111,11 @@ const HANDOFF_REFUSAL_FOR_OUTCOME: Record<
 };
 
 /**
- * Raised when a hand-off confirmation is refused, carrying which refusal it was so
- * the surfaces can name the way out that exists.
- *
- * `"run-in-flight"`: a run of this exchange holds the run+rotate lock, so the spend
- * was excluded rather than checked -- the secret it would hand over is one the run
- * may rotate before the operator's files are anyone's to use. Nothing is spent, and
- * the remedy is to confirm again once the run is over (which the currency check then
- * decides, the run having rotated the secret or not).
- *
- * `"superseded"`: the exchange's stored secret is no longer the one the downloaded
- * artifact carries, so the copy the operator is attesting to has been superseded --
- * by a run's rotation in any context, or by a re-invite. Nothing is spent, and the
- * remedy is to download the exchange again.
- *
- * `"record-gone"`: the record is gone from the store, where there is no live copy
- * left to spend and nothing left to download either.
+ * Raised when a hand-off confirmation is refused, stating which refusal it
+ * was: `"run-in-flight"` excludes the spend on the run+rotate lock rather
+ * than checking it and clears once the run ends; `"superseded"` means the
+ * stored secret no longer matches the downloaded artifact; `"record-gone"`
+ * means the record is gone from the store.
  */
 export class ManagedHandoffRefusedError extends Error {
   /** Which refusal this is, for the surface to phrase. */
@@ -187,17 +144,15 @@ function handoffRefusalMessage(
 }
 
 /**
- * Spend the source on the operator's attestation, through the one store step that
- * spends only while no run of the record is in flight and `exported` -- the record
- * the dispatch actually serialized -- is still what the store holds, and raise the
- * refusal it reports when it is not. The secret is the identity that decides the
- * currency half: it is what the artifact hands over and what a rotation moves, and
- * an edit that leaves it alone (a label, a max-age policy) leaves the artifact
- * usable.
+ * Spend the source on the operator's attestation, through the one store step
+ * that spends only while no run of the record is in flight and `exported`
+ * is still what the store holds, raising the refusal it reports otherwise.
+ * The secret is what decides currency: an edit that leaves it alone (a
+ * label, a max-age policy) leaves the artifact usable.
  *
- * @throws {ManagedHandoffRefusedError} if a run holds the run+rotate lock, the
- *   stored secret has moved on, or the record is gone -- carrying which of the three
- *   it was. Nothing is written in any case.
+ * @throws {ManagedHandoffRefusedError} if a run holds the run+rotate lock,
+ *   the stored secret has moved on, or the record is gone. Nothing is
+ *   written in any case.
  */
 async function spendIfArtifactIsCurrent(
   id: string,
@@ -227,17 +182,15 @@ export interface ManagedBackupResult {
 }
 
 /**
- * The atomic step under the two marking intents: one clock read, then the store's
- * read-serialize-and-mark by id, then the download of exactly those bytes. Reading by
- * id rather than from a caller-held record is what keeps a stale tab -- or a stale
- * React snapshot holding a pre-rotation secret -- from being what an export
- * serializes, and serializing inside the step is what keeps the marker unable to
- * attest bytes it did not read. A step that resolves without serializing would leave
- * exactly that marker, so it fails the export rather than downloading.
+ * The atomic step under the two marking intents: one clock read, then the
+ * store's read-serialize-and-mark by id, then the download of exactly those
+ * bytes. Reading by id (not a caller-held record) keeps a stale tab or
+ * pre-rotation snapshot from being what an export serializes. A step that
+ * resolves without serializing fails the export rather than downloading, so
+ * the marker never attests bytes it did not read.
  *
- * Returns the mark instant and the record read, so the marker and the
- * locally-rendered state carry the same clock read (no second `new Date()`) and the
- * caller sees what it exported.
+ * Returns the mark instant and the record read, so the caller sees what it
+ * exported without a second clock read.
  */
 async function readMarkAndDownload(
   id: string,
@@ -297,17 +250,12 @@ export interface ManagedMigrationDispatch {
 }
 
 /**
- * Dispatch a MIGRATION export ("take over on another device"): read the current
- * record, stamp the backup marker, and download exactly those bytes -- the same
- * atomic read-serialize-and-mark as a backup -- then return a dispatch whose {@link
- * ManagedMigrationDispatch.confirm} spends the source. The spend is deliberately
- * NOT written here: `anchor.click()` gives no landing signal, so the source stays
- * live until the operator attests the file is saved (a cancelled or failed save
- * leaves it recoverable by exporting again). The source is marked backed-up on
- * dispatch: a spent source has a current artifact -- the one just written -- and it
- * reads green until spent. managedExchangeExport.test.ts drives that ordering: the
- * mark lands before a spend is possible, and `confirm` refuses an artifact a
- * rotation superseded.
+ * Dispatch a MIGRATION export ("take over on another device"): read the
+ * current record, stamp the backup marker, download exactly those bytes,
+ * and return a dispatch whose {@link ManagedMigrationDispatch.confirm}
+ * spends the source. The spend is not written here: `anchor.click()` gives
+ * no landing signal, so the source stays live and recoverable until the
+ * operator attests the file is saved. Pinned in managedExchangeExport.test.ts.
  *
  * @throws {Error} if no record with `id` exists.
  * @throws {ZodError} if the stored record or its sibling entry is invalid.
@@ -327,16 +275,16 @@ export async function dispatchManagedMigration(
   };
 }
 
-/** The platform seams the command-line export drives: a NON-STAMPING read of the
- * record by id (this export marks no backup marker -- see the module header), a
- * download that carries each composed file's own media type -- the two files land as
- * the YAML and JSON documents the CLI opens, not as one artifact blob -- and a spend
- * that records which hand-off spent the copy, so the durable spent state does not
- * read as a migration's. */
+/** The platform boundaries the command-line export drives: a NON-STAMPING read of
+ * the record by id (this export marks no backup marker -- see the module header),
+ * a download that takes each composed file's own media type -- the two files land
+ * as the YAML and JSON documents the CLI opens, not as one artifact blob -- and a
+ * spend that records which hand-off spent the copy, so the durable spent state
+ * does not read as a migration's. */
 export interface ManagedCronExportDeps {
   /** Read the current stored record for `id`, or `undefined` when none is stored.
    * Read at dispatch and never from a caller-held record, so a stale tab composes the
-   * files the store's record carries or none at all. */
+   * files the store's record has or none at all. */
   readRecord: (id: string) => Promise<ManagedExchangeRecord | undefined>;
   /** Trigger a client-side download of one composed file. */
   download: (fileName: string, content: string, mimeType: string) => void;
@@ -357,7 +305,7 @@ export interface ManagedCronExportDeps {
 export interface ManagedCronExportDispatch {
   /** The record the export composed from (the fresh store read). */
   record: ManagedExchangeRecord;
-  /** What the two downloads carried, and the invocation that runs them. */
+  /** What the two downloads held, and the invocation that runs them. */
   composed: ManagedCronExport;
   /** Spend the source as of `spentAt` (the operator's confirmation instant), under
    * the command-line hand-off. Called only after the operator confirms both files
@@ -373,37 +321,27 @@ export interface ManagedCronExportDispatch {
 const CRON_EXPORT_HANDOFF: ManagedSpentHandoff = "command-line";
 
 /**
- * Dispatch a COMMAND-LINE export: read the current record by id, compose the CLI's
- * two files from exactly that read, download each under its own name, and return a
- * dispatch whose {@link ManagedCronExportDispatch.confirm} spends the source.
+ * Dispatch a COMMAND-LINE export: read the current record by id, compose
+ * the CLI's two files from exactly that read, download each under its own
+ * name, and return a dispatch whose
+ * {@link ManagedCronExportDispatch.confirm} spends the source.
  *
- * Nothing durable is written here, and no backup marker is stamped at any point of
- * this export: the two files are the CLI's, not an artifact this app's import
- * accepts, so marking the record backed up would tell the operator they hold a
- * restorable backup they do not hold. The exchange's backup state is therefore
- * whatever the last artifact export left it -- unchanged by taking these files, by
- * confirming the hand-off, and by dismissing it.
+ * No backup marker is stamped: the two files are not an artifact this app's
+ * import accepts, so the exchange's backup state is left exactly as the
+ * last artifact export set it, whatever happens to this dispatch.
  *
- * The composition is the partial one ({@link composeManagedCronExport} refuses a
- * record this app could not have composed); a refusal throws before any download and
- * leaves the store exactly as it was.
+ * The composition is partial ({@link composeManagedCronExport} refuses a
+ * record this app could not have composed); a refusal throws before any
+ * download and leaves the store untouched.
  *
- * The spend is deliberately NOT written here, for the reason
- * {@link dispatchManagedMigration} defers it: `anchor.click()` gives no landing
- * signal, and two clicks give two chances to fail, so the source stays live until
- * the operator attests both files are saved. Handing the secret to a scheduler
- * without spending the source would leave two live owners of one linear secret,
- * which is the fork single-device ownership forbids (docs/MANAGED_EXCHANGE.md,
- * "Single-device ownership").
+ * The spend is not written here, for the reason
+ * {@link dispatchManagedMigration} defers it (single-device ownership;
+ * docs/MANAGED_EXCHANGE.md, "Single-device ownership"), and records the
+ * command-line hand-off ({@link ManagedSpentHandoff}) rather than a bare
+ * instant, so the durable spent state does not read as a migration's.
  *
- * The spend records the command-line hand-off ({@link ManagedSpentHandoff}) rather
- * than a bare instant: this export produces the CLI's two files, which the import
- * flow does not accept, so the durable spent state must not read as a migration's
- * -- whose surfaces send the operator to an import that has no artifact here, and
- * whose spent copy an artifact revives.
- *
- * @throws {Error} if no record with `id` exists, or if the record is one the
- *   command-line export refuses ({@link composeManagedCronExport}).
+ * @throws {Error} if no record with `id` exists, or if the record is one
+ *   the command-line export refuses ({@link composeManagedCronExport}).
  * @throws {ZodError} if the stored record is invalid.
  */
 export async function dispatchManagedCronExport(

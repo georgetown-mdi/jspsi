@@ -47,19 +47,19 @@ export const TERMINATED_RECORD_KEYS_NOTICE =
   "keys private all the same.";
 
 /** The lead the seat shows over a completed run's record it is offering here --
- * the run finished, and its own results block did not carry the pair. */
+ * the run finished, and its own results block did not hold the pair. */
 export const COMPLETED_RECORD_LEAD =
   "This console holds the exchange record for this run.";
 
 /** What the seat says under that lead: the same keeping instruction the results
- * block's own record rows carry, said here because this is where the download is. */
+ * block's own record rows hold, said here because this is where the download is. */
 export const COMPLETED_RECORD_NOTICE =
   "It states what this run disclosed and is what a disclosure accounting is " +
   "written from. Download it before you move on: removing this run takes the " +
   "record from this console along with the results.";
 
 /**
- * The lead the seat shows over a record file the appliance holds and cannot read
+ * The lead the seat shows over a record file the console holds and cannot read
  * as a record. It states the file's presence, which is the part that is
  * established, and not what it says, which is the part that is not.
  */
@@ -68,10 +68,10 @@ export const UNDESCRIBABLE_RECORD_LEAD =
   "record.";
 
 /**
- * What the seat says under that lead. The appliance withholds the download rather
+ * What the seat says under that lead. The console withholds the download rather
  * than serving a pair it cannot vouch for, so the copy stands in place of a
  * download row: it says where the file is, why nothing is offered here, and that
- * every control on this surface removes it. It names the reasons the appliance can
+ * every control on this surface removes it. It names the reasons the console can
  * have -- an outcome a differently-versioned psilink wrote, or a pair it cannot
  * read whole -- because that is what tells the operator which build to open it
  * with.
@@ -86,7 +86,7 @@ export const UNDESCRIBABLE_RECORD_NOTICE =
   "on from here removes this run's files from this console, that one included.";
 
 /**
- * The lead the seat shows when the appliance stopped answering about a run's
+ * The lead the seat shows when the console stopped answering about a run's
  * record. It states what happened to the asking rather than the record: an
  * unanswered ask never said whether this run has one.
  */
@@ -134,7 +134,7 @@ function recordPanelCopy(offer: RenderedRecordOffer): {
 /**
  * The self-attested exchange record a console server-job run produced, offered on
  * every console server-job seat (invite, accept, Direct, and strand recovery)
- * whenever the appliance holds one the run's own results block is not already
+ * whenever the console holds one the run's own results block is not already
  * offering.
  *
  * The run this exists for is the one that DISCLOSED AND THEN STOPPED. A record is
@@ -147,17 +147,17 @@ function recordPanelCopy(offer: RenderedRecordOffer): {
  * the run's whole folder.
  *
  * A run that failed BEFORE disclosing owes no record and wrote none, so the
- * appliance reports none and this renders nothing -- the absence is structural,
+ * console reports none and this renders nothing -- the absence is structural,
  * not a status test standing in for it.
  *
  * The two outcomes are not offered alike. A terminated record attests the same
  * disclosure a completed one does, but its commitments re-supply from a result file
  * that run never wrote, so the keys beside it have nothing to open; the copy says
- * so where the download is rather than leaving the pair to read as a completed
+ * so where the download is rather than leaving the pair to display as a completed
  * run's.
  *
- * A record the appliance holds and cannot describe renders too, with no download:
- * the appliance withholds a pair it cannot read whole, and a panel that stayed
+ * A record the console holds and cannot describe renders too, with no download:
+ * the console withholds a pair it cannot read whole, and a panel that stayed
  * silent would leave the operator with a confirm naming a file no surface admits
  * is there.
  *

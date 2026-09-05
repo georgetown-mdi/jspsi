@@ -4,12 +4,11 @@ import styles from "./bench.module.css";
 
 /**
  * A preformatted, copyable block: the configuration or command shown whole (with
- * horizontal scroll for long lines) beside a copy button. Every hand-off surface
- * that gives an operator something to carry to a command line uses this one, so
- * a line they copy behaves the same wherever they meet it.
+ * horizontal scroll for long lines) beside a copy button. Every handoff surface
+ * that gives an operator something to paste at a command line uses this one.
  *
- * The clipboard check is defence-in-depth for a non-secure origin, where the
- * block is still selectable by hand.
+ * The clipboard check covers a non-secure origin, where the block is still
+ * selectable by hand.
  */
 export function CopyableCode({
   code,

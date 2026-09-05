@@ -12,9 +12,9 @@ import { resultFileExists } from "@jobs/workdir";
  * Feature-gated and id-validated, served only after the job succeeded. The path is
  * the job's server-chosen output file inside its workdir -- never derived from
  * client input. Content-Type and Content-Disposition are set explicitly with a
- * fixed download name, and a nosniff/no-store discipline applies. A job that has
- * not succeeded, or whose result is missing, is 404 rather than leaking whether
- * an unfinished job exists.
+ * fixed download name, and the nosniff and no-store headers are set. A job that
+ * has not succeeded, or whose result is missing, is 404 rather than leaking
+ * whether an unfinished job exists.
  */
 export const Route = createFileRoute("/api/jobs/$jobId/result")({
   server: {

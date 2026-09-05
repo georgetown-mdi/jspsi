@@ -48,7 +48,7 @@ import type { Algorithm, LinkageStrategy, LinkageTerms } from "@psilink/core";
 import type { AdvancedInviteDraft } from "@psi/advancedInvite";
 
 /** The guided-list badge copy and CSS class for each per-key verdict
- * ({@link KeyVerdict}). A dead key reads amber ("won't match") rather than red:
+ * ({@link KeyVerdict}). A dead key displays amber ("won't match") rather than red:
  * its columns resolve, so the remedy is the transform rather than the file. It
  * closes Generate as an unsatisfiable key does -- an exchange runs every key its
  * terms declare, and this one can never match. */
@@ -90,15 +90,11 @@ const OPT_IN_KEYS_GUIDANCE_LEAD =
   "set alone.";
 
 /**
- * The points under {@link OPT_IN_KEYS_GUIDANCE_LEAD}. The shape of the offer
- * needs stating as much as the departure does: each type is offered only inside
- * a compound key, and an operator who reads the list as a menu of single
- * identifiers would not see why. The last two points are about the badge, which
- * a metadata edit can leave on an offer the file no longer supplies a column
- * for, and about the cleaning that follows the key -- an operator who edited an
- * offered type's steps and then lost the key to a column edit gets the
- * recommended steps back, not their own, and is told so here rather than
- * discovering it in the workbench.
+ * The points under {@link OPT_IN_KEYS_GUIDANCE_LEAD}. Each type is offered only
+ * inside a compound key, never on its own. The last two points cover behavior
+ * not otherwise visible: a metadata edit can leave a badge on an offer the file
+ * no longer supplies a column for, and turning a lost key back on restores the
+ * recommended cleaning steps rather than an operator's own edits.
  */
 const OPT_IN_KEYS_GUIDANCE_POINTS = [
   "Each is offered only inside a compound key, never on its own: a single " +
@@ -120,21 +116,16 @@ const OPT_IN_KEYS_GUIDANCE_POINTS = [
  * strategy, matching method, and deduplication controls, each live while the
  * exchange applies what it writes.
  *
- * The list holds the keys the built-in rule set offers for these columns and,
- * turned off and in the cascade position each belongs at, the ones
- * `optInLinkageKeys` offers for the matchable types that set uses in none of its
- * keys. Both are the same control -- a checkbox and the reorder pair -- so an
- * addition is made the way a default key is turned off; what tells them apart is
- * a marker on the entry and the guidance below the list
- * ({@link OPT_IN_KEYS_GUIDANCE_LEAD}), which states what the addition costs rather
- * than a shape of control that hides the choice.
+ * The list holds the built-in keys for these columns and, turned off and in the
+ * cascade position each belongs at, any `optInLinkageKeys` offers for matchable
+ * types the built-in set uses in none of its keys. Both use the same control --
+ * a checkbox and the reorder pair -- with an opt-in entry marked and its cost
+ * stated in the guidance below the list ({@link OPT_IN_KEYS_GUIDANCE_LEAD}).
  *
- * It also carries the notice about the terms the editor will emit that refuses
- * nothing: an imported document's rule-set citation the rebuild will not carry
- * ({@link importedCitationDropNotice}), read live from the draft so it appears the
- * moment the import lands or an edit costs the citation. Review & create restates
- * the same notice, since an operator who imports here can leave without reading
- * it.
+ * Also renders {@link importedCitationDropNotice} live from the draft, so a
+ * rule-set citation the rebuild drops is flagged as soon as the import lands
+ * or an edit costs it. Review & create restates the same notice, for an
+ * operator who imports here and leaves without reading it.
  */
 export function KeysTab({
   editor,
@@ -164,7 +155,7 @@ export function KeysTab({
   onDeduplicate: (deduplicate: boolean) => void;
   onImport: (terms: LinkageTerms) => void;
   /** The validation message for the key set, rendered inline beside the list
-   * it names (the work column's Problems block carries it too). */
+   * it names (the work column's Problems block shows it too). */
   keysError: string | undefined;
   announce: (message: string) => void;
   onBack: () => void;
@@ -275,14 +266,13 @@ export function KeysTab({
           {keysError}
         </p>
       )}
-      {/* Rendered against the key list rather than beside the import control
-        below: the list is what costs the citation and what restores it, and the
-        drop outlives the Expert switch the import hides behind. The persistent
-        region below announces the headline (the notice's own title), not the
-        body beside it: a conditionally-mounted region is missed by screen
-        readers that watch only what is already in the DOM, and repeating the
-        whole body would voice it once as a live update and again in reading
-        order. */}
+      {/* Rendered against the key list, not beside the import control: the list
+        is what costs and restores the citation, and the drop outlives the
+        Expert switch the import hides behind. The persistent region announces
+        only the notice's title, not its body: a conditionally-mounted region
+        is missed by screen readers watching only what is already in the DOM,
+        and repeating the whole body would voice it twice -- once live, once in
+        reading order. */}
       {citationDrop !== undefined && (
         <CitationDropNotice notice={citationDrop} />
       )}

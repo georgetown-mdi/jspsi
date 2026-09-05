@@ -26,14 +26,14 @@ import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
 
 /**
  * The acceptor's Cleaning tab: per-field pipelines with previews and whole-file
- * coverage over its OWN standardization. Adopted from the inviter's {@link CleaningTab}
- * idiom, but the acceptor edits only its own cleaning -- the keys and fields came from
- * the invitation and are not editable here, so there is no add/remove-field
- * affordance. The dead-key advisory (a self-defeating adopted rule) surfaces here,
- * amber not red, routing the fix to the partner.
+ * coverage over its OWN standardization. It follows the inviter's
+ * {@link CleaningTab}, but the acceptor edits only its own cleaning -- the keys and
+ * fields came from the invitation and are not editable here, so there is no
+ * add/remove-field control. The dead-key advisory (a self-defeating adopted rule)
+ * appears here, amber not red, routing the fix to the partner.
  *
- * Presentational over the shared column-step state the bench owns; the full-CSV
- * coverage (`rates`) and the per-column preview samples are computed by the bench
+ * Presentational over the shared column-step state the host owns; the full-CSV
+ * coverage (`rates`) and the per-column preview samples are computed by the host
  * (from the browser rows on the hosted build, read from the server-side profile on
  * the console) and passed in, so one sweep drives both this tab and the Customize
  * menu's Cleaning-attention value and the console never reads rows it does not hold.
@@ -62,7 +62,7 @@ export function AcceptorCleaningStep({
   /** The per-column preview samples, keyed by input-column name: the browser rows'
    * samples on the hosted build, the profiled samples on the console. */
   columnSamples: ColumnSamples;
-  /** Full-CSV per-field coverage, or null before the first sweep settles. */
+  /** Full-CSV per-field coverage, or null before the first sweep finishes. */
   rates: ReadonlyMap<string, FieldValueCoverage> | null;
   ratesPending: boolean;
   /** Whether the last sweep failed for good (a deterministic coverage failure), so the
@@ -74,7 +74,7 @@ export function AcceptorCleaningStep({
    * the cleaning error boundary. */
   cleaningResetKey: string;
   /** The coverage pending-placeholder copy: the console passes the whole-file
-   * appliance-sweep phrasing, so the readout does not read as an instant local
+   * console-sweep phrasing, so the readout does not look like an instant local
    * check. Undefined keeps the default local copy. */
   coveragePendingLabel?: string;
   onFieldSteps: (output: string, steps: Array<StandardizationStep>) => void;

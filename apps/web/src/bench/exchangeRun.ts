@@ -8,11 +8,11 @@ import type { PreparedExchange } from "@psilink/core";
 import type { StageDefinition } from "@psi/exchangeLifecycle";
 
 /**
- * The pure model behind the bench's post-create flow: the run's stage tree and
+ * The pure model behind the console's post-create flow: the run's stage tree and
  * visit history as the lifecycle reports them, and the view-model builders the
  * protocol timeline, the status panel, and the completion header render from.
  * No React, no I/O -- the tested boundary for "the timeline advances on stage
- * events". Stage ids and labels come from the same lifecycle seam the current
+ * events". Stage ids and labels come from the same lifecycle boundary the current
  * exchange screen renders ({@link describeExchangeStages} plus the owner's
  * pre/done stages), so the Console engine's driver contract later fronts this
  * model unchanged.

@@ -49,27 +49,14 @@ function useManagedStoreAvailability(): boolean | undefined {
 }
 
 /**
- * The offer to save this exchange as a recurring one, rendered as its own panel on
- * the inviter's share surface and the acceptor's completion surface. Declining is
- * simply not acting: the offer never blocks the one-shot flow, and leaving it
- * untouched leaves no managed record (the one-shot discard stands). Committing
- * deposits a managed-exchange record for this party -- the standing terms plus the
- * deposited secret -- so the same partnership can run again later.
- *
- * The panel collects the operator's label and optional max-age policy and hands
- * them to {@link onManage}; the host owns the async store write and reports back
- * through {@link status}. The label cap and the max-age cadence line come from the
- * pure {@link ./manageOfferModel}, so the copy and the enforcement match the record
- * schema.
- *
- * Before the form, the panel probes whether this browser can open the managed store
- * at all: a storage-blocked browser (private mode, or an engine without IndexedDB)
- * cannot honor a deposit, so collecting a label and a max-age policy there would
- * invest the operator in a form that only fails at the write. When the probe settles
- * unavailable, a short honest state stands in for the form; the panel holds until the
- * probe settles rather than flashing the form first (the offer sits on a completion
- * surface, so a brief settle is invisible). A write can still fail after a successful
- * probe, so the deposit-failure alert stays.
+ * The offer to save this exchange as a recurring one, rendered on the inviter's
+ * share surface and the acceptor's completion surface. Declining is not acting:
+ * nothing is stored. Committing deposits a managed-exchange record (the standing
+ * terms plus the deposited secret) through {@link onManage}; the host owns the
+ * async store write and reports back through {@link status}. The panel renders
+ * nothing until the managed-store availability probe settles, showing a fallback
+ * state for a storage-blocked browser instead of a form that can only fail at
+ * the write.
  */
 export function ManageExchangeOffer({
   status,
@@ -123,7 +110,7 @@ export function ManageExchangeOffer({
   if (storeAvailable === undefined) return null;
 
   // The store cannot be opened at all in this browser, so no deposit can land: offer
-  // the honest state instead of a form that only fails at the write. No alarm
+  // the accurate state instead of a form that only fails at the write. No alarm
   // styling -- the one-off exchange the operator just completed is unaffected.
   if (!storeAvailable)
     return (

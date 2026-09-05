@@ -126,7 +126,7 @@ export function SavedExchangesHome() {
  * existed, so restore-from-backup lives here rather than only behind a detected loss
  * (see docs/MANAGED_EXCHANGE.md, "Eviction recovery is the import flow").
  *
- * Deliberately NOT the management list: no add/remove, no per-exchange detail, no edit.
+ * NOT the management list: no add/remove, no per-exchange detail, no edit.
  * Those are separate items. Each row joins its record to the local sibling state (the
  * backup marker and any spent state): a spent record shows no Run action and names its
  * handoff date.
@@ -175,7 +175,7 @@ function SavedExchangesSurface({
 }
 
 /** The populated run list: a row per stored exchange with a run/open action and the
- * always-available delete, above a first-class create entry into the invite/configure
+ * always-available delete, above a primary create entry into the invite/configure
  * flow (where saving as recurring happens at share time) and the one-off quick-path
  * alternative. Deleting a row calls `reload`, so the list reflects the removal without
  * a page navigation. */
@@ -267,17 +267,16 @@ function StorageUnavailable() {
   );
 }
 
-/** The per-row schedule lines, for a row whose record carries an agreed schedule:
- * where the recurrence stands right now, quietly, and -- once the record's
- * consecutive-miss count has reached the escalation threshold -- the coordination
- * line, which is the one state here an operator acts on. A row with no schedule
- * renders nothing, so a list of exchanges nobody scheduled is unchanged.
+/** The per-row schedule lines, for a row whose record holds an agreed
+ * schedule: where the recurrence stands, quietly, and -- once the record's
+ * consecutive-miss count reaches the escalation threshold -- the coordination
+ * line, the one state here an operator acts on. A row with no schedule renders
+ * nothing.
  *
- * The coordination line takes the caution treatment, matching the yellow Alert the
- * exchange's own surface renders the same state in: repeated misses are a state to
- * look into, not a failure, and the failure red would make the miss surface the
- * standing warning the design keeps it from being (see docs/MANAGED_EXCHANGE.md,
- * "Repeated misses surface, they do not auto-pause"). */
+ * The coordination line takes the caution treatment, matching the yellow Alert
+ * the exchange's own surface uses for the same state, rather than the failure
+ * red (docs/MANAGED_EXCHANGE.md, "Repeated misses surface, they do not
+ * auto-pause"). */
 function ScheduleLines({ row }: { row: SavedExchangeRow }) {
   if (row.schedule === undefined) return null;
   return (
@@ -322,16 +321,14 @@ function BackupLine({ row }: { row: SavedExchangeRow }) {
   );
 }
 
-/** The always-available per-row delete: a first-class action with one simple confirm.
- * The confirm names the exchange, and carries a custody note for each thing the delete
- * leaves behind -- an exported backup file (the row's backed-up state), and the files a
- * hand-off saved elsewhere ({@link handoff}), which keep running the exchange from the
- * machine that holds them. An exchange with neither needs no such note.
- * Deletion removes everything the browser holds for the exchange in one step
- * ({@link deleteManagedExchange}); it is local and unilateral, so the confirm says the
- * partner is not notified. On success it calls {@link onDeleted} so the list reflects
- * the removal. Exported so the per-exchange detail surface reuses the one confirm
- * component rather than duplicating it. */
+/** The always-available per-row delete: a primary action with one simple confirm.
+ * The confirm names the exchange, and states a custody note for each thing the
+ * delete leaves behind -- an exported backup file (the row's backed-up state),
+ * and the files a hand-off saved elsewhere ({@link handoff}), which keep running
+ * the exchange from the machine that holds them. Deletion removes everything the
+ * browser holds for the exchange in one step ({@link deleteManagedExchange}),
+ * local and unilateral, so the confirm says the partner is not notified.
+ * Exported so the per-exchange detail surface reuses this one confirm component. */
 export function DeleteExchangeButton({
   id,
   label,
@@ -347,7 +344,7 @@ export function DeleteExchangeButton({
   /** The hand-off that spent this copy, when the surface knows of one: its own
    * custody note then names what that hand-off left running elsewhere. Absent for a
    * live copy, for a migration spend (which records no hand-off), and on the
-   * read-failed listing, whose diagnostic read carries no spent state. */
+   * read-failed listing, whose diagnostic read holds no spent state. */
   handoff?: ManagedSpentHandoff;
   onDeleted: () => void;
 }) {
@@ -366,7 +363,7 @@ export function DeleteExchangeButton({
         setConfirming(false);
       } catch {
         // A rejected delete (transaction abort, quota, a blocked open) leaves the
-        // row standing: keep the modal open and surface the failure so the operator
+        // row standing: keep the modal open and report the failure so the operator
         // can retry rather than the row silently vanishing from confirm.
         setDeleteFailed(true);
       } finally {
@@ -446,7 +443,7 @@ export function DeleteExchangeButton({
 
 /** The first-run empty state: a designed surface, not a blank list. It explains what a
  * managed exchange is, offers creating one and accepting a recurring invitation into the
- * quick path, and carries the standing import affordance for post-eviction recovery. A
+ * quick path, and includes the standing import affordance for post-eviction recovery. A
  * wholesale eviction cannot be told from a first visit, so the import is offered here
  * standing rather than behind a detected loss. */
 function SavedExchangesEmpty() {
@@ -475,15 +472,15 @@ function SavedExchangesEmpty() {
   );
 }
 
-/** The read-failed surface: the list opened but its records could not be read, so the
- * normal list ({@link listManagedExchanges}) rejects wholesale on the one offending
- * record. This surface adds a recovery listing built from a separate diagnostic read
- * ({@link listManagedExchangesDiagnostic}) that never rejects wholesale: each stored
- * entry appears with its label and side/date when parseable, or "Unreadable record"
- * when not, each with the same one-step delete-by-key. Discarding the offending record
- * and reloading lets a now-readable list recover to the normal surface. A fresh import
- * still cannot mend the list while the bad record stands, so the restore-from-backup
- * affordance stays as a way straight to a run surface. */
+/** The read-failed surface: the list opened but its records could not be read,
+ * so the normal list ({@link listManagedExchanges}) rejects wholesale on the one
+ * offending record. This surface adds a recovery listing built from a separate
+ * diagnostic read ({@link listManagedExchangesDiagnostic}) that never rejects
+ * wholesale: each stored entry appears with its label and side/date when
+ * parseable, or "Unreadable record" when not, each with the same one-step
+ * delete-by-key. A fresh import still cannot mend the list while the bad record
+ * stands, so the restore-from-backup affordance stays as a way straight to a run
+ * surface. */
 function SavedExchangesFailed({ reload }: { reload: () => void }) {
   return (
     <>
@@ -498,14 +495,13 @@ function SavedExchangesFailed({ reload }: { reload: () => void }) {
   );
 }
 
-/** The recovery listing on the read-failed surface: the diagnostic read's per-entry
- * result, each row with the one-step delete-by-key. It loads on mount from the
- * diagnostic read (which never rejects wholesale), so an unreadable record is
- * identifiable and discardable even when the normal list cannot load. A delete calls
- * `reload`, which re-runs the whole load -- once the offending record is gone the
- * normal list read can succeed and the surface recovers to the run list. If the
- * diagnostic read itself fails (the store's own failure, not a single bad record),
- * the listing is simply omitted and the restore affordance below still stands. */
+/** The recovery listing on the read-failed surface: the diagnostic read's
+ * per-entry result, each row with the one-step delete-by-key. It loads on mount
+ * from the diagnostic read (which never rejects wholesale), so an unreadable
+ * record is identifiable and discardable even when the normal list cannot load.
+ * A delete calls `reload`, which re-runs the whole load. If the diagnostic read
+ * itself fails (the store's own failure, not a single bad record), the listing
+ * is simply omitted and the restore affordance below still stands. */
 function RecoveryListing({ reload }: { reload: () => void }) {
   const [rows, setRows] = useState<Array<RecoveryRow>>();
   useEffect(() => {

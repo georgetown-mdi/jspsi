@@ -3,31 +3,25 @@ import { loadCSVFile } from "@psilink/core";
 import { errorFromWorkerEvent } from "./workerEventError";
 
 /**
- * Off-main-thread CSV parse for the web app: a browser File above a size threshold
- * is parsed in a Web Worker the app owns, so the parse itself (the dominant CPU:
- * tokenizing, splitting, and building the row objects) runs off the main thread and
- * the tab stays interactive WHILE a large intake -- the once-per-exchange invite or
- * accept file -- parses. The worker does not post the whole parsed row array back in
- * one message: it STREAMS the rows back in batches (see {@link CSVParseResponse}), so
- * the main thread pays the receive-time structured-clone deserialization in many
- * small, interruptible steps rather than one uninterruptible clone proportional to the
- * full result size. That spreads the receive cost -- it does not lower its total -- so
- * the tab stays responsive even receiving a near-cap intake, closing the receive-time
- * stall the single-post hand-off left. Everything
- * else -- a small File, or the Node readable stream the unit tests feed
- * generateInvitation -- parses inline, where a worker's spawn and the streamed hand-off
- * buy nothing.
+ * Off-main-thread CSV parse for the web app: a browser File above a size
+ * threshold is parsed in a Web Worker the app owns, keeping the dominant CPU
+ * (tokenizing, splitting, building row objects) off the main thread while a
+ * large intake -- the once-per-exchange invite or accept file -- parses. The
+ * worker streams the rows back in batches (see {@link CSVParseResponse}) rather
+ * than posting the whole array in one message, so the main thread's
+ * receive-time structured-clone cost lands in many small, interruptible steps
+ * instead of one clone proportional to the full result. Everything else -- a
+ * small File, or the Node readable stream the unit tests feed
+ * generateInvitation -- parses inline.
  *
- * The worker WRAPS core's {@link loadCSVFile} rather than reimplementing the parse
- * (see {@link ./csvParse.worker}), so the non-string-header guard and the
- * `data`/`meta.fields` result contract hold identically whether the parse runs on
- * this thread or in the worker -- the streaming only chunks the hand-off of an
- * already-complete parse, it does not change how the parse itself is run. This is the
- * Vite-native replacement for PapaParse's `worker: true` self-hosted worker, which
- * corrupts the parse once Vite bundles and minifies the app (see the
- * `worker: false` rationale in core's `file.ts`): a worker Vite bundles from
- * `new Worker(new URL(...))` survives a production `vite build`; one PapaParse
- * constructs from the running script's URL does not.
+ * The worker WRAPS core's {@link loadCSVFile} rather than reimplementing the
+ * parse (see {@link ./csvParse.worker}): the non-string-header guard and the
+ * `data`/`meta.fields` result contract hold identically on either thread. This
+ * is the Vite-native replacement for PapaParse's `worker: true` self-hosted
+ * worker, which corrupts the parse once Vite bundles and minifies the app (see
+ * the `worker: false` rationale in core's `file.ts`): a worker Vite bundles
+ * from `new Worker(new URL(...))` survives a production `vite build`; one
+ * PapaParse constructs from the running script's URL does not.
  */
 
 /** The input {@link loadCSVFile} accepts (a browser `File`, or a Node readable
@@ -40,24 +34,21 @@ export type CSVParseInput = Parameters<typeof loadCSVFile>[0];
  * from its return type for the same no-papaparse-import reason. */
 export type CSVParseResult = Awaited<ReturnType<typeof loadCSVFile>>;
 
-/** The row array a {@link CSVParseResult} carries -- the part the worker reply streams
+/** The row array a {@link CSVParseResult} holds -- the part the worker reply streams
  * in batches and {@link parseInWorker} accumulates back. Derived from
  * {@link CSVParseResult} for the same no-papaparse-import reason. */
 export type CSVParseRows = CSVParseResult["data"];
 
 /**
- * Byte size above which a browser File's parse moves to the worker. Below it the
- * inline parse is quick enough not to drop a frame, and the worker's spawn plus the
- * structured-clone hand-off would cost more than it saves. The trade-off above it is
- * not all upside: the worker path removes the parse CPU from the main thread but adds
- * a serialize-in-worker plus deserialize-on-main round-trip of the whole row set (and
- * a transient second copy of it in memory during transfer) that the inline path never
- * pays, so for mid-sized files the net main-thread saving is smaller than the raw
- * parse cost and could even be marginal. The 4 MiB line is a reasoned default, not a
- * measured optimum: it is sized for the modern-workstation execution target and
- * tunable as that profile is measured, the same way `MAX_CSV_FILE_BYTES` and the
- * nonEmptyAggregate thresholds are; it sits well below the 100 MB intake cap the
- * worst-case parse this offloads is bounded by.
+ * Byte size above which a browser File's parse moves to the worker. Below it
+ * the inline parse is quick enough not to drop a frame, and the worker's spawn
+ * plus the structured-clone hand-off would cost more than it saves. Above it,
+ * the worker path removes the parse CPU from the main thread but adds a
+ * serialize/deserialize round-trip of the whole row set that the inline path
+ * never pays, so the net saving can be smaller than the raw parse cost. The
+ * 4 MiB line is a reasoned default, not a measured optimum -- tunable like
+ * `MAX_CSV_FILE_BYTES` and the nonEmptyAggregate thresholds -- well below the
+ * 100 MB intake cap the worst-case parse this offloads is bounded by.
  */
 export const CSV_WORKER_FILE_BYTE_THRESHOLD = 4 * 1024 * 1024;
 
@@ -72,18 +63,16 @@ export interface CSVParseRequest {
 
 /**
  * Worker response, delivered as a STREAM rather than a single post: zero or more
- * `{ ok: true; done: false }` batches, each carrying a slice of the parsed rows in
- * order, followed by exactly one terminal message. The terminal message is either
- * `{ ok: true; done: true }` -- carrying the non-row remainder of the result
- * (`errors` and `meta`), which {@link parseInWorker} pairs with the accumulated rows
- * to rebuild the full {@link CSVParseResult} -- or `{ ok: false }`, a serialized error
- * (message plus name, so it survives structured clone and rebuilds into an Error the
- * consumer can display and the tests can match on). Batching the rows lets the main
- * thread deserialize the reply in many small, interruptible steps instead of one clone
- * of the whole array (see the module header). A parse that fails inside the worker
- * rejects before any batch is posted -- loadCSVFile runs to completion first -- so the
- * error is the ONLY message and the failure surfaces exactly as it did under the single
- * post.
+ * `{ ok: true; done: false }` batches, each holding a slice of the parsed rows
+ * in order, followed by exactly one terminal message. The terminal message is
+ * either `{ ok: true; done: true }` -- holding the non-row remainder of the
+ * result (`errors` and `meta`), which {@link parseInWorker} pairs with the
+ * accumulated rows to rebuild the full {@link CSVParseResult} -- or
+ * `{ ok: false }`, a serialized error (message plus name, so it survives
+ * structured clone and rebuilds into an Error the consumer can display). A
+ * parse that fails inside the worker rejects before any batch is posted, so the
+ * error is the ONLY message and the failure shows exactly as it did under
+ * the single post.
  */
 export type CSVParseResponse =
   | { ok: true; done: false; rows: CSVParseRows }
@@ -96,29 +85,26 @@ export type CSVParseResponse =
   | { ok: false; message: string; name: string };
 
 /**
- * Target source-CSV bytes per streamed reply batch. {@link replyBatchRows} turns this
- * into a row count from the file's average bytes-per-row, so each batch is a bounded
- * slice of the FILE regardless of row width -- a few wide rows batch as tightly as many
- * narrow ones. This bounds a batch's SOURCE bytes, which under-represents the
- * parsed-object structured-clone cost the main thread actually pays on receipt: a row is
- * an object of per-cell strings, several times heavier than its source bytes. So the
- * target is set conservatively -- it keeps each batch's deserialization small relative to
- * the whole-array clone it replaces, NOT provably under a single animation frame -- and
- * is a reasoned, tunable default like {@link CSV_WORKER_FILE_BYTE_THRESHOLD}: lower it if
- * measurement shows a batch's receive step exceeding a frame near the top of the intake
- * range.
+ * Target source-CSV bytes per streamed reply batch. {@link replyBatchRows}
+ * turns this into a row count from the file's average bytes-per-row, so each
+ * batch is a bounded slice of the FILE regardless of row width. This bounds a
+ * batch's SOURCE bytes, which under-represents the parsed-object
+ * structured-clone cost the main thread actually pays: a row is an object of
+ * per-cell strings, several times heavier than its source bytes. The target is
+ * set conservatively -- NOT provably under a single animation frame -- and is a
+ * reasoned, tunable default like {@link CSV_WORKER_FILE_BYTE_THRESHOLD}.
  */
 export const CSV_WORKER_REPLY_BATCH_BYTES = 1024 * 1024;
 
 /**
- * Rows per streamed batch for a `rowCount`-row parse of a `fileBytes`-byte File: the
- * count whose source bytes are about {@link CSV_WORKER_REPLY_BATCH_BYTES}, so batch size
- * tracks row width (bytes per row) rather than row count -- a bigger file of similar rows
- * yields more batches, not bigger ones. At least 1 whenever there are rows, so the
- * worker's batch loop always advances: a very wide row whose own source exceeds the
- * target still emits one row per batch rather than flooring to 0 and spinning, and
- * `Math.max(fileBytes, 1)` keeps the division defined for a (degenerate) zero-byte file.
- * The value is irrelevant when there are no rows, where the loop never runs.
+ * Rows per streamed batch for a `rowCount`-row parse of a `fileBytes`-byte
+ * File: the count whose source bytes are about
+ * {@link CSV_WORKER_REPLY_BATCH_BYTES}, so batch size tracks row width rather
+ * than row count. At least 1 whenever there are rows: a very wide row whose own
+ * source exceeds the target still emits one row per batch rather than flooring
+ * to 0, and `Math.max(fileBytes, 1)` keeps the division defined for a
+ * (degenerate) zero-byte file. Irrelevant when there are no rows, where the
+ * loop never runs.
  */
 export function replyBatchRows(rowCount: number, fileBytes: number): number {
   if (rowCount === 0) return 1;
@@ -165,18 +151,17 @@ export function shouldParseOffThread(file: CSVParseInput): boolean {
 
 /**
  * Parse `file` off the main thread when it is a large browser File, inline
- * otherwise. Resolves the same {@link CSVParseResult} either way -- a drop-in for
- * core's `loadCSVFile` at the web intake call sites.
+ * otherwise. Resolves the same {@link CSVParseResult} either way -- a drop-in
+ * for core's `loadCSVFile` at the web intake call sites.
  *
- * `spawnWorker` is injected only by the unit tests (to drive the dispatch with a
- * fake); production omits it, and the browser worker module is imported lazily so
- * this module stays Node-loadable -- `invitation.ts`, which calls this, is unit-
- * tested under Node with a readable stream (the inline path, which never reaches the
- * import).
+ * `spawnWorker` is injected only by the unit tests; production omits it, and
+ * the browser worker module is imported lazily so this module stays
+ * Node-loadable -- `invitation.ts`, which calls this, is unit-tested under Node
+ * with a readable stream (the inline path, which never reaches the import).
  *
  * `signal` tears the worker down if the caller aborts mid-parse (a component
- * unmount), so a discarded parse does not keep a worker running; a caller that never
- * unmounts mid-parse (the inviter flows) simply omits it.
+ * unmount); a caller that never unmounts mid-parse (the inviter flows) simply
+ * omits it.
  */
 export async function loadCSVFileOffMainThread(
   file: CSVParseInput,
@@ -187,11 +172,10 @@ export async function loadCSVFileOffMainThread(
   } = {},
 ): Promise<CSVParseResult> {
   const { byteCeiling, spawnWorker, signal } = options;
-  // Off-thread only for a browser File: a large one (the routing predicate) or any
-  // File when a test injects a spawner to force the worker path. A Node stream is not
-  // structured-cloneable, so it -- and a small File -- parses inline. loadCSVFile
-  // applies its own byteCeiling default when this one is undefined. The isBrowserFile
-  // guard narrows `file` to File for parseInWorker, so no unchecked cast is needed.
+  // Off-thread for a browser File: a large one, or any File when a test injects
+  // a spawner. A Node stream is not structured-cloneable, so it -- and a small
+  // File -- parses inline. The isBrowserFile guard narrows `file` to File for
+  // parseInWorker, so no unchecked cast is needed.
   if (
     isBrowserFile(file) &&
     (spawnWorker !== undefined || shouldParseOffThread(file))
@@ -205,17 +189,17 @@ export async function loadCSVFileOffMainThread(
 }
 
 /**
- * Drive one parse through `worker` and settle. The reply streams in as a sequence of
- * row batches this accumulates, terminated by one outcome that settles: a `done`
- * message (reassembled with the accumulated rows into the result), a worker-level
- * failure (a module-load error, a non-cloneable message) surfaced through `onerror`,
- * an undeserializable reply surfaced through `onmessageerror`, a synchronous
- * `postMessage` failure, or a caller abort. The worker is one-shot: it is torn down on
- * that outcome, so nothing lingers past the single parse and a caller never hangs on a
- * worker that cannot answer. A `settled` guard makes every later event -- including a
- * stray batch arriving after the outcome -- a no-op, so a second outcome cannot
- * double-settle or re-terminate and a post-settle batch cannot mutate the discarded
- * accumulator.
+ * Drive one parse through `worker` and settle. The reply streams in as a
+ * sequence of row batches this accumulates, terminated by one outcome that
+ * settles: a `done` message (reassembled with the accumulated rows into the
+ * result), a worker-level failure (a module-load error, a non-cloneable
+ * message) reported through `onerror`, an undeserializable reply reported
+ * through `onmessageerror`, a synchronous `postMessage` failure, or a caller
+ * abort. The worker is one-shot: it is torn down on that outcome, so nothing
+ * lingers past the single parse. A `settled` guard makes every later event --
+ * including a stray batch arriving after the outcome -- a no-op, so a second
+ * outcome cannot double-settle and a post-settle batch cannot mutate the
+ * discarded accumulator.
  */
 function parseInWorker(
   worker: CSVParseWorker,
@@ -276,7 +260,7 @@ function parseInWorker(
     // A reply that fails to deserialize on this thread fires onmessageerror, not
     // onmessage/onerror; without a handler the promise would hang. No reply this
     // worker sends today can fail to clone (an all-string CSVRow tree), so this is a
-    // backstop rather than a live path -- one csvParseController.test.ts drives, so
+    // safety check rather than a live path -- one csvParseController.test.ts drives, so
     // the never-hang guarantee holds if a reply ever gains an uncloneable field.
     worker.onmessageerror = () =>
       settle(() =>

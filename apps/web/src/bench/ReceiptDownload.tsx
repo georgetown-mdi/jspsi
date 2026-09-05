@@ -9,8 +9,8 @@ import type { JobReceiptOffer } from "@psi/jobReceipt";
 
 /**
  * The lead the seat shows when a run that asked for a signed receipt has none on
- * the appliance. It states the artifact's absence, not the exchange's outcome,
- * which the panel above it already carries.
+ * the console. It states the artifact's absence, not the exchange's outcome,
+ * which the panel above it already shows.
  */
 export const RECEIPT_MISSING_LEAD = "This run has no signed receipt.";
 
@@ -18,7 +18,7 @@ export const RECEIPT_MISSING_LEAD = "This run has no signed receipt.";
  * What the seat says under that lead. This renders on any settled run, not only a
  * completed one, so it cannot claim the exchange finished: a receipt is written
  * once the signature swap completes, and a run that stopped before that point
- * never had one to lose. What holds either way is that the loss is settled --
+ * never had one to lose. What holds either way is that the loss is final --
  * running the exchange again produces a receipt for that run, not this one.
  */
 export const RECEIPT_MISSING_NOTICE =
@@ -30,7 +30,7 @@ export const RECEIPT_MISSING_NOTICE =
   "neither party can recreate one afterwards.";
 
 /**
- * The lead the seat shows when the appliance stopped answering about a run's
+ * The lead the seat shows when the console stopped answering about a run's
  * receipt. It states what happened to the asking rather than the receipt: an
  * unanswered ask never said whether this run has one.
  */
@@ -53,29 +53,28 @@ export const RECEIPT_UNANSWERED_NOTICE =
 /**
  * The dual-signed receipt a console server-job run produced, offered on every
  * console server-job seat (invite, accept, Direct, and strand recovery) whenever
- * the appliance holds one. Renders nothing for a run that signed nothing, so a
- * seat mounts it unconditionally and an ordinary run shows no trace of it.
+ * the console holds one. Renders nothing for a run that signed nothing, so a seat
+ * mounts it unconditionally and an ordinary run shows no trace of it.
  *
- * Deliberately NOT gated on the run having succeeded. The receipt is written once
- * the signature swap completes, independently of the local record build and of
- * the exit code, so a persistence-loss exit -- a completed exchange whose local
- * write failed -- is precisely the run whose receipt may be the only
- * third-party-verifiable artifact left. It is offered beside a failure exactly as
- * beside a completion, which is why it hangs off the appliance's answer rather
- * than off the success-gated run outputs.
+ * NOT gated on the run having succeeded: the receipt is written once the
+ * signature swap completes, independently of the local record build and the exit
+ * code, so a persistence-loss exit -- a completed exchange whose local write
+ * failed -- is precisely the run whose receipt may be the only
+ * third-party-verifiable artifact left. It hangs off the console's answer rather
+ * than off the success-gated run outputs, offered beside a failure exactly as
+ * beside a completion.
  *
- * It is gated on the run being SETTLED, which is a different claim: the file
- * appears at the signature swap, so an ask before the terminal would read a
- * receipt that has not been written yet as one the run does not have. By the time
- * a run has settled the file is written or it never will be, so one answered ask
- * settles it for good.
+ * Gated on the run being SETTLED, a different claim: the file appears at the
+ * signature swap, so an ask before the terminal would read a not-yet-written
+ * receipt as one the run does not have. By the time a run has settled the file
+ * is written or it never will be, so one answered ask decides it for good.
  *
- * A receipt the appliance says it does not hold is stated rather than omitted, so
- * an operator who authored a certificate-mode exchange is never left reading an
- * absent control as an absent feature. So is an appliance that stops answering
- * about the receipt: an ask that fails establishes neither that the receipt
- * exists nor that it does not, and a seat that rendered nothing for it would
- * hide a real receipt behind one failed request at the moment the run settled.
+ * A receipt the console says it does not hold is stated rather than omitted, so
+ * an operator who authored a certificate-mode exchange never reads an absent
+ * control as an absent feature. So is a console that stops answering about the
+ * receipt: a failed ask establishes neither existence nor absence, and rendering
+ * nothing for it would hide a real receipt behind one failed request at the
+ * moment the run settled.
  */
 export function ReceiptDownload({
   jobId,
@@ -83,7 +82,7 @@ export function ReceiptDownload({
 }: {
   jobId: string;
   /** Whether the run has reached a terminal state; while it is false the
-   * appliance is not asked at all. */
+   * console is not asked at all. */
   settled: boolean;
 }) {
   // The job the ask resolved for, rather than a bare offer: a seat handed a

@@ -6,7 +6,7 @@
  * Background: PeerJS interpolates the remote peer id into its warning-level logs
  * (e.g. `You received a malformed message from <peerId>`), and in this app those
  * ids are rendezvous addresses derived from the invitation secret -- the app
- * deliberately keeps them out of its default logs (see `psi/rendezvous.ts` and
+ * keeps them out of its default logs (see `psi/rendezvous.ts` and
  * `core/rendezvous.ts`). So raising PeerJS verbosity for diagnosis must not
  * reintroduce them. The split here is: {@link resolvePeerDebugLevel} decides
  * *when* verbosity is raised; {@link createRedactingLogFunction} decides *whether*
@@ -23,20 +23,13 @@ export const PEERJS_ERRORS_ONLY = 1;
 const PEERJS_ALL = 3;
 
 /**
- * Resolve the PeerJS `debug` level for a session. Off (no diagnostic toggle),
- * the configured base is used unchanged -- the errors-only default that keeps
- * PeerJS warnings, and thus the interpolated peer ids, suppressed. On, the level
- * is raised to PeerJS's most verbose so the protocol-anomaly paths that today
- * only log at warning level become visible; this is safe because every line then
- * routes through {@link createRedactingLogFunction}, which strips the ids.
- *
- * Never lowers below the configured base, so an operator who raised the base via
- * config does not lose verbosity when the toggle is off.
- *
- * A base outside PeerJS's valid 0-3 integer range falls back to errors-only: a
- * misconfigured `NaN` would otherwise reach PeerJS as `NaN || 0 === 0` and
- * silently disable all logging (including while diagnosing), and a negative or
- * fractional value undershoots the documented default.
+ * Resolve the PeerJS `debug` level for a session. When off, the configured
+ * base is used unchanged; when on, it is raised to PeerJS's most verbose
+ * level, safe only because {@link createRedactingLogFunction} strips ids
+ * from every line at that verbosity. Never lowers below the configured
+ * base. An out-of-range or non-integer base falls back to errors-only
+ * (guards a misconfigured `NaN`, which would otherwise silently disable all
+ * logging via `NaN || 0 === 0`).
  */
 export function resolvePeerDebugLevel(
   baseLevel: number,
@@ -70,7 +63,7 @@ function redactString(text: string, ids: ReadonlyArray<string>): string {
  * Redact sensitive ids out of one log argument, recursing into arrays and plain
  * objects so an id buried in a structured PeerJS message (e.g. the `message`
  * object some warnings log) is stripped too, not just top-level strings. Numbers,
- * booleans, null, and undefined cannot carry an id and pass through untouched.
+ * booleans, null, and undefined cannot hold an id and pass through untouched.
  * `seen` guards against a cyclic object spinning the recursion forever; the
  * caller passes a fresh set per top-level argument (see createRedactingLogFunction).
  */
@@ -80,11 +73,9 @@ function redactValue(
   seen: WeakSet<object>,
 ): unknown {
   if (typeof value === "string") return redactString(value, ids);
-  // Collapse an Error to "(Name) message" the way PeerJS's own default printer
-  // does, but redact the message first: the message can interpolate a peer id,
-  // and a raw Error object would otherwise slip that id past redaction. The
-  // `.cause` chain is dropped, matching PeerJS's printer -- an id in a cause is
-  // discarded with it, never printed.
+  // Collapse an Error to "(Name) message" like PeerJS's own printer, redacting
+  // the message first so no id survives in the collapsed string. The `.cause`
+  // chain is dropped, matching PeerJS's printer.
   if (value instanceof Error)
     return `(${value.name}) ${redactString(value.message, ids)}`;
   if (typeof value !== "object" || value === null) return value;
@@ -122,14 +113,13 @@ export function createRedactingLogFunction(
   sink: LogSink = console,
 ): (logLevel: number, ...rest: Array<unknown>) => void {
   return (logLevel, ...rest) => {
-    // A fresh cycle-guard per argument: one shared across sibling arguments would
-    // return the same object unredacted the second time it appeared (already in
-    // the set), so an id in a repeated argument would escape.
+    // Each log argument gets a fresh cycle-guard: reusing one across arguments
+    // would leave a repeated id unredacted after its first appearance.
     const redacted = rest.map((arg) => {
       try {
         return redactValue(arg, ids, new WeakSet<object>());
       } catch {
-        // A throwing getter or pathologically deep structure must never surface
+        // A throwing getter or pathologically deep structure must never expose
         // the raw (unredacted) argument or throw back into PeerJS's emit path;
         // drop to a placeholder instead. Fails closed, not open.
         return "[unredactable]";
@@ -146,27 +136,12 @@ export function createRedactingLogFunction(
 }
 
 /**
- * Redact the given `ids` out of an `Error`'s `message` and `stack`, in place,
- * returning the same value (non-`Error` inputs pass through untouched). Applied
- * at every seam where a PeerJS error crosses into app code -- the rendezvous
- * setup catch and the live data-connection's `onError` (see callers) -- because
- * PeerJS not only *prints* ids through its logger, it also *emits* them inside
- * the `Error` objects it raises on connection failure (e.g. `ID "<id>" is taken`,
- * a failed negotiation to a dialed id mid-exchange). Those errors propagate to
- * the app's own error sinks (a `console.error` of the raw object, the failure
- * alert), which the `logFunction` never sees. Redacting at the seam, before the
- * error is wrapped, also cleans the `.cause` the wrapper attaches.
- *
- * Mutating in place (rather than wrapping) preserves the error's identity and any
- * `type`/`kind` discriminant a caller's control flow keys off. If the in-place
- * assignment throws -- a frozen or read-only-`message` error, which is not what
- * PeerJS emits but could be a hostile or future shape -- it fails closed: a fresh
- * redacted error is returned rather than letting the throwing `TypeError`, which
- * re-embeds the unredacted message, escape.
- *
- * Redaction is exact-substring on the supplied ids: best-effort over the known
- * PeerJS error shapes, not a guarantee against an id interpolated in some other
- * form.
+ * Redact `ids` out of an `Error`'s `message` and `stack`, in place (non-`Error`
+ * inputs pass through). Call at each boundary where a PeerJS error reaches app
+ * code: PeerJS embeds ids directly in the `Error` objects it raises, not only
+ * in logger output. Mutates in place to preserve the error's identity and any
+ * `type`/`kind` discriminant; falls back to a fresh redacted error if the
+ * in-place assignment throws. Matching is exact-substring, best-effort only.
  */
 export function redactErrorIds(
   err: unknown,

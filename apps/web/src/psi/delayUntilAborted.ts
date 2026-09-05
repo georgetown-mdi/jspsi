@@ -2,10 +2,9 @@
  * Resolve after `ms`, or promptly when `signal` aborts, so a wait the caller has
  * stopped leaves no timer running behind it.
  *
- * Shared by the readers that ask the appliance about one job's artifacts
+ * Shared by the readers that ask the console about one job's artifacts
  * ({@link ./jobDiagnosticLog}, {@link ./jobReceipt}), which pace their bounded
- * re-asks with it: a second copy of an abort-aware timer is a second place for a
- * listener and a timeout to outlive the seat that started them.
+ * retries with it, so no listener or timeout outlives the caller that started it.
  */
 export function delayUntilAborted(
   ms: number,

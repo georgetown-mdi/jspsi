@@ -22,7 +22,7 @@ import type { LedgerOutcome, RailFact, RailStepState } from "./inviterModel";
 import type { AcceptableInvitation } from "@psi/acceptInvitation";
 
 /**
- * The pure model behind the acceptor bench's three-step spine: the step
+ * The pure model behind the acceptor console's three-step spine: the step
  * progression the top bar walks, the disclosure ledger built from the decoded
  * invitation's terms and the acceptor's own live metadata disclosure, the single
  * Customize fact, and the consent-gate helper the consent step submits through. No
@@ -36,13 +36,14 @@ import type { AcceptableInvitation } from "@psi/acceptInvitation";
  * `preparePayload` transmits), never by the inviter's authored request. The
  * inviter's `payload.receive` mirrors only to a data-dictionary CLAIM on the
  * acceptor's `payload.send`, which core holds equal to the disclosed set (or the
- * run aborts) -- so the disclosed metadata is the one honest source in every state.
- * Before a file exists there is no metadata, so the send rows use the invitation's
- * forward-reference wording (the exact set is confirmed after choosing a file),
- * matching {@link InvitationTerms}. Partner-controlled strings reach the ledger
- * through {@link summarizeInvitation}, the one sanitizing boundary; the acceptor's
- * own column names take the isolation the confirm-columns screen shows them with
- * ({@link isolatedColumnName}) rather than that escape.
+ * run aborts) -- so the disclosed metadata is the one accurate source in every
+ * state. Before a file exists there is no metadata, so the send rows use the
+ * invitation's forward-reference wording (the exact set is confirmed after
+ * choosing a file), matching {@link InvitationTerms}. Partner-controlled strings
+ * reach the ledger through {@link summarizeInvitation}, the one sanitizing
+ * boundary; the acceptor's own column names take the isolation the
+ * confirm-columns screen shows them with ({@link isolatedColumnName}) rather than
+ * that escape.
  */
 
 /** The acceptor's three spine steps, in order -- the steps the top bar walks. */
@@ -105,7 +106,7 @@ export function acceptorSpine(
 }
 
 /** The Customize group's single fact: a Cleaning tab whose value is the em-dash
- * placeholder until the columns step surfaces a reason to review cleaning
+ * placeholder until the columns step raises a reason to review cleaning
  * (silent-empty fields, dead keys, invalid steps), then an amber attention value
  * naming the count. Renders like the inviter's quiet facts. `attention` is the
  * derived fact string (undefined -> em-dash); its presence colors the row amber. */
@@ -147,7 +148,7 @@ export interface AcceptorLedgerRow {
   shareBar?: boolean;
 }
 
-/** The forward-reference wording the pre-file send rows carry, before any file is
+/** The forward-reference wording the pre-file send rows hold, before any file is
  * chosen and so before any metadata exists: the exact send set is not yet known,
  * so the row points ahead to the confirm-columns step rather than overclaiming a
  * count. Mirrors {@link InvitationTerms}'s pre-file outbound forward-reference. */
@@ -155,14 +156,13 @@ export const ACCEPTOR_SEND_FORWARD_REFERENCE =
   "Confirmed after you choose your file";
 
 /** The acceptor's outbound send row, keyed to the ledger's tense. `disclosure` is
- * the acceptor's OWN live disclosed column names ({@link disclosedColumnNames} over
- * its metadata) once a file exists -- the exact set core transmits -- each isolated
- * rather than escaped by {@link isolatedColumnName}: this row names the same set the
- * confirm-columns step's panel does, beside it on the one screen where the operator
- * decides what leaves the machine, so a header that read two ways across the two
- * would be a disagreement about exactly that. Undefined before a file is chosen (no
- * metadata yet), where the row carries the invitation's forward-reference rather
- * than a claim it cannot yet make. */
+ * the acceptor's OWN live disclosed column names ({@link disclosedColumnNames}
+ * over its metadata) once a file exists -- the exact set core transmits -- each
+ * isolated rather than escaped by {@link isolatedColumnName}: this row names the
+ * same set the confirm-columns step's panel does, beside it on the one screen
+ * where the operator decides what leaves the machine. Undefined before a file is
+ * chosen (no metadata yet), where the row holds the invitation's forward-reference
+ * rather than a claim it cannot yet make. */
 function acceptorSendRow(
   label: string,
   disclosure: ReadonlyArray<string> | undefined,
@@ -209,7 +209,7 @@ export function acceptorLedgerTag(invitingParty: string): string {
  * exactly what core transmits, so the ledger cannot overclaim. Undefined on the
  * review/consent steps (no file yet), where the send row forward-references the
  * confirm-columns step. The proposal's non-send rows are read-only here, so they never
- * carry a spine-step reference.
+ * hold a spine-step reference.
  */
 export function acceptorLedgerRows(
   token: InvitationToken,
@@ -218,7 +218,7 @@ export function acceptorLedgerRows(
 ): Array<AcceptorLedgerRow> {
   const summary = summarizeInvitation(token);
   // What the acceptor receives for matched records is the inviter's send set
-  // (summary.payload.send), which derives from the carried disclosedPayloadColumns.
+  // (summary.payload.send), which derives from disclosedPayloadColumns on the token.
   const received = summary.payload?.send ?? [];
   const disclosure =
     metadata === undefined ? undefined : disclosedColumnNames(metadata);
@@ -261,7 +261,7 @@ export function acceptorLedgerRows(
 
 /** The invitation heading names the partner: the same sanitized identity the
  * ledger tag uses, so the two surfaces cannot disagree. An invitation whose terms
- * carry no identity reads as the absence marker rather than as a blank heading --
+ * hold no identity displays as the absence marker rather than as a blank heading --
  * the inviter named nobody, which is a fact the acceptor is consenting under. */
 export function invitingPartyName(token: InvitationToken): string {
   return displayPartyIdentity(token.linkageTerms.identity);
@@ -273,16 +273,16 @@ export const ACCEPTOR_DONE_LEDGER_FOOTER =
   "Your file never left this browser. The results above are all your partner " +
   "received about your data.";
 
-/** The completion trust line for a console file-drop accept, which runs on the
- * appliance (the CLI reads the mounted CSV, never the browser): the
- * "never left this browser" claim would be false, so it is dropped and only the
- * honest statement about what the partner received is kept. */
+/** The completion trust line for a console file-drop accept: the CLI reads the
+ * mounted CSV, never the browser, so the "never left this browser" claim would
+ * be false and is dropped, leaving only the accurate statement about what the
+ * partner received. */
 export const ACCEPTOR_DONE_SERVER_JOB_LEDGER_FOOTER =
   "The results above are all your partner received about your data.";
 
 /** The completion trust line under the settled ledger, chosen by how the accept ran:
  * a server-job (console file-drop) accept drops the "never left this browser" claim
- * the appliance cannot make, mirroring the inviter's server-job footer. */
+ * the console cannot make, mirroring the inviter's server-job footer. */
 export function acceptorDoneLedgerFooter(serverJob: boolean): string {
   return serverJob
     ? ACCEPTOR_DONE_SERVER_JOB_LEDGER_FOOTER
@@ -382,7 +382,7 @@ export const ACCEPTOR_NAME_CONTROL_CHAR_PROBLEM =
  * would attribute to the invitation or the file.
  *
  * Read on the TRIMMED name, which is what the gate commits and what core sees. An
- * empty name is deliberately not reported here: that is the consent gate's own
+ * empty name is not reported here: that is the consent gate's own
  * refusal, raised at submit rather than at an operator who has not finished
  * typing.
  */
@@ -393,7 +393,7 @@ export function acceptorNameProblem(name: string): string | undefined {
 }
 
 /** The consent-step legal-agreement display: the three sanitized values plus
- * whether sanitization changed how any of them reads. */
+ * whether sanitization changed how any of them displays. */
 export interface AcceptorLegalAgreementDisplay {
   /** Agreement identifier, sanitized for display. */
   reference: string;
@@ -402,7 +402,7 @@ export interface AcceptorLegalAgreementDisplay {
   /** Expiration date (ISO 8601, YYYY-MM-DD), sanitized for display. */
   expirationDate: string;
   /**
-   * True when the display does not read exactly as the authored value:
+   * True when the displayed value does not match the authored value exactly:
    * sanitizeForDisplay escaped a code point outside plain ASCII or truncated a
    * long value in at least one of the three fields. The consent step then adds
    * a caveat so "check these against your signed agreement" does not overclaim
@@ -438,45 +438,41 @@ export function acceptorLegalAgreementDisplay(
   };
 }
 
-/** The connection endpoint an accepted invitation carries, narrowed from the token
+/** The connection endpoint an accepted invitation holds, narrowed from the token
  * by {@link prepareAcceptedInvitation}: a WebRTC signaling endpoint, or a file-drop
  * or SFTP endpoint on a console build. */
 type AcceptEndpoint = AcceptableInvitation["endpoint"];
 
-/** The honest title for a console accept whose endpoint the appliance cannot run,
+/** The accurate title for a console accept whose endpoint the console cannot run,
  * pointing the operator at where it CAN run. */
 export const ACCEPT_UNSUPPORTED_TITLE = "This console cannot run this exchange";
 
-/** The honest unsupported-accept copy for a console build, deciding runnability by
+/** The accurate unsupported-accept copy for a console build, deciding runnability by
  * the endpoint's SHAPE rather than a channel kill-switch: a WebRTC accept has no
- * in-tab exchange on the appliance (WebRTC is the public web app's domain); a
+ * in-tab exchange on the console (WebRTC is the public web app's domain); a
  * split-directory SFTP accept needs the command-line tool; and a file-drop accept
- * needs the appliance's own mounts to be the shape the invitation names. */
+ * needs the console's own mounts to be the shape the invitation names. */
 export interface AcceptUnsupported {
   title: string;
   message: string;
 }
 
-/** Whether a file-drop endpoint carries the split inbound/outbound pair rather than
- * a single shared directory. Read as the endpoint's SHAPE, which the appliance's own
- * provisioning has to match: unlike SFTP's remote directories, a file-drop accept
- * takes its directories from the appliance's mounts rather than from the partner's
- * endpoint, and those mounts are already oriented from THIS party's side -- so a
- * split accept needs no mirror swap here, only two mounts to run over.
+/** Whether a file-drop endpoint holds the split inbound/outbound pair rather than
+ * a single shared directory, matched against the console's own provisioning. A
+ * file-drop accept takes its directories from the console's mounts, already
+ * oriented from THIS party's side, never from the partner's endpoint locator --
+ * so a split accept needs no mirror swap, only two mounts to run over.
  *
- * Keyed on the pair alone, so an endpoint naming no directory at all reads as the
- * single-shared-folder shape and is admitted against a one-mount appliance. That is
- * the honest reading here rather than a gap: a console file-drop accept runs over
- * this appliance's own mounts and never over the locator the endpoint carries, so
- * the only thing the locator decides is which SHAPE the two sides agreed on, and no
- * named pair is a shared folder. */
+ * An endpoint naming no directory at all is treated as the single-shared-folder
+ * shape and is admitted against a one-mount console: the locator only decides
+ * which SHAPE the two sides agreed on, and no named pair is a shared folder. */
 function isSplitDirectoryFiledrop(endpoint: AcceptEndpoint): boolean {
   return endpoint.channel === "filedrop" && endpoint.inboundPath !== undefined;
 }
 
 /**
- * The appliance's rendezvous provisioning, as the accept gate reads it: whether a
- * mount resolves at all, whether it is a split pair, and the appliance's own reason
+ * The console's rendezvous provisioning, as the accept gate reads it: whether a
+ * mount resolves at all, whether it is a split pair, and the console's own reason
  * when a filedrop exchange cannot run as provisioned. The shape the browser client
  * reports, narrowed to what this decision needs.
  */
@@ -486,7 +482,7 @@ export interface AcceptRendezvous {
   problem?: string;
 }
 
-/** Whether an SFTP endpoint carries the inbound/outbound split the console does not
+/** Whether an SFTP endpoint holds the inbound/outbound split the console does not
  * ACCEPT. The console authors a split of its own -- the operator names both
  * directories -- but an accept takes its directories from the partner's endpoint,
  * which states the pair from the INVITER's side and so has to be mirror-swapped;
@@ -498,21 +494,18 @@ function isSplitDirectorySftp(endpoint: AcceptEndpoint): boolean {
 }
 
 /**
- * The unsupported-accept state for a console build, or undefined when the appliance
+ * The unsupported-accept state for a console build, or undefined when the console
  * can run the accepted endpoint. Determined by the endpoint SHAPE and the
- * appliance's own rendezvous provisioning, not a static kill-switch: a runnable
+ * console's own rendezvous provisioning, not a static kill-switch: a runnable
  * console accept is a file-drop whose shape MATCHES the mounts (a single shared
- * directory against one mount, the inbound/outbound pair against a split pair), or a
- * single-directory SFTP endpoint (the operator authors the connection to the
- * partner-named server before launch). The caller consults this only on a console
- * build; off the console every admitted endpoint runs in the browser.
+ * directory against one mount, the inbound/outbound pair against a split pair),
+ * or a single-directory SFTP endpoint. The caller consults this only on a
+ * console build; off the console every admitted endpoint runs in the browser.
  *
- * The shapes have to match in both directions, because the file-handling regimes do:
- * a split appliance cannot run a single shared directory (it has no one folder to
- * meet in), and a single-mount appliance cannot run a split rendezvous (it has no
- * second folder to write into). Either mismatch names the mount to add or the
- * invitation to ask for instead, rather than leaving the operator at a run that
- * stops when the two sides meet.
+ * The shapes have to match in both directions: a split console cannot run a
+ * single shared directory (no one folder to meet in), and a single-mount console
+ * cannot run a split rendezvous (no second folder to write into). Either
+ * mismatch names the mount to add or the invitation to ask for instead.
  */
 export function acceptUnsupported(
   endpoint: AcceptEndpoint,
@@ -557,7 +550,7 @@ export function acceptUnsupported(
   if (!rendezvous.configured)
     return {
       title: ACCEPT_UNSUPPORTED_TITLE,
-      // The appliance's own reason wins where it has one: a pair of mounts the
+      // The console's own reason wins where it has one: a pair of mounts the
       // console refuses reports itself unconfigured, and the generic
       // set-JOB_RENDEZVOUS_DIR sentence would send an operator who already
       // mounted two folders to add a third.
@@ -593,7 +586,7 @@ export function acceptUnsupported(
   return undefined;
 }
 
-/** Whether a console accept runs as a server job on the appliance: a console build
+/** Whether a console accept runs as a server job: a console build
  * accepting a file-drop endpoint (against the mounted shared directory) or an SFTP
  * endpoint (against the operator-authored server) runs the exchange through the
  * command-line tool, not in the browser. Every other admitted accept runs the live
@@ -611,7 +604,7 @@ export function acceptorRunsAsServerJob(
 }
 
 /** The ledger's "How it runs" phrasing for an accepted endpoint. A console
- * single-directory file-drop accept runs on the appliance against the shared
+ * single-directory file-drop accept runs on the console against the shared
  * directory, and a console SFTP accept against the partner-named server (both the
  * command-line tool), not in the browser; every other admitted accept runs the live
  * exchange in this browser. */

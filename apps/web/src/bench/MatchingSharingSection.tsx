@@ -30,16 +30,16 @@ const SEMANTIC_TYPES = Object.keys(SEMANTIC_TYPE_LABELS) as Array<SemanticType>;
  * `announcement`.
  *
  * The grid's row headers and its two control labels, the chip list, the summary
- * its live region speaks, and the demotion `announcement` its caller composes
- * carry the operator's own CSV headers through {@link ColumnName} /
- * {@link isolatedColumnName}, the treatment the ledger's send row beside it and
- * the acceptor's confirm-columns grid show the same names with, so a header
- * cannot read one way where its disclosure is set and another in the chips, the
- * sentence, the notice, or the rail. That module carries what the isolation does
- * and does not contain: a sink here that puts literal copy in one text block with
- * the names -- the notice's separators and its trailing sentence, the summary the
- * live region speaks -- is of the shape the residual reaches, and the notice is
- * the one driven in test/browser/benchInviterSharing.test.ts.
+ * its live region speaks, and the demotion `announcement` its caller composes all
+ * pass the operator's own CSV headers through {@link ColumnName} /
+ * {@link isolatedColumnName} -- the same treatment the ledger's send row and the
+ * acceptor's confirm-columns grid use -- so a header cannot read one way where its
+ * disclosure is set and another in the chips, the sentence, the notice, or the
+ * rail. That module documents what the isolation does and does not cover: a sink
+ * here that puts literal copy in one text block with the names -- the notice's
+ * separators and its trailing sentence, the summary the live region speaks -- is
+ * where the residual lands, and the notice is driven in
+ * test/browser/benchInviterSharing.test.ts.
  */
 export function MatchingSharingSection({
   metadata,
@@ -78,9 +78,9 @@ export function MatchingSharingSection({
     return () => clearTimeout(handle);
   }, [summary]);
 
-  // The two-identifier conflict's visible surfaces are the standing hint and
-  // the work column's Problems entry, per the design; this deferred region is
-  // its audible half, voiced even when a seed mounts already in conflict.
+  // The two-identifier conflict's visible surfaces are the standing hint and the
+  // work column's Problems entry; this deferred region is its audible half, voiced
+  // even when a seed mounts already in conflict.
   const conflictAnnouncement = useDeferredAnnouncement(
     hasMultipleIdentifiers(metadata)
       ? "Problem: choose a single record identifier."

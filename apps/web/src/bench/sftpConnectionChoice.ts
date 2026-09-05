@@ -6,25 +6,20 @@ import type { SftpConnectionProjection } from "@jobs/jobManager";
 /**
  * The pure model behind the console SFTP card: on a console build, the operator
  * authors the connection in-console, and the invitation's sftp endpoint is
- * derived from its locator fields at the same mint seam the save surface's
+ * derived from its locator fields at the same mint boundary the save surface's
  * authored fields feed (generateInvitation's `connectionEndpoint`). No React,
- * no I/O -- the tested boundary for "the code points where the appliance will
+ * no I/O -- the tested boundary for "the code points where the console will
  * actually connect".
  */
 
 /**
- * The invitation endpoint for the authored SFTP connection: its locator
- * fields verbatim -- host, optional port, and whichever remote-directory form
- * the connection carries (the shared `path`, or the split
- * `inboundPath`/`outboundPath` pair) -- mirroring how the save surface's
- * `endpointRequestFor` maps its authored fields. No credential can appear: the
- * projection carries none by construction and {@link SFTPEndpoint} admits none.
+ * The invitation endpoint for the authored SFTP connection, mirroring how the
+ * save surface's `endpointRequestFor` maps the same fields. No credential can
+ * appear: {@link SFTPEndpoint} admits none.
  *
- * The split pair is carried as THIS party authored it, not mirrored: an
- * {@link SFTPEndpoint}'s pair is defined from the inviter's side, and the swap
- * that makes the acceptor read where the inviter writes belongs to the single
- * consumer that builds a connection from an endpoint. Emitting the pair mirrored
- * here would apply that swap twice.
+ * The split pair is kept as this party authored it, NOT mirrored -- the
+ * inviter/acceptor swap belongs to the single consumer that builds a
+ * connection from an endpoint; mirroring here would apply it twice.
  */
 export function sftpEndpointForConnection(
   connection: SftpConnectionProjection,
@@ -45,16 +40,13 @@ export function sftpEndpointForConnection(
 }
 
 /**
- * Why the authored connection cannot be used with the exchange's file-handling
- * choices as they stand right now -- a split-directory connection needs retain
- * mode -- or undefined when the two agree.
+ * Why the authored connection cannot run with the exchange's current
+ * file-handling choice -- a split-directory connection needs retain mode --
+ * or undefined when the two agree.
  *
- * The connection and the retain choice are authored on separate cards and change
- * independently, so the precondition the authoring form states while both are in
- * front of the operator is re-asked wherever the two are known together. Without
- * that, retain mode turned off after the connection was authored reaches the run
- * as a refused job, and on the invite path only after a partner-facing accept kit
- * was already minted for a rendezvous the run will not conduct.
+ * The connection and the retain choice are authored on separate cards and
+ * change independently, so this precondition is re-checked wherever both are
+ * known together.
  */
 export function splitDirectoryRetainProblem(
   connection: SftpConnectionProjection | null | undefined,

@@ -51,12 +51,11 @@ function draftSummary(draft: ExchangeFilesDraft): string {
  * The console's "How files are handled" card: retain mode and the file-sync
  * toggles that travel with it, for an SFTP or shared-directory exchange. Offered
  * as a closed disclosure, since the defaults are right for a first run and these
- * are the settings an operator reaches for deliberately -- for a durable
- * transcript, or for a synced folder whose behaviour needs the lockless
- * rendezvous.
+ * are the settings an operator reaches for in a specific situation -- a durable
+ * transcript, or a synced folder whose behaviour needs the lockless rendezvous.
  *
- * Two properties are load-bearing and belong to {@link exchangeFilesModel}, not
- * to this component: retain mode's implications are resolved by core (so the card
+ * Two behaviors belong to {@link exchangeFilesModel}, not to this component:
+ * retain mode's implications are resolved by core (so the card
  * states no rule of its own), and an inadmissible combination is reported in
  * core's own words as a form problem, before the run, rather than as a failed
  * job. The card renders the retain-mode bilateral notice the moment retain is
@@ -71,7 +70,7 @@ export function ExchangeFilesCard({
   onChange,
 }: {
   draft: ExchangeFilesDraft;
-  /** Which controls this flow can carry; a flow that composes no configuration
+  /** Which controls this flow supports; a flow that composes no configuration
    * document omits the unexpected-files control rather than accepting a value it
    * would drop. */
   capabilities: ExchangeFilesCapabilities;

@@ -52,12 +52,11 @@ export function isAdmissibleInputName(name: string): boolean {
  * Whether `name` is an admissible mount-browse segment: the shared single-segment
  * shape ({@link hasAdmissibleSegmentShape}) with NO leading-dot ban, so a
  * dot-prefixed directory or file (`.ssh`, `.ssh/id_ed25519`) is navigable -- SSH
- * key material lives under such names. It keeps every other check
- * {@link isAdmissibleInputName} applies (separators, `.`/`..`, control
- * characters, length), differing from it only on the leading dot. Every returned
- * listing entry passes this rule, so each is itself a valid next segment; a name
- * is never trusted from the shape alone -- {@link ./mountBrowse} re-resolves it
- * under the server-anchored mount root and re-confines the realpath.
+ * key material lives under such names. Differs from {@link isAdmissibleInputName}
+ * only on the leading dot; every returned listing entry passes this rule, so
+ * each is itself a valid next segment. A name is never trusted from the shape
+ * alone -- {@link ./mountBrowse} re-resolves it under the server-anchored mount
+ * root and re-confines the realpath.
  */
 export function browseSegment(name: string): boolean {
   return hasAdmissibleSegmentShape(name);

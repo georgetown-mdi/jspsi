@@ -6,11 +6,10 @@
  *
  * Every fact here comes from the run's exchange record and nothing else (see
  * docs/spec/EXCHANGE_RECORD.md): the accounting presents that record, it does not
- * summarize or re-derive it. One consequence is worth stating, because it is what
- * an auditor reads: a fact the record does not carry is shown as not recorded,
- * never inferred. The result size is the standing example -- the record omits it
- * unless both parties' agreed terms had them both receive output, so an entry that
- * does not carry one says so rather than substituting a number from elsewhere.
+ * summarize or re-derive it. A fact the record does not have is shown as not
+ * recorded, never inferred. The result size is the standing example -- the record
+ * omits it unless both parties' agreed terms had them both receive output, so an
+ * entry with none says so rather than substituting a number from elsewhere.
  *
  * A record stores partner-authored free text byte-exactly (the partner identity,
  * the agreement reference and purpose, the payload column names and their
@@ -47,16 +46,14 @@ import type {
 } from "@psi/disclosureAccounting";
 
 /**
- * One fact of one disclosure: its first-party label, the display values it carries
- * (several, for a category list), and the named empty state shown when it carries
- * none. `muted` is always populated, so a fact never renders -- or exports -- as a
- * blank cell whose meaning the reader has to guess.
+ * One fact of one disclosure: its label, the display values it holds (several,
+ * for a category list), and the named empty state shown when it has none. `muted`
+ * is always populated, so a fact never renders -- or exports -- as a blank cell.
  *
- * `note` is fixed first-party copy qualifying what the values assert, carried by a
- * fact whose label alone would overstate them. It travels with the fact rather
- * than living in the renderer so the screen and the export state one qualification
- * rather than two, and it is attached only where values stand: a fact showing its
- * named empty state has no assertion to qualify.
+ * `note` is fixed first-party copy qualifying what the values assert. It travels
+ * with the fact rather than living in the renderer so the screen and the export
+ * state one qualification, and it is attached only where values stand: a fact
+ * showing its named empty state has no assertion to qualify.
  */
 export interface DisclosureFact {
   label: string;
@@ -69,7 +66,7 @@ export interface DisclosureFact {
 export interface DisclosureEntryView {
   /** The run's own instant, verbatim from the record's `createdAt`: the ISO-8601
    * value, not the minute-resolution {@link when} the screen shows and the export's
-   * first column carries. Not the entry's identity either -- {@link bindingNonce}
+   * first column holds. Not the entry's identity either -- {@link bindingNonce}
    * is, since two runs can share a millisecond instant. */
   at: string;
   /** The record's own per-run identity (see `appendDisclosureRecord` in
@@ -114,7 +111,7 @@ export const DISCLOSURE_FACT_LABELS: ReadonlyArray<string> = [
   "Where the result was filed",
 ];
 
-/** The named empty state for a field the record does not carry. */
+/** The named empty state for a field the record does not have. */
 const NOT_RECORDED = "Not recorded";
 
 /** The named empty state for a direction that disclosed no payload columns -- none
@@ -122,14 +119,14 @@ const NOT_RECORDED = "Not recorded";
  * rather than by omission, and so does this. */
 const NO_COLUMNS = "No columns";
 
-/** The named empty state for a result size the record does not carry: it is
+/** The named empty state for a result size the record does not have: it is
  * recorded only when both parties' agreed terms had them both receive output (see
  * docs/spec/EXCHANGE_RECORD.md), so its absence is a statement about entitlement,
  * not a missing number. */
 const RESULT_SIZE_ABSENT = "Not recorded - only one party received the result";
 
 /** The label of the rule-set citation, named because both branches of the fact
- * below carry it. It is held to {@link DISCLOSURE_FACT_LABELS} by the same unit
+ * below have it. It is held to {@link DISCLOSURE_FACT_LABELS} by the same unit
  * test that pins every other fact's label against the export's columns. */
 const RULE_SET_LABEL = "Rule set cited";
 
@@ -157,12 +154,12 @@ const ALGORITHM_DISCLOSURE: Record<Algorithm, Displayable> = {
   "psi-c": displayText`How many records you both hold - a count only, no identifiers`,
 };
 
-/** A fact carrying exactly one value the record always has. */
+/** A fact holding exactly one value the record always has. */
 function fact(label: string, value: Displayable): DisclosureFact {
   return { label, values: [value], muted: NOT_RECORDED };
 }
 
-/** A fact carrying a list of values, with its own named empty state. */
+/** A fact holding a list of values, with its own named empty state. */
 function listFact(
   label: string,
   values: ReadonlyArray<Displayable>,
@@ -171,7 +168,7 @@ function listFact(
   return { label, values, muted };
 }
 
-/** A fact carrying a value the record may omit, with its own named empty state. */
+/** A fact holding a value the record may omit, with its own named empty state. */
 function optionalFact(
   label: string,
   value: Displayable | undefined,
@@ -195,20 +192,12 @@ function categoryLabel(column: {
 
 /**
  * One cited half of a rule set -- the set name beside that half's content
- * version -- as one display value, composed through core's terms-value seam
- * ({@link ruleSetCitation}) over the two values this sink has escaped.
+ * version -- composed through core's terms-value boundary ({@link ruleSetCitation}).
  *
- * The seam's brand claims delimiting and control-character treatment, not
- * escaping, so its result is not a {@link Displayable} on its own and the
- * assertion below is what carries it into a fact. What makes the assertion true
- * is that this function escapes both values itself and takes the raw pair to do
- * it: every byte of the result is either a byte of a {@link sanitizeForDisplay}
- * output or one of the printable-ASCII delimiters and the single space the seam
- * composes with, so no value reaches a fact unescaped and no second pass is owed
- * -- which is also why the escape cannot be lifted to the caller, where a value
- * could arrive already branded and skip it. It is total, so there is no entry
- * point through which an unescaped value could reach the assertion; the unit
- * suite drives a crafted name and an out-of-shape version through it.
+ * The boundary brands delimiting and control-character treatment, not escaping, so
+ * its result is not a {@link Displayable} on its own; the cast below holds only
+ * because this function escapes both values itself and takes the raw pair to do
+ * it, so no value reaches a fact unescaped.
  */
 function citedSetIdentity(setIdentity: {
   name: string;
@@ -221,37 +210,20 @@ function citedSetIdentity(setIdentity: {
 }
 
 /**
- * The rule-set citation as its two cited halves, keys before fields -- the
- * specific artifact before the substrate it is built from, the order core's own
- * rule-set mismatch message and the acceptance surfaces both present them in.
+ * The rule-set citation as its two cited halves, keys before fields -- the order
+ * core's own mismatch message and the acceptance surfaces use -- each rendered
+ * through core's terms-value boundary ({@link ruleSetCitation}).
  *
- * Each half renders through core's terms-value seam ({@link ruleSetCitation}),
- * the grammar the two consent surfaces and core's own mismatch message render
- * this pair with: the set name as one delimited run whose delimiter is doubled
- * inside it, the content version through the checked bare form with that run as
- * its fallback. A name is free text of the authoring party's choosing, so it may
- * carry a space that would otherwise blur into the version beside it, or a
- * delimiter and a version-shaped token that would spell a citation of some other
- * set at some other version; inside a run, what it spells is content of one
- * value rather than structure this line asserted. The half's name leads the line
- * as this app's own chrome, outside the run, so a crafted value cannot occupy
- * it.
+ * The record stores both values raw, so unlike the consent surfaces (escaped
+ * from `summarizeInvitation`), this is where they cross the display boundary:
+ * each value is escaped ahead of the delimiters, so a value's own truncation
+ * cannot take the closing delimiter off the composed run.
  *
- * The record stores both values raw -- byte-exact is what its cross-party
- * validation needs -- so unlike the consent surfaces, whose values arrive
- * escaped from `summarizeInvitation`, this sink is where they cross the display
- * boundary. The escape runs per value, ahead of the delimiters, for the reason
- * the consent screen gives: it bounds and rewrites each value on its own, so its
- * truncation cannot take the closing delimiter off a composed run. The two
- * compose in that order -- the seam emits only printable ASCII, which the escape
- * leaves alone -- so neither doubles the other's work.
- *
- * The caveat beneath them is core's ({@link RECORDED_LINKAGE_RULE_SET_CAVEAT}),
- * beside the per-verdict copy the consent surfaces render, so what the accounting
- * says a citation is worth cannot drift from what they say. It points at the
- * writing party's verdict in the record rather than restating its value: the
- * accounting presents the citation, not the verdict (see
- * docs/spec/EXCHANGE_RECORD.md, "The writing party's verdict").
+ * The caveat below is core's ({@link RECORDED_LINKAGE_RULE_SET_CAVEAT}), matching
+ * the per-verdict copy the consent surfaces render, so what the accounting says a
+ * citation is worth cannot drift from what they say -- it points at the writing
+ * party's verdict rather than restating it (see docs/spec/EXCHANGE_RECORD.md,
+ * "The writing party's verdict").
  */
 function ruleSetFact(
   ruleSet: RecordLinkageRuleSet | undefined,
@@ -357,24 +329,19 @@ export function disclosureEntries(
     .reverse();
 }
 
-/** The characters a spreadsheet reads as the start of a formula rather than as
+/** The characters a spreadsheet treats as the start of a formula rather than as
  * text. A cell beginning with one is prefixed with an apostrophe below, so an
  * exported accounting cannot execute in the reader's spreadsheet on values the
- * partner chose (the agreement purpose and the column names are theirs). The tab
- * and carriage-return leads of this class do not reach here: the display boundary
- * escapes every non-printable-ASCII code point first, which
- * disclosureAccountingModel.test.ts drives on a tab-led and a return-led value, so
- * only the printable leads remain. */
+ * partner chose. The display boundary escapes every non-printable-ASCII code
+ * point first, so only these printable leads ever reach this check. */
 const FORMULA_LEAD = /^[=+\-@]/;
 
 /**
  * One CSV cell, per RFC 4180: always quoted, with an embedded quote doubled.
- * Quoting unconditionally is also what lets a multi-value cell separate its values
- * with a newline: a display value can never contain one itself, because the
- * display boundary escapes every non-printable-ASCII code point, so a newline
- * inside a quoted cell is unambiguously the separator rather than a value's own
- * byte. A separator character that a value CAN carry -- a semicolon, a pipe --
- * would not have that property.
+ * Quoting unconditionally also lets a multi-value cell separate its values with a
+ * newline: a display value can never contain one itself, since the display
+ * boundary escapes every non-printable-ASCII code point, so a newline inside a
+ * quoted cell is unambiguously the separator, never a value's own byte.
  */
 function csvCell(value: string): string {
   const guarded = FORMULA_LEAD.test(value) ? `'${value}` : value;
@@ -399,7 +366,7 @@ function factCell(entry: DisclosureFact): string {
  * The accounting as CSV -- the form a compliance reader is handed: a header row,
  * then one row per filed run in run order (oldest first, as a disclosure log
  * reads), each row the run instant followed by that run's facts. The values are
- * the display forms, so what the file carries is what the screen showed.
+ * the display forms, so what the file holds is what the screen showed.
  *
  * An accounting with no entries still exports its header row: "this copy of the
  * accounting holds nothing" is a meaningful answer, and a zero-byte file is not.
@@ -435,17 +402,13 @@ export const DISCLOSURE_STORED_EXPORT_MIME = "application/json";
  * The stored accounting as the file an operator recovers it into: the envelope
  * and its entries, serialized as they sit at rest.
  *
- * This is the ONE export shape for an accounting this build's exchange-record
- * format can no longer read, and it is deliberately not a reading of the entries.
- * The CSV above reads each record's fields and names what a fact's absence means,
- * which is exactly what an entry written under an earlier record version does not
- * license: the version literal moves with the field set, so an earlier record's
- * silence is not what the current format's silence means (see
- * docs/spec/EXCHANGE_RECORD.md). Handing over the stored form asserts nothing
- * about the entries; rendering them would assert the current format's meaning.
+ * The ONE export for an accounting this build's exchange-record format can no
+ * longer read: an earlier record's silence does not mean what the current
+ * format's silence means (see docs/spec/EXCHANGE_RECORD.md), so handing over the
+ * stored form asserts nothing about the entries, unlike rendering them.
  *
- * Pretty-printed with a trailing newline: the file is an archival artifact a
- * person may open, and the bytes carry no other framing to read it by.
+ * Pretty-printed with a trailing newline, since the file is an archival artifact
+ * a person may open.
  */
 export function storedDisclosureAccountingDocument(
   stored: StoredDisclosureAccounting,

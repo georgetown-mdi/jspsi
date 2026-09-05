@@ -18,13 +18,13 @@ import type {
  * -- while a round masks, instead of freezing for the round's duration (the browser
  * analogue of the CLI's `worker_threads` offload).
  *
- * This is the BROWSER SPAWN ADAPTER for the runtime-agnostic PSI worker seam in
+ * This is the BROWSER SPAWN ADAPTER for the runtime-agnostic PSI worker boundary in
  * `@psilink/core`: core's {@link WorkerPsiEngine} turns each crypto call into a
  * request/response round trip with a worker reached through a {@link PsiWorkerHandle},
  * and core's `servePsiWorker` runs the crypto on the worker side. This module wires
- * a Web Worker into that seam (the CLI wires a `worker_threads` worker into the same
- * seam); {@link psiCrypto.worker} is the worker entry. Only raw bytes, value lists,
- * and index lists cross the boundary -- never a live library handle, and never the
+ * a Web Worker into that boundary (the CLI wires a `worker_threads` worker into the same
+ * boundary); {@link psiCrypto.worker} is the worker entry. Only raw bytes, value lists,
+ * and index lists cross it -- never a live library handle, and never the
  * secret key, which `servePsiWorker` generates and keeps inside the worker.
  *
  * Kept Node-loadable (it never references the real `Worker` constructor -- that lives
@@ -35,7 +35,7 @@ import type {
 /** The slice of the dedicated-`Worker` API the host side drives. The real `Worker`
  * is adapted to it in {@link ./psiCryptoWorkerClient}; a unit test supplies a fake.
  * `onmessage` receives the worker's {@link PsiWorkerResponse} replies; `onerror` and
- * `onmessageerror` surface a worker-level fault (see {@link createPsiCryptoWorkerHandle}). */
+ * `onmessageerror` report a worker-level fault (see {@link createPsiCryptoWorkerHandle}). */
 export interface PsiCryptoWorker {
   postMessage: (message: PsiWorkerRequest) => void;
   onmessage: ((event: { data: PsiWorkerResponse }) => void) | null;
@@ -47,7 +47,7 @@ export interface PsiCryptoWorker {
 /** Spawns a fresh PSI-crypto worker seeded with `init` (its role and id). The seed
  * is passed at construction -- through the Worker's `name`, the browser analogue of
  * the CLI worker's `workerData` (see {@link encodePsiWorkerInit}) -- so the worker's
- * message channel carries only crypto requests. Injected so this module never
+ * message channel sends only crypto requests. Injected so this module never
  * references the real `Worker` constructor directly (keeping it Node-loadable and the
  * dispatch unit-testable); the browser default is {@link ./psiCryptoWorkerClient}. */
 export type SpawnPsiCryptoWorker = (init: PsiWorkerInit) => PsiCryptoWorker;
@@ -57,7 +57,7 @@ export type SpawnPsiCryptoWorker = (init: PsiWorkerInit) => PsiCryptoWorker;
  * A Web Worker has no `workerData` channel like `worker_threads`, so the seed rides
  * `name` (a string set at construction and readable synchronously as `self.name` at
  * worker startup), which is the browser analogue of the CLI worker's `workerData`:
- * available before the first message, so the worker's message channel carries only
+ * available before the first message, so the worker's message channel sends only
  * crypto requests. Paired with {@link decodePsiWorkerInit}, the worker's side.
  */
 export function encodePsiWorkerInit(init: PsiWorkerInit): string {
@@ -122,7 +122,7 @@ export function createBufferingRequestRouter(
  * Wrap a Web Worker as the runtime-agnostic {@link PsiWorkerHandle} a
  * {@link WorkerPsiEngine} drives: post a request, route replies and faults, and
  * terminate. This is the browser counterpart of the CLI's `createWorkerThreadHandle`,
- * and it is deliberately the SINGLE definition of the host-side event wiring --
+ * and it is the SINGLE definition of the host-side event wiring --
  * production spawns a real Worker through it and the unit tests wrap a fake through it,
  * so neither re-implements a mirror that can drift.
  *
@@ -134,7 +134,7 @@ export function createBufferingRequestRouter(
  * reply that fails structured-clone deserialization fires `onmessageerror` instead of
  * `onmessage`/`onerror` -- with no handler it is silently dropped and the pending call
  * hangs, so route it to `onError` too. Today's replies all clone (byte arrays and
- * index lists), so that route is a backstop rather than a live path -- one
+ * index lists), so that route is a safety check rather than a live path -- one
  * psiCryptoController.test.ts drives with the other fault events, mirroring the CLI
  * handle's `messageerror` routing.
  */

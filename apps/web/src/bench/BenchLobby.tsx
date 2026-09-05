@@ -37,19 +37,17 @@ export function BenchLobby() {
   // Advisory only. Every entry below navigates or reads -- authoring an exchange
   // file for the command-line tool reaches no partner, and neither does reading
   // an invitation -- so the block belongs to the create or run each flow ends in,
-  // which carries it. Saying so here spares an operator the walk to a gate they
+  // which holds it. Saying so here spares an operator the walk to a gate they
   // will meet after choosing a file. Only the offline direction is read: being
   // online is no promise the partner is there (see @utils/networkStatus).
   const online = useOnlineStatus();
 
-  // Whether this browser already holds a saved recurring exchange, read once on
-  // mount. The "run it again" pointer below is gated on it, so a first-run visitor
-  // is not offered a list they have nothing in; the restore-from-backup pointer
-  // stands either way -- a wholesale eviction leaves no saved rows yet is exactly
-  // when restoring from a backup matters (see savedExchangesLoad / /saved).
-  // Undefined until the async store read settles, so the pointer slot renders
-  // nothing rather than flashing the empty-state copy at a visitor who has saved
-  // exchanges (the /quick path reaches this screen with a populated store).
+  // Whether this browser already holds a saved recurring exchange, read once
+  // on mount. Gates the "run it again" pointer below; the restore-from-backup
+  // pointer stands regardless (see savedExchangesLoad / /saved). Stays undefined
+  // until the async store read settles, so the pointer slot renders nothing
+  // rather than flashing the wrong empty-state copy (the /quick path reaches
+  // this screen with a populated store).
   const [hasSavedExchanges, setHasSavedExchanges] = useState<boolean>();
   useEffect(() => {
     // The managed store is not a console concept, and a console build renders no
@@ -70,14 +68,12 @@ export function BenchLobby() {
     };
   }, []);
 
-  // "Review invitation" peels the token out of whatever was pasted -- a bare
-  // code or a deep-link URL -- via the shared tokenFromInput helper, and
-  // routes to the accept bench with the token in the URL fragment, never a
-  // search param (the same confidential-value handling the inviter's deep-link
-  // and the legacy accept form use). An empty extraction shows the inline
-  // field error and does not navigate. The button itself is disabled until the
-  // field holds a usable token (see below), so this guard only covers a submit
-  // that slips past that disabled state.
+  // "Review invitation" peels the token out of whatever was pasted -- a bare code
+  // or a deep-link URL -- via the shared tokenFromInput helper, and routes to the
+  // accept console with the token in the URL fragment, never a search param. An
+  // empty extraction shows the inline field error and does not navigate. The
+  // button itself is disabled until the field holds a usable token (see below),
+  // so this guard only covers a submit that slips past that disabled state.
   function reviewInvitation() {
     const token = tokenFromInput(invitation);
     if (token === "") {
@@ -89,8 +85,8 @@ export function BenchLobby() {
 
   const invitationToken = tokenFromInput(invitation);
 
-  // A full navigation, not the SPA Link: the bench reads `?demo=1` from the
-  // real URL on mount, and the route has no typed search schema to carry it.
+  // A full navigation, not the SPA Link: the console reads `?demo=1` from the
+  // real URL on mount, and the route has no typed search schema to hold it.
   function loadSample() {
     downloadSampleCsvs();
     window.location.assign("/exchange?demo=1");
@@ -156,7 +152,7 @@ export function BenchLobby() {
           </div>
           {/* The console's third path: a direct exchange the two parties arranged
               out of band (a shared server, no invitation). Console-only -- it drives
-              the appliance's job API, which a hosted deployment does not run. */}
+              the console's job API, which a hosted deployment does not run. */}
           {isConsoleBuild() && (
             <div className={styles.actionCard}>
               <h3>Run an exchange you have already arranged</h3>

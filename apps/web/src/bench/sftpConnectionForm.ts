@@ -19,7 +19,7 @@ import type { AuthoredSftpConnectionRequest } from "@psi/sftpAuthoringClient";
  * The credential is a FILE by default -- one the operator picked from the secrets
  * mount (a locator the server resolves) or a typed `@path` reference -- with a
  * de-emphasized fallback to paste the value, which the server materializes to a
- * file on the appliance. The optional passphrase is always an `@path`, never a
+ * file on the console. The optional passphrase is always an `@path`, never a
  * pasted value.
  */
 
@@ -33,7 +33,7 @@ export type SftpCredentialMethod = "password" | "private_key";
  *   under the mount; the server resolves them to an absolute path).
  * - `path`: a typed `@path` for a credential outside any listable mount.
  * - `raw`: a pasted value (the de-emphasized fallback); the server materializes it
- *   to a file on the appliance. It is held in component state only, never
+ *   to a file on the console. It is held in component state only, never
  *   persisted to browser storage or the query cache.
  */
 export type SftpCredentialSource =
@@ -82,8 +82,8 @@ export const EMPTY_SFTP_FORM: SftpConnectionFormValues = {
 };
 
 /** A partner-supplied SFTP locator: the credential-free host/port/path an accepted
- * invitation's endpoint carries. It names WHERE to connect and nothing else -- an
- * {@link SFTPEndpoint} structurally cannot carry a credential or a host-key
+ * invitation's endpoint holds. It names WHERE to connect and nothing else -- an
+ * {@link SFTPEndpoint} structurally cannot hold a credential or a host-key
  * fingerprint. */
 export interface SftpEndpointLocator {
   host: string;
@@ -97,7 +97,7 @@ export interface SftpEndpointLocator {
  * fingerprint, credential, method, and passphrase stay EMPTY -- the operator
  * supplies every one of those. This is the accept-side pre-fill boundary: no
  * invitation field can populate a credential or the host-key fingerprint, because
- * the locator carries neither and this reads only its host/port/path. A form built
+ * the locator holds neither and this reads only its host/port/path. A form built
  * from this alone is unsubmittable ({@link buildAuthoringRequest} returns undefined)
  * until the operator adds the fingerprint and a credential.
  */
@@ -137,7 +137,7 @@ export interface SftpFormError {
 // cannot drift), re-run server-side on every PUT.
 const SIGNING_FINGERPRINT_SHAPE = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
 
-/** The connection fields a pasted `sftp://user@host:port/path` URL carries. */
+/** The connection fields a pasted `sftp://user@host:port/path` URL holds. */
 export interface ParsedSftpUrl {
   host: string;
   username?: string;
@@ -233,7 +233,7 @@ export const SPLIT_DIRECTORY_BOTH_HALVES_REQUIREMENT =
  * NAMING a different directory rather than as differing text, because core
  * refuses only the pairs its own textual comparison can see as one directory
  * -- a trailing slash or a "." segment makes two different strings one
- * folder. Core deliberately under-collapses: a pair that differs only
+ * folder. Core under-collapses by design: a pair that differs only
  * through ".." segments, case, or the login-home expansion of a relative
  * path is the operator's own to keep distinct, per `pathsResolveToSameDir`'s
  * stated design.
@@ -316,8 +316,8 @@ function splitDirectoryError(
  * in with a password. It states core's `privateKeyPassphrase is only valid with
  * privateKey` rule -- the same one the CLI raises against
  * `--server-private-key-passphrase` -- over the two controls the operator has:
- * the sign-in choice and the passphrase field. Surfacing it here is what keeps a
- * typed passphrase from being silently dropped on the way to the appliance.
+ * the sign-in choice and the passphrase field. Showing it here is what keeps a
+ * typed passphrase from being silently dropped on the way to the console.
  */
 export const PASSPHRASE_REQUIRES_PRIVATE_KEY =
   'A key passphrase only decrypts a private key: choose "Private key" under ' +
@@ -374,7 +374,7 @@ const CREDENTIAL_PROBE_REF = "@/credential-file";
  * console's words and on the control that resolves it, or undefined when the
  * combination is coherent. The rules over it -- a passphrase only with a private
  * key, keyboard-interactive only with a password, at most one primary method --
- * are core's single statement, re-run by the appliance on every `PUT` and by the
+ * are core's single statement, re-run by the console on every `PUT` and by the
  * CLI on every run, so this composes the connection core would parse and asks
  * core rather than restating any rule of its own.
  */

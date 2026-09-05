@@ -1,5 +1,5 @@
 /**
- * Maximum size, in bytes, of a file the bench intake dropzones accept -- 100 MB.
+ * Maximum size, in bytes, of a file the console intake dropzones accept -- 100 MB.
  *
  * This is a browser-memory bound, not a parser bound: core's `loadCSVFile`
  * accumulates across PapaParse chunks, so the cap is set against what a browser
@@ -10,7 +10,7 @@
  * profile is measured. The rationale, and why this intake budget is distinct from
  * the comparison-step memory, lives in `docs/spec/PROTOCOL.md`.
  *
- * No-silent-truncation is the invariant that actually matters here, and it is
+ * No-silent-truncation is the invariant that matters here, and it is
  * pinned directly by a multi-chunk correctness test
  * (`test/browser/loadCSVFile.test.ts`), not by holding the cap below the chunk
  * size. Each intake dropzone passes this constant through as `maxSize` rather

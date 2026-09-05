@@ -24,21 +24,15 @@ import { formatFirstIssue } from "@jobs/schemaIssueMessage";
 import type { SigningFingerprintResult } from "@jobs/signingIdentity";
 
 /**
- * The strict fingerprint body: the identity label to bind to a NEW identity, and
- * whether to also write the public certificate out. NOTHING else -- no path, no
- * `--force`, and `.strictObject` rejects any unmodeled key -- so the request can
- * only ever say WHOSE identity to mint, never where to read or write.
- *
- * The label is the operator's own `linkage_terms.identity`, held to the shared label
- * contract (`@psi/identityLabel`) on the same terms the zero-setup intent's
- * `identity` is: bounded by {@link MAX_IDENTITY_LENGTH}, forbidden a leading `-`
- * -- the driver emits it as a single `--identity=<value>` token, which parses a
- * `-`-leading value verbatim anyway, so that much is defense in depth -- and
- * refused any control character. The last is load-bearing here rather than
- * defensive: what this route binds the label into is a long-lived certificate the
- * partner pins and displays, and rebinding is the CLI's `psilink fingerprint
- * --force` and a re-pin by every partner. A NUL would otherwise be caught only
- * incidentally, where the child is spawned.
+ * The strict fingerprint body: an identity label to bind to a NEW identity, and
+ * whether to also write the public certificate out. `.strictObject` rejects any
+ * unmodeled key, so the request can only ever say WHOSE identity to mint, never
+ * where to read or write. The label is held to the shared label contract
+ * (`@psi/identityLabel`): bounded by {@link MAX_IDENTITY_LENGTH}, refused a
+ * leading `-`, and refused any control character -- the last is critical rather
+ * than defensive, since the label binds into a long-lived certificate every
+ * partner pins, and a NUL would otherwise be caught only incidentally, where the
+ * child is spawned.
  */
 const fingerprintBodySchema = z.strictObject({
   identity: z
@@ -53,13 +47,13 @@ const fingerprintBodySchema = z.strictObject({
 });
 
 /**
- * The typed 200 envelope for a fingerprint attempt that RAN. A completed attempt
- * is always a 200 with a discriminated body: success carries the re-validated
- * fingerprint, whether the identity was created by this call, and the two mount
- * FILE NAMES the console's copy points the operator at -- names, never paths, so
- * no container location crosses the boundary. Anything else is a category
- * (`refused` / `timeout` / `error`), so the client reads the outcome from the body
- * rather than from the status.
+ * The typed 200 envelope for a fingerprint attempt that RAN: a completed attempt
+ * is always a 200 with a discriminated body. Success includes the re-validated
+ * fingerprint, whether this call created the identity, and the two mount FILE
+ * NAMES the console's copy points the operator at -- names, never paths, so no
+ * container location crosses the boundary. Anything else is a category
+ * (`refused` / `timeout` / `error`), so the client reads the outcome from the
+ * body rather than from the status.
  */
 function fingerprintEnvelope(
   result: SigningFingerprintResult,
@@ -78,28 +72,21 @@ function fingerprintEnvelope(
 
 /**
  * `POST /api/jobs/signing/fingerprint` -- create-or-reuse this party's signing
- * identity in the appliance's mounted working directory and return its
- * fingerprint, so the operator can share it out-of-band before a signed exchange
- * (the partner pins it first, which is why the identity must exist before the run
- * rather than during it).
+ * identity in the console's mounted working directory and return its
+ * fingerprint, so the operator can share it out-of-band before a signed exchange.
  *
- * It is the console's whole signing-identity surface, and deliberately a narrow
- * one: it can create-or-reuse and it can export the PUBLIC certificate. It cannot
- * regenerate -- there is no `--force` here and no body field that would reach one
- * -- because a re-key invalidates every fingerprint a partner has pinned, and that
- * coordinated action stays on the command line where the flag names what it does.
- * Nothing here refuses the operator anything: `psilink fingerprint --force` is
- * theirs to run against the same mounted file whenever they mean to.
+ * It is the console's whole signing-identity surface, narrow by design: it can
+ * create-or-reuse and export the PUBLIC certificate, but cannot regenerate --
+ * re-keying invalidates every partner-pinned fingerprint, so that coordinated
+ * action stays on the command line (`psilink fingerprint --force`).
  *
- * The request carries an identity label and a boolean ONLY; the response carries a
- * canonical fingerprint, a created flag, and fixed file names ONLY. Every path is
- * the manager's ({@link JobManager.resolveSigningFingerprint}); child stderr,
- * which names container paths, is discarded before it reaches this layer.
- *
- * `gateJobRoute` runs first, so a hosted build or an unset `JOB_DATA_ROOT` answers
- * 404. The body is read under a tight byte cap
- * ({@link MAX_SIGNING_FINGERPRINT_BODY_BYTES}), so an oversized body is a 413 (and
- * an unparseable one a 400) before validation.
+ * The request contains an identity label and a boolean ONLY; the response
+ * contains a fingerprint, a created flag, and fixed file names ONLY -- never a
+ * container path (every path stays with the manager,
+ * {@link JobManager.resolveSigningFingerprint}; child stderr is discarded before
+ * it reaches this layer). `gateJobRoute` 404s a hosted build or an unset
+ * `JOB_DATA_ROOT`; the body is capped at
+ * {@link MAX_SIGNING_FINGERPRINT_BODY_BYTES} (413 over, 400 unparseable).
  */
 export const Route = createFileRoute("/api/jobs/signing/fingerprint")({
   server: {

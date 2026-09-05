@@ -33,9 +33,9 @@ import type { SftpConnectionProjection } from "@jobs/jobManager";
  * The direct-exchange server step: choose the agreed transport, then author (or
  * confirm) the server both parties settled on out of band. SFTP is authored
  * free-hand -- inviter-style, never prefilled from a partner locator (a direct
- * exchange carries no invitation) -- through the shared {@link SftpConnectionCard},
+ * exchange has no invitation) -- through the shared {@link SftpConnectionCard},
  * with the save-a-file affordance dropped since this flow always runs on the
- * appliance. Filedrop runs through the appliance's configured rendezvous mount and
+ * console. Filedrop runs through the console's configured rendezvous mount and
  * is offered only when one is mounted.
  *
  * The host-key fingerprint is captured and pinned here, in the SFTP authoring form,
@@ -67,9 +67,9 @@ export function DirectServerSection({
 }: {
   transport: DirectTransport;
   onTransport: (transport: DirectTransport) => void;
-  /** The appliance's authored SFTP connection, or null when none is set up yet. */
+  /** The console's authored SFTP connection, or null when none is set up yet. */
   sftpConnection: SftpConnectionProjection | null;
-  /** The appliance's rendezvous mount, or undefined before it resolves. */
+  /** The console's rendezvous mount, or undefined before it resolves. */
   rendezvous: JobRendezvousConfig | undefined;
   /** The operator's file-handling choices, authored here because both parties
    * settle them out of band alongside the server itself. */
@@ -85,7 +85,7 @@ export function DirectServerSection({
   onConnectionTuningOpen: (open: boolean) => void;
   /** The operator's per-run diagnostic and recovery choices. Authored here, with
    * the other pre-run cards, because the sweep is a decision about the very
-   * directory this step settles. */
+   * directory this step determines. */
   runDiagnostics: RunDiagnosticsDraft;
   runDiagnosticsOpen: boolean;
   onRunDiagnostics: (draft: RunDiagnosticsDraft) => void;
@@ -108,7 +108,7 @@ export function DirectServerSection({
   // so the split precondition is re-asked at the step's exit, where both are
   // known, rather than only inside the authoring form the operator has already
   // left -- or, on the shared-directory transport, nowhere at all, since the
-  // appliance's two mounts are provisioning the operator never authors here.
+  // console's two mounts are provisioning the operator never authors here.
   const splitDirectoryProblem =
     transport === "sftp"
       ? splitDirectoryRetainProblem(sftpConnection, exchangeFiles.retainFiles)
@@ -216,7 +216,7 @@ export function DirectServerSection({
           icon={<IconAlertCircle aria-hidden />}
           title="No shared directory is mounted"
         >
-          {/* The appliance's own reason wins where it has one: an incoherent
+          {/* The console's own reason wins where it has one: an incoherent
               pair of mounts reports itself unconfigured, and the generic
               sentence would send an operator who already mounted two folders to
               add a third. */}

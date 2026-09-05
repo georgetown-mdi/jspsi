@@ -35,8 +35,8 @@ export const Route = createRootRoute({
         content: "width=device-width, initial-scale=1",
       },
       {
-        // Matches the manifest's theme_color and the bench's paper surface, so
-        // an installed window's title bar is the app's own ground rather than
+        // Matches the manifest's theme_color and the console's background, so an
+        // installed window's title bar takes the app's color rather than
         // browser white.
         name: "theme-color",
         content: "#f6f5f1",
@@ -75,9 +75,9 @@ export const Route = createRootRoute({
 });
 
 function RootComponent() {
-  // Every route renders on the bench, which brings its own page surface and
-  // landmarks (see BenchPage/BenchShell), so the root hands the whole viewport to
-  // the route Outlet with no shared chrome wrapper.
+  // Every route renders on the console, which supplies its own page surface and
+  // landmarks (see BenchPage/BenchShell), so the root gives the whole viewport to
+  // the route Outlet with no shared wrapper.
   return (
     <RootDocument>
       <Outlet />

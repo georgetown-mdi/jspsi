@@ -1,12 +1,10 @@
 import type { InvitationLocation } from "@psi/invitation";
 
 /**
- * This page's location, in the shape {@link generateInvitation} consumes. It
- * reads `window`, so it must be called from a client-side path; it throws rather
- * than return a wrong value if ever reached during SSR, since there is no sensible
- * server-side location. Callers invoke it from a submit/generate handler, an event
- * that cannot fire during render. Shared by the inviter bench's create and
- * save-exchange-file paths so both build the locator identically.
+ * This page's location, in the shape {@link generateInvitation} takes. It reads
+ * `window`, so it must be called from the client and throws when `window` is
+ * absent rather than return a server-side value. The inviter console's create and
+ * save-exchange-file paths both use it so they build the locator identically.
  */
 export function invitationLocation(): InvitationLocation {
   if (typeof window === "undefined")

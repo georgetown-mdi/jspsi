@@ -1,5 +1,5 @@
 /**
- * The pure decision half of the "manage this exchange" offer the bench makes at
+ * The pure decision half of the "manage this exchange" offer the console makes at
  * invite creation (the inviter) and at accept (the acceptor). It composes the
  * fields a managed-exchange deposit needs -- the credential-free webrtc locator,
  * this party's exchange-file document, the deposited secret, this party's `side`,
@@ -18,7 +18,7 @@
  * on the acceptor's decoded one; the one-shot run that follows discards its own
  * derived rotation, so both parties' records stay coherent at the deposited value
  * until a later managed re-run rotates it. Declining leaves no record: the offer
- * is skipped and the one-shot flow's discard stands, so there is deliberately no
+ * is skipped and the one-shot flow's discard stands, so there is by design no
  * "compose then throw away" path here -- a caller that declines never composes.
  */
 
@@ -50,11 +50,10 @@ import type {
  * connection block is composed from, out of a webrtc {@link WebRTCEndpoint}. The
  * acceptor's endpoint is the invitation's own endpoint; the inviter's is the one
  * {@link webrtcEndpointFromLocation} built for the token from this app's location.
- * Either is already the invitation's `WebRTCEndpointSchema` shape (host/port/path,
- * no credential), and the locator IS that schema (see
- * docs/spec/MANAGED_EXCHANGE_RECORD.md, "The connection block") -- so this only
- * re-shapes it, dropping an absent optional rather than carrying an explicit
- * `undefined` the composer's strict parse would otherwise reject.
+ * Both are already the invitation's `WebRTCEndpointSchema` shape (see
+ * docs/spec/MANAGED_EXCHANGE_RECORD.md, "The connection block"); this only drops
+ * an absent optional the composer's strict parse would otherwise reject as
+ * `undefined`.
  */
 export function webrtcLocatorFromEndpoint(
   endpoint: WebRTCEndpoint,
@@ -87,11 +86,9 @@ export interface ManagedExchangeDocumentParts {
    * This party's side of the partnership, and the deposit's ONE statement of it:
    * {@link buildManagedDeposit} composes the document from these parts and records
    * this same value as the record's `side`, so a deposit cannot store one side
-   * while carrying the other side's document. Required, not optional: it decides
-   * whether the composed document carries an outbound-payload consent record, and
-   * an ABSENT record is a silent pass at every later run -- so a composing surface
-   * must state its side rather than omit it into that default (see
-   * {@link composeManagedDocument}).
+   * while holding the other side's document. Required, not optional: an omitted
+   * side would default to no outbound-payload consent record, a silent pass at
+   * every later run (see {@link composeManagedDocument}).
    */
   side: ManagedExchangeSide;
   /** This party's linkage terms -- the inviter's minted terms, or the acceptor's
@@ -104,26 +101,25 @@ export interface ManagedExchangeDocumentParts {
   /**
    * This party's SEND-side disclosure commitment -- the inviter supplies the
    * token's own `disclosedPayloadColumns` (one source: the set the partner
-   * consented to and locked in, never a re-derivation that could drift from it).
-   * Empty means a strict "sends nothing" commitment; absent means no commitment
-   * on record (the acceptor, whose send commitment rides its mirrored
-   * `payload.send` instead -- see docs/spec/FILE_SYNC.md, "Which mint paths
-   * persist disclosedPayloadColumns").
+   * consented to, never a re-derivation that could drift from it). Empty means a
+   * strict "sends nothing" commitment; absent means no commitment on record (the
+   * acceptor's send commitment rides its mirrored `payload.send` instead -- see
+   * docs/spec/FILE_SYNC.md, "Which mint paths persist disclosedPayloadColumns").
    */
   disclosedPayloadColumns?: Array<string>;
   /**
-   * This party's RECEIVE-side lock-in -- the acceptor supplies the invitation
-   * token's `disclosedPayloadColumns` (the partner's committed send set, in the
-   * partner's column namespace), so a managed re-run fails CLOSED if the partner
-   * transmits a different set than was consented to at accept, exactly as the
-   * CLI accept persists it (docs/spec/FILE_SYNC.md, "Runtime lock-in"). Empty
-   * means a strict "receive nothing" lock-in; absent means lazy (a token that
-   * carried no set). The inviter omits it: its received set is unknowable at
-   * mint (the CLI inviter crystallizes it only by observing the first exchange).
+   * This party's RECEIVE-side enforcement -- the acceptor supplies the
+   * invitation token's `disclosedPayloadColumns` (the partner's committed send
+   * set, in the partner's namespace), so a managed re-run fails CLOSED if the
+   * partner transmits a different set than was consented to at accept, exactly
+   * as the CLI accept persists it (docs/spec/FILE_SYNC.md, "Runtime lock-in").
+   * Empty means a strict "receive nothing" enforcement; absent means lazy (no set
+   * on the token). The inviter omits it: its received set is unknowable at mint,
+   * crystallized only by observing the first exchange.
    */
   expectedPayloadColumns?: Array<string>;
   /**
-   * This party's TERMS-side lock-in -- the acceptor supplies the invitation
+   * This party's TERMS-side enforcement -- the acceptor supplies the invitation
    * token's `linkageTerms.deduplicate` (the value the invitation declared for the
    * INVITER's own side, and the one the consent screen stated), so a managed
    * re-run refuses an inviter presenting anything else at the terms exchange,
@@ -136,31 +132,21 @@ export interface ManagedExchangeDocumentParts {
 /**
  * Compose this party's persisted exchange-file document from its own document
  * parts and the credential-free webrtc locator. The payload-column commitments
- * are caller-supplied and carried verbatim -- `disclosedPayloadColumns` is the
- * token's published set (the inviter's send commitment), and
- * `expectedPayloadColumns` is the token's set from the partner's side (the
- * acceptor's receive lock-in), and `expectedPartnerDeduplicate` is the token's
- * declared value for the inviter's own side (the acceptor's terms-side lock-in)
- * -- never re-derived here, so the persisted commitment cannot disagree with the
- * one the token carried. An empty array is a strict commitment and is preserved;
- * only an absent field is omitted. The document carries no `authentication` block
- * and no credential by construction (see {@link composeManagedExchangeFile}).
+ * (`disclosedPayloadColumns`, `expectedPayloadColumns`, and
+ * `expectedPartnerDeduplicate`) are caller-supplied and held verbatim, never
+ * re-derived, so the persisted commitment cannot disagree with the token's. An
+ * empty array is a strict commitment and is preserved; only an absent field is
+ * omitted.
  *
- * The one field this composer DERIVES rather than carries is the acceptor's
- * `outboundPayloadConsent`. Nobody authors an acceptance's own outbound set --
- * the invitation authors the inviter's, the mirror leaves the acceptor's absent,
- * and it resolves from the acceptor's own CSV header -- so the record is what
- * makes it chosen instead of inferred, and core's `deriveOutboundPayloadConsent`
- * derives it from the very `metadata` this document persists: the set the columns
- * step showed the operator, resolved by the predicate the run transmits on. That
- * derivation, rather than a caller-supplied set, is what keeps the persisted
- * record and the persisted metadata from disagreeing. An inviter records none:
- * its own set was authored at mint and pinned as `disclosedPayloadColumns` (see
+ * The one field this composer DERIVES rather than holds is the acceptor's
+ * `outboundPayloadConsent`: nobody authors it directly, so core's
+ * `deriveOutboundPayloadConsent` resolves it from the very `metadata` this
+ * document persists, keeping the two from disagreeing. An inviter records none:
+ * its own set was authored at mint as `disclosedPayloadColumns` (see
  * docs/spec/EXCHANGE_FILE.md, "The acceptor's outbound consent").
  *
- * {@link buildManagedDeposit} composes through this function rather than taking a
- * composed document, so a completion surface never holds one to pair with a side
- * of its own; it stays exported so the composition rules are the tested boundary.
+ * Exported so the composition rules stay the tested boundary, even though
+ * {@link buildManagedDeposit} is its only caller.
  *
  * @throws {ZodError} if the assembled document fails schema validation (a
  *   malformed locator, an out-of-range port).
@@ -194,8 +180,8 @@ export function composeManagedDocument(
 }
 
 /** The operator's choices on the manage offer: the display label and whether to
- * opt into a max-age policy. The schedule is deliberately not among them: it is a
- * cadence agreed with the partner out of band, which the operator settles once
+ * opt into a max-age policy. The schedule is not among them, by design: it is a
+ * cadence agreed with the partner out of band, which the operator decides once
  * they have the exchange in front of them, on its own page's local-fields editor
  * (see {@link ./scheduleEntryModel.ts}). */
 export interface ManageOfferChoices {
@@ -211,7 +197,7 @@ export interface ManageOfferChoices {
  * invitation's secret, an optional input-file handle where the platform yielded
  * one, and the operator's choices. */
 export interface ManagedDepositInputs {
-  /** This party's document parts, carrying the deposit's one statement of its
+  /** This party's document parts, holding the deposit's one statement of its
    * `side` (see {@link ManagedExchangeDocumentParts}). */
   documentParts: ManagedExchangeDocumentParts;
   /** The credential-free webrtc locator the document's connection block is
@@ -231,24 +217,20 @@ export interface ManagedDepositInputs {
 /**
  * Assemble the {@link NewManagedExchange} fields a deposit persists, composing
  * this party's document from `documentParts` here rather than accepting a
- * pre-composed one: the record's `side` and the document's side-dependent content
- * (the acceptor's `outboundPayloadConsent`) are then read from a single stated
- * side, so no deposit built here can state divergent sides. The bound is this
- * builder's callers: a record reconstructed from an imported artifact
- * (`managedExchangeImport`) carries the artifact's own side and document
- * verbatim, so its coherence rests on the artifact, not on this builder.
+ * pre-composed one, so the record's `side` and the document's side-dependent
+ * content (the acceptor's `outboundPayloadConsent`) are read from a single
+ * stated side and cannot diverge. A record reconstructed from an imported
+ * artifact (`managedExchangeImport`) is a separate path, holding the
+ * artifact's own side and document verbatim.
  *
- * The label is carried verbatim -- its cap is enforced by the record schema at
+ * The label is held verbatim -- its cap is enforced by the record schema at
  * the store write ({@link buildManagedExchangeRecord}), with
  * {@link labelWithinCap} as the UI gate.
  *
- * The max-age policy drives `expires`: when the operator opts in, `expires`
- * is stamped `now + tokenMaxAgeDays` through {@link rotationWriteBack} (reusing
- * the run-rotate date math and its guards, not duplicating them), so a
- * creation-time bound is applied exactly as a rotation would restamp it; when
- * they do not, `tokenMaxAgeDays` and `expires` are both absent -- the opt-in
- * default. The invitation's setup lifetime never flows into `expires`: the
- * record's `expires` provenance is single-source (see
+ * The max-age policy drives `expires`: opting in stamps `now + tokenMaxAgeDays`
+ * through {@link rotationWriteBack} (reusing the run-rotate date math); opting
+ * out leaves `tokenMaxAgeDays` and `expires` both absent. The invitation's setup
+ * lifetime never flows into `expires`, whose provenance is single-source (see
  * docs/spec/MANAGED_EXCHANGE_RECORD.md, the `expires` row).
  *
  * @param now The instant the max-age stamp counts from, injected so the deposit
@@ -292,14 +274,13 @@ export function labelWithinCap(label: string): boolean {
 /**
  * Validate an opted-in max-age day count as the operator typed it (a number, or
  * the string a cleared/partial number input reports), returning the field error
- * to show, or `undefined` when the value is a usable policy. The offer must not
- * resolve an enabled-but-invalid count to "no bound": the max-age policy is the
- * only control bounding a dormant partnership's stored-secret exposure, so a
- * cleared field silently converting opt-in to no-bound would deposit an unbounded
- * secret the operator believes is bounded -- an invalid value blocks the deposit
- * with this error instead. The bounds are the record schema's (a positive integer
- * at most {@link MAX_TOKEN_MAX_AGE_DAYS}), checked here so an out-of-range value
- * fails at the field, not as a generic store-write failure after the click.
+ * to show, or `undefined` when the value is a usable policy. An enabled-but-
+ * invalid count must never resolve to "no bound": a cleared field silently
+ * converting opt-in to no-bound would deposit an unbounded secret the operator
+ * believes is bounded, so an invalid value blocks the deposit instead. The
+ * bounds are the record schema's (a positive integer at most
+ * {@link MAX_TOKEN_MAX_AGE_DAYS}), checked here so an out-of-range value fails
+ * at the field rather than as a generic store-write failure.
  */
 export function maxAgeDaysError(value: number | string): string | undefined {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 1)
@@ -310,7 +291,7 @@ export function maxAgeDaysError(value: number | string): string | undefined {
 }
 
 /**
- * The cadence line surfaced when the operator sets a max-age policy, naming the
+ * The cadence line shown when the operator sets a max-age policy, naming the
  * implication the operator weighs against the partnership's known cadence: the
  * exchange must run or be renewed within the bound or its stored secret lapses
  * (see docs/MANAGED_EXCHANGE.md, "Expiry is its own state"). Returns `undefined`

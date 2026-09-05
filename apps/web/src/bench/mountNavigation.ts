@@ -2,9 +2,9 @@
  * The pure navigation model behind the secrets-mount browser: descending into a
  * subdirectory, the breadcrumb trail back up, and the full subPath a picked file
  * yields. No React, no I/O -- the tested boundary for "the picker navigates and
- * selects the right path segments". Every segment is a single admissible name (the
- * server re-admits each and re-confines the realpath to the mount, so nothing here
- * is trusted as a path).
+ * selects the right path segments". Every segment is a single admissible name; the
+ * server validates each again and re-confines the realpath to the mount, so
+ * nothing here is trusted as a path.
  */
 
 /** Descend into `name` from the current `subPath`, appending one segment. */
@@ -31,7 +31,7 @@ export interface MountBreadcrumb {
 
 /**
  * The breadcrumb trail for `subPath`: the mount root (labeled `rootLabel`, an
- * empty subPath) followed by one crumb per segment, each carrying the subPath that
+ * empty subPath) followed by one crumb per segment, each with the subPath that
  * navigates back to it. So `["a", "b"]` yields root, `a` ([a]), `b` ([a, b]).
  */
 export function breadcrumbTrail(

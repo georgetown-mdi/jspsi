@@ -29,14 +29,13 @@ import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
 import type { Standardization } from "@psilink/core";
 
 /**
- * The environment variable naming the operator-mounted directory the console lists
- * and reads input CSVs from. When unset or empty the input directory falls back to
- * `JOB_DATA_ROOT`, so a single-folder console -- one mount, only `JOB_DATA_ROOT`
- * set -- lists inputs out of the data root. The feature is off only when both are
- * unset: the listing then reports `configured: false` with an empty list and the
- * profile/coverage routes answer 404. The operator is present at the host and mounts
- * their own data, so the directory is trusted local input, not a shared-service
- * surface.
+ * The environment variable naming the operator-mounted directory the console
+ * lists and reads input CSVs from. When unset or empty, falls back to
+ * `JOB_DATA_ROOT` (so a single-folder console, one mount with only
+ * `JOB_DATA_ROOT` set, still lists inputs). The feature is off only when both
+ * are unset: the listing reports `configured: false` with an empty list and
+ * the profile/coverage routes answer 404. The operator mounts their own data,
+ * so this is trusted local input, not a shared-service surface.
  */
 export const JOB_INPUT_DIR_ENV = "JOB_INPUT_DIR";
 
@@ -60,7 +59,7 @@ export class JobInputNotFoundError extends Error {
 }
 
 /**
- * The closed set of reasons a profile pass fails other than not-found. Carried to
+ * The closed set of reasons a profile pass fails other than not-found. Sent to
  * the browser as a bare code so the operator gets a meaningful reason without any
  * file content, path, or raw error object riding the wire:
  * - `too_large`: a header, field, or unterminated line exceeded the CSV single-line
@@ -72,7 +71,7 @@ export class JobInputNotFoundError extends Error {
 export type JobInputProfileErrorCode =
   "too_large" | "not_a_csv" | "parse_failed";
 
-/** A profile fault the route maps to a 400 carrying only {@link code}. Never wraps
+/** A profile fault the route maps to a 400 holding only {@link code}. Never wraps
  * the underlying error, so no path or cell bytes reach the response. */
 export class JobInputProfileError extends Error {
   constructor(readonly code: JobInputProfileErrorCode) {
@@ -82,8 +81,8 @@ export class JobInputProfileError extends Error {
 }
 
 /** Signals that a {@link coverageJobInput} pass was aborted through its signal (a
- * client disconnect or a superseded sweep). Carries no path, so the aborted pass
- * never surfaces the mounted directory. */
+ * client disconnect or a superseded sweep). Holds no path, so the aborted pass
+ * never exposes the mounted directory. */
 export class JobInputCoverageAbortedError extends Error {
   constructor() {
     super("job input coverage aborted");
@@ -107,8 +106,8 @@ function mtimeMsInt(mtimeMs: number): number {
  * ({@link isAdmissibleInputName}) so it never composes a traversal even though the
  * mounted directory is the operator's own; a name that resolves to no regular file
  * is a {@link JobInputNotFoundError}. Returning the stat lets a caller read size and
- * mtime without a second stat that could race the file away and surface a raw fs
- * error carrying the mounted path.
+ * mtime without a second stat that could race the file away and expose a raw fs
+ * error holding the mounted path.
  */
 function resolveJobInputFile(
   resolvedDir: string,
@@ -151,7 +150,7 @@ export interface JobInputListing {
    * permission fault), so the operator is told the mount is unreadable rather than to
    * place a file in a directory that already holds one. True in every other case,
    * including the unconfigured state (nothing failed to read). The errno and the
-   * absolute path are deliberately NOT carried -- only this boolean. */
+   * absolute path are NOT held -- only this boolean. */
   readable: boolean;
   files: Array<JobInputFileEntry>;
 }
@@ -196,7 +195,7 @@ export function listJobInputs(
 }
 
 /** One column's preview samples on the wire: the column name paired with its first
- * {@link PREVIEW_SAMPLE_SIZE} non-empty values. Carried as an array element -- never
+ * {@link PREVIEW_SAMPLE_SIZE} non-empty values. Held as an array element -- never
  * an object key -- so a column named an `Object.prototype` member (`__proto__`,
  * `constructor`, `prototype`) is ordinary data rather than a prototype-setter hazard. */
 export interface ColumnSample {
@@ -266,8 +265,8 @@ export async function profileJobInput(
     });
   } catch (error) {
     // Classify the fault into a closed code; the underlying error (a read fault
-    // embedding the mounted path, or a parser error carrying cell bytes) is never
-    // surfaced. A ceiling trip is the one distinguishable non-generic case.
+    // embedding the mounted path, or a parser error holding cell bytes) is never
+    // exposed. A ceiling trip is the one distinguishable non-generic case.
     throw new JobInputProfileError(
       error instanceof CsvLineByteCeilingError ? "too_large" : "parse_failed",
     );
@@ -300,7 +299,7 @@ export async function profileJobInput(
  * An optional `signal` stops the pass early: when the client disconnects or the
  * browser supersedes the sweep it aborts, the read stream is destroyed, and the pass
  * rejects with a {@link JobInputCoverageAbortedError} rather than scanning the rest
- * of a CLI-scale file. The abort error carries no path or row bytes.
+ * of a CLI-scale file. The abort error holds no path or row bytes.
  */
 export async function coverageJobInput(
   resolvedDir: string,
@@ -312,8 +311,8 @@ export async function coverageJobInput(
   if (signal?.aborted) throw new JobInputCoverageAbortedError();
   const stream = fs.createReadStream(filePath);
   // A no-op error listener so destroying the stream on abort -- or an open fault that
-  // races the abort -- never surfaces as an uncaught 'error'; the parse rejection
-  // carries the real fault on the non-abort path.
+  // races the abort -- is never reported as an uncaught 'error'; the parse rejection
+  // holds the real fault on the non-abort path.
   stream.on("error", () => {});
   const accumulator = createFieldCoverageAccumulator(standardization);
   const parse = streamCSVRows(stream, (rows) => {
@@ -354,7 +353,7 @@ export async function coverageJobInput(
  * falling back to {@link JOB_DATA_ROOT_ENV} when it is unset so one mount runs a full
  * console, or undefined when both are unset. The mounted directory is trusted
  * operator data, so this is a plain resolve -- no containment check against the data
- * root, no fail-closed existence assertion (a mis-mount surfaces as an empty
+ * root, no fail-closed existence assertion (a mis-mount shows as an empty
  * listing). */
 function loadJobInputDir(env: NodeJS.ProcessEnv): string | undefined {
   const configured = (env[JOB_INPUT_DIR_ENV] ?? "").trim();
@@ -377,17 +376,15 @@ export function useJobInputDir(
 }
 
 /**
- * The standardization functions whose named param is compiled to a linear-time
- * regex at pipeline construction (`compileLinearRegex` in core's
- * standardization.ts), paired with that param's camelCase name. These are the only
- * sources whose LENGTH drives the super-linear RE2 compile this route bounds. A
- * plain-string param -- coalesce's `default`, null_if's `value`/`values` -- is never
- * compiled and is unbounded on every other path (core's schema, the browser
- * preview, the job-create intent), so capping it here would 400 a pipeline that runs
- * fine everywhere else. `parse_date`'s format param also compiles, but the shared
- * coverage accumulator already gates every field through `isStepValid`, which bounds
- * that format at its own cap before any compile; only the regex-tier
- * pattern/delimiter sources need this route's pre-parse rejection.
+ * The standardization functions whose named param is compiled to a
+ * linear-time regex at pipeline construction (`compileLinearRegex` in core's
+ * standardization.ts), paired with that param's camelCase name -- the only
+ * sources whose length drives the super-linear RE2 compile this route
+ * bounds. A plain-string param (coalesce's `default`, null_if's
+ * `value`/`values`) is never compiled and is unbounded elsewhere, so capping
+ * it here would 400 a pipeline that runs fine everywhere else. `parse_date`'s
+ * format param also compiles, but the coverage accumulator already bounds it
+ * via `isStepValid` before any compile.
  */
 const REGEX_SOURCE_PARAM_BY_FUNCTION: Record<string, string> = {
   replace_regex: "pattern",
@@ -398,13 +395,13 @@ const REGEX_SOURCE_PARAM_BY_FUNCTION: Record<string, string> = {
 
 /**
  * Whether every standardization step's compiled regex source stays within
- * {@link MAX_TRANSFORM_PATTERN_LENGTH}. The intent-level schema bounds counts, not
- * pattern length, and while RE2JS execution is linear-time its COMPILE cost lands on
- * this process's event loop before any row streams, so this route caps the source
- * length of exactly the params that reach regex compilation
- * ({@link REGEX_SOURCE_PARAM_BY_FUNCTION}). This is a compute-DoS bound on the one
- * input the browser still supplies (the standardization body), not an access
- * perimeter over the operator's own directory.
+ * {@link MAX_TRANSFORM_PATTERN_LENGTH}. The intent-level schema bounds
+ * counts, not pattern length, and RE2JS compile cost lands on this process's
+ * event loop before any row streams, so this route caps the source length of
+ * exactly the params that reach regex compilation
+ * ({@link REGEX_SOURCE_PARAM_BY_FUNCTION}) -- a compute-DoS bound on the
+ * browser-supplied standardization body, not an access perimeter over the
+ * operator's own directory.
  */
 function stepPatternsWithinCap(
   transformation: Standardization[number],
@@ -425,7 +422,7 @@ function stepPatternsWithinCap(
  * The coverage route's standardization validation: core's structural schema plus
  * the same count bounds the intent schema applies (reusing its exported caps) plus
  * the route-level per-step pattern-length cap ({@link stepPatternsWithinCap}). The
- * shared intent schema is deliberately NOT modified -- only this in-process compute
+ * shared intent schema is NOT modified -- only this in-process compute
  * endpoint needs the pattern cap.
  */
 const coverageStandardizationSchema = StandardizationSchema.refine(

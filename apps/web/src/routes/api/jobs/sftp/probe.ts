@@ -29,20 +29,12 @@ const probeBodySchema = z.strictObject({
 });
 
 /**
- * The typed 200 envelope for a probe attempt that RAN. A completed attempt is
- * always a 200 with a discriminated body -- success carries the re-validated
- * fingerprint and key type; a probe that ran but yielded no key is a category
- * (`unreachable` / `timeout` / `error`). Non-2xx is reserved for HTTP-level
- * conditions (a bad body, a probe already in flight, the gate off, or an
- * unexpected internal fault), so the client reads a probe outcome from the body,
- * never from the status.
- *
- * An `unreachable` may carry the child's diagnosis of what answered the port:
- * `peerAnswer` from a closed two-value vocabulary and, for a non-SSH answer, the
- * shape and the ESCAPED, capped excerpt of the peer's first bytes. That excerpt
- * is the one field on this surface an untrusted party chose the content of; it
- * is bounded and escaped in `sftpProbe` before it reaches here. No latency, no
- * stderr, and no unbounded or unescaped banner crosses the boundary.
+ * The 200 envelope for a probe attempt that ran: `ok` holds the fingerprint
+ * and key type; a probe with no key is `unreachable` / `timeout` / `error`.
+ * Non-2xx is reserved for HTTP-level conditions (a bad body, a probe already
+ * in flight, the gate off, an internal fault). An `unreachable` may hold a
+ * closed `peerAnswer` vocabulary and, for a non-SSH answer, the shape and an
+ * ESCAPED, capped excerpt of the peer's first bytes, bounded in `sftpProbe`.
  */
 function probeEnvelope(result: SftpProbeResult): Record<string, unknown> {
   if (result.kind === "ok")
@@ -71,7 +63,7 @@ function probeEnvelope(result: SftpProbeResult): Record<string, unknown> {
  * is stateless (it never touches the authored connection, records nothing) and
  * single-flight (a concurrent probe is a 409).
  *
- * The request carries host + port ONLY; the response carries a fingerprint and a
+ * The request contains host + port ONLY; the response contains a fingerprint and a
  * key type ONLY (fingerprint regex-validated, key type charset/length-capped), or
  * a probe-outcome category and, on an `unreachable` the child diagnosed, a closed
  * peer-answer vocabulary with a bounded escaped excerpt of the peer's first

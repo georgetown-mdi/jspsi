@@ -1,23 +1,15 @@
 /**
  * The managed (recurring) exchange record: the browser-persisted state that lets
- * a two-party PPRL exchange run again on an agreed schedule without re-authoring
- * the exchange or re-establishing a shared secret. This module is the pure,
- * IndexedDB-free half -- the record's shape, its Zod validation, and the
- * credential-free composition of the persisted document -- so the schema rules
- * (reader-rejects-unknown `schemaVersion`, the label cap, the credential-free
- * connection, the no-input-content invariant) are unit-testable without a
- * database. The thin IndexedDB CRUD layer that stores these records is in
- * {@link ./managedExchangeStore.ts}.
+ * a two-party PPRL exchange run again without re-authoring or re-establishing a
+ * shared secret. Pure and IndexedDB-free -- the record's shape, its Zod
+ * validation, and the credential-free document composition; the IndexedDB CRUD
+ * layer is {@link ./managedExchangeStore.ts}. Normative shape:
+ * docs/spec/MANAGED_EXCHANGE_RECORD.md.
  *
- * Normative shape: docs/spec/MANAGED_EXCHANGE_RECORD.md. The record holds this
- * party's whole minted exchange-file document verbatim (no `authentication`
- * block) plus the one at-rest secret and the small set of local-only fields the
- * document deliberately does not carry. It never holds input content or a row
- * value: at most a `FileSystemFileHandle` pointer to the operator's file. The
- * document is fixed for the partnership: a re-invite re-issues it verbatim with
- * only a fresh secret, and a change to the agreed terms is a new exchange, not a
- * re-invite or an in-place edit; only the local fields (`label`, `schedule`,
- * `tokenMaxAgeDays`) update in place.
+ * Holds this party's exchange-file document verbatim (no `authentication`
+ * block), the one at-rest secret, and a small set of local-only fields; never
+ * input content or a row value. The document is fixed for the partnership --
+ * only `label`, `schedule`, and `tokenMaxAgeDays` update in place.
  */
 
 import {
@@ -43,7 +35,7 @@ import type { ZodType } from "zod";
  * The single recognized `schemaVersion` literal for the v1 record. A reader
  * rejects any other value rather than migrating it (the reader-rejects-unknown
  * rule the exchange-record and verification-keys files follow); a future shape
- * change is a new literal under a new version, never a v1 record carrying
+ * change is a new literal under a new version, never a v1 record holding
  * speculative fields.
  */
 export const MANAGED_EXCHANGE_SCHEMA_VERSION = "psilink-managed-exchange/v1";
@@ -69,8 +61,8 @@ export const MANAGED_EXCHANGE_ARTIFACT_VERSION =
 export const MAX_LABEL_LENGTH = 120;
 
 /** This party's side of the partnership, dispatching a re-run to the matching
- * rendezvous flow. Local-only by design -- deliberately not the document's
- * schema-only `connection.role`. */
+ * rendezvous flow. Local-only: not the document's schema-only
+ * `connection.role`. */
 export type ManagedExchangeSide = "inviter" | "acceptor";
 
 /**
@@ -122,18 +114,15 @@ export type ManagedExchangeRunOutcome =
 
 /** For a non-succeeded outcome, the kind of failure. Closed enum: the five benign
  * pre-run problems -- an `"input"` problem (the file missing, unreadable, or gone
- * from under its handle), a `"terms-shortfall"` refusal (the file was read and
- * cannot satisfy every linkage key the standing terms declare), a `"consent"`
- * refusal (this run's outbound disclosure is not the set this exchange recorded
- * agreeing to send), a `"handed-off"` refusal (an export gave this device's copy
- * away, so the run does not rotate a secret whose owner is elsewhere), and a
- * `"custody-unreadable"` refusal (the sibling entry recording whether the copy was
- * handed off did not read, so the run does not rotate on custody it could not
- * establish) -- are detected before any connection and never routed through
- * desync/attack framing. Each is its own kind because each has its own remedy:
- * putting the file back, a conforming file or terms re-agreed with the partner,
- * re-settling what the exchange sends, running the exchange where it was handed to,
- * and this browser's own stored copy becoming readable again. */
+ * from under its handle), a `"terms-shortfall"` refusal (the file cannot satisfy
+ * every linkage key the standing terms declare), a `"consent"` refusal (this
+ * run's outbound disclosure is not the set this exchange recorded agreeing to
+ * send), a `"handed-off"` refusal (an export gave this device's copy away, so
+ * the run does not rotate a secret whose owner is elsewhere), and a
+ * `"custody-unreadable"` refusal (the sibling entry recording whether the copy
+ * was handed off did not read, so the run does not rotate on custody it could
+ * not establish) -- are detected before any connection and never routed through
+ * desync/attack framing. */
 export type ManagedExchangeFailureKind =
   | "auth"
   | "transport"
@@ -146,8 +135,8 @@ export type ManagedExchangeFailureKind =
   | "cancelled";
 
 /** Run bookkeeping the backup state and the desync UX read. Every field is a
- * timestamp or a closed enum -- deliberately no free-text field, so the record
- * structurally cannot carry a match result, a count, or a row value. */
+ * timestamp or a closed enum -- no free-text field, so the record structurally
+ * cannot hold a match result, a count, or a row value. */
 export interface ManagedExchangeLastRun {
   /** ISO 8601 UTC instant of the run. */
   at: string;
@@ -175,7 +164,7 @@ export interface ManagedExchangeRecord {
   label: string;
   /**
    * This party's exchange-file document, verbatim: the validated
-   * {@link ExchangeSpec} both applications share. Carries no `authentication`
+   * {@link ExchangeSpec} both applications share. Contains no `authentication`
    * block (the secret lives in {@link sharedSecret}) and its connection block is
    * composed from a credential-free locator, so no credential is representable
    * (see {@link composeManagedExchangeFile}).
@@ -216,9 +205,8 @@ export interface ManagedExchangeRecord {
  * laxer copy -- a tampered artifact with `intervalDays: 0` must be rejected
  * exactly as a stored record would be.
  *
- * The upper bounds are what let every surface that renders a window render it:
- * within them the next window off any anchor this schema admits lands on a
- * calendar `Intl` can format, so no display carries a fallback for a recurrence
+ * Within these bounds, the next window off any anchor the schema admits lands on
+ * a calendar `Intl` can format, so no display has a fallback for a recurrence
  * whose instants no calendar has (see {@link ../bench/scheduleSurfacingModel.ts}).
  */
 export const scheduleSchema: ZodType<ManagedExchangeSchedule> = z.object({
@@ -230,24 +218,23 @@ export const scheduleSchema: ZodType<ManagedExchangeSchedule> = z.object({
 });
 
 /** The instant a stored ISO datetime denotes, or `NaN` for a string the
- * validators above would not admit as one: unparseable, or carrying no UTC
- * designator (they take `Z` and no bare offset). Without the designator
- * `Date.parse` reads the wall clock against the HOST zone -- five hours off the
- * stored moment under America/New_York -- so the same record would name a
- * different instant on every machine that read it. Shared with the schedule
- * arithmetic, which reads these same fields and must land on the same moments
- * (see {@link ./managedSchedule.ts}). */
+ * validators above would not admit as one: unparseable, or having no UTC
+ * designator (they take `Z`, never a bare offset). Without the designator,
+ * `Date.parse` reads the wall clock against the host zone -- five hours off
+ * under America/New_York -- so the same record would name a different instant
+ * on every machine that read it. Shared with the schedule arithmetic, which
+ * reads these same fields and must land on the same moments (see
+ * {@link ./managedSchedule.ts}). */
 export function parseStoredInstant(value: string): number {
   return value.endsWith("Z") ? Date.parse(value) : Number.NaN;
 }
 
-/** The canonical `lastRun` validator. Exported so the export/import artifact reuses
- * it rather than re-declaring a laxer copy. A record written before a kind was added
- * to the enum still reads: every earlier kind remains a member, so a stored
- * `"input"` entry loads and tiers exactly as it did. The converse is the
- * reader-rejects-unknown rule's own consequence -- an artifact carrying a kind this
- * reader does not know is refused whole, loudly, rather than read with the kind
- * dropped. */
+/** The canonical `lastRun` validator. Exported so the export/import artifact
+ * reuses it rather than re-declaring a laxer copy. Every earlier `failureKind`
+ * remains a member of the enum, so a record written before a kind was added
+ * still reads and tiers exactly as it did. An artifact holding a kind this
+ * reader does not know is refused whole rather than read with the kind
+ * dropped -- the reader-rejects-unknown rule. */
 export const lastRunSchema: ZodType<ManagedExchangeLastRun> = z.object({
   at: z.iso.datetime(),
   outcome: z.enum(["succeeded", "failed", "desynced", "missed"]),
@@ -275,14 +262,12 @@ export const tokenMaxAgeDaysSchema = z
   .max(MAX_TOKEN_MAX_AGE_DAYS);
 
 /**
- * The persisted exchange-file document, as validated when a record is read back:
- * a full {@link ExchangeSpec} that additionally must carry no `authentication`
+ * The persisted exchange-file document, validated when a record is read back: a
+ * full {@link ExchangeSpec} that additionally must hold no `authentication`
  * block. The secret lives in {@link ManagedExchangeRecord.sharedSecret}, never in
- * the document; a document carrying an `authentication` block is rejected rather
- * than silently accepted, so a stored record cannot smuggle a secret through the
- * document half. Composition never produces the block (see
- * {@link composeManagedExchangeFile}); this refine guards the read path against a
- * hand-edited or corrupted store.
+ * the document, so a stored record cannot smuggle a secret through the document
+ * half. Guards the read path against a hand-edited or corrupted store;
+ * composition never produces the block (see {@link composeManagedExchangeFile}).
  */
 const persistedExchangeFileSchema = ExchangeSpecSchema.refine(
   (spec) => spec.authentication === undefined,
@@ -293,9 +278,10 @@ const persistedExchangeFileSchema = ExchangeSpecSchema.refine(
  * The `.psilink.key` field shape the record's secret half maps onto: a
  * `sharedSecret` matching {@link SHARED_SECRET_REGEX} and, when a bound is in
  * force, an ISO 8601 `expires`. Reused by the export/import artifact so the
- * artifact's key half is validated against the exact key-file shape rather than a
- * looser copy, keeping the CLI-separability commitment one source of truth. Strict
- * so a reader rejects an unknown key on the pair rather than silently accepting it.
+ * artifact's key half validates against the exact key-file shape rather than a
+ * looser copy, keeping the CLI-separability commitment a single source of truth.
+ * Strict, so a reader rejects an unknown key on the pair rather than silently
+ * accepting it.
  */
 export const keyFileFieldsSchema = z
   .object({
@@ -310,8 +296,8 @@ export const keyFileFieldsSchema = z
  * input-file handle is validated only for its presence, not its structure: a
  * `FileSystemFileHandle` is an opaque platform object IndexedDB stores by
  * structured clone, so there is no serializable shape to assert -- the schema
- * carries it through as an optional unknown and the no-input-content invariant is
- * a property of the type (a handle is a pointer), not a runtime check.
+ * treats it as an optional unknown, and the no-input-content invariant is a
+ * property of the type (a handle is a pointer), not a runtime check.
  */
 export const ManagedExchangeRecordSchema: ZodType<ManagedExchangeRecord> =
   z.object({
@@ -331,7 +317,7 @@ export const ManagedExchangeRecordSchema: ZodType<ManagedExchangeRecord> =
 /**
  * Parse and validate a value read from the store as a {@link ManagedExchangeRecord}.
  * Throws on an unrecognized `schemaVersion`, an over-long label, a malformed
- * secret, or a document carrying an `authentication` block, rather than migrating
+ * secret, or a document holding an `authentication` block, rather than migrating
  * or silently accepting -- the reader-rejects-unknown rule.
  *
  * @throws {ZodError} if the value is not a valid v1 record.
@@ -351,7 +337,7 @@ export function safeParseManagedExchangeRecord(raw: unknown) {
  * A per-entry read of the stored list: the entries that parsed as v1 records, and
  * the stored keys of the entries that did not. The unreadable half is the STORED
  * KEY rather than the entry's own `id`, which a failed parse leaves untrusted --
- * the same reason the diagnostic read's unreadable marker carries the key (see
+ * the same reason the diagnostic read's unreadable marker holds the key (see
  * {@link ManagedExchangeDiagnosticEssentials}).
  */
 export interface ManagedExchangeReadableRecords {
@@ -368,12 +354,9 @@ export interface ManagedExchangeReadableRecords {
  * on the first entry that fails.
  *
  * Tolerance is for the UNATTENDED read alone (see
- * {@link ./managedScheduleRunner.ts}), where the two readings have very different
- * costs: skipping one entry stops that exchange's scheduled runs, while rejecting
- * wholesale stops every scheduled exchange in the store, standing, with nobody
- * present to recover it. The attended list read stays strict, so an operator still
- * meets the read-failed recovery surface that identifies and discards the
- * offending entry.
+ * {@link ./managedScheduleRunner.ts}); the attended list read stays strict, so an
+ * operator still meets the read-failed recovery surface that identifies and
+ * discards the offending entry.
  *
  * Never throws: every parse is per-entry, so an unreadable value becomes a
  * reported key rather than a rejection.
@@ -395,14 +378,13 @@ export function partitionReadableManagedExchanges(
 }
 
 /**
- * The display essentials a diagnostic read surfaces for one stored entry, when the
- * entry parses: only the fields a recovery listing renders -- the label, this
- * party's side, and the last run's instant when recorded. Deliberately NOT the
- * whole record: the diagnostic path must never return the `sharedSecret` or any
- * document field to a component, so this type structurally cannot carry secret
- * material (see docs/MANAGED_EXCHANGE.md, "Deleting a managed exchange", and the
- * read-failed recovery listing). The `id` is the stored key a delete-by-key acts
- * on.
+ * The display essentials a diagnostic read reports for one stored entry that
+ * parses: only the fields a recovery listing renders -- the label, this party's
+ * side, and the last run's instant when recorded. Not the whole record: the
+ * diagnostic path must never return the `sharedSecret` or any document field to a
+ * component, so this type structurally cannot hold secret material (see
+ * docs/MANAGED_EXCHANGE.md, "Deleting a managed exchange", and the read-failed
+ * recovery listing). The `id` is the stored key a delete-by-key acts on.
  */
 export interface ManagedExchangeDiagnosticEssentials {
   /** The stored key, the delete acts on it (matches the record's `id`). */
@@ -418,14 +400,13 @@ export interface ManagedExchangeDiagnosticEssentials {
 /**
  * Extract only the display essentials from a stored value for the read-failed
  * recovery listing: the `id`, `label`, `side`, and last-run instant, and nothing
- * else. Structurally incapable of returning secret material -- it reads named
- * scalar fields off the validated record and copies them into a
- * {@link ManagedExchangeDiagnosticEssentials}, so the `sharedSecret`, the document,
- * and the input handle never leave this function. Full record validation still
- * runs first, so a value that would fail {@link parseManagedExchangeRecord}
- * (unknown `schemaVersion`, malformed secret, a document carrying an
- * `authentication` block) throws here exactly as it would on the strict read; the
- * caller catches that to mark the entry unreadable.
+ * else. Structurally incapable of returning secret material: it reads named
+ * scalar fields off the validated record into a
+ * {@link ManagedExchangeDiagnosticEssentials}, so the `sharedSecret`, the
+ * document, and the input handle never leave this function. Full record
+ * validation runs first, so a value that would fail
+ * {@link parseManagedExchangeRecord} throws here exactly as it would on the
+ * strict read; the caller catches that to mark the entry unreadable.
  *
  * @throws {ZodError} if the value is not a valid v1 record.
  */
@@ -458,28 +439,27 @@ export interface ManagedExchangeFileComposition {
   standardization?: ExchangeSpec["standardization"];
   /** This party's send-side disclosure commitment. */
   disclosedPayloadColumns?: Array<string>;
-  /** This party's receive-side lock-in. */
+  /** This party's receive-side commitment. */
   expectedPayloadColumns?: Array<string>;
   /** The `deduplicate` an accepted invitation declared for the partner's own
-   * side -- this party's terms-side lock-in. Absent for a party that accepted
+   * side -- this party's terms-side commitment. Absent for a party that accepted
    * no invitation, which has no declaration to bind. */
   expectedPartnerDeduplicate?: boolean;
   /** This party's consent to its own outbound payload set. Absent for a party
-   * that records none -- every side but the acceptor, whose record the bench's
+   * that records none -- every side but the acceptor, whose record the console's
    * deposit builder derives at composition. */
   outboundPayloadConsent?: OutboundPayloadConsent;
 }
 
 /**
  * Compose the persisted exchange-file document from a credential-free webrtc
- * locator, exactly as the mint layer composes a downloadable file -- through the
- * same {@link assembleExchangeSpec} the mint path serializes, so one code path
- * carries the assembly rule for both artifacts. The connection is expanded from
- * the locator through {@link connectionFromLocator} (validated through the strict
- * `WebRTCEndpointSchema`, so any credential-bearing field is rejected rather than
- * stripped), and the schema's parse result -- never the raw input -- is what the
- * record persists, so no credential is representable in a stored document and no
- * `authentication` block is ever assembled.
+ * locator, through the same {@link assembleExchangeSpec} the mint path
+ * serializes, so one code path holds the assembly rule for both artifacts. The
+ * connection is expanded from the locator through {@link connectionFromLocator}
+ * (validated through the strict `WebRTCEndpointSchema`, so a credential-bearing
+ * field is rejected rather than stripped); the schema's parse result, never the
+ * raw input, is what the record persists, so no credential is representable in a
+ * stored document and no `authentication` block is ever assembled.
  *
  * @throws {ZodError} if the assembled spec fails validation (an out-of-range port,
  *   a malformed locator, a smuggled unknown key on the locator).
@@ -515,7 +495,7 @@ export interface NewManagedExchange {
   expires?: string;
   /** The agreed run schedule, when saved as recurring. */
   schedule?: ManagedExchangeSchedule;
-  /** Prior run bookkeeping to carry forward. Set only by an import, which restores
+  /** Prior run bookkeeping to retain. Set only by an import, which restores
    * the artifact's snapshot of `lastRun` so the first wake after an import reads the
    * same catch-up state the source had; a freshly-created record has no run yet. */
   lastRun?: ManagedExchangeLastRun;
@@ -530,7 +510,7 @@ export interface NewManagedExchange {
  * `undefined`.
  *
  * @throws {ZodError} if the assembled record is invalid (an over-long label, a
- *   malformed secret, a document carrying an `authentication` block).
+ *   malformed secret, a document holding an `authentication` block).
  */
 export function buildManagedExchangeRecord(
   fields: NewManagedExchange,
@@ -557,10 +537,10 @@ export function buildManagedExchangeRecord(
 
 /** The rotation fields a successful run advances on the stored record: the
  * rotated secret always, and the `expires` bound restamped from the max-age
- * policy (a string to set it, `null` to clear any standing bound). Deliberately
- * the only fields {@link applyManagedExchangeRotation} touches, so a rotation
- * write cannot carry a stale secret or a stale document -- the persist-before-
- * success write is structurally incapable of it (see
+ * policy (a string to set it, `null` to clear any standing bound). The only
+ * fields {@link applyManagedExchangeRotation} touches, so a rotation write
+ * cannot hold a stale secret or a stale document -- the persist-before-success
+ * write is structurally incapable of it (see
  * docs/spec/MANAGED_EXCHANGE_RECORD.md, "Persist-before-success ordering"). */
 export interface ManagedExchangeRotation {
   /** The rotated shared secret (base64url) to persist as the current secret. */
@@ -572,7 +552,7 @@ export interface ManagedExchangeRotation {
 /**
  * Apply a rotation to a record, producing a validated new record with only the
  * rotated secret and the `expires` bound changed -- the document, the label, the
- * schedule, the handle, and the bookkeeping are carried through untouched. A
+ * schedule, the handle, and the bookkeeping remain untouched. A
  * string `expires` sets the bound; `null` clears it (a policy dropped between runs
  * must not leave a stale bound armed). The result is re-validated through the
  * schema, so a malformed rotated secret is rejected here. The input record is not
@@ -597,13 +577,13 @@ export function applyManagedExchangeRotation(
  * Apply a re-invite rotation to a record: advance the rotated secret and the
  * `expires` bound exactly as {@link applyManagedExchangeRotation}, AND drop any
  * `lastRun` bookkeeping. A re-invite is the recovery for the failure `lastRun`
- * recorded, so leaving that entry in place would re-derive the consumed failure at
- * the next visit -- and once the import marker is cleared in the same rotation, a
- * stale `auth` failure would re-derive as the attack tier, resurrecting the framing
- * the operator already recovered from. Clearing it in the same field-scoped write
- * makes the post-re-invite record read as "no failure to tier" (see
- * {@link ./managedFailureTiers.ts}). The document, the label, the schedule, and the
- * handle are carried through untouched; the input record is not mutated.
+ * recorded; leaving that entry in place would re-derive the consumed failure at
+ * the next visit, and once the import marker is cleared in the same rotation, a
+ * stale `auth` failure would re-derive as the attack tier. Clearing it in the
+ * same field-scoped write makes the post-re-invite record treated as holding no
+ * failure to tier (see {@link ./managedFailureTiers.ts}). The document, the
+ * label, the schedule, and the handle remain untouched; the input
+ * record is not mutated.
  *
  * @throws {ZodError} if the rotated record is invalid (a malformed secret).
  */
@@ -622,16 +602,16 @@ export function applyManagedExchangeReinviteRotation(
 }
 
 /** Apply a `lastRun` bookkeeping entry to a record, producing a validated new
- * record with only `lastRun` changed. The document and the secret are carried
- * through untouched. Separate from a rotation write so the run outcome is recorded
+ * record with only `lastRun` changed. The document and the secret remain
+ * untouched. Separate from a rotation write so the run outcome is recorded
  * without re-touching the rotated secret. The input record is not mutated.
  *
  * Monotonic on `at`: an entry older than the stored one leaves the record
- * unchanged. Two runs' bookkeeping tails are not serialized by the run+rotate
- * lock (it covers only handshake through persist), so a slow earlier run's late
- * write could otherwise land after -- and mask -- a newer run's outcome; the
- * guard makes the stale write a no-op instead. Compared as parsed instants, not
- * strings: the schema admits ISO datetimes of varying fractional precision, whose
+ * unchanged. The run+rotate lock covers only handshake through persist, not two
+ * runs' bookkeeping tails, so a slow earlier run's late write could otherwise
+ * land after -- and mask -- a newer run's outcome; this guard makes the stale
+ * write a no-op instead. Compared as parsed instants, not strings, since the
+ * schema admits ISO datetimes of varying fractional precision, whose
  * lexicographic order diverges from chronological. */
 export function applyManagedExchangeLastRun(
   record: ManagedExchangeRecord,
@@ -647,8 +627,9 @@ export function applyManagedExchangeLastRun(
 
 /** Whether two stored instants denote the same moment, compared as parsed
  * instants for the precision reason {@link applyManagedExchangeLastRun} gives.
- * A string {@link parseStoredInstant} cannot read matches nothing, itself
- * included, which holds a conditioned write off a plan it cannot read. */
+ * A string {@link parseStoredInstant} cannot read parses to `NaN`, which never
+ * equals itself, so it matches nothing -- holding a conditioned write off a plan
+ * it cannot read. */
 function sameStoredInstant(left: string, right: string): boolean {
   return parseStoredInstant(left) === parseStoredInstant(right);
 }
@@ -666,7 +647,7 @@ export interface ManagedExchangeScheduleAdvance {
   schedule: ManagedExchangeSchedule;
   /** The `nextWindow` the advance was computed FROM, matched against the stored
    * one exactly as the cadence is: the advance is the successor of that one
-   * plan, so it lands only while the record still carries it. */
+   * plan, so it lands only while the record still holds it. */
   fromNextWindow: string;
   /** The `consecutiveMisses` the advance was computed FROM, matched the same
    * way: the count is the escalation's own input, and an operator may clear it
@@ -681,25 +662,16 @@ export interface ManagedExchangeScheduleAdvance {
 
 /** Apply a scheduled window's bookkeeping to a record, producing a validated new
  * record with `schedule` and `lastRun` advanced together and everything else --
- * the document, the secret, the handle -- carried through untouched. The input
+ * the document, the secret, the handle -- stays untouched. The input
  * record is not mutated. This is the runner's write; the attended run path
  * records `lastRun` alone and never touches `schedule`.
  *
  * Conditioned on the whole stored plan, which the operator may edit and another
  * wake may advance at any time: the write lands only while the record still
- * carries the cadence the advance was computed against (`anchor`,
- * `intervalDays`, `windowSeconds`) AND still plans the `nextWindow` and carries
- * the `consecutiveMisses` it was computed from. Any other stored schedule -- a
- * re-entered cadence, a plan some other write already moved, a count the
- * operator cleared, or none at all -- leaves the record entirely unchanged.
- * Writing regardless would resurrect a schedule the operator dropped, overwrite
- * a re-entered cadence with a planned window derived from the replaced one,
- * restore a count the operator cleared on the plan the wake was running, or --
- * the tails of two wakes being no more serialized than two runs' (see
- * {@link applyManagedExchangeLastRun}) -- rewind `nextWindow` and LOWER
- * `consecutiveMisses` behind a newer advance, deferring the escalation two
- * consecutive misses fire. A wake against the stored plan recomputes both
- * honestly.
+ * holds the cadence the advance was computed against (`anchor`, `intervalDays`,
+ * `windowSeconds`) AND still plans the `nextWindow` and holds the
+ * `consecutiveMisses` it was computed from. Any other stored schedule leaves the
+ * record entirely unchanged; a wake against the stored plan recomputes both.
  *
  * The stored instants are compared as parsed moments rather than strings, for
  * the varying-ISO-precision reason {@link applyManagedExchangeLastRun} states.
@@ -709,10 +681,8 @@ export interface ManagedExchangeScheduleAdvance {
  * window did close, whatever landed afterwards -- while a bookkeeping entry
  * staler than the stored one is dropped rather than masking a newer outcome.
  * Both stamps are read through {@link parseStoredInstant} rather than
- * `Date.parse`, so one carrying no UTC designator is not measured against the
- * host's zone: it compares as no run at all, which lets the window's own
- * bookkeeping land over it -- the same conservative direction the catch-up walk
- * takes for a stamp it cannot read. */
+ * `Date.parse`, so a stamp having no UTC designator compares as no run at all,
+ * letting the window's own bookkeeping land over it. */
 export function applyManagedExchangeScheduleAdvance(
   record: ManagedExchangeRecord,
   advance: ManagedExchangeScheduleAdvance,
@@ -743,11 +713,11 @@ export function applyManagedExchangeScheduleAdvance(
 /**
  * Apply an input-file handle to a record, producing a validated new record with
  * only `inputFileHandle` changed -- the document, the secret, and the bookkeeping
- * are carried through untouched. A `FileSystemFileHandle` sets (or re-points) the
+ * remain untouched. A `FileSystemFileHandle` sets (or re-points) the
  * handle; `null` drops it. This is the field-scoped write the save flow uses to
  * persist a handle and the surfaces use to re-point one after a missing-file
  * failure; separate from a rotation or a local edit so persisting a handle cannot
- * carry a stale secret or a stale document back over a concurrent write. The input
+ * hold a stale secret or a stale document back over a concurrent write. The input
  * record is not mutated.
  *
  * @throws {ZodError} if the resulting record is invalid.
@@ -766,7 +736,7 @@ export function applyManagedExchangeInputHandle(
  * display label, the run schedule, and the max-token-age policy. The agreed
  * terms are fixed for the partnership -- a re-invite only refreshes the secret,
  * and a terms change is a new exchange, not a re-invite -- so the document and
- * the secret are deliberately not editable here. */
+ * the secret are not editable here. */
 export interface ManagedExchangeLocalEdits {
   /** A new display label (validated to {@link MAX_LABEL_LENGTH}). */
   label?: string;

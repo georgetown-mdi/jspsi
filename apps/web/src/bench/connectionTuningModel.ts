@@ -14,7 +14,7 @@ import type { JobExchangeOptions } from "@jobs/intent";
 /**
  * The pure model behind the console's "Connection tuning" authoring card: how the
  * operator's polling, timeout, retry, and SFTP session-mode choices become the
- * tuning `options` a server job carries, what the card refuses before the run
+ * tuning `options` a server job holds, what the card refuses before the run
  * starts, and the two advisories the CLI raises at run time raised here instead,
  * while the operator can still act on them.
  *
@@ -47,8 +47,8 @@ export const POLL_INTERVAL_UNITS: ReadonlyArray<DurationUnit> = [
   "m",
 ];
 
-/** The units the two timeout fields offer. Milliseconds are deliberately absent:
- * a coarse duration flag cannot state one, so a zero-setup run could not carry
+/** The units the two timeout fields offer. Milliseconds are absent by design: a
+ * coarse duration flag cannot state one, so a zero-setup run could not hold
  * the value the operator authored. */
 export const TIMEOUT_UNITS: ReadonlyArray<DurationUnit> = ["s", "m", "h"];
 
@@ -89,7 +89,7 @@ export const CONNECTION_TUNING_DEFAULT: ConnectionTuningDraft = {
   connectionPerPoll: false,
 };
 
-/** Which of the card's controls the calling flow can carry. The SFTP session mode
+/** Which of the card's controls the calling flow can hold. The SFTP session mode
  * is an sftp-only dialing choice -- a filedrop client holds no socket -- so the
  * intent's filedrop arms refuse it and the card withholds it there. */
 export interface ConnectionTuningCapabilities {
@@ -126,11 +126,10 @@ function durationMs(field: DurationField): number | undefined | null {
 /**
  * The longest wait either timeout field may state: core's seven-day
  * {@link MAX_TIMEOUT_SECONDS}, in the milliseconds the job intent speaks. Both
- * fields ride the CLI's `--peer-timeout` / `--connection-timeout` on a zero-setup
- * run, where the same ceiling is a usage error (exit 64), so a larger value here
- * would create a job whose child exits immediately -- accepted and then dropped.
- * The poll interval takes no ceiling, exactly as `--polling-frequency` takes
- * none: a long interval is merely slow.
+ * fields ride the CLI's `--peer-timeout` / `--connection-timeout` on a
+ * zero-setup run, where the same ceiling is a usage error (exit 64); a
+ * larger value here would create a job whose child exits immediately. The
+ * poll interval takes no ceiling, matching `--polling-frequency`.
  */
 const MAX_TIMEOUT_MS = MAX_TIMEOUT_SECONDS * 1000;
 
@@ -163,7 +162,7 @@ function reconnectAttempts(raw: string): number | undefined | null {
 /**
  * The tuning `options` block a draft contributes to a job intent, or undefined
  * when the operator changed nothing (so the intent omits the block and the
- * composed config carries no `options` at all). A field the draft states
+ * composed config holds no `options` at all). A field the draft states
  * inadmissibly is omitted here and reported by {@link connectionTuningProblems},
  * which blocks the run, so no malformed value reaches an intent.
  */
@@ -192,13 +191,12 @@ export function connectionTuningOptions(
 }
 
 /**
- * Merge the connection-tuning block onto another authored block (the file-handling
- * card's), so the two cards contribute to the one `options` object a job intent
- * carries. Each card owns its own fields, so the merge overwrites no authored
- * choice; that the two field sets stay disjoint is checked over both cards' whole
- * surfaces in connectionTuningModel.test.ts. Returns undefined when neither
- * card contributed anything, keeping the "an untouched form composes no options
- * block at all" property.
+ * Merge the connection-tuning block onto another authored block (the
+ * file-handling card's), so the two cards contribute to the one `options`
+ * object a job intent holds. Each card owns its own fields, so the merge
+ * overwrites no authored choice -- checked over both cards' whole surfaces
+ * in connectionTuningModel.test.ts. Returns undefined when neither card
+ * contributed anything.
  */
 export function withConnectionTuning(
   base: JobExchangeOptions | undefined,
@@ -241,16 +239,15 @@ function timeoutProblem(
 }
 
 /**
- * Everything wrong with the draft, as messages to show beside the card -- empty
- * when it is admissible. The run is blocked while this is non-empty, so a value
- * the intent schema would refuse is caught here, at authoring time, instead of
- * failing the create.
+ * Everything wrong with the draft, as messages to show beside the card --
+ * empty when it is admissible. The run is blocked while this is non-empty,
+ * so a value the intent schema would refuse is caught here, at authoring
+ * time.
  *
- * These are shape rules on what the operator typed plus the two ceilings the run
- * itself refuses -- core's {@link MAX_RECONNECT_ATTEMPTS} and the seven-day
- * {@link MAX_TIMEOUT_MS} the timeout flags cap -- never a judgement about a value
- * both boundaries accept: an aggressive poll interval or a large retry budget
- * draws an advisory ({@link connectionTuningAdvisories}) rather than a block.
+ * These are shape rules on what the operator typed, plus the two ceilings
+ * the run itself refuses ({@link MAX_RECONNECT_ATTEMPTS}, the seven-day
+ * {@link MAX_TIMEOUT_MS}) -- never a judgement about a value both accept:
+ * that draws an advisory ({@link connectionTuningAdvisories}) instead.
  */
 export function connectionTuningProblems(
   draft: ConnectionTuningDraft,
@@ -303,15 +300,15 @@ export const CONNECTION_PER_POLL_SHORT_INTERVAL_ADVISORY =
   "the single held connection.";
 
 /**
- * The non-blocking advisories the draft draws -- the CLI's two run-time warnings
- * about these values, raised at authoring time instead. Warn and guide, never a
- * block: both values are legitimate against a server the operator controls, and
- * the CLI refuses neither.
+ * The non-blocking advisories the draft draws: the CLI's two run-time
+ * warnings about these values, raised here at authoring time instead. Warn
+ * and guide, never a block -- both values are legitimate against a server
+ * the operator controls.
  *
- * The short-interval advisory reads the EFFECTIVE interval, core's
- * `DEFAULT_POLLING_FREQUENCY_MS` included, exactly as the CLI's does: leaving the
- * interval unset and switching the session mode on is the wasteful pairing the
- * advisory is about, not an untuned run.
+ * The short-interval advisory reads the EFFECTIVE interval,
+ * `DEFAULT_POLLING_FREQUENCY_MS` included, matching the CLI: an unset
+ * interval with the session mode on is the wasteful pairing this warns
+ * about, not an untuned run.
  */
 export function connectionTuningAdvisories(
   draft: ConnectionTuningDraft,
@@ -338,13 +335,12 @@ export function connectionTuningAdvisories(
 }
 
 /**
- * The card's collapsed summary, so a closed card is not a blind box: whether
- * anything here departs from the defaults the run would otherwise take. It reads
- * the same capabilities {@link connectionTuningOptions} emits under, so a field
- * the flow drops -- the SFTP session mode on a shared-directory transport -- is
- * not counted as a departure the run would never make. Lives with the model
- * rather than the card for exactly that reason: which fields count is the
- * capabilities rule, not a presentation choice.
+ * The card's collapsed summary: whether anything here departs from the
+ * defaults the run would otherwise take. It reads the same capabilities
+ * {@link connectionTuningOptions} emits under, so a field the flow drops --
+ * the SFTP session mode on a shared-directory transport -- is not counted
+ * as a departure. Lives with the model rather than the card: which fields
+ * count is the capabilities rule, not a presentation choice.
  */
 export function connectionTuningSummary(
   draft: ConnectionTuningDraft,
@@ -376,12 +372,11 @@ function naturalDurationUnit(ms: number): DurationUnit {
 /**
  * The placeholder each duration field shows: core's own default for that
  * field, so an operator who leaves it blank can see what the run will
- * actually use. When the default is a whole number in the unit the field is
- * currently authored in, that bare number is shown, exactly as before. When
- * it is not, showing a rounded bare number would misstate the default (or,
- * for some unit/default pairs, round to "0", a value the field itself
- * refuses), so the placeholder instead states the default in its own natural
- * unit as text -- never a rounded bare number.
+ * actually use. When the default is a whole number in the field's current
+ * unit, that bare number is shown. Otherwise a rounded bare number would
+ * misstate the default (or round to "0", a value the field itself
+ * refuses), so the placeholder states the default in its own natural unit
+ * as text.
  */
 export function defaultPlaceholder(
   defaultMs: number,

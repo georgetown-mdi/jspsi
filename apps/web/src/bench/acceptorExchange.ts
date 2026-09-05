@@ -7,28 +7,28 @@ import type { CSVRow, LinkageTerms, PreparedExchange } from "@psilink/core";
 import type { AcceptorDataEdits } from "@psi/acceptInvitation";
 
 /**
- * Assemble the acceptor's prepared exchange, re-surfacing ExchangeView's acceptor
- * wiring exactly: the data spec adopts the invitation's `linkageTerms` with the
- * committed name substituted and the confirm-columns edits threaded in
- * ({@link acceptorExchangeDataSpec}), then `prepareForExchange` binds it to the
- * acquired CSV's rows and columns.
+ * Assemble the acceptor's prepared exchange: the data spec adopts the
+ * invitation's `linkageTerms` with the committed name substituted and the
+ * confirm-columns edits threaded in ({@link acceptorExchangeDataSpec}), then
+ * `prepareForExchange` binds it to the acquired CSV's rows and columns.
  *
- * The payload lock-in is the security-relevant part: `expectedPayloadColumns` is
- * set to the invitation's `disclosedPayloadColumns` -- the set the consent screen
- * showed -- so an inviter transmitting a different column set than it disclosed
- * aborts the exchange ({@link reconcileReceivedPayload}). An omitted disclosed set
- * (an older or metadata-unknown mint) stays undefined, and the acceptor reconciles
- * lazily; whenever it is present (including the empty set) it locks in.
+ * The payload commitment is the security-relevant part: `expectedPayloadColumns`
+ * is set to the invitation's `disclosedPayloadColumns` -- the set the consent
+ * screen showed -- so an inviter transmitting a different column set than it
+ * disclosed aborts the exchange ({@link reconcileReceivedPayload}). An omitted
+ * disclosed set (an older or metadata-unknown mint) stays undefined, and the
+ * acceptor reconciles lazily; whenever it is present (including the empty set)
+ * it is committed.
  *
- * The terms-side lock-in beside it is `expectedPartnerDeduplicate`, the value the
- * invitation declared for the inviter's own side: the consent screen stated it,
- * the acceptor's own value is derived as false, and nothing in the agreed terms
- * compares the two -- so an inviter presenting a different value at the terms
- * exchange aborts the run before any key or payload moves
+ * The terms-side commitment beside it is `expectedPartnerDeduplicate`, the value
+ * the invitation declared for the inviter's own side: the consent screen stated
+ * it, the acceptor's own value is derived as false, and nothing in the agreed
+ * terms compares the two -- so an inviter presenting a different value at the
+ * terms exchange aborts the run before any key or payload moves
  * ({@link assertPresentedDeduplicateMatchesInvitation}).
  *
- * Pure and exported so the lock-in and the spec assembly are the tested boundary,
- * pinned without running the run lifecycle.
+ * Pure and exported so the commitments and the spec assembly are the tested
+ * boundary, pinned without running the run lifecycle.
  */
 export function prepareAcceptorExchange({
   linkageTerms,

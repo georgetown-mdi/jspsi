@@ -26,7 +26,7 @@ const RECURRING_EXCHANGE_DOC_URL =
  * collapsed until the run completes, absent on a failed or stopped run. It
  * fetches the job's portable,
  * secret-free hand-off from `GET /api/jobs/:jobId/handoff` and lays out exactly
- * what the operator carries from this prototyped run to a scheduled `psilink`
+ * what the operator takes from this prototyped run to a scheduled `psilink`
  * command line: the config or command template (the portable values from this run
  * filled in, machine-specific paths shown as placeholders), the key-file copy step
  * for an invitation run, cron and Windows Task Scheduler examples, and the caveats.

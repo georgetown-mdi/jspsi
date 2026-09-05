@@ -1,37 +1,16 @@
 /**
- * The pure derivation of a managed exchange's FAILURE TIER from what the record
- * already knows -- the desync-versus-attack tiering (see docs/MANAGED_EXCHANGE.md,
- * "Telling a desync from an attack"). The web handshake wrapper collapses every
- * trust failure into one `security`-kind error, so the tool cannot cryptographically
- * tell a rotation desync from an attack. What it CAN do is read the record's
- * structured bookkeeping and surface the failure through the tier that bookkeeping
- * explains, reserving the full out-of-band confirmation for a failure nothing else
- * explains.
+ * The pure derivation of a managed exchange's failure tier from the record's own
+ * evidence -- `lastRun.failureKind`, a lapsed `expires`, and the local
+ * `imported` marker -- never the live error, so an unattended run's failure
+ * tiers the same way at the next visit as it would at the moment it failed.
+ * Design rationale for the desync-versus-attack tiering: docs/MANAGED_EXCHANGE.md,
+ * "Telling a desync from an attack".
  *
- * The tier is DERIVED from the record's evidence, never guessed, and never read from
- * the live error -- a failure from an unattended run surfaces through the same tiers
- * at the next visit. The evidence is:
- *
- * - `lastRun.failureKind` -- the structured enum the runner and the critical section
- *   stamp (`auth` \| `transport` \| `storage` \| `custody-unreadable` \| `input` \|
- *   `terms-shortfall` \| `consent` \| `handed-off` \| `cancelled`);
- * - a lapsed `expires` (its own state, detected before any connection; handled by the
- *   pre-connection check, mirrored here for a next-visit read);
- * - an import/restore since the last successful run -- the local `imported` sibling
- *   marker, cleared on the first rotation after an import (a completed handshake
- *   proves the parties were in sync), so its presence alone means "restored and not
- *   yet successfully run since" (see {@link ./managedExchangeStore.ts}).
- *
- * Benign tiers get plain, specific copy naming their specific recovery; only the
- * unexplained tier gets the attack checklist. The secret-farming caveat is load-
- * bearing: an active impersonator wants the operator to reach a benign reading, so a
- * benign tier is surfaced ONLY when the record's own structured evidence explains the
- * failure, never as the default reading of an unexplained one.
- *
- * Pure and platform-free: it reads a record and its import marker and returns a tier.
- * The confirmation MESSAGE and the two-outcome GATE are composed in the sibling
- * modules {@link ./managedFailureConfirmation.ts} and the display copy in
- * {@link ../bench/managedRunLaunchModel.ts}; this module decides only which tier.
+ * Pure and platform-free: it reads a record and its import marker and returns a
+ * tier. The confirmation MESSAGE and the two-outcome GATE are composed in the
+ * sibling modules {@link ./managedFailureConfirmation.ts} and the display copy
+ * in {@link ../bench/managedRunLaunchModel.ts}; this module decides only which
+ * tier.
  */
 
 import { managedExchangeLapsed } from "./managedExpiry";
@@ -41,11 +20,11 @@ import type { ManagedLocalState } from "./managedLocalStateShape";
 
 /**
  * The failure tier a record's bookkeeping resolves to. Each benign tier names a
- * specific recovery; only `"unexplained"` carries the out-of-band confirmation.
+ * specific recovery; only `"unexplained"` has the out-of-band confirmation.
  *
  * - `"expired"` -- the stored secret's age bound has lapsed (its own benign state;
  *   recovery: re-invite). Detected before any connection, so a live launch reaches it
- *   through the pre-connection check; carried here for a next-visit read of a record
+ *   through the pre-connection check; kept here for a next-visit read of a record
  *   whose bound lapsed while dormant.
  * - `"input"` -- a benign pre-run input problem the last run recorded: the file was
  *   missing, unreadable, or gone from under its handle (recovery: put the file back
@@ -112,29 +91,21 @@ export function importedSinceLastSuccess(
 }
 
 /**
- * Derive the failure tier for a record from its structured bookkeeping and its local
- * sibling state as of `now`. The order encodes the tiering's precedence: a lapsed
- * bound is its own state (checked first, mirroring the pre-connection check that never
- * lets expiry reach attack framing); a recorded benign `lastRun` cause surfaces as its
- * specific tier; a restore since the last success explains an otherwise-unexplained
- * handshake failure; and only a failed-closed handshake (`auth`) with none of those
- * explanations reaches `"unexplained"`.
- *
- * The evidence is the record's own -- `lastRun.failureKind`, `expires`, and the local
- * import marker -- never the live error, so an unattended run's failure surfaces
- * through the same tier at the next visit as an attended one does at the moment it
- * fails. A benign tier is never the DEFAULT reading of an unexplained failure: it is
- * returned only when the record's structured evidence explains the failure, so an
- * active impersonator cannot farm a benign reading (the secret-farming caveat).
+ * Derive the failure tier for a record from its structured bookkeeping and its
+ * local sibling state as of `now`, in precedence order: a lapsed bound first
+ * (mirroring the pre-connection check), then a recorded benign `lastRun` cause,
+ * then a restore since the last success, and only then `"unexplained"` for a
+ * failed-closed (`auth`) handshake with none of those. Rationale for the
+ * ordering and the secret-farming caveat: docs/MANAGED_EXCHANGE.md, "Telling a
+ * desync from an attack".
  */
 export function deriveManagedFailureTier(
   record: ManagedExchangeRecord,
   local: ManagedLocalState | undefined,
   now: number,
 ): ManagedFailureTier {
-  // A lapsed bound is its own state and never routed through attack framing, exactly
-  // as the pre-connection check keeps it: checked first so a record that lapsed while
-  // dormant reads as expiry at the next visit, whatever its last recorded run was.
+  // Checked first: never routed through attack framing, matching the
+  // pre-connection check.
   if (managedExchangeLapsed(record, now)) return "expired";
 
   const lastRun = record.lastRun;
@@ -166,15 +137,11 @@ export function deriveManagedFailureTier(
   // -- Tier 1, no attack checklist.
   if (lastRun.failureKind === "storage") return "storage";
 
-  // A restore since the last success explains a failed-CLOSED handshake benignly: the
-  // restored copy can hold a secret the partnership rotated past, so the handshake
-  // fails to authenticate and a re-invite recovers it. Only an `auth` failure is what
-  // a stale-secret restore explains -- a transport drop is a connection problem the
-  // marker does not bear on, so it stays the retryable transport tier regardless of a
-  // standing marker (see docs/MANAGED_EXCHANGE.md, "Telling a desync from an attack").
-  // This precedes the unexplained reading precisely because naming a benign cause is
-  // only honest when the record's own evidence supplies it -- the marker is consumed by
-  // any successful run, so its presence is real evidence, not a guess.
+  // A restore since the last success benignly explains only a failed-CLOSED
+  // `auth` handshake -- a stale-secret restore does not bear on a transport
+  // drop, which stays the retryable transport tier regardless of the marker.
+  // Rationale and the secret-farming caveat: docs/MANAGED_EXCHANGE.md, "Telling
+  // a desync from an attack".
   if (lastRun.failureKind === "auth" && importedSinceLastSuccess(local))
     return "imported";
 

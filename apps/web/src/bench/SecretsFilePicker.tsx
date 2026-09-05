@@ -24,7 +24,7 @@ import type { SecretsEntriesResult } from "@psi/sftpAuthoringClient";
 /** The mount-root breadcrumb label. */
 const ROOT_LABEL = "secrets";
 
-/** The settle copy for the aria-live status region. */
+/** What the aria-live status region announces once a listing resolves. */
 function secretsLiveMessage(listing: SecretsEntriesResult | "loading"): string {
   if (listing === "loading") return "";
   if (listing.kind === "disabled")
@@ -47,10 +47,10 @@ function secretsLiveMessage(listing: SecretsEntriesResult | "loading"): string {
  * container-absolute path is ever shown or sent. No file bytes are read; this is a
  * name browse only (SSH key material and password files, not profiled).
  *
- * A missing or unreadable secrets mount reads as a named config gap (name
- * `JOB_SECRETS_DIR`), not a dead end, reusing the shared listing-shell discipline
- * ({@link MountStateNotice}). A polite status region announces each settle and
- * focus follows a navigation so a screen-reader user is not stranded.
+ * A missing or unreadable secrets mount is shown as a named config gap (name
+ * `JOB_SECRETS_DIR`), not a dead end, reusing the shared listing shell
+ * ({@link MountStateNotice}). A polite status region announces each resolved
+ * listing, and focus follows a navigation so a screen-reader user is not stranded.
  */
 export function SecretsFilePicker({
   onSelect,
@@ -65,7 +65,7 @@ export function SecretsFilePicker({
   );
 
   // A monotonic id per fetch so a superseded resolution (a fast navigation or a
-  // refresh spam) falls on the floor; `mounted` drops a resolution after unmount.
+  // refresh spam) is discarded; `mounted` drops a resolution after unmount.
   const listingId = useRef(0);
   const mounted = useRef(true);
   useEffect(() => {
@@ -86,8 +86,9 @@ export function SecretsFilePicker({
     void load(subPath);
   }, [subPath, load]);
 
-  // Focus the stage on a navigation settle so a screen-reader user is not stranded
-  // on a control that unmounted; skipped on mount so initial focus stays put.
+  // Focus the stage once a navigation resolves so a screen-reader user is not
+  // stranded on a control that unmounted; skipped on mount so initial focus stays
+  // put.
   const stageRef = useRef<HTMLDivElement>(null);
   const stageMounted = useRef(false);
   useEffect(() => {
@@ -130,7 +131,7 @@ function renderListing(
     return <MountLoading message="Loading the secrets directory..." />;
 
   // The whole job API is off (JOB_DATA_ROOT unset): a stable config state, so it
-  // reads as informational and names the variable to set.
+  // is shown as informational and names the variable to set.
   if (listing.kind === "disabled")
     return (
       <MountStateNotice

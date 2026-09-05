@@ -90,7 +90,7 @@ function profileLiveMessage(
  * streaming profile ({@link fetchJobInputProfile}) and shows a confirm panel --
  * columns, row count, size, modified time, and a per-column sample peek -- with an
  * explicit loading state, since a pass over a CLI-scale file takes seconds. "Use this
- * file" commits the profile to the bench.
+ * file" commits the profile to the console.
  *
  * Focus moves to the active stage on a listing<->confirm swap and on a refresh settle
  * (so the loading branch is never a focus dead-end), and a polite status region
@@ -101,10 +101,10 @@ export function ServerFilePicker({
   committed,
   onUse,
 }: {
-  /** The file currently committed to the bench (its reference), so its row is
+  /** The file currently committed to the console (its reference), so its row is
    * marked. */
   committed: WorkInputReference | undefined;
-  /** Commit a profiled file to the bench -- the second stage's "Use this file". */
+  /** Commit a profiled file to the console -- the second stage's "Use this file". */
   onUse: (profile: ProfiledJobInput) => void;
 }) {
   const [listing, setListing] = useState<JobInputsResult | "loading">(
@@ -235,8 +235,8 @@ function ListingView({
   if (listing === "loading")
     return <MountLoading message="Loading files from the console..." />;
 
-  // The job API is deliberately off (JOB_DATA_ROOT unset), a stable config state
-  // -- so it reads as informational and names the variable to set, distinct from
+  // The job API is off by design (JOB_DATA_ROOT unset), a stable config state --
+  // so it displays as informational and names the variable to set, distinct from
   // the red transient fault below whose advice is to retry.
   if (listing.kind === "disabled")
     return (

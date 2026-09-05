@@ -28,21 +28,20 @@ function draftSummary(draft: RunDiagnosticsDraft): string {
 /**
  * The console's "Diagnostics and recovery" card: the two per-run controls an
  * operator reaches for when a run misbehaves. A closed disclosure, since a first
- * run needs neither: they are the CLI's diagnostic and recovery affordances,
- * offered here so a failed prototype run does not send the operator out of the
- * GUI for exactly the situation it exists to smooth.
+ * run needs neither: they are the CLI's diagnostic and recovery options, offered
+ * here so a failed prototype run does not send the operator back to the command
+ * line.
  *
  * Both choices are this run's alone; nothing here is remembered for the next
  * one. The rules behind them belong to {@link runDiagnosticsModel}: the sweep is
  * emitted only once confirmed, and an unconfirmed sweep is a form problem the
- * calling flow blocks the run on rather than a request the appliance receives.
+ * calling flow blocks the run on rather than a request the console receives.
  *
- * What the sweep DOES is entirely the CLI's: it passes `--sweep-exchange-files`
- * and nothing else, so which files count as the exchange's own and whether a
- * retain-mode transcript may be deleted are decided where they always were. The
- * escalation past that guard is named here and not offered, in fixed copy the
- * operator's own draft brings up -- nothing a run says decides what this card
- * tells them.
+ * What the sweep DOES belongs to the CLI: this card passes
+ * `--sweep-exchange-files` and nothing else, so which files count as the
+ * exchange's own, and whether a retain-mode transcript may be deleted, are
+ * decided there. The escalation past that guard is named here in fixed copy and
+ * not offered; nothing a run says decides what this card tells the operator.
  */
 export function RunDiagnosticsCard({
   draft,

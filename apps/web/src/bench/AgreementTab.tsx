@@ -21,7 +21,7 @@ const EMPTY_AGREEMENT: DraftLegalAgreement = {
 /**
  * The Legal agreement tab: attach or detach the optional agreement block and
  * author the three values the partner must enter identically at accept time.
- * Validation errors surface inline on the owning field.
+ * Validation errors show inline on the field they belong to.
  */
 export function AgreementTab({
   editor,

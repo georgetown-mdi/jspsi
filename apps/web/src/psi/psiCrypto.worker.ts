@@ -47,10 +47,10 @@ const scope = globalThis as unknown as WorkerScope;
 // loads (or fails it fast if the load fails).
 const onRequest = createBufferingRequestRouter(
   async () => {
-    // The role/id seed rides self.name (set at construction), the browser analogue of
-    // the CLI worker's workerData -- available synchronously at startup. The browser
-    // always uses WASM; loadPsiBackend keeps the backend selection identical to the
-    // main-thread path (ExchangeView), which has no native addon.
+    // The role/id seed is passed in self.name (set at construction), the browser
+    // analogue of the CLI worker's workerData -- available synchronously at
+    // startup. The browser always uses WASM; loadPsiBackend keeps the backend
+    // selection identical to the main-thread path, which has no native addon.
     const init = decodePsiWorkerInit(scope.name);
     const { library } = await loadPsiBackend(
       { loadWasm: () => PSI() as Promise<PSILibrary> },

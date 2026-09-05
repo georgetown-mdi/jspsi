@@ -7,37 +7,26 @@ import { WORKDIR_MODE, jobFileExists, resolveWorkdirFile } from "./workdir";
 import { runCapturedCliChild } from "./capturedCliChild";
 
 /**
- * The appliance's signing-identity driver. It spawns the CLI's `fingerprint`
- * subcommand -- the same binary the exchange runs -- so the console never
- * re-implements key generation, certificate binding, or the fingerprint digest:
- * the one authority on all three stays `psilink fingerprint`, and the console is
- * a caller of it.
+ * The console's signing-identity driver. It spawns the CLI's `fingerprint`
+ * subcommand -- the same binary the exchange runs -- rather than
+ * re-implementing key generation, certificate binding, or the fingerprint
+ * digest.
  *
- * The command is create-or-reuse by design (see the header of
- * `apps/cli/src/commands/fingerprint.ts`): a party must be able to show its
- * fingerprint before any signed exchange, because the partner pins it
- * out-of-band first, so the identity is created at the moment the operator asks
- * to see the fingerprint rather than at run time. The console never passes
- * `--force`: regeneration invalidates every fingerprint a partner has pinned,
- * and a coordinated action of that weight belongs on the command line, where the
- * flag names what it does, rather than behind a button beside the pin it breaks.
+ * The command is create-or-reuse (`apps/cli/src/commands/fingerprint.ts`);
+ * the console never passes `--force`.
  *
- * Every value crossing back is re-validated at this trust boundary: the
- * fingerprint against core's canonical regex, and nothing else is read at all --
- * stderr is discarded (it can name paths), and the child is watchdog-bounded so
- * the endpoint's latency stays bounded.
+ * The child's stdout fingerprint is re-validated against core's canonical
+ * regex; stderr is discarded (it can name filesystem paths), and the child
+ * is watchdog-bounded.
  */
 
 /**
- * The signing identity file's name inside the appliance's mounted data root.
+ * The signing identity file's name inside the console's mounted data root.
  *
- * Dot-prefixed for the same reason the CLI's key file is: it holds a private key,
- * and the work-input listing's own admissibility rule excludes a leading dot
- * ({@link isAdmissibleInputName}), so the file cannot turn up in the operator's
- * input picker as a selectable CSV. It lives in the MOUNT rather than in a job
- * workdir because the identity is long-lived -- one identity serves every
- * exchange and every partner, and a partner's pin must keep matching -- while a
- * job workdir is removed with its job.
+ * Dot-prefixed so the input listing's admissibility rule
+ * ({@link isAdmissibleInputName}) excludes it from the operator's input
+ * picker. Lives in the mount, not a job workdir, since the identity
+ * outlives any one job.
  */
 export const SIGNING_IDENTITY_FILE_NAME = ".psilink-signing-identity.json";
 
@@ -50,13 +39,11 @@ export const SIGNING_IDENTITY_FILE_NAME = ".psilink-signing-identity.json";
 export const SIGNING_CERTIFICATE_FILE_NAME = "psilink-certificate.json";
 
 /**
- * A fixed-name file's absolute path in the appliance's mounted data root,
+ * A fixed-name file's absolute path in the console's mounted data root,
  * resolved through the same containment check a job artifact's path takes
- * ({@link resolveWorkdirFile}) rather than joined. Both names below are server
- * constants, so a null resolution is a caller bug -- a constant that stopped
- * resolving inside the mount -- refused here instead of naming a file somewhere
- * else on the host that the CLI would then read a private key from or write a
- * certificate over.
+ * ({@link resolveWorkdirFile}) rather than joined. Both names below are
+ * server constants; a null resolution is a caller bug and throws here
+ * rather than falling back to a path outside the mount.
  */
 function mountFilePath(dataRoot: string, name: string): string {
   const filePath = resolveWorkdirFile(dataRoot, name);
@@ -66,7 +53,7 @@ function mountFilePath(dataRoot: string, name: string): string {
 }
 
 /**
- * The signing identity file's absolute path under `dataRoot`, the appliance's
+ * The signing identity file's absolute path under `dataRoot`, the console's
  * single mounted working directory.
  */
 export function signingIdentityPath(dataRoot: string): string {
@@ -79,24 +66,14 @@ export function signingCertificatePath(dataRoot: string): string {
 }
 
 /**
- * Refuse an export path that resolves to the identity file itself.
+ * Refuse an export path that resolves to the identity file itself, matching
+ * the CLI's own `--export-certificate` guard
+ * (`apps/cli/src/commands/fingerprint.ts`): overwriting it would destroy the
+ * private key and every partner pin.
  *
- * The CLI raises this refusal too, and it is the enforcement that matters -- the
- * console is a caller, and a caller cannot vouch for the callee. This is the
- * console's own statement of the same rule, held where the two paths are
- * composed: writing the public certificate over the identity file would destroy
- * the private key and every pin a partner holds, so "the console never composes
- * such a pair" is encoded as a check that fails rather than as a comment that
- * cannot.
- *
- * Lexical, exactly as the CLI's is, and lexical is enough for the reason the CLI
- * records beside its own copy (`apps/cli/src/commands/fingerprint.ts`, the
- * `--export-certificate` guard): the export is written with `writeFileAtomic`,
- * which finishes with `rename()`, and renaming onto a symlink's path replaces the
- * LINK rather than following it -- so the variant a lexical compare misses, an
- * export path that merely resolves to the identity file, leaves the private key
- * intact. What has to be caught is the path that names the identity file itself,
- * and comparing resolved paths catches every spelling of that.
+ * Comparison is lexical on resolved paths: the export's `rename()` replaces
+ * a symlink rather than following it, so only a path naming the identity
+ * file itself needs catching.
  */
 export function assertExportPathDistinct(
   identityPath: string,
@@ -124,24 +101,19 @@ export const FINGERPRINT_SIGKILL_GRACE_MS = 5_000;
 
 /**
  * The reconciled outcome of a fingerprint attempt:
- * - `ok`: the identity exists (created now or loaded) and its fingerprint was
- *   read; `created` distinguishes the two, so the console can say which happened.
- *   `certificateExported` is true when an export was asked for and the child
- *   exited cleanly, so the copy names a file that is actually there.
- * - `refused`: the CLI exited 64, its usage-error code. The request cannot be the
- *   cause -- the endpoint's schema requires a non-empty identity label, and every
- *   path is server-composed -- so what is left are conditions in the appliance's
- *   mounted working directory: an identity file that cannot be read or parsed, a
- *   first-time exclusive create that kept losing a create/delete race, a failed
- *   certificate-export write, or a malformed `psilink.yaml` sitting in that same
- *   folder (the child reads its default config there for hints; see
- *   {@link runSigningFingerprint}). Which of them it was is NOT observable here
- *   (stderr names container paths and is discarded), so the whole class is
- *   reported as one category the operator can act on in their own folder, apart
- *   from a generic failure.
+ * - `ok`: identity created or loaded, fingerprint read. `created`
+ *   distinguishes the two; `certificateExported` is true only when an
+ *   export was requested and the child exited cleanly.
+ * - `refused`: the CLI exited 64 (usage error). The request is schema-valid
+ *   and every path is server-composed, so the cause is a condition in the
+ *   console's mounted working directory (an unreadable or unparsable
+ *   identity file, a create/delete race, a failed certificate-export
+ *   write, or a malformed default `psilink.yaml`; see
+ *   {@link runSigningFingerprint}) -- not distinguishable here since stderr
+ *   is discarded, so all are reported as one category.
  * - `timeout`: the watchdog killed the child.
- * - `error`: the child exited non-zero for another reason, emitted no valid
- *   fingerprint line, or could not be spawned.
+ * - `error`: any other non-zero exit, no valid fingerprint line, or the
+ *   child could not be spawned.
  */
 export type SigningFingerprintResult =
   | {
@@ -193,16 +165,14 @@ export function reconcileFingerprintExit(
 }
 
 /**
- * The argv a fingerprint run drives. A fixed template plus two server-composed
- * absolute paths and the operator's identity label, every value-bearing flag
- * emitted as a single `--flag=value` token so a `-`-leading label cannot be
- * misparsed by yargs as its own flag. There is no `--config-file`: the console
- * composes a config per job, and no job exists at the moment the operator asks
- * for their fingerprint. Omitting it does not mean nothing is read off disk --
- * the CLI falls back to its default `./psilink.yaml` for identity hints, relative
- * to the CHILD's working directory -- so what bounds the search is the explicit
- * `cwd` the spawn pins ({@link runSigningFingerprint}), not this argv. There is
- * no `--force`.
+ * The argv a fingerprint run drives: a fixed template plus two
+ * server-composed absolute paths and the operator's identity label. Each
+ * value-bearing flag is a single `--flag=value` token so a `-`-leading
+ * label cannot be misparsed by yargs as its own flag.
+ *
+ * No `--config-file`: the CLI falls back to `./psilink.yaml` relative to
+ * the child's cwd, bounded by the pinned `cwd` ({@link runSigningFingerprint}).
+ * No `--force`.
  *
  * @internal exported for testing
  */
@@ -224,35 +194,24 @@ export function fingerprintArgv(args: {
 }
 
 /**
- * Spawn the CLI's `fingerprint` subcommand against the appliance's mounted
- * identity file and reconcile its outcome. The shared spawn boundary
- * ({@link runCapturedCliChild}) passes the argv as an array with no shell, caps
- * the stdout read, discards stderr (it names filesystem paths inside the
- * container), and runs the watchdog. What stays here is the argv, the two
- * budgets, and the mapping from the child's exit to a typed result.
+ * Spawn the CLI's `fingerprint` subcommand against the console's mounted
+ * identity file and reconcile its outcome via the shared spawn boundary
+ * ({@link runCapturedCliChild}): array argv with no shell, capped stdout,
+ * discarded stderr, and the watchdog. This driver owns the argv, the two
+ * budgets, and the exit-to-result mapping.
  *
- * Whether the identity already existed is read HERE, before the child runs,
- * rather than from the child's own "Created"/"Loaded" banner: the banner is on
- * the stderr this boundary discards, and the file's presence is a fact the server
- * owns either way.
+ * `created` is read from the identity file's presence before the child
+ * runs, not from its stderr banner, which this boundary discards.
  *
- * The child's working directory is pinned to the directory holding the identity
- * file -- the appliance's mounted data root -- rather than inherited from the
- * server. With `--config-file` omitted the CLI reads its default `./psilink.yaml`
- * for identity hints, resolved against whatever directory the child runs in, so
- * an inherited cwd would let a document the operator never mounted decide the
- * outcome (a malformed one exits 64, which this boundary reports as a condition
- * in the operator's own folder). Pinning it makes the mount the only place that
- * config can come from, matching where the identity itself lives. The directory
- * is created if missing on the same owner-only terms a workdir is, because a
- * spawn cannot start in a directory that does not exist yet while the CLI would
- * have created the mount for its own write.
+ * The child's cwd is pinned to the identity file's directory rather than
+ * inherited, since an inherited cwd would let an unmounted `psilink.yaml`
+ * decide the CLI's default config lookup. The directory is created if
+ * missing, owner-only.
  *
- * @throws {Error} SYNCHRONOUSLY, before any child is spawned, when the export
- *   path names the identity file ({@link assertExportPathDistinct}). Not a
- *   rejection, because it is a caller bug rather than a run outcome, and failing
- *   before the spawn is what keeps a bugged call from touching the file at all;
- *   the manager's `async` wrapper turns it into a rejection for its own callers.
+ * @throws {Error} synchronously, before any child spawns, when the export
+ *   path names the identity file ({@link assertExportPathDistinct}) -- a
+ *   caller bug, not a run outcome; the manager's `async` wrapper turns it
+ *   into a rejection for its own callers.
  */
 export function runSigningFingerprint(args: {
   binaryPath: string;
@@ -270,7 +229,7 @@ export function runSigningFingerprint(args: {
   try {
     fs.mkdirSync(childCwd, { recursive: true, mode: WORKDIR_MODE });
   } catch {
-    // A mount path occupied by a regular file settles as a result kind rather
+    // A mount path occupied by a regular file returns a result kind rather
     // than rejecting: the endpoint reconciles kinds, and the one rejection this
     // driver raises is the export-path caller bug above.
     return Promise.resolve({ kind: "error" });

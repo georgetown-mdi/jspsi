@@ -25,16 +25,16 @@ import type { AdvancedInviteSeed } from "@psi/advancedInvite";
 const IMPORT_SUCCESS = "Imported. Review the loaded terms before generating.";
 
 /**
- * The JSON/YAML escape hatch: export the current linkage terms to a portable
- * document, or import one to load the editor from. Export writes the snake_case
- * on-disk form (the "exported from the GUI" reference). Import routes through
- * {@link importLinkageTerms} -- which validates through `safeParseLinkageTerms`,
- * the single validation source -- then refuses any terms that turn on a setting
- * the run does not yet apply ({@link gatedActiveSettingMessage}) or that carry
- * per-field constraints the editor cannot represent and would silently normalize
- * ({@link importedConstraintDivergenceMessage}), so the escape hatch cannot bring
- * either past the GUI controls. A rejected import surfaces a readable, value-free
- * error and leaves the draft untouched.
+ * Import or export linkage terms as JSON/YAML, for authoring outside the GUI
+ * controls. Export writes the snake_case on-disk form (the "exported from the
+ * GUI" reference). Import routes through {@link importLinkageTerms} -- which
+ * validates through `safeParseLinkageTerms`, the single validation source --
+ * then refuses any terms that turn on a setting the run does not yet apply
+ * ({@link gatedActiveSettingMessage}) or that contain per-field constraints the
+ * editor cannot represent and would silently normalize
+ * ({@link importedConstraintDivergenceMessage}), so neither can reach the
+ * draft past the GUI's own controls. A rejected import shows a readable,
+ * value-free error and leaves the draft untouched.
  */
 export function TermsImportExport({
   currentTerms,
@@ -157,8 +157,8 @@ export function TermsImportExport({
         placeholder="{ ... }"
         styles={{ input: { fontFamily: "monospace" } }}
       />
-      {/* Visual-only status; the announcement is carried by the persistent live
-          region at the end so it is not missed when newly mounted. */}
+      {/* Visual-only status; the persistent live region holds the announcement
+          at the end so it is not missed when newly mounted. */}
       {error !== undefined && (
         <Alert
           color="red"

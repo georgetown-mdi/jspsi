@@ -5,14 +5,14 @@ import { isConsoleBuild } from "@utils/clientConfig";
 import { seo } from "@utils/seo";
 
 export const Route = createFileRoute("/saved/")({
-  // The canonical always-list route: it renders the full recurring-exchange list
-  // surface unconditionally, including the designed empty state and the store-degrade
-  // message. The home route at `/` shows this list only once an exchange exists; this
-  // path always shows it, so eviction recovery's import affordance stays discoverable.
-  // Client-only because it reads the managed-exchange store (IndexedDB).
+  // Always renders the recurring-exchange list, including its empty state and
+  // the store-degrade message. The home route at `/` shows the list only once an
+  // exchange exists; this path always shows it, so the import control stays
+  // reachable after an eviction. Client-only because it reads the
+  // managed-exchange store (IndexedDB).
   ssr: false,
-  // The recurring surface belongs only to the hosted browser build; a console build
-  // has no managed store, so it never reaches the list.
+  // The recurring surface exists only in the hosted browser build; a console
+  // build has no managed store, so it never reaches the list.
   beforeLoad: () => {
     if (isConsoleBuild()) throw redirect({ to: "/" });
   },

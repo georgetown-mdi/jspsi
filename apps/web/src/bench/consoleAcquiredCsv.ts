@@ -4,10 +4,10 @@ import type { CSVRow } from "@psilink/core";
 
 /**
  * The file facts the console acquires from the server-side profile instead of the
- * rows: the browser never reads the file on the console (it is read on the
- * appliance), so the intake has the name, size, column list, row count, and the
- * pre-inferred date-of-birth format -- everything the pure draft model needs -- but
- * no rows. The per-column preview samples ride a separate seam (the coverage/preview
+ * rows: on the console the file is read server-side, never in the browser, so the
+ * intake has the name, size, column list, row count, and the pre-inferred
+ * date-of-birth format -- everything the pure draft model needs -- but no rows. The
+ * per-column preview samples come through a separate path (the coverage/preview
  * providers), not this shape.
  */
 export interface ConsoleAcquiredProfile {
@@ -21,21 +21,21 @@ export interface ConsoleAcquiredProfile {
 /**
  * Build the console's acquired CSV from a server-side profile -- structurally the
  * hosted {@link AcquiredCsv} and {@link AcceptorAcquiredCsv}, but with no rows: the
- * console reads the file on the appliance, never in the browser.
+ * console reads the file server-side, never in the browser.
  *
  * `rawRows` is a getter that throws in dev and test and yields the empty array in a
  * production build. Any explicit `rawRows` read is a consumer that does not source
- * from the profile (rowCount, dateInputFormat, and the preview/coverage seams);
+ * from the profile (rowCount, dateInputFormat, and the preview/coverage boundaries);
  * failing loud in every dev run and test catches it at once, while degrading to
  * empty in production keeps an overlooked reader rendering an empty preview rather
  * than crashing the operator's session. The ESLint `rawRows` restriction is the
- * static half of the same backstop.
+ * static half of the same safety check.
  *
- * The getter is defined NON-ENUMERABLE: a bench component receives this shape as a
+ * The getter is defined NON-ENUMERABLE: a console component receives this shape as a
  * prop, and React's dev-mode render logging enumerates prop values, which would trip
  * the throwing getter on an entirely legitimate render. A non-enumerable property is
  * skipped by that reflection (and by spreads / `Object.keys`) yet still throws on an
- * explicit `csv.rawRows`, so the backstop catches real consumers without firing on
+ * explicit `csv.rawRows`, so the check catches real consumers without firing on
  * the framework's own introspection.
  */
 export function consoleAcquiredCsv(
@@ -47,7 +47,7 @@ export function consoleAcquiredCsv(
     columns: profile.columns,
     rowCount: profile.rowCount,
     dateInputFormat: profile.dateInputFormat,
-    // Signals to the draft reconciliations that this shape carries no rows, so they
+    // Signals to the draft reconciliations that this shape has no rows, so they
     // feed an empty row set to the seed helpers rather than reading the getter below
     // (the date-of-birth format they need is already profiled).
     rowsWithheld: true,

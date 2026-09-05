@@ -17,21 +17,15 @@ import type { StandardizationStep } from "@psilink/core";
 const STEP_ANNOUNCE_DEBOUNCE_MS = 600;
 
 /**
- * The per-field standardization step editor: one card holding an ordered, editable
- * list of the cleaning steps applied to one linkage field, plus the input-column
- * header. The one-card-per-field layout makes per-output uniqueness structural --
- * each card edits exactly one field's transformation, so two cards can never name
- * the same `output`.
+ * The per-field standardization step editor: one card holding an ordered,
+ * editable list of cleaning steps for one linkage field, plus the input-column
+ * header. One card per field makes per-output uniqueness structural -- two
+ * cards can never name the same `output`.
  *
- * The step-editing UX (descriptor-driven typed param inputs, keyboard reorder/remove
- * with focus restoration, the grouped add menu) lives in {@link StepListEditor},
- * shared with the expert linkage-terms transform editor so the two cannot drift.
- * This component adds the standardization framing -- the field label, the column the
- * pipeline reads, and a debounced live-region summary of the step list (an
- * announcement specific to this per-party data-prep surface, not the shared editor).
- * Presentational -- it holds no step state of its own; it renders `steps` and emits
- * the next array through {@link onStepsChange}, so the host owns the model and
- * decides what an edit means (the host docks the `StandardizationPreview` beside it).
+ * The step-editing UX lives in {@link StepListEditor}, shared with the expert
+ * linkage-terms transform editor so the two cannot drift. Presentational: it
+ * holds no step state of its own, rendering `steps` and emitting the next
+ * array through {@link onStepsChange} for the host to own.
  */
 export function StandardizationStepEditor({
   fieldLabel,
@@ -46,7 +40,7 @@ export function StandardizationStepEditor({
    * semantic-type label, never the partner-controlled field name). */
   fieldLabel: string;
   /** Suppress the in-card field-label line. Set when the host wraps this editor in a
-   * collapsible card whose header already carries the label (see the per-field card
+   * collapsible card whose header already holds the label (see the per-field card
    * in {@link StandardizationCards}), so it is not shown twice. Defaults to showing
    * it (the standalone layout). */
   hideFieldLabel?: boolean;

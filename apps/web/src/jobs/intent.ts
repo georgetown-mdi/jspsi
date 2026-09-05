@@ -48,25 +48,22 @@ import type {
 import type { JobSftpServerEntry } from "./sftpServer";
 
 /**
- * The tuning knobs a client may set on a job. Deliberately the numeric, boolean,
- * closed-enum, and bounded-label subset of the CLI's file-sync options: none can
- * carry a path, host, credential, or command. The path and directory fields of
- * {@link FileSyncOptions} are intentionally NOT surfaced -- the server owns every
+ * The tuning settings a client may set on a job: the numeric, boolean,
+ * closed-enum, and bounded-label subset of the CLI's file-sync options. None
+ * can hold a path, host, credential, or command. The path and directory
+ * fields of {@link FileSyncOptions} are not exposed -- the server owns every
  * directory.
  *
- * `peerId` is the one free-text field, and it is bounded here rather than merely
- * passed through: it becomes a FILENAME PREFIX in the shared rendezvous
- * directory, so {@link isAdmissiblePeerId} confines it to a single bounded label
- * -- never a separator, a dot run, or a leading dash. The semantic rules on it --
- * the `timestampInFilename` dependency and the reserved `temp` value -- are
- * core's, applied through core's own schema so this boundary restates none of
- * them.
+ * `peerId` is the one free-text field: it becomes a FILENAME PREFIX in the
+ * shared rendezvous directory, so {@link isAdmissiblePeerId} confines it to a
+ * single bounded label -- never a separator, a dot run, or a leading dash.
+ * Its semantic rules (the `timestampInFilename` dependency and the reserved
+ * `temp` value) are core's, applied through core's own schema.
  *
- * Not every arm admits every field. `connectionPerPoll` is admitted on the sftp
- * arms alone, mirroring the CLI, which applies the mode only there; and the
- * zero-setup arms admit only what their argv can carry (see
- * {@link zeroSetupOptionsArgv}), so a field with no route to that run is refused
- * rather than accepted and dropped.
+ * Not every arm admits every field. `connectionPerPoll` is admitted on the
+ * sftp arms alone. The zero-setup arms admit only what their argv can pass
+ * (see {@link zeroSetupOptionsArgv}); a field with no route to that run is
+ * refused rather than accepted and dropped.
  */
 export interface JobExchangeOptions {
   pollIntervalMs?: number;
@@ -83,13 +80,11 @@ export interface JobExchangeOptions {
 
 /**
  * Run the resolved option block through core's own {@link FileSyncOptions}
- * schema and re-raise its issues on this boundary's parse. Core stays the single
+ * schema and re-raise its issues on this boundary's parse. Core is the single
  * source for every cross-field rule -- `peer_id` requires
  * `timestamp_in_filename`, `peer_id` may not be the reserved `temp`, and
  * `retain_files` requires both `timestamp_in_filename` and
- * `lockless_rendezvous` -- so a contradictory combination is refused with core's
- * wording at create time instead of failing later, at config composition or at
- * rendezvous.
+ * `lockless_rendezvous`.
  */
 function checkAgainstCoreFileSyncOptions(
   options: JobExchangeOptions,
@@ -105,12 +100,11 @@ function checkAgainstCoreFileSyncOptions(
     });
 }
 
-// The poll interval carries no floor beyond core's own positive-integer rule,
-// matching the CLI: a sub-second poll is warned about (the anti-flood advisory
-// at LOW_POLLING_FREQUENCY_WARN_MS) and allowed, because a demo against a
-// controlled server legitimately wants one. The console's authoring surface is
-// the operator's own choice about a server they authored the connection to, so
-// it warns and guides rather than refusing.
+// The poll interval has no floor beyond core's own positive-integer rule,
+// matching the CLI: a sub-second poll is warned about (the anti-flood
+// advisory at LOW_POLLING_FREQUENCY_WARN_MS) and allowed rather than
+// refused, since it is the operator's own choice about a server they
+// authored the connection to.
 const jobExchangeOptionsFields = {
   pollIntervalMs: z.number().int().positive().optional(),
   peerTimeoutMs: z.number().int().positive().optional(),
@@ -138,11 +132,9 @@ const jobExchangeOptionsSchema: z.ZodType<JobExchangeOptions> = z
   .strict()
   .superRefine(checkAgainstCoreFileSyncOptions);
 
-// The sftp variant adds `connectionPerPoll`, and only it: the ephemeral-session
-// mode dials a real SFTP socket, which filedrop's connectionless client has
-// none of, so the CLI applies it on `sftp` alone. Admitting it on the filedrop
-// arm would take a value the run cannot honour; the strict parse refuses it
-// there instead.
+// The sftp variant adds `connectionPerPoll`, and only it: the mode dials a
+// real SFTP socket, which filedrop's connectionless client has none of. The
+// strict parse refuses it on the filedrop arm.
 const jobSftpExchangeOptionsSchema: z.ZodType<JobExchangeOptions> = z
   .object({
     ...jobExchangeOptionsFields,
@@ -153,17 +145,15 @@ const jobSftpExchangeOptionsSchema: z.ZodType<JobExchangeOptions> = z
   .superRefine(checkAgainstCoreFileSyncOptions);
 
 /**
- * A millisecond duration a zero-setup run must be able to express as one of the
- * CLI's coarse duration flags (`--peer-timeout`, `--connection-timeout`), whose
- * grammar takes a second-or-coarser unit and rejects a millisecond one. A value
- * that is not a whole number of seconds has no faithful flag form, so it is
- * refused here rather than rounded into one the operator did not author.
+ * A millisecond duration a zero-setup run must be able to express as one of
+ * the CLI's coarse duration flags (`--peer-timeout`, `--connection-timeout`),
+ * whose grammar takes a second-or-coarser unit. A value that is not a whole
+ * number of seconds is refused here rather than rounded.
  *
- * Both flags are also capped at core's {@link MAX_TIMEOUT_SECONDS} (seven days),
- * which the CLI enforces as a usage error, so a value past it is refused here
- * too: accepting one would create a job -- occupying the appliance's single run
- * slot -- whose spawned child then exits 64 on the very argv the job exists to
- * run.
+ * Both flags are also capped at core's {@link MAX_TIMEOUT_SECONDS} (seven
+ * days), which the CLI enforces as a usage error; a value past it is refused
+ * here too, rather than occupying the console's single run slot on a job
+ * whose spawned child exits 64 on the very argv the job exists to run.
  */
 function wholeSecondFlagMs(field: string) {
   return z
@@ -185,12 +175,12 @@ function wholeSecondFlagMs(field: string) {
     .optional();
 }
 
-// The zero-setup arms admit only what {@link zeroSetupOptionsArgv} can carry to
-// the child. `unexpectedFiles` is absent: it is a configuration-only key with no
-// CLI flag at all, and a zero-setup run composes no configuration document, so
-// the strict parse refuses it rather than accepting a choice the run would drop.
-// The two coarse-duration fields are additionally held to whole seconds, the
-// only values their flags can state.
+// The zero-setup arms admit only what {@link zeroSetupOptionsArgv} can pass
+// to the child. `unexpectedFiles` is absent: it has no CLI flag, and a
+// zero-setup run composes no configuration document, so the strict parse
+// refuses it rather than accepting a choice the run would drop. The two
+// coarse-duration fields are held to whole seconds, the only values their
+// flags can state.
 const jobZeroSetupOptionsFields = {
   ...jobExchangeOptionsFields,
   peerTimeoutMs: wholeSecondFlagMs("peerTimeoutMs"),
@@ -212,43 +202,43 @@ const jobZeroSetupSftpOptionsSchema: z.ZodType<JobExchangeOptions> = z
 
 /**
  * A reference to a file in the operator-mounted work-input directory, the
- * alternative to inline `inputCsv`. It carries no content: the opaque `name`
+ * alternative to inline `inputCsv`. It holds no content: the opaque `name`
  * selects a file in the mounted directory (validated by the listing's own
- * {@link isAdmissibleInputName} single-segment shape rule so it never composes a
- * traversal). The CLI reads the file in place, so no size/mtime snapshot travels.
+ * {@link isAdmissibleInputName} single-segment shape rule so it never
+ * composes a traversal). The CLI reads the file in place, so no size/mtime
+ * snapshot travels.
  */
 export interface JobInputFileReference {
   name: string;
 }
 
 /**
- * The receipt-signing mode a job may ask for. Deliberately NARROWER than core's
- * {@link SigningMode}: it ALLOWLISTS the two modes an exchange honors, exactly as
- * core's own `assertSigningModeImplemented` does, so `session-derived` -- and any
- * mode later added to core's enum but not yet implemented -- is refused here
- * rather than accepted into a job whose spawned child then exits 64 on the very
- * config the job exists to run. The console's own card offers the mode as a
- * disabled choice with core's reason, the treatment it already gives `psi-c` and
+ * The receipt-signing mode a job may ask for. Narrower than core's
+ * {@link SigningMode} by design: it allowlists the two modes an exchange
+ * honors, as core's own `assertSigningModeImplemented` does, so
+ * `session-derived` -- and any mode later added to core's enum but not yet
+ * implemented -- is refused here rather than accepted into a job whose
+ * spawned child then exits 64. The console's own card offers the mode as a
+ * disabled choice with core's reason, as it already does for `psi-c` and
  * `deduplicate`.
  */
 export type JobSigningMode = "none" | "certificate";
 
 /**
- * The receipt-signing choices a client may set on an exchange job: the mode, and
- * the partner fingerprint to pin under `certificate`.
+ * The receipt-signing choices a client may set on an exchange job: the mode,
+ * and the partner fingerprint to pin under `certificate`.
  *
  * The two PATH fields of core's {@link SigningConfig} -- `identity_file` and
- * `receipt_output` -- are intentionally NOT representable here, for the reason the
- * connection's directories are not: the server owns every path a job's CLI child
- * is pointed at. They are supplied at composition from {@link JobSigningPaths}.
+ * `receipt_output` -- are not representable here: the server owns every path
+ * a job's CLI child is pointed at. They are supplied at composition from
+ * {@link JobSigningPaths}.
  *
- * `partnerFingerprint` is the one free-text field, and it is bounded here rather
- * than merely passed through: core's {@link FINGERPRINT_REGEX} admits exactly a
- * canonical 43-character unpadded base64url SHA-256 digest, so the value cannot
- * carry a separator, a path, or a flag-shaped token. It is a public digest of a
- * public certificate, not a credential. It is REQUIRED under `certificate` (see
- * {@link jobSigningChoiceSchema}), the one cross-field rule this boundary keeps
- * beyond field shape.
+ * `partnerFingerprint` is the one free-text field: core's
+ * {@link FINGERPRINT_REGEX} admits exactly a canonical 43-character unpadded
+ * base64url SHA-256 digest, so the value cannot hold a separator, a path, or
+ * a flag-shaped token. It is a public digest of a public certificate, not a
+ * credential, and is required under `certificate` (see
+ * {@link jobSigningChoiceSchema}).
  */
 export interface JobSigningChoice {
   mode: JobSigningMode;
@@ -268,10 +258,9 @@ const jobSigningChoiceSchema: z.ZodType<JobSigningChoice> = z
       .optional(),
   })
   .strict()
-  // A pin is meaningful only where a certificate is verified against it, so a
-  // fingerprint arriving beside `mode: none` is a contradiction rather than an
-  // inert extra field: refuse it here instead of composing a config whose pin
-  // nothing reads.
+  // A pin is meaningful only where a certificate is verified against it, so
+  // a fingerprint beside `mode: none` is refused rather than composed into a
+  // config whose pin nothing reads.
   .refine(
     (signing) =>
       signing.mode === "certificate" ||
@@ -282,12 +271,10 @@ const jobSigningChoiceSchema: z.ZodType<JobSigningChoice> = z
       path: ["partnerFingerprint"],
     },
   )
-  // And the converse: certificate mode REQUIRES one, matching core's own
-  // pre-exchange gate (`assertCertificateModePinsPartner`). Without a pin the
-  // spawned child refuses the very config the job exists to run -- and the
-  // refusal it would otherwise reach is the one inside the exchange, after this
-  // party's payload has crossed. Refusing at create time is what keeps that
-  // disclosure from happening for a run that could never finish; authoring is
+  // And the converse: certificate mode requires one, matching core's own
+  // pre-exchange gate (`assertCertificateModePinsPartner`). Without a pin,
+  // the spawned child's own refusal would come only after this party's
+  // payload has crossed; refusing at create time closes that. Authoring is
   // untouched, since a draft is not a job.
   .refine(
     (signing) =>
@@ -303,13 +290,12 @@ const jobSigningChoiceSchema: z.ZodType<JobSigningChoice> = z
   );
 
 /**
- * The paths a composed `signing` block names, supplied by the caller rather than
- * the client. Split from {@link JobSigningChoice} because the two have different
- * owners and different machines in view: the choice is the operator's, while the
- * paths belong to whichever machine the composed document is for -- the
- * appliance's own mount and workdir for a live run, and the operator's host for
- * the graduation template, which is why the template's caller passes placeholders
- * instead (see `handoff.ts`).
+ * The paths a composed `signing` block names, supplied by the caller rather
+ * than the client. Split from {@link JobSigningChoice}: the choice is the
+ * operator's, while the paths belong to whichever machine the composed
+ * document is for -- the console's own mount and workdir for a live run, or
+ * the operator's host for the graduation template, whose caller passes
+ * placeholders instead (see `handoff.ts`).
  */
 export interface JobSigningPaths {
   /** Absolute path of the signing identity file the run loads its private key
@@ -325,19 +311,18 @@ export interface JobSigningPaths {
 }
 
 /**
- * The `signing` block a validated intent composes, or undefined when the config
- * carries none. Only `certificate` composes a block: `none` -- and an intent that
- * states no choice at all -- is the absent block the CLI already treats as "sign
- * nothing", so an operator who changed nothing composes the config they composed
- * before this surface existed.
+ * The `signing` block a validated intent composes, or undefined when the
+ * config holds none. Only `certificate` composes a block: `none`, and an
+ * intent that states no choice at all, compose the absent block the CLI
+ * already treats as "sign nothing".
  *
- * Both throws below guard an impossible state on a schema-validated intent rather
- * than a live branch: `jobSigningChoiceSchema`'s refine requires a certificate
- * intent to carry `partnerFingerprint`, so composing one without it is a
- * programming error -- a caller reaching this function with a hand-built intent
- * that bypassed the schema -- not a shape a validated job ever has. Throwing here
- * turns that into a loud failure at compose time rather than a config the CLI
- * child would refuse minutes later with a bare exit 64.
+ * Both throws below guard an impossible state on a schema-validated intent
+ * rather than a live branch: `jobSigningChoiceSchema`'s refine requires a
+ * certificate intent to hold `partnerFingerprint`, so composing one without
+ * it means a caller reached this function with a hand-built intent that
+ * bypassed the schema. Throwing turns that into a loud failure at compose
+ * time rather than a config the CLI child would refuse later with a bare
+ * exit 64.
  */
 function composedSigning(
   intent: JobExchangeIntent,
@@ -366,8 +351,9 @@ function composedSigning(
 
 /**
  * Which side of the partnership the submitting party is running. A closed
- * two-value enum -- never a path, host, or credential -- carrying no connection
- * or column material of its own; it selects a composition rule, not a value.
+ * two-value enum -- never a path, host, or credential -- holding no
+ * connection or column material of its own; it selects a composition rule,
+ * not a value.
  */
 export type JobExchangeSide = "inviter" | "acceptor";
 
@@ -375,73 +361,64 @@ export type JobExchangeSide = "inviter" | "acceptor";
  * The fields shared by every {@link JobExchangeIntent} arm. Field-level
  * contracts (see {@link jobExchangeIntentSchema} for the closure argument):
  *
- * - `linkageTerms` is validated by core's {@link LinkageTermsSchema}, whose
- *   vocabulary is bounded partner-authored text (field names, key elements,
- *   transforms) -- it carries no filesystem path, host, or command field, so a
- *   hostile value cannot escape into argv or the filesystem.
- * - `sharedSecret` is credential material matching the CLI key-file shape; it is
- *   written into a fixed-name key file, never used as a path or argv fragment.
- * - `inputCsv` is CONTENT the server writes to a fixed, server-chosen filename in
- *   the job workdir; the client never names a file. Exactly one of `inputCsv` or
- *   `inputFile` is set (enforced by {@link jobExchangeIntentSchema}).
+ * - `linkageTerms` is validated by core's {@link LinkageTermsSchema}: bounded
+ *   partner-authored text (field names, key elements, transforms) holding no
+ *   filesystem path, host, or command field.
+ * - `sharedSecret` is credential material matching the CLI key-file shape,
+ *   written into a fixed-name key file, never a path or argv fragment.
+ * - `inputCsv` is CONTENT the server writes to a fixed, server-chosen
+ *   filename in the job workdir; the client never names a file. Exactly one
+ *   of `inputCsv` or `inputFile` is set (enforced by
+ *   {@link jobExchangeIntentSchema}).
  * - `inputFile` is a REFERENCE to a file in the operator-mounted work-input
- *   directory: an opaque single-segment name. The manager composes the mounted
- *   path (`join(jobInputDir, name)`) into the CLI config so the child reads the
- *   file in place; the name never reaches argv, only the server-owned YAML config.
- *   A name that resolves to no regular file is refused before the workdir exists.
+ *   directory: an opaque single-segment name resolved server-side
+ *   (`join(jobInputDir, name)`); the name never reaches argv. A name that
+ *   resolves to no regular file is refused before the workdir exists.
  * - `options` is the numeric/boolean/enum subset of the CLI's tuning options.
- * - `metadata` and `standardization` are the operator's per-party data-prep edits
- *   (which columns are sent vs ignored, their roles/types, and the transform
- *   pipeline). Both are validated structured data -- core's {@link MetadataSchema}
- *   and {@link StandardizationSchema} -- carrying only column names/roles/types and
- *   a step pipeline. They are written into the composed config as YAML VALUES, never
- *   as an argv fragment, a path, a host, or a credential. The connection block the
- *   server composes is unaffected by them, so neither can redirect a directory or
- *   introduce an authentication field. Both are wrapped web-side with generous
- *   size caps ({@link MAX_METADATA_COLUMNS}, {@link MAX_METADATA_DESCRIPTION_LENGTH},
- *   {@link MAX_STANDARDIZATION_TRANSFORMATIONS}, {@link MAX_STANDARDIZATION_STEPS},
- *   and {@link MAX_NAME_LENGTH} on `output`/`input`) so the arrays and free-text
- *   fields cannot be unbounded; each standardization step's `params` is a
- *   `Record<string, unknown>` left uncapped by nature, with the boundary byte cap
- *   as its backstop. The linkage-terms dialect gate (which caps and dialect-checks
- *   transform-pattern SOURCES) applies to `linkageTerms` patterns, not to the
- *   standardization pipeline's raw-pattern steps -- so a client can submit a large
- *   or (in the linkage-terms sense) non-conformant `standardization` pattern. That
- *   is a compile/size cost, NOT a ReDoS hole: every standardization raw-pattern step
- *   still compiles and runs under core's linear-time RE2 engine (RE2JS), so it
- *   cannot backtrack catastrophically. It stays a resource bound, not an injection
- *   escape: it cannot become argv/path/host/credential.
- * - `expectedPayloadColumns` is the acceptor's received-payload lock-in: a list of
- *   partner-namespace column names, no path/host/credential. See the field doc for
- *   the empty-vs-absent semantics.
- * - `expectedPartnerDeduplicate` is the acceptor's terms-side lock-in: a schema
- *   boolean, contributing one YAML `true`/`false` and no free text at all.
- * - `side` is a closed two-value enum selecting which composition rules apply to
- *   this party; it contributes no value to the composed config.
+ * - `metadata` and `standardization` are the operator's per-party data-prep
+ *   edits (which columns are sent vs ignored, their roles/types, and the
+ *   transform pipeline), validated by core's {@link MetadataSchema} and
+ *   {@link StandardizationSchema} and written into the composed config as
+ *   YAML values, never an argv fragment, path, host, or credential. Both are
+ *   bounded web-side ({@link MAX_METADATA_COLUMNS},
+ *   {@link MAX_METADATA_DESCRIPTION_LENGTH},
+ *   {@link MAX_STANDARDIZATION_TRANSFORMATIONS},
+ *   {@link MAX_STANDARDIZATION_STEPS}, {@link MAX_NAME_LENGTH} on
+ *   `output`/`input`); a standardization step's `params` is uncapped by
+ *   nature, bounded only by the boundary byte cap. A standardization
+ *   raw-pattern step is not dialect-checked the way a `linkageTerms` pattern
+ *   is, but still compiles and runs under core's linear-time RE2 engine
+ *   (RE2JS), so an oversized or non-conformant one is a compile/size cost,
+ *   not a ReDoS hole or an injection escape.
+ * - `expectedPayloadColumns` is the acceptor's received-payload enforcement:
+ *   a list of partner-namespace column names, no path/host/credential. See
+ *   the field doc for the empty-vs-absent semantics.
+ * - `expectedPartnerDeduplicate` is the acceptor's terms-side enforcement: a
+ *   schema boolean, contributing one YAML `true`/`false` and no free text.
+ * - `side` is a closed two-value enum selecting which composition rules apply
+ *   to this party; it contributes no value to the composed config.
  * - `diagnosticRun` and `sweepExchangeFiles` are the per-run controls
- *   ({@link jobRunControlFields}): booleans that select a fixed CLI flag and
- *   carry no value of their own.
- * - `signing` is the receipt-signing choice ({@link JobSigningChoice}): a closed
- *   two-value mode plus, under `certificate`, a required fingerprint held to
- *   core's canonical 43-character digest shape. Neither the identity file nor the
- *   receipt output is representable -- the server supplies both paths. Under
- *   `certificate` this intent's own `linkageTerms.identity` is required too, the
- *   one signing rule that spans two blocks (see {@link jobExchangeIntentSchema}).
- * - `retentionDisposition` is this party's own free-text retention note, written
- *   into the composed config as a YAML value and from there into THIS party's
- *   exchange record. Bounded by core's `MAX_TEXT_LENGTH` (the record schema's own
- *   ceiling, so a note that passes here cannot fail the record build), held to a
- *   control-character rule of its own -- every C0 and C1 control and DEL refused
- *   apart from the tab, LF, and CR a multi-line note carries, since a NUL or an
- *   ESC composes into the YAML and lands in the record verbatim -- and never a
- *   path, host, credential, or argv fragment.
+ *   ({@link jobRunControlFields}): booleans that each select a fixed CLI
+ *   flag and hold no value of their own.
+ * - `signing` is the receipt-signing choice ({@link JobSigningChoice}): a
+ *   closed two-value mode plus, under `certificate`, a required fingerprint
+ *   held to core's canonical 43-character digest shape. Neither the identity
+ *   file nor the receipt output is representable -- the server supplies both
+ *   paths. Under `certificate`, this intent's own `linkageTerms.identity` is
+ *   required too (see {@link jobExchangeIntentSchema}).
+ * - `retentionDisposition` is this party's own free-text retention note,
+ *   written into the composed config as a YAML value and from there into
+ *   this party's exchange record. Bounded by core's `MAX_TEXT_LENGTH` and a
+ *   control-character rule that refuses every C0 and C1 control and DEL
+ *   apart from the tab, LF, and CR a multi-line note holds; never a path,
+ *   host, credential, or argv fragment.
  */
 interface JobExchangeIntentBase {
   /**
    * The mode discriminant, `"exchange"`. Optional on the wire: the merged
-   * exchange client predates the discriminant and sends none, so the create route
-   * defaults a missing `mode` to `"exchange"` (see {@link jobCreateIntentSchema}).
-   * A zero-setup intent ({@link JobZeroSetupIntent}) names itself explicitly.
+   * exchange client sends none, so the create route defaults a missing
+   * `mode` to `"exchange"` (see {@link jobCreateIntentSchema}). A zero-setup
+   * intent ({@link JobZeroSetupIntent}) names itself explicitly.
    */
   mode?: "exchange";
   linkageTerms: LinkageTerms;
@@ -451,44 +428,43 @@ interface JobExchangeIntentBase {
   metadata?: Metadata;
   standardization?: Standardization;
   /**
-   * The acceptor's RECEIVE-side lock-in: the partner-namespace columns this party
-   * will enforce it receives (the invitation's disclosed set). Mirrors the browser
-   * acceptor, which sets `prepared.expectedPayloadColumns` from the same source so
-   * an inviter that sends extra columns aborts the exchange rather than having them
-   * silently ingested. Column names only -- never a path, host, or credential.
+   * The acceptor's RECEIVE-side enforcement: the partner-namespace columns
+   * this party will enforce it receives (the invitation's disclosed set).
+   * Mirrors the browser acceptor's `prepared.expectedPayloadColumns`, so an
+   * inviter that sends extra columns aborts the exchange rather than having
+   * them silently ingested. Column names only -- never a path, host, or
+   * credential.
    *
-   * The empty-vs-absent distinction is load-bearing: an empty array is a strict
-   * "receive nothing" (a non-empty partner payload then aborts), while an omitted
-   * field reconciles lazily. It is forwarded (below) whenever it is present,
-   * INCLUDING an empty array, so the strict form is preserved.
+   * The empty-vs-absent distinction is critical: an empty array is a strict
+   * "receive nothing" (a non-empty partner payload then aborts), while an
+   * omitted field reconciles lazily. It is forwarded (below) whenever
+   * present, including an empty array, so the strict form is preserved.
    */
   expectedPayloadColumns?: Array<string>;
   /**
-   * The acceptor's TERMS-side lock-in: the `deduplicate` the invitation declared
-   * for the INVITING party's own side. Mirrors the browser acceptor, which sets
-   * `prepared.expectedPartnerDeduplicate` from the same source so an inviter
-   * presenting a different value at the terms exchange aborts the exchange before
-   * any key or payload moves rather than running terms nobody consented to. A
-   * schema boolean -- never a path, host, or credential, and never free text.
+   * The acceptor's TERMS-side enforcement: the `deduplicate` the invitation
+   * declared for the INVITING party's own side. Mirrors the browser
+   * acceptor's `prepared.expectedPartnerDeduplicate`, so an inviter
+   * presenting a different value at the terms exchange aborts the exchange
+   * before any key or payload moves. A schema boolean -- never a path, host,
+   * or credential, and never free text.
    *
    * Absent is a party with no declaration to bind (the inviter, or a config
-   * authored rather than accepted), which binds nothing; it is forwarded (below)
-   * whenever present, including `false`, which is a real declaration and the one
-   * a hostile inviter would widen away from.
+   * authored rather than accepted); it is forwarded (below) whenever
+   * present, including `false`, a real declaration.
    */
   expectedPartnerDeduplicate?: boolean;
   /**
-   * Which side of the partnership this party runs. The composers read it for one
-   * decision: only an acceptance derives an `outbound_payload_consent` record
-   * into the composed config, because only an acceptance has an outbound set
-   * nobody authored (the invitation authors the inviter's and pins it; the
-   * mirror leaves the acceptor's absent, so it resolves from this party's own
-   * columns). See {@link composeConfigDocument}.
+   * Which side of the partnership this party runs. The composers read it for
+   * one decision: only an acceptance derives an `outbound_payload_consent`
+   * record into the composed config, because only an acceptance has an
+   * outbound set nobody authored (the invitation authors the inviter's and
+   * pins it; the mirror leaves the acceptor's absent, so it resolves from
+   * this party's own columns). See {@link composeConfigDocument}.
    *
-   * Optional on the wire, and an absent value composes no record -- the state
-   * every non-acceptor is in regardless. Stating it is not left to a submitter's
-   * discipline where it matters: the server-job driver's config makes `side`
-   * required, so the console cannot build an acceptance that omits it.
+   * Optional on the wire; an absent value composes no record. The
+   * server-job driver's own config makes `side` required, so the console
+   * cannot build an acceptance that omits it.
    */
   side?: JobExchangeSide;
   options?: JobExchangeOptions;
@@ -501,7 +477,7 @@ interface JobExchangeIntentBase {
 
 /**
  * A filedrop exchange intent. A filedrop exchange has no host and no
- * credentials at all, so the connection block the server composes carries no
+ * credentials at all, so the connection block the server composes holds no
  * injectable field; the one path field is the server-chosen rendezvous
  * directory inside the job workdir.
  */
@@ -510,12 +486,12 @@ export interface JobFiledropExchangeIntent extends JobExchangeIntentBase {
 }
 
 /**
- * An sftp exchange intent. It carries no connection field at all beyond the
- * shared shape: the appliance runs the one operator-authored SFTP connection, so
- * the client selects nothing. Every piece of connection material (host, port,
- * username, credential references, host-key fingerprint) comes only from the
- * server-side authored entry; the intent contributes only the `sftp`
- * discriminant.
+ * An sftp exchange intent. It holds no connection field at all beyond the
+ * shared shape: the console runs the one operator-authored SFTP connection,
+ * so the client selects nothing. Every piece of connection material (host,
+ * port, username, credential references, host-key fingerprint) comes only
+ * from the server-side authored entry; the intent contributes only the
+ * `sftp` discriminant.
  */
 export interface JobSftpExchangeIntent extends JobExchangeIntentBase {
   channel: "sftp";
@@ -526,7 +502,7 @@ export interface JobSftpExchangeIntent extends JobExchangeIntentBase {
  * discriminated on `channel`. It is the ONLY channel from the client into a CLI
  * invocation, and it is injection-closed by construction: every field is either
  * bounded structured data validated by a core schema, a closed enum, a
- * numeric/boolean tuning knob, fixed-name file CONTENT (`inputCsv`), an opaque
+ * numeric/boolean tuning setting, fixed-name file CONTENT (`inputCsv`), an opaque
  * single-segment name selecting a file in the operator-mounted directory
  * (`inputFile.name`), or credential material written to a fixed key file. There
  * is no field that becomes a path, a host, a credential reference (`@path`), or
@@ -547,29 +523,26 @@ export type JobExchangeIntent =
 export type JobZeroSetupLinkageStrategy = "cascade" | "single-pass";
 
 /**
- * The fields shared by every {@link JobZeroSetupIntent} arm. A zero-setup exchange
- * carries NO shared secret and NO linkage terms: both parties run the CLI's
- * positional `$0` form against the same server, terms inferred from each party's
- * input file, and there is no application-layer encryption to key. It therefore
- * carries none of the exchange mode's `sharedSecret`, `linkageTerms`, `metadata`,
- * `standardization`, `expectedPayloadColumns`, or `expectedPartnerDeduplicate`
- * -- only an input source, the tuning `options` subset, the `eventStream`
- * toggle, the per-run controls ({@link jobRunControlFields}),and two optional,
- * bounded selectors:
+ * The fields shared by every {@link JobZeroSetupIntent} arm. A zero-setup
+ * exchange has NO shared secret and NO linkage terms: both parties run the
+ * CLI's positional `$0` form against the same server, terms inferred from
+ * each party's input file, with no application-layer encryption to key. It
+ * therefore holds none of the exchange mode's `sharedSecret`,
+ * `linkageTerms`, `metadata`, `standardization`, `expectedPayloadColumns`,
+ * or `expectedPartnerDeduplicate` -- only an input source, the tuning
+ * `options` subset, the `eventStream` toggle, the per-run controls
+ * ({@link jobRunControlFields}), and two optional, bounded selectors:
  *
- * - `linkageStrategy` is a closed enum forwarded to the CLI's `--linkage-strategy`.
- * - `identity` is a bounded operator label forwarded to the CLI's `--identity`
- *   (the party name/org/contact string). Bounded by {@link MAX_IDENTITY_LENGTH}
- *   and, being free text rather than a closed enum, held to the shared label
- *   contract's two shape rules as well: no leading `-`, so a flag-shaped value
- *   cannot masquerade as a CLI flag -- the driver also emits it as a single
- *   `--identity=<value>` token, which parses a `-`-leading value verbatim
- *   regardless -- and no control character, which would otherwise ride the run
- *   into this party's own disclosure record.
+ * - `linkageStrategy` is a closed enum forwarded to the CLI's
+ *   `--linkage-strategy`.
+ * - `identity` is a bounded operator label forwarded to the CLI's
+ *   `--identity` (the party name/org/contact string), bounded by
+ *   {@link MAX_IDENTITY_LENGTH} and held to the shared label contract's two
+ *   shape rules: no leading `-` and no control character.
  *
- * Neither is a path, host, or credential, so neither can escape into a file path
- * or a connection field. Exactly one of `inputCsv` or `inputFile` is set (enforced
- * by {@link jobZeroSetupIntentSchema}), identically to the exchange mode.
+ * Neither is a path, host, or credential. Exactly one of `inputCsv` or
+ * `inputFile` is set (enforced by {@link jobZeroSetupIntentSchema}),
+ * identically to the exchange mode.
  */
 interface JobZeroSetupIntentBase {
   mode: "zeroSetup";
@@ -594,11 +567,11 @@ export interface JobZeroSetupFiledropIntent extends JobZeroSetupIntentBase {
 }
 
 /**
- * An sftp zero-setup intent. It carries no connection field at all: the appliance
- * runs one authored SFTP connection, so host, port, path, credential references,
- * and the host-key fingerprint all come from the server-side entry (turned into a
- * `sftp://` URL and `--server-*` flags by {@link zeroSetupSftpArgv}), never from
- * the intent.
+ * An sftp zero-setup intent. It holds no connection field at all: the
+ * console runs one authored SFTP connection, so host, port, path, credential
+ * references, and the host-key fingerprint all come from the server-side
+ * entry (turned into a `sftp://` URL and `--server-*` flags by
+ * {@link zeroSetupSftpArgv}), never from the intent.
  */
 export interface JobZeroSetupSftpIntent extends JobZeroSetupIntentBase {
   channel: "sftp";
@@ -608,7 +581,7 @@ export interface JobZeroSetupSftpIntent extends JobZeroSetupIntentBase {
  * The typed, schema-validated intent a client submits to create a zero-setup job,
  * discriminated on `channel`. Injection-closed by construction exactly as the
  * exchange intent is: every field is a bounded input source, a numeric/boolean/enum
- * tuning knob, a closed strategy enum, or a bounded identity label. No field becomes
+ * tuning setting, a closed strategy enum, or a bounded identity label. No field becomes
  * a path, host, credential reference, or argv string; the connection is drawn only
  * from the server (the authored SFTP connection, or the configured rendezvous mount).
  */
@@ -664,10 +637,10 @@ export const MAX_STANDARDIZATION_TRANSFORMATIONS = 4096;
  */
 export const MAX_STANDARDIZATION_STEPS = 256;
 
-// The size bounds below apply to BOTH union arms through the shared common
-// fields. Each `standardization` step's `params` (a Record<string, unknown>) is
-// unbounded by nature and left uncapped here; the boundary byte cap
-// (MAX_JOB_BODY_BYTES) is its backstop.
+// The size bounds below apply to both union arms through the shared common
+// fields. Each `standardization` step's `params` (a Record<string, unknown>)
+// is unbounded by nature and left uncapped here; the boundary byte cap
+// (MAX_JOB_BODY_BYTES) is its safety check.
 const boundedMetadataSchema = MetadataSchema.refine(
   (columns) => columns.length <= MAX_METADATA_COLUMNS,
   { message: "metadata must not exceed the column cap" },
@@ -716,18 +689,18 @@ const jobInputFileReferenceSchema: z.ZodType<JobInputFileReference> = z
 
 /**
  * The per-run diagnostic and recovery controls, admitted on every arm of both
- * modes. Each is a bare boolean that SELECTS a fixed CLI flag rather than
- * contributing a value: neither can become a path, host, credential, or argv
- * fragment, so both leave the create surface injection-closed exactly as it was.
+ * modes. Each is a bare boolean that selects a fixed CLI flag rather than
+ * contributing a value, so neither can become a path, host, credential, or
+ * argv fragment.
  *
- * They are per-run rather than appliance state, matching the console's
- * author-and-run-once shape: nothing about one run's choice survives into the
- * next.
+ * They are per-run rather than console state, matching the console's
+ * author-and-run-once shape: nothing about one run's choice survives into
+ * the next.
  *
- * `sweepExchangeFiles` reaches the CLI as `--sweep-exchange-files` and nothing
- * else -- the classification of what is a protocol file and the retain-mode
- * guard over it are the CLI's, and the escalation past that guard
- * (`--force-retain-sweep`) is deliberately not representable here.
+ * `sweepExchangeFiles` reaches the CLI as `--sweep-exchange-files` and
+ * nothing else -- the classification of what is a protocol file, and the
+ * retain-mode guard over it, are the CLI's. The escalation past that guard
+ * (`--force-retain-sweep`) is not representable here.
  */
 const jobRunControlFields = {
   diagnosticRun: z.boolean().optional(),
@@ -765,12 +738,13 @@ const jobExchangeIntentCommonFields = {
     .optional(),
 };
 
-// Intentionally NOT annotated z.ZodType: z.discriminatedUnion requires concrete
-// ZodObject members (the same reason core's connection schemas leave their
-// intermediate objects unannotated); type safety is enforced on the unions below.
-// Each arm carries the `mode: "exchange"` literal so it can be a member of the
-// mode-discriminated union the create route parses; a body that omits `mode`
-// still parses as exchange via the route schema's default (see below).
+// Not annotated z.ZodType: z.discriminatedUnion requires concrete ZodObject
+// members (the same reason core's connection schemas leave their
+// intermediate objects unannotated); type safety is enforced on the unions
+// below. Each arm holds the `mode: "exchange"` literal so it can be a member
+// of the mode-discriminated union the create route parses; a body that
+// omits `mode` still parses as exchange via the route schema's default (see
+// below).
 const jobFiledropExchangeIntentSchema = z
   .object({
     mode: z.literal("exchange"),
@@ -825,21 +799,20 @@ function withDefaultExchangeMode(raw: unknown): unknown {
 
 /**
  * Whether the intent's own terms name this party, where the receipt-signing
- * choice needs a name. An intent that signs nothing passes whatever its terms
- * carry: identity is optional everywhere else on this surface. Takes an exchange
- * intent alone -- a zero-setup one carries neither field, and the create union's
- * refine selects the arm by its discriminant rather than asking this of it.
+ * choice needs a name. An intent that signs nothing passes whatever its
+ * terms hold: identity is optional everywhere else on this surface. Takes
+ * an exchange intent alone -- a zero-setup one holds neither field, and the
+ * create union's refine selects the arm by its discriminant instead.
  *
- * A blank label is absence: it is what a form field left alone submits, and core's
- * terms schema refuses an empty identity outright, so a value that is only
- * whitespace could never have reached the agreed terms as a name.
+ * A blank label is absence: core's terms schema refuses an empty identity
+ * outright, so a whitespace-only value could never have reached the agreed
+ * terms as a name.
  *
- * Applied at BOTH union levels, as {@link hasExactlyOneInputSource} is: the
+ * Applied at both union levels, as {@link hasExactlyOneInputSource} is: the
  * create route parses {@link jobCreateIntentSchema}'s own mode-discriminated
- * union rather than {@link jobExchangeIntentSchema}, so a rule stated only on the
- * latter would leave the 400 undecided where it is actually decided. It cannot
- * live on the arms themselves -- `z.discriminatedUnion` takes concrete
- * `ZodObject` members, and a refine wraps one -- nor beside the pin rule in
+ * union rather than {@link jobExchangeIntentSchema}. It cannot live on the
+ * arms themselves -- `z.discriminatedUnion` takes concrete `ZodObject`
+ * members, and a refine wraps one -- nor beside the pin rule in
  * `jobSigningChoiceSchema`, which sees only the signing block.
  */
 function certificateModeNamesThisParty(intent: {
@@ -850,8 +823,8 @@ function certificateModeNamesThisParty(intent: {
   return (intent.linkageTerms.identity ?? "").trim() !== "";
 }
 
-/** The refusal {@link certificateModeNamesThisParty} carries at both union
- * levels, stated once so the two cannot drift. */
+/** The refusal message {@link certificateModeNamesThisParty} uses at both
+ * union levels, stated once so the two cannot drift. */
 const UNNAMED_CERTIFICATE_PARTY_ISSUE = {
   message:
     "linkageTerms.identity is required with signing mode 'certificate': a " +
@@ -862,36 +835,31 @@ const UNNAMED_CERTIFICATE_PARTY_ISSUE = {
 };
 
 /**
- * Zod schema for a single {@link JobExchangeIntent} (the exchange mode alone).
- * Both arms are `.strict()`, so a client cannot smuggle an unmodeled field (a
- * `path`, a `host`, a `server` block, an `@path` credential, or a
- * connection-selecting `remote`) past validation, and each arm admits only its own
- * fields. The sftp arm carries no connection field at all (the appliance runs one
- * authored connection), and its options variant differs from the filedrop arm's
- * only in admitting `connectionPerPoll`, the dialing mode a connectionless
- * filedrop client cannot honour. A missing `mode` defaults to `"exchange"`, so a
- * merged exchange client parses unchanged.
+ * Zod schema for a single {@link JobExchangeIntent} (the exchange mode
+ * alone). Both arms are `.strict()`, so a client cannot smuggle an unmodeled
+ * field (a `path`, a `host`, a `server` block, an `@path` credential, or a
+ * connection-selecting `remote`) past validation. The sftp arm holds no
+ * connection field at all (the console runs one authored connection), and
+ * its options variant differs from the filedrop arm's only in admitting
+ * `connectionPerPoll`. A missing `mode` defaults to `"exchange"`.
  *
- * A union-level refine enforces exactly one input source -- inline `inputCsv` or
- * the mounted `inputFile` reference -- on both arms: the arm's strict parse runs
- * first (so a smuggled extra field still fails, on the `inputFile` sub-object too),
- * then the cross-field XOR rejects an intent that names neither or both.
+ * A union-level refine enforces exactly one input source -- inline
+ * `inputCsv` or the mounted `inputFile` reference -- on both arms: the
+ * arm's strict parse runs first, then the cross-field XOR rejects an
+ * intent that names neither or both.
  */
 export const jobExchangeIntentSchema: z.ZodType<JobExchangeIntent> = z
   .preprocess(withDefaultExchangeMode, jobExchangeChannelUnion)
   .refine(hasExactlyOneInputSource, {
     message: "exactly one of inputCsv or inputFile must be set",
   })
-  // Certificate mode also requires a NAMED party, matching core's own
-  // pre-exchange gate (`assertCertificateModeNamesLocalParty`). A certificate is
-  // trusted by the identity its holder used in the agreed terms, so a job whose
-  // terms carry none composes a config the spawned child refuses -- and the
-  // refusal it would reach without core's gate is the one inside the exchange,
-  // after this party's payload has crossed. It sits here rather than in
-  // `jobSigningChoiceSchema` beside the pin rule because it spans two blocks:
-  // only the whole intent holds both `signing` and `linkageTerms`. Authoring is
-  // untouched -- a draft is not a job -- and an intent asking for no receipt is
-  // asked for no name.
+  // Certificate mode also requires a named party, matching core's own
+  // pre-exchange gate (`assertCertificateModeNamesLocalParty`): a
+  // certificate is trusted by the identity its holder used in the agreed
+  // terms, so a job whose terms hold none is refused here rather than
+  // inside the exchange, after this party's payload has crossed. It sits
+  // here rather than in `jobSigningChoiceSchema` because it spans two
+  // blocks: only the whole intent holds both `signing` and `linkageTerms`.
   .refine(certificateModeNamesThisParty, UNNAMED_CERTIFICATE_PARTY_ISSUE);
 
 // The identity-label contract -- the length cap and the control-character rule --
@@ -901,11 +869,11 @@ export const jobExchangeIntentSchema: z.ZodType<JobExchangeIntent> = z
 // with no shared constant). Re-exported here to preserve its public entry point.
 export { MAX_IDENTITY_LENGTH };
 
-// The zero-setup common fields carry NONE of the exchange mode's credential or
-// terms material -- no sharedSecret, linkageTerms, metadata, standardization,
-// expectedPayloadColumns, or expectedPartnerDeduplicate -- only an input source,
-// the tuning options, the event toggle, and the two bounded selectors.
-// `inputCsv` reuses the exchange mode's cap.
+// The zero-setup common fields hold NONE of the exchange mode's credential
+// or terms material -- no sharedSecret, linkageTerms, metadata,
+// standardization, expectedPayloadColumns, or expectedPartnerDeduplicate --
+// only an input source, the tuning options, the event toggle, and the two
+// bounded selectors. `inputCsv` reuses the exchange mode's cap.
 const jobZeroSetupIntentCommonFields = {
   ...jobRunControlFields,
   inputCsv: z.string().min(1).max(MAX_INPUT_CSV_LENGTH).optional(),
@@ -913,11 +881,9 @@ const jobZeroSetupIntentCommonFields = {
   eventStream: z.boolean().optional(),
   linkageStrategy: z.enum(["cascade", "single-pass"]).optional(),
   // Free text, unlike the closed strategy enum, so it takes the shared label
-  // contract's two shape rules (`@psi/identityLabel`): no leading `-`, so a
-  // flag-shaped label (e.g. "--save") cannot be mistaken for a CLI flag -- defense
-  // in depth, since the driver emits it as a single `--identity=<value>` token,
-  // which parses a `-`-leading value verbatim regardless -- and no control
-  // character, which rides the run into this party's own disclosure record.
+  // contract's two shape rules (`@psi/identityLabel`): no leading `-` and no
+  // control character. The driver emits it as a single `--identity=<value>`
+  // token, which parses a `-`-leading value verbatim regardless.
   identity: z
     .string()
     .min(1)
@@ -929,7 +895,7 @@ const jobZeroSetupIntentCommonFields = {
     .optional(),
 };
 
-// Mode-carrying zero-setup arms, each `.strict()` and discriminated on channel.
+// Mode-holding zero-setup arms, each `.strict()` and discriminated on channel.
 // Not annotated z.ZodType for the same reason the exchange arms are not.
 const jobZeroSetupFiledropIntentSchema = z
   .object({
@@ -969,15 +935,13 @@ export const jobZeroSetupIntentSchema: z.ZodType<JobZeroSetupIntent> =
 
 /**
  * The schema `POST /api/jobs` parses: a discriminated union on `mode`
- * (`exchange` | `zeroSetup`), each in turn discriminated on `channel`. A body that
- * omits `mode` defaults to the exchange arm (the merged client sends none). Every
- * leaf arm is `.strict()`, so a `connection`/`server`/`remote` key -- or any other
- * unmodeled field -- fails the parse on either mode, keeping the create surface
- * injection-closed. The exactly-one-input-source rule is enforced once at the
- * union level over the shared `inputCsv`/`inputFile` fields, and the
- * named-party rule certificate-mode signing needs beside it -- both are
- * cross-field, so both are restated here rather than inherited from the
- * per-mode schemas this union does not go through.
+ * (`exchange` | `zeroSetup`), each in turn discriminated on `channel`. A
+ * body that omits `mode` defaults to the exchange arm. Every leaf arm is
+ * `.strict()`, so a `connection`/`server`/`remote` key -- or any other
+ * unmodeled field -- fails the parse on either mode. The
+ * exactly-one-input-source rule and the named-party rule certificate-mode
+ * signing needs are both cross-field, so both are enforced once at the
+ * union level rather than inherited from the per-mode schemas.
  */
 export const jobCreateIntentSchema: z.ZodType<JobCreateIntent> = z
   .preprocess(
@@ -990,9 +954,9 @@ export const jobCreateIntentSchema: z.ZodType<JobCreateIntent> = z
   .refine(hasExactlyOneInputSource, {
     message: "exactly one of inputCsv or inputFile must be set",
   })
-  // Only an exchange job signs anything: the zero-setup arms carry no `signing`
-  // block and no `linkageTerms` at all, so the discriminant selects the arm the
-  // rule is about rather than the predicate reading fields off one that has none.
+  // Only an exchange job signs anything: the zero-setup arms hold no
+  // `signing` block and no `linkageTerms` at all, so the discriminant
+  // selects the arm the rule is about.
   .refine(
     (intent) =>
       intent.mode !== "exchange" || certificateModeNamesThisParty(intent),
@@ -1008,7 +972,7 @@ export const jobCreateIntentSchema: z.ZodType<JobCreateIntent> = z
 export const JOB_FILE_NAMES = {
   /** The composed CLI config document. */
   config: "psilink.yaml",
-  /** The CLI key file carrying the shared secret. */
+  /** The CLI key file holding the shared secret. */
   key: ".psilink.key",
   /** The client's input CSV content. */
   input: "input.csv",
@@ -1022,33 +986,31 @@ export const JOB_FILE_NAMES = {
    * `.keys.json`); a unit test pins this cross-workspace pairing. */
   recordKeys: "record.keys.json",
   /** The dual-signed receipt a `certificate`-mode run writes, pinned as the
-   * config's `signing.receipt_output` so the appliance knows its path. The CLI's
-   * own default would be a timestamped name this server could not then serve --
-   * the right behaviour for a recurring command line, which accumulates a trail,
-   * and the wrong one for a single job whose artifact is downloaded once. */
+   * config's `signing.receipt_output` so the console knows its path. The
+   * CLI's own default is a timestamped name this server could not serve: it
+   * suits a recurring command line but not a single job downloaded once. */
   receipt: "receipt.json",
   /** The CLI's own diagnostic log, written only when the run asked to be a
-   * diagnostic one (`--log-file`). A debug-level log can carry partner identity,
-   * linkage keys, and data categories, so it stays inside the owner-only workdir
-   * and is served only through the job's own log endpoint. */
+   * diagnostic one (`--log-file`). A debug-level log can hold partner
+   * identity, linkage keys, and data categories, so it stays inside the
+   * owner-only workdir and is served only through the job's own log
+   * endpoint. */
   log: "run.log",
 } as const;
 
 /**
- * This party's consent to its OWN outbound payload set, for the composed config's
- * `outbound_payload_consent`. An acceptance is the only side that records one, and
- * it records core's {@link deriveOutboundPayloadConsent} of the very
- * `linkageTerms.output` and `metadata` the same call composes into the config --
- * the acceptor's own-perspective output (mirrored, so `shareWithPartner` is what
- * THIS party transmits under) and the columns the confirm step showed the operator.
- * Deriving from the composed fields rather than from a set the client names is what
- * keeps the recorded consent and the config it rides in from disagreeing.
+ * This party's consent to its OWN outbound payload set, for the composed
+ * config's `outbound_payload_consent`. An acceptance is the only side that
+ * records one, deriving core's {@link deriveOutboundPayloadConsent} from the
+ * same `linkageTerms.output` and `metadata` the same call composes into the
+ * config, so the recorded consent and the config it rides in cannot
+ * disagree.
  *
- * The three states are core's, not this composer's: absent where nothing is
- * transmitted, `pending` where no metadata was resolvable, `confirmed` with the
- * resolved set otherwise. A `pending` or `confirmed` record is what makes a later
- * unattended run's consent gate live on this config -- without one the gate reads
- * "no record" and no run is ever held to a set.
+ * The three states are core's: absent where nothing is transmitted,
+ * `pending` where no metadata was resolvable, `confirmed` with the resolved
+ * set otherwise. A `pending` or `confirmed` record is what a later
+ * unattended run's consent gate reads; without one the gate finds no record
+ * and no run is held to a set.
  */
 function outboundPayloadConsentFor(
   intent: JobExchangeIntent,
@@ -1067,21 +1029,18 @@ function outboundPayloadConsentFor(
  * reach. The directory is server-side environment configuration, never a
  * browser-sent string.
  *
- * On a split-provisioned appliance (`JOB_RENDEZVOUS_OUTBOUND_DIR` set) the caller
- * passes both mounts and the connection carries the CLI's
- * `inbound_path`/`outbound_path` pair INSTEAD of the single `path` -- never the two
- * forms together, which `mintExchangeFile`'s own schema refuses. The pair's own
- * rules (both halves set, the two resolving to different directories, and the
- * retain-mode precondition) are core's single statement on the composed connection,
- * so nothing here restates them.
+ * On a split-provisioned console (`JOB_RENDEZVOUS_OUTBOUND_DIR` set) the
+ * caller passes both mounts and the connection holds the CLI's
+ * `inbound_path`/`outbound_path` pair instead of the single `path`, never
+ * both together, which `mintExchangeFile`'s own schema refuses. The pair's
+ * own rules are core's.
  *
- * The connection is built as a credential-free filedrop locator, so by core's
- * {@link ExchangeFileInput} typing no credential is representable; `mintExchangeFile`
- * validates the assembled spec through the CLI's own schema and never assembles
- * an `authentication` block (the shared secret rides the key file). The client's
- * `linkageTerms`, and its `metadata`/`standardization` when present, reach the file
- * only after core's schema validation, and the one path field (`path`) is set by
- * the server, not the client.
+ * The connection is built as a credential-free filedrop locator, so by
+ * core's {@link ExchangeFileInput} typing no credential is representable;
+ * `mintExchangeFile` never assembles an `authentication` block (the shared
+ * secret rides the key file). The client's `linkageTerms`, `metadata`, and
+ * `standardization` reach the file only after core's schema validation; the
+ * one path field (`path`) is set by the server, not the client.
  *
  * Forwarding `metadata`/`standardization` is what makes the operator's data-prep
  * edits authoritative on the console path: the CLI's `prepareForExchange` uses the
@@ -1089,29 +1048,25 @@ function outboundPayloadConsentFor(
  * operator marked ignored (or non-payload) is not silently disclosed.
  *
  * `expectedPayloadColumns`, when present, is forwarded as the config's
- * `expected_payload_columns` so the acceptor's received-payload lock-in is
- * enforced explicitly (the CLI prefers it over the `payload.receive` fallback);
- * an empty array is forwarded verbatim -- it means "receive nothing" and must lock
- * in strictly -- and only an omitted field reconciles lazily.
+ * `expected_payload_columns` (the CLI prefers it over the `payload.receive`
+ * fallback); an empty array is forwarded verbatim -- it means "receive
+ * nothing" -- and only an omitted field reconciles lazily.
  *
  * `expectedPartnerDeduplicate`, when present, is forwarded as the config's
- * `expected_partner_deduplicate` so the acceptance's terms-side binding survives
- * into the unattended run this composer hands the operator: the CLI holds the
- * inviter's presented `deduplicate` to the value its invitation declared and
- * refuses a contradiction before any key or payload moves. `false` is forwarded
- * verbatim -- it is a real declaration, and the one a hostile inviter would widen
- * away from -- and only an omitted field binds nothing.
+ * `expected_partner_deduplicate`: the CLI holds the inviter's presented
+ * `deduplicate` to the value its invitation declared and refuses a
+ * contradiction before any key or payload moves. `false` is forwarded
+ * verbatim, a real declaration; only an omitted field binds nothing.
  *
- * The send-side counterpart is `outbound_payload_consent`, derived here for an
- * acceptance alone (see {@link outboundPayloadConsentFor}), so the config this
- * composer hands an operator to graduate to cron is one a later unattended run is
- * held to rather than one whose consent gate finds no record.
+ * The send-side counterpart is `outbound_payload_consent`, derived here for
+ * an acceptance alone (see {@link outboundPayloadConsentFor}), so the
+ * config this composer hands the operator is one a later unattended run's
+ * consent gate is held to.
  *
- * `signingPaths` supplies the two paths a `signing` block names, which the intent
- * cannot carry; it is read only under `certificate` mode and is otherwise
- * unused, so a caller composing an unsigned exchange may omit it. The
- * `retention_disposition` note is forwarded verbatim, as the per-party local
- * value it is.
+ * `signingPaths` supplies the two paths a `signing` block names, which the
+ * intent cannot hold; it is read only under `certificate` mode, so a caller
+ * composing an unsigned exchange may omit it. The `retention_disposition`
+ * note is forwarded verbatim.
  */
 export function composeConfigDocument(
   intent: JobFiledropExchangeIntent,
@@ -1158,32 +1113,25 @@ export function composeConfigDocument(
  * Compose the CLI config document for an sftp job from a validated sftp intent
  * and the operator-authored server entry.
  *
- * The connection's `server` block is EXACTLY the authored entry: every
+ * The connection's `server` block is exactly the authored entry: every
  * host, port, identity, and credential-reference field is server-side data
- * validated when authored, and the intent contributes nothing to it. The entry's
- * `@path` credential strings land in the YAML verbatim: they are references the
- * CLI child resolves
- * at exchange time, so no secret byte transits this process. The client's
- * `linkageTerms`, `metadata`, `standardization`, `expectedPayloadColumns`, and
- * `expectedPartnerDeduplicate` reach the file exactly as they do on the
- * filedrop path -- as schema-validated
- * YAML values -- the acceptance's `outbound_payload_consent` is derived exactly as
- * it is there (see {@link outboundPayloadConsentFor}), and the tuning `options`
- * are the same numeric/boolean/enum subset, plus the `connectionPerPoll` dialing
- * mode this channel is the only one to admit. The `signing` block and the
- * `retention_disposition` note are composed exactly as they are there, from the
- * same {@link composedSigning} and the same forwarded value.
+ * validated when authored; the intent contributes nothing to it. The
+ * entry's `@path` credential strings land in the YAML verbatim -- references
+ * the CLI child resolves at exchange time, so no secret byte transits this
+ * process. The client's `linkageTerms`, `metadata`, `standardization`,
+ * `expectedPayloadColumns`, `expectedPartnerDeduplicate`,
+ * `outbound_payload_consent`, `signing`, and `retention_disposition` are
+ * composed as they are on the filedrop path; `options` is the same
+ * numeric/boolean/enum subset, plus the `connectionPerPoll` dialing mode
+ * this channel alone admits.
  *
- * This path deliberately does NOT use `mintExchangeFile`: its
- * {@link ExchangeFileInput} typing makes credentials unrepresentable, an
- * invariant shared with the browser minting flow that must not be loosened to
- * admit the appliance's credential-reference entries. Instead the exchange spec
- * is assembled directly, validated through core's {@link ExchangeSpecSchema}
- * (so the CLI's cross-field refines hold before any file is written), and the
- * PARSE RESULT is serialized with the same snakeize + yaml discipline
- * `mintExchangeFile` uses -- only the schema's own fields reach the YAML. No
- * `authentication` block is ever assembled; the shared secret rides the key
- * file.
+ * This path does not use `mintExchangeFile`: its {@link ExchangeFileInput}
+ * typing makes credentials unrepresentable, an invariant shared with the
+ * browser minting flow that must not admit the console's credential-reference
+ * entries. Instead the exchange spec is assembled directly, validated
+ * through core's {@link ExchangeSpecSchema}, and serialized with the same
+ * snakeize + yaml discipline `mintExchangeFile` uses. No `authentication`
+ * block is ever assembled; the shared secret rides the key file.
  */
 export function composeSftpConfigDocument(
   intent: JobSftpExchangeIntent,
@@ -1223,8 +1171,8 @@ export function composeSftpConfigDocument(
 
 /**
  * Serialize the CLI key file body. Only the shared secret is written; no
- * `expires` is stamped, so a server-driven job carries no invitation-token
- * lifetime of its own. Channel-independent: both arms carry `sharedSecret`.
+ * `expires` is stamped, so a server-driven job holds no invitation-token
+ * lifetime of its own. Channel-independent: both arms have `sharedSecret`.
  */
 export function composeKeyFileDocument(intent: JobExchangeIntent): string {
   return JSON.stringify({ sharedSecret: intent.sharedSecret });
@@ -1242,27 +1190,25 @@ const ZERO_SETUP_URL_SENTINEL_HOST = "host.invalid";
  * component is encoded correctly; a bare IPv6 literal is bracketed first, since
  * the hostname setter silently rejects an unbracketed one.
  *
- * A split-directory entry puts its INBOUND half on the URL, because that is the
- * half the CLI reads there: `--outbound-path` (emitted alongside by
- * {@link zeroSetupSftpArgv}) takes the URL's path as the inbound directory and
- * supplies the outbound one.
+ * A split-directory entry puts its INBOUND half on the URL: `--outbound-path`
+ * (emitted alongside by {@link zeroSetupSftpArgv}) takes the URL's path as
+ * the inbound directory and supplies the outbound one.
  *
- * The composed `url.hostname` -- the WHATWG-canonical form -- is then adopted as the
- * host, rather than requiring it to equal the input verbatim. Exact-equality
- * over-rejected a legitimately-authored non-canonical host the setter safely
- * canonicalizes (a non-canonical or uppercase-hex IPv6 literal like `2001:0db8::0001`
- * -> `[2001:db8::1]`, or an IDN host it percent-encodes), while the exchange mode
- * accepts the same host verbatim. The setter's other two behaviours are the real
- * hazard: it silently TRUNCATES at a URL-significant delimiter (`foo#bar` -> `foo`)
- * and NO-OPS on a host it cannot parse (leaving the sentinel) -- either could point
- * the exchange at the wrong server. Truncation is closed off upstream: the
- * `isBareSftpHost` predicate (`@psi/sftpHost`) rejects every truncating character
- * (`#`, `?`, `\`, `%`) plus userinfo, path, and whitespace, so a host that reaches
- * here can differ from the input ONLY by safe canonicalization. A total drop -- an
- * empty hostname or the untouched sentinel (the no-op) -- is the one alteration still
- * possible here, and it is a compose-time error. Credentials never ride the URL --
- * they are `--server-*` flags built by {@link zeroSetupSftpArgv} -- so no secret byte
- * is ever URL-encoded here.
+ * The composed `url.hostname` -- the WHATWG-canonical form -- is adopted as
+ * the host, rather than requiring it to equal the input verbatim: the
+ * setter safely canonicalizes a non-canonical or uppercase-hex IPv6 literal
+ * (`2001:0db8::0001` -> `[2001:db8::1]`) or an IDN host it percent-encodes.
+ * It also silently TRUNCATES at a URL-significant delimiter (`foo#bar` ->
+ * `foo`) and NO-OPS on a host it cannot parse (leaving the sentinel) --
+ * either could point the exchange at the wrong server. Truncation is closed
+ * off upstream: `isBareSftpHost` (`@psi/sftpHost`) rejects every truncating
+ * character (`#`, `?`, `\`, `%`) plus userinfo, path, and whitespace, so a
+ * host reaching here can differ from the input only by safe
+ * canonicalization. A total drop -- an empty hostname or the untouched
+ * sentinel -- is the one alteration still possible here, and is a
+ * compose-time error. Credentials never ride the URL -- they are
+ * `--server-*` flags built by {@link zeroSetupSftpArgv} -- so no secret
+ * byte is ever URL-encoded here.
  */
 function buildZeroSetupSftpUrl(serverEntry: JobSftpServerEntry): string {
   const hostForUrl =
@@ -1288,28 +1234,28 @@ function buildZeroSetupSftpUrl(serverEntry: JobSftpServerEntry): string {
  * The argv analog of {@link composeSftpConfigDocument} -- it draws every field from
  * the server entry, contributing nothing from the client.
  *
- * Credentials are emitted as single `--server-<field>=@path` tokens with the `@path`
- * string VERBATIM (the same `@path` the entry carries), never a resolved secret: the
- * CLI child resolves the reference at live-use, so no secret byte is ever on argv.
- * Every value-bearing flag uses the `=value` form (never a two-token pair) so a value
- * that begins with `-` cannot be misparsed by yargs as its own flag. The
- * primary credential (`password` or `private_key`) is picked exactly as
- * {@link composeSftpConfigDocument} lets core pick it -- whichever the entry carries,
- * at most one -- with the optional passphrase (`@path`) and keyboard-interactive
+ * Credentials are emitted as single `--server-<field>=@path` tokens with
+ * the `@path` string verbatim (the same `@path` the entry holds), never a
+ * resolved secret: the CLI child resolves the reference at live-use, so no
+ * secret byte is ever on argv. Every value-bearing flag uses the `=value`
+ * form so a value beginning with `-` cannot be misparsed by yargs as its
+ * own flag. The primary credential (`password` or `private_key`) is picked
+ * exactly as {@link composeSftpConfigDocument} lets core pick it -- at most
+ * one -- with the optional passphrase (`@path`) and keyboard-interactive
  * toggle alongside.
  *
- * A split-directory entry adds `--outbound-path`, the CLI's own name for the same
- * split: the URL carries the inbound half (see {@link buildZeroSetupSftpUrl}) and
- * this flag the outbound one. The CLI's guard on that flag then holds the run to
- * retain mode, which {@link zeroSetupOptionsArgv} emits from the operator's own
- * file-handling choice -- so a split run without it is refused by the CLI rather
- * than running with a directory layout it cannot honour.
+ * A split-directory entry adds `--outbound-path`, the CLI's own name for
+ * the same split: the URL holds the inbound half (see
+ * {@link buildZeroSetupSftpUrl}) and this flag the outbound one. The CLI's
+ * guard on that flag holds the run to retain mode, which
+ * {@link zeroSetupOptionsArgv} emits from the operator's own file-handling
+ * choice.
  *
- * The host-key fingerprint is MANDATORY and always emitted: a zero-setup run has no
- * TTY, so trust-on-first-use is impossible and the pin is the only host-key defense.
- * The CLI flag is single-valued, so a multi-fingerprint entry (an `Array`) is a
- * compose-time error rather than a silently dropped pin -- a repeatable/multi-pin
- * flag is out of scope for this slice.
+ * The host-key fingerprint is mandatory and always emitted: a zero-setup
+ * run has no TTY, so trust-on-first-use is impossible and the pin is the
+ * only host-key defense. The CLI flag is single-valued, so a
+ * multi-fingerprint entry (an `Array`) is a compose-time error rather than
+ * a silently dropped pin.
  */
 export function zeroSetupSftpArgv(
   serverEntry: JobSftpServerEntry,
@@ -1339,21 +1285,20 @@ export function zeroSetupSftpArgv(
 }
 
 /**
- * Map the operator-configured rendezvous directory to the connection portion of a
- * filedrop zero-setup CLI argv: a single `file://` URL positional. Built through
- * {@link pathToFileURL} from the server-side directory, so no client string is ever
- * a path and the URL is always well formed. The filedrop channel has no host or
+ * Map the operator-configured rendezvous directory to the connection portion
+ * of a filedrop zero-setup CLI argv: a single `file://` URL positional.
+ * Built through {@link pathToFileURL} from the server-side directory, so no
+ * client string is ever a path. The filedrop channel has no host or
  * credential, so this is the whole connection.
  *
- * A split-provisioned appliance adds `--outbound-path`, the CLI's own name for the
- * same split: the positional carries the inbound leg (which the CLI maps to
- * `inbound_path`) and this flag the outbound one. The flag's value is the plain
- * absolute directory, not a `file://` URL -- the CLI copies it straight into the
- * connection's `outbound_path`, where core requires an absolute path. The CLI's own
- * guard on the flag then holds the run to retain mode, which
- * {@link zeroSetupOptionsArgv} emits from the operator's file-handling choice. The
- * `=value` form matches every other value-bearing flag, so a directory beginning
- * with `-` cannot be misparsed by yargs as its own flag.
+ * A split-provisioned console adds `--outbound-path`, the CLI's own name
+ * for the same split: the positional holds the inbound leg (which the CLI
+ * maps to `inbound_path`) and this flag the outbound one, as the plain
+ * absolute directory rather than a `file://` URL. The CLI's guard on that
+ * flag holds the run to retain mode, which {@link zeroSetupOptionsArgv}
+ * emits from the operator's file-handling choice. The `=value` form
+ * matches every other value-bearing flag, so a directory beginning with
+ * `-` cannot be misparsed by yargs as its own flag.
  */
 export function zeroSetupFiledropArgv(
   rendezvousDir: string,
@@ -1367,26 +1312,24 @@ export function zeroSetupFiledropArgv(
 
 /**
  * Map the intent's tuning options to their CLI flags, the zero-setup argv's
- * counterpart to the exchange mode's composed `options` block. A zero-setup run
- * composes no config document, so these flags are the only route the operator's
- * authored choices have into the child, and every field the zero-setup arms
- * admit has one here -- what has no flag is refused by those arms rather than
- * accepted and dropped (see {@link jobZeroSetupOptionsSchema}).
+ * counterpart to the exchange mode's composed `options` block. A zero-setup
+ * run composes no config document, so these flags are the only route the
+ * operator's authored choices have into the child; every field the
+ * zero-setup arms admit has one here (see
+ * {@link jobZeroSetupOptionsSchema}).
  *
- * Only an enabled toggle is emitted. Each of the three booleans is `false` by
- * default in core, and a zero-setup run loads no configuration file for a flag to
- * override, so an explicitly-off toggle and an unset one select the same
- * behaviour; the negated forms would add argv tokens that change nothing.
- * `peerId` rides a single `--peer-id=<value>` token (the `=` form, like every
- * other value-bearing flag here) and reaches this point only through
- * {@link isAdmissiblePeerId}, so it is a bare label -- never a path, a
- * separator, or a flag-shaped value.
+ * Only an enabled toggle is emitted: each of the three booleans is `false`
+ * by default in core, and a zero-setup run loads no configuration file for
+ * a flag to override, so an explicitly-off toggle and an unset one select
+ * the same behaviour. `peerId` rides a single `--peer-id=<value>` token and
+ * reaches this point only through {@link isAdmissiblePeerId}, so it is a
+ * bare label -- never a path, a separator, or a flag-shaped value.
  *
  * The durations are emitted in the units each flag's own grammar takes:
- * `--polling-frequency` accepts a millisecond suffix and carries the interval
- * verbatim, while the two coarse-duration flags take a second-or-coarser unit
- * and so carry whole seconds -- exact, because the zero-setup arms admit only a
- * whole-second value for them.
+ * `--polling-frequency` accepts a millisecond suffix and holds the interval
+ * verbatim, while the two coarse-duration flags take a second-or-coarser
+ * unit and so hold whole seconds -- exact, because the zero-setup arms
+ * admit only a whole-second value for them.
  */
 export function zeroSetupOptionsArgv(
   options: JobExchangeOptions | undefined,
@@ -1412,8 +1355,8 @@ export function zeroSetupOptionsArgv(
 
 /**
  * Narrow the intent's tuning subset into a {@link FileSyncOptions}. Returns
- * undefined when no option was set, so the composed connection omits the block
- * entirely rather than carrying an empty object.
+ * undefined when no option was set, so the composed connection omits the
+ * block entirely rather than holding an empty object.
  */
 function intentOptionsToFileSyncOptions(
   options: JobExchangeOptions | undefined,

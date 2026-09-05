@@ -9,7 +9,7 @@ import type { CSVParseRequest, CSVParseResponse } from "./csvParseController";
  * {@link loadCSVFile} on it -- so the non-string-header guard and the
  * `data`/`meta.fields` contract hold exactly as on the main thread -- and STREAMS the
  * result back to the controller as a sequence of row batches followed by a terminal
- * `done` message carrying the errors/meta (or a single serialized error if the parse
+ * `done` message holding the errors/meta (or a single serialized error if the parse
  * fails). Batching the reply lets the main thread deserialize it in many small,
  * interruptible steps instead of one clone of the whole row array; see
  * {@link CSVParseResponse}. Bundled by Vite from {@link ./csvParseWorkerClient}; it
@@ -17,7 +17,7 @@ import type { CSVParseRequest, CSVParseResponse } from "./csvParseController";
  */
 
 // Worker globals are not in the app's DOM lib; narrow `globalThis` to the two
-// dedicated-worker affordances this entry uses rather than pulling the WebWorker lib
+// dedicated-worker APIs this entry uses rather than pulling the WebWorker lib
 // into the whole program (which would clash with DOM on `self`/`postMessage`).
 interface WorkerScope {
   onmessage: ((event: { data: CSVParseRequest }) => void) | null;
@@ -33,7 +33,7 @@ async function parseAndReply(
     // loadCSVFile applies its own byteCeiling default when this is undefined. It runs
     // to completion here -- including the non-string-header guard -- BEFORE any batch is
     // posted, so a parse failure throws into the catch below and posts the serialized
-    // error as the only message, exactly as the single-post hand-off did.
+    // error as the only message.
     const result = await loadCSVFile(file, byteCeiling);
     // Stream the rows back in batches so the main thread deserializes the reply in many
     // small, interruptible steps rather than one clone of the whole array. loadCSVFile

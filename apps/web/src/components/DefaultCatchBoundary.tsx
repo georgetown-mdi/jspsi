@@ -25,23 +25,21 @@ export function DefaultCatchBoundary({ error }: ErrorComponentProps) {
     select: (state) => state.id === rootRouteId,
   });
 
-  // Dev-gated: the raw Error's message, cause chain, and `.stack` can embed
-  // partner-/server-controlled bytes, so a production console carries none of
-  // it, while a developer (or a deployed client with the diagnostics toggle on)
-  // keeps the full object -- expandable stack and `.cause` chain -- for
-  // debugging. The on-screen render below is separately sanitized.
+  // Dev-gated: the raw Error's message, cause chain, and `.stack` can hold
+  // partner- or server-controlled bytes, so a production browser console logs
+  // none of it, while a developer (or a deployed client with the diagnostics
+  // toggle on) gets the whole object for debugging. The on-screen render below
+  // is sanitized separately.
   whenDiagnostic(() => console.error("DefaultCatchBoundary Error:", error));
 
-  // A root-level error surface outside any route layout: it renders itself on
-  // the bench page ground and supplies its own <main> landmark and padding.
+  // Rendered outside any route layout, so it supplies its own <main> landmark
+  // and padding.
   return (
     <BenchPage>
       <Stack component="main" gap="sm" p="xl">
-        {/* An offline browser is by far the likeliest reason a page failed here,
-            and the sanitized error alone ("Failed to fetch") does not say so.
-            Name it, and name the recovery: a part of the app this browser has
-            not stored yet needs one visit with a connection, after which it
-            opens without one. */}
+        {/* The sanitized error alone ("Failed to fetch") does not say the browser
+            is offline, the likeliest cause here, so name that state and its
+            recovery. */}
         {!online && (
           <p>
             This device is offline. A part of psilink this browser has not
@@ -50,9 +48,9 @@ export function DefaultCatchBoundary({ error }: ErrorComponentProps) {
           </p>
         )}
         {/* ErrorComponent renders only `error.message` (auto-shown in dev, behind
-            a toggle in production), never `.stack`. Hand it a sanitized message
+            a toggle in production), never `.stack`. Pass it a sanitized message
             rather than the raw Error so the at-the-sink escaping and the
-            key-redaction backstop apply before anything reaches the DOM. */}
+            key-redaction safety check apply before anything reaches the DOM. */}
         <ErrorComponent error={new Error(sanitizeErrorForDisplay(error))} />
         <Group gap="sm">
           <Button

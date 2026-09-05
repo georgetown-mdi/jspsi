@@ -190,8 +190,7 @@ interface AcceptorLaunched {
 }
 
 /** The async decode's outcome: pending while it runs, an error message on a bad
- * or expired invitation, or the validated invitation ready to review. Mirrors the
- * legacy accept route's DecodeState. */
+ * or expired invitation, or the validated invitation ready to review. */
 type DecodeState =
   | { status: "pending" }
   | { status: "error"; message: string }
@@ -209,16 +208,16 @@ interface FieldErrors {
  * URL fragment (failing closed before anything renders), reviews the partner's
  * terms, captures explicit consent and a name, and takes the acceptor's file --
  * then commits it behind the consent gate (parsing it in the browser on the hosted
- * build, or referencing the appliance-profiled mounted file on the console) and
- * hands off to the confirm-columns step. On the console an invitation whose endpoint
- * the appliance cannot run -- no accept channel is appliance-runnable today -- is
- * stopped at the review step with an honest state before consent or intake.
+ * build, or referencing the profiled mounted file on the console build) and hands
+ * off to the confirm-columns step. On the console, an invitation whose endpoint
+ * this console cannot run -- no accept channel is console-runnable today -- is
+ * stopped at the review step, before consent or intake, in a state that names
+ * what it cannot run.
  *
- * The consent semantics are re-surfaced from the hardened legacy flow, never
- * re-derived: {@link InvitationTerms} renders the full, never-condensed terms at
- * the review step, and {@link acceptorConsentName} (the shared `commitAcceptance`
- * gate) governs the consent step's submit BOTH as its disabled state and as a
- * re-check inside the handler, exactly as the legacy accept flow did.
+ * {@link InvitationTerms} renders the full, never-condensed terms at the review
+ * step, and {@link acceptorConsentName} (the shared `commitAcceptance` gate)
+ * governs the consent step's submit BOTH as its disabled state and as a re-check
+ * inside the handler.
  */
 export function AcceptorBench() {
   const consoleBuild = isConsoleBuild();
@@ -231,7 +230,7 @@ export function AcceptorBench() {
   // The consent gate's two inputs; the file is held as an unparsed handle until
   // "Accept and continue" fires and passes the gate.
   const [consented, setConsented] = useState(false);
-  // The operator's file-handling choices for an accept the appliance conducts.
+  // The operator's file-handling choices for an accept the console conducts.
   // Authored on the confirm-columns step, beside the connection, and consumed by
   // the launch; the disclosure's open state rides alongside.
   const [exchangeFiles, setExchangeFiles] = useState<ExchangeFilesDraft>(
@@ -274,7 +273,7 @@ export function AcceptorBench() {
   // managed deposit can persist a reusable pointer to the input without a second
   // picker dialog. Absent for a click-selected file and a browser without the API.
   const [sourceHandle, setSourceHandle] = useState<FileSystemFileHandle>();
-  // The console profile behind the acquired shape: the appliance reads the file, so
+  // The console profile behind the acquired shape: the console reads the file, so
   // the browser holds only the profile (name, size, mtime, columns, samples, date
   // format), committed via the picker's "Use this file" before consent. It backs the
   // columns seed, the run's mounted-file reference, the coverage sweep, and the preview
@@ -282,10 +281,10 @@ export function AcceptorBench() {
   // the consent gate instead.
   const [consoleSource, setConsoleSource] = useState<ProfiledJobInput>();
   const [columnsState, setColumnsState] = useState<AcceptorColumnsState>();
-  // The appliance's own rendezvous mount, fetched once on a console build. Undefined
+  // The console's own rendezvous mount, fetched once on a console build. Undefined
   // before it resolves; a console filedrop accept is runnable only when `configured`
   // is true (the exchange runs against the mounted directory), and `folderName` is
-  // this appliance's own name for that directory -- present only where the console
+  // this console's own name for that directory -- present only where the console
   // can name it, and the only value this seat may show as the shared folder's name.
   const [rendezvous, setRendezvous] = useState<JobRendezvousConfig>();
   // The console's effective SFTP connection for an accepted SFTP endpoint, held
@@ -340,12 +339,12 @@ export function AcceptorBench() {
     return () => controller.abort();
   }, []);
 
-  // A console accept whose endpoint the appliance cannot run, decided by the endpoint
-  // SHAPE against this appliance's own provisioning ({@link acceptUnsupported}): a
+  // A console accept whose endpoint this console cannot run, decided by the endpoint
+  // SHAPE against this console's own provisioning ({@link acceptUnsupported}): a
   // WebRTC accept is out of scope here, a split-directory SFTP accept needs the
   // command-line tool, and a file-drop accept needs mounts of the shape the
-  // invitation names. Surfaced at the review step BEFORE consent or intake, so the
-  // operator meets an honest block naming where it CAN run rather than a doomed run.
+  // invitation names. Shown at the review step BEFORE consent or intake, so the
+  // operator meets a block naming where it CAN run rather than a doomed run.
   // Off the console every admitted endpoint runs in the browser, so this is undefined
   // there.
   const unsupported =
@@ -395,13 +394,13 @@ export function AcceptorBench() {
   const sftpConnection =
     sftpInfo === undefined ? undefined : sftpInfo.connection;
   // An accepted SFTP exchange is blocked from launch until a connection (authored,
-  // carrying the required host-key fingerprint) is effective. True while the accept
+  // containing the required host-key fingerprint) is effective. True while the accept
   // endpoint resolves too, so launch stays fail-closed until then.
   const sftpConnectionMissing =
     acceptSftpLocator !== undefined && sftpConnection == null;
 
   // On the review step, move focus to the terms heading once the decode resolves
-  // to ready, to the unsupported notice when the appliance cannot run this accept,
+  // to ready, to the unsupported notice when this console cannot run this accept,
   // or to the error alert once it resolves to error, so a screen-reader user is
   // taken to the revealed terms, the block, or the failure rather than left on the
   // spinner. The consent and columns steps own their own heading focus below.
@@ -417,7 +416,7 @@ export function AcceptorBench() {
   }, [decode.status, step, unsupportedShown]);
 
   // Moving to the consent step replaces the work column, so focus is sent to the
-  // incoming h1 (it carries tabIndex -1) or a screen-reader user is left on a control
+  // incoming h1 (it has tabIndex -1) or a screen-reader user is left on a control
   // that no longer exists. Skipped on mount and on the review step (the decode effect
   // owns its focus); the columns, cleaning, and launched surfaces each focus their
   // own heading on entry, so this effect covers only the consent step.
@@ -458,7 +457,7 @@ export function AcceptorBench() {
 
   // Apply a position arriving from a browser Back/Forward: set the step and its
   // sub-section without pushing a new history entry (the browser already moved
-  // the cursor). The bench stays mounted, so the loaded file, the confirmed
+  // the cursor). The console stays mounted, so the loaded file, the confirmed
   // columns, and every in-progress edit survive the transition untouched. A
   // token naming no live step (a stale entry from before a deploy renamed one)
   // is ignored rather than rendered as an empty work column. A position whose
@@ -483,7 +482,7 @@ export function AcceptorBench() {
   const { pushStep } = useStepHistory("review", restorePosition);
 
   // Move to a new step and its sub-section, pushing a history entry so Back
-  // returns here. Every in-bench step transition routes through this.
+  // returns here. Every in-console step transition routes through this.
   function goToStep(
     nextStep: AcceptorStep,
     nextColumnsSection: AcceptorColumnsSection = "columns",
@@ -501,11 +500,11 @@ export function AcceptorBench() {
     setFile(chosen);
   }
 
-  // The file-assurance line for the acceptor's own intake: with the console now
-  // reading the file on the appliance, the acceptor opts into the mounted-directory
-  // claim explicitly (as the inviter's YourFileSection does), while the hosted build
-  // keeps the browser-only line. Not FILE_ASSURANCE_LINE alone -- that resolves to no
-  // claim on the console, which would leave this truthful surface silent.
+  // The file-assurance line for the acceptor's own intake: the console reads the
+  // file itself, so the acceptor opts into the mounted-directory claim explicitly
+  // (as the inviter's YourFileSection does), while the hosted build keeps the
+  // browser-only line. Not FILE_ASSURANCE_LINE alone -- that resolves to no claim
+  // on the console, which would leave this accurate surface silent.
   const acceptAssuranceLine = consoleBuild
     ? APPLIANCE_FILE_ASSURANCE
     : FILE_ASSURANCE_LINE;
@@ -534,7 +533,7 @@ export function AcceptorBench() {
   // Commit a profiled mounted file (the console picker's "Use this file") to the
   // consent step. A blank header cell is refused early with the shared unnameable
   // alert -- core's inferMetadata would otherwise throw when the columns-step editor
-  // seeds and unmount the bench. The editor is seeded here from the profile's column
+  // seeds and unmount the console. The editor is seeded here from the profile's column
   // NAMES (which the operator already saw in the picker's confirm panel, not from
   // file content), reconciling a re-profile of the committed file the way the inviter
   // does: unchanged columns keep the operator's remaps and cleaning edits, changed
@@ -562,10 +561,10 @@ export function AcceptorBench() {
   }
 
   // "Accept and continue": re-check the consent gate in the handler (not the
-  // disabled state alone), surface the mockup's inline errors when a submit slips
+  // disabled state alone), show the mockup's inline errors when a submit slips
   // past it, then commit the file behind the gate. On the hosted build the file is
-  // parsed here (the browser holds the rows); on the console the appliance already
-  // profiled it, so the acquired shape is built from the committed profile (no rows,
+  // parsed here (the browser holds the rows); on the console it is already
+  // profiled, so the acquired shape is built from the committed profile (no rows,
   // no parse). Only a clean commit advances to the confirm-columns step.
   async function acceptAndContinue() {
     if (decode.status !== "ready") return;
@@ -578,7 +577,7 @@ export function AcceptorBench() {
       : file !== undefined;
     if (name === undefined || nameProblem !== undefined || !fileChosen) {
       const nextErrors: FieldErrors = {};
-      // A name carrying a control character needs no entry here: the field
+      // A name containing a control character needs no entry here: the field
       // renders that refusal live, for every keystroke rather than this submit.
       if (name === undefined && acceptorName.trim() === "")
         nextErrors.name = "Your name is required";
@@ -589,7 +588,7 @@ export function AcceptorBench() {
     setFieldErrors({});
 
     if (consoleBuild) {
-      // The console reads the file on the appliance: the profile was committed and
+      // The console reads the file itself: the profile was committed and
       // the columns seeded via the picker, so there is no browser parse behind the
       // gate. Build the acquired shape from the profile (rows withheld) and advance,
       // committing the gate-checked name so the run records it even if the input is
@@ -659,20 +658,20 @@ export function AcceptorBench() {
 
   const ready = decode.status === "ready";
   const token = ready ? decode.invitation.token : undefined;
-  // Whether this accept runs on the appliance as a server job (a console file-drop)
+  // Whether this accept runs as a server job on the console (a console file-drop)
   // rather than in the browser: the one signal behind the "How it runs" ledger row
   // and the settled footer's "never left this browser" claim.
   const acceptServerJob =
     ready && acceptorRunsAsServerJob(decode.invitation.endpoint, consoleBuild);
   // The ledger's "How it runs" phrasing, from the accepted endpoint's run mode: a
-  // console single-directory file-drop accept runs on the appliance (the shared
+  // console single-directory file-drop accept runs on the console (the shared
   // directory), every other admitted accept in this browser.
   const howItRuns = ready
     ? acceptorHowItRunsLabel(decode.invitation.endpoint, consoleBuild)
     : "";
   // Whether the consent step asks the operator to confirm the shared folder: a
   // runnable console file-drop accept, past the unsupported gate, so a doomed accept
-  // does not surface it. The invitation's own locator is NOT what it confirms against
+  // does not show it. The invitation's own locator is NOT what it confirms against
   // -- that value is the folder's name only where the inviting console could name the
   // folder, and the inviting launcher's mount segment where it could not, and this
   // seat cannot tell the two apart. It names the directory mounted HERE instead,
@@ -689,7 +688,7 @@ export function AcceptorBench() {
       ? SFTP_CONNECTION_TUNING
       : FILEDROP_CONNECTION_TUNING;
   // The split precondition belongs to the channel the accept runs on, so the
-  // accept's own channel decides it before the appliance's mounts are consulted:
+  // accept's own channel decides it before the console's mounts are consulted:
   // a filedrop accept rendezvouses through those mounts, and a split pair needs
   // retain mode, while an SFTP accept connects to the partner-named server and
   // reaches no such rule -- it authors no outbound directory of its own, and a
@@ -794,7 +793,7 @@ export function AcceptorBench() {
   // the hosted build, or a committed mounted-file profile on the console -- and
   // disarms once the exchange is launched (a browser run is dialing). A console
   // server-job accept is NOT armed: leaving the page does not abandon it (the
-  // appliance keeps running it and the recovery panel is the way back), so a
+  // console keeps running it and the recovery panel is the way back), so a
   // prompt would assert a loss that does not happen.
   useUnloadGuard({
     hasFile: file !== undefined || consoleSource !== undefined,
@@ -805,7 +804,7 @@ export function AcceptorBench() {
   // held until the run settles: this seat dials on launch, an unload ends the
   // session for BOTH parties, and the app-shell update notice renders its Reload
   // button above this route throughout the run. A server-job accept stays out for
-  // the same reason it is out above -- the appliance carries that one out.
+  // the same reason it is out above -- the console conducts it instead.
   useBeforeUnloadPrompt(
     !acceptServerJob &&
       launched !== undefined &&
@@ -815,7 +814,7 @@ export function AcceptorBench() {
 
   // The coverage input, unified across builds: the browser's parsed rows on the
   // hosted build, the mounted-file reference on the console (whose sweep is a fetch
-  // to the appliance). Memoized so a standardization edit reuses the provider and
+  // there). Memoized so a standardization edit reuses the provider and
   // only a new file rebuilds it. The console reads no rows -- `acquired.rawRows` is a
   // throwing getter there -- so this never touches it on that path.
   const coverageInput = useMemo<BenchCoverageInput>(() => {
@@ -951,7 +950,7 @@ export function AcceptorBench() {
 
   // The name field's live inline refusal: a control character in the name the run
   // would adopt as this party's identity, named at the field the operator can fix
-  // rather than surfacing as an opaque failure once the exchange is under way.
+  // rather than showing up as an opaque failure once the exchange is under way.
   const nameProblem = acceptorNameProblem(acceptorName);
   const consentGateReady =
     acceptorConsentReady({
@@ -1022,7 +1021,7 @@ export function AcceptorBench() {
 
   // The operator authored an in-console SFTP connection to the partner's server
   // (its credential-free projection): hold it so launch unblocks. The connection
-  // material -- credential and host-key fingerprint -- lives in appliance memory,
+  // material -- credential and host-key fingerprint -- lives in console memory,
   // scoped to this one exchange; the browser holds only the locator. A freshly
   // authored server is a different rendezvous directory, so any sweep
   // confirmation is re-asked.
@@ -1031,7 +1030,7 @@ export function AcceptorBench() {
     setRunDiagnostics(runDiagnosticsAfterRetarget);
   };
 
-  // Clear the authored connection: forget it on the appliance and locally, so the
+  // Clear the authored connection: forget it on the console and locally, so the
   // card returns to the authoring prompt and launch re-blocks.
   const clearSftpConnection = () => {
     setSftpInfo({ connection: null });
@@ -1042,8 +1041,8 @@ export function AcceptorBench() {
   // hook's effect cleanup and resets it) and return to the confirm-columns step
   // with every column-step input intact, where the acceptor fixes its settings.
   const backToColumns = () => {
-    // A server-job accept the operator is leaving is deliberately abandoned:
-    // cancel-if-running and DELETE, which frees the appliance's single slot for
+    // A server-job accept the operator is leaving is abandoned by design:
+    // cancel-if-running and DELETE, which frees the console's single slot for
     // the re-launch. A no-op on a browser accept.
     abandonRun();
     setLaunched(undefined);
@@ -1052,29 +1051,15 @@ export function AcceptorBench() {
   };
 
   // Deposit a managed-exchange record for this exchange as the acceptor: this
-  // party's own perspective of the terms plus the secret carried in the
-  // invitation link, so the same partnership can run again later. The connection
-  // block is composed from the INVITATION's endpoint (the acceptor's rendezvous
-  // is the inviter's signaling location, not this browser's), and this party's
-  // linkage terms are its derived perspective (identity replaced, output/payload
-  // mirrored) with its own authored metadata and standardization -- the exact
-  // spec this run used. The token's disclosed set is persisted as the record's
-  // expectedPayloadColumns (empty = strict receive-nothing; an absent set stays
-  // absent = lazy), exactly as the CLI accept persists it, so a managed re-run
-  // fails closed if the partner transmits a set diverging from what was
-  // consented to here. The token's declared deduplicate -- the inviter's own side
-  // of the cardinality, which the consent screen stated -- is persisted beside it
-  // as expectedPartnerDeduplicate, so a re-run refuses an inviter presenting a
-  // different value at the terms exchange. This party's OWN outbound set -- the
-  // one the columns step showed -- is recorded as the document's
-  // outboundPayloadConsent when its
-  // mirrored terms share with the partner (with shareWithPartner false nothing
-  // is recorded, and nothing is transmitted to confirm), derived by the
-  // composer from the same metadata persisted beside it, so a later run that
-  // resolves a different set refuses before connecting rather than transmitting
-  // it silently. The secret is the invitation's; the one-shot run discards
-  // its own derived rotation, so the record stays coherent at this value until a
-  // managed re-run rotates it. Declining is simply not pressing Manage.
+  // party's perspective of the terms, its authored metadata and standardization,
+  // and the secret held in the invitation link, so the same partnership can run
+  // again later. The connection composes from the INVITATION's endpoint, since
+  // the acceptor's rendezvous is the inviter's signaling location, not this
+  // browser's. expectedPayloadColumns and expectedPartnerDeduplicate persist the
+  // token's consent so a managed re-run fails closed on a diverging partner (see
+  // docs/spec/MANAGED_EXCHANGE_RECORD.md and
+  // docs/spec/EXCHANGE_FILE.md#payload-disclosure-consent). Declining is simply
+  // not pressing Manage.
   async function manageExchange(choices: ManageOfferChoices) {
     if (decode.status !== "ready" || launched === undefined) return;
     const { token: invitationToken, endpoint } = decode.invitation;
@@ -1167,8 +1152,8 @@ export function AcceptorBench() {
               headingOrder={1}
               headingRef={termsHeadingRef}
             />
-            {/* The appliance cannot run this endpoint's shape: stop here, before
-                consent or intake, with an honest state naming where the operator CAN
+            {/* This console cannot run this endpoint's shape: stop here, before
+                consent or intake, with a state naming where the operator CAN
                 run it rather than a doomed run. */}
             {unsupported !== undefined ? (
               <Alert
@@ -1313,8 +1298,8 @@ export function AcceptorBench() {
                     differ, and this seat's inbound leg is the partner's outbound
                     one, so the confirmation names both legs with their direction.
                     Both names or neither, for the reason the accept kit gives:
-                    naming one folder of a two-folder rendezvous reads as though
-                    the other did not exist. */}
+                    naming one folder of a two-folder rendezvous is treated as
+                    though the other did not exist. */}
                 {rendezvous?.split === true ? (
                   <>
                     This exchange runs through the two shared folders mounted on

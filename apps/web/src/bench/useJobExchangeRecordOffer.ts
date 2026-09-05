@@ -5,15 +5,15 @@ import { askJobExchangeRecordOffer } from "@psi/jobExchangeRecord";
 import type { JobExchangeRecordOffer } from "@psi/jobExchangeRecord";
 
 /**
- * Where a seat's record ask stands: the answer once the appliance gave one, or
+ * Where a seat's record ask stands: the answer once the console gave one, or
  * `asking` while the ask this seat put is still in flight.
  *
  * The two are kept apart because a seat that reads them alike reads an ask still
  * running as one that answered nothing -- and the answer decides whether a control
  * that DELETEs the run confirms first, on a run that may hold the record of a
- * disclosure. A seat with no ask to make (no appliance job, or a run the seat does
+ * disclosure. A seat with no ask to make (no console job, or a run the seat does
  * not ask about) is neither, and takes the `undefined` every consumer here already
- * carries.
+ * holds.
  */
 export type JobExchangeRecordOfferState =
   JobExchangeRecordOffer | { kind: "asking" };
@@ -23,30 +23,24 @@ export type JobExchangeRecordOfferState =
 const ASKING: JobExchangeRecordOfferState = { kind: "asking" };
 
 /**
- * Ask the appliance where a console run's exchange record stands, once the run has
+ * Ask the console where a console run's exchange record stands, once the run has
  * settled, and hold the answer for the seat.
  *
- * A hook rather than state inside the panel because two things on one seat turn on
- * the same answer, and a second ask to learn it twice would be a second request for
- * one fact: the panel that OFFERS the record ({@link ./RecordDownload}), and the
- * failure surface's recovery controls, which discard the run -- and the record with
- * it -- and so confirm first while one is standing untaken.
+ * A hook, not panel-local state: the same answer drives both the panel that
+ * offers the record ({@link ./RecordDownload}) and the failure surface's
+ * recovery controls, which must confirm before discarding a run that may hold
+ * the record.
  *
- * `jobId` is undefined on a seat with no appliance job (a browser run, or a console
- * run before its job exists) and nothing is asked. `enabled` is the seat's own
- * gate: it passes false while the run has not settled -- the CLI writes the pair
- * near the end of a run, so an earlier ask could read a run mid-write as one with
- * no record -- and false again where the run's completion downloads already carry
- * the pair, which is the ordinary successful run and needs no second offer.
+ * `jobId` undefined means no console job, and nothing is asked. `enabled` gates
+ * the ask: false while the run has not settled (the CLI writes the pair near the
+ * end of a run, so an earlier ask would race the write), and false again once
+ * the run's completion downloads already hold the pair.
  *
- * The answer is held against the job it was asked for, so a seat handed a
- * different id (a retry creates a new job) asks for that run rather than showing
- * the previous one's.
+ * The answer is keyed to the job it was asked for, so a retry's new job id asks
+ * again rather than showing the previous run's answer.
  *
- * Until that answer lands the hook reports `asking` rather than nothing, so a
- * consumer can tell an ask in flight from a seat that never put one: the ask is
- * bounded but not instant, and on the failure it exists for -- an appliance that
- * stopped answering -- it runs for the whole of that bound.
+ * The hook reports `asking`, not `undefined`, while the ask is in flight, so a
+ * consumer can tell a bounded ask still running from a seat that never asked.
  */
 export function useJobExchangeRecordOffer(
   jobId: string | undefined,
@@ -57,7 +51,7 @@ export function useJobExchangeRecordOffer(
     offer: JobExchangeRecordOffer;
   }>();
   // Compared through an explicit presence test rather than `resolved?.jobId ===
-  // jobId`: a seat with no appliance job passes `jobId` undefined, which that
+  // jobId`: a seat with no console job passes `jobId` undefined, which that
   // shorthand would match against an unresolved ask.
   const answer =
     resolved !== undefined && resolved.jobId === jobId

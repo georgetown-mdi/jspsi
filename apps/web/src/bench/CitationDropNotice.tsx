@@ -19,11 +19,10 @@ export const CITATION_DROP_TITLE =
  * cannot meet two wordings of the same fact, and one who works through either
  * step alone still meets it once.
  *
- * It blocks nothing: dropping the citation is the correct outcome, since
- * re-emitting it would claim a provenance the rules do not have, so the operator
- * is told what the outgoing document will say rather than stopped from creating
- * it. That is why it is a `note` rather than a Problems entry, whose every member
- * holds the create gate shut.
+ * It blocks nothing: re-emitting the citation would claim a provenance the rules
+ * do not have, so the operator is told what the outgoing document will say rather
+ * than stopped from creating it. It is a `note`, not a Problems entry -- every
+ * Problems entry holds the create gate shut.
  */
 export function CitationDropNotice({ notice }: { notice: string }) {
   return (

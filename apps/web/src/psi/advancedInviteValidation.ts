@@ -50,16 +50,12 @@ import type {
 
 /**
  * The Generate gate, the import-refusal messages, and the two notices that refuse
- * nothing. {@link validateAdvancedInvite} runs a draft's built terms
- * through the core schema (the single validation source
- * for everything it covers) and adds only the gates the schema does not express;
+ * nothing. {@link validateAdvancedInvite} runs a draft's built terms through the
+ * core schema and adds only the gates the schema does not express.
  * {@link gatedActiveSettingMessage} and {@link importedConstraintDivergenceMessage}
- * refuse an import that carries a gated setting or a constraint the editor cannot
- * represent; {@link importedCitationDropNotice} tells the operator when the rebuilt
- * document loses the rule-set citation the imported one carried, and
- * {@link inertCoalesceNotice} when a declared default value will not be
- * substituted where it sits -- each a consequence to state rather than an
- * obstacle to clear. No React, no I/O.
+ * refuse an import holding a gated setting or a constraint the editor cannot
+ * represent. {@link importedCitationDropNotice} and {@link inertCoalesceNotice}
+ * state a consequence rather than block it. No React, no I/O.
  */
 
 /** Today's date as YYYY-MM-DD, for the legal-agreement expiry check. Matches the
@@ -74,13 +70,12 @@ function todayIso(now: Date): string {
 /** Shown when generation is blocked because an enabled linkage key references a
  * field the inviter's columns cannot supply, or no key is supplyable at all --
  * distinct from {@link messageForField}'s "Enable at least one linkage key." so an
- * operator can tell "a key needs a field your columns cannot supply" apart from
- * "you turned every key off." Deliberately names no specific field: the offending
- * element's `field` reference can be partner-controlled (it rides an imported
- * document), so echoing it here would surface partner text into the UI -- the same
- * reason {@link messageForField} and core's referential-integrity refine locate the
- * offender by issue path rather than by value. The operator identifies the key from
- * its red "not satisfiable" badge in the key list instead. */
+ * operator can tell the two apart. Names no specific field: an offending
+ * element's `field` reference can be partner-controlled, so echoing it would
+ * expose partner text in the UI -- the same reason {@link messageForField} and
+ * core's referential-integrity refine locate the offender by issue path rather
+ * than value. The operator identifies the key from its red "not satisfiable"
+ * badge in the key list instead. */
 const UNSUPPLYABLE_KEY_MESSAGE =
   "A linkage key needs a field your columns cannot supply. Add a column of that " +
   "type, or turn that key off.";
@@ -100,14 +95,12 @@ function declaresFanOut(
 /** Shown when a cleaning step or a linkage-key transform splits one value into
  * several match candidates. This editor authors no fan-out -- its add-step menu
  * offers none (`OFFERED_EXPERT_FUNCTION_GROUPS`), so one can only arrive on an
- * imported document -- and it is deliberately blocked at the moment of choice
- * rather than left to mint an invitation the editor cannot show the operator the
- * consequences of authoring. The gate is this editor's, wider than core's own
- * refusal, which admits a fan-out under single-pass; the message therefore points
- * at the surface that does author one rather than calling the capability unbuilt.
- * Names that capability and not the offending step: the step's function name can
- * arrive on an imported document, which is partner-influenceable, the same reason
- * {@link UNSUPPLYABLE_KEY_MESSAGE} names no field. */
+ * imported document -- and is blocked at the moment of choice rather than left to
+ * mint an invitation whose consequences the editor cannot show the operator. Wider
+ * than core's own refusal, which admits a fan-out under single-pass, so the
+ * message points at the surface that does author one. Names the capability, not
+ * the offending step: the step's function name can be partner-influenced, the
+ * same reason {@link UNSUPPLYABLE_KEY_MESSAGE} names no field. */
 const FAN_OUT_MESSAGE_BODY =
   "splits one value into several values to match on, which this editor does " +
   "not author. Remove that step before generating; an exchange that matches " +
@@ -115,42 +108,31 @@ const FAN_OUT_MESSAGE_BODY =
   "under single-pass linkage only.";
 
 /** Shown when the value the built terms cannot canonically encode sits in an
- * enabled key element's transform -- the one such value this editor authors, since
- * the element editor offers `substring` and `pad_left` and writes their numeric
- * params into the draft beside the inline error rather than withholding them.
- *
- * The terms schema does not catch it: a transform param value is `z.unknown()`
- * there, so an integer past the safe range parses cleanly and only the encoder
- * refuses it. A non-finite one does raise a schema issue, but on the `linkageKeys`
- * path, which the generic mapping collapses to "Enable at least one linkage key."
- * on a draft whose keys are all enabled -- so this message has to be set ahead of
- * that mapping to be the one the operator reads.
- *
- * Names neither the key nor the parameter: an imported key's names are
- * partner-influenceable, the same reason {@link UNSUPPLYABLE_KEY_MESSAGE} names no
- * field, and the element editor marks the offending input where the operator fixes
- * it. */
+ * enabled key element's transform -- the one such value this editor authors, via
+ * the `substring` and `pad_left` numeric params the element editor writes into the
+ * draft. The terms schema does not catch it (a transform param is `z.unknown()`
+ * there), and a non-finite param's schema issue collapses to "Enable at least one
+ * linkage key." on a draft whose keys are all enabled, so this message must be set
+ * ahead of that mapping to be the one the operator reads. Names neither the key
+ * nor the parameter: an imported key's names are partner-influenceable, the same
+ * reason {@link UNSUPPLYABLE_KEY_MESSAGE} names no field; the element editor marks
+ * the offending input where the operator fixes it. */
 const UNENCODABLE_KEY_TRANSFORM_MESSAGE =
   "A linkage key's transform has a parameter that cannot be recorded in the " +
   "exact form both parties agree on, such as a number too large to store " +
   "precisely. Open that key and correct that transform's parameters, or remove " +
   "the step.";
 
-/** Shown when a key's two swapped elements carry different cleaning steps.
- *
- * A swap has only the receiver read the pair in the other order, and each
- * element's steps stay on its own position, so a pair whose steps differ cleans a
- * column one way on the party that swaps and another on the party that does not.
- * The terms schema refuses it -- on the `linkageKeys` path, which the generic
- * mapping collapses to "Enable at least one linkage key." on a draft whose keys
- * are all enabled, so this message has to be set ahead of that mapping to be the
- * one the operator reads.
- *
- * Names neither the key nor the fields, for the reason
- * {@link UNSUPPLYABLE_KEY_MESSAGE} names none: an imported key's names are
- * partner-influenceable. Both remedies are the operator's to choose between --
- * matching the steps keeps the either-order matching, dropping the swap keeps the
- * differing steps. */
+/** Shown when a key's two swapped elements have different cleaning steps: a swap
+ * has only the receiver read the pair in the other order, while each element's
+ * steps stay on its own position, so the column cleans one way on the party that
+ * swaps and another on the party that does not. The terms schema refuses it on the
+ * `linkageKeys` path, which the generic mapping collapses to "Enable at least one
+ * linkage key." on a draft whose keys are all enabled, so this message must be set
+ * ahead of that mapping. Names neither the key nor the fields, the same reason
+ * {@link UNSUPPLYABLE_KEY_MESSAGE} names none. Both remedies are the operator's to
+ * choose between: matching the steps keeps the either-order matching, dropping the
+ * swap keeps the differing steps. */
 const SWAP_TRANSFORM_MISMATCH_MESSAGE =
   "A linkage key matches two of its fields in either order, but gives them " +
   "different cleaning steps. Open that key and give both fields the same steps, " +
@@ -159,11 +141,9 @@ const SWAP_TRANSFORM_MISMATCH_MESSAGE =
 /** Shown when the built terms cannot be canonically encoded and the offending
  * value is not in any enabled key's transform -- the residual the editor's own
  * controls and the import path have no way to author, since every other term is a
- * string, a boolean, or an enum the schema types, and a linkage field's constraints
- * carry only strings, booleans, and string lists.
- *
- * Deliberately not "reset to defaults": the fault is one value, and discarding the
- * operator's whole authored draft is not a remedy for it. */
+ * string, a boolean, or an enum the schema types. Not "reset to defaults": the
+ * fault is one value, and discarding the operator's whole authored draft is not a
+ * remedy for it. */
 const UNENCODABLE_TERMS_MESSAGE =
   "These terms include a value that cannot be recorded in the exact form both " +
   "parties agree on. Import them again from a corrected document, or rebuild the " +
@@ -188,7 +168,7 @@ const REVEAL_IDENTIFIERS_INSTEAD =
  * change, in this editor's own words rather than core's refusal text -- the same
  * split {@link messageForField} keeps for a schema failure, whose Zod message is
  * technical. The rules themselves are core's ({@link countOnlyShapeViolation}), so
- * only the wording lives here, and each message names the control that carries
+ * only the wording lives here, and each message names the control that holds
  * the setting it asks about. */
 const COUNT_ONLY_MESSAGES: Record<CountOnlyShapeViolation, string> = {
   linkageKeys:
@@ -210,12 +190,9 @@ const COUNT_ONLY_MESSAGES: Record<CountOnlyShapeViolation, string> = {
 /** Shown when the draft asks for a deduplicating match under a linkage strategy
  * that cannot run one. Core refuses that pair on both parties before matching
  * begins ({@link assertDeduplicateImplemented}), so an invitation minted on it is
- * one both sides abort on rather than one the partner can accept. Names the two
- * ways out in the words the controls carrying them are labelled, keeping the same
- * split the count-only messages do: the rule is core's, the wording this
- * editor's. It names no strategy, because which one cannot run a deduplicating
- * match is core's verdict rather than this message's -- every strategy this build
- * offers can. */
+ * one both sides abort on. Names the two ways out in the words their controls are
+ * labelled. Names no strategy: which one cannot run a deduplicating match is
+ * core's verdict, not this message's. */
 const DEDUPLICATE_STRATEGY_MESSAGE =
   "The linkage strategy this invitation names cannot run a deduplicating " +
   'match. Choose another Linkage strategy, or clear "Allow several of your ' +
@@ -240,16 +217,16 @@ function isCanonicallyEncodable(value: unknown): boolean {
 
 /**
  * What to do about a linkage shortfall, chosen by which shortfall holds -- the
- * split the acceptor's launch gate keeps (`acceptorLaunchBlockedReason`), and for
- * the same reason: a key the columns cannot produce is cleared at the column
- * mapping, while a key whose declared cleaning drops every record has columns that
- * already resolve, so pointing at the mapping would name a control that cannot
- * clear it. An unsatisfiable key takes precedence where both hold, as it does
- * there, since it is the shortfall the operator's own columns settle.
+ * same split the acceptor's launch gate keeps (`acceptorLaunchBlockedReason`): a
+ * key the columns cannot produce is cleared at the column mapping, while a key
+ * whose declared cleaning drops every record has columns that already resolve, so
+ * pointing at the mapping would name a control that cannot clear it. An
+ * unsatisfiable key takes precedence where both hold, since it is the shortfall
+ * the operator's own columns determine.
  *
- * The dead case points at the badge rather than the key, for the reason
- * {@link UNSUPPLYABLE_KEY_MESSAGE} names no field: an imported document's key names
- * are partner-influenceable, and the key list carries the badge beside this
+ * The dead case points at the badge rather than the key, the same reason
+ * {@link UNSUPPLYABLE_KEY_MESSAGE} names no field: an imported document's key
+ * names are partner-influenceable, and the key list has the badge beside this
  * message.
  */
 function shortfallRemedy(verdict: LinkageTermsVerdict): string {
@@ -264,20 +241,16 @@ function shortfallRemedy(verdict: LinkageTermsVerdict): string {
 /**
  * Validate a draft for the Generate gate. The core schema
  * ({@link safeParseLinkageTerms}) is the single source for everything it covers
- * (identity/legal-text presence, the date format, referential integrity); this
- * adds only the gates the schema does not express: the invitation-lifetime
- * bounds (not part of the terms), a not-yet-passed legal-agreement expiry (the
- * schema checks format, not that the date is still current -- the exchange
- * rejects an already-passed date later, so refuse it up front), at least one
- * column-satisfiable linkage key, a canonical-encode dry run (the byte form both
- * parties hash; refuse a value that cannot encode rather than fail cross-party,
- * naming the transform it sits in where it sits in one), and the two pairings the
- * schema admits and the run refuses (a declared fan-out step, and a deduplicating
- * term under a linkage strategy that matches one value per record).
+ * (identity/legal-text presence, date format, referential integrity); this adds
+ * only the gates the schema does not express: the invitation-lifetime bounds, a
+ * not-yet-passed legal-agreement expiry, at least one column-satisfiable linkage
+ * key, a canonical-encode dry run (the byte form both parties hash), and the two
+ * pairings the schema admits but the run refuses (a declared fan-out step, and a
+ * deduplicating term under a linkage strategy that matches one value per record).
  *
- * Schema errors are mapped back to the offending control by their issue path --
- * the editor re-derives the control because the referential-integrity refines
- * report at the array path by design, echoing no value.
+ * Schema errors are mapped back to the offending control by their issue path,
+ * since the referential-integrity refines report at the array path, echoing no
+ * value.
  */
 export function validateAdvancedInvite(
   draft: AdvancedInviteDraft,
@@ -315,10 +288,9 @@ export function validateAdvancedInvite(
   if (enabledKeys.length === 0) {
     // No key is active. Enabling one fixes it ONLY if a supplyable key exists --
     // checked across ALL keys, enabled or not, since the question is whether
-    // enabling one COULD help. When none is supplyable (a fully-unsupplyable
-    // import, every key referencing a field the columns cannot supply), "turn one
-    // on" would mislead, so name the real obstacle instead, preserving the
-    // fail-closed refusal.
+    // enabling one COULD help. When none is supplyable (every key references a
+    // field the columns cannot supply), "turn one on" would mislead, so name the
+    // real obstacle instead.
     const someKeyIsSupplyable = draft.keys.some((entry) =>
       keyIsSupplyable(entry.key, declarable),
     );
@@ -337,15 +309,12 @@ export function validateAdvancedInvite(
   // Canonical-encode dry run: the terms are hashed into the cross-party agreement
   // in this byte form, and a value outside the reproducible domain throws here
   // rather than desyncing two parties. Run up front so this message wins over the
-  // schema mapping and the linkage grading -- the schema mapping reports a
-  // non-finite transform param as "Enable at least one linkage key." on a draft
-  // whose keys are all enabled. The later shape gates (fan-out, deduplicate
-  // strategy, count-only) still overwrite errors.keys unconditionally; that
-  // changes only which message shows, never whether generation is refused.
+  // schema mapping, which reports a non-finite transform param as "Enable at least
+  // one linkage key." on a draft whose keys are all enabled.
   //
-  // Where the offending value sits is asked of the encoder too, one transform at a
+  // The offending value's location is asked of the encoder too, one transform at a
   // time, rather than read off the error: its message quotes the value and a path
-  // that can carry a partner-chosen param name, neither of which is surfaceable.
+  // that can hold a partner-chosen param name, neither of which is safe to show.
   const encodable = isCanonicallyEncodable(terms);
   if (!encodable && errors.keys === undefined) {
     errors.keys = terms.linkageKeys.some((key) =>
@@ -359,13 +328,12 @@ export function validateAdvancedInvite(
       : UNENCODABLE_TERMS_MESSAGE;
   }
 
-  // A swap pair whose two elements carry different transforms, which the schema
-  // refuses on the linkageKeys path -- so it needs its own message ahead of the
-  // mapping for the same reason the checks above do. Placed after the encode dry
-  // run because an un-encodable param makes a pair unmatchable here too, and that
-  // fault has the more precise remedy of the two. The verdict is core's own
-  // reading of the rule, so the editor and the schema cannot disagree about which
-  // pairs are refused.
+  // A swap pair whose two elements have different transforms, which the schema
+  // refuses on the linkageKeys path, needs its own message ahead of the mapping
+  // for the same reason the checks above do. Placed after the encode dry run
+  // because an un-encodable param makes a pair unmatchable too, and that fault has
+  // the more precise remedy. The verdict is core's own reading of the rule, so the
+  // editor and the schema cannot disagree about which pairs are refused.
   if (
     errors.keys === undefined &&
     terms.linkageKeys.some(swapPairTransformsDiffer)
@@ -373,13 +341,12 @@ export function validateAdvancedInvite(
     errors.keys = SWAP_TRANSFORM_MISMATCH_MESSAGE;
 
   // The "non-receiving-party-cannot-receive" rule, enforced live: sending payload
-  // to a partner that receives no result is incoherent -- the partner has no matched
-  // records to attach it to, and the acceptor's mirror (receive = this send, with
-  // expectsOutput false) is exactly what the schema rejects at accept time
-  // (deriveAcceptedLinkageTerms throws). Block it here so the inviter never mints an
-  // invitation the partner cannot accept. The check reads the same disclosed set
-  // buildAdvancedTerms derives the send from, so it fires precisely when the built
-  // terms carry a payload.send the chosen direction makes unacceptable.
+  // to a partner that receives no result is incoherent, since the partner has no
+  // matched records to attach it to -- exactly what the schema rejects at accept
+  // time (`deriveAcceptedLinkageTerms` throws). Block it here so the inviter never
+  // mints an invitation the partner cannot accept. Reads the same disclosed set
+  // `buildAdvancedTerms` derives the send from, so it fires precisely when the
+  // built terms contain a payload.send the chosen direction makes unacceptable.
   if (
     !outputForDirection(draft.outputDirection).shareWithPartner &&
     disclosedColumnNames(draft.metadata).length > 0
@@ -394,15 +361,15 @@ export function validateAdvancedInvite(
   const parsed = safeParseLinkageTerms(terms);
   if (!parsed.success) {
     // Each control touched by a schema issue gets its control-specific message
-    // (the message is keyed on the control, not the individual issue, so the set of
-    // affected controls is all that matters). Keep the first message per control:
-    // the keys control deliberately sets its accurate message up front so it wins
-    // over the generic schema mapping, and stacking several messages on one input
-    // is noise. The payload control is the one exception -- a schema payload error
-    // (e.g. an over-long sent column name) is a second, distinct obstacle from the
-    // direction-conflict message that may already occupy it, so both are surfaced
-    // rather than letting the direction conflict mask the schema problem and leave
-    // the operator unaware of an obstacle that still blocks generation.
+    // (keyed on the control, not the individual issue, so the set of affected
+    // controls is all that matters). Keeps the first message per control: the keys
+    // control sets its accurate message up front so it wins over the generic
+    // schema mapping, and stacking several messages on one input is noise. The
+    // payload control is the exception -- a schema payload error (e.g. an
+    // over-long sent column name) is a second, distinct obstacle from the
+    // direction-conflict message that may already occupy it, so both are shown
+    // rather than leaving the operator unaware of one that still blocks
+    // generation.
     const schemaFields = new Set(
       parsed.error.issues.map((issue) => fieldForIssuePath(issue.path)),
     );
@@ -422,12 +389,11 @@ export function validateAdvancedInvite(
   }
 
   // An already-passed expiry is not a schema rule (it checks only the date
-  // format), so add it -- mirroring the exchange, which rejects an expirationDate
-  // strictly before today (config/linkageTerms.ts). A same-day expiry is still
-  // honored at the exchange, so accept it here too rather than refuse an
-  // invitation the exchange would. Apply it only once the date is a well-formed
-  // date the schema accepted, so a malformed date shows the format error rather
-  // than this one.
+  // format), so add it here, mirroring the exchange, which rejects an
+  // expirationDate strictly before today (config/linkageTerms.ts). A same-day
+  // expiry is still honored at the exchange, so accept it here too. Applied only
+  // once the date is well-formed and schema-accepted, so a malformed date shows
+  // the format error instead.
   const expiration = draft.legalAgreement?.expirationDate.trim();
   if (
     expiration !== undefined &&
@@ -458,7 +424,7 @@ export function validateAdvancedInvite(
     );
     if (!verdict.fullySatisfied) {
       // The shortfall fragment is core's, the one the run-boundary refusal states,
-      // so the editor cannot describe the fault in words of its own. It carries
+      // so the editor cannot describe the fault in words of its own. It states
       // counts only; the key names stay off this message. Taken on the draft
       // standing: these terms are the inviter's own, and Generate is the step that
       // would first put them in front of a partner.
@@ -469,43 +435,32 @@ export function validateAdvancedInvite(
   }
 
   // Every authored cleaning step must be well-formed before Generate -- the same
-  // launch gate the acceptor applies (acceptorLaunchBlockedReason's step-validity
-  // clause). A step left mid-edit (a cleared substring.start) or a
-  // malformed/over-length raw pattern would otherwise reach the exchange, where
-  // core runs it as a silent full-field exclusion or throws at compile. Raw
-  // patterns being ungated for per-party cleaning is what makes this gate
-  // load-bearing rather than defensive. Gated in this tested boundary (not only
-  // the component wrapper) so it cannot be bypassed.
+  // launch gate the acceptor applies (`acceptorLaunchBlockedReason`'s
+  // step-validity clause). A step left mid-edit or a malformed/over-length raw
+  // pattern would otherwise reach the exchange, where core runs it as a silent
+  // full-field exclusion or throws at compile. Raw patterns are ungated for
+  // per-party cleaning, which makes this gate critical rather than defensive; it
+  // runs in this tested boundary, not only the component wrapper, so it cannot be
+  // bypassed.
   //
-  // Scoped to draft.standardization deliberately: a linkage-key element transform
-  // does NOT take this descriptor gate. The descriptors are the authoring
-  // surface's own typing, stricter than what core runs, and an element transform
-  // arrives by a second door -- an imported partner document, whose params the
-  // operator cannot edit one by one. A descriptor-shaped refusal there would
-  // hard-block a document core runs benignly: a `coalesce` whose `default` is not
-  // text and a `null_if` whose value is not a string are each a pass-through at
-  // runtime, costing no match. So on a key element the encoder is the gate, not
+  // Scoped to draft.standardization: a linkage-key element transform does NOT
+  // take this descriptor gate. The descriptors are the authoring surface's own
+  // typing, stricter than what core runs, and an element transform can arrive by
+  // a second door -- an imported partner document whose params the operator
+  // cannot edit one by one. A descriptor-shaped refusal there would hard-block a
+  // document core runs benignly (e.g. a `coalesce` whose `default` is not text is
+  // a harmless pass-through), so on a key element the encoder is the gate, not
   // the descriptors.
   //
-  // What that stance does not extend to is a param the pipeline drops on
-  // value-INDEPENDENTLY, which is not a tolerated shape but a key that matches
-  // nothing for BOTH parties -- and the mint is the last point either of them
-  // holds a control over it, since the terms are hashed into the agreement and
-  // the acceptor cannot edit them. Those are refused, in core rather than here:
-  // `pipelineAlwaysDrops` grades such an element dead, so the linkage grading
-  // above blocks Generate, the mint and the run boundary refuse the same terms,
-  // and the key list carries its "won't match" badge -- one refusal covering the
-  // authored draft and the imported document alike. Its measured instance is a
-  // `substring` whose declared window reads nothing at any value length -- an
-  // absent or zero bound, which the terms schema admits and the factory nulls
-  // every row for. (A present non-integer bound never reaches this grading: that
-  // shape the terms schema rejects at parse.) Every window core grades dead is
-  // one these descriptors also reject, so
-  // the element editor marks the offending param inline while the badge names
-  // the key: held by tests rather than by this note --
-  // advancedInviteValidation.test.ts for the grading and that agreement,
-  // stepListEditor.test.ts for the inline mark, and invitation.test.ts /
-  // prepareForExchange.test.ts for the mint and run boundaries.
+  // The exception is a param the pipeline drops value-INDEPENDENTLY -- a key that
+  // matches nothing for BOTH parties, refused in core instead: `pipelineAlwaysDrops`
+  // grades such an element dead, so the linkage grading above, the mint, and the
+  // run boundary all refuse the same terms, and the key list has a "won't
+  // match" badge covering both the authored draft and an imported document. Its
+  // measured instance is a `substring` window that reads nothing at any value
+  // length (an absent or zero bound); a present non-integer bound is rejected
+  // earlier, at schema parse. Verified in advancedInviteValidation.test.ts,
+  // stepListEditor.test.ts, invitation.test.ts, and prepareForExchange.test.ts.
   if (
     !draft.standardization.every((transformation) =>
       (transformation.steps ?? []).every(isStepValid),
@@ -516,14 +471,13 @@ export function validateAdvancedInvite(
   }
 
   // The fan-out gate, read from the same list core's own refusal
-  // (`assertFanOutImplemented`) reads, and deliberately wider than it: core
-  // admits a fan-out under single-pass, while this editor authors none at any
-  // strategy. Both surfaces a fan-out can reach are checked: an authored cleaning
-  // step, and a linkage-key element transform, which an imported document carries
-  // (the step editor offers the family on neither). Written last and
-  // unconditionally -- a fan-out step blocks generation whatever else the control
-  // reports, and removing it is the only fix here, so it is the message worth
-  // showing.
+  // (`assertFanOutImplemented`) reads, and wider than it: core admits a fan-out
+  // under single-pass, while this editor authors none at any strategy. Both
+  // surfaces a fan-out can reach are checked: an authored cleaning step, and a
+  // linkage-key element transform, which an imported document holds (the step
+  // editor offers the family on neither). Written last and unconditionally -- a
+  // fan-out step blocks generation whatever else the control reports, and
+  // removing it is the only fix.
   if (
     draft.standardization.some((transformation) =>
       declaresFanOut(transformation.steps),
@@ -539,14 +493,13 @@ export function validateAdvancedInvite(
 
   // The deduplicating-pair gate, run as core's own refusal rather than a second
   // web-side copy of the pair it names -- the same reading-from-core the fan-out
-  // gate above does with core's list, so a pair added there is refused here with
-  // no second edit. Core refuses it symmetrically from the agreed terms, so an
-  // exchange configured on it aborts both parties at the run boundary; refusing
-  // it at Generate puts the answer where the operator still holds both controls.
-  // Written over whatever else the key list reports, since generation stays
-  // blocked until one of the two settings moves. The count-only gate below writes
-  // over it in turn for a `psi-c` draft, whose own shape rules own these settings
-  // and whose remedies stay valid for that algorithm.
+  // gate above does, so a pair added there is refused here with no second edit.
+  // Core refuses it symmetrically from the agreed terms, so an exchange configured
+  // on it aborts both parties at the run boundary; refusing it at Generate puts the
+  // answer where the operator still holds both controls. Written over whatever
+  // else the key list reports; the count-only gate below writes over it in turn
+  // for a `psi-c` draft, whose own shape rules own these settings and whose
+  // remedies stay valid for that algorithm.
   try {
     assertDeduplicateImplemented(terms);
   } catch (err) {
@@ -627,9 +580,9 @@ function messageForField(field: AdvancedField): string {
     case "output":
       // The one rule that reports against the output pair: a party that receives
       // no matched results has nothing to deduplicate its own records onto. Both
-      // halves settle it, so both are named, the result-direction control first:
-      // the issue path points at that pair, and it is the half the operator did
-      // not choose deliberately when they turned deduplication on.
+      // halves determine it, so both are named, the result-direction control
+      // first: the issue path points at that pair, and it is the half the
+      // operator did not choose when they turned deduplication on.
       return (
         "Deduplicating your own records needs you to receive the matched " +
         'results. Under "Who receives the matched results", choose an option ' +
@@ -653,10 +606,9 @@ function messageForField(field: AdvancedField): string {
 /** A message naming any setting an imported terms set turns on that the run does
  * not yet honor (gated by {@link APPLIED_SETTINGS}), or `undefined` when none. The
  * editor refuses such an import rather than load a draft whose headline behavior
- * silently does not happen -- the same gate the disabled GUI controls and the
- * {@link buildAdvancedTerms} clamp enforce, applied at the one door (import) that
- * could otherwise carry a gated setting in from outside. Without it the disabled
- * control would be the operator's only way to clear a setting an import turned
+ * silently does not happen. Applied at the one door (import) that could otherwise
+ * bring a gated setting in from outside; the GUI controls that enforce the same
+ * gate are disabled, not removed, so they cannot clear a setting an import turned
  * on. */
 export function gatedActiveSettingMessage(
   terms: LinkageTerms,
@@ -679,57 +631,44 @@ export function gatedActiveSettingMessage(
 }
 
 /**
- * A message refusing an import whose linkage fields carry constraints the editor
+ * A message refusing an import whose linkage fields hold constraints the editor
  * cannot represent, or `undefined` when none does -- the constraints counterpart of
  * {@link gatedActiveSettingMessage}, applied at the same door. The draft holds no
- * per-field constraint state ({@link AdvancedInviteDraft} has none) and
- * `authoredLinkageFields` re-stamps each rebuilt field with its semantic
- * type's DEFAULT-template constraints, so an imported field's own `constraints` -- a
- * non-default `exclude` denylist, `validOnly`, `allowedCharacters`, or
- * `affixesAllowed` -- would be silently normalized away on rebuild. Constraints are
- * warn-not-enforce (they govern the data-quality warning surface, not which records
- * match -- see core's `checkValueConstraints`), but they ARE hashed into the
- * cross-party agreement, so a silent normalization re-generates a DIFFERENT
- * agreement than the imported document declared, with no signal to the operator.
+ * per-field constraint state, and `authoredLinkageFields` re-stamps each rebuilt
+ * field with its semantic type's DEFAULT-template constraints, so an imported
+ * field's own `constraints` (a non-default `exclude` denylist, `validOnly`,
+ * `allowedCharacters`, or `affixesAllowed`) would be silently normalized away on
+ * rebuild. Constraints are advisory (they govern the data-quality warning surface,
+ * not which records match -- see core's `checkValueConstraints`), but they ARE
+ * hashed into the cross-party agreement, so a silent normalization re-generates a
+ * DIFFERENT agreement than the imported document declared, with no signal to the
+ * operator.
  *
  * Refuse, not preserve: the editor has no surface to view or edit per-field
- * constraints, so preserving them would carry hash- and warning-relevant state the
- * operator can neither see nor change -- a worse footgun than refusing. Fail-closed
+ * constraints, so preserving them would hold hash- and warning-relevant state the
+ * operator can neither see nor change -- a worse hazard than refusing. Fail-closed
  * at the one door (import) that can introduce a constraint the authoring UI never
  * produces.
  *
- * Rather than enumerate the constraint shapes, it asks the precise question -- would
- * the rebuild change any field's declaration? -- by reconstructing exactly what an
- * import would generate ({@link draftFromTerms} then {@link buildAdvancedTerms}) and
- * comparing each GENERATED field against the imported field of the same name in the
- * canonical form the agreement hashes (`canonicalString`). Name and type are
- * reproduced verbatim, so a surviving field whose canonical form differs differs
- * only in its constraints: exactly the silent-divergence case. This also catches the
- * inverse -- an import that STRIPS a default the rebuild adds back. An import
- * carrying only type-default constraints rebuilds to identical canonical fields and
- * is accepted unchanged -- so the guided and expert paths, which never author custom
- * constraints, always pass.
+ * Rather than enumerate the constraint shapes, it reconstructs exactly what an
+ * import would generate ({@link draftFromTerms} then {@link buildAdvancedTerms})
+ * and compares each GENERATED field against the imported field of the same name
+ * in the canonical form the agreement hashes (`canonicalString`). Name and type
+ * are reproduced verbatim, so a surviving field whose canonical form differs
+ * differs only in its constraints. This also catches the inverse -- an import
+ * that STRIPS a default the rebuild adds back. An import holding only
+ * type-default constraints rebuilds identically and is accepted unchanged.
  *
- * The message names no field value: an imported document is partner-influenceable,
- * the same reason {@link UNSUPPLYABLE_KEY_MESSAGE} and core's schema refines locate
- * an offender by path, not value.
+ * The message names no field value, the same reason {@link UNSUPPLYABLE_KEY_MESSAGE}
+ * and core's schema refines locate an offender by path.
  *
- * Scope -- it owns the one divergence direction the faithful round-trip does NOT close:
- * a SURVIVING field (one a key references and the columns can bind) whose custom
- * constraint the rebuild re-stamps to the type default, the genuine silent-normalization
- * case. It need not own the others, because {@link buildAdvancedTerms} preserves the
- * imported field declaration on rebuild: (1) it does NOT falsely refuse the
- * disable-and-show case -- a field a key references but the inviter's columns cannot
- * supply is dropped rather than generated, so it is not compared and a legitimate
- * partial import is not refused; (2) a declared field NO key references is preserved
- * verbatim on rebuild, so it is compared and MATCHES rather than diverging -- an inert
- * field's custom constraint is carried, not refused (it is never standardized,
- * constraint-checked, or matched, so carrying it moves nothing but the agreement hash,
- * which faithful preservation keeps equal); and (3) field ORDER and a benign empty
- * `constraints: {}` (on a type whose default is absent) are likewise preserved, so
- * neither diverges here, and the empty `{}` no longer over-refuses. So this guard stays
- * scoped to the constraints a generated field actually runs, while the rest of the
- * round-trip fidelity is preserved upstream.
+ * Scoped to the one divergence a faithful round-trip does not close: a SURVIVING
+ * field (one a key references and the columns can bind) whose custom constraint
+ * the rebuild re-stamps to the type default. It need not cover the rest, because
+ * {@link buildAdvancedTerms} preserves the imported field declaration on rebuild:
+ * a dropped field is not compared, an unreferenced field is preserved verbatim
+ * and matches, and field order and a benign empty `constraints: {}` are likewise
+ * preserved.
  */
 export function importedConstraintDivergenceMessage(
   terms: LinkageTerms,
@@ -781,13 +720,12 @@ const CITATION_DROP_CONSEQUENCE =
  * citation is left out of what the editor emits, why, and -- where an edit here
  * reaches the cause -- how to get it back.
  *
- * None of them names the set. An imported citation's names and versions are
- * partner-controlled free text, and a document carries exactly one citation, so a
- * name identifies nothing here that the sentence does not: the same reason
- * {@link UNSUPPLYABLE_KEY_MESSAGE} and core's schema refines locate an offender by
- * path rather than by value. The consent surface, which must show the operator the
- * partner's own words, is where those names render -- each escaped and bound in its
- * own chrome-free box (`InvitationTerms`), which prose cannot do.
+ * None of them names the set: an imported citation's names and versions are
+ * partner-controlled free text, the same reason {@link UNSUPPLYABLE_KEY_MESSAGE}
+ * and core's schema refines locate an offender by path rather than value. The
+ * consent surface, which must show the operator the partner's own words, is
+ * where those names render, each escaped and bound in its own chrome-free box
+ * (`InvitationTerms`).
  */
 const CITATION_DROP_NOTICES: Record<ImportedCitationDropCause, string> = {
   "shipped-set-unmet":
@@ -820,15 +758,15 @@ const CITATION_DROP_NO_SUPPLYABLE_KEY =
   "column of the type a linkage key needs to keep it.";
 
 /**
- * The notice for an imported rule-set citation the rebuilt document will not carry,
- * or `undefined` when it carries it (and for a draft that imported nothing, or
- * imported a document that cited nothing -- neither has a citation to lose).
+ * The notice for an imported rule-set citation the rebuilt document will not include,
+ * or `undefined` when it includes it (or when the draft imported nothing, or
+ * imported a document that cited nothing).
  *
- * It blocks nothing: dropping the citation is the correct behavior in all three
- * cases -- re-emitting it would claim a provenance the rules do not have -- so the
- * operator is told what the outgoing document will say, not stopped from creating
- * it. That is why this is not one of {@link validateAdvancedInvite}'s errors, whose
- * every member holds the Generate gate shut.
+ * It blocks nothing: dropping the citation is correct in all three cases --
+ * re-emitting it would claim a provenance the rules do not have -- so the
+ * operator is told what the outgoing document will say, not stopped from
+ * creating it. Not one of {@link validateAdvancedInvite}'s errors, whose every
+ * member holds the Generate gate shut.
  */
 export function importedCitationDropNotice(
   draft: AdvancedInviteDraft,
@@ -845,20 +783,19 @@ export function importedCitationDropNotice(
 }
 
 /**
- * The fields whose declared cleaning or linkage-key transform carries a
+ * The fields whose declared cleaning or linkage-key transform includes a
  * `coalesce` that substitutes nothing where it sits, named by their safe
  * semantic-type label and de-duplicated in first-seen order.
  *
- * Both surfaces a coalesce can reach are read, because the two arrive by
- * different doors: the per-party cleaning the operator authors here, and a
- * linkage-key element transform, authored in the key editor or carried by an
- * imported document.
+ * Both surfaces a coalesce can reach are read: the per-party cleaning the
+ * operator authors here, and a linkage-key element transform, authored in the
+ * key editor or held by an imported document.
  *
  * Labels, never names: an imported document's field names are
  * partner-influenceable, the same reason {@link UNSUPPLYABLE_KEY_MESSAGE} names
  * no field. A transformation or element whose field the built terms do not
- * declare contributes nothing: an unreferenced field is not part of the
- * exchange, so its steps cannot cost a match.
+ * declare contributes nothing: it is not part of the exchange, so its steps
+ * cannot cost a match.
  */
 function inertCoalesceFieldLabels(
   draft: AdvancedInviteDraft,
@@ -898,27 +835,24 @@ function inertCoalesceFieldLabels(
  * `undefined` when every declared one substitutes where it sits.
  *
  * The failure it names is silent under-matching: the author declares a default
- * expecting blank-ish records to participate, and at runtime the step is a
+ * expecting blank-ish records to participate, but at runtime the step is a
  * pass-through, so those records quietly do not match. The verdict is core's own
- * position-aware, name-only one (see `pipelineHasInertCoalesce`, over
- * `coalesceSubstitutesConstant`): a preceding step is counted by what its
- * function NAME can do, not its params, so a params-degenerate shape (a
- * `null_if` with no exclusion list) counts as emptying and leaves its coalesce
- * unadvised even though the run never substitutes. Adding an emptying-capable
- * rule ahead of the step, moving the step after one, or declaring a text
- * default clears it.
+ * position-aware, name-only one (`pipelineHasInertCoalesce`, over
+ * `coalesceSubstitutesConstant`): a preceding step is counted by its function
+ * NAME, not its params, so a params-degenerate shape (a `null_if` with no
+ * exclusion list) counts as emptying and leaves its coalesce unadvised even
+ * though the run never substitutes. Adding an emptying-capable rule ahead of the
+ * step, moving the step after one, or declaring a text default clears it.
  *
- * It speaks for several fields at once, so it names BOTH conditions rather than
- * whichever one a given step fails -- the same choice core's consent-side
- * description of a non-substituting coalesce makes, and for the same reason: one
- * sentence then covers every shape. The step editor, which has a row to attach
- * advice to, names the failing one instead (`INERT_COALESCE_ADVICE`).
+ * Speaks for several fields at once, so it names BOTH conditions rather than
+ * whichever one a given step fails -- one sentence then covers every shape. The
+ * step editor, which has a row to attach advice to, names the failing one
+ * instead (`INERT_COALESCE_ADVICE`).
  *
- * It blocks nothing: a terms document carrying this shape is valid, mints, and
- * runs, with the step as a pass-through, so the operator is told what their terms
- * will do rather than stopped from creating them. That is why this is not one of
+ * Blocks nothing: a terms document holding this shape is valid, mints, and
+ * runs, with the step as a pass-through. Not one of
  * {@link validateAdvancedInvite}'s errors, whose every member holds the Generate
- * gate shut -- the same reason {@link importedCitationDropNotice} is not.
+ * gate shut.
  */
 export function inertCoalesceNotice(
   draft: AdvancedInviteDraft,

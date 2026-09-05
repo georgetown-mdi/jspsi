@@ -25,8 +25,8 @@ import type { DataConnection } from "peerjs";
  * One slice of a chunked PeerJS frame, as it reaches the connection's
  * `_handleChunk`. Shape pinned from the PeerJS chunker (`__peerData` is the
  * message id shared by every chunk of one frame, `n` the chunk index, `total`
- * the chunk count, `data` the slice bytes). A premise this guard rests on; see
- * {@link boundChunkReassembly}.
+ * the chunk count, `data` the slice bytes). An assumption this guard rests
+ * on; see {@link boundChunkReassembly}.
  */
 interface PeerChunk {
   __peerData: number;
@@ -43,16 +43,14 @@ interface PeerDataMessage {
 }
 
 /**
- * The PeerJS `DataConnection` internals this guard wraps. PeerJS reassembles a
- * chunked binary frame in `_handleChunk` (accumulating slices into `_chunkedData`
- * keyed by message id, deleting the entry on completion), and `unpack`s every
- * frame -- unchunked, or the reassembled buffer on completion -- in
- * `_handleDataMessage`. None is part of the public `DataConnection` type, so this
- * is a documented dependency premise (the binary/chunked connection class is the
- * one `peer.connect`/an incoming connection uses by default; see the `peerjs`
- * bundler). {@link assertChunkReassemblySupported} checks all three exist, so a
- * `peerjs` upgrade that renames or restructures them fails loud rather than
- * silently dropping the bound.
+ * The PeerJS `DataConnection` internals this guard wraps. PeerJS reassembles
+ * a chunked binary frame in `_handleChunk` (accumulating slices into
+ * `_chunkedData` keyed by message id, deleting the entry on completion), and
+ * `unpack`s every frame -- unchunked, or the reassembled buffer on completion
+ * -- in `_handleDataMessage`. None is part of the public `DataConnection`
+ * type, so this is a documented dependency assumption;
+ * {@link assertChunkReassemblySupported} checks all three exist, so a
+ * `peerjs` upgrade that renames or restructures them fails loud.
  */
 interface ChunkedDataConnection {
   _handleChunk: (chunk: PeerChunk) => void;
@@ -86,7 +84,7 @@ function toUint8(data: PeerDataMessage["data"]): Uint8Array {
  * standing in for the rest. Kind `protocol`: a refused frame is the peer
  * violating the message contract (the same class as core's inbound-buffer
  * overflow), never benign, since every bound sits far above any legitimate frame.
- * It carries no peer-controlled bytes (only the fixed limits), so it needs no
+ * It holds no peer-controlled bytes (only the fixed limits), so it needs no
  * redaction. */
 function frameRefusalError(predicate: string): ConnectionError {
   return new ConnectionError(`inbound WebRTC frame ${predicate}`, "protocol");
@@ -94,13 +92,12 @@ function frameRefusalError(predicate: string): ConnectionError {
 
 /**
  * The delivered-frame half of the inbound byte bound: returns the terminal
- * {@link frameRefusalError} if `data` is a binary frame larger than `maxBytes`,
- * otherwise `undefined`. This runs at the stable `data` event -- a backstop, at
- * the public layer, for the reassembly guard at the fragile internal layer: an
- * over-cap `Uint8Array` is refused as delivered regardless of how (or whether)
- * PeerJS chunked it. A parsed object/array returns `undefined` (not cheaply
- * byte-measurable here); the reassembly bounds govern it before delivery and
- * core's count/structure bounds after.
+ * {@link frameRefusalError} if `data` is a binary frame larger than
+ * `maxBytes`, otherwise `undefined`. Runs at the stable `data` event -- a
+ * safety check, at the public layer, for the reassembly guard at the fragile
+ * internal layer, refusing an over-cap `Uint8Array` regardless of how PeerJS
+ * chunked it. A parsed object/array returns `undefined`: the reassembly
+ * bounds govern it before delivery and core's count/structure bounds after.
  */
 export function checkDeliveredFrameBound(
   data: unknown,
@@ -116,13 +113,13 @@ export function checkDeliveredFrameBound(
 }
 
 /**
- * Asserts `conn` exposes the PeerJS internals {@link boundChunkReassembly} wraps.
- * Encodes the dependency premise as a runtime check, not a comment: a `peerjs`
- * upgrade that renames or restructures the chunk reassembly or the unpack
- * chokepoint must fail loud (the live browser exchange test installs the guard on
- * every exchange) rather than silently run with no inbound bound. Called up front
- * in `openPeerMessageConnection`, before any listener is attached, so a broken
- * premise fails cleanly with nothing to tear down.
+ * Asserts `conn` exposes the PeerJS internals {@link boundChunkReassembly}
+ * wraps. Encodes the dependency assumption as a runtime check, not a
+ * comment: a `peerjs` upgrade that renames or restructures the chunk
+ * reassembly or the unpack chokepoint must fail loud (the live browser
+ * exchange test installs the guard on every exchange) rather than silently
+ * run with no inbound bound. Called before any listener is attached, so a
+ * broken assumption fails cleanly with nothing to tear down.
  */
 export function assertChunkReassemblySupported(conn: DataConnection): void {
   const probe = conn as unknown as {
@@ -146,41 +143,36 @@ export function assertChunkReassemblySupported(conn: DataConnection): void {
 }
 
 /**
- * Wraps `conn`'s PeerJS reassembly and unpack so an inbound frame cannot exhaust
- * memory, the primary inbound bound for the WebRTC transport. PeerJS reassembles
- * a chunked frame in `_handleChunk` (accumulating slices keyed by message id) and
- * `unpack`s every frame -- unchunked, or the reassembled buffer on completion --
- * in `_handleDataMessage`, with no cap on any of total wire bytes, deserialized
- * structure size, retained chunk count, or concurrent reassemblies, and no
- * eviction of a never-completed partial. This wrap adds all of those before
- * delegating, each fail-closed via `fail` (mirroring the file-sync frame-size
- * control's intent), so the offending chunk is never stored and the offending
- * frame is never unpacked:
+ * Wraps `conn`'s PeerJS reassembly and unpack so an inbound frame cannot
+ * exhaust memory, the primary inbound bound for the WebRTC transport. PeerJS
+ * itself caps none of wire bytes, deserialized structure size, retained
+ * chunk count, or concurrent reassemblies, and evicts no never-completed
+ * partial; this wrap adds all of those before delegating, each fail-closed
+ * via `fail`, so the offending chunk is never stored and the offending frame
+ * is never unpacked:
  *
- * - Wire bytes across all in-flight reassemblies are bounded by `maxFrameBytes`
- *   (in `_handleChunk`).
- * - Retained chunks per reassembly are bounded by `maxChunks`, each charged at
- *   least `minChunkResidentBytes` against the byte cap (a chunk is a retained
- *   `Uint8Array` the payload-byte count undercounts).
- * - Concurrent incomplete reassemblies are bounded by `maxConcurrentReassemblies`;
- *   a new id beyond the cap evicts the oldest partial. Eviction is silent and
- *   non-fatal: the lockstep protocol never has a legitimate second partial, so it
- *   only drops adversarial data, and logging per eviction would itself be a
- *   spray-amplified log-flood vector.
- * - The deserialized structure's approximate retained-byte cost is bounded by
- *   `maxStructureBytes` (in `_handleDataMessage`, the unpack chokepoint, which both
- *   an unchunked frame and the reassembled-completion path flow through): the
- *   frame's BinaryPack structure is scanned and each declared value charged its
- *   per-kind weight before PeerJS unpacks it, since `unpack` can allocate far more
- *   than the wire bytes. The same walk enforces the nesting depth, the per-string
- *   cap, the byte-backed-elements check and the map-key rule, and the refusal names
- *   whichever of them fired.
+ * - Wire bytes across all in-flight reassemblies: `maxFrameBytes` (in
+ *   `_handleChunk`).
+ * - Retained chunks per reassembly: `maxChunks`, each charged at least
+ *   `minChunkResidentBytes` against the byte cap.
+ * - Concurrent incomplete reassemblies: `maxConcurrentReassemblies`; a new id
+ *   beyond the cap silently evicts the oldest partial (the lockstep protocol
+ *   never has a legitimate second partial, so eviction only drops
+ *   adversarial data).
+ * - Deserialized structure's approximate retained-byte cost:
+ *   `maxStructureBytes`, in `_handleDataMessage` (both an unchunked frame and
+ *   a completed reassembly flow through it) -- the frame's BinaryPack
+ *   structure is scanned and each value charged its per-kind weight before
+ *   PeerJS unpacks it, since `unpack` can allocate far more than the wire
+ *   bytes. The same walk enforces nesting depth, the per-string cap, the
+ *   byte-backed-elements check and the map-key rule.
  *
  * @param conn   The PeerJS data connection (open or not yet open).
  * @param fail   Latches a terminal failure (the connection's `controls.fail`).
  * @param options  Per-bound overrides defaulting to the fixed core constants;
- *                 set only by tests, never an operator-facing knob.
- * @throws If the PeerJS internals are not as expected (a broken upgrade premise).
+ *                 set only by tests, never an operator-facing setting.
+ * @throws If the PeerJS internals are not as expected (a broken upgrade
+ *   assumption).
  */
 export function boundChunkReassembly(
   conn: DataConnection,

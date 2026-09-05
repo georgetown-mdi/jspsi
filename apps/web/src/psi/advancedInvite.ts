@@ -1,7 +1,7 @@
 /**
- * The pure data model behind the inviter's authoring bench, split by concern
- * across five siblings and re-exported here as the bench's single import surface.
- * No React, no I/O.
+ * The pure data model behind the inviter's authoring console, split by concern
+ * across five siblings and re-exported here as the console's single import
+ * surface. No React, no I/O.
  *
  * - {@link ./advancedInviteTypes} -- the shared draft/seed types and the
  *   {@link OutputDirection} <-> {@link Output} mapping the others build on.

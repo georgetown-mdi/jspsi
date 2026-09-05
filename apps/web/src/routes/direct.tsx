@@ -4,8 +4,8 @@ import { DirectExchangeBench } from "@bench/DirectExchangeBench";
 import { seo } from "@utils/seo";
 
 export const Route = createFileRoute("/direct")({
-  // The bench reads the console build flag and drives the appliance's same-origin
-  // job API, so it renders client-side only (like the accept route).
+  // DirectExchangeBench reads the console build flag and calls the console's
+  // same-origin job API, so this route renders client-side only.
   ssr: false,
   component: DirectExchangeBench,
   head: () => ({
