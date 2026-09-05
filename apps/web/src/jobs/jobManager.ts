@@ -1,6 +1,15 @@
 import path from "node:path";
 
 import {
+  DEFAULT_MAX_DISPLAY_LENGTH,
+  DISPLAY_TRUNCATION_MARKER,
+  redactPrivateKeyMaterial,
+  renderedDisplayCost,
+} from "@psilink/core";
+
+import { ERROR_MESSAGE_CHAIN_FIELD } from "@psi/relayErrorChain";
+
+import {
   zeroSetupFiledropArgv,
   zeroSetupOptionsArgv,
   zeroSetupSftpArgv,
@@ -1072,7 +1081,7 @@ export class JobManager {
    * status is `failed` and nothing is offered.
    *
    * A synthesized failure names what the CLI printed on stderr
-   * ({@link withStderrTail}): that terminal stands in for the diagnosis the
+   * ({@link diagnosedTerminal}): that terminal stands in for the diagnosis the
    * run never emitted, and the tail is the only account of it the console
    * holds. An interrupt takes none -- the operator asked for the exit -- and a
    * run that emitted its own terminal event is synthesized nothing at all, so
@@ -1118,29 +1127,27 @@ export class JobManager {
           resultWritten: true,
         });
       else if (state.outcome === "completedWithPersistenceLoss")
-        this.synthesizeTerminal(record, {
-          v: 1,
-          type: "error",
-          category: "output",
-          message: withStderrTail(
+        this.synthesizeTerminal(
+          record,
+          diagnosedTerminal(
+            "output",
             "the run reported a lost local write and its event stream broke " +
               "before naming which one, so this console cannot confirm which " +
               "files reached disk; look in the folder it writes its exchange " +
               "files to",
             diagnostics.stderrTail,
           ),
-        });
+        );
       else
-        this.synthesizeTerminal(record, {
-          v: 1,
-          type: "error",
-          category: "exchange",
-          message: withStderrTail(
+        this.synthesizeTerminal(
+          record,
+          diagnosedTerminal(
+            "exchange",
             "CLI exited without a terminal event; the event stream broke" +
               (state.exitCode !== null ? ` (exit ${state.exitCode})` : ""),
             diagnostics.stderrTail,
           ),
-        });
+        );
     }
 
     this.maybeFreeSlot(record);
@@ -1345,18 +1352,87 @@ function liveRecordAvailability(record: JobRecord):
   };
 }
 
+/** How the cause link naming the child's stderr introduces it. */
+const STDERR_CAUSE_LABEL = "the CLI last wrote on stderr: ";
+
 /**
- * Name the child's stderr after a synthesized diagnostic, so an operator whose
- * run emitted no terminal event reads what the CLI printed instead of only that
- * the stream broke. The tail arrives escaped and capped from the driver
- * ({@link CliRunDiagnostics}) and is composed in as it stands: escaping it a
- * second time would double every backslash on its way to the operator
- * (CONTRIBUTING.md, Operator-facing escaping).
+ * What one such link may render to at the seat that shows it: the per-value
+ * display budget, label included, the same budget every other labelled cause
+ * link charges a chooser's value at (`fittedCauseLink` in
+ * apps/cli/src/connection/causeLink.ts).
  */
-function withStderrTail(message: string, stderrTail: string): string {
-  return stderrTail.length === 0
-    ? message
-    : `${message} (stderr: ${stderrTail})`;
+const STDERR_CAUSE_BUDGET = DEFAULT_MAX_DISPLAY_LENGTH;
+
+/**
+ * A synthesized terminal naming what the CLI printed on stderr, so an operator
+ * whose run emitted no terminal event reads the cause rather than only that the
+ * stream broke.
+ *
+ * The tail rides a LABELLED CAUSE LINK of its own rather than being
+ * interpolated into the first-party message: a chooser's bytes composed into
+ * that sentence can spell whatever delimiter closes them and read on as console
+ * copy, which on the persistence-loss terminal is a do-not-repeat instruction
+ * the operator must not misread. The flat `message` field stays this console's
+ * own text at every width of tail, and a run whose child wrote nothing carries
+ * no chain at all, which the seat reads as the flat field.
+ */
+function diagnosedTerminal(
+  category: "output" | "exchange",
+  message: string,
+  stderrTail: string,
+): RelayEvent {
+  const link = stderrCauseLink(stderrTail);
+  return {
+    v: 1,
+    type: "error",
+    category,
+    message,
+    ...(link === null ? {} : { [ERROR_MESSAGE_CHAIN_FIELD]: [message, link] }),
+  };
+}
+
+/**
+ * The cause link for a retained stderr tail, or null when the child wrote none.
+ *
+ * The tail is redacted and then fitted, in that order: fitting first could leave
+ * a `BEGIN` marker in what is kept for the fail-closed dangling rule to consume.
+ * What is kept is RAW, since the seat rendering the chain escapes each link once
+ * ({@link CliRunDiagnostics}), and it is fitted by RENDERED cost, so
+ * the budget bounds what that seat displays rather than what the child wrote.
+ */
+function stderrCauseLink(stderrTail: string): string | null {
+  const tail = redactPrivateKeyMaterial(stderrTail.trim());
+  if (tail.length === 0) return null;
+  return `${STDERR_CAUSE_LABEL}${lastRenderedWindow(
+    tail,
+    STDERR_CAUSE_BUDGET - renderedDisplayCost(STDERR_CAUSE_LABEL),
+  )}`;
+}
+
+/**
+ * Longest SUFFIX of `value` whose rendered cost fits `budget`, with
+ * {@link DISPLAY_TRUNCATION_MARKER} in FRONT of it -- and paid for out of that
+ * same budget -- when anything was dropped.
+ *
+ * The suffix, not the prefix `clipToRenderedCost` keeps: a run writes its
+ * diagnosis last, so a verbose failure's final line is exactly what a cut taken
+ * from the front deletes. A code point is kept only when its whole rendered cost
+ * fits, so the cut falls on a code-point boundary and the budget is an upper
+ * bound rather than a width the result meets.
+ */
+function lastRenderedWindow(value: string, budget: number): string {
+  if (renderedDisplayCost(value) <= budget) return value;
+  const room = budget - DISPLAY_TRUNCATION_MARKER.length;
+  const points = Array.from(value);
+  let kept = "";
+  let cost = 0;
+  for (let index = points.length - 1; index >= 0; index -= 1) {
+    const next = cost + renderedDisplayCost(points[index]);
+    if (next > room) break;
+    kept = `${points[index]}${kept}`;
+    cost = next;
+  }
+  return `${DISPLAY_TRUNCATION_MARKER}${kept}`;
 }
 
 /**
