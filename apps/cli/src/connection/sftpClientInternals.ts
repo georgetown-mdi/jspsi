@@ -119,9 +119,13 @@ export interface Ssh2SftpClientInternals {
      * the ssh2 Client's EventEmitter surface; typed optional so an upgrade that
      * relocates them fails the connect-time seam check rather than the type.
      * See resolveTransportCloseSeams().
+     *
+     * The same pair also takes 'ready', which ssh2 emits when authentication has
+     * succeeded: it is what arms the dial's subsystem-open bound and what drops
+     * that arming when the dial settles first (see ./sftpSubsystemOpen).
      */
-    once?(event: "close", listener: () => void): void;
-    removeListener?(event: "close", listener: () => void): void;
+    once?(event: "close" | "ready", listener: () => void): void;
+    removeListener?(event: "close" | "ready", listener: () => void): void;
     /**
      * Node's own EventEmitter ceiling control, driven once at construction to
      * seat `SHARED_SSH2_CLIENT_MAX_EVENT_LISTENERS` (ssh2SftpAdapter.ts). Optional

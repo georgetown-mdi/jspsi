@@ -12,6 +12,7 @@
 // counters, so a fragment reaching one later must already arrive escaped by
 // the call site that is its sink.
 import {
+  TimeoutError,
   TransportOperationStalledError,
   TransportPublishIndeterminateError,
   UsageError,
@@ -239,6 +240,52 @@ export function unreadableTransportLifecycleWarning(
     `than it needs to be. The exchange still completes. This build of ` +
     `psilink does not fully support the installed SFTP library; ` +
     `${REPORT_LIBRARY_INCOMPATIBILITY}.`
+  );
+}
+
+/**
+ * The terminal error a dial reports when the server authenticated it and then
+ * left the SFTP subsystem request unanswered for the whole bound. A
+ * {@link TimeoutError} rather than a `UsageError`, on the same terms as every
+ * other connect-phase deadline: an availability failure (exit 69), not a
+ * misconfigured command.
+ *
+ * The message names the phase, which is what tells this apart from the two
+ * failures it would otherwise read as: the credentials were accepted, so it is
+ * not a rejected login, and the handshake completed, so it is not the
+ * pre-authentication connect deadline ssh2 raises. It holds no server-supplied
+ * text.
+ *
+ * @param subsystemOpenTimeoutMs - The bound the request went unanswered for.
+ */
+export function subsystemOpenTimeoutError(
+  subsystemOpenTimeoutMs: number,
+): TimeoutError {
+  return new TimeoutError(
+    `the SFTP server accepted this connection's credentials and then did not ` +
+      `open the SFTP subsystem within ${subsystemOpenTimeoutMs} ms, so no ` +
+      `SFTP session was established. Check that ` +
+      `the account psilink signs in as may use SFTP on that server -- an ` +
+      `OpenSSH server needs a 'Subsystem sftp' line, and a per-user or ` +
+      `per-group setting can withdraw it -- or raise ` +
+      `server_connect_timeout_ms if the server is only slow to open it.`,
+  );
+}
+
+/**
+ * The warning a dial reports when this build cannot arm the bound above,
+ * because it cannot subscribe to the ssh2 client at all. The dial still runs;
+ * what it loses is the deadline on everything after authentication, so the
+ * warning states the wait the operator may be left in and how to end it.
+ */
+export function unboundedSubsystemOpenWarning(): string {
+  return (
+    `This build of psilink cannot put a deadline on the SFTP subsystem ` +
+    `request that follows authentication, so a server that accepts this ` +
+    `connection's credentials and then never opens the SFTP subsystem leaves ` +
+    `the command waiting with nothing to end it; interrupt the command if it ` +
+    `stops making progress. This build of psilink does not fully support the ` +
+    `installed SFTP library; ${REPORT_LIBRARY_INCOMPATIBILITY}.`
   );
 }
 

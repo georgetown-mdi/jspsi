@@ -312,6 +312,26 @@ export interface SftpSessionControls {
    */
   stallHandshakeOnConnect: boolean;
   /**
+   * Complete the SSH handshake and the authentication, accept the session
+   * channel, and then never answer the client's `subsystem sftp` request --
+   * neither accepting nor rejecting it. The client is left with an
+   * authenticated connection and no SFTP session, which is the phase ssh2's own
+   * `readyTimeout` no longer covers: it is cleared the moment authentication
+   * succeeds. Models a server that admits the operator and then leaves the SFTP
+   * subsystem unopened, without refusing it either.
+   *
+   * Read as each subsystem request arrives, so a connection already serving one
+   * is unaffected; false by default. In-process only, like the fault hooks.
+   */
+  withholdSubsystemOpen: boolean;
+  /**
+   * How many `subsystem sftp` requests {@link withholdSubsystemOpen} has left
+   * unanswered. A case waits for this count before acting on a parked dial:
+   * a client that has authenticated has not necessarily reached the subsystem
+   * request yet.
+   */
+  withheldSubsystemOpenCount(): number;
+  /**
    * Stop stalling handshakes entirely: clear {@link stallHandshakeOnConnect}
    * and hand the real write back to every muted socket -- clearing the flag
    * alone does neither for a connection already accepted under it. The

@@ -14,6 +14,7 @@ import {
   GetOptions,
   PutOptions,
   PutSource,
+  TimeoutError,
   TransportOperationStalledError,
   getLoggerForVerbosity,
   retryPromise,
@@ -59,6 +60,10 @@ import {
   peerProbeTargetFromConnectOptions,
 } from "./sftpPeerIdentification";
 import {
+  subsystemOpenTimeoutMs,
+  watchSubsystemOpen,
+} from "./sftpSubsystemOpen";
+import {
   resolveEndedTransportCloseSeams,
   resolveTerminalCloseSeam,
   resolveTransportCloseSeams,
@@ -93,6 +98,7 @@ import {
   sessionRecoveredEphemeralWarning,
   sessionRecoveredHeldWarning,
   transitionWaitExpiredError,
+  unboundedSubsystemOpenWarning,
   unreadableTransportLifecycleWarning,
 } from "./sftpAdapterWarnings";
 
@@ -371,6 +377,10 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // core logs at debug, and the connection that end() failed to close has already
   // been closed from this side by the time any caller can see it.
   private terminalClose: Promise<void> | undefined;
+  // Whether this adapter has already told the operator it cannot bound a dial's
+  // post-authentication phase. The condition is the installed SFTP library's, so
+  // one report per adapter says everything a second would.
+  private warnedUnboundedSubsystemOpen = false;
   // The tail of the session-transition queue. Every acquire chains onto it and
   // replaces it SYNCHRONOUSLY at the call, so transitions run in the order their
   // methods were called in and an inserted microtask cannot reorder them.
@@ -1524,7 +1534,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         () => {
           if (connectAttempted) this.ledger.countConnectRetry();
           connectAttempted = true;
-          return this.client.connect(connectOptions);
+          return this.dialOnce(connectOptions);
         },
         maxReconnects,
         1_000,
@@ -1537,6 +1547,12 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
           // close, and a re-attempt mints a FRESH socket (measured: a re-dial 1 s
           // after the destroy, on a socket reading writable again).
           if (this.session.isClosing) return false;
+          // A subsystem-open deadline is terminal: the server took the whole
+          // per-attempt budget on a connection it had already authenticated, and
+          // a re-attempt puts the same request to the same server for the rest
+          // of the reconnect budget. Nothing else in this dial raises a
+          // TimeoutError, so the type is the classification.
+          if (err instanceof TimeoutError) return false;
           // A key-exchange negotiation with nothing in common is terminal on a
           // process missing a primitive: the offer this side can make is fixed
           // for the life of the process, so every re-attempt puts the same
@@ -1709,6 +1725,72 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // the dial rather than at the charge, so the line describes a session this
     // side has in fact re-established.
     if (absorbedAPartnerDrop) this.warnSessionRecovered();
+  }
+
+  // One dial attempt, bounded for its whole length. ssh2's readyTimeout covers
+  // the attempt only up to authentication and is cleared there, so the SFTP
+  // subsystem request that follows is bounded here instead (see
+  // ./sftpSubsystemOpen for the bound and its derivation).
+  private async dialOnce(
+    connectOptions: Ssh2SftpClient.ConnectOptions,
+  ): Promise<void> {
+    const internals = this.client as unknown as Ssh2SftpClientInternals;
+    const watch = watchSubsystemOpen(
+      internals.client,
+      subsystemOpenTimeoutMs(connectOptions.readyTimeout),
+    );
+    if (watch === undefined) {
+      this.warnUnboundedSubsystemOpen();
+      await this.client.connect(connectOptions);
+      return;
+    }
+    try {
+      await Promise.race([this.client.connect(connectOptions), watch.expired]);
+    } catch (error: unknown) {
+      // The dial that lost that race is still parked on a socket that is still
+      // WRITABLE, which every later dial on this shared client would defer
+      // behind forever (docs/spec/DEPENDENCY_PINS.md). Closed before the
+      // rejection is reported, so no caller can observe the failure over a
+      // transport that is still open.
+      if (error instanceof TimeoutError) this.closeUnansweredDial();
+      throw error;
+    } finally {
+      watch.cancel();
+    }
+  }
+
+  // Close the transport beneath a dial this side is abandoning. net.Socket's
+  // destroy() needs nothing from the peer, and it settles the abandoned dial as
+  // well (measured against the pinned stack in
+  // test/integration/sftpStackPremises.test.ts). Nothing here throws: the caller
+  // is already reporting a failure, and a transport this build cannot reach is
+  // one the operator can do nothing about beyond that report.
+  private closeUnansweredDial(): void {
+    const transport = resolveTerminalCloseSeam(
+      this.client as unknown as Ssh2SftpClientInternals,
+    );
+    if ("missing" in transport) {
+      this.log.debug(
+        `closing an abandoned dial from this side drives ssh2's ` +
+          `${transport.missing}, which is not available, so its transport is ` +
+          `left to the operating system`,
+      );
+      return;
+    }
+    transport.destroy();
+  }
+
+  // Paced to once per adapter because the condition is the installed version's
+  // rather than any one dial's, exactly as the transport-lifecycle warning is.
+  private warnUnboundedSubsystemOpen(): void {
+    if (this.warnedUnboundedSubsystemOpen) return;
+    this.warnedUnboundedSubsystemOpen = true;
+    this.log.warn(unboundedSubsystemOpenWarning());
+    this.log.debug(
+      `the phase after authentication is bounded by subscribing to ssh2's ` +
+        `client.once('ready'), which is not available on the installed ssh2 / ` +
+        `ssh2-sftp-client version`,
+    );
   }
 
   // What the dial sequence hands its caller when the dial failed: the rejection

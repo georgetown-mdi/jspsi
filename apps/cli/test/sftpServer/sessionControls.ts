@@ -136,6 +136,12 @@ export interface SftpSessionControlHub extends SftpSessionControls {
   ): void;
   /** Count one SFTP operation on a tracked connection, applying the op caps. */
   recordOp(conn: DroppableConnection): void;
+  /**
+   * Note one `subsystem sftp` request the backend is leaving unanswered under
+   * {@link SftpSessionControls.withholdSubsystemOpen}, feeding
+   * {@link SftpSessionControls.withheldSubsystemOpenCount}.
+   */
+  recordWithheldSubsystemOpen(): void;
   /** Stop tracking a connection and cancel its pending drops. */
   releaseConnection(conn: DroppableConnection): void;
 }
@@ -266,6 +272,7 @@ export function createSftpSessionControls(): SftpSessionControlHub {
   };
 
   let handshakes = 0;
+  let withheldSubsystemOpens = 0;
   let activeConnection: DroppableConnection | undefined;
   let oneShotOpsRemaining = 0;
   let pendingMsTarget: DroppableConnection | undefined;
@@ -379,6 +386,15 @@ export function createSftpSessionControls(): SftpSessionControlHub {
     maxIdleMs: 0,
     withholdCloseOnDisconnect: false,
     stallHandshakeOnConnect: false,
+    withholdSubsystemOpen: false,
+
+    withheldSubsystemOpenCount(): number {
+      return withheldSubsystemOpens;
+    },
+
+    recordWithheldSubsystemOpen(): void {
+      withheldSubsystemOpens += 1;
+    },
 
     dropActiveAfterOps(ops: number): void {
       oneShotOpsRemaining = ops > 0 ? ops : 0;

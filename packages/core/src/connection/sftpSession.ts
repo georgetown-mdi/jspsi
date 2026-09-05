@@ -177,12 +177,13 @@ export class SftpSession {
       )
         connectOptions["tryKeyboard"] = true;
     }
-    // serverConnectTimeoutMs for SFTP is enforced by ssh2 via readyTimeout, not a
-    // Promise.race wrapper -- the per-attempt deadline is equivalent. Always set:
-    // the schema defaults the field to DEFAULT_SERVER_CONNECT_TIMEOUT_MS, and the
-    // ?? fallback covers a config built without an options block at all, so an
-    // unset value gets the documented 30000 ms deadline rather than dropping to
-    // ssh2's shorter (~20s) internal default.
+    // serverConnectTimeoutMs for SFTP is enforced by ssh2 via readyTimeout as far
+    // as authentication; the SFTP adapter reads the same value back off this
+    // option to bound the subsystem-open phase past it, which ssh2's own deadline
+    // does not reach. Always set: the schema defaults the field to
+    // DEFAULT_SERVER_CONNECT_TIMEOUT_MS, and the ?? fallback covers a config built
+    // without an options block at all, so an unset value gets the documented 30000
+    // ms deadline rather than dropping to ssh2's shorter (~20s) internal default.
     connectOptions["readyTimeout"] =
       config.options?.serverConnectTimeoutMs ??
       DEFAULT_SERVER_CONNECT_TIMEOUT_MS;

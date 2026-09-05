@@ -318,6 +318,14 @@ export async function startInProcessSftpServer(): Promise<InProcessSftpServer> {
       client.on("session", (acceptSession) => {
         const session = acceptSession();
         session.on("sftp", (acceptSftp) => {
+          // Neither accepted nor rejected: the request stays open and the
+          // client's dial is left authenticated with no SFTP session. Read
+          // here rather than at accept time so a case can arm it against one
+          // dial while another is already being served.
+          if (sessionControls.withholdSubsystemOpen) {
+            sessionControls.recordWithheldSubsystemOpen();
+            return;
+          }
           const sftp = acceptSftp();
           // Count each SFTP request for the session op caps and one-shot op
           // drop. A cap that fires arms the drop as this request is counted; the
