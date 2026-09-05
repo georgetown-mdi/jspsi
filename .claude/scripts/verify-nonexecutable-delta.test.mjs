@@ -1,15 +1,8 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import {
-  chmodSync,
-  mkdirSync,
-  mkdtempSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { createGitFixtures } from "./lib/gitFixture.mjs";
 import {
   canonicalSource,
   canonicalYaml,
@@ -588,61 +581,15 @@ describe("summarize", () => {
   });
 });
 
-const fixtureDirs = [];
+const {
+  makeTempDir,
+  makeFixture: makeBareFixture,
+  cleanup,
+} = createGitFixtures();
 
-afterEach(() => {
-  while (fixtureDirs.length > 0) {
-    rmSync(fixtureDirs.pop(), { recursive: true, force: true });
-  }
-});
+afterEach(cleanup);
 
-/** A temp directory removed after the test that created it. */
-function makeTempDir(prefix) {
-  const dir = mkdtempSync(join(tmpdir(), prefix));
-  fixtureDirs.push(dir);
-  return dir;
-}
-
-/** Helpers over one working tree, whether a repository's own or linked to it. */
-function treeAt(dir) {
-  const git = (args) =>
-    execFileSync("git", args, { cwd: dir, encoding: "utf8" });
-  return {
-    dir,
-    git,
-    write: (path, text) => {
-      mkdirSync(dirname(join(dir, path)), { recursive: true });
-      writeFileSync(join(dir, path), text);
-    },
-    remove: (path) => rmSync(join(dir, path)),
-    chmod: (path, mode) => chmodSync(join(dir, path), mode),
-    commit: (message) => {
-      git(["add", "-A"]);
-      git(["commit", "-q", "-m", message]);
-      return git(["rev-parse", "HEAD"]).trim();
-    },
-  };
-}
-
-function makeFixture() {
-  const tree = treeAt(makeTempDir("nonexec-delta-"));
-  tree.git(["init", "-q", "-b", "main"]);
-  tree.git(["config", "user.email", "verifier-test@example.invalid"]);
-  tree.git(["config", "user.name", "Verifier Test"]);
-  return {
-    ...tree,
-    // A linked worktree shares the repository's object database and its config,
-    // the identity set above included, while keeping its own HEAD -- the
-    // disagreement the tree-binding cases below need. Both that inheritance and
-    // `worktree add` accepting the existing empty directory `mkdtemp` just made
-    // were measured against real git rather than assumed.
-    addWorktree: (branch) => {
-      const linked = treeAt(makeTempDir("nonexec-delta-linked-"));
-      tree.git(["worktree", "add", "-q", "-b", branch, linked.dir]);
-      return linked;
-    },
-  };
-}
+const makeFixture = () => makeBareFixture("nonexec-delta-");
 
 // The `-z` records above are hand-written, which makes them a model of git's
 // output rather than a measurement of it. These drive real git instead, through
@@ -898,6 +845,40 @@ describe("against a real git repository", () => {
     expect(byPath(collectVerdicts({ attested, head, git }))).toEqual({
       "src/has space.ts": "comment-only",
       "src/uni-é.ts": "executable-delta",
+    });
+  });
+
+  // `verify-rebase-invariance.mjs` compares one branch's own paths across a
+  // moved base, so it passes them in. What git does with a path that reads as a
+  // glob is measured here rather than trusted to the magic word.
+  describe("restricted to named paths", () => {
+    /** A repository where a glob-shaped path has a neighbour that path matches. */
+    const withGlobShapedPath = () => {
+      const fixture = makeFixture();
+      fixture.write("src/star[1].ts", "export const s = 1;\n");
+      fixture.write("src/star1.ts", "export const n = 1;\n");
+      const attested = fixture.commit("Base");
+      fixture.write("src/star[1].ts", "export const s = 1; // note\n");
+      fixture.write("src/star1.ts", "export const n = 2;\n");
+      return { ...fixture, attested, head: fixture.commit("Touch both") };
+    };
+
+    it("compares a named path literally, not as a pattern over its neighbours", () => {
+      const { git, attested, head } = withGlobShapedPath();
+      expect(byPath(collectVerdicts({ attested, head, git }))).toEqual({
+        "src/star[1].ts": "comment-only",
+        "src/star1.ts": "executable-delta",
+      });
+      expect(
+        byPath(
+          collectVerdicts({ attested, head, git, paths: ["src/star[1].ts"] }),
+        ),
+      ).toEqual({ "src/star[1].ts": "comment-only" });
+    });
+
+    it("compares nothing when the named set is empty, rather than everything", () => {
+      const { git, attested, head } = withGlobShapedPath();
+      expect(collectVerdicts({ attested, head, git, paths: [] })).toEqual([]);
     });
   });
 

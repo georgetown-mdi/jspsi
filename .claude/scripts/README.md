@@ -10,7 +10,9 @@ push:
   provisions its `node_modules`
 - `squash-message.mjs`, which drafts the squash message a pull request lands as
 - `verify-nonexecutable-delta.mjs`, which decides whether a review attestation
-  survives a moved head
+  survives a moved head, and `verify-rebase-invariance.mjs`, which decides the
+  same question for a head moved by a rebase. `lib/gitFixture.mjs` holds the
+  throwaway repositories both suites drive real git through
 - `measure-pr-checks.mjs`, which measures the wall clock a pull request pays for
   its checks and names the critical path that gates the merge. It makes several
   hundred GitHub API calls, so it is asked for explicitly:

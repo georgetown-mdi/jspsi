@@ -377,13 +377,31 @@ export function parseChangedPaths(stdout) {
  * from an array of arguments and returns its stdout, throwing on a nonzero exit;
  * injecting it lets a test drive a fixture repo through the same code the CLI
  * runs against this one.
+ *
+ * `paths`, where given, narrows the diff to exactly those paths -- an empty
+ * array to none of them. Each goes to git under `:(literal)` magic, so a path
+ * holding `*`, `?`, or a bracket matches itself rather than globbing over its
+ * neighbours. The caller that passes it -- `verify-rebase-invariance.mjs`,
+ * comparing one branch's own paths across a moved base -- owns the argument
+ * that the paths it leaves out need no verdict.
  */
-export function collectVerdicts({ attested, head, git }) {
+export function collectVerdicts({ attested, head, git, paths }) {
   for (const ref of [attested, head]) {
     git(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
   }
+  if (paths !== undefined && paths.length === 0) return [];
+  const restriction =
+    paths === undefined ? [] : ["--", ...paths.map((p) => `:(literal)${p}`)];
   return parseChangedPaths(
-    git(["diff", "--raw", "--no-renames", "-z", attested, head]),
+    git([
+      "diff",
+      "--raw",
+      "--no-renames",
+      "-z",
+      attested,
+      head,
+      ...restriction,
+    ]),
   ).map(({ status, record, path, beforeMode, afterMode }) => {
     if (status === null) {
       return {

@@ -157,6 +157,27 @@ describe("PR review attestation", () => {
     expect(attestationViolations(body, HEAD)).toEqual([]);
   });
 
+  // A mechanical re-attestation path names the sha it was verified from as well
+  // as the head it attests (.claude/commands/assess-review.md, Step 4). The
+  // check reads the head slot only, so the second sha is prose to it -- and
+  // writing the pair the wrong way round still fails.
+  it("accepts a line naming both a re-attestation's shas, head first", () => {
+    const priorHead = "fedcba9876543210fedcba9876543210fedcba98";
+    const reattested = passingBody.replace(
+      "-- n/a: none of the listed surfaces touched",
+      `-- rebase-invariance verification against the round read at ${priorHead}`,
+    );
+    expect(attestationViolations(reattested, HEAD)).toEqual([]);
+    const reversed = reattested
+      .replace(`of ${HEAD}`, `of ${priorHead}`)
+      .replace(`read at ${priorHead}`, `read at ${HEAD}`);
+    expect(
+      attestationViolations(reversed, HEAD).some((m) =>
+        m.includes("is not this PR's head"),
+      ),
+    ).toBe(true);
+  });
+
   it("flags a sha that is not the PR head", () => {
     const body = passingBody.replace(HEAD, "fedcba98765");
     const v = attestationViolations(body, HEAD);
