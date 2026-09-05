@@ -18,15 +18,12 @@ import { SftpAdapterLedger } from "../../../src/connection/sftpAdapterLedger";
 export const protocolTempPath = (dir = "/remote"): string =>
   `${dir}/temp-${randomUUID()}.tmp`;
 
-// The error ssh2-sftp-client's haveConnection() raises once its `sftp` property
-// has been cleared -- what every high-level op below rejects with on a released
-// session, so an op that reached the server without re-establishing first shows
-// up as a counted, warned re-dial rather than passing silently.
-// The exact error ssh2-sftp-client's haveConnection() raises on a cleared
-// session: message "<name>: No SFTP connection available", code
-// "ERR_NOT_CONNECTED" (node_modules/ssh2-sftp-client/src/utils.js +
-// constants.js). Pinned here rather than matched by a loose string so a library
-// bump that changes the identity is caught, per DEPENDENCY_PINS.md exact-pinning.
+// The exact error ssh2-sftp-client's haveConnection() raises once its `sftp`
+// property has been cleared: message "<name>: No SFTP connection available",
+// code "ERR_NOT_CONNECTED" (node_modules/ssh2-sftp-client/src/utils.js and
+// constants.js). Every high-level op rejects with it on a released session, so
+// an op that reached the server without re-establishing shows up as a counted,
+// warned re-dial. Pinned exactly so a library bump that changes it is caught.
 export const notConnected = (name: string) =>
   Object.assign(new Error(`${name}: No SFTP connection available`), {
     code: "ERR_NOT_CONNECTED",
