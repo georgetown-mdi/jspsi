@@ -10,10 +10,12 @@ import { PERSISTENCE_LOSS_EXIT_CODE } from "../src/eventStream";
  * One error per class `exitCodeForError` (src/util/exit.ts) distinguishes, with
  * the exit code docs/CLI.md's exit-code table states a command reports for it.
  *
- * Every command routes its caught error through that one classification, so a
- * boundary test plants each of these at the call the boundary wraps and asserts
- * the code the process exits with. `plant` returns a fresh error per case so a
- * test can throw it and a later assertion can still name what it threw.
+ * A boundary reads that classification when its errors vary; a boundary
+ * whose errors are all usage faults exits 64 outright instead. Either way,
+ * a boundary test plants each of these at the call the boundary wraps and
+ * asserts the code the process exits with. `plant` returns a fresh error
+ * per case so a test can throw it and a later assertion can still name
+ * what it threw.
  *
  * @internal test-only
  */

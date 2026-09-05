@@ -1,8 +1,8 @@
 // Classifying a caught error into a process exit code, and the two boundaries
-// that apply it: the classification every command's error->exit boundary reads,
-// plus two of the sysexits rungs docs/CLI.md's exit-code table lists -- 70 for
-// an internal fault and 65 for a definite verify-receipt failure. The table's
-// other rungs are declared where they are set.
+// that apply it: the classification a boundary reads when its errors vary,
+// plus two of the sysexits rungs docs/CLI.md's exit-code table lists -- 70
+// for an internal fault and 65 for a definite verify-receipt failure. The
+// table's other rungs are declared where they are set.
 
 import {
   ConnectionError,
@@ -47,8 +47,8 @@ export const RECEIPT_VERIFICATION_FAILED_EXIT_CODE = 65;
  * {@link UsageError} or a {@link ConnectionError} of kind `usage`,
  * {@link INTERNAL_FAULT_EXIT_CODE} (70) for an {@link InternalConsistencyError},
  * otherwise the error's own numeric `exitCode` when it has one, else
- * EX_UNAVAILABLE (69). The single classification every command's error->exit
- * boundary reads.
+ * EX_UNAVAILABLE (69). The classification a boundary reads when its errors
+ * vary; a boundary whose errors are all usage faults exits 64 outright.
  *
  * A {@link ConnectionError}'s taxonomy is a FIELD (`kind`) rather than a
  * subclass, so it is read here rather than left to the 69 default: a `usage`
