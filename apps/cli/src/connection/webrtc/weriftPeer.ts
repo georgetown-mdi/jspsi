@@ -1,3 +1,5 @@
+import logLibrary from "loglevel";
+
 import {
   chainDetailCauses,
   ConnectionError,
@@ -617,10 +619,16 @@ export async function openWebRtcPeerSession(
  * at the log sink, rather than composed raw (CONTRIBUTING.md, Operator-facing
  * escaping). A report that names no pair says so: an operator comparing two
  * runs learns as much from the absence as from a type.
+ *
+ * Everything below is one debug line, and collecting the statistics is bounded
+ * rather than instant, so a level that prints nothing skips the collection: a
+ * peer whose `getStats` stalls must not cost the open channel that ceiling for
+ * a line no one reads.
  */
 async function logSelectedCandidatePair(
   peer: RTCPeerConnection,
 ): Promise<void> {
+  if (log.getLevel() > logLibrary.levels.DEBUG) return;
   const report = await readIceStats(peer);
   if (report === undefined) {
     log.debug("the data channel opened; no ICE statistics were available");

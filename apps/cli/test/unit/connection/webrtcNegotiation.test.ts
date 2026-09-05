@@ -131,6 +131,8 @@ class ScriptedPeer {
    * settles. Both leave a failure with no candidate report to attach.
    */
   statsAnswer: "resolves" | "throws" | "never-settles" = "resolves";
+  /** How many times the session collected them. */
+  statsCalls = 0;
   /** Fired during setLocalDescription, as werift does. */
   candidatesDuringSetLocal: Array<Record<string, unknown>> = [];
 
@@ -175,6 +177,7 @@ class ScriptedPeer {
   }
 
   getStats(): Promise<Map<string, unknown>> {
+    this.statsCalls += 1;
     if (this.statsAnswer === "throws")
       throw new Error("the peer connection is closed");
     if (this.statsAnswer === "never-settles")
@@ -900,6 +903,30 @@ test("the open channel reports the candidate pair it runs over", async () => {
   );
 });
 
+test("a run at a level that prints no debug line collects no statistics", async () => {
+  // The pair line is the whole of what the collection is for, and collecting is
+  // bounded rather than instant, so a run that would print nothing must not
+  // spend the open channel's time on a peer whose getStats stalls.
+  setLogLevel(logLibrary.levels.INFO);
+  const { peer, session } = await startRendezvous({ role: "acceptor" });
+  peer.statsAnswer = "never-settles";
+  peer.stats = connectedStats("relay");
+  const startedAt = Date.now();
+  peer.channels[0].open();
+  await session;
+  expect(peer.statsCalls).toBe(0);
+  expect(Date.now() - startedAt).toBeLessThan(ICE_STATS_TIMEOUT_MS);
+});
+
+test("a debug run collects them once", async () => {
+  captureDiagnostics();
+  const { peer, session } = await startRendezvous({ role: "acceptor" });
+  peer.stats = connectedStats("relay");
+  peer.channels[0].open();
+  await session;
+  expect(peer.statsCalls).toBe(1);
+});
+
 test("a run whose statistics name no pair says so rather than nothing", async () => {
   const lines = captureDiagnostics();
   const { peer, session } = await startRendezvous({ role: "acceptor" });
@@ -934,7 +961,7 @@ test("an ICE failure names what was gathered, received and tried", async () => {
     "no network path between the two parties could be established",
   );
   expect(rendered).toContain(
-    "local candidates gathered: 2 (host, srflx); no relay candidate gathered",
+    "local candidates gathered: no relay candidate gathered; 2 (host, srflx)",
   );
   expect(rendered).toContain("remote candidates received: none");
   expect(rendered).toContain("candidate pairs: none formed");
@@ -956,7 +983,7 @@ test("a relay gathered that still found no path is reported apart", async () => 
   peer.failConnection();
   const rendered = await renderedFailure(session);
   expect(rendered).toContain(
-    "local candidates gathered: 1 (relay); relay candidate gathered",
+    "local candidates gathered: relay candidate gathered; 1 (relay)",
   );
   expect(rendered).toContain("remote candidates received: 1 (host)");
   expect(rendered).toContain("candidate pairs: 1 tried, none succeeded");
@@ -979,7 +1006,7 @@ test("the channel-open ceiling reports the same diagnosis", async () => {
   const rendered = await renderedFailure(session);
   expect(rendered).toContain("did not open within 100ms");
   expect(rendered).toContain(
-    "local candidates gathered: 1 (host); no relay candidate gathered",
+    "local candidates gathered: no relay candidate gathered; 1 (host)",
   );
 });
 

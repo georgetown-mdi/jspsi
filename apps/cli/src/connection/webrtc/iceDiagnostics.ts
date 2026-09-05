@@ -16,11 +16,15 @@ import type { RTCPeerConnection } from "werift";
  * waiting on the other party will fix.
  *
  * Every candidate type on the remote side is a token the exchange partner
- * chose: werift takes it verbatim from the candidate line it was sent and
- * validates nothing about it. It is bounded and escaped where it reaches the
- * operator -- a labelled cause link on the failure path,
- * `redactAndSanitizeForDisplay` at the log call site on the success path --
- * never composed into a first-party summary.
+ * chose. Driven against werift 0.24.4, a candidate line whose `typ` token is
+ * not one werift names is accepted without throwing and then reaches no
+ * `getStats` entry at all, so what a report holds is werift's own vocabulary
+ * rather than the partner's text (pinned by
+ * test/integration/webrtc/transport.test.ts). The value is bounded and escaped
+ * where it reaches the operator all the same -- a labelled cause link on the
+ * failure path, `redactAndSanitizeForDisplay` at the log call site on the
+ * success path -- so a version that does pass the token through cannot reach a
+ * terminal with it, and it is never composed into a first-party summary.
  */
 
 /** Candidate type an entry with no readable one is counted under. */
@@ -194,7 +198,9 @@ export function describeSelectedCandidatePair(
  * Whether a relay candidate was gathered is stated on the local link either
  * way, because it is what separates a network that blocked the TURN server
  * from one where a relayed path was available and still no pair worked -- the
- * two failures have different remedies and look identical without it.
+ * two failures have different remedies and look identical without it. It leads
+ * the link rather than following the tally, so a long list of gathered types
+ * cannot be what the fitting below clips it away for.
  *
  * Each link is fitted at this composition site
  * ({@link ../causeLink.fittedCauseLink}), so the partner's candidate types can
@@ -216,7 +222,7 @@ export function iceFailureDetails(
   return [
     fittedCauseLink(
       LOCAL_CANDIDATES_LABEL,
-      `${describeTally(report.local)}; ${relay}`,
+      `${relay}; ${describeTally(report.local)}`,
     ),
     fittedCauseLink(REMOTE_CANDIDATES_LABEL, describeTally(report.remote)),
     fittedCauseLink(CANDIDATE_PAIRS_LABEL, pairs),

@@ -95,7 +95,7 @@ test("a failure with no relay gathered is distinguishable from one with", () => 
     ),
   );
   expect(withoutRelay[0]).toBe(
-    "local candidates gathered: 2 (host, srflx); no relay candidate gathered",
+    "local candidates gathered: no relay candidate gathered; 2 (host, srflx)",
   );
   expect(withoutRelay[1]).toBe("remote candidates received: none");
   expect(withoutRelay[2]).toBe("candidate pairs: none formed");
@@ -122,7 +122,7 @@ test("a failure with no relay gathered is distinguishable from one with", () => 
     ),
   );
   expect(withRelay[0]).toBe(
-    "local candidates gathered: 2 (host, relay); relay candidate gathered",
+    "local candidates gathered: relay candidate gathered; 2 (host, relay)",
   );
   expect(withRelay[1]).toBe("remote candidates received: 1 (relay)");
   expect(withRelay[2]).toBe("candidate pairs: 2 tried, none succeeded");
@@ -174,9 +174,22 @@ test("a hostile remote candidate type cannot spend another link's budget", () =>
   const [local, remote, pairs] = iceFailureDetails(summary);
   expect(remote.length).toBeLessThan(300);
   expect(local).toBe(
-    "local candidates gathered: none; no relay candidate gathered",
+    "local candidates gathered: no relay candidate gathered; none",
   );
   expect(pairs).toBe("candidate pairs: none formed");
+});
+
+test("a long local candidate type cannot clip the relay clause away", () => {
+  // The clause leads the link, so what the fitting takes from an anomalous
+  // tally is the tally: the two failures the clause separates have different
+  // remedies, and losing it is losing the diagnosis.
+  const [local] = iceFailureDetails(
+    readIceCandidateReport(report([localCandidate("L1", "x".repeat(4000))])),
+  );
+  expect(local).toContain(
+    "local candidates gathered: no relay candidate gathered;",
+  );
+  expect(local.length).toBeLessThan(300);
 });
 
 test("stats that cannot be read are reported as none rather than thrown", async () => {
