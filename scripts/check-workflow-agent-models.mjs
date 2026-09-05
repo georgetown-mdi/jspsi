@@ -21,9 +21,9 @@
 // decide the tier at run time, so the spread is itself a violation whether or not
 // a literal sits beside it.
 //
-// The block reader and the lexer below are the shared half:
-// check-workflow-args-resolve.mjs imports them to scan the same two script
-// shapes for its own rule.
+// The block reader is the shared one in scripts/lib/markdownFences.mjs; the
+// lexer below is shared with check-workflow-args-resolve.mjs, which imports it
+// to scan the same two script shapes for its own rule.
 //
 // The scan lexes a block rather than pattern-matching it: strings, template
 // literals, regex literals, and comments are read as tokens, so a `model: 'opus'`
@@ -53,60 +53,13 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { jsBlocks } from "./lib/markdownFences.mjs";
+
 const SOURCE_DIRS = [".claude/commands", ".claude/agents", ".claude/skills"];
 const SCRIPT_DIR = ".claude/scripts";
 const SCRIPT_SUFFIX = "-workflow.mjs";
 const ALLOWED_TIERS = ["opus", "sonnet", "haiku"];
-const JS_LANGUAGES = new Set(["js", "javascript", "mjs"]);
 const SUMMARY_LENGTH = 100;
-
-const FENCE_LINE = /^\s*(`{3,}|~{3,})(.*)$/;
-
-/**
- * The fenced js blocks of a Markdown source, as `{code, startLine}` where
- * startLine is the 1-based line of the block's first code line. Recognizes the
- * CommonMark fence forms: three or more backticks or tildes, indented, and an
- * info string whose first word is the language. An unclosed js fence yields the
- * rest of the file rather than disappearing.
- */
-export function jsBlocks(source) {
-  const blocks = [];
-  const lines = source.split("\n");
-  let open = null;
-  const push = (endLine) => {
-    if (!JS_LANGUAGES.has(open.language)) return;
-    blocks.push({
-      code: lines.slice(open.start, endLine).join("\n"),
-      startLine: open.start + 1,
-    });
-  };
-  for (let i = 0; i < lines.length; i++) {
-    const match = lines[i].match(FENCE_LINE);
-    if (!match) continue;
-    const marker = match[1];
-    const rest = match[2];
-    if (open === null) {
-      // A backtick fence's info string may not itself contain a backtick.
-      if (marker[0] === "`" && rest.includes("`")) continue;
-      open = {
-        char: marker[0],
-        length: marker.length,
-        language: rest.trim().split(/\s+/)[0].toLowerCase(),
-        start: i + 1,
-      };
-      continue;
-    }
-    const closes =
-      marker[0] === open.char &&
-      marker.length >= open.length &&
-      rest.trim().length === 0;
-    if (!closes) continue;
-    push(i);
-    open = null;
-  }
-  if (open !== null) push(lines.length);
-  return blocks;
-}
 
 const IDENT_START = /[A-Za-z_$]/;
 const IDENT_PART = /[A-Za-z0-9_$]/;
