@@ -169,6 +169,11 @@ export const CHECKS = [
       "No WebRTC transport or entry point on either side reads connection.provider_options, which the spec states is inert on that channel.",
   },
   {
+    script: "check:run-failure-sink",
+    description:
+      "Every render of a RunFailure message in apps/web/src goes through the FailureMessage sink, so no alert collapses a relayed cause chain onto one line.",
+  },
+  {
     script: "check:zero-setup-keys",
     description:
       "Every built-in linkage key is built from the built-in field set, so a zero-setup exchange strands no party over a field its file lacks.",

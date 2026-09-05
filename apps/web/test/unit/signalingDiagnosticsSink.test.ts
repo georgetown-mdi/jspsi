@@ -22,6 +22,7 @@ import { Realm } from "@psilink/peerjs-broker/models/realm";
 
 import type { AddressInfo } from "node:net";
 import type { DiagnosticSink } from "@psilink/core";
+import type { IRealm } from "@psilink/peerjs-broker/models/realm";
 
 // The sink behind the signaling server's `error` event: that a released socket
 // reaches an operator-readable log line at all, that the line says which release
@@ -58,6 +59,19 @@ const HOSTILE_FRAME = "\u001b\r\n[forged] not json";
  * into the line rather than resolved to a tag this sink knows. */
 const HOSTILE_SOURCE = "\u001b\r\n[forged] not-a-real-source";
 
+/** The pair a relay round trip runs between: the peer whose socket raises the
+ * diagnostic, and the peer it addresses once the sink has thrown on it. */
+const RELAY_SENDER_ID = "peer-relay-sender";
+const RELAY_DESTINATION_ID = "peer-relay-destination";
+
+/** A signaling payload of the shape a real offer has, so the frame the relay
+ * moves across is one an exchange would produce. */
+const OFFER_PAYLOAD = {
+  sdp: { type: "offer", sdp: "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\n" },
+  type: "data",
+  connectionId: "dc_9c1d",
+};
+
 const cleanups: Array<() => Promise<void>> = [];
 
 let capturedLines: Array<string>;
@@ -91,6 +105,12 @@ function brokerLines(): Array<string> {
 interface Broker {
   port: number;
   wss: WebSocketServer;
+}
+
+interface SignalingFrame {
+  type?: unknown;
+  src?: unknown;
+  payload?: unknown;
 }
 
 /** Stop a loopback HTTP server at the end of the test that started it. */
@@ -146,15 +166,18 @@ async function startBroker(): Promise<Broker> {
  * restatement of it. */
 async function startShippedBroker(
   opts: { coResidentUpgrade?: "answers" | "ignores" } = {},
-): Promise<{ port: number }> {
+): Promise<{ port: number; realm: IRealm }> {
   const server = http.createServer();
-  CreatePeerServerWSOnly(server, { path: "/", key: "peerjs" });
+  const { realm } = CreatePeerServerWSOnly(server, {
+    path: "/",
+    key: "peerjs",
+  });
   if (opts.coResidentUpgrade !== undefined)
     attachCoResidentUpgrade(server, opts.coResidentUpgrade);
 
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   closeWithTest(server);
-  return { port: (server.address() as AddressInfo).port };
+  return { port: (server.address() as AddressInfo).port, realm };
 }
 
 function upgradeRequest(port: number, target: string): string {
@@ -194,9 +217,18 @@ function openRawConnection(port: number): {
   };
 }
 
+interface RegisteredPeer {
+  ws: WebSocket;
+  /** Every frame the server sent this socket, in arrival order. Collected from
+   * the moment it opens, so a frame the server relays to it cannot be missed
+   * between the OPEN and the first assertion. */
+  frames: Array<SignalingFrame>;
+}
+
 /** Register a client on the signaling path and resolve once the server answers
- * OPEN, so a frame sent afterwards reaches the registered-client message path. */
-function connectRegistered(port: number, id: string): Promise<WebSocket> {
+ * OPEN, so a frame sent afterwards reaches the registered-client message path,
+ * collecting what the server sends it. */
+function connectCollecting(port: number, id: string): Promise<RegisteredPeer> {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(
       `ws://127.0.0.1:${port}/peerjs?key=peerjs&id=${id}&token=tok`,
@@ -205,12 +237,19 @@ function connectRegistered(port: number, id: string): Promise<WebSocket> {
       ws.terminate();
       return Promise.resolve();
     });
+    const frames: Array<SignalingFrame> = [];
     ws.on("message", (data: WebSocket.RawData) => {
-      const parsed = JSON.parse(data.toString()) as { type?: unknown };
-      if (parsed.type === "OPEN") resolve(ws);
+      const frame = JSON.parse(data.toString()) as SignalingFrame;
+      frames.push(frame);
+      if (frame.type === "OPEN") resolve({ ws, frames });
     });
     ws.on("error", reject);
   });
+}
+
+/** The socket alone, for a test that only sends on it. */
+async function connectRegistered(port: number, id: string): Promise<WebSocket> {
+  return (await connectCollecting(port, id)).ws;
 }
 
 async function waitFor(
@@ -529,6 +568,48 @@ describe("signaling diagnostics sink", () => {
     expect(() =>
       broker.wss.emit("error", new Error("a peer hung up"), "client-socket"),
     ).not.toThrow();
+  });
+
+  test("a peer whose report threw in the sink stays registered and keeps relaying", async () => {
+    const broker = await startShippedBroker();
+    const sender = await connectCollecting(broker.port, RELAY_SENDER_ID);
+    const destination = await connectCollecting(
+      broker.port,
+      RELAY_DESTINATION_ID,
+    );
+
+    // The sink throws from inside the socket's own message handler, where `ws`
+    // has nothing between it and the receiver: an escaped throw would end the
+    // process, and the registration this peer's rendezvous depends on with it.
+    let reachedSink = 0;
+    setDiagnosticSink(() => {
+      reachedSink += 1;
+      throw new Error("the sink is broken");
+    });
+
+    sender.ws.send("not json at all");
+    await waitFor(() => reachedSink > 0);
+
+    // The realm still holds both registrations, and what they are for still
+    // works: an offer from the peer whose report threw reaches the second peer,
+    // stamped with the sender's id, so the relay is measured across the throw
+    // rather than inferred from the process still standing.
+    expect(broker.realm.getClientById(RELAY_SENDER_ID)).toBeDefined();
+    expect(broker.realm.getClientById(RELAY_DESTINATION_ID)).toBeDefined();
+
+    sender.ws.send(
+      JSON.stringify({
+        type: "OFFER",
+        dst: RELAY_DESTINATION_ID,
+        payload: OFFER_PAYLOAD,
+      }),
+    );
+    await waitFor(() =>
+      destination.frames.some((frame) => frame.type === "OFFER"),
+    );
+    const offer = destination.frames.find((frame) => frame.type === "OFFER");
+    expect(offer?.src).toBe(RELAY_SENDER_ID);
+    expect(offer?.payload).toEqual(OFFER_PAYLOAD);
   });
 
   test("the shipped instance wiring sends a report to the sink", async () => {
