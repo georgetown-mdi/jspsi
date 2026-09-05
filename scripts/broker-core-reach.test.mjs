@@ -1,10 +1,18 @@
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import {
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import ts from "typescript";
 import { ESLint } from "eslint";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 
 // What the standalone signaling broker can reach at run time. It is the one
 // process here that listens on the internet with no application around it, so
@@ -44,6 +52,14 @@ const CORE_BUILD_COMMAND = "npm run build -w packages/core";
  */
 const BROKER_RUNTIME_PACKAGES = ["ws", CORE_SUBPATH];
 
+// Loading the flat config and typescript-eslint parser for the first time is the
+// expensive part of a lintText call, so it is paid once here rather than by each
+// eslint case.
+const eslint = new ESLint({
+  cwd: repoRoot,
+  overrideConfigFile: join(repoRoot, "eslint.config.mjs"),
+});
+
 /** Files the walk below reads. `.ts` is the whole of this workspace's source. */
 function sourceFilesUnder(root) {
   const found = [];
@@ -70,8 +86,9 @@ function parse(path) {
 /**
  * Every module specifier `path` names, each with whether TypeScript erases it
  * before the file runs. A `import type` declaration and a type-only named
- * import both erase; a plain import, an `export ... from`, a `require(...)` and
- * a dynamic `import(...)` do not.
+ * import both erase; a plain import, a live default binding beside a type-only
+ * named list, an `export ... from`, a `require(...)` and a dynamic `import(...)`
+ * do not.
  */
 function specifiersOf(path) {
   const found = [];
@@ -85,7 +102,8 @@ function specifiersOf(path) {
       const named = clause?.namedBindings;
       const allTypeOnly =
         clause?.isTypeOnly === true ||
-        (named !== undefined &&
+        (clause?.name === undefined &&
+          named !== undefined &&
           ts.isNamedImports(named) &&
           named.elements.length > 0 &&
           named.elements.every((element) => element.isTypeOnly));
@@ -153,7 +171,49 @@ function requireBuiltDist(file) {
   return path;
 }
 
-describe("the broker's own source", () => {
+describe("specifiersOf", () => {
+  let tempRoot;
+  let caseCount = 0;
+
+  afterAll(() => {
+    if (tempRoot) rmSync(tempRoot, { recursive: true, force: true });
+  });
+
+  /** `source`'s specifiers, written to a real file so specifiersOf runs the
+   * same parse and walk it runs against the broker's own source. */
+  function specifiersFor(source) {
+    tempRoot ??= mkdtempSync(resolve(tmpdir(), "broker-core-reach-"));
+    const file = resolve(tempRoot, `case-${caseCount++}.ts`);
+    writeFileSync(file, source);
+    return specifiersOf(file);
+  }
+
+  it("treats a default binding beside a type-only named import as live", () => {
+    expect(
+      specifiersFor('import Default, { type Foo } from "mod";\nDefault;\n'),
+    ).toEqual([{ text: "mod", typeOnly: false }]);
+  });
+
+  it("treats a namespace import as live", () => {
+    expect(specifiersFor('import * as ns from "mod";\nns;\n')).toEqual([
+      { text: "mod", typeOnly: false },
+    ]);
+  });
+
+  it("treats a type-only named import with no default binding as erased", () => {
+    expect(specifiersFor('import { type Foo } from "mod";\n')).toEqual([
+      { text: "mod", typeOnly: true },
+    ]);
+  });
+
+  it("treats an `import type` declaration as erased", () => {
+    expect(specifiersFor('import type X from "mod";\n')).toEqual([
+      { text: "mod", typeOnly: true },
+    ]);
+  });
+});
+
+describe("the broker's own source", { timeout: 60_000 }, () => {
   const files = sourceFilesUnder(brokerSrc);
 
   it("scans every file in the workspace", () => {
@@ -189,10 +249,6 @@ describe("the broker's own source", () => {
   });
 
   it("is refused by eslint when it imports the package root", async () => {
-    const eslint = new ESLint({
-      cwd: repoRoot,
-      overrideConfigFile: join(repoRoot, "eslint.config.mjs"),
-    });
     const [result] = await eslint.lintText(
       'import { getLogger } from "@psilink/core";\nexport const log = getLogger("x");\n',
       { filePath: join(brokerSrc, "reachFixture.ts") },
@@ -205,10 +261,6 @@ describe("the broker's own source", () => {
   });
 
   it("is not refused by eslint when it imports the subpath", async () => {
-    const eslint = new ESLint({
-      cwd: repoRoot,
-      overrideConfigFile: join(repoRoot, "eslint.config.mjs"),
-    });
     const [result] = await eslint.lintText(
       `import { sanitizeForDisplay } from "${CORE_SUBPATH}";\nexport const escape = sanitizeForDisplay;\n`,
       { filePath: join(brokerSrc, "reachFixture.ts") },
