@@ -19,6 +19,11 @@
       "import": "./dist/testing.esm.js",
       "require": "./dist/testing.cjs",
       "types": "./dist/testing.d.ts"
+    },
+    "./untrusted-text": {
+      "import": "./dist/untrusted-text.esm.js",
+      "require": "./dist/untrusted-text.cjs",
+      "types": "./dist/untrusted-text.d.ts"
     }
   },
   "scripts": {

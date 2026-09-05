@@ -1,6 +1,7 @@
 import { CreatePeerServerWSOnly } from "@psilink/peerjs-broker";
 
 import { getServer as getHttpServer } from "./httpServer";
+import { signalingDiagnosticSink } from "./signalingDiagnostics";
 
 import type { AddressInfo } from "node:net";
 
@@ -42,7 +43,7 @@ function createPeerServer(): PeerServerInstance {
     port = addressInfo.port;
   }
 
-  return CreatePeerServerWSOnly(server, {
+  return CreatePeerServerWSOnly(server, signalingDiagnosticSink, {
     corsOptions: { origin: origin },
     port,
     path: "/api",

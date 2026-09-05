@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { OutgoingMessage } from "node:http";
 import { Socket } from "node:net";
 
-import { parseBoundedJson } from "@psilink/core";
+import { parseBoundedJson } from "@psilink/core/untrusted-text";
 import { WebSocketServer as Server } from "ws";
 
 import { Errors, MessageType } from "../../enums.ts";

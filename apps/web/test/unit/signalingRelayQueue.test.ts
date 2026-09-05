@@ -13,6 +13,8 @@ import { CreatePeerServerWSOnly } from "@psilink/peerjs-broker";
 import { MAX_QUEUE_BYTES } from "@psilink/peerjs-broker/models/realm";
 import { MessageType } from "@psilink/peerjs-broker/enums";
 
+import { signalingDiagnosticSink } from "../../src/signalingDiagnostics";
+
 import { KEY } from "../utils/signalingHarness";
 
 import type { AddressInfo } from "node:net";
@@ -113,7 +115,10 @@ function brokerLines(): Array<string> {
  * and the drain behind it are the shipped ones rather than a restatement. */
 async function startShippedBroker(): Promise<{ port: number; realm: IRealm }> {
   const server = http.createServer();
-  const { realm } = CreatePeerServerWSOnly(server, { path: "/", key: KEY });
+  const { realm } = CreatePeerServerWSOnly(server, signalingDiagnosticSink, {
+    path: "/",
+    key: KEY,
+  });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   cleanups.push(
     () =>

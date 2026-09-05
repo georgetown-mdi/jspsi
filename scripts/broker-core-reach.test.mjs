@@ -1,0 +1,257 @@
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import ts from "typescript";
+import { ESLint } from "eslint";
+import { describe, expect, it } from "vitest";
+
+// What the standalone signaling broker can reach at run time. It is the one
+// process here that listens on the internet with no application around it, so
+// the packages in its runtime closure are the packages an advisory can force a
+// redeploy of it over -- a cost that has nothing to do with whether the advisory
+// is exploitable through the broker.
+//
+// Two halves, because either alone can be satisfied while the reach is wide. The
+// first holds the broker's own source to `@psilink/core/untrusted-text`; it
+// scans every file under packages/peerjs-broker/src, including the vendored ones
+// the repo-wide eslint ignores leave unlinted, so a root import added there
+// fails here rather than passing unnoticed. The second measures what that
+// subpath resolves to once BUILT: an entry that re-exports from a module which
+// imports zod narrows nothing, and only the built graph shows it.
+//
+// The eslint ban beside them (eslint.config.mjs, the packages/peerjs-broker/src
+// block) is what a contributor meets first; it covers the linted tree only,
+// which is why the scan below does not lean on it.
+
+const here = dirname(fileURLToPath(import.meta.url));
+const repoRoot = resolve(here, "..");
+const brokerSrc = join(repoRoot, "packages/peerjs-broker/src");
+const coreDir = join(repoRoot, "packages/core");
+const coreDist = join(coreDir, "dist");
+
+/** The core entry point this workspace reads, and the rebuild that produces it. */
+const CORE_SUBPATH = "@psilink/core/untrusted-text";
+const CORE_BUILD_COMMAND = "npm run build -w packages/core";
+
+/**
+ * Every package the broker's own source may name at run time. `ws` is the
+ * WebSocket server it is built on; the core subpath holds the display,
+ * redaction and bounded-parse chokepoints it shares with the rest of psilink
+ * (CONTRIBUTING.md, Untrusted-JSON parsing and Operator-facing escaping). A
+ * `node:` builtin is neither installed nor advisory-bearing, so it is out of
+ * scope rather than listed.
+ */
+const BROKER_RUNTIME_PACKAGES = ["ws", CORE_SUBPATH];
+
+/** Files the walk below reads. `.ts` is the whole of this workspace's source. */
+function sourceFilesUnder(root) {
+  const found = [];
+  const visit = (path) => {
+    for (const entry of readdirSync(path)) {
+      const full = join(path, entry);
+      if (statSync(full).isDirectory()) visit(full);
+      else if (full.endsWith(".ts")) found.push(full);
+    }
+  };
+  visit(root);
+  return found;
+}
+
+function parse(path) {
+  return ts.createSourceFile(
+    path,
+    readFileSync(path, "utf8"),
+    ts.ScriptTarget.Latest,
+    true,
+  );
+}
+
+/**
+ * Every module specifier `path` names, each with whether TypeScript erases it
+ * before the file runs. A `import type` declaration and a type-only named
+ * import both erase; a plain import, an `export ... from`, a `require(...)` and
+ * a dynamic `import(...)` do not.
+ */
+function specifiersOf(path) {
+  const found = [];
+  const record = (node, typeOnly) => {
+    if (node && ts.isStringLiteral(node))
+      found.push({ text: node.text, typeOnly });
+  };
+  const visit = (node) => {
+    if (ts.isImportDeclaration(node)) {
+      const clause = node.importClause;
+      const named = clause?.namedBindings;
+      const allTypeOnly =
+        clause?.isTypeOnly === true ||
+        (named !== undefined &&
+          ts.isNamedImports(named) &&
+          named.elements.length > 0 &&
+          named.elements.every((element) => element.isTypeOnly));
+      record(node.moduleSpecifier, allTypeOnly === true);
+    } else if (ts.isExportDeclaration(node)) {
+      record(node.moduleSpecifier, node.isTypeOnly);
+    } else if (
+      ts.isCallExpression(node) &&
+      (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+        (ts.isIdentifier(node.expression) &&
+          node.expression.text === "require"))
+    ) {
+      record(node.arguments[0], false);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(parse(path));
+  return found;
+}
+
+const isRelative = (specifier) => specifier.startsWith(".");
+const isBuiltin = (specifier) => specifier.startsWith("node:");
+
+/** A specifier's package name, so a subpath import is reported under the package
+ * an advisory would name. */
+function packageOf(specifier) {
+  const parts = specifier.split("/");
+  return specifier.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0];
+}
+
+/**
+ * Every package the module graph rooted at `entry` reaches, following the
+ * relative chunk imports rollup emits and stopping at anything else. Reads the
+ * BUILT output, which is what a consumer resolves.
+ */
+function resolvedClosure(entry) {
+  const external = new Set();
+  const seen = new Set();
+  const visit = (path) => {
+    if (seen.has(path)) return;
+    seen.add(path);
+    for (const { text } of specifiersOf(path)) {
+      if (isBuiltin(text)) continue;
+      if (!isRelative(text)) {
+        external.add(packageOf(text));
+        continue;
+      }
+      visit(resolve(dirname(path), text));
+    }
+  };
+  visit(entry);
+  return [...external].sort();
+}
+
+function requireBuiltDist(file) {
+  const path = join(coreDist, file);
+  try {
+    statSync(path);
+  } catch {
+    throw new Error(
+      `packages/core/dist/${file} is missing, so the broker's reach cannot be ` +
+        `measured. Build core first:\n\n    ${CORE_BUILD_COMMAND}\n`,
+    );
+  }
+  return path;
+}
+
+describe("the broker's own source", () => {
+  const files = sourceFilesUnder(brokerSrc);
+
+  it("scans every file in the workspace", () => {
+    // A walk that found nothing would pass every assertion below.
+    expect(files.length).toBeGreaterThan(10);
+  });
+
+  it("names no package outside its declared runtime set", () => {
+    const offenders = files.flatMap((path) =>
+      specifiersOf(path)
+        .filter(
+          ({ text, typeOnly }) =>
+            !typeOnly &&
+            !isRelative(text) &&
+            !isBuiltin(text) &&
+            !BROKER_RUNTIME_PACKAGES.includes(text),
+        )
+        .map(({ text }) => `${path.slice(repoRoot.length + 1)}: ${text}`),
+    );
+    expect(offenders).toEqual([]);
+  });
+
+  it("never names the @psilink/core package root", () => {
+    // Held apart from the set above because a type-only root import passes that
+    // one -- it erases -- while still being the import a later edit turns into a
+    // value import without touching this workspace's dependency list.
+    const offenders = files.flatMap((path) =>
+      specifiersOf(path)
+        .filter(({ text }) => text === "@psilink/core")
+        .map(() => path.slice(repoRoot.length + 1)),
+    );
+    expect(offenders).toEqual([]);
+  });
+
+  it("is refused by eslint when it imports the package root", async () => {
+    const eslint = new ESLint({
+      cwd: repoRoot,
+      overrideConfigFile: join(repoRoot, "eslint.config.mjs"),
+    });
+    const [result] = await eslint.lintText(
+      'import { getLogger } from "@psilink/core";\nexport const log = getLogger("x");\n',
+      { filePath: join(brokerSrc, "reachFixture.ts") },
+    );
+    const messages = result.messages.filter(
+      (message) => message.ruleId === "no-restricted-imports",
+    );
+    expect(messages).toHaveLength(1);
+    expect(messages[0].message).toContain(CORE_SUBPATH);
+  });
+
+  it("is not refused by eslint when it imports the subpath", async () => {
+    const eslint = new ESLint({
+      cwd: repoRoot,
+      overrideConfigFile: join(repoRoot, "eslint.config.mjs"),
+    });
+    const [result] = await eslint.lintText(
+      `import { sanitizeForDisplay } from "${CORE_SUBPATH}";\nexport const escape = sanitizeForDisplay;\n`,
+      { filePath: join(brokerSrc, "reachFixture.ts") },
+    );
+    expect(
+      result.messages.filter(
+        (message) => message.ruleId === "no-restricted-imports",
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe("the built @psilink/core/untrusted-text closure", () => {
+  const coreDependencies = Object.keys(
+    JSON.parse(readFileSync(join(coreDir, "package.json"), "utf8"))
+      .dependencies,
+  );
+
+  it("reaches no package at all, on either published condition", () => {
+    // Stated as an equality rather than an absence list, so a dependency added
+    // to one of the modules behind the subpath fails here whatever it is called.
+    expect(resolvedClosure(requireBuiltDist("untrusted-text.esm.js"))).toEqual(
+      [],
+    );
+    expect(resolvedClosure(requireBuiltDist("untrusted-text.cjs"))).toEqual([]);
+  });
+
+  it("holds none of the packages core declares", () => {
+    // The named form of the same measurement, derived from core's manifest so
+    // the list cannot go stale: zod, papaparse, yaml, luxon, the PSI bindings
+    // and the rest are each absent by name rather than by byte count.
+    const reached = resolvedClosure(requireBuiltDist("untrusted-text.esm.js"));
+    expect(reached.filter((name) => coreDependencies.includes(name))).toEqual(
+      [],
+    );
+  });
+
+  it("measures something: the package root does hold them", () => {
+    // The canary. A walk that resolved nothing, or a chunk layout this stopped
+    // following, would report an empty closure for every entry point.
+    const reached = resolvedClosure(requireBuiltDist("core.esm.js"));
+    expect(
+      reached.filter((name) => coreDependencies.includes(name)).length,
+    ).toBeGreaterThan(4);
+  });
+});

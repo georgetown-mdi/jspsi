@@ -380,6 +380,15 @@ export default tseslint.config(
       ],
       // Close the named-import bypass (`import { parse } from "yaml"`); the
       // chokepoint imports the YAML default, so this never hits legitimate code.
+      //
+      // The `@psilink/core` entry beside it holds this workspace to the
+      // `./untrusted-text` subpath. The broker is a network-facing process, so
+      // its runtime closure is the set of packages an advisory can force a
+      // redeploy of it over; the package root reaches every dependency core
+      // declares, the subpath none of them. It bans the exact specifier only, so
+      // a subpath import is untouched. The measured closure behind it, and the
+      // scan that covers the vendored files the repo-wide ignores leave unlinted:
+      // scripts/broker-core-reach.test.mjs.
       "no-restricted-imports": [
         "error",
         {
@@ -389,6 +398,11 @@ export default tseslint.config(
               importNames: ["parse", "parseDocument", "parseAllDocuments"],
               message:
                 "Parse operator/credential files through @psilink/core; do not import yaml's raw parsers directly.",
+            },
+            {
+              name: "@psilink/core",
+              message:
+                "Import the helpers this workspace uses from @psilink/core/untrusted-text; the package root pulls core's whole dependency set into a network-facing process's runtime closure. A helper the subpath lacks is added to packages/core/src/untrustedText.ts.",
             },
           ],
           patterns: crossWorkspaceImportBans.packages,

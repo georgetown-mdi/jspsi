@@ -20,6 +20,8 @@ import {
 import { CreatePeerServerWSOnly } from "@psilink/peerjs-broker";
 import { Realm } from "@psilink/peerjs-broker/models/realm";
 
+import { signalingDiagnosticSink } from "../../src/signalingDiagnostics";
+
 import type { AddressInfo } from "node:net";
 import type { DiagnosticSink } from "@psilink/core";
 import type { IRealm } from "@psilink/peerjs-broker/models/realm";
@@ -153,7 +155,7 @@ async function startBroker(): Promise<Broker> {
     realm: new Realm(),
     config: { path: "/", key: "peerjs", concurrent_limit: 5000 },
   });
-  attachSignalingDiagnostics(wss);
+  attachSignalingDiagnostics(wss, signalingDiagnosticSink);
 
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   closeWithTest(server);
@@ -168,7 +170,7 @@ async function startShippedBroker(
   opts: { coResidentUpgrade?: "answers" | "ignores" } = {},
 ): Promise<{ port: number; realm: IRealm }> {
   const server = http.createServer();
-  const { realm } = CreatePeerServerWSOnly(server, {
+  const { realm } = CreatePeerServerWSOnly(server, signalingDiagnosticSink, {
     path: "/",
     key: "peerjs",
   });

@@ -1,11 +1,10 @@
 import {
   displayText,
-  getLogger,
   redactAndSanitizeForDisplay,
   sanitizeForDisplay,
-} from "@psilink/core";
+} from "@psilink/core/untrusted-text";
 
-import type { Displayable } from "@psilink/core";
+import type { Displayable } from "@psilink/core/untrusted-text";
 import type { EventEmitter } from "node:events";
 
 // Every source the sink recognizes. The type below is derived from it rather
@@ -93,7 +92,19 @@ export const DIAGNOSTICS_PER_RATE_LIMIT_WINDOW = 10;
  */
 export const DIAGNOSTIC_DETAIL_MAX_LENGTH = 256;
 
-const log = getLogger("peerjs-broker");
+/**
+ * Where a signaling diagnostic goes once this module has attributed, escaped,
+ * capped and rate limited it. Injected by whoever builds the server rather than
+ * resolved here, so this package holds no logging policy of its own: the web
+ * app's mount hands it a prefixed `@psilink/core` logger, and the standalone
+ * runner a stderr writer, each unconditionally. Every report is a warning, so
+ * the sink takes no level.
+ *
+ * The text it receives is already safe to write: peer-controlled bytes reach it
+ * escaped and capped, and nothing further is expected of the sink but writing
+ * what it is handed.
+ */
+export type SignalingDiagnosticSink = (message: Displayable) => void;
 
 /** Read whatever was raised as text, without letting a hostile or malformed
  * error take the diagnostic down with it: a `message` getter or a `toString`
@@ -154,10 +165,9 @@ function describeShedBySource(
  * point is to sit idle between rendezvous. A clock that steps backwards leaves
  * the current window running longer, which sheds more rather than less.
  */
-function createSignalingDiagnosticsReporter(): (
-  source: unknown,
-  error: unknown,
-) => void {
+function createSignalingDiagnosticsReporter(
+  write: SignalingDiagnosticSink,
+): (source: unknown, error: unknown) => void {
   let windowStartedAt = Date.now();
   let writtenInWindow = 0;
   let shedInWindow = 0;
@@ -181,7 +191,7 @@ function createSignalingDiagnosticsReporter(): (
       // shedding began, so the fact survives, but the total and the identity
       // of any class starved after that notice are both lost with it.
       if (shed > 0)
-        log.warn(
+        write(
           displayText`peerjs signaling diagnostics resumed: ${shed} suppressed while rate limited (${shedDetail})`,
         );
     }
@@ -194,7 +204,7 @@ function createSignalingDiagnosticsReporter(): (
       // budget ran out on; the rest of the window's breakdown rides the resumed
       // notice above.
       if (shedInWindow === 1)
-        log.warn(
+        write(
           displayText`peerjs signaling diagnostics rate limited: ${DIAGNOSTICS_PER_RATE_LIMIT_WINDOW} written in the last ${DIAGNOSTIC_RATE_LIMIT_WINDOW_MS / 1000} seconds, suppressing the rest of this window; suppressed so far (${describeShedBySource(shedBySource)})`,
         );
       return;
@@ -211,23 +221,27 @@ function createSignalingDiagnosticsReporter(): (
     // The source is escaped alongside it -- it is resolved to a first-party tag
     // above, and escaping it costs nothing -- and the peer's detail is placed
     // last, so no byte of it can be read as one of the fields ahead of it.
-    log.warn(
+    write(
       displayText`peerjs signaling diagnostic [${sanitizeForDisplay(source)}]: ${detail}`,
     );
   };
 }
 
 /**
- * Attach the diagnostics sink to a signaling server's `error` event.
+ * Attach the diagnostics sink to a signaling server's `error` event, writing
+ * every report through `write`.
  *
- * Attaching a listener is load-bearing on its own: an `error` emitted with no
+ * Attaching a listener is critical on its own: an `error` emitted with no
  * listener at all is thrown rather than dropped, which would end the process
  * over an ordinary peer hang-up. So the listener's first duty is to absorb the
- * event, and it holds that whatever the sink does -- a logger that throws is
+ * event, and it holds that whatever `write` does -- one that throws is
  * swallowed here rather than allowed back out through `emit`.
  */
-export function attachSignalingDiagnostics(server: EventEmitter): void {
-  const report = createSignalingDiagnosticsReporter();
+export function attachSignalingDiagnostics(
+  server: EventEmitter,
+  write: SignalingDiagnosticSink,
+): void {
+  const report = createSignalingDiagnosticsReporter(write);
   server.on("error", (error: unknown, source: unknown) => {
     try {
       report(source, error);

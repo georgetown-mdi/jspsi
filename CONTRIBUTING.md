@@ -21,7 +21,7 @@ psilink is organized as an npm workspaces monorepo. The workspaces and the suppo
 | Path             | Description                                                                                |
 | ---------------- | ------------------------------------------------------------------------------------------ |
 | `packages/core/` | Shared library: PSI primitive, exchange orchestration, file-sync transport, config schemas |
-| `packages/peerjs-broker/` | The PeerJS-compatible WebRTC signaling broker: vendored server source plus a standalone entry point (`npm start -w packages/peerjs-broker`). Ships TypeScript source with no build step of its own, reading `@psilink/core` from that workspace's `dist/`; the web app bundles it into its server |
+| `packages/peerjs-broker/` | The PeerJS-compatible WebRTC signaling broker: vendored server source plus a standalone entry point (`npm start -w packages/peerjs-broker`). Ships TypeScript source with no build step of its own, reading `@psilink/core/untrusted-text` -- the whole of its reach into core -- from that workspace's `dist/`; the web app bundles it into its server |
 | `packages/testkit/` | Test-only material shared by more than one workspace's test tree (`@psilink/testkit`), consumed as raw TypeScript with no build step; what qualifies and why: [docs/TESTING.md](docs/TESTING.md#shared-test-material) and [docs/notes/cross-workspace-test-material.md](docs/notes/cross-workspace-test-material.md) |
 | `apps/cli/`      | Node.js CLI (`psilink`), built with Rollup, distributed as a Docker image                  |
 | `apps/web/`      | TanStack Start (React/SSR) web app; serves the peer-coordination broker above at `/api`    |
