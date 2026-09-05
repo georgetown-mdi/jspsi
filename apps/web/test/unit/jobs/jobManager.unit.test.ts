@@ -420,7 +420,10 @@ describe("JobManager end-to-end via the stub CLI", () => {
   });
 
   test("exit 73 without a terminal event synthesizes an output terminal", async () => {
-    const manager = makeManager({ exitCode: 73 });
+    const manager = makeManager({
+      exitCode: 73,
+      stderr: "ENOSPC: no space left on device\n",
+    });
     const id = await manager.createJob(validIntent());
     const record = manager.getJob(id)!;
     await waitForTerminal(record);
@@ -434,6 +437,9 @@ describe("JobManager end-to-end via the stub CLI", () => {
     // exists to prevent.
     expect(terminal.category).toBe("output");
     expect(String(terminal.message)).toContain("lost local write");
+    expect(String(terminal.message)).toContain(
+      "ENOSPC: no space left on device",
+    );
   });
 
   test("an interrupt without a terminal event synthesizes a cancelled error", async () => {
