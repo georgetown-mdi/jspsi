@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { AlgorithmSchema } from "../types.js";
 import type { Algorithm } from "../types.js";
-import { camelizeKeys } from "../utils/camelizeKeys.js";
+import { camelizeKeys, MAX_NESTING_DEPTH } from "../utils/camelizeKeys.js";
 import { safeParseCamelized } from "./safeParseCamelized.js";
 import { boundedArray } from "../utils/boundedArray.js";
 import {
@@ -101,6 +101,14 @@ export const TEXT_CONTROL_CHAR_MESSAGE =
  */
 export const LONE_SURROGATE_MESSAGE =
   "a linkage terms text value must not contain an unpaired UTF-16 surrogate";
+
+/**
+ * Shared refusal message for a terms document that nests deeper than
+ * {@link MAX_NESTING_DEPTH}, which the well-formedness walk reports rather than
+ * recursing into. A fixed literal naming no submitted value, for the reason
+ * {@link LONE_SURROGATE_MESSAGE} gives.
+ */
+export const NESTING_DEPTH_MESSAGE = `a linkage terms value must not nest deeper than ${MAX_NESTING_DEPTH} levels`;
 
 /**
  * Upper bound on the COUNT of entries in the `linkageFields` and
@@ -228,36 +236,61 @@ const freeTextValue = (schema: z.ZodString) =>
   });
 
 /**
- * The path within `value` of the first string -- a member value, an array
- * element, or an object KEY -- holding an unpaired UTF-16 surrogate, or
- * undefined when every string in it is well-formed
- * ({@link loneSurrogateIndex}).
+ * What the well-formedness walk refused, and where: a string -- a member value,
+ * an array element, or an object KEY -- holding an unpaired UTF-16 surrogate,
+ * or a value nested past the depth the walk goes to.
+ */
+type WellFormednessRefusal = {
+  reason: "lone-surrogate" | "too-deep";
+  path: PropertyKey[];
+};
+
+/**
+ * The first thing in `value` that fails the well-formed UTF-16 rule
+ * ({@link loneSurrogateIndex}), or undefined when every string in it is
+ * well-formed and it nests no deeper than {@link MAX_NESTING_DEPTH}.
  *
  * A walk over the parsed document rather than a per-field check: it reaches
  * every string-typed field the schema declares at once, the keys of a
  * `transform.params` record, and the arbitrary JSON a param VALUE may hold --
- * the last of which no per-field refine can be written for. Its depth is
- * bounded by the camelize pre-pass every parse path runs (MAX_NESTING_DEPTH,
- * utils/camelizeKeys.ts) and its width by the schema's own count bounds.
+ * the last of which no per-field refine can be written for. Its width is
+ * bounded by the schema's own count bounds.
+ *
+ * The depth bound is the walk's own, not the camelize pre-pass's: the camelize
+ * bound covers `parseLinkageTerms` and `safeParseLinkageTerms`, while
+ * `LinkageTermsSchema` is also consumed bare (config/exchangeSpec.ts, the web
+ * app's job-intent schemas), where an arbitrarily deep param value would
+ * otherwise overflow this recursion and raise a `RangeError` out of
+ * `safeParse`. A value at the bound is refused rather than walked, matching
+ * what the camelize pre-pass does at the same depth.
  */
-function loneSurrogatePath(
+function firstWellFormednessRefusal(
   value: unknown,
   path: PropertyKey[],
-): PropertyKey[] | undefined {
+  depth: number,
+): WellFormednessRefusal | undefined {
   if (typeof value === "string")
-    return loneSurrogateIndex(value) >= 0 ? path : undefined;
+    return loneSurrogateIndex(value) >= 0
+      ? { reason: "lone-surrogate", path }
+      : undefined;
+  if (value === null || typeof value !== "object") return undefined;
+  if (depth >= MAX_NESTING_DEPTH) return { reason: "too-deep", path };
   if (Array.isArray(value)) {
     for (const [index, element] of value.entries()) {
-      const found = loneSurrogatePath(element, [...path, index]);
+      const found = firstWellFormednessRefusal(
+        element,
+        [...path, index],
+        depth + 1,
+      );
       if (found !== undefined) return found;
     }
     return undefined;
   }
-  if (value === null || typeof value !== "object") return undefined;
   for (const [key, child] of Object.entries(value)) {
     const childPath = [...path, key];
-    if (loneSurrogateIndex(key) >= 0) return childPath;
-    const found = loneSurrogatePath(child, childPath);
+    if (loneSurrogateIndex(key) >= 0)
+      return { reason: "lone-surrogate", path: childPath };
+    const found = firstWellFormednessRefusal(child, childPath, depth + 1);
     if (found !== undefined) return found;
   }
   return undefined;
@@ -1295,15 +1328,19 @@ export const LinkageTermsSchema: z.ZodType<LinkageTerms> =
     // computeTermsHash, which runs after the exchange has disclosed -- and
     // RFC 8785 requires an encoder to terminate on a lone surrogate, so a
     // document admitted here ends the run with neither a receipt nor the
-    // record of that disclosure. Every parse path inherits it. Full
-    // reasoning: docs/spec/CANONICAL_ENCODING.md, "Strings".
+    // record of that disclosure. Every parse path inherits it, and a document
+    // too deeply nested for the walk to finish is refused under its own
+    // message. Full reasoning: docs/spec/CANONICAL_ENCODING.md, "Strings".
     .superRefine((terms, ctx) => {
-      const path = loneSurrogatePath(terms, []);
-      if (path !== undefined)
+      const refusal = firstWellFormednessRefusal(terms, [], 0);
+      if (refusal !== undefined)
         ctx.addIssue({
           code: "custom",
-          message: LONE_SURROGATE_MESSAGE,
-          path,
+          message:
+            refusal.reason === "lone-surrogate"
+              ? LONE_SURROGATE_MESSAGE
+              : NESTING_DEPTH_MESSAGE,
+          path: refusal.path,
         });
     });
 

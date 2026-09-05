@@ -13,6 +13,8 @@ import {
   MAX_TEXT_LENGTH,
   TEXT_CONTROL_CHAR_MESSAGE,
   LONE_SURROGATE_MESSAGE,
+  LinkageTermsSchema,
+  NESTING_DEPTH_MESSAGE,
   MAX_LINKAGE_ENTRIES,
   MAX_PARAMS_ENTRIES,
   MAX_PAD_LEFT_LENGTH,
@@ -25,6 +27,7 @@ import {
   MAX_PAYLOAD_ENTRIES,
 } from "../../src/config/linkageTermsSchema";
 import type { LinkageKey } from "../../src/config/linkageTermsSchema";
+import { ExchangeSpecSchema } from "../../src/config/exchangeSpec";
 import { pipelineAlwaysDrops } from "../../src/linkageSatisfiability";
 import { describeDecodeError } from "../../src/utils/describeDecodeError";
 import {
@@ -2522,6 +2525,75 @@ test("a deeply-nested transform.params value fails cleanly, not with a RangeErro
   }
   expect(err).toBeInstanceOf(NestingDepthExceededError);
   expect(err).not.toBeInstanceOf(RangeError);
+});
+
+/** `base` with a `transform.params` value nested `levels` deep. The param value
+ * is typed `z.unknown()`, so the arbitrary JSON under it reaches the schema
+ * whole and the well-formedness walk is the only thing that recurses through
+ * it. */
+const deepParamsTerms = (levels: number) => {
+  let deepValue: unknown = { leaf: 1 };
+  for (let i = 0; i < levels; i++) deepValue = { nested: deepValue };
+  return {
+    ...base,
+    linkageKeys: [
+      {
+        name: "SSN",
+        elements: [
+          {
+            field: "ssn",
+            transform: [{ function: "trim", params: { deep: deepValue } }],
+          },
+        ],
+      },
+    ],
+  };
+};
+
+test("the bare schema reports a deeply-nested params value as an issue, not a RangeError", () => {
+  // The camelize pre-pass bounds the depth for parseLinkageTerms only.
+  // LinkageTermsSchema is also consumed bare -- by ExchangeSpecSchema and by the
+  // web app's job-intent schemas -- where nothing runs ahead of Zod, so the
+  // well-formedness walk holds its own bound rather than recursing until the
+  // call stack overflows and a RangeError escapes safeParse.
+  let result: ReturnType<typeof LinkageTermsSchema.safeParse> | undefined;
+  expect(() => {
+    result = LinkageTermsSchema.safeParse(deepParamsTerms(20_000));
+  }).not.toThrow();
+  expect(result?.success).toBe(false);
+  expect(
+    result?.success === false
+      ? result.error.issues.map((issue) => issue.message)
+      : [],
+  ).toContain(NESTING_DEPTH_MESSAGE);
+});
+
+test("a bare consumer of the schema inherits that bound", () => {
+  // ExchangeSpecSchema embeds LinkageTermsSchema directly, so the same value
+  // arriving inside a spec is refused the same way.
+  let result: ReturnType<typeof ExchangeSpecSchema.safeParse> | undefined;
+  expect(() => {
+    result = ExchangeSpecSchema.safeParse({
+      connection: {
+        channel: "sftp",
+        server: { host: "sftp.example.org", username: "psilink" },
+      },
+      linkageTerms: deepParamsTerms(20_000),
+    });
+  }).not.toThrow();
+  expect(result?.success).toBe(false);
+  expect(
+    result?.success === false
+      ? result.error.issues.map((issue) => issue.message)
+      : [],
+  ).toContain(NESTING_DEPTH_MESSAGE);
+});
+
+test("a params value nesting well under the bound still parses", () => {
+  // The bound refuses what the walk cannot finish, not nesting as such: a param
+  // value the camelize pre-pass admits parses on both routes.
+  expect(LinkageTermsSchema.safeParse(deepParamsTerms(200)).success).toBe(true);
+  expect(() => parseLinkageTerms(deepParamsTerms(200))).not.toThrow();
 });
 
 test("a pathological-count linkage key elements list fails cleanly, not with a RangeError", () => {
