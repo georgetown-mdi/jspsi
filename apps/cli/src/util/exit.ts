@@ -1,6 +1,8 @@
 // Classifying a caught error into a process exit code, and the two boundaries
-// that apply it. The sysexits rungs a command can report are declared here so
-// docs/CLI.md's exit-code table has one source in the code.
+// that apply it: the classification every command's error->exit boundary reads,
+// plus two of the sysexits rungs docs/CLI.md's exit-code table lists -- 70 for
+// an internal fault and 65 for a definite verify-receipt failure. The table's
+// other rungs are declared where they are set.
 
 import {
   ConnectionError,

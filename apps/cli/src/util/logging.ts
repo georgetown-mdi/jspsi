@@ -331,8 +331,7 @@ export interface ConfiguredLogging {
  * no argv parsing. {@link configureLogFile} still throws a {@link UsageError}
  * on an unopenable `--log-file` path, so a caller keeps that mapped to exit 64
  * by invoking this inside its existing usage boundary (`parseOrExit` in
- * ./flags, or
- * a command's `runOrExit`).
+ * ./flags, or a command's `runOrExit`).
  */
 export function configureLogging(params: {
   logLevel: logLibrary.LogLevelNumbers;

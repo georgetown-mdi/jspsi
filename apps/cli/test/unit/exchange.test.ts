@@ -18,7 +18,11 @@ import type {
   LinkageTerms,
   PreparedExchange,
 } from "@psilink/core";
-import { loadKeyFile, saveKeyFile } from "../../src/keyFile";
+import {
+  loadKeyFile,
+  provisionKeyFileFromInvitation,
+  saveKeyFile,
+} from "../../src/keyFile";
 import {
   loadSigningIdentity,
   saveSigningIdentity,
@@ -42,6 +46,7 @@ import {
 import { PLACEHOLDER_IDENTITY } from "../../src/partyIdentity";
 import { ttyStream, withStdin } from "../stdinStream";
 import { captureProcessExit } from "../exitCapture";
+import { ERROR_CLASS_EXIT_CODES } from "../exitCodeCases";
 
 const mockState = vi.hoisted(() => ({
   warnings: [] as string[],
@@ -105,6 +110,19 @@ vi.mock("../../src/protocol", () => ({ runProtocol: vi.fn() }));
 // drives; stub it so that test reaches the runProtocol hand-off without probing
 // sftp.example.org (hostKeyTrust.test.ts covers the real flow).
 vi.mock("../../src/hostKeyTrust", () => ({ establishHostKeyTrust: vi.fn() }));
+
+// The invitation provisioning step is spy-WRAPPED so the exit-boundary tests can
+// plant an error at it; every other key-file export, and provisioning itself
+// wherever nothing is planted, stays real.
+vi.mock("../../src/keyFile", async (importActual) => {
+  const actual = await importActual<typeof import("../../src/keyFile")>();
+  return {
+    ...actual,
+    provisionKeyFileFromInvitation: vi.fn(
+      actual.provisionKeyFileFromInvitation,
+    ),
+  };
+});
 
 // The signing-identity load is spy-WRAPPED for the same reason: the ordering
 // test below needs to observe when the handler reaches it, while every test that
@@ -1613,6 +1631,91 @@ test("handler: --invitation with a malformed code fails closed (exit 64), writin
     exitSpy.mockRestore();
   }
 });
+
+// --- handler: the exit code each error boundary reports ----------------------
+// Each boundary below routes its caught error through the one exitCodeForError
+// (src/util/exit.ts): one error per class it distinguishes, planted at the
+// module call the boundary wraps, against the code docs/CLI.md's exit-code table
+// states. The other commands' boundaries: exitBoundaryMapping.test.ts. These say
+// what a boundary reports for an error that reaches it, and nothing about which
+// classes can reach it.
+
+/** Run the handler, asserting it exits with `code` and never reaches the
+ * exchange. */
+async function expectExchangeExit(
+  argv: Arguments,
+  code: number,
+): Promise<void> {
+  vi.mocked(runProtocol).mockReset();
+  const exitSpy = captureProcessExit();
+  try {
+    await expect(handler(argv)).rejects.toThrow(`exit:${code}`);
+    expect(exitSpy).toHaveBeenCalledExactlyOnceWith(code);
+    expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
+  } finally {
+    exitSpy.mockRestore();
+  }
+}
+
+/** Seed a filedrop config, a live key file, and an input file, and return the
+ * argv a run of them takes. */
+function filedropRun(): Arguments {
+  fs.writeFileSync(configFile, YAML.stringify(minimalFiledropConfig));
+  saveKeyFile(keyFile, {
+    sharedSecret: TOKEN_A,
+    expires: new Date(Date.now() + 365 * 86_400_000).toISOString(),
+  });
+  const input = path.join(dir, "in.csv");
+  fs.writeFileSync(input, "ssn\n123456789\n");
+  return {
+    _: [],
+    $0: "psilink",
+    input,
+    "config-file": configFile,
+    "key-file": keyFile,
+    "log-level": "silent",
+  } as unknown as Arguments;
+}
+
+test.each(ERROR_CLASS_EXIT_CODES)(
+  "handler: --invitation provisioning exits $code on $planted",
+  async ({ plant, code }) => {
+    fs.writeFileSync(configFile, YAML.stringify(minimalFiledropConfig));
+    const input = path.join(dir, "in.csv");
+    fs.writeFileSync(input, "ssn\n123456789\n");
+    vi.mocked(provisionKeyFileFromInvitation).mockRejectedValueOnce(plant());
+    await expectExchangeExit(
+      {
+        _: [],
+        $0: "psilink",
+        input,
+        "config-file": configFile,
+        "key-file": keyFile,
+        invitation: await encodeInvitation(inviteToken()),
+        "log-level": "silent",
+      } as unknown as Arguments,
+      code,
+    );
+  },
+);
+
+test.each(ERROR_CLASS_EXIT_CODES)(
+  "handler: the signing-identity load exits $code on $planted",
+  async ({ plant, code }) => {
+    const argv = await signedExchangeRun("Test Party");
+    vi.mocked(loadSigningIdentity).mockRejectedValueOnce(plant());
+    await expectExchangeExit(argv, code);
+  },
+);
+
+test.each(ERROR_CLASS_EXIT_CODES)(
+  "handler: the host-key trust step exits $code on $planted",
+  async ({ plant, code }) => {
+    const argv = filedropRun();
+    vi.mocked(establishHostKeyTrust).mockRejectedValueOnce(plant());
+    await expectExchangeExit(argv, code);
+  },
+);
 
 // --- handler: prepare-time guards precede the credential-bearing connect -----
 

@@ -46,10 +46,11 @@ import { inProcessOnly } from "../sftpBackendGate";
 
 // Stub only promptConfirm so the first-use host-key prompt can be answered in a
 // non-interactive test run; every other prompt export stays real, as does
-// util/dataIo's input-source loader the validate path uses. promptConfirm is the production
-// default behind HostKeyTrustDeps.confirm, so stubbing it supplies the same
-// first-use confirmation the hostKeyTrust unit layer injects -- here driven
-// through the live runOnlineBootstrap chain rather than a direct call.
+// util/dataIo's input-source loader the validate path uses. promptConfirm is
+// the production default behind HostKeyTrustDeps.confirm, so stubbing it
+// supplies the same first-use confirmation the hostKeyTrust unit layer injects
+// -- here driven through the live runOnlineBootstrap chain rather than a direct
+// call.
 //
 // The stub DECLINES by default and the first-use test opts into confirming only
 // for its own run (restoring the decline default afterward). That default matters

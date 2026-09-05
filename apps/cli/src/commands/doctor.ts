@@ -108,8 +108,10 @@ async function runDoctor(
     // not in use.
     process.exitCode = DOCTOR_EXIT_CODE[overallOf(report)];
   } catch (err) {
-    // Reached only by an error the checks did not classify: a failing tool
-    // becomes a verdict rather than a throw.
+    // Reached by the operator-input faults readSmbProbeInput and
+    // readSmbMountInput raise (doctor/smbEnvironment), and by anything the
+    // checks did not turn into a verdict -- a failing tool becomes a verdict
+    // rather than a throw. exitCodeForError classifies whichever arrives.
     exitWithError(log, err, exitCodeForError(err));
   } finally {
     closeLogging();
