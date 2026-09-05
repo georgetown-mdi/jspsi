@@ -92,7 +92,7 @@ describe("export/import round-trip", () => {
     expect(restored.exchangeFile).toEqual(record.exchangeFile);
   });
 
-  test("carries the run bookkeeping forward", () => {
+  test("keeps the run bookkeeping across the round trip", () => {
     const record = buildManagedExchangeRecord(newExchange());
     const withRun = {
       ...record,
@@ -138,7 +138,7 @@ describe("CLI separability", () => {
       parseSensitiveYaml(artifact.exchangeDocument, "test"),
     );
     expect(parsed).toEqual(record.exchangeFile);
-    // The document is credential-free and carries no secret half.
+    // The document is credential-free and has no secret half.
     expect(parsed.authentication).toBeUndefined();
     expect(artifact.exchangeDocument).not.toContain(record.sharedSecret);
   });
@@ -230,10 +230,10 @@ describe("rejection of malformed or tampered imports", () => {
     ).toThrow();
   });
 
-  test("a document tampered to carry an authentication block is rejected", () => {
+  test("a document tampered to hold an authentication block is rejected", () => {
     const artifact = JSON.parse(goodBytes());
     // Smuggle a secret into the embedded document: the reconstructed record must
-    // reject it (the document carries no authentication block).
+    // reject it (the document has no authentication block).
     artifact.exchangeDocument = `${artifact.exchangeDocument}\nauthentication:\n  shared_secret: ${generateSharedSecret()}\n`;
     expect(() =>
       reconstructRecordFromArtifact(

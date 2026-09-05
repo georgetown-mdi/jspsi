@@ -12,14 +12,11 @@ import { importLinkageTerms } from "@psi/linkageTermsIO";
 import type { CSVRow, LinkageTerms } from "@psilink/core";
 
 // The count-only shape refusals as the ACCEPTING web operator meets them: an
-// out-of-shape document refused as it is read (the import door, sharing core's
-// schema with the invitation decode), and this party's own marked columns refused
-// at the launch gate, which is the rule no linkage-terms document carries.
-//
-// Both hold with the real APPLIED_SETTINGS: the rules read the algorithm, not
-// whether a count-only run path exists yet. The authoring half runs behind a
-// forced flag in countOnlyMintGate.test.ts, since the editor clamps the algorithm
-// out of the terms it builds until then.
+// out-of-shape document refused on import (core's schema, shared with the
+// invitation decode), and marked columns refused at the launch gate -- a rule
+// no linkage-terms document holds. Both use the real APPLIED_SETTINGS, since
+// the rules read the algorithm, not whether a count-only run path exists yet;
+// the authoring half is behind a forced flag in countOnlyMintGate.test.ts.
 
 /** An invitation in exactly the count-only shape the specification admits: one
  * linkage key, cascade, no deduplication, no payload in either direction. */
@@ -90,7 +87,7 @@ describe("the count-only launch gate (the acceptor's own marked columns)", () =>
 });
 
 describe("the import door refuses a count-only document outside the shape", () => {
-  // The import door surfaces core's own value-free refine message, so the rules
+  // The import door shows core's own value-free refine message, so the rules
   // are stated once and this pins that they reach the operator intact.
   test.each([
     {

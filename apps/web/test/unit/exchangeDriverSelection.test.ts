@@ -14,7 +14,7 @@ const CHANNELS: ReadonlyArray<Transport> = ["browser", "sftp", "filedrop"];
 const SFTP_CONFIGURED: ReadonlyArray<boolean> = [false, true];
 
 // Every (channel x profile x sftp-configured) cell, asserting the fixed
-// scope-decision table (with no deliberate save-a-file preference):
+// scope-decision table (with no save-a-file preference):
 //   browser  (any profile, any sftp)         -> browser
 //   filedrop + console (any sftp)            -> server-job
 //   filedrop + hosted  (any sftp)            -> save-file
@@ -56,7 +56,7 @@ describe("selectExchangeDriver", () => {
     }
   }
 
-  test("the deliberate save-a-file preference flips unconfigured console sftp", () => {
+  test("the save-a-file preference flips unconfigured console sftp", () => {
     // Only when the operator explicitly chooses to save a file for their own
     // command-line tool does an unconfigured console sftp route to save-file.
     expect(selectExchangeDriver("sftp", "console", false, true).kind).toBe(

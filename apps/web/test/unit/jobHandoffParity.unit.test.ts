@@ -40,7 +40,7 @@ import type { Metadata, Standardization } from "@psilink/core";
  * first scheduled run.
  */
 
-/** Where one authorable member is carried into the hand-off. */
+/** Where one authorable member is passed into the hand-off. */
 type HandoffRoute =
   /** A top-level key of the composed `psilink.yaml`. */
   | { carries: "configKey"; key: string }
@@ -49,7 +49,7 @@ type HandoffRoute =
   /** The connection's tuning block, routed member by member by
    * {@link TUNING_OPTION_ROUTES}. */
   | { carries: "tuningOptions" }
-  /** Deliberately not carried, for the stated reason. */
+  /** Not passed, for the stated reason. */
   | { carries: "nothing"; because: string };
 
 /** How one tuning option graduates: as a configuration key on the exchange
@@ -134,7 +134,7 @@ const PARTNER_FINGERPRINT = "c".repeat(42) + "A";
 const DISTINCT_SECRET = "b".repeat(42) + "A";
 
 /** The container-internal paths the LIVE run composes, none of which may appear
- * in a template the operator carries to another machine. */
+ * in a template the operator sends to another machine. */
 const CONTAINER_SIGNING_IDENTITY = "/data/jobs/job-7/signing-identity.json";
 const CONTAINER_RECEIPT_OUTPUT = "/data/jobs/job-7/receipt.json";
 /** The container-internal credential reference the authored server entry holds. */
@@ -250,8 +250,8 @@ const ZERO_SETUP_INTENT_ROUTES: Record<
       "it selects the connection locator, which the command's own positional " +
       "carries as a placeholder",
   },
-  // The input SOURCE does not travel -- the appliance's mount is not the
-  // scheduling machine's -- but the command carries a positional for it, under
+  // The input SOURCE does not travel -- the console's mount is not the
+  // scheduling machine's -- but the command holds a positional for it, under
   // the fixed name the hand-off tells the operator to use.
   inputCsv: { carries: "argvToken", token: "input.csv" },
   inputFile: { carries: "argvToken", token: "input.csv" },
@@ -348,7 +348,7 @@ describe("every authorable option graduates into the hand-off", () => {
   });
 
   test("the exchange template's keys are exactly the routed ones", () => {
-    // Two-way: an authorable field routed to a key the template does not carry
+    // Two-way: an authorable field routed to a key the template does not hold
     // fails, and a key appearing in the template that no authorable field routes
     // to fails -- which is what would catch a console-only key.
     const routedKeys = Object.values(EXCHANGE_INTENT_ROUTES)
@@ -402,7 +402,7 @@ describe("every authorable option graduates into the hand-off", () => {
 
   test("the linkage strategy graduates on the exchange mode inside the terms", () => {
     // The exchange mode has no `--linkage-strategy` of its own: the strategy is
-    // part of the linkage terms both parties agreed, and the template carries
+    // part of the linkage terms both parties agreed, and the template holds
     // them as they ran.
     const intent = maximalExchangeIntent();
     intent.linkageTerms = {
@@ -432,7 +432,7 @@ describe("the composed config stays one format with one validator", () => {
     ).not.toThrow();
   });
 
-  test("the template carries no key outside core's schema", () => {
+  test("the template contains no key outside core's schema", () => {
     // Re-serializing core's own parse of the document reproduces it byte for
     // byte: nothing in the template is outside the schema (it would be dropped),
     // and nothing the schema fills in is missing from the template.
@@ -469,7 +469,7 @@ describe("the composed config stays one format with one validator", () => {
 });
 
 describe("the placeholder invariants hold over every authorable option", () => {
-  test("the maximal exchange template carries no secret and no container path", () => {
+  test("the maximal exchange template contains no secret and no container path", () => {
     const yaml = maximalExchangeYaml();
     // The live run's own config, composed from the same intent and the same
     // authored entry, holds exactly the container paths the template must not.
@@ -493,7 +493,7 @@ describe("the placeholder invariants hold over every authorable option", () => {
     expect(yaml).toContain(HANDOFF_SIGNING_IDENTITY_PLACEHOLDER);
   });
 
-  test("the maximal zero-setup command carries no secret and no container path", () => {
+  test("the maximal zero-setup command contains no secret and no container path", () => {
     const line = maximalZeroSetupArgv().join(" ");
     expect(line).not.toContain(CONTAINER_CREDENTIAL_PATH);
     expect(line).not.toContain(CONTAINER_SIGNING_IDENTITY);

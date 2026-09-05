@@ -137,7 +137,7 @@ describe("acceptor columns editor state", () => {
   });
 });
 
-describe("acceptor verdict (re-surfaced, not re-derived)", () => {
+describe("acceptor verdict (re-shown, not re-derived)", () => {
   test("a file with no matching columns is blocked with the exact mockup title and a distinct announcement", () => {
     const { editorState } = editorFor(["notes"], nameTerms);
     const verdict = acceptorVerdict(["notes"], nameTerms, editorState);
@@ -150,7 +150,7 @@ describe("acceptor verdict (re-surfaced, not re-derived)", () => {
     expect(verdict.announcement).not.toBe(verdict.title);
   });
 
-  test("a partially-covered file reads N-of-M and is not fully satisfied", () => {
+  test("a partially-covered file shows N-of-M and is not fully satisfied", () => {
     const { editorState } = editorFor(["first_name", "notes"], nameTerms);
     const verdict = acceptorVerdict(
       ["first_name", "notes"],
@@ -162,7 +162,7 @@ describe("acceptor verdict (re-surfaced, not re-derived)", () => {
     expect(verdict.announcement).toBe(
       "1 of 2 linkage keys can be satisfied by your columns.",
     );
-    // The three display kinds read coverage; the launch decision is core's.
+    // The three display kinds show coverage; the launch decision is core's.
     expect(verdict.fullySatisfied).toBe(false);
   });
 
@@ -180,7 +180,7 @@ describe("acceptor verdict (re-surfaced, not re-derived)", () => {
     );
   });
 
-  test("a self-defeating adopted rule reads all-clear on coverage yet is not satisfied", () => {
+  test("a self-defeating adopted rule shows all-clear on coverage yet is not satisfied", () => {
     const { editorState } = editorFor(["date_of_birth"], deadDobTerms);
     const verdict = acceptorVerdict(
       ["date_of_birth"],
@@ -308,7 +308,7 @@ describe("acceptor launch gates", () => {
   });
 
   test("a dead key disables launch and sends the operator to the partner", () => {
-    // Every element field resolves, so coverage reads all-clear -- but the agreed
+    // Every element field resolves, so coverage shows all-clear -- but the agreed
     // terms declare cleaning that drops every record, which no edit on this screen
     // clears. The sentence names the one remedy that exists.
     const columns = ["date_of_birth"];
@@ -329,7 +329,7 @@ describe("acceptor launch gates", () => {
   test("two identifier columns disable launch even when the keys are satisfiable, naming the identifier rule", () => {
     const columns = ["id", "identifier", "first_name", "last_name"];
     const { editorState } = editorFor(columns, nameTerms);
-    // The keys are covered, but the seed carries two identifiers.
+    // The keys are covered, but the seed has two identifiers.
     const verdict = acceptorVerdict(columns, nameTerms, editorState);
     expect(verdict.kind).toBe("allClear");
     expect(acceptorHasIdentifierConflict(editorState.metadata)).toBe(true);
@@ -340,7 +340,7 @@ describe("acceptor launch gates", () => {
 
   test("a mid-edit cleaning step disables launch (standardization invalid) and points at the steps", () => {
     // A date_of_birth field whose recommended parse_date step is cleared mid-edit:
-    // the override layer carries an invalid step, so the gate must close.
+    // the override layer has an invalid step, so the gate must close.
     const dobTerms: LinkageTerms = {
       ...nameTerms,
       linkageFields: [{ name: "dob", type: "date_of_birth" }],
@@ -398,7 +398,7 @@ describe("acceptor launch gates", () => {
       ),
     ).toBe(OFFLINE_EXCHANGE_REASON);
     // Only the offline direction gates: a device reporting a connection is not
-    // read as a promise that the partner is reachable, so it blocks nothing.
+    // treated as a promise that the partner is reachable, so it blocks nothing.
     expect(
       acceptorLaunchBlockedReason(
         satisfiableVerdict,
@@ -448,8 +448,8 @@ describe("acceptor launch gates", () => {
   });
 
   test("a split rendezvous without retain mode disables launch, in the console's words", () => {
-    // The acceptor's directories are the appliance's own mounts, so a split
-    // appliance carries the retain precondition into every accept it runs -- and
+    // The acceptor's directories are the console's own mounts, so a split
+    // console imposes the retain precondition on every accept it runs -- and
     // the sentence the operator meets is the one naming the control to turn on,
     // taken from the shared predicate rather than restated here.
     expect(
@@ -495,7 +495,7 @@ describe("acceptor launch gates", () => {
     // Both cards sit in the one section below the columns, so a shared flag would
     // send the operator to the wrong one -- and each is a collapsed disclosure
     // whose own problem notice is invisible until it is opened. Driven through
-    // both cards' models exactly as the bench drives them, rather than by setting
+    // both cards' models exactly as the console drives them, rather than by setting
     // the flags by hand.
     const stepBlocks = {
       offline: false,
@@ -552,7 +552,7 @@ describe("acceptor launch gates", () => {
   });
 
   test("with several gates closed the sentence names the topmost surface on the screen", () => {
-    // A file that can match nothing AND carries two identifiers AND has no
+    // A file that can match nothing AND has two identifiers AND has no
     // connection authored: the operator is sent to the verdict at the top of the
     // step, not to a gate further down that a fix up there may clear anyway.
     const columns = ["id", "identifier", "notes"];
@@ -575,7 +575,7 @@ describe("acceptor launch gates", () => {
   });
 });
 
-describe("a marked column whose name is too long to carry", () => {
+describe("a marked column whose name is too long to include", () => {
   // The gap this closes: the seed metadata comes from inferMetadata over the
   // acceptor's own header, which no schema bounds, so an oversized name is markable
   // here and refused only by the partner's parse of the payload frame -- after the
@@ -584,7 +584,7 @@ describe("a marked column whose name is too long to carry", () => {
   const pastCeiling = atCeiling + "a";
   // One code POINT, two UTF-16 code units: MAX_NAME_LENGTH of them is under the
   // ceiling on the count ColumnName's display cut uses and over it on the count
-  // every carrying bound uses.
+  // every such bound uses.
   const astralPastCeiling = "\u{1D54F}".repeat(MAX_NAME_LENGTH);
 
   /** The columns step for a file covering both keys plus one payload column of
@@ -598,7 +598,7 @@ describe("a marked column whose name is too long to carry", () => {
     };
   }
 
-  test("a name at the ceiling is carryable and does not block launch", () => {
+  test("a name at the ceiling is valid and does not block launch", () => {
     const { editorState, verdict } = stepFor(atCeiling);
     expect(acceptorDisclosedColumns(editorState.metadata)).toEqual([atCeiling]);
     expect(
@@ -633,7 +633,7 @@ describe("a marked column whose name is too long to carry", () => {
 
   test("unmarking the column clears the block -- the file itself is not refused", () => {
     // An oversized name is fully usable for matching and ignoring: the bound is on
-    // what is CARRIED, so it clears on this screen without another file.
+    // what is DISCLOSED, so it clears on this screen without another file.
     const { editorState, verdict } = stepFor(pastCeiling);
     const unmarked = {
       ...editorState,
@@ -666,7 +666,7 @@ describe("a marked column whose name is too long to carry", () => {
 
   test("says nothing when the inviting party is entitled to no result", () => {
     // Nothing is transmitted to a party that receives no result, so no name is
-    // carried and the run does not refuse this pair -- and the panel beside the
+    // disclosed and the run does not refuse this pair -- and the panel beside the
     // grid already states that no column leaves whatever these marks say.
     const noResultTerms: LinkageTerms = {
       ...nameTerms,
@@ -688,7 +688,7 @@ describe("a marked column whose name is too long to carry", () => {
 
   test("the gate refuses exactly what core's prepare-time refusal does", () => {
     // Driven through core's own function rather than a second model of it: the
-    // screen and the run must not disagree about which names are carryable. The
+    // screen and the run must not disagree about which names are valid. The
     // acceptor's own output is the invitation's mirrored onto it, which is what
     // core reads.
     const accepted = deriveAcceptedLinkageTerms(nameTerms, "Sam Alvarez");
@@ -740,7 +740,7 @@ describe("the invitation's declared payload set against the marks", () => {
     },
   } satisfies Record<string, Partial<LinkageTerms>>;
 
-  /** The invitation's own perspective, which the columns step holds, carrying the
+  /** The invitation's own perspective, which the columns step holds, with the
    * named shape's payload declaration and output entitlement. Taking a name rather
    * than a literal keeps {@link shapes} the only place a shape is written. */
   function invitation(shape: keyof typeof shapes): LinkageTerms {
@@ -823,7 +823,7 @@ describe("the invitation's declared payload set against the marks", () => {
   test("says nothing when the invitation declares no payload set at all", () => {
     // The lazy direction: an absent declaration is reconciled against this party's
     // own disclosure when the exchange runs, not against a set it never named --
-    // whether the invitation carries no payload block, or one naming only what it
+    // whether the invitation has no payload block, or one naming only what it
     // sends.
     for (const terms of [
       invitation("declaresNoPayloadAtAll"),
@@ -1031,7 +1031,7 @@ describe("the invitation's declared payload set against the marks", () => {
   });
 
   test("both directions at once are stated together, and clearing one leaves the other named", () => {
-    // Core reports both directions in one refusal, so both are carried in one
+    // Core reports both directions in one refusal, so both are held in one
     // statement: an operator who clears the marked column must not meet an
     // unmentioned second problem on the next attempt.
     const terms = invitation("acceptsOnlyAColumnNotDisclosed");
@@ -1153,7 +1153,7 @@ describe("the invitation's declared payload set against the marks", () => {
 });
 
 describe("acceptor launch payload", () => {
-  test("carries the same metadata and standardization the verdict consumed", () => {
+  test("has the same metadata and standardization the verdict consumed", () => {
     const { editorState } = editorFor(["first_name", "last_name"], nameTerms);
     const payload = acceptorLaunchPayload(editorState);
     // The gate and the run cannot disagree: identical object references.

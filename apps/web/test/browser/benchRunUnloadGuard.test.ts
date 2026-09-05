@@ -20,14 +20,12 @@ import { createAppMount } from "./renderApp";
 
 import type { InvitationToken, LinkageTerms } from "@psilink/core";
 
-// A bench seat hosts the live WebRTC exchange itself, and the app-shell update
-// notice renders its Reload button above every route -- so the one thing that
-// must not happen is the page unloading out from under a run with nothing asking
-// first, which would end the session for BOTH parties. The seats' other unload
-// guard covers unsaved work and deliberately disarms the moment the invitation is
-// minted or the launch commits, which is exactly when the run begins; what is
-// under test here is the cover from that moment until the run settles. Chromium is
-// where this belongs: `beforeunload` is the platform contract under test.
+// A console seat hosts the live WebRTC exchange itself, so unloading mid-run
+// with nothing asking first would end the session for both parties. The
+// unsaved-work guard disarms when the invitation is minted or the launch
+// commits, which is when the run begins; this suite covers the guard from that
+// moment until the run settles, in Chromium, where `beforeunload` is the
+// platform contract under test.
 
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
@@ -40,10 +38,10 @@ vi.mock("@psi/rendezvous", async () =>
 );
 
 // Stub the run lifecycle so a run never dials: each invocation's options are
-// captured so a test can end the run through the same onResult/onError seams the
-// real lifecycle fires, with the seat still mounted -- which is what makes the
-// disarm assertion meaningful rather than a by-product of unmounting (the
-// bench.test.ts pattern).
+// captured so a test can end the run through the same onResult/onError call
+// sites the real lifecycle fires, with the seat still mounted -- which is what
+// makes the disarm assertion meaningful rather than a by-product of unmounting
+// (the bench.test.ts pattern).
 interface CapturedLifecycle {
   onResult: (outputs: {
     kind: "counted";
@@ -118,7 +116,7 @@ afterEach(() => {
   window.location.hash = "";
 });
 
-describe("leaving the page during a live bench exchange", () => {
+describe("leaving the page during a live console exchange", () => {
   test("the inviting seat confirms while the run is live, and not once it completes", async () => {
     app.render(createElement(InviterBench));
     await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();

@@ -78,8 +78,8 @@ export function expectCliSucceeded(run: CliRun, what: string): void {
  *
  * Matched by shape rather than by the sentence above it: the invitation is the
  * one base64url run long enough to be a token, so the extraction survives a
- * rewording of the operator copy around it. More than one is a genuine
- * ambiguity and is refused rather than guessed at.
+ * rewording of the operator copy around it. More than one is an ambiguity
+ * and is refused rather than guessed at.
  */
 export function invitationFrom(run: CliRun): string {
   const candidates = run.output
@@ -112,7 +112,7 @@ function fileDropConnectionBlock(params: {
 }
 
 /** Whether a configuration already names this file-drop directory, so the
- * caller can tell an endpoint the partner's invitation carried from one the
+ * caller can tell an endpoint the partner's invitation held from one the
  * operator had to supply. */
 export function namesFileDrop(configPath: string, dropDir: string): boolean {
   const config = readFileSync(configPath, "utf8");
@@ -155,7 +155,7 @@ export function fillInFileDropConnection(params: {
   );
 }
 
-/** The matched (own row, partner row) pairs a party's result CSV carries. */
+/** The matched (own row, partner row) pairs a party's result CSV holds. */
 export function pairsFromResultCsv(
   resultPath: string,
 ): Array<[number, number]> {

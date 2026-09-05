@@ -307,7 +307,7 @@ describe("relay message-queue bounds", () => {
     // The queue must retain the serialization it counted, not the parsed object
     // it arrived as: a parsed object of this shape occupies a large multiple of
     // its serialized bytes, so holding it would leave MAX_QUEUE_BYTES bounding
-    // something other than the memory the process is carrying. Sized at the
+    // something other than the memory the process holds. Sized at the
     // wire cap, where that divergence is worth the most to an attacker.
     const payload = densePayload(NEAR_WIRE_CAP_CHARS);
     const serialized = JSON.stringify(payload);
@@ -407,7 +407,7 @@ describe("relay message-queue bounds", () => {
   test("holds the largest wire-legal frame addressed between rendezvous ids", async () => {
     // MAX_QUEUE_BYTES is twice the wire cap so that any single legal frame can
     // always be held, but at the extreme that headroom is two bytes wide: a
-    // frame charged for a byte it never carried on the wire spends it and is
+    // frame charged for a byte that never crossed the wire spends it and is
     // refused. The worst case is the biggest frame a peer can actually put on
     // the socket -- the sender omits `src`, which the server stamps for it, so
     // every byte saved there becomes payload -- addressed between the two ids
@@ -465,7 +465,7 @@ describe("relay message-queue bounds", () => {
     // Only the four protocol fields are held, so a property a peer hangs off
     // its frame rides neither into the queue's retained bytes nor past them
     // uncounted -- and the peer that drains the hold is handed the same four
-    // fields a directly relayed frame would have carried.
+    // fields a directly relayed frame would have included.
     const payload = { sdp: "v=0\r\na=group:BUNDLE 0\r\n" };
     const offer = {
       type: MessageType.OFFER,
@@ -592,15 +592,12 @@ describe("liveness-timeout config invariant", () => {
     );
   });
 
-  // The unconfirmed window's safety argument is that it is at least 4x the PeerJS
-  // first-heartbeat cadence, so a real peer always sends a frame and graduates to
-  // the generous window before it can fire (4x leaves margin for a slow socket
-  // open and one missed heartbeat). The cadence is psilink-owned -- set
-  // explicitly at Peer construction (PEER_PING_INTERVAL_MS) rather than left to
-  // the caret-ranged `peerjs` default -- so pin the margin against both values
-  // here: a future edit to either the reap window or the cadence that narrows it
-  // below 4x fails CI rather than silently shrinking the headroom that justifies
-  // the window.
+  // The unconfirmed window must stay at least 4x the PeerJS first-heartbeat
+  // cadence (PEER_PING_INTERVAL_MS, set explicitly at Peer construction, not
+  // the caret-ranged `peerjs` default) so a real peer always sends a frame and
+  // graduates before the window can fire, with margin for a slow socket open
+  // and one missed heartbeat. This pins the margin against both values so a
+  // narrowing edit fails CI.
   test("unconfirmed_timeout stays at least 4x the heartbeat cadence", () => {
     expect(defaultConfig.unconfirmed_timeout).toBeGreaterThanOrEqual(
       4 * PEER_PING_INTERVAL_MS,

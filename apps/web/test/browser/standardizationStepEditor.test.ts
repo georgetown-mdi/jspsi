@@ -128,7 +128,7 @@ describe("StandardizationPreview renders each pipeline outcome distinctly", () =
         rawRows: [{ n: "---" }],
       }),
     );
-    // Rendered as a value outcome carrying the distinct "empty value" chip, never
+    // Rendered as a value outcome with the distinct "empty value" chip, never
     // the grey "dropped" chip.
     await expect
       .element(page.getByTestId("outcome-value"))
@@ -294,7 +294,7 @@ describe("StandardizationStepEditor", () => {
   });
 
   test("editing a numeric param across keystrokes keeps the input mounted", async () => {
-    // A stable per-step key carries the row's identity across each immutable param
+    // A stable per-step key holds the row's identity across each immutable param
     // update, so the controlled input is not remounted between keystrokes; typing
     // a multi-digit value lands every digit (a per-keystroke remount would drop
     // focus and lose all but the first).
@@ -331,7 +331,7 @@ describe("StandardizationStepEditor", () => {
     expect(emitted?.[0].params).toEqual({ length: 2 });
   });
 
-  test("the add menu surfaces each function's plain-language consequence", async () => {
+  test("the add menu shows each function's plain-language consequence", async () => {
     app.render(
       createElement(EditorWithPreview, {
         field: FIRST_NAME,
@@ -341,7 +341,7 @@ describe("StandardizationStepEditor", () => {
       }),
     );
     await userEvent.click(page.getByRole("button", { name: "Add a step" }));
-    // coalesce's blurb carries the match-creating consequence, shown at the moment
+    // coalesce's blurb states the match-creating consequence, shown at the moment
     // of choice rather than hidden behind the bare label.
     await expect
       .element(
@@ -462,7 +462,7 @@ describe("StandardizationStepEditor raw-pattern authoring (per-party, ungated)",
       .toHaveTextContent("mary");
   });
 
-  test("an out-of-dialect pattern surfaces the dialect error inline", async () => {
+  test("an out-of-dialect pattern shows the dialect error inline", async () => {
     app.render(
       createElement(EditorWithPreview, {
         field: FIRST_NAME,
@@ -472,7 +472,7 @@ describe("StandardizationStepEditor raw-pattern authoring (per-party, ungated)",
       }),
     );
     // A lookahead is out of the linear-time dialect; the editor rejects it with the
-    // descriptor's own message, surfaced inline as an alert, exactly as the exchange
+    // descriptor's own message, shown inline as an alert, exactly as the exchange
     // would refuse it.
     await userEvent.fill(
       page.getByRole("textbox", { name: "Pattern" }),
@@ -687,7 +687,7 @@ describe("preview outcomes reach assistive tech by text/label, not color alone",
       .toBeInTheDocument();
   });
 
-  test("a dropped value carries the word 'dropped', not a color cue alone", async () => {
+  test("a dropped value includes the word 'dropped', not a color cue alone", async () => {
     app.render(
       previewElement({
         field: FIRST_NAME,

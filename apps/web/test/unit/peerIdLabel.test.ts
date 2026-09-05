@@ -54,7 +54,7 @@ describe("the party-name bound and the message that reports it", () => {
     ["a diaeresis", "Ünal"],
     ["Cyrillic", "клиника"],
     ["Han", "診療所"],
-  ])("a party name carrying %s is refused", (_label, peerId) => {
+  ])("a party name containing %s is refused", (_label, peerId) => {
     expect(isAdmissiblePeerId(peerId)).toBe(false);
   });
 

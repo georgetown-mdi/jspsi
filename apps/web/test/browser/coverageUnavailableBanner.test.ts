@@ -16,7 +16,7 @@ import { createAppMount } from "./renderApp";
 
 import type { AcquiredCsv } from "@bench/inviterModel";
 
-// A minimal file whose seeded terms carry a few cleaning fields, so both surfaces
+// A minimal file whose seeded terms hold a few cleaning fields, so both surfaces
 // mount their standardization workbench alongside the banner under test.
 const csv: AcquiredCsv = {
   fileName: "clients.csv",

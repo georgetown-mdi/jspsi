@@ -33,16 +33,12 @@ import type {
 } from "@psi/managedLocalState";
 import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
 
-// The three export intents, tested in Node with injected seams. Every export reads
-// the record fresh rather than trusting a caller's copy. The backup and migration
-// exports serialize and mark in one atomic step (readAndMark), so what they serialize
-// is what the marker attests; the command-line export takes a plain read and has no
-// marking seam at all, since the two files it writes are not a backup this app
-// restores from. A backup leaves the source live; a migration and a command-line
-// export download and return a confirm handle, spending the source only when the
-// operator attests the files are saved (a dismissed save leaves it live) and only
-// through the one atomic step (spendIfCurrent) that writes the spend while the stored
-// secret is still the one the download carried.
+// The three export intents, tested in Node with injected dependencies. Every
+// export reads the record fresh rather than trusting a caller's copy. The
+// backup and migration exports serialize and mark atomically (readAndMark), so
+// what they serialize is what the marker attests; the command-line export
+// takes a plain read with no marking call site, since its two files are not a
+// backup this app restores from.
 
 const linkageTerms = getDefaultLinkageTerms("County Health Dept");
 
@@ -107,7 +103,7 @@ describe("exportManagedBackup", () => {
     expect(result.record).toBe(rec);
   });
 
-  test("the marker attests the secret the downloaded file carries", async () => {
+  test("the marker attests the secret the downloaded file has", async () => {
     const rec = record();
     const deps = backupDeps(rec);
     await exportManagedBackup(rec.id, deps);
@@ -118,9 +114,9 @@ describe("exportManagedBackup", () => {
   });
 
   test("a step that marks without serializing is refused, not downloaded", async () => {
-    // The binding is only as good as the step honoring it, so a seam that resolves
-    // having skipped the serialization fails the export rather than downloading bytes
-    // no marker attests.
+    // The binding is only as good as the step honoring it, so a dependency that
+    // resolves having skipped the serialization fails the export rather than
+    // downloading bytes no marker attests.
     const rec = record();
     const deps = {
       ...backupDeps(rec),
@@ -420,7 +416,7 @@ describe("dispatchManagedCronExport", () => {
       spent,
       stored,
       // The plain read this export takes: no marker is written here or anywhere else
-      // in it, so the deps carry no marking seam to write one through.
+      // in it, so the deps have no marking call site to write one through.
       readRecord: vi.fn((_id: string) => {
         order.push("read");
         return Promise.resolve<ManagedExchangeRecord | undefined>(rec);

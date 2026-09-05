@@ -30,36 +30,19 @@ import type { WebHandshakeDriver, WebPartyOutcome } from "./webParty";
 import type { CliRun } from "./cliParty";
 
 /**
- * A CLI party and a web party completing one live exchange together.
+ * A CLI party and a web party completing one live exchange over a shared
+ * file-drop directory -- the only transport a Node host can stand up without
+ * a browser and a broker. This proves the two runtimes complete a handshake
+ * and PSI rounds WITH each other (byte-parity fixtures only pin that their
+ * outputs agree). The CLI party is the real `psilink` program; the web party
+ * is assembled from the web app's own modules (apps/web/src).
  *
- * The byte-parity fixtures already pin that the two runtimes AGREE on outputs
- * for a given input. What they cannot show is that the two runtimes complete a
- * handshake and a set of PSI rounds WITH each other, which is what a change
- * landed on one runtime and not the other breaks. Here the CLI party is the real
- * `psilink` program -- its own argv, config, key file, PSI backend, and result
- * CSV -- and the web party is assembled from the web app's own modules
- * (apps/web/src), meeting in one file-drop directory.
- *
- * WHY FILE-DROP, AND WHAT THE HARNESS SUPPLIES FOR IT. The two runtimes share no
- * live transport a node host can stand up without a browser and a broker, so the
- * transport here is the file-drop directory: no server, no network, and the same
- * core file-sync protocol on both sides. Two pieces of that are the harness's,
- * because apps/web has neither and may not import the CLI's:
- *
- *  - the directory client the web party's file-sync connection runs on
- *    (./fileDropTransport), and
- *  - the application-layer AEAD wrap. A CLI party on a file-sync channel asks
- *    for it unconditionally, and `applyEncryption` is the OR of both parties'
- *    requests, so a web party must apply it or the exchange cannot start. The
- *    web app's own handshake driver refuses it, because the app exchanges only
- *    over a DTLS-confidential WebRTC channel; the last test below runs that
- *    driver and pins the refusal, so the stand-in cannot outlive the day
- *    apps/web applies the wrap itself.
- *
- * Everything else on the web party's side is the app's: its acceptor assembly
- * and its inviter mint and spec assembly, its browser WASM PSI engine, and its
- * reading of the CLI's minted credential. Everything on the CLI side is the
- * shipped program.
+ * The harness supplies what apps/web has neither of and may not import from
+ * the CLI: the file-sync client (./fileDropTransport) and an AEAD wrap
+ * stand-in for `applyEncryption`, which a file-sync CLI party always
+ * requests. The app's own driver refuses that wrap (WebRTC only, already
+ * DTLS-confidential); the last test below pins the refusal, so the stand-in
+ * cannot outlive the day apps/web applies the wrap itself.
  */
 
 // Two rows in common, at different offsets on each side, so a party reading its

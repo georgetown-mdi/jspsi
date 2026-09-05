@@ -12,14 +12,12 @@ import { SavedExchanges, SavedExchangesHome } from "@bench/SavedExchanges";
 
 import { createAppMount } from "./renderApp";
 
-// The store-unavailable behavior, rendered, for both routes. When the managed store
-// cannot be opened at all (private mode with storage blocked, an engine without
-// IndexedDB), the home route at `/` renders the quick path directly -- a visitor whose
-// browser cannot store recurring exchanges gets exactly the one-off flow, with no scary
-// banner -- while the always-list route at `/saved` shows the explicit degrade message
-// with a link to the quick path. The unavailability is a real failed-open -- the
-// store's open here rejects -- not a user-agent guess. The load ordering and its
-// classification are unit-tested; this file proves both renders.
+// The store-unavailable behavior, rendered, for both routes. When the managed
+// store cannot be opened at all (storage blocked, no IndexedDB), the home
+// route at `/` renders the quick path directly with no degrade banner, while
+// the always-list route at `/saved` shows an explicit degrade message with a
+// link to the quick path. Load ordering and classification are unit-tested
+// elsewhere; this file checks rendering.
 
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
@@ -58,7 +56,7 @@ describe("store unavailable", () => {
       )
       .toBeInTheDocument();
 
-    // No degrade banner on landing, and no error surfaced.
+    // No degrade banner on landing, and no error shown.
     expect(
       page
         .getByText("This browser cannot store recurring exchanges", {
@@ -85,7 +83,7 @@ describe("store unavailable", () => {
     await expect.element(quick).toBeInTheDocument();
     expect((await quick.element()).getAttribute("href")).toBe("/quick");
 
-    // No error surfaced, and no empty-list affordances leaked through.
+    // No error shown, and no empty-list affordances leaked through.
     expect(
       page.getByRole("button", { name: "Import a backup file" }).query(),
     ).toBeNull();

@@ -5,14 +5,9 @@ let originalMatchMedia: typeof window.matchMedia | undefined;
  * replacing `window.matchMedia` with a stub answering `prefersReduced` for a
  * `prefers-reduced-motion` query and no match for anything else.
  *
- * Mantine's Collapse reads the signal through `useReducedMotion`, which
- * resolves the match in a post-mount effect rather than on the first render, so
- * a test asserting the reduced-motion code path polls for the settled state
- * instead of assuming it is immediate.
- *
- * The replacement is undone by {@link restoreMatchMedia}, which every caller
- * owes its `afterEach`: the stub is a whole-window substitution and would
- * otherwise outlive the test that wanted it.
+ * Mantine's Collapse resolves `useReducedMotion` in a post-mount effect, so a
+ * test polls for the final state rather than assuming it is immediate. Undo the
+ * whole-window substitution with {@link restoreMatchMedia} in every `afterEach`.
  */
 export function stubReducedMotion(prefersReduced: boolean): void {
   originalMatchMedia ??= window.matchMedia;

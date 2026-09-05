@@ -54,7 +54,7 @@ vi.mock("@psi/managedExchangeStore", async (importOriginal) => {
 // mocks the store open); the pure load ordering and its failure classification are
 // unit-tested without a database.
 
-// Assert on hrefs rather than navigation: the router seam is stubbed to a plain
+// Assert on hrefs rather than navigation: the router boundary is stubbed to a plain
 // anchor, so a rendered Link is an <a href> and useNavigate is a no-op.
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
@@ -260,7 +260,7 @@ describe("saved list route: the always-list surface", () => {
     expect((await quick.element()).getAttribute("href")).toBe("/quick");
   });
 
-  test("a populated list offers a first-class create entry into the invite/configure flow", async () => {
+  test("a populated list offers a primary create entry into the invite/configure flow", async () => {
     await createManagedExchange(newExchange());
 
     app.render(createElement(SavedExchanges));
@@ -291,7 +291,7 @@ describe("saved list route: the always-list surface", () => {
   });
 });
 
-describe("saved list route: an agreed schedule surfaces its due-ness", () => {
+describe("saved list route: an agreed schedule shows its due-ness", () => {
   test("a window open right now is named as open on the row", async () => {
     await createManagedExchange(
       newExchange({
@@ -395,7 +395,7 @@ describe("saved list route: an agreed schedule surfaces its due-ness", () => {
       .toBeInTheDocument();
     // The escalation is a state to look into, not a failure: it takes the same
     // caution treatment the exchange's own surface renders it in, and the failure
-    // red would make the miss surface the standing warning the design keeps it
+    // red would make the miss show up as the standing warning the design keeps it
     // from being (docs/MANAGED_EXCHANGE.md, "Repeated misses surface, they do not
     // auto-pause").
     expect(
@@ -406,7 +406,7 @@ describe("saved list route: an agreed schedule surfaces its due-ness", () => {
   });
 });
 
-describe("saved list route: delete is a first-class, always-available action", () => {
+describe("saved list route: delete is a fully supported, always-available action", () => {
   test("delete confirms, then removes the exchange from the list", async () => {
     await createManagedExchange(newExchange({ label: "Riverbend quarterly" }));
 
@@ -442,7 +442,7 @@ describe("saved list route: delete is a first-class, always-available action", (
     expect(page.getByText("Riverbend quarterly").query()).toBeNull();
   });
 
-  test("a backed-up exchange's confirm carries the exported-backup custody note", async () => {
+  test("a backed-up exchange's confirm holds the exported-backup custody note", async () => {
     const created = await createManagedExchange(
       newExchange({ label: "Backed up partnership" }),
     );
@@ -471,7 +471,7 @@ describe("saved list route: delete is a first-class, always-available action", (
       .toBeInTheDocument();
   });
 
-  test("a never-backed-up exchange's confirm carries no custody note", async () => {
+  test("a never-backed-up exchange's confirm holds no custody note", async () => {
     await createManagedExchange(newExchange({ label: "Fresh partnership" }));
 
     app.render(createElement(SavedExchanges));
@@ -491,7 +491,7 @@ describe("saved list route: delete is a first-class, always-available action", (
   });
 
   test("a command-line hand-off's confirm says the saved files keep running it", async () => {
-    // The hand-off marks no backup, so the backed-up note cannot carry the custody
+    // The hand-off marks no backup, so the backed-up note cannot hold the custody
     // reminder for it: deleting this row leaves the CLI's two files and the schedule
     // the operator set around them running the exchange.
     const created = await createManagedExchange(
@@ -608,7 +608,7 @@ describe("saved list route: delete is a first-class, always-available action", (
     );
   });
 
-  test("a rejected delete surfaces an error and leaves the row standing", async () => {
+  test("a rejected delete shows an error and leaves the row standing", async () => {
     await createManagedExchange(newExchange({ label: "Riverbend quarterly" }));
     // The delete rejects (a transaction abort, quota, or blocked open): the confirm
     // must not close silently over a row that is still there.

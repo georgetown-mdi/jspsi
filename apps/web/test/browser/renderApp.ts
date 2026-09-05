@@ -11,7 +11,7 @@ import type { Root } from "react-dom/client";
 
 /**
  * Overrides a browser test may layer onto the app provider config. Only the
- * knobs a test genuinely varies are exposed; anything else stays fixed at the
+ * settings a test varies are exposed; anything else stays fixed at the
  * app root's configuration so a test cannot silently diverge from what ships.
  */
 export interface RenderAppOptions {

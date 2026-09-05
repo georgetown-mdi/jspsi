@@ -21,15 +21,12 @@ import type {
   SpawnPsiCryptoWorker,
 } from "../../src/psi/psiCryptoController.js";
 
-// createPsiCryptoWorkerHandle is the SINGLE definition of the browser host-side worker
-// wiring (see psiCryptoController.ts): production spawns a real Web Worker through it
-// (via createBrowserPsiEngineFactory) and these tests wrap a fake through it, so
-// neither re-implements a mirror that could drift. Driving a fake also reaches paths a
-// real worker cannot exercise on demand: an 'onmessageerror' (a reply that fails
-// structured-clone deserialization) never fires for today's cloneable payloads, so
-// only a fake can prove it is routed rather than silently dropped (which would hang the
-// pending call). The real worker + real WASM round-trip lives in the browser suite
-// (test/browser/psiCryptoWorker.test.ts), where a Worker constructor exists.
+// createPsiCryptoWorkerHandle is the single definition of the browser host-side
+// worker wiring; production reaches it via createBrowserPsiEngineFactory and these
+// tests reach it through a fake, so neither re-implements a second copy that could
+// drift. A fake also reaches 'onmessageerror', which never fires for today's
+// cloneable payloads and so cannot be exercised by a real worker. The real worker +
+// WASM round-trip lives in test/browser/psiCryptoWorker.test.ts.
 
 // A stand-in for a dedicated Web Worker: records posted requests and terminate() calls,
 // and lets a test emit the worker's message/error/messageerror events on demand.
@@ -194,8 +191,8 @@ describe("createBrowserPsiEngineFactory", () => {
 
   // The acceptance criterion: the worker is torn down on every exchange-end path.
   // runExchange funnels all three -- success, error, abort -- through the participant's
-  // dispose() in its finally, so at the engine seam each is "dispose() after that prior
-  // state", and dispose() must terminate the worker exactly once every time.
+  // dispose() in its finally, so at the engine boundary each is "dispose() after that
+  // prior state", and dispose() must terminate the worker exactly once every time.
   describe("dispose() terminates the worker on every terminal path", () => {
     test("success: after a resolved call", async () => {
       const { factory, workers } = wireFactory();

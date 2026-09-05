@@ -69,7 +69,7 @@ function makeConn(overrides?: {
 }
 
 /** Let pending microtasks and zero-delay timers run, so a promise that is not
- * settled after this one is genuinely parked. */
+ * settled after this one is parked. */
 function drainTaskQueue(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
@@ -129,13 +129,10 @@ describe("waitForPeerClose", () => {
   test.each(["closed", "failed"] as const)(
     "does not read a channel closing on a %s link as the peer's receipt",
     async (state) => {
-      // The channel goes down either way, so the event alone cannot say whether
-      // the peer took the final frame or this side's teardown discarded it. A
-      // link already gone when the channel starts closing, with PeerJS still
-      // holding the connection open -- no peer close read -- settles that:
-      // there was nothing left to deliver over, and reporting the delivery
-      // signal would tell the operator of an exchange that lost its final frame
-      // that it landed.
+      // The channel closing event alone cannot say whether the peer took the
+      // final frame or this side's teardown discarded it. A link already down
+      // before the channel starts closing means nothing was left to deliver,
+      // so this resolves as peer-gone rather than a peer close.
       const { conn, channel, peerConnection } = makeConn();
 
       const waiting = waitForPeerClose(conn);
@@ -169,7 +166,7 @@ describe("waitForPeerClose", () => {
 
   test("still reads a completed close as the peer's, whatever the link shows", async () => {
     // The `close` event is the fallback for a stack that never enters `closing`,
-    // and it deliberately does not repeat the reading above: a close that has
+    // and it does not repeat the reading above: a close that has
     // completed is one this side's own stack may have answered by tearing the
     // link down, so a dead link here would not say the link died BEFORE the
     // close. Inventing a doubt about a healthy exchange is the worse error.
@@ -340,7 +337,7 @@ describe("waitForPeerClose", () => {
 describe("DEFAULT_PEER_CLOSE_TIMEOUT_MS", () => {
   test("matches the spec budget table's Close drain row", () => {
     // docs/spec/WEBRTC_TRANSPORT.md, "## Budgets": "Close drain | 5 min" --
-    // a deliberate change to either must update the other.
+    // a change to either must update the other.
     expect(DEFAULT_PEER_CLOSE_TIMEOUT_MS).toBe(5 * 60 * 1000);
   });
 

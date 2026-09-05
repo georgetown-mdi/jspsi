@@ -14,7 +14,7 @@ import { defaultSpawnCSVParseWorker } from "@psi/csvParseWorkerClient";
 // real browser (dev). The controller's dispatch plumbing is pinned in Node with a
 // fake worker (test/unit/csvParseController.test.ts); these confirm the actual worker
 // module -- constructed via `new Worker(new URL(...))`, running core's loadCSVFile --
-// parses correctly and surfaces core's guards, in a real Worker. The production-BUNDLE
+// parses correctly and exposes core's guards, in a real Worker. The production-BUNDLE
 // case is a separate build-gated integration test, since Vitest's browser mode
 // serves the dev transform, not a `vite build`.
 
@@ -45,7 +45,7 @@ describe("CSV worker parse (real Vite-native worker)", () => {
     // its rejection is serialized back and rebuilt into an Error -- so a malformed parse
     // fails clearly rather than crashing a downstream consumer. The non-string-header
     // guard is the same mechanism; a real File cannot produce a non-string header, so
-    // its firing is pinned in core's browser suite and its worker-path surfacing in the
+    // its firing is pinned in core's browser suite and its worker-path exposure in the
     // controller unit test.
     const ceiling = 512;
     const file = new File(["x".repeat(ceiling * 2)], "huge-line.csv", {

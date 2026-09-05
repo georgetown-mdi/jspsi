@@ -14,7 +14,7 @@ import type { ManagedRotationCriticalSection } from "@psi/managedRunRotate";
 
 // The pure ordering and decision half of the run+rotate critical section, tested
 // in Node without a database or a real Web Lock: the persist-before-data-exchange
-// sequence (with the persist and lock seams faked), the `expires` restamp from the
+// sequence (with the persist and lock boundaries faked), the `expires` restamp from the
 // max-age policy, and the `lastRun` bookkeeping. The strict-durability transaction,
 // the single-writer lock, and the no-steal property are the platform half, tested
 // against real Chromium in test/browser/managedExchangeRun.test.ts.
@@ -146,7 +146,7 @@ describe("runRotationCriticalSection: persist-before-gate ordering", () => {
     );
   });
 
-  test("a persist failure aborts the section and carries storage bookkeeping", async () => {
+  test("a persist failure aborts the section and records storage bookkeeping", async () => {
     const order: Array<string> = [];
     const section = tracedSection(order, {
       persist: () => {

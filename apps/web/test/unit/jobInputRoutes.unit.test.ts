@@ -227,7 +227,7 @@ describe("GET /api/jobs/inputs/profile", () => {
     );
     const responsePromise = profile(name);
     // Let the parser attach its stream listeners before the read faults, so the error
-    // flows through the parser rather than surfacing as an uncaught 'error'.
+    // flows through the parser rather than showing up as an uncaught 'error'.
     await new Promise((resolve) => setImmediate(resolve));
     const leak = `${dir}/${name}: EIO 111223333`;
     stream.destroy(new Error(leak));
@@ -235,7 +235,7 @@ describe("GET /api/jobs/inputs/profile", () => {
     expect(response.status).toBe(400);
     const raw = await response.text();
     expect(JSON.parse(raw)).toEqual({ error: "parse_failed" });
-    // The response body carries the code only -- never the mounted path or cell bytes
+    // The response body contains the code only -- never the mounted path or cell bytes
     // the underlying read error embeds.
     expect(raw).not.toContain(dir);
     expect(raw).not.toContain("111223333");

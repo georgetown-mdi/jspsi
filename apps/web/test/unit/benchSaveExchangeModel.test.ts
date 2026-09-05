@@ -26,7 +26,7 @@ const terms = {
 
 // Two columns, one disclosed (`program_code`, isPayload) and one match-only
 // (`dob`): disclosedColumnNames(metadata) is exactly ["program_code"]. The
-// stub's own disclosedPayloadColumns is deliberately a DIFFERENT set
+// stub's own disclosedPayloadColumns is by design a DIFFERENT set
 // (["case_number"], not a payload column in this metadata at all) so a test
 // asserting against it can only pass on a verbatim pass-through of the
 // invitation's field -- a re-derivation via disclosedColumnNames(metadata)
@@ -179,7 +179,7 @@ describe("the run command names the minted config file", () => {
 });
 
 describe("endpoint and config derive from one locator", () => {
-  test("SFTP request and config carry the authored host and path", () => {
+  test("SFTP request and config hold the authored host and path", () => {
     const request = endpointRequestFor("sftp", sftpFields);
     expect(request).toEqual({
       channel: "sftp",
@@ -202,7 +202,7 @@ describe("endpoint and config derive from one locator", () => {
     expect(input.disclosedPayloadColumns).toEqual(["case_number"]);
   });
 
-  test("an empty disclosed set is carried through, not omitted", () => {
+  test("an empty disclosed set passes through, not omitted", () => {
     const input = exchangeFileInputFor(
       "sftp",
       sftpFields,
@@ -222,7 +222,7 @@ describe("endpoint and config derive from one locator", () => {
     ).toEqual({ channel: "sftp", host: "sftp.riverbend.example.gov" });
   });
 
-  test("filedrop request and config carry the shared directory only", () => {
+  test("filedrop request and config hold the shared directory only", () => {
     expect(endpointRequestFor("filedrop", filedropFields)).toEqual({
       channel: "filedrop",
       path: "/exchanges/psilink",

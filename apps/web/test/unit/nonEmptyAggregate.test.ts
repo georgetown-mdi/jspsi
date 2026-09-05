@@ -25,7 +25,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** A fan-out pipeline: a value carrying the delimiter realizes several candidates. */
+/** A fan-out pipeline: a value containing the delimiter realizes several candidates. */
 const SPLIT_ON_SPACE: Standardization = [
   {
     output: "first_name",
@@ -35,7 +35,7 @@ const SPLIT_ON_SPACE: Standardization = [
 ];
 
 describe("computeFieldCoverage: the silent-empty defense", () => {
-  test("a transform that collapses every row to null surfaces a 0% coverage alarm", () => {
+  test("a transform that collapses every row to null reports a 0% coverage alarm", () => {
     // parse_date with the wrong input format matches no row -> every value drops to
     // null. This is the cited hazard: SHAPE is satisfiable (a date column is bound)
     // but VALUE collapses, byte-indistinguishable from a real empty intersection.
@@ -159,7 +159,7 @@ describe("computeFieldCoverage: the silent-empty defense", () => {
 
   test("an empty CSV is not flagged, and a missing column collapses to silent-empty", () => {
     expect(isSilentEmpty(computeFieldCoverage([], stdFor("c"))[0])).toBe(false);
-    // A row lacking the input column carries no value; it still counts toward total.
+    // A row lacking the input column has no value; it still counts toward total.
     const rows = [{ other: "x" }, { other: "y" }];
     const [coverage] = computeFieldCoverage(rows, stdFor("c"));
     expect(coverage.total).toBe(2);

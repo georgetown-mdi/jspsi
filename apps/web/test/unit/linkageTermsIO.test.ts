@@ -29,7 +29,7 @@ describe("exportLinkageTerms", () => {
     const json = exportLinkageTerms(TERMS, "json");
     const parsed = JSON.parse(json) as Record<string, unknown>;
     // Keys are snake_cased, matching psilink.yaml and the EXCHANGE_REFERENCE
-    // snippets -- not the camelCase the TypeScript carries.
+    // snippets -- not the camelCase the TypeScript uses.
     expect(parsed).toHaveProperty("linkage_fields");
     expect(parsed).toHaveProperty("linkage_keys");
     expect(parsed).not.toHaveProperty("linkageFields");
@@ -116,7 +116,7 @@ describe("importLinkageTerms rejection", () => {
   });
 
   test("never echoes a parsed value in the error", () => {
-    // A hostile identity carrying control/markup bytes: it must not appear in
+    // A hostile identity containing control/markup bytes: it must not appear in
     // the rejection message (the no-echo parse-error contract).
     const hostile = "[31mPWNED[0m<script>";
     const result = importLinkageTerms(
@@ -133,7 +133,7 @@ describe("importLinkageTerms rejection", () => {
     // readableTermsError forwards issue.message verbatim ONLY for `custom`-code
     // issues, trusting the schema's referential-integrity refines to use static,
     // value-free messages (the useful, safe ones). Pin that contract at the door: a
-    // refine fired on a hostile value must surface its static message and never the
+    // refine fired on a hostile value must show its static message and never the
     // value. A swap target that matches no element identifier triggers such a refine
     // with the hostile target in the offending position.
     const hostile = "HOSTILE<script>VALUE";
@@ -154,7 +154,7 @@ describe("importLinkageTerms rejection", () => {
   });
 
   test("never echoes a transform params key (a partner-controlled path segment)", () => {
-    // The one partner-controlled segment a Zod issue path can carry is a transform
+    // The one partner-controlled segment a Zod issue path can include is a transform
     // `params` record key (params is a record over arbitrary keys). An over-long
     // key fails the schema's key-length bound with the key in the issue path; the
     // readable error must locate it ("...params") without echoing the key.

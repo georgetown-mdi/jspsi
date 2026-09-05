@@ -15,9 +15,9 @@ import { createAppMount } from "./renderApp";
 // The offer's store-availability gate, rendered. Before the form, the panel probes
 // whether this browser can open the managed store at all: when it can, the label and
 // max-age form renders; when it cannot (private browsing with storage blocked, an
-// engine without IndexedDB), a short honest state stands in for the form so the
-// operator is not invested in inputs a deposit could never honor. The probe seam is
-// probeManagedStoreOpen, mocked here to resolve either answer.
+// engine without IndexedDB), a short, accurate state stands in for the form so the
+// operator is not invested in inputs a deposit could never honor. The probe is
+// `probeManagedStoreOpen`, mocked here to resolve either answer.
 
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
@@ -65,7 +65,7 @@ describe("manage-exchange offer store gate", () => {
       .toBeInTheDocument();
   });
 
-  test("an unavailable store renders the honest state and no form inputs", async () => {
+  test("an unavailable store renders the accurate state and no form inputs", async () => {
     probeStoreOpen.mockResolvedValue(false);
     app.render(
       createElement(ManageExchangeOffer, {

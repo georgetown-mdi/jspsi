@@ -139,7 +139,7 @@ describe.skipIf(!hasBuild)("SFTP connection authoring (server side)", () => {
   test("author from a mountRef locator the operator picked in the browse", async () => {
     const base = `http://127.0.0.1:${port}/api/jobs`;
 
-    // A mountRef carries only the picked path segments; the server resolves them
+    // A mountRef holds only the picked path segments; the server resolves them
     // against JOB_SECRETS_DIR to an absolute @path -- no absolute path from the
     // browser.
     const put = await fetch(`${base}/sftp`, {
@@ -191,7 +191,7 @@ describe.skipIf(!hasBuild)("SFTP connection authoring (server side)", () => {
     });
     expect(put.status).toBe(200);
     const projection = await put.text();
-    // Neither the pasted value nor an @path rides the response.
+    // Neither the pasted value nor an @path appears in the response.
     expect(projection).not.toContain("s3cret-pasted-password");
     expect(projection).not.toContain("@");
     expect(JSON.parse(projection)).toEqual({
@@ -273,7 +273,7 @@ describe.skipIf(!hasBuild)("SFTP connection authoring (server side)", () => {
     expect(await response.text()).toContain("connection.credential");
   });
 
-  test("a host carrying userinfo and a path is refused, naming the field only", async () => {
+  test("a host with userinfo and a path is refused, naming the field only", async () => {
     if (secretsDir === undefined) throw new Error("fixtures not initialized");
     const response = await fetch(`http://127.0.0.1:${port}/api/jobs/sftp`, {
       method: "PUT",

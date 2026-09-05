@@ -106,7 +106,7 @@ function enableJobApi(): string {
 }
 
 /**
- * Construct a job-API Request that carries a loopback `Host` by default. A
+ * Construct a job-API Request that has a loopback `Host` by default. A
  * synthetic Request sets no `Host` (a real HTTP server always does), so without
  * this the gate's loopback Host-allowlist would 403 every route-driven test. An
  * explicit `host` header wins (the rebinding and mismatch cases), and passing
@@ -132,7 +132,7 @@ function createRequest(body: unknown, headers: Record<string, string> = {}) {
 }
 
 /** A record body with the given createdAt and outcome, matching the shape the
- * status route reads. Every record carries an outcome, so the default is the
+ * status route reads. Every record has an outcome, so the default is the
  * completed run's and a terminated run's is stated at the call site. */
 function recordJson(
   createdAt: string,
@@ -171,7 +171,7 @@ async function recordPairStatuses(
 
 /**
  * Enable the API, seed the global manager with one pointed at the stub CLI
- * (carrying its scenario through childEnv, since the route path's sanitized child
+ * (passing its scenario through childEnv, since the route path's sanitized child
  * env drops ambient STUB_* vars), create a job, and resolve its id once it has
  * reached `target`. `stubEnv` scripts the stub: what output/record files it
  * writes, and what it exits with.
@@ -802,7 +802,7 @@ describe("status route reports record availability", () => {
   /** The record fields the status route reports for `id`, driven through the
    * route. The withheld reason is read beside the boolean everywhere, since the
    * two together are the answer a client acts on: the boolean alone reports a
-   * record the appliance holds and cannot describe exactly as it reports one that
+   * record the console holds and cannot describe exactly as it reports one that
    * was never written. */
   async function recordStatusOf(id: string): Promise<{
     status: string;
@@ -832,7 +832,7 @@ describe("status route reports record availability", () => {
     expect(body.recordAvailable).toBe(true);
     expect(body.recordCreatedAt).toBe(CREATED_AT);
     // An offered pair is not withheld at all, so the field that says why one is
-    // withheld is absent rather than carrying a stale reason beside it.
+    // withheld is absent rather than holding a stale reason beside it.
     expect(body.recordUnavailableReason).toBeUndefined();
   });
 
@@ -849,7 +849,7 @@ describe("status route reports record availability", () => {
   test("a running job's pair is withheld as not settled, not as absent", async () => {
     // The CLI writes the pair near the end of a run, so a mid-run read says
     // nothing about whether this run will owe a record -- and reporting it as the
-    // absence of one would be a claim the appliance cannot make yet.
+    // absence of one would be a claim the console cannot make yet.
     const root = tempDataRoot("routes-running-record");
     roots.push(root);
     vi.stubEnv("JOB_DATA_ROOT", root);
@@ -874,7 +874,7 @@ describe("status route reports record availability", () => {
     // of that disclosure and still exits non-zero, so the record pair is on disk
     // under a FAILED job. It is the disclosure-accounting artifact that run's
     // operator needs, and the console's own recovery controls DELETE the folder it
-    // sits in, so the appliance offers it rather than holding it back on the run's
+    // sits in, so the console offers it rather than holding it back on the run's
     // exit code.
     const id = await createFinishedJob("failed", {
       STUB_EXIT_CODE: "1",
@@ -932,10 +932,10 @@ describe("status route reports record availability", () => {
     expect(await recordPairStatuses(id)).toEqual({ record: 404, keys: 404 });
   });
 
-  test("a record carrying no recognized outcome is held back as undescribable", async () => {
-    // Every record the appliance's own CLI writes states its outcome, so one that
+  test("a record with no recognized outcome is held back as undescribable", async () => {
+    // Every record the console's own CLI writes states its outcome, so one that
     // does not -- a data root a differently-versioned CLI wrote -- is not a record
-    // this appliance can describe. It is refused at the downloads rather than
+    // this console can describe. It is refused at the downloads rather than
     // offered under a completed run's framing, and the status body says the file
     // is nonetheless there, so a console control that removes the workdir asks
     // first instead of reading the denial as an absence.
@@ -954,7 +954,7 @@ describe("status route reports record availability", () => {
     const body = await recordStatusOf(id);
     expect(body.recordAvailable).toBe(false);
     expect(body.recordUnavailableReason).toBe("undescribable-record");
-    // Withheld, not offered: the appliance serves no pair it cannot read whole,
+    // Withheld, not offered: the console serves no pair it cannot read whole,
     // and the two routes stay on the status field's own gate.
     expect(await recordPairStatuses(id)).toEqual({ record: 404, keys: 404 });
   });
@@ -977,7 +977,7 @@ describe("status route reports record availability", () => {
     expect(await recordPairStatuses(id)).toEqual({ record: 404, keys: 404 });
   });
 
-  test("a malformed record file reads as undescribable (defensive parse)", async () => {
+  test("a malformed record file is treated as undescribable (defensive parse)", async () => {
     // The record write landed a non-JSON body; the status route must not throw,
     // and must treat the record as unavailable rather than serving a bad stamp --
     // while still reporting the file it could not read as being there.
@@ -992,7 +992,7 @@ describe("status route reports record availability", () => {
     expect(await recordPairStatuses(id)).toEqual({ record: 404, keys: 404 });
   });
 
-  test("a record missing createdAt reads as undescribable", async () => {
+  test("a record missing createdAt is treated as undescribable", async () => {
     const id = await createSucceededJob({
       STUB_OUTPUT_FILE: "id\n1\n",
       STUB_RECORD_JSON: JSON.stringify({ summary: "no timestamp" }),
@@ -1003,7 +1003,7 @@ describe("status route reports record availability", () => {
     expect(await recordPairStatuses(id)).toEqual({ record: 404, keys: 404 });
   });
 
-  test("the status body carries no restored key", async () => {
+  test("the status body has no restored key", async () => {
     const id = await createSucceededJob({ STUB_OUTPUT_FILE: "id\n1\n" });
     const response = (await handlersOf(JobRoute).GET({
       request: jobRequest(`http://localhost/api/jobs/${id}`),
@@ -1116,7 +1116,7 @@ describe("POST /api/jobs drives a job from a mounted work input", () => {
 });
 
 describe("POST /api/jobs and the authored sftp connection", () => {
-  test("a second concurrent sftp create is a 409 carrying the occupying job id", async () => {
+  test("a second concurrent sftp create is a 409 with the occupying job id", async () => {
     enableJobApiWithSftpServer({ STUB_DELAY_MS: "5000" });
     const first = (await handlersOf(CreateRoute).POST({
       request: createRequest(validSftpIntent()),
@@ -1130,7 +1130,7 @@ describe("POST /api/jobs and the authored sftp connection", () => {
       params: {},
     })) as Response;
     expect(second.status).toBe(409);
-    // The busy body carries only the occupying exchange's id so the browser can
+    // The busy body has only the occupying exchange's id so the browser can
     // re-attach to it -- nothing else about the running exchange.
     expect(await second.json()).toEqual({ id: firstId });
   });
@@ -1147,7 +1147,7 @@ describe("POST /api/jobs and the authored sftp connection", () => {
 
   test("the create path composes the authored connection into the job config", async () => {
     // The connection material comes only from the authored entry: the composed
-    // psilink.yaml carries its host and @path credential ref, and nothing
+    // psilink.yaml has its host and @path credential ref, and nothing
     // client-chosen.
     const root = tempDataRoot("routes-sftp-compose");
     roots.push(root);
@@ -1176,7 +1176,7 @@ describe("POST /api/jobs and the authored sftp connection", () => {
 });
 
 describe("POST /api/jobs rejects a concurrent filedrop job", () => {
-  test("a second concurrent filedrop create is a 409 carrying the occupying job id", async () => {
+  test("a second concurrent filedrop create is a 409 with the occupying job id", async () => {
     const root = tempDataRoot("routes-filedrop");
     roots.push(root);
     vi.stubEnv("JOB_DATA_ROOT", root);
@@ -1205,7 +1205,7 @@ describe("POST /api/jobs rejects a concurrent filedrop job", () => {
   });
 });
 
-describe("POST /api/jobs on a split-provisioned appliance", () => {
+describe("POST /api/jobs on a split-provisioned console", () => {
   /** The retain trio a split rendezvous requires, as the console's file-handling
    * card resolves it before it POSTs. */
   const RETAIN_OPTIONS = {
@@ -1215,7 +1215,7 @@ describe("POST /api/jobs on a split-provisioned appliance", () => {
   };
 
   /** Seed the global manager with both rendezvous legs mounted, so every filedrop
-   * create it serves carries the inbound/outbound pair. */
+   * create it serves has the inbound/outbound pair. */
   function enableSplitRendezvous(): void {
     const root = tempDataRoot("routes-split");
     roots.push(root);
@@ -1311,7 +1311,7 @@ describe("GET /api/jobs/sftp", () => {
     });
   });
 
-  test("the projection carries only {host, port, path} and no @ ref or fingerprint", async () => {
+  test("the projection has only {host, port, path} and no @ ref or fingerprint", async () => {
     enableJobApiWithSftpServer();
     const response = (await handlersOf(SftpRoute).GET({
       request: jobRequest("http://localhost/api/jobs/sftp"),
@@ -1371,7 +1371,7 @@ describe("GET /api/jobs/rendezvous names the shared folder", () => {
     expect((await getRendezvous()).status).toBe(404);
   });
 
-  test("carries the launcher-passed folder name as both locator and name", async () => {
+  test("has the launcher-passed folder name as both locator and name", async () => {
     enableJobApi();
     vi.stubEnv("JOB_RENDEZVOUS_NAME", "agency-a-agency-b");
     const response = await getRendezvous();
@@ -1447,7 +1447,7 @@ describe("GET /api/jobs/rendezvous names the shared folder", () => {
     expect(typeof body.locator).toBe("string");
   });
 
-  test("never carries the resolved mount path", async () => {
+  test("never includes the resolved mount path", async () => {
     const root = enableJobApi();
     const mount = path.join(root, "agency-drop");
     fs.mkdirSync(mount, { recursive: true });
@@ -1456,7 +1456,7 @@ describe("GET /api/jobs/rendezvous names the shared folder", () => {
     const body = await (await getRendezvous()).text();
     expect(body).not.toContain(mount);
     expect(body).not.toContain(root);
-    // Not merely absent by value: no field carries a path at all.
+    // Not merely absent by value: no field has a path at all.
     expect(Object.keys(JSON.parse(body) as object)).toEqual([
       "configured",
       "sharesDataRoot",
@@ -1466,7 +1466,7 @@ describe("GET /api/jobs/rendezvous names the shared folder", () => {
     ]);
   });
 
-  test("a split appliance reports both legs' names, and never either path", async () => {
+  test("a split console reports both legs' names, and never either path", async () => {
     const root = enableJobApi();
     const inbound = path.join(root, "from-partner");
     const outbound = path.join(root, "to-partner");
@@ -1489,8 +1489,8 @@ describe("GET /api/jobs/rendezvous names the shared folder", () => {
   });
 
   test("a single-mount console names no outbound leg, whatever the name variable says", async () => {
-    // A split body always carries an outboundLocator, so a body that carried one
-    // without a second mount would announce a split this appliance cannot run. The
+    // A split body always has an outboundLocator, so a body that had one
+    // without a second mount would announce a split this console cannot run. The
     // mount decides the shape; the name variable only names a leg that exists.
     const root = enableJobApi();
     const mount = path.join(root, "agency-drop");
@@ -1518,7 +1518,7 @@ describe("GET /api/jobs/rendezvous names the shared folder", () => {
     >;
     expect(body.configured).toBe(false);
     expect(body.problem).toContain("JOB_RENDEZVOUS_OUTBOUND_DIR");
-    // The reason names variables, never the appliance's own paths.
+    // The reason names variables, never the console's own paths.
     expect(JSON.stringify(body)).not.toContain(root);
   });
 
@@ -1542,7 +1542,7 @@ describe("GET /api/jobs/rendezvous names the shared folder", () => {
   });
 });
 
-/** GET /api/jobs/slot with a loopback Host, carrying any extra headers. */
+/** GET /api/jobs/slot with a loopback Host, plus any extra headers. */
 async function getSlot(
   headers: Record<string, string> = {},
 ): Promise<Response> {
@@ -1783,7 +1783,7 @@ describe("PUT/DELETE /api/jobs/sftp (authoring the connection)", () => {
     "$label crosses the 400 as a fixed reason, never its own spelling",
     async ({ overrides, error }) => {
       // The schema's own unrecognized-key message quotes the submitted spelling,
-      // which is how a key name carrying control bytes would reach the operator's
+      // which is how a key name with control bytes would reach the operator's
       // screen. This route takes the substitution from the same shared formatter
       // the probe and fingerprint routes do, so a fixed reason crosses instead.
       enableJobApi();
@@ -2000,7 +2000,7 @@ describe("POST /api/jobs/sftp/probe reads a host key without authoring", () => {
     expect(await response.json()).toEqual({ status: "unreachable" });
   });
 
-  test("a diagnosed exit 69 carries the peer answer and a bounded escaped excerpt", async () => {
+  test("a diagnosed exit 69 has the peer answer and a bounded escaped excerpt", async () => {
     seedManagerWithProbe({
       STUB_EXIT_CODE: "69",
       STUB_PROBE_STDOUT:
@@ -2042,7 +2042,7 @@ describe("POST /api/jobs/sftp/probe reads a host key without authoring", () => {
     });
   });
 
-  test("a body carrying a credential-shaped field is a 400 (strict, no such field)", async () => {
+  test("a body with a credential-shaped field is a 400 (strict, no such field)", async () => {
     seedManagerWithProbe({ STUB_PROBE_STDOUT: okProbeLine() });
     const response = await postProbe({
       host: "sftp.example.org",
@@ -2059,7 +2059,7 @@ describe("POST /api/jobs/sftp/probe reads a host key without authoring", () => {
 
   test("an unmodeled key's own spelling never crosses the 400", async () => {
     // The schema's own unrecognized-key message quotes the submitted spelling,
-    // which is how a key name carrying control bytes would reach the operator's
+    // which is how a key name with control bytes would reach the operator's
     // screen. What the caller has to know is that a key they sent is not modeled,
     // so a fixed reason crosses instead.
     seedManagerWithProbe({ STUB_PROBE_STDOUT: okProbeLine() });
@@ -2121,7 +2121,7 @@ describe("POST /api/jobs/sftp/probe reads a host key without authoring", () => {
 describe("the shared rejected-body formatter", () => {
   test("an empty issue list is refused, never read through", () => {
     // A failed parse reports at least one issue. The guard is what keeps that
-    // premise honest: were it ever false, the formatter says so rather than
+    // assumption correct: were it ever false, the formatter says so rather than
     // reading a property off nothing, so the message -- not a TypeError from the
     // read -- is what this asserts.
     expect(() => formatFirstIssue([])).toThrow(/no schema issue/);
@@ -2132,7 +2132,7 @@ describe("the shared rejected-body formatter", () => {
   });
 });
 
-describe("PUT /api/jobs/sftp keeps the mandatory-pin backstop (invariant)", () => {
+describe("PUT /api/jobs/sftp keeps the mandatory-pin safety check (invariant)", () => {
   test.each([
     ["an empty string", ""],
     ["an @-file reference", "@/x"],
@@ -2288,11 +2288,10 @@ describe("readJobRequestBody caps the read, not Content-Length", () => {
   test("a body filling the authoring cap parses", async () => {
     // A body filling the authoring route's byte cap exactly: no realistic
     // authored body reaches the structural bounds the bounded parse also
-    // enforces (object width, array length, nesting) within that byte cap, so
-    // this pins that the largest realistic body the cap admits still reaches
-    // the caller parsed rather than turning into a 400. The structural bound
-    // for pathological nesting is stated on JobRequestBodyResult in
-    // routeSupport.ts, and the next test exercises it directly.
+    // enforces (object width, array length, nesting) within that byte cap. This
+    // pins that the largest realistic body the cap admits still parses rather
+    // than turning into a 400 -- the structural bound is documented on
+    // JobRequestBodyResult in routeSupport.ts, and exercised directly next.
     const overhead = '{"field":""}'.length;
     const filled = "a".repeat(MAX_SFTP_AUTHOR_BODY_BYTES - overhead);
     const body = `{"field":"${filled}"}`;
@@ -2331,7 +2330,7 @@ describe("readJobRequestBody caps the read, not Content-Length", () => {
     // fields stays well under the boundary cap and gets a clean schema error,
     // never a spurious 413. A pathological control-character payload that
     // inflates ~6x under \uXXXX escaping is not valid CSV and is bounded here by
-    // design, so the cap is deliberately not sized to clear it.
+    // design, so the cap is not sized to clear it.
     const sample = "12345,Jane,Public,1990-01-01\n".repeat(4096);
     const jsonBytesPerChar =
       new TextEncoder().encode(JSON.stringify(sample)).length / sample.length;

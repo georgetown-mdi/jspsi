@@ -7,7 +7,7 @@ import { prepareManagedRerunExchange } from "@psi/managedPreparedExchange";
 import type { CSVRow } from "@psilink/core";
 
 // The re-run's prepared-exchange assembly, tested in Node: the persisted document's
-// own-perspective terms bind to this run's rows, and the received-payload lock-in
+// own-perspective terms bind to this run's rows, and the received-payload commitment
 // is threaded from the record's persisted `expectedPayloadColumns` exactly as the
 // accept path threads it from the invitation's disclosed set.
 
@@ -37,23 +37,23 @@ describe("prepareManagedRerunExchange", () => {
     expect(prepared.rowCount).toBe(1);
   });
 
-  test("threads the persisted expected-payload lock-in onto the prepared exchange", () => {
+  test("threads the persisted expected-payload commitment onto the prepared exchange", () => {
     const prepared = prepareManagedRerunExchange(
       exchangeFile(["shared_id"]),
       rows,
       columns,
     );
-    // The received-payload lock-in is the record's persisted set, passed as-is (the
-    // same explicit lock-in the accept path applies from the disclosed set).
+    // The received-payload commitment is the record's persisted set, passed as-is (the
+    // same explicit commitment the accept path applies from the disclosed set).
     expect(prepared.expectedPayloadColumns).toEqual(["shared_id"]);
   });
 
-  test("a record with no lock-in leaves it undefined (lazy reconciliation)", () => {
+  test("a record with no commitment leaves it undefined (lazy reconciliation)", () => {
     const prepared = prepareManagedRerunExchange(exchangeFile(), rows, columns);
     expect(prepared.expectedPayloadColumns).toBeUndefined();
   });
 
-  test("threads the persisted terms-side lock-in onto the prepared exchange", () => {
+  test("threads the persisted terms-side commitment onto the prepared exchange", () => {
     // A managed re-run holds no invitation token, so the declaration it binds the
     // inviter to comes from the record's own document. Both booleans: `false` is a
     // real declaration, and the one an inviter would widen away from by presenting
@@ -79,7 +79,7 @@ describe("prepareManagedRerunExchange", () => {
   test("refuses before connecting when the run's set is not the one consented to", () => {
     // A stored acceptor document whose consent names a set this run's columns no
     // longer resolve: the re-run must refuse rather than transmit it. The document
-    // carries no metadata, so the set resolves from THIS run's header.
+    // has no metadata, so the set resolves from THIS run's header.
     const stale = composeManagedExchangeFile({
       connection: { channel: "webrtc", host: "signaling.example.org" },
       linkageTerms: standingTerms("Clinic A"),

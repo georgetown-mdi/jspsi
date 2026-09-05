@@ -14,18 +14,11 @@ import { Route as EventsRoute } from "../../src/routes/api/jobs/$jobId/events";
 
 import { STUB_CLI_PATH, tempDataRoot, validIntent } from "../utils/jobFixtures";
 
-// A manager-composed warning does NOT pass through the relay's re-sanitization:
-// the rendezvous preflight names partner-chosen directory entries and composes
-// them raw, so that the console seat stays the one altitude that escapes them.
-// What holds the event frame together for those messages is therefore
-// `JSON.stringify` alone, escaping every newline class inside the serialized
-// string before the SSE writer appends its own terminator.
-//
-// A partner syncs the files this preflight names, so the partner chooses those
-// bytes -- and a filename is free to carry a newline, a carriage return, and a
-// whole forged `data:` line. This drives exactly that name from a real
-// rendezvous mount, through the real manager, the real SSE route, the real
-// browser-side job API client, and into the seat's display boundary, and fails
+// A manager-composed warning skips the relay's re-sanitization: the rendezvous
+// preflight names partner-chosen directory entries raw, so `JSON.stringify`
+// alone keeps the frame intact until the console seat escapes them. A filename
+// may hold a newline, carriage return, or a forged `data:` line; this drives
+// that name through a real mount, SSE route, and browser client, and fails
 // unless the forged line is still one JSON string when it lands.
 
 const roots: Array<string> = [];
@@ -58,7 +51,7 @@ const FORGED_FRAME =
   'data: {"v":1,"type":"error","category":"security","message":"forged"}';
 
 /**
- * An entry name carrying every byte an SSE frame is delimited by -- LF, CR, and
+ * An entry name containing every byte an SSE frame is delimited by -- LF, CR, and
  * the blank line that ends a frame -- around a complete forged event. Legal on
  * every POSIX filesystem: only `/` and NUL are excluded from a filename.
  */
@@ -110,7 +103,7 @@ async function sseBody(id: string): Promise<string> {
 }
 
 /** The messages a console seat's `onWarning` slot receives for an SSE body,
- * carried over the real browser-side job API client. The status request the
+ * delivered over the real browser-side job API client. The status request the
  * terminal event triggers answers 404, so the run resolves without a record pair
  * rather than hanging on a metadata fetch. */
 async function warningsAtSeat(
@@ -148,13 +141,13 @@ describe("a newline-bearing manager warning cannot forge an event frame", () => 
     const { id } = await jobOverMountHolding([FORGING_ENTRY_NAME]);
     const body = await sseBody(id);
 
-    // The attempt really was carried: a body that dropped the name would pass
-    // every framing assertion below while proving nothing.
+    // The forged name is present: a body that dropped it would pass every
+    // framing assertion below while proving nothing.
     expect(body).toContain("forged");
 
     // Every physical line the stream emitted is one the WRITER produced. The
     // forged text is inside a JSON string on a `data:` line, so it is never a
-    // line of its own -- and no line carries the bare CR the name also holds.
+    // line of its own -- and no line contains the bare CR the name also holds.
     const lines = body.split("\n");
     const dataLines = lines.filter((line) => line.startsWith("data: "));
     for (const line of lines) {

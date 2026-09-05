@@ -26,16 +26,13 @@ import type { ManagedRendezvousFlows } from "@psi/managedRendezvous";
 
 // The side-dispatched rendezvous, tested in Node with the rendezvous flows faked:
 // the record's local `side` selects listenAsInviter vs dialAsAcceptor, the
-// record's CURRENT sharedSecret is passed to whichever runs (so its peer id
-// derives fresh, never from storage), and the acceptor's dial endpoint comes from
-// the app's OWN location -- the stored document's server locator is inert per the
-// spec (docs/spec/MANAGED_EXCHANGE_RECORD.md, "Role: a local side field"). One
-// test drives the REAL listenAsInviter through an injected peer factory to prove
-// the constructed id is deriveRendezvousPeerId over the current secret -- the
-// "derived, never stored" property by construction.
+// current sharedSecret goes to whichever runs (its peer id derives fresh, never
+// from storage), and the acceptor's dial endpoint comes from the app's OWN
+// location, not the stored document's server locator, which the spec keeps inert
+// (docs/spec/MANAGED_EXCHANGE_RECORD.md, "Role: a local side field").
 
-// Every locator field deliberately differs from the stubbed app location below,
-// so an assertion on the dial endpoint distinguishes the two sources.
+// Every locator field differs from the stubbed app location below, so an
+// assertion on the dial endpoint distinguishes the two sources.
 const webrtcLocator: WebRTCExchangeLocator = {
   channel: "webrtc",
   host: "signaling.example.org",
@@ -170,7 +167,7 @@ describe("beginManagedRendezvous: side dispatch", () => {
     expect(endpoint.path).not.toBe(webrtcLocator.path);
   });
 
-  test("carries a supplied peer-wait bound into the acceptor's dial budget", async () => {
+  test("passes a supplied peer-wait bound into the acceptor's dial budget", async () => {
     stubAppLocation();
     const { flows, acceptorCalls } = recordingFlows();
 

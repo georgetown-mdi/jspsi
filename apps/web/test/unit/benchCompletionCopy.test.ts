@@ -48,7 +48,7 @@ describe("completionOutcome", () => {
       count: 1847,
       label: "matched records",
     });
-    // The console's server-job path holds the result on the appliance and counts
+    // The console's server-job path holds the result locally and counts
     // no rows, so the headline states completion without inventing a figure.
     expect(completionOutcome(matched(undefined))).toBeUndefined();
   });
@@ -64,7 +64,7 @@ describe("completionOutcome", () => {
 
   test("distinguishes a count-only run from a withheld one in the headline", () => {
     // A helper received nothing and a count-only party received exactly what its
-    // terms promised, so the two must not read alike here either.
+    // terms promised, so the two must not look alike here either.
     expect(completionOutcome({ kind: "withheld" })).toBeUndefined();
     expect(completionOutcome(counted(0))).toEqual({ label: "count only" });
   });
@@ -114,7 +114,7 @@ describe("the exchange-record copy", () => {
   test("the terminated lead leads with the disclosure, not the failure", () => {
     // The alert above already says the run stopped. What the operator would not
     // otherwise know -- and what the record is FOR -- is that data had already
-    // crossed, so the lead must not read as one more restatement of the failure.
+    // crossed, so the lead must not be treated as one more restatement of the failure.
     expect(TERMINATED_RECORD_LEAD).toContain("already exchanged data");
     expect(TERMINATED_RECORD_LEAD).toContain("record of that disclosure");
   });
@@ -143,7 +143,7 @@ describe("the exchange-record copy", () => {
     // and still pairs with a receipt the partner holds.
     expect(TERMINATED_RECORD_KEYS_NOTICE).toContain("still states what");
     expect(TERMINATED_RECORD_KEYS_NOTICE).toContain("keys private");
-    // And the completed run's copy must not carry the limitation, which does not
+    // And the completed run's copy must not state the limitation, which does not
     // hold for it.
     expect(COMPLETED_RECORD_NOTICE).not.toContain("nothing to open");
   });
@@ -161,7 +161,7 @@ describe("the exchange-record copy", () => {
   });
 
   test("the undescribable copy states the file, not what it records", () => {
-    // The appliance holds a file it cannot read as a record, so the panel may
+    // The console holds a file it cannot read as a record, so the panel may
     // claim its presence and nothing else -- and since no download stands under
     // this copy, it has to say where the file is and that going on removes it.
     expect(UNDESCRIBABLE_RECORD_LEAD).toContain("cannot read as an exchange");
@@ -206,7 +206,7 @@ describe("the exchange-record copy", () => {
     // The other confirm that names a record points the operator at the panel's
     // download; there is none here, so this one has to name where the file sits.
     // And it claims only that a file is there -- not what it records, which is
-    // the part the appliance could not read.
+    // the part the console could not read.
     expect(UNDESCRIBABLE_RECORD_CONFIRM_TITLE).toContain("exchange record");
     expect(UNDESCRIBABLE_RECORD_CONFIRM_BODY).toContain("cannot read");
     expect(UNDESCRIBABLE_RECORD_CONFIRM_BODY).toContain(
@@ -240,7 +240,7 @@ describe("untakenRecordConfirm", () => {
     keysFileName: "psilink-record.keys.json",
   };
 
-  test("confirms over a record the appliance says it holds", () => {
+  test("confirms over a record the console says it holds", () => {
     expect(
       untakenRecordConfirm({
         kind: "available",
@@ -253,10 +253,10 @@ describe("untakenRecordConfirm", () => {
     });
   });
 
-  test("confirms over a record the appliance holds and cannot read", () => {
+  test("confirms over a record the console holds and cannot read", () => {
     // Nothing downloads in this state, so the confirm is the only place the
     // operator is told a record file is standing in the folder they are about to
-    // remove. Reading the appliance's denial as an absence here is the loss this
+    // remove. Reading the console's denial as an absence here is the loss this
     // state exists to prevent.
     expect(untakenRecordConfirm({ kind: "undescribable" })).toEqual({
       title: UNDESCRIBABLE_RECORD_CONFIRM_TITLE,
@@ -266,7 +266,7 @@ describe("untakenRecordConfirm", () => {
 
   test("confirms over an ask that never answered, under its own copy", () => {
     // An exhausted ask established nothing, and a run that got as far as
-    // exchanging data owes a record whether or not the appliance said so -- so
+    // exchanging data owes a record whether or not the console said so -- so
     // the silence still buys a confirm, just not the one that asserts a record.
     expect(untakenRecordConfirm({ kind: "unanswered" })).toEqual({
       title: UNKNOWN_RECORD_CONFIRM_TITLE,
@@ -276,7 +276,7 @@ describe("untakenRecordConfirm", () => {
 
   test("confirms while the ask is still in flight, saying so", () => {
     // The window between a failure alert appearing and its record ask landing is
-    // the whole of the ask's bound on the failure this exists for -- an appliance
+    // the whole of the ask's bound on the failure this exists for -- a console
     // that stopped answering -- and every recovery in that window DELETEs the
     // run's folder. An unresolved ask has established no less than an exhausted
     // one, so it confirms too, under copy about the asking rather than a silence.
@@ -286,15 +286,15 @@ describe("untakenRecordConfirm", () => {
     });
   });
 
-  test("does not confirm over the appliance's own not-available answer", () => {
-    // `none` is the one definitive absence there is: the appliance answered and
+  test("does not confirm over the console's own not-available answer", () => {
+    // `none` is the one definitive absence there is: the console answered and
     // holds no record, which is what a run that failed before disclosing looks
     // like. Interrupting there would spend the confirm on nothing.
     expect(untakenRecordConfirm({ kind: "none" })).toBeUndefined();
   });
 
   test("does not confirm where the seat put no ask at all", () => {
-    // A browser run has no appliance job, so its recoveries destroy no record
+    // A browser run has no console job, so its recoveries destroy no record
     // anywhere and nothing was ever asked about one.
     expect(untakenRecordConfirm(undefined)).toBeUndefined();
   });

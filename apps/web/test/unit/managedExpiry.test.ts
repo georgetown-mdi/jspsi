@@ -40,7 +40,7 @@ describe("managedExchangeLapsed", () => {
 });
 
 describe("ManagedExchangeExpiredError", () => {
-  test("carries the lapsed instant for the surface to name", () => {
+  test("holds the lapsed instant for the surface to name", () => {
     const error = new ManagedExchangeExpiredError("2026-07-01T00:00:00.000Z");
     expect(error.expires).toBe("2026-07-01T00:00:00.000Z");
     expect(error.name).toBe("ManagedExchangeExpiredError");

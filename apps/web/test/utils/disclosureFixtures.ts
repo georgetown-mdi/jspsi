@@ -23,7 +23,7 @@ import type {
  * fixture stays relative to wherever the literal stands rather than pinning a
  * version that stops being the neighbour when core's moves.
  *
- * Throws when the constant carries no ordinal to count from. The split that tells
+ * Throws when the constant holds no ordinal to count from. The split that tells
  * a stranded accounting from a stale page reads that same shape, so a fixture
  * quietly falling back to some other literal would leave the suites driving
  * neither direction.
@@ -37,7 +37,7 @@ export function neighbouringRecordVersion(offset: number): string {
   return `${match[1]}/v${Number(match[2]) + offset}`;
 }
 
-/** The linkage terms both sides of the fixture exchange agree, carrying the
+/** The linkage terms both sides of the fixture exchange agree, holding the
  * governance fields an accounting reads: the agreement and its purpose, the
  * linkage fields the keys reference, and the payload data dictionary that
  * describes a disclosed column. */
@@ -115,14 +115,14 @@ export interface DisclosureRecordOverrides {
 }
 
 /** The rule set the citing fixture terms name: a field set and a key set, each
- * separately named and separately versioned as the terms document carries them. */
+ * separately named and separately versioned as the terms document holds them. */
 const LOCAL_RULE_SET: NonNullable<LinkageTerms["linkageRuleSet"]> = {
   fieldSet: { name: "baseline-pii", version: "1.0.0" },
   keySet: { name: "hmis-keys", version: "2.1.0" },
 };
 
 /** The partner's terms: the local ones relabelled, or -- for an explicit `null`
- * -- carrying no identity key at all, the shape a partner that supplied no name
+ * -- holding no identity key at all, the shape a partner that supplied no name
  * sends. Built by omission rather than by an explicit undefined, which the
  * canonical encoding the record hashes its terms through rejects. */
 function partnerTermsFor(

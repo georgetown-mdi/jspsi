@@ -70,7 +70,7 @@ const ceilingRefusal = (): unknown => {
 };
 
 describe("failureFor", () => {
-  test("each category carries its alert title", () => {
+  test("each category has its alert title", () => {
     expect(failureFor("output", new Error("x")).title).toBe(
       "Results unavailable",
     );
@@ -85,7 +85,7 @@ describe("failureFor", () => {
     );
   });
 
-  test("a tagged security error surfaces its own recovery guidance", () => {
+  test("a tagged security error shows its own recovery guidance", () => {
     const failure = failureFor(
       "security",
       Object.assign(
@@ -110,7 +110,7 @@ describe("failureFor", () => {
     expect(failure.message).toContain("start over with a fresh invitation");
   });
 
-  test("the output message forbids the re-run and still carries the cause", () => {
+  test("the output message forbids the re-run and still holds the cause", () => {
     // The exchange itself completed, so the alert withholds every run-again
     // control -- and says why, rather than leaving the operator to look for the
     // control somewhere else. The local cause stays in the message.
@@ -199,7 +199,7 @@ describe("failureFor", () => {
 
   test("a config fault that is not a mounted-file 400 keeps the generic copy", () => {
     // An inline-source create rejection, and a CLI prepare-time config fault, both
-    // surface the plain config message -- only the workFile 400 names the file.
+    // show the plain config message -- only the workFile 400 names the file.
     expect(
       failureFor("config", new JobApiRequestError(400, "x"), {
         kind: "inline",
@@ -213,14 +213,11 @@ describe("failureFor", () => {
 
   test("the prepare-time ceiling refusal reaches the operator with its remedies", () => {
     // core types the single-pass ceiling pre-flight as an OperatorConfigError, so
-    // this alert surfaces the refusal's own text rather than swallowing it in the
-    // generic exchange copy. Its remedies -- fewer records, smaller batches, and
-    // terms re-agreed for the key count that is not this party's alone to change
-    // -- are the whole value of showing it. Driven from the refusal core actually
-    // raises, so the alert is checked against the real text rather than a copy of
-    // it that could drift; the other half of the path, a prepare-phase
-    // OperatorConfigError reaching this builder as `config` at all, is pinned in
-    // exchangeLifecycle.test.ts against the same base type.
+    // this alert shows the refusal's own text rather than generic exchange copy.
+    // Checked against the real text core raises, not a copy that could drift.
+    // The other half of the path -- a prepare-phase OperatorConfigError reaching
+    // this builder as `config` at all -- is pinned in exchangeLifecycle.test.ts
+    // against the same base type.
     const refusal = ceilingRefusal();
     expect(refusal).toBeInstanceOf(OperatorConfigError);
     const failure = failureFor("config", refusal, WORK_FILE);

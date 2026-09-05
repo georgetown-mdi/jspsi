@@ -17,21 +17,13 @@ import {
 import type { Browser, FileChooser } from "playwright";
 import type { ChildProcess } from "node:child_process";
 
-// The regression this guards against: PapaParse's `worker: true` self-hosted
-// worker corrupted the CSV parse once Vite bundled and minified the app
-// (dev and Vitest's real-Chromium tests both passed with the broken worker, so a
-// dev-only test cannot catch it). This drives the REAL inviter bench flow -- the
-// operator's name, a large CSV, and the spine through to Create -- against the app
-// served from a production `vite build` (.output), so the parse runs through the
-// Vite-native worker in the exact bundled/minified form the inline switch was
-// forced by. A worker is created (page.on("worker")) and the invitation is produced
-// with correct linkage terms, which only happens if the parse yielded a clean header
-// -- the broken worker mis-applied the header and crashed invitation generation. The
-// CSV is sized above CSV_WORKER_FILE_BYTE_THRESHOLD so the off-thread routing takes
-// the worker rather than the inline fallback.
-//
-// This runs against whatever `.output` currently holds -- rebuild (`npm run build
-// -w apps/web`) before re-running to validate a change; CI always rebuilds first.
+// PapaParse's `worker: true` self-hosted worker corrupted the CSV parse once
+// Vite bundled and minified the app; only a production build catches it, since
+// dev and Vitest's real-Chromium tests both passed with the broken worker. This
+// drives the real inviter bench flow against a `vite build` (.output), with a
+// CSV sized above CSV_WORKER_FILE_BYTE_THRESHOLD so parsing routes off-thread.
+// Rebuild (`npm run build -w apps/web`) before re-running; CI always rebuilds
+// first.
 
 const READY_TIMEOUT_MS = 30_000;
 // The phases that wait on real work: the bundle fetch, the off-thread parse, and
@@ -48,7 +40,7 @@ const CHOOSER_PROBE_TIMEOUT_MS = 2_000;
 // of the loop it sits in (playwright's 30s default would).
 const ACTION_TIMEOUT_MS = 5_000;
 
-// A CSV comfortably above CSV_WORKER_FILE_BYTE_THRESHOLD (4 MiB), carrying columns
+// A CSV comfortably above CSV_WORKER_FILE_BYTE_THRESHOLD (4 MiB), with columns
 // that infer to default linkage keys so the invitation is producible. Duplicate rows
 // are fine -- invitation generation parses and infers, it does not deduplicate.
 function writeLargeCsv(dir: string): string {
@@ -96,8 +88,8 @@ describe.skipIf(!hasBuild)(
           // Record the URL of every Web Worker the page constructs. Asserting on the
           // CSV parse worker's own bundled-asset URL (not merely that some worker
           // fired) is what proves the Vite-native worker -- and not the inline
-          // fallback or an unrelated worker -- actually ran in the production build:
-          // Vite emits it as `csvParse.worker-<hash>.js`, so its URL carries that name.
+          // fallback or an unrelated worker -- ran in the production build: Vite
+          // emits it as `csvParse.worker-<hash>.js`, so its URL includes that name.
           const workerUrls: Array<string> = [];
           page.on("worker", (worker) => workerUrls.push(worker.url()));
 
@@ -109,17 +101,12 @@ describe.skipIf(!hasBuild)(
           });
 
           // Supply the CSV through the dropzone's own file chooser, retrying only
-          // the click that opens it. The page is server-rendered and hydrates
-          // asynchronously -- `load` guarantees the bundle fetched, not that
-          // hydration ran -- and a file set on the input before React attaches its
-          // change handler is lost. Setting the same path again does not recover
-          // it: driven against this build, the app registered no file on any
-          // re-application. So the file cannot be applied on a retry loop, and a
-          // loop that tried would also restart the 5 MiB parse on every pass,
-          // holding the dropzone in its reading state for as long as it ran.
-          // Retrying the CLICK costs nothing and gates itself: the dropzone opens
-          // a chooser only once its React handler is attached, so a chooser
-          // opening IS hydration, and the file is applied exactly once, after it.
+          // the click that opens it: `load` guarantees the bundle fetched, not
+          // that hydration ran, and a file set before React attaches its change
+          // handler is lost, with no recovery from re-setting the same path. The
+          // click alone gates itself -- the chooser opens only once the handler
+          // is attached, so its opening IS hydration, and the file is applied
+          // exactly once, after it.
           const dropzone = page.getByLabel("Your data file");
           let chooser: FileChooser | undefined;
           try {
@@ -146,7 +133,7 @@ describe.skipIf(!hasBuild)(
             throw new Error("no file chooser was captured");
           await chooser.setFiles(csvPath);
 
-          // The file card carries the parsed row count, so it renders only once the
+          // The file card shows the parsed row count, so it renders only once the
           // off-thread parse has landed -- the one signal that separates a parse
           // that never finished from a Continue button held back by something else.
           try {
@@ -198,7 +185,7 @@ describe.skipIf(!hasBuild)(
             .getByRole("heading", { name: "Share this invitation" })
             .waitFor({ state: "visible", timeout: GENERATE_TIMEOUT_MS });
 
-          // The deep link carries the accept route and the encoded token in its
+          // The deep link has the accept route and the encoded token in its
           // fragment, further confirming a real invitation was minted from the parse.
           const deepLink = await page
             .getByText("/accept#", { exact: false })
@@ -211,7 +198,7 @@ describe.skipIf(!hasBuild)(
           await page.close();
         }
       },
-      // Cover every bounded phase serially, so a slow one surfaces its own error
+      // Cover every bounded phase serially, so a slow one reports its own error
       // rather than a bare per-test timeout: goto, the parsed-file wait, and the
       // share-block wait at GENERATE_TIMEOUT_MS each; the chooser loop at
       // HYDRATION_TIMEOUT_MS plus the one iteration in flight when the deadline

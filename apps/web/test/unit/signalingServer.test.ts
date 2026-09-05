@@ -37,7 +37,7 @@ import type { ServerResponse } from "node:http";
 // cap is covered in signalingPayloadBound.test.ts; the pre-101 handshake timeout
 // in signalingUpgradeTimeout.test.ts, which imports no `ws` (see the note there).
 
-/** How many `error` and `close` listeners a socket is carrying. The release
+/** How many `error` and `close` listeners a socket has. The release
  * window installs one of each, so these counts are where a test sees whether it
  * took them back off. */
 interface HandleCounts {
@@ -274,7 +274,7 @@ function openRawConnection(port: number): RawConnection {
   const socket = net.connect(port, "127.0.0.1");
   const chunks: Array<Buffer> = [];
   socket.on("data", (chunk: Buffer) => chunks.push(chunk));
-  // A released socket may land as a reset; `close` carries the verdict.
+  // A released socket may land as a reset; `close` holds the verdict.
   socket.on("error", () => {});
   const released = new Promise<void>((resolve) => {
     socket.once("close", () => resolve());
@@ -523,7 +523,7 @@ describe("signaling socket guards", () => {
 
 // A release the peer declines to cooperate with must still happen on the bound,
 // so every case below drives a raw socket that answers nothing. Waiting a
-// multiple of the bound keeps the check honest on a slow runner while staying far
+// multiple of the bound keeps the check accurate on a slow runner while staying far
 // under the `ws` close timer (30 seconds) a missing release would fall back to,
 // which is the failure these pin.
 const RELEASE_MARGIN_MS = SOCKET_RELEASE_TIMEOUT_MS * 3;
@@ -603,12 +603,12 @@ describe("signaling socket release", () => {
 
     expect(await settlesWithin(peer.released, RELEASE_MARGIN_MS)).toBe(true);
     // Releasing what nobody else could have answered is the expected shape, not
-    // a premise that broke.
+    // an assumption that broke.
     expect(sig.errors).toEqual([]);
   }, 15_000);
 
   test("an upgrade left to a co-resident listener that answers it is not taken back", async () => {
-    // The premise the branch rests on, holding: the co-resident listener adopts
+    // The assumption the branch rests on, holding: the co-resident listener adopts
     // the upgrade, and the socket it now owns must survive the release bound --
     // cutting it is the dev-server HMR teardown the `noServer` wiring exists to
     // avoid.
@@ -623,7 +623,7 @@ describe("signaling socket release", () => {
     expect(sig.errors).toEqual([]);
   }, 15_000);
 
-  test("an adopted socket is left carrying none of the release window's handles", async () => {
+  test("an adopted socket is left holding none of the release window's handles", async () => {
     // The hand-off has to be clean as well as survivable: a watch or a close
     // handler of this server's still attached to a socket it no longer owns is
     // bookkeeping running against an adopter's connection for as long as that
@@ -643,7 +643,7 @@ describe("signaling socket release", () => {
     });
 
     // Past the bound, which is where the hand-off concludes: what the socket
-    // carries is the baseline plus the adopter's own handles, and nothing else.
+    // has is the baseline plus the adopter's own handles, and nothing else.
     await new Promise((resolve) => setTimeout(resolve, RELEASE_MARGIN_MS));
     expect(sig.accepted[0].destroyed).toBe(false);
     expect(handleCounts(sig.accepted[0])).toEqual({
@@ -658,9 +658,9 @@ describe("signaling socket release", () => {
   }, 15_000);
 
   test("an upgrade left to a co-resident listener that ignores it is released on the bound", async () => {
-    // The same premise, broken: a second `upgrade` listener exists, so the
+    // The same assumption, broken: a second `upgrade` listener exists, so the
     // sole-listener release does not apply, but nothing answers the socket. It is
-    // reclaimed on the bound rather than held on a premise that no longer holds.
+    // reclaimed on the bound rather than held on an assumption that no longer holds.
     const sig = await startSignaling({ coResidentUpgrade: "ignores" });
 
     const peer = openRawUpgrade(sig.port, "/not-the-signaling-path");
@@ -673,7 +673,7 @@ describe("signaling socket release", () => {
     // outlives the socket it was watching. Polled rather than read once --
     // `destroy()` flips `destroyed` immediately, while the `close` the teardown
     // hangs on waits for the handle to come fully down an event-loop turn or
-    // more later -- and polling the counts themselves keeps the failure legible.
+    // more later -- and polling the counts themselves keeps the failure clear.
     await expect
       .poll(() => handleCounts(sig.accepted[0]), { timeout: RELEASE_MARGIN_MS })
       .toEqual(sig.coResidentUpgrades[0].handlesBeforeWindow);
@@ -733,7 +733,7 @@ describe("signaling socket release", () => {
     });
 
     const peer = openRawConnection(sig.port);
-    // One write carrying both, so the upgrade is parsed before the response to
+    // One write holding both, so the upgrade is parsed before the response to
     // the request ahead of it has written a byte.
     peer.send(
       ordinaryRequest(sig.port, STREAMING_PATH) +
@@ -829,7 +829,7 @@ describe("signaling socket release", () => {
   test("a peer that resets after adoption but before the bound is released and reported by this server", async () => {
     // The watch comes off at the bound rather than at the adopter's answer, so
     // between the two -- most of a second, an adopter answering in the same tick
-    // as the decline -- a socket someone else already owns still carries it.
+    // as the decline -- a socket someone else already owns still holds it.
     // What the watch does in that stretch is what this pins: the socket is
     // released and the error raised here rather than left to the adopter. The
     // report is what attributes the release, an adopter having reasons of its

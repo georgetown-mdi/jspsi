@@ -7,20 +7,17 @@ import { loopbackTlsCert } from "@psilink/testkit/loopbackTlsCert";
 export { ALLOW_MISSING_PREREQUISITES_ENV, prerequisitesAreRequired };
 
 // A suite that skips when a tool the environment did not supply is missing is
-// only honest while the skip is visible. `apps/web/test/integration/requireProdBuild.ts`
+// only accurate while the skip is visible. `apps/web/test/integration/requireProdBuild.ts`
 // makes that case loud for an artifact the run itself builds; this is the same
 // guard for a prerequisite the ENVIRONMENT supplies, and it is registered at the
 // ROOT `test` block of vite.config.ts -- the whole run's config rather than one
 // project's -- so every project, including one added later, is gated by it.
 //
 // Two outcomes, decided by where the run happens. Where nothing promises the
-// prerequisite (a workstation without `openssl`), the run continues and the
-// missing prerequisite is named on the console, so the skip is never silent.
-// Where the environment is supposed to supply it, the run fails instead of
-// reporting a pass over legs that did not execute. "Supposed to supply it" is
-// read from CI rather than asserted in a comment: a CI runner is provisioned to
-// a spec, and a prerequisite absent there is a defect in the image or the
-// workflow, not a property of somebody's laptop.
+// prerequisite (a workstation without `openssl`), the run continues and names the
+// missing prerequisite on the console, so the skip is never silent. Where the
+// environment is supposed to supply it -- a CI runner provisioned to a spec --
+// the run fails instead of reporting a pass over legs that did not execute.
 
 /** Something a suite needs from its environment, not from this repository. */
 export interface TestPrerequisite {

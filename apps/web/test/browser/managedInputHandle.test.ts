@@ -37,15 +37,11 @@ import type {
 import type { NewManagedExchange } from "@psi/managedExchangeRecord";
 
 // The platform half of the input-file handle lifecycle, exercised against real
-// Chromium: reading a File through a FileSystemFileHandle at run start (real
-// getFile, via the origin-private file system), the read-through-not-snapshot
-// property, the benign missing-file and column-shape failures, and the run-seam
-// composition (the input guard gating the handshake). The permission layer is
-// injected: an origin-private-file-system handle implements neither queryPermission
-// nor requestPermission, so its real behavior is the always-granted feature-detect
-// fallback; the non-granted and prompt cases can only be covered by injection, and
-// are, in the "permission layer" block below. The pure column-shape verdict and the
-// input-rejection classification are unit-tested in test/unit/managedInputGuard.test.ts.
+// Chromium: reading a File through a FileSystemFileHandle at run start, the
+// read-through-not-snapshot property, the benign missing-file and column-shape
+// failures, and the run-seam composition (the input guard gating the handshake).
+// The permission layer below is injected since an OPFS handle has no real
+// queryPermission or requestPermission to exercise the non-granted and prompt cases.
 
 const webrtcLocator: WebRTCExchangeLocator = {
   channel: "webrtc",
@@ -372,7 +368,7 @@ describe("permission layer (injected)", () => {
 describe("handle persistence and re-point", () => {
   test("no handle is persisted where none is supplied (the unsupported-platform shape)", async () => {
     // On a browser without the API the save flow supplies no handle; the record
-    // carries none, and the first run re-selects the file.
+    // has none, and the first run re-selects the file.
     const created = await createManagedExchange(newExchange());
     expect(created.inputFileHandle).toBeUndefined();
     expect(
@@ -381,7 +377,7 @@ describe("handle persistence and re-point", () => {
   });
 
   test("an imported record re-acquires a handle by re-point (the post-import path)", async () => {
-    // An imported record carries no handle (the export omits it); the first run
+    // An imported record has no handle (the export omits it); the first run
     // after import re-acquires one by selection, persisted through the re-point
     // write.
     const created = await createManagedExchange(newExchange());
@@ -550,7 +546,7 @@ describe("run seam composition: the input guard gates the handshake", () => {
 });
 
 describe("capturedInputHandle", () => {
-  // The bench's Dropzone (over file-selector) attaches a `handle` to a dropped
+  // The console's Dropzone (over file-selector) attaches a `handle` to a dropped
   // File in a secure context on Chromium; capturedInputHandle reads it back so a
   // deposit persists a reusable pointer without a second picker dialog. Here the
   // handle is a real OPFS FileSystemFileHandle attached the same way file-selector

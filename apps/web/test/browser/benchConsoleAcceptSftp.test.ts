@@ -32,8 +32,8 @@ import type {
 } from "@psilink/core";
 
 // The CONSOLE acceptor seat over SFTP: the operator authors the connection to the
-// SFTP server the PARTNER named in the invitation before the appliance can run the
-// accept. The invitation endpoint carries only the credential-free locator
+// SFTP server the PARTNER named in the invitation before the console can run the
+// accept. The invitation endpoint has only the credential-free locator
 // (host/port/path); the operator supplies the username, the required host-key
 // fingerprint, and the credential. No invitation field flows into any of those.
 // The hosted acceptor journey (which rejects SFTP outright) stays pinned by
@@ -92,7 +92,7 @@ async function encodeToken(endpoint: ConnectionEndpoint): Promise<string> {
   return encodeInvitation(token);
 }
 
-// A single-directory SFTP endpoint: the partner-named rendezvous server, carrying
+// A single-directory SFTP endpoint: the partner-named rendezvous server, holding
 // only its credential-free locator.
 const SFTP_ENDPOINT: ConnectionEndpoint = {
   channel: "sftp",
@@ -100,7 +100,7 @@ const SFTP_ENDPOINT: ConnectionEndpoint = {
   port: 2022,
   path: "/drop",
 };
-// A split inbound/outbound SFTP endpoint the appliance does not run (the authored
+// A split inbound/outbound SFTP endpoint the console does not run (the authored
 // connection composes a single remote directory).
 const SPLIT_SFTP_ENDPOINT: ConnectionEndpoint = {
   channel: "sftp",
@@ -132,7 +132,7 @@ interface CapturedRequest {
   body?: string;
 }
 
-// A split-provisioned appliance: two rendezvous mounts, which the operator set up for
+// A split-provisioned console: two rendezvous mounts, which the operator set up for
 // their own shared-folder exchanges. An SFTP accept takes its directories from the
 // partner's endpoint, so this provisioning is none of its business.
 const SPLIT_RENDEZVOUS = {
@@ -148,7 +148,7 @@ const SPLIT_RENDEZVOUS = {
  * its profile, the sftp connection endpoints (GET reports the effective connection,
  * PUT authors it and flips GET to report it), and the job POST plus event stream.
  * PUT/POST bodies are captured so the test can assert what left the browser.
- * `rendezvous` is the appliance's own filedrop provisioning, unmounted by default. */
+ * `rendezvous` is the console's own filedrop provisioning, unmounted by default. */
 function stubSftpAccept(rendezvous: unknown = { configured: false }): {
   captured: Array<CapturedRequest>;
   emitEvent: (event: object) => void;
@@ -313,7 +313,7 @@ describe("console SFTP accept: author-then-launch", () => {
       .toBeDisabled();
   });
 
-  test("authors from the operator's own fields and runs on the appliance", async () => {
+  test("authors from the operator's own fields and runs on the console", async () => {
     const api = stubSftpAccept();
     window.location.hash = await encodeToken(SFTP_ENDPOINT);
     app.render(createElement(AcceptorBench));
@@ -343,7 +343,7 @@ describe("console SFTP accept: author-then-launch", () => {
     );
     await page.getByRole("button", { name: "Save connection" }).click();
 
-    // The PUT carried the partner's locator (host/port/path) as the connection
+    // The PUT held the partner's locator (host/port/path) as the connection
     // target, and the operator's own username, fingerprint, and credential -- no
     // invitation field reached the credential or the fingerprint.
     const put = api.captured.find(
@@ -368,7 +368,7 @@ describe("console SFTP accept: author-then-launch", () => {
       .element(page.getByRole("button", { name: "Start the exchange" }))
       .toBeEnabled();
 
-    // Start the exchange: the appliance runs it as a server job on the sftp arm.
+    // Start the exchange: the console runs it as a server job on the sftp arm.
     await page.getByRole("button", { name: "Start the exchange" }).click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
@@ -377,7 +377,7 @@ describe("console SFTP accept: author-then-launch", () => {
       .element(page.getByText(SERVER_JOB_KEEP_OPEN_BODY))
       .toBeInTheDocument();
 
-    // The job POST rode the sftp intent arm; the appliance reads the authored
+    // The job POST rode the sftp intent arm; the console reads the authored
     // connection, so no host, credential, or fingerprint is in the intent body.
     const post = api.captured.find(
       (request) => request.url === "/api/jobs" && request.method === "POST",
@@ -388,7 +388,7 @@ describe("console SFTP accept: author-then-launch", () => {
     expect(intentText).not.toContain(FINGERPRINT);
     expect(intentText).not.toContain("partner-key");
 
-    // Settle the run from the appliance's event stream.
+    // Settle the run from the console's event stream.
     await vi.waitFor(() => expect(api.hasEventStream()).toBe(true));
     api.emitEvent({ v: 1, type: "result", resultWritten: true });
     api.closeEvents();
@@ -397,7 +397,7 @@ describe("console SFTP accept: author-then-launch", () => {
       .toHaveTextContent("Exchange complete");
   });
 
-  test("a split-provisioned appliance does not gate a single-directory SFTP accept", async () => {
+  test("a split-provisioned console does not gate a single-directory SFTP accept", async () => {
     stubSftpAccept(SPLIT_RENDEZVOUS);
     window.location.hash = await encodeToken(SFTP_ENDPOINT);
     app.render(createElement(AcceptorBench));
@@ -416,7 +416,7 @@ describe("console SFTP accept: author-then-launch", () => {
     await page.getByRole("button", { name: "Save connection" }).click();
     await expect.element(page.getByText("Ready to try")).toBeInTheDocument();
 
-    // The appliance's two rendezvous mounts are its FILEDROP provisioning. This
+    // The console's two rendezvous mounts are its FILEDROP provisioning. This
     // accept meets the partner on the server the invitation names, in the one
     // remote directory it names, so the split-rendezvous retain requirement is not
     // its rule and cannot stand between the operator and the launch.

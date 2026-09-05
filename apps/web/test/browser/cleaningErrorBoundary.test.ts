@@ -91,7 +91,7 @@ describe("CleaningErrorBoundary contains a cleaning-section crash and recovers",
       breakCleaning?.(true);
 
       // The fallback is a role="alert" live region (so the swap is announced) that
-      // carries an accessible name from its title, and it takes focus off the
+      // has an accessible name from its title, and it takes focus off the
       // unmounted crashing subtree.
       const fallback = page.getByRole("alert", {
         name: "The cleaning editor hit an unexpected state",

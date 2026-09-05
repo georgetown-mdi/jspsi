@@ -17,13 +17,12 @@ import {
 
 import type { ChildProcess } from "node:child_process";
 
-// The mounted-input drive path, demonstrated once against the REAL built server: a job
-// can be driven from an operator-mounted directory with no UI -- a single POST names a
-// mounted file and the CLI reads it in place, so no input.csv is copied into the
-// workdir. The job API runs only in a console build, so the server env sets
-// VITE_DEPLOYMENT_PROFILE=console alongside the data root; the CLI is stubbed so no real
-// exchange (or built CLI) is needed. A filedrop job composes its connection against the
-// configured rendezvous mount, so the server needs JOB_RENDEZVOUS_DIR set.
+// The mounted-input drive path, against the real built server: a job can be
+// driven from an operator-mounted directory with no UI -- a single POST
+// names a mounted file and the CLI reads it in place, so no input.csv is
+// copied into the workdir. The job API runs only in a console build, so the
+// server sets VITE_DEPLOYMENT_PROFILE=console and stubs the CLI; a filedrop
+// job needs JOB_RENDEZVOUS_DIR for its rendezvous mount.
 const stubCli = resolve(webRoot, "test/utils/stubCli.mjs");
 
 const READY_TIMEOUT_MS = 30_000;

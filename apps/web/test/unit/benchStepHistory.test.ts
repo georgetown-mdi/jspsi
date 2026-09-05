@@ -44,7 +44,7 @@ describe("bench step history state", () => {
 });
 
 describe("benchStepStateForPush", () => {
-  // A pushed entry sits beside the router's own entries, so it must carry the
+  // A pushed entry sits beside the router's own entries, so it must hold the
   // router's push bookkeeping: index advanced by one, a fresh entry key. The
   // router's patched history classifies a popstate as Back or Forward from the
   // index delta; a frozen index would read every in-bench pop as an in-place GO.
@@ -82,10 +82,10 @@ describe("benchStepStateForPush", () => {
 });
 
 describe("stepFromPopState", () => {
-  // A Back-equivalent event carries the previous entry's bench state; the step
+  // A Back-equivalent event holds the previous entry's bench state; the step
   // it names is the one the bench restores. A Forward-equivalent event is the
   // same shape at the next entry -- both round-trip through this reader.
-  test("reads the step a bench entry carries", () => {
+  test("reads the step a bench entry holds", () => {
     const backTarget = benchStepState("file");
     expect(stepFromPopState(backTarget)).toBe("file");
     const forwardTarget = benchStepStateForPush("columns", backTarget);
@@ -128,7 +128,7 @@ describe("unloadGuardArmed", () => {
   });
 
   test("stays disarmed once finalized even for a console server-job run", () => {
-    // A finalized console exchange runs on the appliance; leaving no longer
+    // A finalized console exchange runs on the console; leaving no longer
     // abandons it (the recovery panel re-attaches), so the guard does not re-arm.
     expect(unloadGuardArmed({ hasFile: true, finalized: true })).toBe(false);
   });

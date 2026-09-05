@@ -23,7 +23,7 @@ import { Ledger } from "@bench/Ledger";
 import { MatchingSharingSection } from "@bench/MatchingSharingSection";
 
 // The expectations derive their form from this function, so they pin that the
-// section's string sink carries the same form its chips do, not what that form
+// section's string sink has the same form its chips do, not what that form
 // is; the literal FSI/PDI expectations live in
 // apps/web/test/unit/columnNameDisplay.test.ts.
 import { isolatedColumnName } from "@components/ColumnName";
@@ -37,8 +37,8 @@ import type { Metadata } from "@psilink/core";
 // The inviter's step 2 states what the partner will receive in two voices at
 // once -- the chip list a sighted operator reads and the live region a screen
 // reader hears -- over the operator's OWN CSV headers. This pins that both
-// voices carry the same name, isolated rather than escaped; @components/ColumnName
-// carries what the isolation contains and what it does not.
+// voices have the same name, isolated rather than escaped; @components/ColumnName
+// states what the isolation contains and what it does not.
 
 // A right-to-left override (U+202E) and a zero-width joiner (U+200D): the two
 // classes that make a header read differently from its bytes. The name is
@@ -49,7 +49,7 @@ const bidiColumn = `notes${RLO}evil\u200D`;
 
 const app = createAppMount();
 
-// The linkage columns carry values their type infers from; anything else is a
+// The linkage columns hold values their type infers from; anything else is a
 // placeholder, so an added column infers to the disclosed set.
 const SAMPLE_VALUES: Record<string, string> = {
   client_id: "1",
@@ -110,7 +110,7 @@ afterEach(() => {
 });
 
 describe("inviter sharing summary: one column name in both voices", () => {
-  test("a header carrying a bidi override reads alike in the chips and the announcement", async () => {
+  test("a header containing a bidi override reads alike in the chips and the announcement", async () => {
     mountSection();
     await expect
       .element(
@@ -135,7 +135,7 @@ describe("inviter sharing summary: one column name in both voices", () => {
       expect(getComputedStyle(element).unicodeBidi).toBe("isolate");
     }
 
-    // The live region is a string sink, so it carries the isolate as characters
+    // The live region is a string sink, so it holds the isolate as characters
     // instead: the spoken summary names the same set the chips do, and neither
     // form can reorder the copy around it. Debounced, so poll for it.
     await expect
@@ -156,10 +156,10 @@ describe("inviter sharing summary: one column name in both voices", () => {
 
 describe("column-name isolation: what the wrapper does not contain", () => {
   // The isolate class is the isolation's own residual: per UAX #9 BD9/X6a a name
-  // carrying an unmatched PDI closes the wrapper's isolate early, and the copy
+  // holding an unmatched PDI closes the wrapper's isolate early, and the copy
   // after the break is laid out at the paragraph's level rather than the name's.
   // What that costs is measured here rather than argued from the standard, on both
-  // forms the module ships -- the characters a string sink carries, and the <bdi>
+  // forms the module ships -- the characters a string sink holds, and the <bdi>
   // whose computed `unicode-bidi: isolate` is the markup form.
   //
   // Guard versus document: every "does not contain" case here is a measurement
@@ -197,7 +197,7 @@ describe("column-name isolation: what the wrapper does not contain", () => {
 
   /** The visual order of the three names as a string sink lays them out: one
    * comma-joined sentence, each name isolated as characters because no element
-   * can carry it there. */
+   * can hold it there. */
   async function isolatedStringOrder(name: string): Promise<Array<string>> {
     app.render(
       createElement(
@@ -248,7 +248,7 @@ describe("column-name isolation: what the wrapper does not contain", () => {
 
   test("the string form does not contain one behind an unmatched PDI", async () => {
     // The residual, driven: the early PDI ends the wrapper, so the override runs
-    // on and carries the name's tail past the name listed after it -- the exact
+    // on and moves the name's tail past the name listed after it -- the exact
     // reordering the wrapper prevents above.
     expect(await isolatedStringOrder(residualName)).toEqual([
       "one",
@@ -348,7 +348,7 @@ describe("column-name isolation: what the wrapper does not contain", () => {
     // The standing ledger's "You will send" row joins the disclosed names with
     // literal separators into one string value, so it is a sink of the shape the
     // residual reaches. Driven through the shipped composer and the shipped
-    // Ledger rather than a hand-built row, so what is measured is what the bench
+    // Ledger rather than a hand-built row, so what is measured is what the console
     // renders beside step 2.
     const acquired = csvOf([
       "client_id",

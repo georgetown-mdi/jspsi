@@ -144,7 +144,7 @@ describe("the injected role", () => {
   test("is the only thing the export adds to a policy-free document", () => {
     const record = managedRecord();
     // Nothing synthesized: no stun list the browser run never used, no path or
-    // value from any machine, and no field the stored document did not carry.
+    // value from any machine, and no field the stored document did not have.
     expect(parseExportedConfig(record)).toEqual({
       ...record.exchangeFile,
       connection: { ...record.exchangeFile.connection, role: record.side },
@@ -153,7 +153,7 @@ describe("the injected role", () => {
 });
 
 describe("the max-age policy", () => {
-  test("is carried into the exported document so it survives CLI rotation", () => {
+  test("is included in the exported document so it survives CLI rotation", () => {
     const parsed = parseExportedConfig(managedRecord({ tokenMaxAgeDays: 90 }));
     // The CLI stamps a rotated token's expires only from this config key, so an
     // export that dropped it would hand over a bound that lapses at the first
@@ -161,7 +161,7 @@ describe("the max-age policy", () => {
     expect(parsed.authentication).toEqual({ tokenMaxAgeDays: 90 });
   });
 
-  test("leaves no authentication block at all when the record carries none", () => {
+  test("leaves no authentication block at all when the record has none", () => {
     const record = managedRecord();
     expect(parseExportedConfig(record).authentication).toBeUndefined();
     expect(composeManagedCronExport(record).config.text).not.toContain(
@@ -169,7 +169,7 @@ describe("the max-age policy", () => {
     );
   });
 
-  test("carries no secret into the configuration half", () => {
+  test("puts no secret into the configuration half", () => {
     const record = managedRecord({
       tokenMaxAgeDays: 90,
       expires: "2026-04-06T14:00:00.000Z",
@@ -244,10 +244,10 @@ describe("the source record", () => {
     expect(record).toEqual(before);
   });
 
-  test("still reads back as a valid stored record after an export", () => {
+  test("still parses as a valid stored record after an export", () => {
     const record = managedRecord({ tokenMaxAgeDays: 90 });
     composeManagedCronExport(record);
-    // The stored document must carry no authentication block (the read-path
+    // The stored document must have no authentication block (the read-path
     // refine rejects one), so the injected block must not have leaked back.
     expect(() => parseManagedExchangeRecord(record)).not.toThrow();
     expect(record.exchangeFile.authentication).toBeUndefined();
@@ -457,7 +457,7 @@ describe("a webrtc connection outside the credential-free locator subset", () =>
       expect(message).not.toContain(value);
   });
 
-  test("admits a locator that carries only the optional fields it composed", () => {
+  test("admits a locator that has only the optional fields it composed", () => {
     // The allowlist is the expansion's own output, so an omitted optional
     // locator field is admitted exactly as a present one is.
     const record = managedRecord({
@@ -564,7 +564,7 @@ describe("a signing block on the stored document", () => {
 
 describe("the exportable top-level document fields", () => {
   test("admit every field the record composer itself writes", () => {
-    // The allowlist is the composer's own output, so a document carrying each
+    // The allowlist is the composer's own output, so a document holding each
     // optional block exports rather than being refused as unrecognized.
     const record = managedRecord({
       exchangeFile: composeManagedExchangeFile({

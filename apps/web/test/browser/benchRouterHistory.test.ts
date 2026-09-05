@@ -7,17 +7,17 @@ import { page, userEvent } from "vitest/browser";
 import { createElement } from "react";
 
 // Load Mantine's stylesheet so components render with their real geometry
-// (the bench browser suites' shared discipline).
+// (the console browser suites' shared discipline).
 import "@mantine/core/styles.css";
 
-// The REAL router history -- deliberately not mocked here. createBrowserHistory
+// The REAL router history -- not mocked here. createBrowserHistory
 // is what the app router runs on (router.tsx -> createRouter): it patches
 // window.history.pushState/replaceState and classifies every popstate as
-// BACK/FORWARD/GO from the __TSR_index delta. This suite pins the bench's
+// BACK/FORWARD/GO from the __TSR_index delta. This suite pins the console's
 // history writes against that patched implementation; mounting a full
 // RouterProvider is not possible in this harness (it trips a duplicate-React
-// dispatcher error, the reason the other bench suites stub the router), but the
-// history layer is plain JS and carries the whole index contract.
+// dispatcher error, the reason the other console suites stub the router), but the
+// history layer is plain JS and holds the whole index contract.
 import { createBrowserHistory } from "@tanstack/react-router";
 
 import { InviterBench } from "@bench/InviterBench";
@@ -46,9 +46,9 @@ function routerKey(): string {
   return (window.history.state as { __TSR_key: string }).__TSR_key;
 }
 
-describe("bench steps under the router's patched history", () => {
+describe("console steps under the router's patched history", () => {
   test("pushes advance the router index and pops classify as BACK/FORWARD, not GO", async () => {
-    // Production ordering: the router history exists before the bench mounts,
+    // Production ordering: the router history exists before the console mounts,
     // has patched window.history, and has seeded __TSR_index on the current
     // entry. destroy() unpatches, so a failure cannot leak the patch into
     // other tests.
@@ -89,7 +89,7 @@ describe("bench steps under the router's patched history", () => {
         .element(page.getByRole("heading", { level: 1 }))
         .toHaveTextContent("Review & create");
 
-      // Each bench push advanced the router's index by one and minted a fresh
+      // Each console push advanced the router's index by one and minted a fresh
       // entry key, exactly as the router's own pushes do, and the router
       // history's tracked location agrees with the browser's.
       expect(routerIndex()).toBe(baseIndex + 2);
@@ -98,7 +98,7 @@ describe("bench steps under the router's patched history", () => {
 
       // Browser Back is classified BACK (delta -1) -- a frozen index would
       // classify it GO(0) and desync the router's position tracking -- and the
-      // bench still restores the step in place.
+      // console still restores the step in place.
       actions.length = 0;
       window.history.back();
       await expect

@@ -73,7 +73,7 @@ describe("acceptorExchangeDataSpec", () => {
     expect(spec.standardization).toBeUndefined();
   });
 
-  test("carries the edited metadata and standardization when prepared", () => {
+  test("has the edited metadata and standardization when prepared", () => {
     const md = remappedMetadata();
     const std = getDefaultStandardization(md, terms);
     const spec = acceptorExchangeDataSpec(terms, "Acceptor", {

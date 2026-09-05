@@ -133,7 +133,7 @@ describe("expert authoring round-trips", () => {
     const { draft } = seedAdvancedInvite("County Health Dept", ALL_COLUMNS);
     // Author one key from scratch: two elements referencing declared fields, a
     // substring transform, and a swap matching them in either order. The swapped
-    // pair carries ONE transform across both positions, which is what the terms
+    // pair holds ONE transform across both positions, which is what the terms
     // admit -- a swap moves the field references and leaves each transform where
     // it is, so a pair whose transforms differ is refused.
     const initial = [
@@ -211,13 +211,12 @@ describe("expert authoring round-trips", () => {
 });
 
 describe("an expert-authored key over a recognized type cleans as its partner does", () => {
-  // The expert editor offers a field for every matchable column, including the
-  // types no built-in key uses (phone_number, email_address, zip_code), which the
-  // authored-field derivation declares under the type's own name whether or not the
-  // draft cleans them. Keying one of those is a complete, schema-valid, mint-passing
-  // way to author a key -- so if the draft carried no pipeline for the column, this
-  // party would hash the raw cell while the accepting party, deriving its cleaning
-  // from these same terms, hashes the cleaned one, and the key would match nothing.
+  // The expert editor offers a field for every matchable column, including
+  // types no built-in key uses (phone_number, email_address, zip_code); the
+  // authored-field derivation declares each under the type's own name whether
+  // or not the draft cleans it. Without a cleaning pipeline for the column,
+  // this party would hash the raw cell while the accepting party hashes the
+  // cleaned one, and the key would match nothing.
   const COLUMNS = ["first_name", "last_name", "dob", "zip", "phone", "email"];
   const ROWS: Array<CSVRow> = [
     {
@@ -276,12 +275,12 @@ describe("an expert-authored key over a recognized type cleans as its partner do
     const [inviterValue, acceptorValue] = cleanedByBothParties(draft, field);
     expect(inviterValue).toEqual([cleaned]);
     expect(acceptorValue).toEqual(inviterValue);
-    // The premise: the two would genuinely have disagreed. The raw cell is not the
+    // The assumption: the two would have disagreed. The raw cell is not the
     // cleaned value, so a party matching on it matches nothing the other offers.
     expect(cleaned).not.toEqual(raw);
   });
 
-  test("the authored key generates and mints carrying its cleaning", async () => {
+  test("the authored key generates and mints holding its cleaning", async () => {
     const { seed } = seedAdvancedInvite("Inviter", COLUMNS, ROWS);
     const draft = expertKeyed("zip_code");
     const terms = buildAdvancedTerms(draft);
@@ -301,7 +300,7 @@ describe("an expert-authored key over a recognized type cleans as its partner do
       standardization: draft.standardization,
     });
     // The mint reconciles the cleaning to the terms it embeds, so what an
-    // invitation hands its keeper carries the pipeline rather than dropping it.
+    // invitation hands its keeper holds the pipeline rather than dropping it.
     expect(
       validateStandardizationAgainstTerms(
         minted.standardization ?? [],
@@ -349,7 +348,7 @@ describe("an expert-authored key over a recognized type cleans as its partner do
 describe("addElement keeps element identifiers unique within a key", () => {
   test("a second element of the same field gets a distinct alias, not a colliding identifier", () => {
     const { draft } = seedAdvancedInvite("Org", ALL_COLUMNS);
-    // A fresh key carries one element of the first declared field, and the picker
+    // A fresh key holds one element of the first declared field, and the picker
     // defaults the next element to that same field -- both would take the bare
     // "first_name" identifier, so addElement aliases the second to tell them apart.
     let d: AdvancedInviteDraft = { ...draft, keys: [] };
@@ -363,7 +362,7 @@ describe("addElement keeps element identifiers unique within a key", () => {
     expect(elements[1].name).toBe("first_name_2");
 
     // The identifiers (`name ?? field`) the schema requires unique -- and the values
-    // the swap control offers -- carry no duplicate, so no Select is ever fed a
+    // the swap control offers -- contain no duplicate, so no Select is ever fed a
     // colliding option set.
     const ids = elements.map((el) => el.name ?? el.field);
     expect(new Set(ids).size).toBe(ids.length);
@@ -401,7 +400,7 @@ describe("addElement keeps element identifiers unique within a key", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  test("two elements sharing an identifier are schema-invalid, so the alias is load-bearing", () => {
+  test("two elements sharing an identifier are schema-invalid, so the alias is required", () => {
     const { draft } = seedAdvancedInvite("Org", ALL_COLUMNS);
     let d: AdvancedInviteDraft = { ...draft, keys: [] };
     d = addKey(d, "first_name");

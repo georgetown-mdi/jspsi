@@ -34,7 +34,7 @@ const composedOptions = (
 };
 
 describe("the authored draft becomes an option block", () => {
-  test("an untouched draft carries no options at all", () => {
+  test("an untouched draft has no options at all", () => {
     expect(exchangeFilesOptions(EXCHANGE_FILES_DEFAULT)).toBeUndefined();
     expect(exchangeFilesProblems(EXCHANGE_FILES_DEFAULT)).toEqual([]);
   });

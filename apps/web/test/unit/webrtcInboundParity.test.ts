@@ -17,29 +17,12 @@ import type {
 import type { ConnectionError } from "@psilink/core";
 import type { DataConnection } from "peerjs";
 
-// The WebRTC inbound bound has two enforcement points over one wire format: core's
-// structural pre-scan (packages/core/src/connection/binaryPackBounds.ts), which
-// decides what a frame costs and which rule refuses it, and this app's PeerJS wrap
-// (src/psi/boundedReassembly.ts), which owns its own chunk bookkeeping and calls that
-// scan at the unpack chokepoint every datagram and every reassembled frame flows
-// through. Nothing about their living in one repository makes them agree, so the
-// labelled fixture set is driven through BOTH below and every divergence fails: a
-// frame the scan refuses that the wrap delivers, a frame the scan admits that the
-// wrap refuses, a refusal the two attribute to different rules or word differently,
-// and a rule that fires on a whole frame but not on the same frame arriving in
-// chunks.
-//
-// The set is `@psilink/testkit/webrtcInboundFrames`, shared with the CLI's
-// reassembler, which is held to it the same way (apps/cli/test/unit/
-// webrtcInboundParity.test.ts) -- so the two transports' verdicts are compared
-// against one reference and therefore against each other. That suite also holds the
-// set's own contract (every fixture draws the rule it is labelled with, both halves
-// are populated, labels are unique), which is a property of the material rather than
-// of either transport; what this leg adds for itself is the vacuity guard below, on
-// the verdicts it actually observed.
-//
-// The scan the wrap is driven against is the one this app links from core's BUILD,
-// not a source copy.
+// Core's structural pre-scan (packages/core/src/connection/binaryPackBounds.ts) and
+// this app's PeerJS wrap (src/psi/boundedReassembly.ts) enforce the same bound; the
+// wrap calls the scan at the unpack chokepoint for every datagram and reassembled
+// frame. The fixture set (`@psilink/testkit/webrtcInboundFrames`), also driven
+// by the CLI's own parity suite, drives both here, and every divergence fails --
+// including a rule that fires on a whole frame but not the same frame in chunks.
 
 /** PeerJS's chunk message ids start at 1: the receive dispatch keys off `__peerData`
  * being TRUTHY, so a chunk numbered 0 would be read as a plain application frame. */
@@ -84,26 +67,19 @@ function concatSlices(slices: Array<Uint8Array>): Uint8Array {
 }
 
 /**
- * A test double for the PeerJS binary connection's receive path, driven the way real
- * PeerJS drives it: `_handleDataMessage` is the SOLE entry, taking one datagram's
- * wire bytes, unpacking them, and routing a truthy `__peerData` to `_handleChunk`;
- * `_handleChunk` accumulates slices by message id and, on the last one, concatenates
- * and recurses back through `this._handleDataMessage` -- so the reassembled frame
- * meets the wrap's replacement, not the original.
- *
- * That entry ordering is what the parity comparison needs, since it is what puts the
- * structural scan on every chunk envelope AND on the frame those chunks assemble
- * into, the same two chokepoints the CLI reassembler applies it at. The other suites
- * in this tree deliberately drive each wrapped method directly instead, to isolate
- * the bookkeeping inside one of them.
- *
- * `delivered` records each unpacked frame that reached the application.
+ * A test double for the PeerJS binary connection's receive path, mirroring real
+ * PeerJS: `_handleDataMessage` is the sole entry, routing a truthy `__peerData` to
+ * `_handleChunk`, which reassembles and recurses back through `this._handleDataMessage`
+ * -- so a reassembled frame re-enters the wrap's replacement of that method. That
+ * puts the structural scan on both the chunk envelope and the assembled frame,
+ * matching the CLI reassembler's two chokepoints.
  */
 class FakePeerJsConnection {
   _chunkedData: Record<
     number,
     { data: Array<Uint8Array>; count: number; total: number } | undefined
   > = {};
+  /** Each unpacked frame that reached the application. */
   delivered: Array<unknown> = [];
 
   _handleDataMessage = (message: { data: Uint8Array }): void => {
@@ -220,7 +196,7 @@ describe("the web PeerJS wrap against core's pre-scan", () => {
         comparableVerdict(preScanVerdict(fixture)),
       );
     }
-    // The vacuity guard for this leg: a fixture set that had stopped carrying one of
+    // The vacuity guard for this leg: a fixture set that had stopped holding one of
     // its halves -- or a wrap that refused or delivered everything -- would satisfy
     // every assertion above while pinning only one side of the bound.
     expect(observed).toEqual(new Set(["refused", "delivered"]));
@@ -246,7 +222,7 @@ describe("the web PeerJS wrap against core's pre-scan", () => {
     // ones before it: a wrap that decided early would pass those tests while
     // delivering (or refusing) a frame it had not seen whole. It also holds the
     // fixture limits above what a chunk envelope itself costs -- a leg that refused
-    // an envelope instead of the frame it carries would pass while testing nothing.
+    // an envelope instead of the frame it holds would pass while testing nothing.
     for (const fixture of WEBRTC_INBOUND_FRAME_FIXTURES) {
       const { conn, failures } = guardedConnection(fixture);
       for (const datagram of chunkedDatagrams(fixture).slice(0, -1)) {

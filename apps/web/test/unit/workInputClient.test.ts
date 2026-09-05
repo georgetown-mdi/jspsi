@@ -56,7 +56,7 @@ describe("fetchJobInputs", () => {
 
   test("maps a 404 to the API-disabled state (JOB_DATA_ROOT unset)", async () => {
     // The gate 404s when the API is off; the picker renders only on a console
-    // build, so a 404 here is deliberate config, not a transient fault.
+    // build, so a 404 here is by design, not a transient fault.
     expect(
       await fetchJobInputs(() =>
         Promise.resolve(new Response(null, { status: 404 })),
@@ -73,7 +73,7 @@ describe("fetchJobInputs", () => {
       ).toEqual({ kind: "error" });
   });
 
-  test("carries the unreadable-mount state through", async () => {
+  test("preserves the unreadable-mount state", async () => {
     const result = await fetchJobInputs(() =>
       Promise.resolve(
         jsonResponse({ configured: true, readable: false, files: [] }),
@@ -386,8 +386,8 @@ describe("fetchJobRendezvous", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
-  test("carries a locator with no folder name as unnamed, not as unconfigured", async () => {
-    // The mount is usable and the invitation can carry the locator; only the
+  test("classifies a locator with no folder name as unnamed, not as unconfigured", async () => {
+    // The mount is usable and the invitation can hold the locator; only the
     // shared folder's own name is missing, which the accept kit degrades on.
     const fetchImpl = vi.fn(() =>
       Promise.resolve(

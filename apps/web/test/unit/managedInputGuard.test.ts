@@ -57,7 +57,7 @@ describe("assessManagedInputColumns: the standing-terms guard", () => {
       "unrelated_b",
     ]);
     expect(rejection?.reason).toBe("columns");
-    // The unproducible standing linkage fields are carried for the caller to name.
+    // The unproducible standing linkage fields are held for the caller to name.
     if (rejection?.reason === "columns")
       expect(rejection.unsatisfied.length).toBeGreaterThan(0);
   });
@@ -84,7 +84,7 @@ describe("assessManagedInputColumns: the standing-terms guard", () => {
 });
 
 describe("ManagedInputError", () => {
-  test("an acquire rejection carries its cause and a non-sensitive message", () => {
+  test("an acquire rejection has its cause and a non-sensitive message", () => {
     const cause = new Error("NotFoundError: the entry was not found");
     const error = new ManagedInputError({ reason: "acquire", cause });
     expect(error).toBeInstanceOf(Error);
@@ -96,7 +96,7 @@ describe("ManagedInputError", () => {
     expect(error.message).not.toContain("NotFound");
   });
 
-  test("a columns rejection carries the unsatisfied fields off the message", () => {
+  test("a columns rejection holds the unsatisfied fields off the message", () => {
     const rejection = assessManagedInputColumns(standingExchangeFile(), [
       "nope",
     ]);

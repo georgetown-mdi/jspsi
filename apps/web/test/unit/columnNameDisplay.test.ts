@@ -4,9 +4,9 @@ import { DISPLAY_TRUNCATION_MARKER, MAX_NAME_LENGTH } from "@psilink/core";
 
 import { isolatedColumnName } from "@components/ColumnName";
 
-// Written as escapes, never as raw bytes, so the source of a test about invisible
-// characters is itself readable: the isolate the string form carries as characters
-// where no element can hold it, and the override it has to contain.
+// Written as escapes, not raw bytes, so the source of a test about invisible
+// characters stays readable; the isolate has to hold the override character
+// verbatim.
 const FSI = "\u2068";
 const PDI = "\u2069";
 const RLO = "\u202e";
@@ -20,7 +20,7 @@ describe("isolatedColumnName", () => {
   });
 
   test("a name at core's own ceiling renders whole", () => {
-    // The cut sits where a name stops being one an exchange would carry -- the
+    // The cut sits where a name stops being one an exchange would transmit -- the
     // partner's parse of the payload frame refuses a longer name, as does
     // ColumnMetadata.name wherever metadata is parsed rather than inferred -- so it
     // can never elide a name that transmits, which is what keeps two accepted

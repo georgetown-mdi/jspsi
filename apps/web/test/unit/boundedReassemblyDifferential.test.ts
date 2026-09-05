@@ -20,14 +20,13 @@ import type { DataConnection } from "peerjs";
 
 // This suite is the differential counterpart to boundedReassembly.test.ts: rather
 // than hand-rolled BinaryPack fixtures, it drives the bounded reassembler against
-// the REAL peerjs-js-binarypack `pack`/`unpack` (the library peerjs uses on the
-// wire), so a divergence between our defensive pre-scan and the real unpacker is
-// caught. `pack`/`unpack` are reached through apps/web's existing `peerjs`/
-// `peerjs-js-binarypack` dependency -- no new dependency is introduced. The
-// pre-scan it differentiates against is core's (`connection/binaryPackBounds.ts`)
-// and is imported, never mocked, so this suite exercises the shipped scan; it
-// lives here rather than beside that module because only this workspace declares
-// the real packer.
+// the real peerjs-js-binarypack `pack`/`unpack` (the library peerjs uses on the
+// wire, reached through apps/web's own `peerjs`/`peerjs-js-binarypack`
+// dependency), so a divergence between the defensive pre-scan and the real
+// unpacker is caught. The pre-scan under test is core's
+// (`connection/binaryPackBounds.ts`), imported rather than mocked; this suite
+// lives here, not beside that module, because only this workspace declares the
+// real packer.
 
 /** The real PeerJS chunk MTU (peerjs/dist/bundler chunker), the boundary at which
  * a packed frame is split into `_handleChunk` slices on the wire. */
@@ -36,19 +35,16 @@ const PEERJS_CHUNK_MTU = 16300;
 /**
  * The budget for the whole-corpus differential below, vitest's 5s default being
  * the wrong scale for it: it re-chunks every corpus frame a byte at a time
- * through a fresh reassembler, which is pure CPU and stretches with whatever
- * else the machine is running -- 0.7s idle here, 3.4s with the unit project
- * running against sixteen competing workers, and 6.2s at worst under container
- * load. The default leaves that last figure under a second of room, and what it
- * buys is a bare test timeout in place of the divergence the case reports.
- * Not a timing assertion: nothing waits for it to elapse on a healthy run, and
- * it is an order of magnitude clear of the worst run measured.
+ * through a fresh reassembler, which is pure CPU and scales with machine load --
+ * measured up to 6.2s worst case under container load, an order of magnitude
+ * under this budget. Not a timing assertion: nothing waits for it to elapse on a
+ * healthy run.
  */
 const CORPUS_DIFFERENTIAL_TIMEOUT_MS = 60_000;
 
 /** Encode a value with the real BinaryPack packer and return the wire bytes. The
  * packer returns a Promise only for `Blob` inputs, which the corpus never uses, so
- * the buffer is always available synchronously; the await keeps the type honest. */
+ * the buffer is always available synchronously; the await keeps the type accurate. */
 async function packBytes(value: Packable): Promise<Uint8Array> {
   const buf = await pack(value);
   return new Uint8Array(buf);
@@ -138,7 +134,7 @@ class FakeChunkedConnection {
 
 /** Install the bound guard with the production structural budget and per-string
  * cap, so a rejection would mean the pre-scan diverged from the real unpacker on a
- * legitimate frame -- not that a deliberately-tiny test budget fired. */
+ * legitimate frame -- not that a tiny test budget fired. */
 function installProduction(conn: FakeChunkedConnection) {
   const fail = vi.fn();
   boundChunkReassembly(conn as unknown as DataConnection, fail, {
@@ -326,7 +322,7 @@ function nestedCorpus(seed: number, count: number): Array<Packable> {
   return out;
 }
 
-/** The mapped-element frame shape the WebRTC transport actually carries -- an array
+/** The mapped-element frame shape the WebRTC transport actually sends -- an array
  * of `{theirIndex, iteration}` records -- so the differential covers the real
  * in-protocol frame, not only synthetic shapes. */
 function mappedElementFrame(n: number): Array<Packable> {
@@ -336,15 +332,14 @@ function mappedElementFrame(n: number): Array<Packable> {
 }
 
 /** A BinaryPack `array32`/`map32` header (marker byte plus a 4-byte big-endian
- * element count) followed by `body`, matching the packer's `pack_array`/`pack_object`
- * wide-container encoding exactly. The pinned packer (peerjs-js-binarypack 2.1.0)
- * recurses once per element in `pack_array`/`pack_object`, so it overflows the call
- * stack far below the 65536-element `array32`/`map32` threshold and cannot emit these
- * two markers at all; the real `unpack_array`/`unpack_map` loop with no such limit
- * and decode them. So these frames are assembled from the same wire encoding the
- * packer would produce were it iterative, and their reference value is taken from the
- * real `unpack` -- the wide-container bytes and their decode are genuine, only the
- * encoder that would emit them on the wire is stack-bounded here. */
+ * element count) followed by `body`, matching `pack_array`/`pack_object`'s
+ * wide-container encoding. The pinned packer (peerjs-js-binarypack 2.1.0) recurses
+ * once per element and overflows the call stack far below the 65536-element
+ * threshold, so it cannot emit these two markers; `unpack_array`/`unpack_map` has
+ * no such limit and decodes them normally. These frames are assembled to the same
+ * wire encoding the packer would produce were it iterative, and their reference
+ * value comes from the real `unpack` -- only the encoder is stack-bounded here,
+ * not the wire format or its decode. */
 function wideContainerFrame(marker: number, count: number, body: Uint8Array) {
   const frame = new Uint8Array(5 + body.length);
   frame[0] = marker;
@@ -397,7 +392,7 @@ async function wideMarkerCorpus(): Promise<
   ];
 }
 
-/** Every frame the differential drives, labeled for a readable failure and carried
+/** Every frame the differential drives, labeled for a readable failure and held
  * as its real wire bytes. Most entries are a `Packable` run through the real packer;
  * the wide-container markers the packer cannot emit are assembled bytes (see
  * {@link wideMarkerCorpus}). Every consumer walks the same `packed` bytes, so each
@@ -465,7 +460,7 @@ describe("boundedReassembly differential: real peerjs-js-binarypack", () => {
     },
   );
 
-  test("reassembles a genuinely multi-chunk frame the same as one delivery", async () => {
+  test("reassembles a multi-chunk frame the same as one delivery", async () => {
     // A frame large enough to cross the real 16300-byte MTU into several chunks, so
     // the completion recursion path (not just the single-frame path) is exercised
     // against the real packer.
@@ -548,17 +543,12 @@ describe("scanFrameStructure differential: agrees with the real unpacker", () =>
   test("charges exactly the modelled cost of the frame's real marker inventory", async () => {
     // A stronger differential than "does not reject": the pre-scan's accept/reject
     // boundary must sit at the exact cost the frame's real marker inventory implies
-    // under the published weights. An independent walk (referenceWalk, mirroring the
-    // real Unpacker.unpack dispatch) sums each value's WEBRTC_VALUE_WEIGHTS cost from
-    // the real-encoded bytes; the source scanFrameStructure must then accept at
-    // exactly that budget and reject one byte below it. A marker the scan dispatched
-    // differently than the real unpacker -- mis-skipping a length prefix, miscounting
-    // a container's children, mis-charging a kind -- would shift the source's computed
-    // cost off this reference and flip one side of the boundary.
-    //
-    // Both sides score by the same weight model, so this pins the scan to the model
-    // rather than the model to the heap; every kind the corpus carries is scored,
-    // `bin`/`raw` included.
+    // under the published weights. An independent walk (referenceWalk, mirroring
+    // Unpacker.unpack's dispatch) sums each value's WEBRTC_VALUE_WEIGHTS cost from
+    // the real-encoded bytes; scanFrameStructure must accept at exactly that budget
+    // and reject one byte below it. Both sides score by the same weight model, so
+    // this pins the scan to the model rather than the model to the heap; every kind
+    // the corpus holds is scored, `bin`/`raw` included.
     for (const { label, packed } of await corpus()) {
       const { cost, endOffset, nonStringKey } = referenceWalk(packed);
       // The reference walk must consume the whole real-encoded frame; a short read
@@ -567,9 +557,9 @@ describe("scanFrameStructure differential: agrees with the real unpacker", () =>
         endOffset,
         `${label}: reference walk did not consume the frame`,
       ).toBe(packed.length);
-      // The premise the cost comparison rests on -- no corpus frame the real packer
-      // emits carries a map key the scan refuses -- established on this independent
-      // oracle rather than only through the scan accepting the frame.
+      // The assumption the cost comparison rests on -- no corpus frame the real
+      // packer emits holds a map key the scan refuses -- established on this
+      // independent oracle rather than only through the scan accepting the frame.
       expect(
         nonStringKey,
         `${label}: the real packer emitted a non-string map key`,
@@ -588,7 +578,7 @@ describe("scanFrameStructure differential: agrees with the real unpacker", () =>
 
 describe("boundedReassembly on the shapes the wire size understates", () => {
   // The corpus above is what a real encoder produces, and in all of it the wire
-  // carries every declared value at a size that says what it retains. These are the
+  // sends every declared value at a size that says what it retains. These are the
   // shapes where what `unpack` retains is decided by something else -- a declared
   // count an ancestor reserves room for, a declared value that decodes to far more
   // than the byte that declared it, and a key the assignment coerces into a property
@@ -733,23 +723,19 @@ function stringWeightOf(declaredBytes: number): number {
 }
 
 /**
- * Walks `bytes` with the real BinaryPack unpacker's marker semantics (an
- * independent mirror of `Unpacker.unpack`'s dispatch, the ground truth) and sums
- * the retained cost the structure implies under the published `WEBRTC_VALUE_WEIGHTS`
- * -- each container its own weight plus a backing slot per declared child, each
- * string its header-plus-per-byte weight, each `bin`/`raw` value the fixed overhead
- * of the view it decodes to, and each number marker wider than 16 bits the heap
- * number its value may be boxed in. A value the weights charge no more than its
- * container's slot adds nothing here. This walk reports the modelled cost and
- * never a measured allocation. `cost` is the exact budget the production scan
- * should charge; `endOffset` is the byte offset the real unpacker finishes at.
- * Deliberately not derived from `scanFrameStructure`, so a source marker-dispatch
- * bug shows up as a boundary mismatch against this reference rather than being
- * masked by a shared walk.
+ * Walks `bytes` with the real unpacker's marker semantics and sums the retained
+ * cost under the published `WEBRTC_VALUE_WEIGHTS`: each container its own weight
+ * plus a backing slot per declared child, each string its header-plus-per-byte
+ * weight, each `bin`/`raw` value the fixed view overhead, and each number marker
+ * wider than 16 bits the heap number it may box; a value charged no more than its
+ * container's slot adds nothing further. `cost` is the exact budget the production
+ * scan should charge; `endOffset` is where the real unpacker finishes. Not derived
+ * from `scanFrameStructure`, so a marker-dispatch bug there shows as a boundary
+ * mismatch here rather than being masked by a shared walk.
  *
- * `nonStringKey` reports the frame's map keys: the production scan refuses a frame
- * carrying a key that is not a string on the wire, at any budget, so a frame this
- * flags is one no `cost` comparison applies to.
+ * `nonStringKey` reports the frame's map keys: the scan refuses a frame holding a
+ * non-string key at any budget, so a flagged frame has no `cost` comparison to
+ * make.
  */
 function referenceWalk(bytes: Uint8Array): {
   cost: number;
@@ -781,7 +767,7 @@ function referenceWalk(bytes: Uint8Array): {
 
   /** A number marker wider than 16 bits: the heap number its value is held in when
    * the container's slot cannot hold it, charged on top of that slot whatever the
-   * marker carries. At a key position it is a key the scan refuses. */
+   * marker holds. At a key position it is a key the scan refuses. */
   const boxedNumber = (atKeyPosition: boolean): void => {
     cost += WEBRTC_VALUE_WEIGHTS.boxedNumber;
     if (atKeyPosition) nonStringKey = true;

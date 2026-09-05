@@ -34,7 +34,7 @@ describe("fileAssuranceLine", () => {
 });
 
 describe("DEPLOYMENT_PROFILE default", () => {
-  test("defaults to hosted: a deployment must opt in to the console appliance", async () => {
+  test("defaults to hosted: a deployment must opt in to the console", async () => {
     const configManager = new ConfigManager();
     const config = await configManager.load({ data: {} });
     expect(config.DEPLOYMENT_PROFILE).toBe("hosted");

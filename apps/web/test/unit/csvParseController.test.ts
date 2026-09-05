@@ -18,7 +18,7 @@ import type {
   CSVParseWorker,
 } from "../../src/psi/csvParseController.js";
 
-// The header meta a well-formed reply carries -- what core's loadCSVFile puts in
+// The header meta a well-formed reply holds -- what core's loadCSVFile puts in
 // meta.fields. Shared by the result fixtures and the streamed done message.
 const META: CSVParseResult["meta"] = {
   delimiter: ",",
@@ -39,7 +39,7 @@ const OK_RESULT: CSVParseResult = {
 };
 
 // Split a result into the message sequence the real worker posts: one `done: false`
-// batch per row group, then the terminal `done: true` carrying errors + meta. Used to
+// batch per row group, then the terminal `done: true` holding errors + meta. Used to
 // drive the controller's reassembly with an explicit batch layout.
 function streamedReply(
   result: CSVParseResult,
@@ -225,7 +225,7 @@ describe("loadCSVFileOffMainThread: worker dispatch", () => {
     expect(fake.terminated).toBe(true);
   });
 
-  test("carries non-empty errors and full meta through the terminal message", async () => {
+  test("round-trips non-empty errors and full meta through the terminal message", async () => {
     // The terminal message reassembles the non-row remainder of the result. Prior tests
     // use empty errors and only assert meta.fields; pin that a populated errors list and
     // a distinguishing meta field round-trip intact, not just `fields`.
@@ -250,12 +250,12 @@ describe("loadCSVFileOffMainThread: worker dispatch", () => {
     expect(fake.terminated).toBe(true);
   });
 
-  test("surfaces a worker parse rejection as an Error the consumer can display", async () => {
+  test("exposes a worker parse rejection as an Error the consumer can display", async () => {
     // The worker runs core's loadCSVFile verbatim, so its guards -- including the
     // non-string-header guard -- reject inside the worker exactly as inline. A real
     // File cannot produce a non-string header, so the guard's own firing is pinned in
-    // core's browser suite; here the guard's exact rejection is carried back over the
-    // worker boundary and must surface as an ordinary Error, not crash a downstream
+    // core's browser suite; here the guard's exact rejection is brought back over the
+    // worker boundary and must show as an ordinary Error, not crash a downstream
     // consumer.
     const fake = new FakeCSVParseWorker([
       {
@@ -273,7 +273,7 @@ describe("loadCSVFileOffMainThread: worker dispatch", () => {
   });
 
   test("rejects rather than hangs when the worker itself fails", async () => {
-    // A worker-level failure (module-load error, non-cloneable message) surfaces
+    // A worker-level failure (module-load error, non-cloneable message) is reported
     // through onerror; the controller must reject and terminate rather than leave the
     // caller waiting on a worker that can never answer.
     const fake = new FakeCSVParseWorker("error");

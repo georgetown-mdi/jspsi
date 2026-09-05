@@ -21,7 +21,7 @@ import { createAppMount } from "./renderApp";
 import type { InvitationToken, LinkageTerms } from "@psilink/core";
 
 // AcceptorBench reads the token from window.location.hash and links home, so a
-// plain-anchor Link is all this test exercises of the router seam.
+// plain-anchor Link is all this test exercises of the router boundary.
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
 );

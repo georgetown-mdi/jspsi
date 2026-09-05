@@ -58,25 +58,23 @@ function chunksAfter(
  * The file-drop directory client the harness's web party runs its file-sync
  * connection on.
  *
- * The shipped one is the CLI's `LocalFSClient`, and the boundary rule keeps it
- * out of reach: apps/web may not import apps/cli (eslint.boundaries.mjs), and
- * core owns `FileSyncConnection` but no filesystem client for it. So the party
- * on this side of the wire supplies its own, scoped to exactly what
- * `FileSyncConnection` calls and to a directory this suite created moments ago.
+ * The shipped client is the CLI's `LocalFSClient`, out of reach because
+ * apps/web may not import apps/cli (eslint.boundaries.mjs) and core owns
+ * `FileSyncConnection` but no filesystem client for it. So this class
+ * supplies its own, scoped to exactly what `FileSyncConnection` calls.
  *
- * It is deliberately NOT a second implementation of the shipped client's
- * hardening: the directory-listing bound, the connect-retry budget, the
- * redaction, and the typed frame-size refusal are the CLI's transport-layer
- * defenses against a partner-writable share, and re-deriving them here would be
- * a copy that drifts. What this class must get right is the semantics the
- * file-sync protocol reads -- an exclusive create that fails EEXIST, a rename
- * that publishes atomically, a listing that reports mtime and size, a read that
- * refuses an over-cap frame -- because those are what the two parties meet on.
+ * It does not re-implement the shipped client's hardening -- the
+ * directory-listing bound, the connect-retry budget, the redaction, and the
+ * typed frame-size refusal, which defend the CLI against a partner-writable
+ * share -- since a re-derived copy would drift. It gets right only the
+ * semantics the protocol reads: an exclusive create that fails EEXIST, a
+ * rename that publishes atomically, a listing that reports mtime and size,
+ * and a read that refuses an over-cap frame.
  *
- * O_NOFOLLOW is carried on every open for the same reason the shipped client
- * carries it: the write destinations are predictable protocol names in a
- * directory the partner also writes, so a symlink planted at one of them is
- * refused rather than followed.
+ * Every open applies O_NOFOLLOW, for the same reason the shipped client
+ * does: the write destinations are predictable protocol names in a
+ * directory the partner also writes, so a planted symlink is refused rather
+ * than followed.
  */
 export class HarnessFileDropClient implements FileTransportClient {
   async connect(options: Record<string, unknown>): Promise<void> {
@@ -167,7 +165,7 @@ export class HarnessFileDropClient implements FileTransportClient {
       await handle.close().catch(() => {});
       throw error;
     }
-    // Surfaced rather than swallowed: on a write handle a failed close can mean
+    // Reported rather than swallowed: on a write handle a failed close can mean
     // the bytes did not durably land.
     await handle.close();
   }

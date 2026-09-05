@@ -84,15 +84,15 @@ describe("composeManagedExchangeFile", () => {
     const server = (file.connection as { server?: Record<string, unknown> })
       .server;
     expect(server).toBeDefined();
-    // The webrtc server locator carries only host/port/path -- no PeerJS key, no
+    // The webrtc server locator has only host/port/path -- no PeerJS key, no
     // username, no relay credential.
     expect(Object.keys(server ?? {}).sort()).toEqual(["host", "path", "port"]);
-    // Scanned as bare substrings, so a credential carried as a VALUE (a PeerJS API
+    // Scanned as bare substrings, so a credential held as a VALUE (a PeerJS API
     // key, an SSH username) is caught wherever in the document it sits, not just a
     // property named for one. The two strings the linkage terms' rule-set citation
     // legitimately spells "key" in -- the `keySet` property and the key set's own
     // name -- are excised by their exact text first, so the scan keeps its reach
-    // without reading the citation as a credential.
+    // without treating the citation as a credential.
     const serialized = JSON.stringify(file);
     expect(serialized).toContain('"keySet"');
     expect(serialized).toContain(DEFAULT_LINKAGE_KEY_SET_NAME);
@@ -172,7 +172,7 @@ describe("buildManagedExchangeRecord", () => {
     ).toThrow();
   });
 
-  test("rejects an exchangeFile carrying an authentication block", () => {
+  test("rejects an exchangeFile holding an authentication block", () => {
     const withAuth = {
       ...exchangeFile(),
       authentication: { sharedSecret: generateSharedSecret() },
@@ -190,7 +190,7 @@ describe("no-input-content invariant", () => {
       newExchange({ inputFileHandle: handle }),
     );
     expect(record.inputFileHandle).toBe(handle);
-    // The record's own fields carry no row value or file content: only the
+    // The record's own fields hold no row value or file content: only the
     // pointer, the terms' column shape, the connection, and the secret.
     expect(Object.keys(record).sort()).toEqual([
       "exchangeFile",
@@ -515,8 +515,8 @@ describe("applyManagedExchangeReinviteRotation", () => {
 });
 
 describe("applyManagedExchangeInputHandle", () => {
-  // A FileSystemFileHandle is an opaque platform object the schema carries through
-  // as an optional unknown (no runtime shape assertion; see the schema note), so a
+  // A FileSystemFileHandle is an opaque platform object the schema holds as an
+  // optional unknown (no runtime shape assertion; see the schema note), so a
   // stand-in object exercises the set path in Node -- the real handle's structured-
   // clone round-trip is the browser suite's.
   const fakeHandle = { kind: "file", name: "input.csv" } as unknown as never;
@@ -702,7 +702,7 @@ describe("applyManagedExchangeScheduleAdvance", () => {
       fromConsecutiveMisses: schedule.consecutiveMisses,
       lastRun: missedRun,
     });
-    // The planned window the advance carries was derived from the replaced
+    // The planned window the advance holds was derived from the replaced
     // cadence, so neither half of it lands.
     expect(advanced.schedule).toEqual({ ...schedule, intervalDays: 14 });
     expect(advanced).not.toHaveProperty("lastRun");
@@ -731,7 +731,7 @@ describe("applyManagedExchangeScheduleAdvance", () => {
     // Two wakes' bookkeeping tails are no more serialized than two runs': the
     // earlier wake's write can land after the newer one's, where an
     // unconditioned write would rewind the plan and drop the count back to the
-    // one miss the newer advance had already carried past.
+    // one miss the newer advance had already moved past.
     const newer = applyManagedExchangeScheduleAdvance(scheduled(), {
       schedule: {
         ...schedule,
@@ -799,8 +799,8 @@ describe("applyManagedExchangeScheduleAdvance", () => {
   });
 
   test("the plan is matched as an instant, not a string, across ISO precisions", () => {
-    // The same moments, stored whole-second and carried fractional: a string
-    // comparison would read them as a different cadence and a different plan.
+    // The same moments, stored whole-second and held fractional: a string
+    // comparison would treat them as a different cadence and a different plan.
     const record = buildManagedExchangeRecord(
       newExchange({
         schedule: {
@@ -923,7 +923,7 @@ describe("diagnoseManagedExchangeRecord", () => {
     expect(diagnoseManagedExchangeRecord(record).lastRunAt).toBeUndefined();
   });
 
-  test("never surfaces the secret or the document", () => {
+  test("never exposes the secret or the document", () => {
     const record = buildManagedExchangeRecord(newExchange());
     const essentials = diagnoseManagedExchangeRecord(record);
     // The essentials object is display-only: the secret, the document, and the
@@ -944,7 +944,7 @@ describe("diagnoseManagedExchangeRecord", () => {
 });
 
 describe("partitionReadableManagedExchanges", () => {
-  /** A record carrying a period past the schema's ceiling -- the shape a
+  /** A record holding a period past the schema's ceiling -- the shape a
    * pre-ceiling import or a hand-edit leaves behind, which the strict read
    * rejects. Assembled past the schema on purpose: the builder would refuse it. */
   function outOfBoundsRecord(): unknown {

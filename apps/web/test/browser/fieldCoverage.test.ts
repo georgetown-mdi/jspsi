@@ -29,9 +29,9 @@ describe("FieldCoverage pending copy", () => {
       .toBeInTheDocument();
   });
 
-  test("the console label says the appliance reads the whole file", async () => {
-    // The console sweep is a whole-file streaming pass on the appliance -- honestly
-    // seconds -- so the pending copy must not read as an instant local check.
+  test("the console label says it reads the whole file", async () => {
+    // The console sweep is a whole-file streaming pass -- seconds, not instant --
+    // so the pending copy must not be treated as an instant local check.
     app.render(
       createElement(FieldCoverage, {
         rate: undefined,

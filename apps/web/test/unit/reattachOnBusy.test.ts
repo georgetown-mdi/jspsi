@@ -112,7 +112,7 @@ describe("isExchangeBusyError", () => {
 });
 
 describe("reattachOnBusy", () => {
-  test("re-attaches on a 409 whose body carries a LIVE id, resuming the run callbacks", async () => {
+  test("re-attaches on a 409 whose body holds a LIVE id, resuming the run callbacks", async () => {
     const store = installStorage();
     const { client, statusIds, streamedIds } = reattachClient({
       probe: { kind: "live", status: "running" },
@@ -149,7 +149,7 @@ describe("reattachOnBusy", () => {
     });
   });
 
-  test("falls back to the persisted id when the 409 body carries none", async () => {
+  test("falls back to the persisted id when the 409 body has none", async () => {
     installStorage();
     writeAttachment({
       jobId: "job-persisted",
@@ -304,16 +304,12 @@ describe("reattachOnBusy", () => {
 });
 
 // A busy create leaves a seat showing a run it did not launch, whose terminal
-// can carry text an untrusted party chose. This pins that the replay's failure
-// reaches the operator as the seat composes any other one -- the re-attach adds
-// nothing of its own to it.
-//
-// This pin exercises failureFor directly, the same composition point the
-// class-kill pins in jobRunDiagnostics.unit.test.ts measure: a seat hook that
-// decorated the returned failure before setFailure would not redden it
-// either. That no seat does is scripts/bench-failure-passthrough.test.mjs,
-// which reads every call site in the bench tree.
-describe("a re-attached run's terminal surfaces as it arrived", () => {
+// can hold text an untrusted party chose. This pins that the replay's failure
+// reaches the operator through the same failureFor composition path any other
+// run uses -- the re-attach adds nothing of its own. The class-kill pins in
+// jobRunDiagnostics.unit.test.ts and scripts/bench-failure-passthrough.test.mjs
+// hold the same invariant elsewhere.
+describe("a re-attached run's terminal shows as it arrived", () => {
   /** A terminal the CLI never composed as a refusal: the CLI's own refusal
    * wording reaches the seat inside a filename an untrusted party chose, which
    * core's foreign-file terminal names verbatim and a partner-writable

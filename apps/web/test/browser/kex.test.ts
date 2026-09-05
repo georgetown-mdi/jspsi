@@ -8,24 +8,18 @@ import { computeKexKeys } from "@psilink/core/testing";
 
 import vectorsRaw from "../../../../packages/core/test/vectors/kex-vectors.json?raw";
 
-// The companion to packages/core/test/kex.test.ts's vector suite: it runs the
-// SAME checked-in key-exchange vectors through the browser build of
-// @psilink/core in real Chromium. The Node suite proves Node reproduces the
-// vectors and this suite proves the browser reproduces the same chaining key,
-// handshake hash, session key, and both confirmation tags -- so a CLI peer
-// (Node) and a web peer (browser) derive an identical session from an identical
-// transcript.
+// The companion to packages/core/test/kex.test.ts: runs the same checked-in
+// key-exchange vectors through the browser build of @psilink/core in real
+// Chromium, so a CLI peer (Node) and a web peer (browser) derive an identical
+// session from an identical transcript.
 //
-// Key establishment runs entirely on crypto.subtle, which is a different
-// implementation on each platform (Node's OpenSSL, Chromium's BoringSSL). The
-// cases below therefore also re-measure, in Chromium, the peer-share validation
-// the Node suite measures: which encodings importKey admits is what decides
-// whether kex.ts's canonical-encoding check is load-bearing, and it is a
-// property of each platform separately.
+// crypto.subtle differs per platform (Node's OpenSSL, Chromium's BoringSSL), so
+// the cases below also re-measure which encodings importKey admits here --
+// what decides whether kex.ts's canonical-encoding check is critical.
 
 const ECDH_P256 = { name: "ECDH", namedCurve: "P-256" } as const;
 
-// The one generic message every authentication failure surfaces.
+// The one generic message every authentication failure shows.
 const GENERIC_FAILURE = "key exchange authentication failed";
 
 interface KexCase {
@@ -212,13 +206,10 @@ describe("key exchange in the browser", () => {
   });
 
   test("the browser's importKey rejects an invalid point, and admits the compressed encoding of a valid one", async () => {
-    // The same measurement the Node suite makes, on the other platform. Point
-    // validity comes from importKey on both; the canonical encoding does not,
-    // and the two platforms do not even agree on which alternative encodings
-    // decode -- Chromium rejects the hybrid form that Node accepts. That
-    // disagreement is why the encoding is pinned in kex.ts above importKey
-    // instead of being left to it: otherwise a share's acceptance would depend
-    // on which peer received it.
+    // The same measurement the Node suite makes, on the other platform: importKey
+    // agrees on point validity but not on which encodings decode -- Chromium
+    // rejects the hybrid form that Node accepts. kex.ts pins the encoding above
+    // importKey so a share's acceptance does not depend on which peer received it.
     const point = await generateEphemeralPoint();
 
     const offCurve = Uint8Array.from(point);
@@ -273,17 +264,12 @@ describe("key exchange in the browser", () => {
     expect(responder.applyEncryption).toBe(true);
   });
 
-  // The wire counterpart of the measurement above, in both roles. Chromium's
-  // importKey admits the compressed encoding and refuses the hybrid one, and
-  // Node's admits both, so on the wire these two shares would have three
-  // different fates were the verdict left to the platform. Both are rejected in
-  // both roles here and in the Node suite, which is what makes a share's
-  // acceptance independent of which peer received it.
-  //
-  // The responder half is what pins the rejection to the share rather than to
-  // the confirmation round: an accepted share would put msg2 on the wire and
-  // leave the responder waiting for msg3, so neither the abort nor the generic
-  // failure would arrive.
+  // The wire counterpart of the measurement above, in both roles: Chromium admits
+  // the compressed encoding and refuses the hybrid one, Node admits both, so an
+  // unpinned encoding's acceptance would depend on which peer received the share.
+  // Both are rejected in both roles here and in the Node suite. The responder
+  // half matters because an accepted share would leave the responder waiting on
+  // msg3 instead of raising the abort or the generic failure.
 
   async function initiatorRejectsMsg2Share(
     share: Uint8Array<ArrayBuffer>,

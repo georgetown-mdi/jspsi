@@ -33,7 +33,7 @@ import type { SerializedFrame } from "@psilink/peerjs-broker/models/messageQueue
 const ABSENT_ID = "peer-absent";
 const SENDER_ID = "peer-sender";
 
-/** A signaling payload of the shape a real offer carries: a JSON object, not a
+/** A signaling payload of the shape a real offer has: a JSON object, not a
  * string. Sizing it is what decides whether the relay holds the frame. */
 const OFFER_PAYLOAD = {
   sdp: { type: "offer", sdp: "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\n" },
@@ -42,7 +42,7 @@ const OFFER_PAYLOAD = {
   browser: "chrome",
 };
 
-/** A payload carrying every JSON shape a signaling frame can nest -- objects
+/** A payload holding every JSON shape a signaling frame can nest -- objects
  * inside arrays inside objects, numbers, booleans, null, and non-Latin1 text --
  * so what the hold returns is compared against more than a string. */
 const NESTED_PAYLOAD = {
@@ -101,7 +101,7 @@ afterEach(async () => {
 });
 
 /** Only the broker's lines: the capture is process-wide, so another core logger
- * emitting during a test must not be read as a broker diagnostic. */
+ * emitting during a test must not be treated as a broker diagnostic. */
 function brokerLines(): Array<string> {
   return capturedLines.filter((line) =>
     line.includes(`[${BROKER_LOG_CONTEXT}]`),
@@ -174,7 +174,7 @@ describe("relay hold-for-reconnect round trip", () => {
       }),
     );
 
-    // Held rather than dropped: the queue exists and carries the one frame.
+    // Held rather than dropped: the queue exists and holds the one frame.
     await waitFor(
       () => broker.realm.getMessageQueueById(ABSENT_ID)?.size() === 1,
     );
@@ -294,7 +294,7 @@ describe("relay hold-for-reconnect round trip", () => {
     ).toEqual([OFFER_PAYLOAD, NESTED_PAYLOAD]);
 
     // The drop is reported as this server's own fault rather than the peer's,
-    // down the same route the enqueue seam's refusal takes.
+    // down the same route the enqueue boundary's refusal takes.
     await waitFor(() =>
       brokerLines().some((line) => line.includes("[frame-dispatch]")),
     );

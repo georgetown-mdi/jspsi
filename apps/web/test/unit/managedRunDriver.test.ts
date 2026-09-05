@@ -46,39 +46,12 @@ import type { PeerCloseOutcome } from "../../src/psi/waitForPeerClose.js";
 import type { RunOutputs } from "@bench/runOutputs";
 
 /**
- * The browser wiring of a managed re-run, with every platform seam it composes
- * mocked: the rendezvous, the message connection, the handshake, the PSI
- * exchange, and the outputs builder. What is left is the wiring's own decisions,
- * and the ones asserted here are the handshake role it hands the key exchange
- * for each stored side, and its two teardowns: neither the run's outputs nor a
- * failed handshake's error may be held behind the clean close's wait for the
- * peer, whose duration the partner chooses up to the close ceiling.
- *
- * The role is asserted from the handshake mock's own arguments, against the
- * cross-application interop vectors rather than against the table this wiring
- * reads: the pairing is half a contract with a CLI partner, and a flow that read
- * the wrong side out of a correct table would take a role no partner pairs with
- * while the table's own test stayed green.
- *
- * On the handshake's teardown that wait costs more than the run's own latency.
- * The handshake phase runs inside the single-writer lock, which releases when the
- * phase settles (`runManagedExchange`; the release on a rejecting critical section
- * is pinned against real Web Locks in test/browser/managedExchangeRun.test.ts), so
- * a phase that settles only after the drain holds the lock -- and every other
- * context's run of this record -- for the partner-chosen duration too. A phase
- * that rejects while the drain is still in flight is what releases it promptly.
- *
- * That is also what fixes the teardown's own order here: with the outcome out in
- * front of the drain on both paths, the broker id has to be freed before the
- * drain rather than after it, or a failed run's retry -- deriving the same
- * rendezvous id from the secret it did not rotate -- meets its own still-live
- * registration at the broker. The premise that the drain survives the freeing is
- * the real stack's, pinned in test/browser/webrtcCloseDelivery.test.ts.
- *
- * The orchestration this driver injects into (the lock, the persist ordering, the
- * bookkeeping) is `runManagedRerun`'s, tested in managedRun.test.ts and against
- * real Chromium in test/browser/managedRun.test.ts; it is replaced here by a fake
- * that runs the three phases in order.
+ * The browser wiring of a managed re-run, every platform boundary mocked
+ * (rendezvous, message connection, handshake, PSI exchange, outputs builder):
+ * only the wiring's own decisions are under test -- the handshake role per
+ * stored side, checked against the cross-application interop vectors, and its
+ * two teardowns, where neither the outputs nor a failed handshake's error
+ * waits on the clean close's peer-controlled drain.
  */
 
 /** The outputs the mocked builder returns; identity is all the assertions need.
@@ -181,7 +154,7 @@ const SIDE_VECTORS = (
 ).rendezvous.sides;
 
 /** Only the fields the driver itself reads: the side that picks the handshake
- * role, and the secret/terms/expiry it hands to seams that are mocked here. */
+ * role, and the secret/terms/expiry it hands to boundaries that are mocked here. */
 const RECORD = {
   id: "record-under-test",
   side: "acceptor",
@@ -201,7 +174,7 @@ const SOURCE = {} as unknown as ManagedInputSource;
 const URLS = { create: () => "blob:artifact", revoke: () => {} };
 
 /** Flush pending microtasks (and any queued macrotask), so a promise that has
- * not settled after this one is genuinely parked. */
+ * not settled after this one is parked. */
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 /** A message connection whose clean close parks until `release` (the peer takes
@@ -356,7 +329,7 @@ describe("runManagedExchangeInBrowser", () => {
   test("a failing teardown does not fail a completed run", async () => {
     // What makes starting the teardown without awaiting it safe: it swallows its
     // own faults, so a rejecting close neither replaces the run's outputs nor
-    // surfaces as an unhandled rejection.
+    // shows as an unhandled rejection.
     const close = vi.fn(() => Promise.reject(new Error("close failed")));
     const failing = {
       close,
@@ -407,7 +380,7 @@ describe("runManagedExchangeInBrowser", () => {
     await expect(running).resolves.toMatchObject({ exchange: OUTPUTS });
   });
 
-  test("frees the broker id before a handshake failure surfaces", async () => {
+  test("frees the broker id before a handshake failure reaches the caller", async () => {
     // The two halves the teardown's order buys, in the one moment they are both
     // visible: the lock is released (the failure is out) with the record's
     // rendezvous id already free, so the retry that derives the same id from the
@@ -426,7 +399,7 @@ describe("runManagedExchangeInBrowser", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  test("finishes a failed handshake's drain after the failure surfaces", async () => {
+  test("finishes a failed handshake's drain after the failure reaches the caller", async () => {
     // Freeing the id first must not mean abandoning the drain behind it: the
     // parked close is still the teardown's to finish, so a fault it raises once
     // the failure is already out lands in the teardown's own handler rather than
@@ -574,7 +547,7 @@ describe("the peer-wait bound", () => {
     // runner's window policy, and every other caller -- the attended surface
     // included -- leaves both waits on the shared human-timescale budget. The
     // options are matched exactly rather than by value, because a driver that
-    // filled the bound in from a default of its own would carry the same
+    // filled the bound in from a default of its own would produce the same
     // numbers here while taking the choice away from the policy that owns it.
     const { mc } = makeParkedCloseMc();
     mockedOpen.mockResolvedValue(mc);
@@ -619,9 +592,9 @@ describe("the peer-wait bound", () => {
 });
 
 describe("naming what the agreed terms resolved to", () => {
-  /** Drive core's pre-round seam with one resolved shape, then finish the run.
-   * `runExchange` is mocked here, so this is where the seam a real run fires
-   * after the terms exchange comes from. */
+  /** Drive core's pre-round call site with one resolved shape, then finish the
+   * run. `runExchange` is mocked here, so this is the call site a real run
+   * fires after the terms exchange completes. */
   function exchangeConfirming(runShape: ResolvedRunShape) {
     mockedRunExchange.mockImplementationOnce(
       (
@@ -692,7 +665,7 @@ describe("naming what the agreed terms resolved to", () => {
   });
 
   test("drops the notices on a run the operator already stopped", async () => {
-    // The live gate every seam of this wiring takes: a cancelled run's notices
+    // The live gate every call site of this wiring takes: a cancelled run's notices
     // are noise, and the caller's surface may be gone.
     const { mc } = makeParkedCloseMc();
     mockedOpen.mockResolvedValue(mc);
@@ -739,7 +712,7 @@ describe("filing the run's disclosure", () => {
 
   test("files the disclosure before the run yields its outputs", async () => {
     // A tab closed on the completion screen must not be what decides whether the
-    // disclosure was recorded, so the entry lands before the outputs surface.
+    // disclosure was recorded, so the entry lands before the outputs are yielded.
     const { mc } = makeParkedCloseMc();
     mockedOpen.mockResolvedValue(mc);
     acquireResources();

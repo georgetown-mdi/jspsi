@@ -19,7 +19,7 @@ vi.mock("@psi/rendezvous", async () =>
   (await import("./moduleMocks")).rendezvousMock(),
 );
 
-// A terminal error the seat surfaces is a cause chain, and the only thing
+// A terminal error the seat shows is a cause chain, and the only thing
 // separating one link from the next is the renderer's own newline. A newline is
 // not a line break by default -- `white-space: normal` collapses it to a space,
 // which runs the failure and the recovery step together as one sentence that

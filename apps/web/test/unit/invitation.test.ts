@@ -35,7 +35,7 @@ const location: InvitationLocation = {
   port: "8443",
 };
 
-// A CSV carrying every default linkage column, so the file-derived terms keep all
+// A CSV containing every default linkage column, so the file-derived terms keep all
 // the default keys -- the baseline that round-trips to the full default terms.
 const ALL_COLUMNS_CSV =
   "ssn,ssn4,first_name,last_name,dob\n123456789,6789,Alice,Smith,1990-01-02\n";
@@ -71,7 +71,7 @@ describe("generateInvitation", () => {
     // The secret is a base64url-encoded 32-byte value (43 chars, last in the
     // padding-constrained set); see SHARED_SECRET_REGEX in core.
     expect(token.sharedSecret).toMatch(/^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/);
-    // The file carries every default column, so the file-derived terms equal the
+    // The file contains every default column, so the file-derived terms equal the
     // full default set keyed on the inviter's name -- real terms, not a placeholder.
     expect(token.linkageTerms).toStrictEqual(
       getDefaultLinkageTerms(inviterName),
@@ -123,7 +123,7 @@ describe("generateInvitation", () => {
       port: 2222,
       path: "/exchanges/drop",
     });
-    // No credential rides along: the endpoint carries only the public locator
+    // No credential rides along: the endpoint contains only the public locator
     // keys (the type admits no credential field; the strict schema rejects one).
     const serialized = JSON.stringify(token.connectionEndpoint);
     expect(serialized).not.toContain("username");
@@ -150,7 +150,7 @@ describe("generateInvitation", () => {
     { label: "an unstated mode", params: {} },
   ])("declares nothing for $label", async ({ params }) => {
     // Neither is a claim that the exchange cleans up after itself, so neither
-    // reaches the token: an absent field states nothing, which is the honest
+    // reaches the token: an absent field states nothing, which is the accurate
     // answer for a webrtc mint (a channel with no retain mode) as well.
     const { encoded } = await generateInvitation({
       inviterName: "County Health Dept",
@@ -164,9 +164,10 @@ describe("generateInvitation", () => {
   });
 
   test("refuses a retain declaration on the default webrtc mint", async () => {
-    // The schema's guard, reached through this seam: retain mode is a file-sync
-    // setting the webrtc channel does not have, so a caller passing the pair is
-    // refused rather than minting a token stating a mode no run could be in.
+    // The schema's guard, reached through generateInvitation: retain mode is a
+    // file-sync setting the webrtc channel does not have, so a caller passing
+    // the pair is refused rather than minting a token stating a mode no run
+    // could be in.
     await expect(
       generateInvitation({
         inviterName: "County Health Dept",
@@ -208,7 +209,7 @@ describe("generateInvitation", () => {
     );
     const token = await decodeInvitation(result.encoded);
     expect(token.linkageTerms).toStrictEqual(expected);
-    // It is genuinely filtered, not the full default set: fewer keys, and none of
+    // It is filtered, not the full default set: fewer keys, and none of
     // the dropped ssn4 keys remain.
     expect(token.linkageTerms.linkageKeys.length).toBeGreaterThan(0);
     expect(token.linkageTerms.linkageKeys.length).toBeLessThan(
@@ -220,7 +221,7 @@ describe("generateInvitation", () => {
       ),
     ).toBe(false);
 
-    // The returned terms object IS the embedded one, surfaced for the inviter's
+    // The returned terms object IS the embedded one, exposed for the inviter's
     // own exchange to reuse verbatim (no re-derivation).
     expect(result.linkageTerms).toStrictEqual(token.linkageTerms);
   });
@@ -276,7 +277,7 @@ describe("generateInvitation", () => {
     // The acceptor adopts the invitation's terms, so an embedded set diverging from
     // what the inviter runs would make the terms-compat handshake reject. The
     // inviter both embeds and runs THESE terms, and the acceptor adopts them (its
-    // own identity substituted), so the two sides carry an identical key set.
+    // own identity substituted), so the two sides have an identical key set.
     const { linkageTerms } = await generateInvitation({
       inviterName: "Inviter",
       file: csvStream(PARTIAL_CSV),
@@ -321,7 +322,7 @@ describe("generateInvitation", () => {
     expect(token.linkageTerms).toStrictEqual(authored);
     // The returned object is the embedded one, for the inviter's own exchange.
     expect(linkageTerms).toStrictEqual(authored);
-    // The default derivation is skipped: the file carries every default column,
+    // The default derivation is skipped: the file contains every default column,
     // so the quick path would have embedded the full multi-key set.
     expect(token.linkageTerms.linkageKeys).toHaveLength(1);
     expect(token.linkageTerms.linkageKeys.length).toBeLessThan(
@@ -335,10 +336,11 @@ describe("generateInvitation", () => {
   });
 
   test("fails closed when authored terms no column can satisfy reach the mint", async () => {
-    // A defense-in-depth backstop on the mint boundary: even if the editor's gate
-    // were bypassed, authored terms whose every key references a field the file
-    // cannot produce must not mint a token (it would run to a silent empty
-    // result). The only key needs ssn4; PARTIAL_CSV has no ssn4 column.
+    // A defense-in-depth safety check on the mint boundary: even if the
+    // editor's gate were bypassed, authored terms whose every key references a
+    // field the file cannot produce must not mint a token (it would run to a
+    // silent empty result). The only key needs ssn4; PARTIAL_CSV has no ssn4
+    // column.
     const base = getDefaultLinkageTerms(
       "Org",
       inferMetadata(["ssn", "ssn4", "first_name", "last_name", "dob"]),
@@ -467,7 +469,7 @@ describe("generateInvitation", () => {
     const inviterFile = () =>
       csvStream("first_name,last_name,dob\nAlice,Smith,1990-01-02\n");
 
-    // The premise the refusal is measured against: with a window that opens,
+    // The assumption the refusal is measured against: with a window that opens,
     // these terms and this file mint, so what closes the mint below is the
     // window and not the fixture.
     await expect(
@@ -492,7 +494,7 @@ describe("generateInvitation", () => {
     if (failure.kind !== "unlinkable") throw new Error("unreachable");
     expect(failure.refusal.kind).toBe("shortfall");
     if (failure.refusal.kind !== "shortfall") throw new Error("unreachable");
-    // Dead rather than short of columns: the file carries what the key names, so
+    // Dead rather than short of columns: the file contains what the key names, so
     // the remedy is a corrected transform, not a different file.
     expect(failure.refusal.verdict.deadKeys.map((key) => key.name)).toEqual([
       "fn-only",
@@ -521,11 +523,11 @@ describe("generateInvitation", () => {
   });
 
   // A name at the ceiling is legitimate and must mint; one code unit past it
-  // cannot be carried -- the payload frame and the exchange record both refuse it.
+  // cannot be held -- the payload frame and the exchange record both refuse it.
   const AT_CEILING = "a".repeat(MAX_NAME_LENGTH);
   const PAST_CEILING = AT_CEILING + "a";
 
-  /** A linkable CSV whose last column carries `name`, which the quick path infers
+  /** A linkable CSV whose last column holds `name`, which the quick path infers
    * as an `other` column and therefore sends. */
   function csvSending(name: string): string {
     return (
@@ -564,9 +566,9 @@ describe("generateInvitation", () => {
 
   test("counts the ceiling in UTF-16 code units, as the wire and record bounds do", async () => {
     // A name of MAX_NAME_LENGTH astral characters is under the ceiling on a
-    // code-point count (the count ColumnName's display cut uses) and over it on the
-    // count every carrying bound uses. The mint refuses it, so nothing this gate
-    // passes is refused later by the partner.
+    // code-point count (the count ColumnName's display cut uses) and over it on
+    // the count every wire-and-record bound uses. The mint refuses it, so
+    // nothing this gate passes is refused later by the partner.
     const astral = "\u{1D54F}".repeat(MAX_NAME_LENGTH);
     expect([...astral].length).toBe(MAX_NAME_LENGTH);
     expect(astral.length).toBe(MAX_NAME_LENGTH * 2);
@@ -583,7 +585,7 @@ describe("generateInvitation", () => {
 
   test("mints an over-long column name the metadata does not send", async () => {
     // The scope of the bound: an oversized header is fully usable for matching and
-    // ignoring, so only a name that is actually carried refuses the mint.
+    // ignoring, so only a name that is actually disclosed refuses the mint.
     const metadata = inferMetadata([
       "ssn",
       "first_name",
@@ -607,12 +609,12 @@ describe("generateInvitation", () => {
   });
 
   test("fails closed when authored terms over-declare payload.send at the mint", async () => {
-    // Defense-in-depth backstop: the Advanced editor authors no payload block
-    // today, so this cannot fire from the UI until payload authoring lands.
-    // Constructed by hand here to prove the mint boundary rejects an over-declaring
-    // payload.send rather than letting the token and the partner's
-    // consent screen carry a column the metadata gates off. `ssn` is a linkage
-    // column (isPayload:false), so it is not disclosed and may not be declared.
+    // Defense-in-depth safety check: the Advanced editor authors no payload
+    // block today, so this can only be constructed by hand, to prove the mint
+    // boundary rejects an over-declaring payload.send rather than letting the
+    // token and the partner's consent screen hold a column the metadata gates
+    // off. `ssn` is a linkage column (isPayload:false), so it is not disclosed
+    // and may not be declared.
     const metadata = inferMetadata(["ssn", "first_name", "last_name", "dob"]);
     const authored = {
       ...getDefaultLinkageTerms("Org", metadata),
@@ -630,14 +632,12 @@ describe("generateInvitation", () => {
     ).rejects.toThrow(/does not transmit/);
   });
 
-  // The mint-boundary fan-out backstop, over the default terms, which are
-  // cascade -- the strategy that matches one value per record and so refuses a
-  // fan-out. The editor's Generate gate names the missing capability on the
-  // offending control, so these hand-built shapes stand in for a caller that
-  // reaches the mint without it -- and pin that the refusal is the mint's, not
-  // the run's, so no invitation for an exchange core already refuses ever reaches
-  // a partner. The declaring function comes from core's list rather than a
-  // literal, so a fan-out function added there is covered here.
+  // The mint-boundary fan-out safety check, over the default (cascade) terms,
+  // which match one value per record and so refuse a fan-out. These hand-built
+  // shapes stand in for a caller that reaches the mint without going through
+  // the editor's Generate gate, so no invitation for an exchange core already
+  // refuses ever reaches a partner. The function comes from core's own list,
+  // so a fan-out function added there is covered here.
   const [fanOutFunction] = FAN_OUT_FUNCTION_NAMES;
   const fanOutStep = { function: fanOutFunction, params: { delimiter: "-" } };
 
@@ -689,7 +689,7 @@ describe("generateInvitation", () => {
     );
   });
 
-  // A linkable CSV (ssn + names + dob give satisfiable keys) that ALSO carries
+  // A linkable CSV (ssn + names + dob give satisfiable keys) that ALSO contains
   // columns the quick path discloses: `notes` infers as an `other` column (role
   // payload), and `member_id` infers as a single row-identifier left isPayload, so
   // both are transmitted -- exactly the two inferred-disclosure shapes the quick
@@ -727,7 +727,7 @@ describe("generateInvitation", () => {
       disclosed,
     );
     expect(token.linkageTerms.payload?.receive).toBeUndefined();
-    // The returned terms (the inviter runs its own exchange on these) carry the
+    // The returned terms (the inviter runs its own exchange on these) have the
     // same authored send.
     expect(linkageTerms.payload?.send?.map((c) => c.name)).toEqual(disclosed);
     // It cannot trip core's over-declaration reject: the send equals the disclosed
@@ -744,7 +744,7 @@ describe("generateInvitation", () => {
     // The partner's consent screen reads its payload entries from the token via
     // summarizeInvitation (the same boundary the Advanced path's authored send
     // flows through). Feed the quick-path token through it to pin that the disclosed
-    // columns surface as payload entries the partner sees before consenting -- the
+    // columns show up as payload entries the partner sees before consenting -- the
     // acceptance criterion that closes the quick-path declaration/consent gap. Plain
     // ASCII names pass through sanitizeForDisplay unchanged.
     const summary = summarizeInvitation(token);
@@ -752,7 +752,7 @@ describe("generateInvitation", () => {
     expect(summary.payload?.receive).toEqual([]);
   });
 
-  test("quick path carries the disclosed-columns subset on the token", async () => {
+  test("quick path holds the disclosed-columns subset on the token", async () => {
     const disclosed = disclosedColumnNames(inferMetadata(DISCLOSING_COLUMNS));
     const result = await generateInvitation({
       inviterName: "Org",
@@ -760,17 +760,17 @@ describe("generateInvitation", () => {
       location,
     });
     const token = await decodeInvitation(result.encoded);
-    // The dedicated wire field carries exactly what preparePayload transmits.
+    // The dedicated wire field holds exactly what preparePayload transmits.
     expect(token.disclosedPayloadColumns).toEqual(disclosed);
-    // The surfaced field is the token's value, so a persisting caller (the
+    // The exposed field is the token's value, so a persisting caller (the
     // managed-exchange deposit) records the same commitment the token published.
     expect(result.disclosedPayloadColumns).toEqual(
       token.disclosedPayloadColumns,
     );
   });
 
-  test("quick path carries an empty disclosed subset when the file discloses nothing", async () => {
-    // The web inviter always knows its metadata, so the field is always carried --
+  test("quick path holds an empty disclosed subset when the file discloses nothing", async () => {
+    // The web inviter always knows its metadata, so the field is always present --
     // here the EMPTY set, which locks the acceptor in to "receive nothing" (a later
     // non-empty payload aborts) rather than reconciling lazily.
     const result = await generateInvitation({
@@ -862,7 +862,7 @@ describe("generateInvitation", () => {
     });
 
     // The returned expires is exactly the bounded value inside the encoded
-    // token, surfaced (not re-decoded) so the inviter threads it into the
+    // token, exposed (not re-decoded) so the inviter threads it into the
     // authenticated key exchange alongside the secret. Always present: every
     // generated invitation is bounded.
     const token = await decodeInvitation(encoded);
@@ -1125,8 +1125,8 @@ describe("generateInvitation expiry", () => {
 
   test("rejects a non-positive (or non-finite) lifetimeSeconds at entry, before encoding", async () => {
     // Caught here with a clear cause rather than at encodeInvitation's
-    // future-expiry backstop. The lifetime bound is checked before the file is
-    // parsed, so a fresh valid stream is supplied but never consumed.
+    // future-expiry safety check. The lifetime bound is checked before the
+    // file is parsed, so a fresh valid stream is supplied but never consumed.
     for (const lifetimeSeconds of [
       0,
       -1,
@@ -1145,8 +1145,9 @@ describe("generateInvitation expiry", () => {
   });
 
   test("rejects a lifetimeSeconds past the one-year ceiling, before encoding", async () => {
-    // The seam must not be able to mint an effectively-permanent token, so a
-    // value past the ceiling is rejected up front with the bound's own cause.
+    // generateInvitation must not be able to mint an effectively-permanent
+    // token, so a value past the ceiling is rejected up front with the bound's
+    // own cause.
     await expect(
       generateInvitation({
         inviterName: "County Health Dept",

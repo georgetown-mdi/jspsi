@@ -94,7 +94,7 @@ describe("PSI crypto Web Worker (real Vite-native worker, real WASM)", () => {
 
   // The acceptance criterion: the worker is torn down on every exchange-end path.
   // runExchange funnels success, error, and abort through the participant's dispose()
-  // in its finally; at the engine seam each is dispose() after that prior state.
+  // in its finally; at the engine boundary each is dispose() after that prior state.
   describe("the worker is torn down on each terminal path", () => {
     test("success: after a completed crypto call", async () => {
       const { spawn, terminations } = trackingSpawner();
@@ -117,7 +117,7 @@ describe("PSI crypto Web Worker (real Vite-native worker, real WASM)", () => {
         "identifier-revealing",
       );
       // A role-guard violation (a joiner has no server key) rejects inside the worker
-      // and surfaces as a rejected call over the boundary -- the error terminal path.
+      // and shows up as a rejected call over the boundary -- the error terminal path.
       await expect(
         engine.processClientRequest(new Uint8Array()),
       ).rejects.toThrow(/server role/);

@@ -103,7 +103,7 @@ const UNCERTAIN_SHARED_RENDEZVOUS: JobRendezvousConfig = {
   sharesDataRootUncertain: true,
 };
 
-/** An appliance whose rendezvous has a mount of its own, where the collision the
+/** A console whose rendezvous has a mount of its own, where the collision the
  * advisory names cannot arise. */
 const SEPARATE_RENDEZVOUS: JobRendezvousConfig = {
   ...SHARED_RENDEZVOUS,
@@ -282,20 +282,20 @@ describe("the intent boundary admits only a mode an exchange honors", () => {
     }
   });
 
-  test("the retention note refuses a control character, keeping the whitespace a note carries", () => {
+  test("the retention note refuses a control character, keeping the whitespace a note holds", () => {
     const admits = (note: string): boolean =>
       jobExchangeIntentSchema.safeParse(
         validIntent({ retentionDisposition: note }),
       ).success;
     // A NUL or an ESC would compose into the YAML and land in the exchange
-    // record verbatim, so the note carries the control-character refusal the
+    // record verbatim, so the note holds the control-character refusal the
     // rest of this surface's operator-supplied strings do.
     for (const code of [0x00, 0x07, 0x0b, 0x0c, 0x1b, 0x7f, 0x9b])
       expect(
         admits(`Filed${String.fromCharCode(code)}under the schedule`),
       ).toBe(false);
     // The card authors this field in a textarea, so the whitespace controls a
-    // multi-line note carries stay admissible.
+    // multi-line note holds stay admissible.
     expect(admits("Filed under the schedule.\nPurged after six years.")).toBe(
       true,
     );
@@ -351,7 +351,7 @@ describe("the composed signing block, per mode", () => {
     expect(composed["retention_disposition"]).toBeUndefined();
   });
 
-  test("mode none composes no block either: absent is what the CLI reads as unsigned", () => {
+  test("mode none composes no block either: absent is what the CLI treats as unsigned", () => {
     const composed = composedSpec(
       composeConfigDocument(
         validIntent({ signing: { mode: "none" } }),
@@ -417,7 +417,7 @@ describe("the composed signing block, per mode", () => {
 
   test("certificate mode with no pinned fingerprint is a compose-time error too", () => {
     // jobSigningChoiceSchema's refine guarantees a validated certificate intent
-    // always carries partnerFingerprint, so an intent missing it is reachable
+    // always has partnerFingerprint, so an intent missing it is reachable
     // here only by bypassing the schema -- exactly what this hand-built intent
     // does. The guard is what turns that impossible state into a loud failure
     // at compose time rather than a config the spawned child would refuse
@@ -465,7 +465,7 @@ describe("the retention note reaches the composed config verbatim", () => {
   });
 });
 
-describe("the graduation hand-off handles the identity path honestly", () => {
+describe("the graduation hand-off handles the identity path accurately", () => {
   const handoffYaml = (
     intent = validIntent({
       signing: { mode: "certificate", partnerFingerprint: PARTNER_FINGERPRINT },
@@ -481,7 +481,7 @@ describe("the graduation hand-off handles the identity path honestly", () => {
     return { handoff, spec: composedSpec(handoff.template.yaml) };
   };
 
-  test("the identity file is a placeholder, never the appliance's own path", () => {
+  test("the identity file is a placeholder, never the console's own path", () => {
     const { spec } = handoffYaml();
     const signing = spec["signing"] as Record<string, unknown>;
     expect(signing["identity_file"]).toBe(HANDOFF_SIGNING_IDENTITY_PLACEHOLDER);
@@ -494,11 +494,11 @@ describe("the graduation hand-off handles the identity path honestly", () => {
     const signing = spec["signing"] as Record<string, unknown>;
     expect(signing["receipt_output"]).toBeUndefined();
     expect(signing["mode"]).toBe("certificate");
-    // The partner's pin is portable and carries over verbatim.
+    // The partner's pin is portable and passes through verbatim.
     expect(signing["partner_fingerprint"]).toBe(PARTNER_FINGERPRINT);
   });
 
-  test("the retention note carries over verbatim", () => {
+  test("the retention note passes through verbatim", () => {
     const { spec } = handoffYaml();
     expect(spec["retention_disposition"]).toBe(RETENTION_NOTE);
   });
@@ -531,7 +531,7 @@ describe("the graduation hand-off handles the identity path honestly", () => {
 });
 
 // Each signing artifact's path is composed from a server constant against a
-// directory the appliance owns, and the receipt's is the one a route then serves
+// directory the console owns, and the receipt's is the one a route then serves
 // out of the job workdir. Each goes through the containment check rather than a
 // join, the way the diagnostic log's path is.
 describe("the signing artifacts resolve inside the directory that owns them", () => {
@@ -689,7 +689,7 @@ describe("the fingerprint driver", () => {
     ).toEqual({ kind: "refused" });
   });
 
-  test("a clean exit carries the created flag and the export acknowledgement", () => {
+  test("a clean exit has the created flag and the export acknowledgement", () => {
     expect(
       reconcileFingerprintExit(0, `${OWN_FINGERPRINT}\n`, {
         created: true,
@@ -932,7 +932,7 @@ describe("the receipts card's model", () => {
       ),
     ).toContain(RETENTION_NOTE_CONTROL_CHAR_PROBLEM);
     // The card authors this field in a textarea, so the whitespace controls a
-    // multi-line note carries -- and that the server admits -- stay clean.
+    // multi-line note holds -- and that the server admits -- stay clean.
     expect(
       problemsFor(
         draft({
@@ -945,7 +945,7 @@ describe("the receipts card's model", () => {
 
   test("an unpinned partner blocks the run, as the run itself would", () => {
     // Core refuses this configuration before any connection is opened
-    // (assertCertificateModePinsPartner) and the appliance's job schema refuses
+    // (assertCertificateModePinsPartner) and the console's job schema refuses
     // the intent at create time, so the card reports it as a problem rather than
     // an advisory: nothing about the partner or the network could make such a run
     // finish, and warning-and-proceeding would spend the operator's disclosure on
@@ -964,13 +964,12 @@ describe("the receipts card's model", () => {
 
   test("an unnamed party blocks the run, as the run itself would", () => {
     // Core refuses this configuration before any connection is opened
-    // (assertCertificateModeNamesLocalParty) and the appliance's job schema
+    // (assertCertificateModeNamesLocalParty) and the console's job schema
     // refuses the intent at create time: a certificate is trusted by the identity
     // its holder used in the agreed terms, so an unnamed party has nothing for
     // the partner to check it against. The card's own fingerprint request is
-    // withheld for want of a name too, but that is a different sink and a
-    // different remedy, and the run gate must not rest on it: a fingerprint
-    // requested under a name since cleared leaves the draft here.
+    // withheld for want of a name too, but the run gate does not rest on it: a
+    // fingerprint requested under a name since cleared leaves the draft here.
     const unnamed = draft({
       mode: "certificate",
       ownFingerprint: OWN_FINGERPRINT,
@@ -988,9 +987,8 @@ describe("the receipts card's model", () => {
 
   test("an unnamed exchange that signs nothing is asked for no name", () => {
     // The gate binds the certificate-signing configuration alone. A quick
-    // unsigned exchange states no name and is asked for none -- the whole point
-    // of an optional identity -- so a nameless draft must report no problem at
-    // all in the modes that sign nothing.
+    // unsigned exchange states no name and is asked for none, so a nameless
+    // draft must report no problem at all in the modes that sign nothing.
     expect(receiptsProblems(RECEIPTS_DEFAULT, "")).toEqual([]);
     expect(
       receiptsProblems(draft({ retentionDisposition: RETENTION_NOTE }), ""),
@@ -1010,7 +1008,7 @@ describe("the receipts card's model", () => {
     // The block is on STARTING a run, not on the draft: the mode stays selected,
     // the resolved own fingerprint stays put (it is what the operator sends the
     // partner to get theirs), and the emitted intent is still the certificate
-    // block the appliance schema will judge. An operator part-way through the
+    // block the console schema will judge. An operator part-way through the
     // two-sided ceremony keeps everything they have authored.
     const unpinned = draft({
       mode: "certificate",
@@ -1027,7 +1025,7 @@ describe("the receipts card's model", () => {
 
   test("the shared-mount advisory raises above the notices", () => {
     // It names a key-disclosure hazard that is live by default on the
-    // single-mount filedrop layout, so it carries warning weight. The two notices
+    // single-mount filedrop layout, so it has warning weight. The two notices
     // state only where a file lands and how to look after it, so they stay at
     // info.
     const pinned = draft({
@@ -1098,7 +1096,7 @@ describe("the receipts card's model", () => {
     // signature} frame before verifying the partner's, so "no results and no
     // receipt" is not the whole cost on the side that sends first: the partner
     // would hold this party's signed receipt when the run stopped. Which role this
-    // side takes is not settled while authoring, so the copy is conditional -- and
+    // side takes is not decided while authoring, so the copy is conditional -- and
     // it still says nothing about what the partner does with what it receives.
     expect(NO_PARTNER_PIN_PROBLEM).toMatch(/sends its signature first/);
     expect(NO_PARTNER_PIN_PROBLEM).toMatch(
@@ -1175,7 +1173,7 @@ describe("the receipts card's model", () => {
 
   test("the uncertain shared-mount advisory states the layout as unruled-out, not established", () => {
     // Raised on the report's fail-closed cases: a leg or a data root whose real
-    // path cannot be read counts as holding (jobRendezvous.ts), and an appliance
+    // path cannot be read counts as holding (jobRendezvous.ts), and a console
     // that has not answered keeps the advisory (the case below). Neither case
     // established the layout, so copy asserting it flatly would be telling the
     // operator something the walk did not find -- which an operator who checks
@@ -1200,7 +1198,7 @@ describe("the receipts card's model", () => {
 
   test("the at-rest notice stands on its own, without the collision half", () => {
     // It is shown on layouts where the shared-mount advisory is withheld, so it
-    // has to read as a whole message: the key-hygiene guidance it carries is true
+    // has to stand as a whole message: the key-hygiene guidance it holds is true
     // wherever the key is written, and it must not lean on a sentence about the
     // partner's folder that the operator may never see.
     expect(IDENTITY_AT_REST_NOTICE).toMatch(/readable only by you/);
@@ -1226,7 +1224,7 @@ describe("the receipts card's model", () => {
     ]);
   });
 
-  test("an appliance that has not answered keeps the hedged shared-mount advisory", () => {
+  test("a console that has not answered keeps the hedged shared-mount advisory", () => {
     // An unresolved probe, a failed one, and a report that cannot run a filedrop
     // exchange as provisioned all leave the layout unknown -- and an unread report
     // is not evidence of a separate mount, so the advisory stands, and in the
@@ -1249,7 +1247,7 @@ describe("the receipts card's model", () => {
   });
 
   test("a blank identity withholds the fingerprint request, with the reason", () => {
-    // The one hard precondition the card holds: the appliance's schema requires a
+    // The one hard precondition the card holds: the console's schema requires a
     // non-empty label, so an ordinary click without one could only ever be a 400
     // the operator was told nothing actionable by.
     expect(fingerprintRequestProblem("")).toBe(IDENTITY_LABEL_REQUIRED_REASON);

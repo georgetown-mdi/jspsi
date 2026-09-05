@@ -37,7 +37,7 @@ function installStorage(): Map<string, string> {
 }
 
 /** A {@link JobApiClient} whose status calls follow a fixed script (a further poll
- * past the script reads as gone), recording the discard's cancel/delete/status
+ * past the script is treated as gone), recording the discard's cancel/delete/status
  * order so the sequence is asserted deterministically. */
 function scriptedDiscardClient(statuses: Array<JobStatusProbe>) {
   const order: Array<string> = [];

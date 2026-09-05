@@ -12,16 +12,12 @@ import type { TestProject } from "vitest/node";
 // touches the dev server.
 //
 // The dev server runs on 127.0.0.1 (the Vite bind host -- not `localhost`,
-// which may resolve to ::1 and miss the IPv4 bind). This setup resolves the
-// port as `process.env.PORT ?? "3000"` and probes/launches there, matching
-// vite.config.ts. The integration tests (Node) read their target from the same
-// expression. The browser tests run in Chromium and cannot read `process.env`,
-// so the resolved port is published via `provide()` for them to `inject()`,
-// pinning each browser test to the exact port this setup probed rather than a
-// hardcoded guess. All three derive from `process.env.PORT ?? "3000"`, so they
-// agree whenever PORT is set in the environment or unset (the repo's `.env`
-// pins 3000); a non-3000 PORT set only in `.env` would not reach this read and
-// is unsupported.
+// which may resolve to ::1 and miss the IPv4 bind), on the port resolved as
+// `process.env.PORT ?? "3000"`, matching vite.config.ts. The integration
+// tests read the same expression; the browser tests cannot read
+// `process.env`, so the resolved port is published via `provide()` for them
+// to `inject()`. A PORT set only in `.env`, not the environment, is
+// unsupported.
 //
 // If a server is already listening on 127.0.0.1:PORT when the suite starts,
 // it is reused and left running on teardown, so a developer's long-lived
@@ -48,7 +44,7 @@ const PROBE_TIMEOUT_MS = 1_000;
 // is roughly the effective poll cadence while the server is still coming up.
 const PROBE_SLEEP_MS = 250;
 // Short probe to detect an already-running server so we reuse rather than
-// start a second one -- and, crucially, leave it running on teardown.
+// start a second one -- and leave it running on teardown.
 const REUSE_PROBE_TIMEOUT_MS = 500;
 // After SIGTERM, how long to wait for the process group to exit before
 // escalating to SIGKILL, so teardown cannot hang on a stuck dev server.
@@ -87,18 +83,12 @@ async function waitForServer(url: string): Promise<void> {
   }
 }
 
-// Vite dev compiles route modules lazily, on first request. The PeerJS
-// signaling server mounted under /api/peerjs attaches its WebSocket `upgrade`
-// handler only when that module first loads -- and waitForServer above probes
-// `/`, which never touches it. A browser peer that dials the signaling
-// WebSocket directly then stalls on an unhandled upgrade until its own timeout.
-// (An auto-id peer hid this by fetching GET /api/peerjs/id first, which loads
-// the module; a peer created with an explicit, pre-derived id skips that and
-// goes straight to the WebSocket.) So waiting only for `/` understates
-// readiness: warm the id endpoint here to load the module and attach the
-// upgrade handler, so a cold `test:browser` finds signaling already accepting
-// peers rather than hanging. Node-side, so there is no cross-origin concern
-// (the id endpoint sets no CORS headers a browser fetch would need).
+// Vite dev compiles route modules lazily, on first request; the PeerJS
+// signaling server's WebSocket `upgrade` handler attaches only once
+// /api/peerjs first loads, and waitForServer's probe of `/` never touches
+// it. A peer with an explicit, pre-derived id dials the signaling WebSocket
+// directly and stalls on an unhandled upgrade, so warm the id endpoint here
+// to load the module before declaring ready.
 async function warmPeerSignaling(port: number): Promise<void> {
   const idUrl = `http://127.0.0.1:${port}/api/peerjs/id`;
   const deadline = Date.now() + READY_TIMEOUT_MS;
@@ -183,13 +173,12 @@ export default async function setup({
     if (child.pid === undefined || child.exitCode !== null)
       return Promise.resolve();
     const pid = child.pid;
-    // Re-ref the child while we wait for it to exit. It was unref'd at spawn so a
-    // never-reached teardown would not pin the process; but here we are actively
-    // awaiting its exit, and on the setup-failure path (this fn runs from the
-    // catch below) vitest holds no other ref'd handle. Without the ref, the event
-    // loop would drain and the process would exit 0 mid-await -- before the child
-    // is killed and before the setup error is re-thrown -- turning a failed setup
-    // into a silent pass. The child's exit releases the ref.
+    // Re-ref the child while we wait for it to exit: it was unref'd at spawn
+    // so a never-reached teardown does not pin the process, but here we are
+    // actively awaiting its exit. Without the ref, the event loop could drain
+    // and the process exit 0 mid-await -- before the child is killed and the
+    // setup error is re-thrown -- turning a failed setup into a silent pass.
+    // The child's exit releases the ref.
     child.ref();
     return new Promise<void>((resolveStop) => {
       const timer = setTimeout(() => {

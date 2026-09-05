@@ -62,7 +62,7 @@ function handlersOf(route: {
 // "absent-from-the-template" assertion is not accidentally satisfied (or defeated)
 // by the fingerprint's own base64 run.
 const DISTINCT_SECRET = "b".repeat(42) + "A";
-// The real container-internal credential @path the sample sftp entry carries; the
+// The real container-internal credential @path the sample sftp entry holds; the
 // hand-off must replace it with the placeholder, never emit it.
 const CONTAINER_CREDENTIAL_PATH = "@/etc/psilink/prod-east-password";
 
@@ -248,7 +248,7 @@ describe("buildJobHandoff composes a portable, secret-free template", () => {
     expect(connection.outbound_path).toBe("/path/to/your/outbound-directory");
     expect(connection.path).toBeUndefined();
     // The template stays a config the CLI would load: both machine-specific paths
-    // are placeholders, and nothing about this appliance survives into it.
+    // are placeholders, and nothing about this console survives into it.
     expect(safeParseExchangeSpec(parseYaml(yaml)).success).toBe(true);
   });
 
@@ -275,7 +275,7 @@ describe("buildJobHandoff composes a portable, secret-free template", () => {
 
   test("the split flag is read on the filedrop channel alone", () => {
     // An sftp run's directories are the partner's server's, identical on any
-    // machine, so the appliance's own provisioning contributes nothing there.
+    // machine, so the console's own provisioning contributes nothing there.
     const handoff = buildJobHandoff(validSftpIntent(), testSftpServerEntry(), {
       credentialPasted: false,
       filedropSplit: true,
@@ -285,7 +285,7 @@ describe("buildJobHandoff composes a portable, secret-free template", () => {
     expect(yaml).not.toContain("/path/to/your/inbound-directory");
   });
 
-  test("an acceptance's template carries the outbound consent record", () => {
+  test("an acceptance's template holds the outbound consent record", () => {
     // The portable template IS the config an operator graduates to cron, so the
     // acceptance's consent record has to survive into it: without one the
     // unattended run's pre-connect gate reads "no record" and holds it to nothing.
@@ -349,7 +349,7 @@ describe("buildJobHandoff composes a portable, secret-free template", () => {
   // its files has to graduate to a command (or a config) that keeps them too:
   // otherwise the scheduled run silently loses the transcript the prototype had,
   // and -- since the trio is bilateral -- stalls against a partner still retaining.
-  test("an exchange template carries the file-sync toggles verbatim", () => {
+  test("an exchange template holds the file-sync toggles verbatim", () => {
     const handoff = buildJobHandoff(
       validIntent({
         options: {
@@ -378,7 +378,7 @@ describe("buildJobHandoff composes a portable, secret-free template", () => {
     });
   });
 
-  test("a zero-setup template carries the file-sync toggles as flags", () => {
+  test("a zero-setup template holds the file-sync toggles as flags", () => {
     const handoff = buildJobHandoff(
       validZeroSetupIntent({
         options: {
@@ -398,20 +398,20 @@ describe("buildJobHandoff composes a portable, secret-free template", () => {
     expect(argv).toContain("--timestamp-in-filename");
     expect(argv).toContain("--peer-id=clinic-a");
     // The flags sit between the connection locator and the trailing positionals,
-    // so the command reads (and parses) as the CLI's own form.
+    // so the command displays (and parses) as the CLI's own form.
     expect(argv[0]).toBe("psilink");
     expect(argv[1]).toBe(HANDOFF_SHARED_DIRECTORY_URL_PLACEHOLDER);
     expect(argv.slice(-2)).toEqual(["input.csv", "results.csv"]);
   });
 
-  test("credentialPasted is carried for an sftp run but forced false for filedrop", () => {
+  test("credentialPasted is preserved for an sftp run but forced false for filedrop", () => {
     expect(
       buildJobHandoff(validSftpIntent(), testSftpServerEntry(), {
         credentialPasted: true,
         filedropSplit: false,
       }).credentialPasted,
     ).toBe(true);
-    // A filedrop run carries no credential, so a stray pasted flag never surfaces.
+    // A filedrop run has no credential, so a stray pasted flag never shows up.
     expect(
       buildJobHandoff(validIntent(), undefined, {
         credentialPasted: true,
@@ -448,7 +448,7 @@ describe("parseHandoff and shellJoinCommand (browser reader)", () => {
       }),
     ).toBeNull();
     // A body missing the signing flag is a partial hand-off, not one whose
-    // carry-the-key caveat silently defaults to absent.
+    // hold-the-key caveat silently defaults to absent.
     expect(
       parseHandoff({
         mode: "exchange",
@@ -522,7 +522,7 @@ function seedManager(): JobManager {
 }
 
 /** Author a real file-reference sftp connection outside the roots, returning the
- * credential `@path` the composed job config would carry. */
+ * credential `@path` the composed job config would hold. */
 function armSftp(manager: JobManager): string {
   const dir = tempDataRoot("handoff-secret");
   roots.push(dir);
@@ -593,7 +593,7 @@ describe("GET /api/jobs/:jobId/handoff", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
     const body = await response.text();
-    // The wire body carries no credential path and no shared secret.
+    // The wire body contains no credential path and no shared secret.
     expect(body).not.toContain(credentialRef);
     expect(body).not.toContain(DISTINCT_SECRET);
     const parsed = parseHandoff(JSON.parse(body));

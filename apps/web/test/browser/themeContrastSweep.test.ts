@@ -22,30 +22,26 @@ import { createAppMount } from "./renderApp";
 import type { InvitationToken, LinkageTerms } from "@psilink/core";
 import type { ReactNode } from "react";
 
-// BREADTH contrast sweep over the primary rendered web routes, complementing --
-// not replacing -- test/browser/themeContrast.test.ts. That harness pins a
-// handful of theme tokens by their exact resolved colour; it proves the token
-// arithmetic but samples nothing at the call sites. This sweep is the other
-// axis: it mounts each primary route surface and measures EVERY rendered
-// text-bearing element against the WCAG 2.1 AA floor, in both colour schemes, so
-// a per-call-site drift a token-pin never sees -- a stray `c=`/`color=` on a
-// Text, a non-filled variant on a primary Button/ActionIcon/Checkbox, an anchor
-// repainted by a stylesheet rule -- fails here. Neither harness subsumes the
-// other: keep both.
+// BREADTH contrast sweep over the primary rendered web routes, complementing
+// test/browser/themeContrast.test.ts, which pins a handful of theme tokens by
+// their exact resolved colour at specific call sites. This sweep instead
+// mounts each primary route surface and measures EVERY rendered text-bearing
+// element against the WCAG 2.1 AA floor, in both colour schemes, catching a
+// per-call-site drift a token pin would miss (a stray `c=`/`color=` on a Text,
+// a non-filled variant on a primary Button/ActionIcon/Checkbox, an anchor
+// repainted by a stylesheet rule). Neither harness subsumes the other.
 //
 // In-house, not axe-core: the contrast check is the local WCAG luminance/ratio
 // math below (~10 lines, the same formula as themeContrast.test.ts, kept
-// self-contained here on purpose -- see the note on that duplication below),
-// walking computed styles. axe-core would add a dev dependency and a second
-// colour engine for a check this app can do against its own rendered tree; the
-// dependency was weighed and declined.
+// self-contained so this sweep does not depend on that harness or add a
+// second colour engine as a dev dependency).
 //
 // Swept routes (extend this set when a top-level screen is added):
-//   /         bench lobby     -> BenchLobby
-//   /exchange inviter bench   -> InviterBench (initial "Your file" step)
-//   /accept   acceptor bench  -> AcceptorBench (review step, a valid token in
-//                                the hash -- the route's real initial state)
-//   /verify   verify receipt  -> VerifyReceiptBench (initial mount)
+//   /         console lobby     -> BenchLobby
+//   /exchange inviter console   -> InviterBench (initial "Your file" step)
+//   /accept   acceptor console  -> AcceptorBench (review step, a valid token in
+//                                  the hash -- the route's real initial state)
+//   /verify   verify receipt    -> VerifyReceiptBench (initial mount)
 // Each renders through renderApp (the app's real MantineProvider + resolver
 // config) in BOTH forceColorScheme: "light" and "dark", so a surface AA-clean in
 // one scheme but not the other is still caught.
@@ -57,9 +53,9 @@ import type { ReactNode } from "react";
 //   - Overlapping / z-stacked layers: the walk climbs the DOM ancestor chain, not
 //     the paint order, so a sibling that visually overlaps a text element is not
 //     considered.
-//   - Genuinely transparent stacks: where no ancestor (up to the page canvas)
-//     paints an opaque background, the element is RECORDED as unresolved rather
-//     than silently passed -- see the unresolved handling below.
+//   - Transparent stacks: where no ancestor (up to the page canvas) paints an
+//     opaque background, the element is RECORDED as unresolved rather than
+//     silently passed -- see the unresolved handling below.
 //   - Disabled controls: WCAG 1.4.3 exempts disabled elements, so they are
 //     skipped; a disabled control's contrast is not asserted here.
 //   - Deeper interaction states (a loaded file, a run in flight, hover/focus
@@ -169,7 +165,7 @@ function contrast(
   return (hi + 0.05) / (lo + 0.05);
 }
 
-/** Composite `top` (which may carry alpha) over the opaque `under`, returning the
+/** Composite `top` (which may have alpha) over the opaque `under`, returning the
  * resulting opaque triple (the standard source-over "over" operator). */
 function composite(
   top: [number, number, number, number],
@@ -219,7 +215,7 @@ function foldLayers(
  * ancestor chain, compositing each translucent layer over the one beneath, until
  * an opaque layer is reached; then the page canvas is the base. Returns undefined
  * (recorded, never silently passed) when nothing up to and including the canvas
- * paints -- a genuinely transparent stack this walk cannot resolve. */
+ * paints -- a transparent stack this walk cannot resolve. */
 function effectiveBackground(
   el: HTMLElement,
 ): [number, number, number] | undefined {
@@ -304,7 +300,7 @@ function sweepContrast(rootEl: HTMLElement): {
       unresolved.push(label);
       continue;
     }
-    // Text may itself carry alpha (rare); composite it onto its own background so
+    // Text may itself have alpha (rare); composite it onto its own background so
     // the ratio is between what is actually painted, not a nominal colour.
     const textColor = composite(rgba(style.color), background);
     const ratio = contrast(textColor, background);
@@ -322,17 +318,10 @@ function sweepContrast(rootEl: HTMLElement): {
 }
 
 /** Wait for the mounted surface's landmark heading (createRoot.render is not
- * synchronous), then read the resting background of any filled-primary control
- * off its hover state, and sweep.
- *
- * The browser project shares one pointer across the suite, so a filled-primary
- * button the sticky pointer happens to land on paints its hover fill (one shade
- * lighter), which drops white-on-fill under the AA floor -- the resting colour
- * the surface actually ships clears it. Moving the pointer off each such control
- * (unhover ignores its argument and parks the pointer on the body) settles it to
- * the resting state before the sweep reads it, so the sweep measures what ships,
- * not a transient hover. themeContrast.test.ts de-flakes its own reads the same
- * way. A surface with no such control just no-ops. */
+ * synchronous), un-hover any filled-primary control, then sweep. The browser
+ * project shares one pointer across the suite, so a stale hover can paint a
+ * lighter fill that reads under the AA floor the resting colour actually
+ * clears; a surface with no such control just no-ops. */
 async function mountAndSweep(
   scheme: "light" | "dark",
   node: ReactNode,

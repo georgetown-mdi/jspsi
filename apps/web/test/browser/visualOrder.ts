@@ -1,10 +1,9 @@
-/** The given substrings in visual reading order, measured with a Range over the
- * text nodes under `root`. Glyph level rather than element level, which is what
- * makes it discriminating: an unterminated override reorders the glyphs a
- * neighbouring name's box already holds without moving that box, so sorting the
- * elements' own rectangles reports the DOM order either way. Throws on a substring
- * that is absent or paints nothing, so an order it returns is one the browser
- * actually laid out rather than a sort over empty boxes. */
+/** The given substrings in visual reading order, measured with a Range over
+ * the text nodes under `root`, at glyph level rather than element level: an
+ * unterminated override can reorder glyphs within a neighbouring name's box
+ * without moving that box, so sorting elements' own rectangles would report
+ * DOM order either way. Throws on a substring that is absent or paints
+ * nothing, so a returned order is one the browser actually laid out. */
 export function visualOrderWithin(
   root: Node,
   substrings: Array<string>,

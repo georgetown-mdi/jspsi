@@ -15,7 +15,7 @@ import {
 import vectorsRaw from "../../../../packages/core/test/vectors/exchange-record-vectors.json?raw";
 
 // Derive the input/randomness types from the function under test rather than
-// importing them, so this file carries no type-only import competing with the
+// importing them, so this file has no type-only import competing with the
 // `?raw` import for import ordering; it also stays in step with
 // buildExchangeRecord's signature automatically.
 type ExchangeRecordInputs = Parameters<typeof buildExchangeRecord>[0];
@@ -42,7 +42,7 @@ interface RecordVector {
   keys: unknown;
 }
 
-// The committed data sets re-supplied at verify time (the keys carry only salts,
+// The committed data sets re-supplied at verify time (the keys hold only salts,
 // never a snapshot), taken from the vector's own inputs.
 function committedData(vector: RecordVector) {
   return {
@@ -130,15 +130,10 @@ describe("web-produced record: round-trip and cross-verification", () => {
     },
   );
 
-  // Cross-verification across runtimes. The checked-in vectors are the CLI/Node
-  // side of the contract -- the Node suite in
-  // packages/core/test/exchangeRecord.test.ts builds and verifies them -- so
-  // parsing a vector's record/keys here and verifying its commitments (against the
-  // vector's re-supplied committed data) proves the web build verifies a
-  // CLI-produced record. The reverse direction (the CLI verifies a web-produced
-  // record) follows from byte-identity: the vector-replay suite above asserts the
-  // web build reproduces this exact record and keys, and the Node suite verifies
-  // that same pair, so the CLI verifies the byte-identical web record.
+  // Cross-verification across runtimes: the checked-in vectors are the CLI/Node
+  // side of the contract (packages/core/test/exchangeRecord.test.ts); verifying
+  // one here proves the web build verifies a CLI-produced record. The reverse
+  // direction is covered by byte-identity with the vector-replay suite above.
   test.each(vectors)(
     "$name: the web build verifies a CLI-produced record",
     async (vector) => {

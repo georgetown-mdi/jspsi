@@ -28,14 +28,12 @@ import { createAppMount } from "./renderApp";
 
 import type { NewManagedExchange } from "@psi/managedExchangeRecord";
 
-// The read-failed recovery listing, against real Chromium (real IndexedDB). Unlike
-// savedExchangesFailed.test.ts, which mocks the strict read to always reject, this
-// file seeds a genuinely unreadable record beside a good one: the strict list read
-// rejects wholesale on the bad record (the untouched contract), which routes both
-// routes to the read-failed surface, and the surface's diagnostic read -- which never
-// rejects wholesale -- lists both stored entries, each with the one-step
-// delete-by-key. Deleting the offending record and reloading recovers the now-readable
-// list to the normal run surface.
+// The read-failed recovery listing, against real Chromium (real IndexedDB).
+// Unlike savedExchangesFailed.test.ts, which mocks the strict read, this file
+// seeds a genuinely unreadable record beside a good one: the strict list read
+// rejects wholesale, routing both routes to the read-failed surface, while the
+// diagnostic read lists both entries with a delete-by-key. Deleting the bad
+// record and reloading recovers the list to the normal run surface.
 
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
@@ -239,7 +237,7 @@ describe("recovery listing: the delete confirm's backup custody note", () => {
     // No bad record here: a corrupted sibling entry alone fails the strict local-state
     // read, which routes the surface to read-failed on its own. The diagnostic read
     // then treats that unparseable sibling conservatively -- backed up on doubt -- so
-    // the good record's delete confirm carries the custody note.
+    // the good record's delete confirm includes the custody note.
     const good = await createManagedExchange(
       newExchange({ label: "Doubtful partnership" }),
     );
@@ -261,7 +259,7 @@ describe("recovery listing: the delete confirm's backup custody note", () => {
       .toBeInTheDocument();
   });
 
-  test("an unlabeled readable entry's confirm reads 'Delete this exchange?', not the row's display text", async () => {
+  test("an unlabeled readable entry's confirm displays 'Delete this exchange?', not the row's display text", async () => {
     // The row text is the display transform "(unnamed exchange)", but the confirm
     // must name the raw (empty) label, so the button's own empty-label branch fires.
     await mountReadFailedWith("");

@@ -11,8 +11,8 @@ import { NotFound } from "@components/NotFound";
 import { createAppMount } from "./renderApp";
 
 // NotFound reaches the home route through Mantine's polymorphic `component` prop
-// (`<Button component={Link} to="/">`). With the stubbed Link surfacing `to` as
-// the href, this still exercises the load-bearing MANTINE side: that the
+// (`<Button component={Link} to="/">`). With the stubbed Link exposing `to` as
+// the href, this still exercises the critical MANTINE side: that the
 // polymorphic `component` is honoured (so "Start over" renders as an <a>, not
 // Mantine's default <button>) and that `to` is forwarded through.
 vi.mock("@tanstack/react-router", async () =>
@@ -32,7 +32,7 @@ describe("NotFound", () => {
 
     // role=link (not button) confirms Mantine honoured `component={Link}` rather
     // than falling back to its default <button>; the href confirms `to` was
-    // forwarded. A Mantine change that broke component-forwarding would surface
+    // forwarded. A Mantine change that broke component-forwarding would show
     // here as a missing link / a stray <button>.
     const startOver = page.getByRole("link", { name: "Start over" });
     await expect.element(startOver).toBeInTheDocument();

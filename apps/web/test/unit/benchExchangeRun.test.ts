@@ -45,7 +45,7 @@ function states(run: ExchangeRun): Array<string> {
 }
 
 describe("stage trees", () => {
-  test("the full tree carries pre-stages, protocol stages, and done", () => {
+  test("the full tree has pre-stages, protocol stages, and done", () => {
     const stages = stagesFor(preparedWith("cascade", 2));
     expect(stages.map((stage) => stage.id)).toEqual([
       BEFORE_START_STAGE_ID,
@@ -197,7 +197,7 @@ describe("the visit history", () => {
     expect(runWithStage(waiting, WAITING_STAGE_ID, at(33))).toBe(waiting);
   });
 
-  test("a stage id outside the tree reads mid-protocol with itself as label", () => {
+  test("a stage id outside the tree is treated as mid-protocol with itself as label", () => {
     const run = runWithStage(initialRun(), "surprise stage", at(32));
     expect(currentStageLabel(run)).toBe("surprise stage");
     expect(states(run)[3]).toBe("Link keys:current");
@@ -248,7 +248,7 @@ describe("the acceptor timeline and labels", () => {
   test("the acceptor's waiting stage is labelled 'Connecting to your partner'", () => {
     const stages = stagesFor(preparedWith("cascade", 2), "acceptor");
     expect(stages[1].label).toBe("Connecting to your partner");
-    // The initial-run tree (before prepare) carries the same acceptor label.
+    // The initial-run tree (before prepare) has the same acceptor label.
     expect(currentStageLabel(acceptorToWaiting())).toBe(
       "Connecting to your partner",
     );

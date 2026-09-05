@@ -28,18 +28,12 @@ import {
 import type { PresentedHostKey } from "@psilink/core";
 import type { RelayEvent } from "@jobs/cliDriver";
 
-// A warning the CLI composes is a whole composition, not one value, and every
-// boundary between fd 3 and a console seat re-escapes it: the relay's
-// trust-boundary pass, and the seat's own display pass. Either one taken at the
-// per-value default cuts the cross-party host-key divergence notice off before
-// its re-pin instruction and its out-of-band confirmation step -- at exactly the
-// moment the operator is being told the two parties observed different host
-// keys. One leg drives the real notice, with every fragment flooded, from the
-// child process's fd 3 to the string a seat renders, and fails unless the
-// delivered text still ends on the composition's own closing clause. The real
-// notice measures well under the shared budget, so a second leg drives a message
-// composed at the budget over the same chain: that one is what catches two
-// budgets silently diverging, at either boundary, anywhere below the constant.
+// A CLI warning is one composition; the relay's trust-boundary pass and the
+// seat's display pass both re-escape it, and either one applying the
+// per-value default would cut the host-key divergence notice before its
+// re-pin instruction. One test drives the real notice end to end; the other
+// drives a message composed at the shared budget, to catch the two
+// boundaries capping differently.
 
 const dirs: Array<string> = [];
 
@@ -56,8 +50,7 @@ function scratchDir(label: string): string {
   return dir;
 }
 
-/** The composition's last words: what the operator must still be reading after
- * every boundary has had its pass. */
+/** The composition's final clause; it must survive every boundary's pass. */
 const CLOSING_CLAUSE = "re-pin it on both sides.";
 
 /** The out-of-band step that precedes it, and the explanation ahead of that. */
@@ -94,13 +87,8 @@ const SYNTHETIC_TAIL = " the clause no boundary below the budget can keep.";
 /**
  * A first-party warning composed to exactly the shared budget, in printable
  * ASCII so every pass escapes it to itself and its delivered length is its
- * composed length.
- *
- * The real divergence notice measures well under the budget, so driving it holds
- * only that both boundaries clear THAT notice: either one re-capped anywhere
- * between the notice's length and the budget still delivers it whole. This
- * message is what ties the two boundaries to the constant itself -- it survives
- * only while the relay and the seat both cap at or above
+ * composed length. It ties both boundaries to the budget constant: it
+ * survives only while the relay and the seat both cap at or above
  * {@link WARNING_MESSAGE_MAX_DISPLAY_LENGTH}.
  */
 function warningComposedAtBudget(): string {
@@ -151,7 +139,7 @@ async function relayWarningFromChild(
 
 /**
  * The messages a seat's `onWarning` slot receives for a relayed event sequence,
- * carried over the real SSE frame encoder and the real browser-side job API
+ * passed through the real SSE frame encoder and the real browser-side job API
  * client. The status request a terminal `result` triggers answers 404, so the
  * run resolves without a record pair rather than hanging on a metadata fetch.
  */
@@ -189,8 +177,7 @@ async function warningsAtSeat(
 
 test("a relayed CLI warning reaches a console seat ending on its own clause", async () => {
   const message = cliWarningMessage();
-  // The case is only worth driving if it is past the cap each boundary would
-  // otherwise apply: a notice that fits the per-value default proves nothing.
+  // This assertion holds only once the message exceeds the per-value default.
   expect(message.length).toBeGreaterThan(DEFAULT_MAX_DISPLAY_LENGTH);
   expect(message.endsWith(CLOSING_CLAUSE)).toBe(true);
 
@@ -203,9 +190,8 @@ test("a relayed CLI warning reaches a console seat ending on its own clause", as
   expect(delivered).toHaveLength(1);
 
   const [rendered] = appendSanitizedRunWarning([], delivered[0]);
-  // The composition runs to its own last words. Each fragment still truncates at
-  // its own cap -- that bound is untouched, and its marker sits inside the
-  // message -- so what is asserted is that the composition's tail, not a
+  // Each fragment still truncates at its own cap, with its marker inside the
+  // message; what this asserts is that the composition's own tail, not a
   // fragment's, is what a seat ends on.
   expect(rendered.endsWith(CLOSING_CLAUSE)).toBe(true);
   expect(rendered.endsWith(DISPLAY_TRUNCATION_MARKER)).toBe(false);

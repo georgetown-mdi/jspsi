@@ -35,7 +35,7 @@ function offerFrom(src: string, payload: unknown): IMessage {
   } as unknown as IMessage;
 }
 
-/** A frame in the form the queue holds one, stamped as held-JSON but carrying
+/** A frame in the form the queue holds one, stamped as held-JSON but holding
  * text that is not JSON -- so any read of it throws where a real held frame's
  * would not. Built by hand: the held text is the server's own serialization, so
  * nothing a peer sends produces this. */
@@ -122,7 +122,7 @@ describe("relay queue expiry sweep", () => {
     expect(realm.getMessageQueueById(ABSENT_ID)).toBeUndefined();
     expect(realm.getClientsIdsWithQueue()).toHaveLength(0);
     // One notice per sender, addressed back the way the held frame came, and
-    // carrying nothing but the two ids the frame was held with -- no payload
+    // holding nothing but the two ids the frame was held with -- no payload
     // rides back out on the expiry path.
     expect(handled).toEqual([
       { type: MessageType.EXPIRE, src: ABSENT_ID, dst: SENDER_ID },
@@ -175,9 +175,8 @@ describe("relay queue expiry sweep", () => {
   });
 
   test("the frame planted above is one a read really cannot parse", () => {
-    // The counterpart of the test above: what makes that one a measurement
-    // rather than a restatement is that the planted frame is genuinely
-    // parse-poisoned on the read path the drain takes.
+    // The planted frame is unparseable on the read path the drain takes,
+    // not merely assumed to be.
     const realm = new Realm();
     realm.addMessageToQueue(
       ABSENT_ID,

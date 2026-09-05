@@ -35,17 +35,11 @@ import { createAppMount } from "./renderApp";
 import type { CapturedDownload } from "./captureDownloads";
 import type { NewManagedExchange } from "@psi/managedExchangeRecord";
 
-// Both hand-offs on the run surface spend this browser's copy of the shared secret,
-// and a run rotates that secret at its handshake -- so the one thing that must not
-// happen is a spend that hands over a copy the rotation has already superseded, or
-// is about to. Two mechanisms are measured here and they are not interchangeable:
-// the CONFIRMATION spends through a store step that takes the run's own lock and
-// re-reads the record inside it, refusing a run in flight and a superseded artifact
-// whatever any UI saw, and the SURFACE withholds the hand-offs while a run is in
-// flight in any context, so the refusal is rarely how the operator learns of the
-// run. Chromium is where this belongs: the record, its sibling state, and the run
-// lock both the surface's poll and the spend take are the real browser ones, and
-// the export the confirm follows is the real one.
+// A spend must never hand over a copy of the shared secret that a run's rotation
+// has already superseded, or is about to supersede. Two independent mechanisms
+// enforce this: the confirmation's store step re-reads the record under the run's
+// own lock, and the surface withholds hand-offs while a run is in flight in any
+// context. This runs in Chromium because both take the real browser lock and poll.
 
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
@@ -55,15 +49,12 @@ vi.mock("@psi/rendezvous", async () =>
   (await import("./moduleMocks")).rendezvousMock(),
 );
 
-// The run driver is stubbed to a run the test itself ends, so the run is in flight
-// for exactly as long as the assertions need and nothing dials a partner. It keeps
-// the two things about a real run this file turns on: the single-writer lock taken
-// over the rotation, and the rotated secret persisted durably BEFORE the data
-// exchange (managedExchangeRun.ts, "Persist-before-success") -- which is what makes
-// an artifact downloaded before the run stale the moment the run gets going. It ends
-// by rejecting: a failed run is the outcome that leaves the operator on the surface
-// still holding the confirmation, so the confirmation coming back is observable there
-// rather than a by-product of the completion surface replacing the controls.
+// The run driver is stubbed to a run the test itself ends, so nothing dials a
+// partner. It keeps two properties of a real run: the single-writer lock over the
+// rotation, and the rotated secret persisted before the data exchange
+// (managedExchangeRun.ts, "Persist-before-success"), which is what makes an
+// artifact downloaded earlier stale. It ends by rejecting, so the operator stays on
+// the surface holding the confirmation instead of a completion screen replacing it.
 const liveRun = vi.hoisted(() => ({
   end: undefined as (() => void) | undefined,
 }));
@@ -203,16 +194,13 @@ async function dispatchCommandLineExport(
 }
 
 /**
- * Filter this record's lock out of every `navigator.locks.query()` reading, so the
- * surfaces read the record free while a run really holds it. That reading is all a
- * surface has -- the poll behind the withholding and the confirm handler's own
- * re-read both take it -- so filtering is how a test puts a click on the far side
- * of it deterministically, where waiting out the real 400 ms interval would race
- * the poll.
+ * Filter this record's lock out of every `navigator.locks.query()` reading, so a
+ * surface reads the record free while a run actually holds it -- the poll and the
+ * confirm handler's re-read both rely on this reading, so filtering puts a click on
+ * the far side of it deterministically without waiting out the real 400 ms interval.
  *
- * `reveal` stops the filtering, for the case whose point is that the reading
- * catches up mid-click; leaving it unrevealed is the case whose point is that
- * nothing on the surface ever sees the run.
+ * `reveal` stops the filtering, once the reading should catch up mid-click; leaving
+ * it unrevealed keeps the surface from ever seeing the run.
  */
 function filterLockFromReadings(id: string): {
   reveal: () => void;
@@ -243,11 +231,10 @@ function filterLockFromReadings(id: string): {
 /**
  * Hold this record's lock reading STALE for the surfaces' poll -- their only
  * reading of a run in another context -- until a click is dispatched, from which
- * moment the reading is the true one again.
+ * moment the reading is true again.
  *
- * That is the window a confirm handler's click-time re-read exists for, and it is
- * the one the poll structurally cannot cover: the lock can be taken in the gap
- * between two readings, leaving a confirm button enabled over a run that is
+ * This is the gap a confirm handler's click-time re-read exists for: the lock can
+ * be taken between two poll readings, leaving a confirm button enabled over a run
  * already under way.
  */
 function stalePollUntilClick(id: string): () => void {
@@ -350,7 +337,7 @@ describe("a hand-off across a run of the same exchange", () => {
       await endRun();
 
       // The download reads the record the run left behind, so the attestation is
-      // measured against the secret those files actually carry.
+      // measured against the secret those files actually hold.
       await dispatchCommandLineExport(downloads.captured);
       await expect.element(cronConfirm(), afterPoll).toBeEnabled();
       await cronConfirm().click();

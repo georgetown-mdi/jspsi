@@ -191,7 +191,7 @@ describe("window geometry", () => {
     ).toThrow(RangeError);
   });
 
-  test("a window the stored instant form cannot carry is refused, not expanded", () => {
+  test("a window the stored instant form cannot hold is refused, not expanded", () => {
     const lateInYear9999: ManagedExchangeSchedule = {
       ...weekly,
       anchor: "9999-12-28T14:00:00.000Z",
@@ -277,7 +277,7 @@ describe("daylight saving", () => {
     };
     const now = at("2026-03-17T15:00:00.000Z");
     // Every rule the module exports bar `resolveLocalCadenceAnchor` and
-    // `localCadenceFromAnchor`, the two that read the zone deliberately and are
+    // `localCadenceFromAnchor`, the two that read the zone by design and are
     // driven on their own below.
     const compute = () => ({
       window: managedScheduleWindow(march, 2),
@@ -301,7 +301,7 @@ describe("daylight saving", () => {
   });
 
   // One offsetless string, driven under both zones below in every position a
-  // record carries an instant. Nothing here passes vacuously: the two tests
+  // record holds an instant. Nothing here passes vacuously: the two tests
   // after the measurement drive the SAME string it measured as divergent.
   const offsetless = "2026-03-10T15:00:00";
   const divergingZones = ["UTC", "America/New_York"];
@@ -474,7 +474,7 @@ describe("catch-up on wake", () => {
     // than replayed from a stale past one.
     expect(caught.schedule.nextWindow).toBe("2026-01-27T14:00:00.000Z");
     expect(caught.dueWindow?.index).toBe(3);
-    // The most recent elapsed window carries the miss.
+    // The most recent elapsed window holds the miss.
     expect(caught.missedLastRun).toEqual({
       at: "2026-01-20T17:00:00.000Z",
       outcome: "missed",
@@ -493,7 +493,7 @@ describe("catch-up on wake", () => {
     expect(caught.missedLastRun?.at).toBe("2026-01-27T17:00:00.000Z");
   });
 
-  test("the count carries the elapsed windows on top of the stored one", () => {
+  test("the count includes the elapsed windows on top of the stored one", () => {
     const caught = catchUpManagedSchedule(
       { ...weekly, consecutiveMisses: 2 },
       undefined,
@@ -819,7 +819,7 @@ describe("catch-up on the import path", () => {
     const restored = reconstructRecordFromArtifact(
       encodeManagedExchangeArtifact(source),
     );
-    // The artifact carries the snapshot's schedule and bookkeeping verbatim, so
+    // The artifact holds the snapshot's schedule and bookkeeping verbatim, so
     // the first wake after an import has the same inputs the source had.
     expect(requireSchedule(restored)).toEqual(stale);
     expect(restored.lastRun).toEqual(source.lastRun);
@@ -917,7 +917,7 @@ describe("resolveLocalCadenceAnchor", () => {
     ).toThrow(RangeError);
   });
 
-  test("a resolution the stored instant form cannot carry is refused", () => {
+  test("a resolution the stored instant form cannot hold is refused", () => {
     const lateInYear9999 = {
       year: 9999,
       month: 12,
@@ -927,12 +927,12 @@ describe("resolveLocalCadenceAnchor", () => {
     };
     withTimeZone("America/New_York", () => {
       // The resolution really does leave the form, so nothing here passes
-      // vacuously: a zone behind UTC carries that wall clock into year 10000,
+      // vacuously: a zone behind UTC puts that wall clock into year 10000,
       // which renders only as the expanded-year ISO string.
       const expanded = new Date(9999, 11, 31, 21, 0, 0, 0).toISOString();
       expect(expanded).toBe("+010000-01-01T02:00:00.000Z");
       // Why returning it would be wrong rather than merely unusual: the record's
-      // own validator refuses it, so the anchor would surface as a validation
+      // own validator refuses it, so the anchor would show up as a validation
       // failure at the write instead of a RangeError at the entry surface.
       expect(
         scheduleSchema.safeParse({ ...weekly, anchor: expanded }).success,
@@ -1049,8 +1049,8 @@ describe("localCadenceFromAnchor", () => {
   });
 
   test("reads to the minute, so an anchor finer than that does not round-trip", () => {
-    // The cadence carries no seconds, which is why an entry surface holding a
-    // stored anchor at this resolution carries it through rather than resolving
+    // The cadence holds no seconds, which is why an entry surface holding a
+    // stored anchor at this resolution passes it through rather than resolving
     // the reading back (see ../../src/bench/scheduleEntryModel.ts).
     withTimeZone("UTC", () => {
       const cadence = localCadenceFromAnchor("2026-03-03T14:00:30.500Z");

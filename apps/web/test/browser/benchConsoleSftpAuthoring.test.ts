@@ -82,16 +82,16 @@ interface StubOptions {
   /** Force the PUT /api/jobs/sftp response status (e.g. 413) instead of
    * authoring the connection. */
   putStatus?: number;
-  /** Non-blocking credential warnings the PUT /api/jobs/sftp projection carries,
+  /** Non-blocking credential warnings the PUT /api/jobs/sftp projection holds,
    * as the server returns when a credential resolves inside an excluded dir. */
   putWarnings?: Array<string>;
   /** The POST /api/jobs/sftp/probe response. Defaults to a 200 ok envelope
-   * carrying {@link PROBE_FINGERPRINT}; a `{status, body}` lets a test drive an
+   * holding {@link PROBE_FINGERPRINT}; a `{status, body}` lets a test drive an
    * unreachable/error outcome. */
   probe?: { status?: number; body?: unknown };
   /** Gates the probe responses wait on, taken in order: the nth probe's response
    * settles when the nth promise does, so a test can act on the form while a
-   * probe is genuinely in flight (the real one runs for as long as ~15s). A
+   * probe is in flight (the real one runs for as long as ~15s). A
    * probe past the end of the list settles immediately. */
   probeGates?: Array<Promise<void>>;
 }
@@ -106,7 +106,7 @@ function createProbeGate(): { promise: Promise<void>; settle: () => void } {
   return { promise, settle };
 }
 
-/** The same-origin job API, stubbed at the global fetch seam. PUT /api/jobs/sftp
+/** The same-origin job API, stubbed at the global fetch boundary. PUT /api/jobs/sftp
  * captures the body and flips the GET to report the authored connection. */
 function stubJobApi(options: StubOptions = {}): {
   captured: Array<CapturedRequest>;
@@ -252,8 +252,8 @@ async function openAndFillForm() {
   );
 }
 
-/** Mount the bench, walk to the authoring form, and run one probe the appliance
- * diagnoses as a non-SSH answer carrying `excerpt`. Returns the field the peer's
+/** Mount the bench, walk to the authoring form, and run one probe the console
+ * diagnoses as a non-SSH answer holding `excerpt`. Returns the field the peer's
  * bytes render in. */
 async function probeWithExcerpt(excerpt: string): Promise<HTMLTextAreaElement> {
   stubJobApi({
@@ -316,7 +316,7 @@ function probeAnnouncement(): HTMLElement {
  * outcome. Mirrored from the form's own copy rather than imported from it, so
  * the containment clause -- the region holds a fixed first-party sentence and
  * nothing else -- is measured against a literal that a copy change has to be
- * made against deliberately, instead of against whatever the form now says. */
+ * made against, instead of against whatever the form now says. */
 const ANNOUNCED_SENTENCE = {
   probing: "Reading the fingerprint from the server...",
   presented:
@@ -326,7 +326,7 @@ const ANNOUNCED_SENTENCE = {
 } as const;
 
 /** Assert the announcing region holds exactly `content` and nothing else: the
- * whole of its text, and no element child to carry what a text sweep would miss
+ * whole of its text, and no element child to hold what a text sweep would miss
  * -- a control's value is a property rather than text content, so a region whose
  * text matches can still hold something unread by that comparison alone. */
 function expectRegionHoldsOnly(region: Element, content: string): void {
@@ -334,7 +334,7 @@ function expectRegionHoldsOnly(region: Element, content: string): void {
   expect(region.childElementCount).toBe(0);
 }
 
-/** Wait until the announcing region carries `sentence` and nothing besides. The
+/** Wait until the announcing region holds `sentence` and nothing besides. The
  * region's text is deferred one commit past the phase that produces it, so the
  * visible outcome reaching the screen does not mean the region has caught up --
  * a read taken on that cue can still find the in-flight sentence, or nothing at
@@ -345,18 +345,12 @@ async function expectAnnounced(sentence: string): Promise<void> {
 }
 
 /**
- * ARIA's global states and properties, written out because nothing in this tree
- * ships the ARIA vocabulary to derive them from; the set matched the WAI-ARIA
- * 1.2 Recommendation's Global States and Properties section byte for byte when
- * checked on 2026-08-27. This is the set the
- * presentational-role-conflict resolution reads: a `role="presentation"` is
- * ignored on an element carrying one of these, and NOT on an element carrying
- * some other `aria-*` attribute, so a premise drawn from the `aria-` prefix
- * would be looser than the rule it rests on.
- *
- * A list that has fallen behind the vocabulary is a list that under-counts, so
- * an element whose only global attribute is one it is missing fails the premise
- * rather than passing it silently.
+ * ARIA's global states and properties, matching the WAI-ARIA 1.2
+ * Recommendation's Global States and Properties section, checked 2026-08-27.
+ * Presentational-role-conflict resolution ignores `role="presentation"` on an
+ * element holding one of these, not any other `aria-*` attribute -- the
+ * assumption the check below rests on. A list that falls behind the
+ * vocabulary under-counts without failing loud.
  */
 const ARIA_GLOBAL_ATTRIBUTES = new Set([
   "aria-atomic",
@@ -382,7 +376,7 @@ const ARIA_GLOBAL_ATTRIBUTES = new Set([
   "aria-roledescription",
 ]);
 
-/** The {@link ARIA_GLOBAL_ATTRIBUTES} `element` carries. */
+/** The {@link ARIA_GLOBAL_ATTRIBUTES} `element` holds. */
 function globalAriaAttributesOf(element: Element): Array<string> {
   return Array.from(element.attributes)
     .map((attribute) => attribute.name)
@@ -475,7 +469,7 @@ describe("console SFTP connection authoring", () => {
 
     await page.getByRole("button", { name: "Save connection" }).click();
 
-    // The PUT carried a mountRef locator -- no credential value, no absolute path.
+    // The PUT held a mountRef locator -- no credential value, no absolute path.
     const put = api.captured.find(
       (request) => request.url === "/api/jobs/sftp" && request.method === "PUT",
     );
@@ -530,7 +524,7 @@ describe("console SFTP connection authoring", () => {
     );
     await page.getByRole("button", { name: "Save connection" }).click();
 
-    // The PUT carried a raw credential -- the value, tagged with the auth method.
+    // The PUT held a raw credential -- the value, tagged with the auth method.
     const put = api.captured.find(
       (request) => request.url === "/api/jobs/sftp" && request.method === "PUT",
     );
@@ -584,7 +578,7 @@ describe("console SFTP connection authoring", () => {
       .toBeInTheDocument();
   });
 
-  test("an emptied paste surfaces its own message at the paste field", async () => {
+  test("an emptied paste shows its own message at the paste field", async () => {
     const api = stubJobApi();
     app.render(createElement(InviterBench));
     await reachReviewCreate();
@@ -623,7 +617,7 @@ describe("console SFTP connection authoring", () => {
     await expect
       .element(page.getByText("the file itself is never uploaded"))
       .toBeInTheDocument();
-    // The paste fallback openly states it writes to a file on the appliance.
+    // The paste fallback openly states it writes to a file on the console.
     await page
       .getByRole("button", { name: "Or paste the value instead" })
       .click();
@@ -634,7 +628,7 @@ describe("console SFTP connection authoring", () => {
       .toBeInTheDocument();
   });
 
-  test("authors from a typed @path escape hatch", async () => {
+  test("authors from a typed @path override", async () => {
     const api = stubJobApi();
     app.render(createElement(InviterBench));
     await reachReviewCreate();
@@ -713,7 +707,7 @@ describe("console SFTP connection authoring", () => {
       .toBeInTheDocument();
   });
 
-  test("an invalid port under collapsed Advanced surfaces on Save", async () => {
+  test("an invalid port under collapsed Advanced shows on Save", async () => {
     stubJobApi();
     app.render(createElement(InviterBench));
     await reachReviewCreate();
@@ -837,7 +831,7 @@ describe("console SFTP connection authoring", () => {
       "You can still paste the fingerprint above.",
     );
     expect(document.querySelector(`.${styles.peerBytes}`)).toBeNull();
-    // Paste stays first-class: the operator types the fingerprint and saves.
+    // Paste stays primary: the operator types the fingerprint and saves.
     await userEvent.fill(
       page.getByLabelText("Server identity fingerprint"),
       FINGERPRINT,
@@ -904,10 +898,10 @@ describe("console SFTP connection authoring", () => {
       .toBeInTheDocument();
     await flushPendingUpdates();
 
-    // The same node, never remounted, carries the console's own sentence.
+    // The same node, never remounted, holds the console's own sentence.
     await expectAnnounced(ANNOUNCED_SENTENCE.error);
     expect(probeAnnouncement()).toBe(region);
-    // One channel announces: within the probe result nothing else carries live
+    // One channel announces: within the probe result nothing else holds live
     // semantics, and the visible alert is not one (Mantine's Alert defaults to
     // role="alert", so this also holds the explicit override in place).
     expect(Array.from(probeResult().querySelectorAll("[aria-live]"))).toEqual([
@@ -916,8 +910,8 @@ describe("console SFTP connection authoring", () => {
     expect(probeResult().querySelector('[role="alert"]')).toBeNull();
     // What the override displaces is the default; the presentational role it
     // names does not itself apply, because ARIA's presentational-role-conflict
-    // resolution ignores it on an element carrying a GLOBAL aria-* state or
-    // property -- which Mantine sets on this root. That premise is pinned here,
+    // resolution ignores it on an element holding a GLOBAL aria-* state or
+    // property -- which Mantine sets on this root. That assumption is pinned here,
     // against the rule's own set rather than against any aria-* attribute, so
     // the reasoning recorded around it cannot outlive it.
     const alert = probeResult().querySelector('[role="presentation"]');
@@ -969,7 +963,7 @@ describe("console SFTP connection authoring", () => {
       name: "Read the fingerprint from the server",
     });
     await trigger.click();
-    // The premise the focus repair rests on: the trigger is disabled while the
+    // The assumption the focus repair rests on: the trigger is disabled while the
     // probe is in flight, so the operator's anchor is gone for the duration.
     await expect.element(trigger).toBeDisabled();
     // The probe runs for as long as ~15s; the operator carries on filling the
@@ -1038,7 +1032,7 @@ describe("console SFTP connection authoring", () => {
 
     // Containment: the announced region is a sibling of the field, not its
     // ancestor, so nothing a peer chose is in the run that is read out. What it
-    // carries instead is the console's own settle sentence, waited for first so
+    // holds instead is the console's own settle sentence, waited for first so
     // the negatives below are measured over a settled region rather than over
     // one that has yet to say anything.
     const region = probeAnnouncement();
@@ -1183,7 +1177,7 @@ describe("console SFTP connection authoring", () => {
     ).toBeNull();
   });
 
-  test("the deliberate save-a-file alternative routes to the save surface", async () => {
+  test("the save-a-file alternative routes to the save surface", async () => {
     stubJobApi();
     app.render(createElement(InviterBench));
     await reachReviewCreate();

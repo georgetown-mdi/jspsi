@@ -30,12 +30,12 @@ import type {
 import type { ObjectUrls, RunOutputs } from "@bench/runOutputs";
 import type { RelayEvent } from "@jobs/cliDriver";
 
-/** The inline CSV content the reused config carries; the driver maps an `inline`
+/** The inline CSV content the reused config holds; the driver maps an `inline`
  * input source to the intent's `inputCsv` arm. */
 const CONFIG_INPUT_CSV = "ssn\n111223333\n";
 
 /** The construction-time config every test reuses (a filedrop transport unless
- * a test overrides it); the driver only carries it into the intent, so its
+ * a test overrides it); the driver only passes it into the intent, so its
  * values are never validated here. */
 function driverConfig(): ServerJobExchangeDriverConfig {
   return {
@@ -152,14 +152,14 @@ function countOnlyResult(
   };
 }
 
-/** The result download url a `matched` outputs shape carries, and undefined for
+/** The result download url a `matched` outputs shape has, and undefined for
  * the two shapes that have no result file at all -- so an assertion reads the field
  * it means without restating the narrowing at every call site. */
 function resultsUrlOf(outputs: RunOutputs): string | undefined {
   return outputs.kind === "matched" ? outputs.resultsUrl : undefined;
 }
 
-/** The count a `counted` outputs shape carries, and undefined for the other two. */
+/** The count a `counted` outputs shape has, and undefined for the other two. */
 function countOf(outputs: RunOutputs): number | undefined {
   return outputs.kind === "counted" ? outputs.intersectionCount : undefined;
 }
@@ -217,7 +217,7 @@ describe("createServerJobExchangeDriver event mapping", () => {
 
     await driver.run(events);
 
-    // stageEnd and metrics carry no lifecycle mapping: they are neither dropped
+    // stageEnd and metrics have no lifecycle mapping: they are neither dropped
     // as unknown nor treated as an error, so the run reaches its terminal result.
     expect(events.onError).not.toHaveBeenCalled();
     expect(events.onResult).toHaveBeenCalledTimes(1);
@@ -227,7 +227,7 @@ describe("createServerJobExchangeDriver event mapping", () => {
     ]);
   });
 
-  test("a written result maps to onResult with the appliance result url", async () => {
+  test("a written result maps to onResult with the console result url", async () => {
     const { client } = scriptedClient([result(true)]);
     const driver = createServerJobExchangeDriver(driverConfig(), client);
     const events = driverEvents(new AbortController().signal);
@@ -264,7 +264,7 @@ describe("createServerJobExchangeDriver event mapping", () => {
     expect(events.onError).not.toHaveBeenCalled();
     const outputs = events.onResult.mock.calls[0][0] as RunOutputs;
     // The count is the run's whole result: nothing was withheld from this party,
-    // and there is no result file on the appliance to point a download at.
+    // and there is no result file on the console to point a download at.
     expect(outputs.kind).toBe("counted");
     expect(countOf(outputs)).toBe(42);
     expect(resultsUrlOf(outputs)).toBeUndefined();
@@ -274,8 +274,8 @@ describe("createServerJobExchangeDriver event mapping", () => {
   });
 
   test("the count's provenance rides the event onto the counted outputs", async () => {
-    // The appliance operator reading a count it did not compute gets the same
-    // trust-contingent caveat the CLI's own completion line carries, so the seat
+    // The console operator reading a count it did not compute gets the same
+    // trust-contingent caveat the CLI's own completion line has, so the seat
     // must survive the relay rather than being flattened to the local reading.
     const reported = scriptedClient([countOnlyResult(42, true)]);
     const reportedEvents = driverEvents(new AbortController().signal);
@@ -333,10 +333,10 @@ describe("createServerJobExchangeDriver event mapping", () => {
     expect(outputs.kind).toBe("withheld");
   });
 
-  test("a written result outranks a count the same event carries", async () => {
-    // An out-of-contract event: the contract carries a count only on the
+  test("a written result outranks a count the same event has", async () => {
+    // An out-of-contract event: the contract states a count only on the
     // resultWritten:false arm (docs/spec/CLI_EVENTS.md, `result`). Reading the count
-    // first would cost the operator the download link for a result the appliance did
+    // first would cost the operator the download link for a result the console did
     // write, so resultWritten stays the outer discriminant.
     const { client } = scriptedClient([
       { v: 1, type: "result", resultWritten: true, intersectionCount: 7 },
@@ -672,7 +672,7 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
     });
   });
 
-  test("an sftp transport POSTs the sftp arm carrying NO connection field", async () => {
+  test("an sftp transport POSTs the sftp arm holding NO connection field", async () => {
     const { client, createdIntents } = scriptedClient([result(true)]);
     const config: ServerJobExchangeDriverConfig = {
       ...driverConfig(),
@@ -722,8 +722,8 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
 
   test("forwards the config's metadata and standardization into the intent", async () => {
     // Both builders (acceptor and inviter) funnel their operator-authored data-prep
-    // edits through this driver config; the driver must carry them into the intent
-    // so the appliance's CLI honors them rather than inferring metadata.
+    // edits through this driver config; the driver must pass them into the intent
+    // so the console's CLI honors them rather than inferring metadata.
     const metadata: Metadata = [
       { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
       { name: "secret", type: "other", role: "ignored", isPayload: true },
@@ -758,7 +758,7 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
   });
 
   test("forwards expectedPayloadColumns into the intent, empty array included", async () => {
-    // The received-payload lock-in must reach the intent as-is; an empty array is a
+    // The received-payload commitment must reach the intent as-is; an empty array is a
     // strict "receive nothing" and must not be collapsed to undefined.
     const nonEmpty = scriptedClient([result(true)]);
     await createServerJobExchangeDriver(
@@ -781,9 +781,9 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
   });
 
   test("forwards expectedPartnerDeduplicate into the intent, false included", async () => {
-    // The terms-side lock-in must reach the intent as-is: `false` is a real
+    // The terms-side commitment must reach the intent as-is: `false` is a real
     // declaration and must not be collapsed into the absent state, which binds
-    // nothing at the run the appliance conducts.
+    // nothing at the run the console conducts.
     for (const declared of [false, true]) {
       const scripted = scriptedClient([result(true)]);
       await createServerJobExchangeDriver(
@@ -842,16 +842,16 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
     );
 
     expect(created).toEqual(["job-77"]);
-    // The seam fires after create resolves and before the event stream opens, so
-    // the recovery record is persisted the instant the job exists on the appliance.
+    // onJobCreated fires after create resolves and before the event stream opens,
+    // so the recovery record is persisted the instant the job exists on the console.
     expect(order).toEqual(["create", "onJobCreated", "stream"]);
   });
 
   test("aborting mid-stream does NOT POST cancel and emits no spurious error", async () => {
     const controller = new AbortController();
     // The stream aborts itself after the first stage, standing in for an unmount /
-    // reload / tab close mid-run. An abort now carries NO cancel intent: it only
-    // stops consuming the stream silently, and the appliance's run keeps going.
+    // reload / tab close mid-run. An abort now has NO cancel intent: it only
+    // stops consuming the stream silently, and the console's run keeps going.
     async function* abortingStream(): AsyncIterable<RelayEvent> {
       await Promise.resolve();
       yield stage("prepare");
@@ -1060,7 +1060,7 @@ describe("createFetchJobApiClient over an injected fetch", () => {
     expect(failure.category).toBe("security");
   });
 
-  test("a non-2xx create surfaces the status as a JobApiRequestError", async () => {
+  test("a non-2xx create reports the status as a JobApiRequestError", async () => {
     const fetchImpl = (() =>
       Promise.resolve(new Response(null, { status: 400 }))) as typeof fetch;
     const client = createFetchJobApiClient(fetchImpl);
@@ -1079,7 +1079,7 @@ describe("createFetchJobApiClient over an injected fetch", () => {
     ).rejects.toBeInstanceOf(JobApiRequestError);
   });
 
-  test("a busy (409) create carries the occupying job id on the error", async () => {
+  test("a busy (409) create has the occupying job id on the error", async () => {
     // The single slot is occupied: the body names its occupant so the client can
     // re-attach to the running exchange rather than dead-end on the alert.
     const fetchImpl = (() =>
@@ -1156,7 +1156,7 @@ describe("createFetchJobApiClient over an injected fetch", () => {
       createdAt: "2026-07-08T14:32:00.000Z",
     });
 
-    // recordAvailable false, a missing createdAt, and a non-2xx all read as
+    // recordAvailable false, a missing createdAt, and a non-2xx all resolve to
     // unavailable.
     await expect(
       createFetchJobApiClient(
@@ -1273,8 +1273,8 @@ describe("createFetchJobApiClient event-stream reconnect limits", () => {
   });
 
   test("a 404 while resuming stops the retries: the job is gone", async () => {
-    // The appliance no longer has the exchange (deleted, or forgotten by a
-    // restart). Retrying cannot bring it back, so the client surfaces it at once.
+    // The console no longer has the exchange (deleted, or forgotten by a
+    // restart). Retrying cannot bring it back, so the client reports it at once.
     vi.useFakeTimers();
     const { fetchImpl, calls } = droppingEventsFetch(() =>
       Promise.resolve(new Response(null, { status: 404 })),
@@ -1361,13 +1361,13 @@ describe("createServerJobZeroSetupDriver intent", () => {
     expect(intent.channel).toBe("filedrop");
     expect(intent.eventStream).toBe(true);
     expect(intent.inputCsv).toBe(CONFIG_INPUT_CSV);
-    // The zero-setup mode carries no exchange-mode credential or terms material.
+    // The zero-setup mode has no exchange-mode credential or terms material.
     expect(intent.sharedSecret).toBeUndefined();
     expect(intent.linkageTerms).toBeUndefined();
     expect(intent.metadata).toBeUndefined();
   });
 
-  test("an sftp zero-setup intent carries NO connection field", async () => {
+  test("an sftp zero-setup intent has NO connection field", async () => {
     const { client, createdIntents } = scriptedClient([result(true)]);
     await createServerJobZeroSetupDriver(
       { ...zeroSetupConfig(), transport: { channel: "sftp" } },
@@ -1377,7 +1377,7 @@ describe("createServerJobZeroSetupDriver intent", () => {
     const intent = createdIntents[0] as Record<string, unknown>;
     expect(intent.channel).toBe("sftp");
     // Only the discriminants and the input source: no remote, host, port, path, or
-    // any other connection material can ride the intent (the appliance composes the
+    // any other connection material can ride the intent (the console composes the
     // connection from its own effective server).
     expect(Object.keys(intent).sort()).toEqual([
       "channel",
@@ -1430,7 +1430,7 @@ describe("createServerJobZeroSetupDriver intent", () => {
     expect(intent.linkageStrategy).toBeUndefined();
   });
 
-  test("maps the appliance event stream onto the lifecycle (shared run body)", async () => {
+  test("maps the console event stream onto the lifecycle (shared run body)", async () => {
     const { client } = scriptedClient([
       stages("prepare"),
       stage("prepare"),
@@ -1506,7 +1506,7 @@ describe("createServerJobReattachDriver", () => {
     expect(events.onError).not.toHaveBeenCalled();
   });
 
-  test("a stream 404 surfaces as the onError the recovery panel maps to stale", async () => {
+  test("a stream 404 is reported as the onError the recovery panel maps to stale", async () => {
     const client: JobApiClient = {
       createJob: () => Promise.reject(new Error("re-attach never creates")),
       // Match the real stream: the non-ok status throws on the first pull.
@@ -1588,8 +1588,8 @@ describe("createFetchJobApiClient deleteJob and fetchJobStatus", () => {
 
   test("a 200 with no recognizable status is live, defaulting to running (never gone)", async () => {
     const signal = new AbortController().signal;
-    // A live in-memory job the status route answered 200 for must never read as
-    // gone, or the recovery panel would delete it; default to running.
+    // A live in-memory job the status route answered 200 for must never resolve
+    // to gone, or the recovery panel would delete it; default to running.
     await expect(
       createFetchJobApiClient(statusFetch({})).fetchJobStatus("job-1", signal),
     ).resolves.toEqual({ kind: "live", status: "running" });
@@ -1679,8 +1679,8 @@ describe("fetchSftpConnection", () => {
     });
   });
 
-  test("a half pair, or a pair beside a shared path, reads as none configured", async () => {
-    // Neither is a shape the appliance can author. Dropping the connection is
+  test("a half pair, or a pair beside a shared path, resolves to none configured", async () => {
+    // Neither is a shape the console can author. Dropping the connection is
     // what keeps a run -- and the invitation minted from the same projection --
     // from naming a directory layout the browser only half read.
     const incoherent: Array<unknown> = [
@@ -1736,13 +1736,13 @@ describe("fetchSftpConnection", () => {
     expect(urls).toEqual(["/api/jobs/sftp"]);
   });
 
-  test("an enabled API with no server reads as none configured", async () => {
+  test("an enabled API with no server resolves to none configured", async () => {
     await expect(
       fetchSftpConnection(jsonResponse({ configured: false })),
     ).resolves.toEqual(none);
   });
 
-  test("a non-2xx reads as none configured (fail toward authoring)", async () => {
+  test("a non-2xx resolves to none configured (fail toward authoring)", async () => {
     // 404 is also the gate's disabled-API response; any non-2xx means "no
     // server-job run can start here".
     for (const status of [404, 500])
@@ -1753,7 +1753,7 @@ describe("fetchSftpConnection", () => {
       ).resolves.toEqual(none);
   });
 
-  test("a malformed body reads as none configured, never a partial connection", async () => {
+  test("a malformed body resolves to none configured, never a partial connection", async () => {
     const malformed: Array<unknown> = [
       [],
       "prod_east",
@@ -1773,7 +1773,7 @@ describe("fetchSftpConnection", () => {
       );
   });
 
-  test("a network error and a non-JSON body read as none configured", async () => {
+  test("a network error and a non-JSON body resolve to none configured", async () => {
     await expect(
       fetchSftpConnection(() => Promise.reject(new Error("offline"))),
     ).resolves.toEqual(none);
@@ -1835,7 +1835,7 @@ describe("fetchSlotOccupancy", () => {
     expect(urls).toEqual(["/api/jobs/slot"]);
   });
 
-  test("a non-2xx reads as free (a disabled API's 404 among them)", async () => {
+  test("a non-2xx resolves to free (a disabled API's 404 among them)", async () => {
     for (const status of [404, 500])
       await expect(
         fetchSlotOccupancy(
@@ -1845,7 +1845,7 @@ describe("fetchSlotOccupancy", () => {
       ).resolves.toEqual(free);
   });
 
-  test("a malformed body reads as free, never a partial occupancy", async () => {
+  test("a malformed body resolves to free, never a partial occupancy", async () => {
     const malformed: Array<unknown> = [
       [],
       "occupied",
@@ -1862,7 +1862,7 @@ describe("fetchSlotOccupancy", () => {
       ).resolves.toEqual(free);
   });
 
-  test("a network error and a non-JSON body read as free", async () => {
+  test("a network error and a non-JSON body resolve to free", async () => {
     await expect(
       fetchSlotOccupancy(signal, () => Promise.reject(new Error("offline"))),
     ).resolves.toEqual(free);

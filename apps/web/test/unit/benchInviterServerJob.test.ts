@@ -29,7 +29,7 @@ const mintedTerms: LinkageTerms = {
 };
 
 // The inviter's OWN authored column metadata, as the mint resolved it. `secret` is
-// roled `ignored`: the server-job path must carry these edits so the appliance's
+// roled `ignored`: the server-job path must hold these edits so the console's
 // CLI honors them rather than inferring metadata from the column names.
 const mintedMetadata: Metadata = [
   { name: "first_name", type: "first_name", role: "linkage", isPayload: false },
@@ -88,7 +88,7 @@ describe("inviterServerJobConfig", () => {
     });
   });
 
-  test("carries the inline CSV source and the mint's shared secret verbatim", () => {
+  test("holds the inline CSV source and the mint's shared secret verbatim", () => {
     const config = configFor();
 
     expect(config.inputSource).toEqual({ kind: "inline", csv: inputCsv });
@@ -97,8 +97,8 @@ describe("inviterServerJobConfig", () => {
 
   test("threads a console workFile reference through as the input source verbatim", () => {
     // The console invite sources from the operator-mounted file: the driver config
-    // carries only the reference (name + profiled freshness pair), never content, so
-    // the appliance's create can resolve and freshness-check the mounted file.
+    // holds only the reference (name + profiled freshness pair), never content, so
+    // the console's create can resolve and freshness-check the mounted file.
     const workFile = {
       kind: "workFile" as const,
       name: "clients.csv",
@@ -119,7 +119,7 @@ describe("inviterServerJobConfig", () => {
 
   test("rides the sftp transport for a console SFTP invite", () => {
     // The console SFTP invite runs the same server job on the sftp intent arm; the
-    // arm carries no connection field (the appliance reads the operator-authored
+    // arm holds no connection field (the console reads the operator-authored
     // connection off GET /api/jobs/sftp), so only the channel changes here.
     const config = inviterServerJobConfig({
       minted,
@@ -132,7 +132,7 @@ describe("inviterServerJobConfig", () => {
     expect(config.linkageTerms).toBe(mintedTerms);
   });
 
-  test("carries the mint's authored metadata and standardization", () => {
+  test("holds the mint's authored metadata and standardization", () => {
     const config = configFor();
 
     expect(config.metadata).toEqual(mintedMetadata);
@@ -151,8 +151,8 @@ describe("inviterServerJobConfig", () => {
     expect(config).not.toHaveProperty("standardization");
   });
 
-  test("sets no received-payload lock-in -- that one is the acceptor's", () => {
-    // The lock-in mirrors an invitation's disclosed set, which only the accepting
+  test("sets no received-payload commitment -- that one is the acceptor's", () => {
+    // The commitment mirrors an invitation's disclosed set, which only the accepting
     // side has to mirror; the inviter authored the set itself.
     expect(configFor().expectedPayloadColumns).toBeUndefined();
   });

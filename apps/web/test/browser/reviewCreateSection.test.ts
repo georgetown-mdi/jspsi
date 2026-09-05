@@ -26,7 +26,7 @@ const CITATION_DROP_NOTICE_NAME =
 const INERT_COALESCE_NOTICE_NAME = "A default value will not be substituted";
 
 // The review step's own notice: an imported document's rule-set citation the terms
-// this step is about to seal will not carry. It is the Matching keys tab's notice
+// this step is about to seal will not hold. It is the Matching keys tab's notice
 // restated here, not a second wording -- an operator can import in that tab and
 // come straight to this step to create.
 
@@ -176,7 +176,7 @@ describe("ReviewCreateSection: the inert-coalesce notice", () => {
     await expect
       .element(page.getByRole("note", { name: INERT_COALESCE_NOTICE_NAME }))
       .toHaveTextContent("is never substituted where it sits");
-    // Advisory, not a refusal: terms carrying this shape are valid and run, so
+    // Advisory, not a refusal: terms with this shape are valid and run, so
     // the create action stays available.
     await expect
       .element(page.getByRole("button", { name: "Create the invitation" }))

@@ -4,13 +4,13 @@ import { DISPLAY_TRUNCATION_MARKER } from "@psilink/core";
 
 import { probeSftpHostKey } from "@psi/sftpAuthoringClient";
 
-// The appliance is trusted and its probe body is still re-validated field by
-// field on the way in, so that a malformed one degrades to an honest state
+// The console is trusted and its probe body is still re-validated field by
+// field on the way in, so that a malformed one degrades to an accurate state
 // rather than reaching the operator's alert as it arrived. These pin the
 // peer-answer half of that boundary, whose excerpt is bytes an untrusted party
 // chose.
 describe("the probe body's peer answer is re-validated client-side", () => {
-  /** The appliance's cap on the escaped excerpt, mirrored by the client. */
+  /** The console's cap on the escaped excerpt, mirrored by the client. */
   const EXCERPT_MAX_LENGTH = 512;
 
   /** A fetch answering one probe with the given JSON body. */
@@ -46,7 +46,7 @@ describe("the probe body's peer answer is re-validated client-side", () => {
     });
   });
 
-  test("an over-long excerpt is truncated rather than carried at whatever length it arrived", async () => {
+  test("an over-long excerpt is truncated rather than kept at whatever length it arrived", async () => {
     const result = await probeSftpHostKey(
       "sftp.example.org",
       undefined,
@@ -71,9 +71,9 @@ describe("the probe body's peer answer is re-validated client-side", () => {
     });
   });
 
-  test("an excerpt the appliance already truncated passes through unchanged", async () => {
-    // The appliance appends the marker ON TOP of its own cap, so its longest
-    // honest excerpt is longer than the cap; re-applying the bound here must not
+  test("an excerpt the console already truncated passes through unchanged", async () => {
+    // The console appends the marker ON TOP of its own cap, so its longest
+    // real excerpt is longer than the cap; re-applying the bound here must not
     // clip it a second time.
     const applianceTruncated =
       "A".repeat(EXCERPT_MAX_LENGTH) + DISPLAY_TRUNCATION_MARKER;
@@ -99,7 +99,7 @@ describe("the probe body's peer answer is re-validated client-side", () => {
     ["a bidi override", "HTTP/1.1 403 \u202eForbidden"],
     ["a non-ASCII character", "HTTP/1.1 403 Forbidden \u00a0"],
   ])(
-    "an excerpt carrying %s never came from the appliance's escape, so the diagnosis is dropped",
+    "an excerpt holding %s never came from the console's escape, so the diagnosis is dropped",
     async (_name, excerpt) => {
       // The alert renders these bytes verbatim, in a field whose containment
       // rests on their being printable ASCII: anything else would let a peer
@@ -116,7 +116,7 @@ describe("the probe body's peer answer is re-validated client-side", () => {
   test("the printable-ASCII range the escape does emit crosses whole", async () => {
     // Every character sanitizeForDisplay passes through or writes an escape out
     // of, including the quotation marks and backslashes an escaped excerpt
-    // carries, so the check bounds what it must and nothing more.
+    // has, so the check bounds what it must and nothing more.
     const excerpt = Array.from({ length: 0x7f - 0x20 }, (_value, index) =>
       String.fromCharCode(0x20 + index),
     ).join("");

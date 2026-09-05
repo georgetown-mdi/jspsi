@@ -422,7 +422,7 @@ describe("a synthesized persistence-loss terminal reaches the operator's alert",
     expect(alert.category).toBe("output");
     expect(alert.title).toBe("Results unavailable");
     // The alert leads with the do-not-repeat instruction, then hands over the
-    // appliance's own cause. The lead must not name an artifact that cause
+    // console's own cause. The lead must not name an artifact that cause
     // immediately says cannot be confirmed -- the two sentences are read together.
     expect(alert.message).toContain("do not run this exchange again");
     expect(alert.message).toContain("a local write failed:");
@@ -590,7 +590,7 @@ describe("cancellation and deletion", () => {
     // Wait for the child to report its handlers installed, not for a fixed
     // interval: SIGINT delivered before registration takes the default action and
     // kills the child outright, so the escalation under test never happens and the
-    // terminal carries no exit code at all.
+    // terminal holds no exit code at all.
     const readyFile = path.join(tempDataRoot("sigint-ready"), "ready");
     fs.mkdirSync(path.dirname(readyFile), { recursive: true });
     roots.push(path.dirname(readyFile));
@@ -837,7 +837,7 @@ describe("the in-app authored sftp connection", () => {
     expect(manager.sftpProjection()).toEqual(projection);
   });
 
-  test("a credential inside the data root surfaces a non-blocking warning", () => {
+  test("a credential inside the data root raises a non-blocking warning", () => {
     const manager = makeManager({});
     const dataRoot = roots[roots.length - 1];
     fs.mkdirSync(dataRoot, { recursive: true });
@@ -848,7 +848,7 @@ describe("the in-app authored sftp connection", () => {
       hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
       credential: { kind: "ref", ref: `@${secretPath}`, credType: "password" },
     });
-    // Authored (not rejected), carrying a warning that persists to a later
+    // Authored (not rejected), holding a warning that persists to a later
     // projection (a console reload) and clears with the connection.
     expect(projection.credentialWarnings).toHaveLength(1);
     expect(projection.credentialWarnings?.[0]).toContain("data root");
@@ -1026,7 +1026,7 @@ describe("the in-app authored sftp connection", () => {
     return dir;
   }
 
-  /** A raw-paste authoring body carrying a pasted credential value. */
+  /** A raw-paste authoring body holding a pasted credential value. */
   function rawBody(value = "s3cret-password") {
     return {
       host: "authored.partner.example",
@@ -1039,7 +1039,7 @@ describe("the in-app authored sftp connection", () => {
     const scratch = scratchDir();
     const manager = makeManager({ credentialScratchDir: scratch });
     const projection = manager.authorSftpServer(rawBody());
-    // The projection carries only the locator -- never the value.
+    // The projection holds only the locator -- never the value.
     expect(projection).toEqual({
       host: "authored.partner.example",
       credentialWarnings: [],
@@ -1120,7 +1120,7 @@ describe("the in-app authored sftp connection", () => {
       `${record.workdir}/psilink.yaml`,
       "utf8",
     );
-    // The composed config carries the @path reference, never the pasted value.
+    // The composed config holds the @path reference, never the pasted value.
     const server = composedServer(configYaml);
     expect(configYaml).toContain("channel: sftp");
     expect(String(server.password).startsWith(`@${scratch}/`)).toBe(true);
@@ -1234,7 +1234,7 @@ describe("filedrop rendezvous facilitation", () => {
 
   /** The not-empty lead a job created over a mount holding leftovers put on its
    * own event stream. The relay event's payload is an open record, so the message
-   * reads as unknown and is narrowed rather than cast. */
+   * is treated as unknown and is narrowed rather than cast. */
   async function notEmptyLeadFor(
     intent: JobFiledropExchangeIntent,
   ): Promise<string | undefined> {
@@ -1259,7 +1259,7 @@ describe("filedrop rendezvous facilitation", () => {
 
   test("the not-empty lead follows this launch's own sweep intent", async () => {
     // The lead is composed moments before the same intent reaches the child as
-    // --sweep-exchange-files, so a launch already carrying the sweep is told the
+    // --sweep-exchange-files, so a launch already holding the sweep is told the
     // control's state rather than told to turn it on -- and one that is not still
     // gets the instruction, which is the only recovery it has.
     const sweeping = await notEmptyLeadFor(
@@ -1277,7 +1277,7 @@ describe("filedrop rendezvous facilitation", () => {
   });
 });
 
-describe("a split-provisioned filedrop appliance", () => {
+describe("a split-provisioned filedrop console", () => {
   /** A manager mounted with two disjoint, existing rendezvous legs. */
   function splitManager(options: { events?: Array<unknown> } = {}): {
     manager: JobManager;
@@ -1357,7 +1357,7 @@ describe("a split-provisioned filedrop appliance", () => {
       validIntent({ options: RETAIN_OPTIONS }),
     );
     const record = manager.getJob(id)!;
-    // The relay event's payload is an open record, so the message reads as
+    // The relay event's payload is an open record, so the message is treated as
     // unknown; narrow it here rather than asserting on a cast.
     const warnings = record.events
       .map((entry) => entry.event)
@@ -1380,7 +1380,7 @@ describe("a split-provisioned filedrop appliance", () => {
     ).toBe(true);
   });
 
-  test("carries the outbound leg to a zero-setup run as --outbound-path", async () => {
+  test("forwards the outbound leg to a zero-setup run as --outbound-path", async () => {
     const spawnZeroSetup = vi.spyOn(cliDriver, "spawnZeroSetupJob");
     const { manager, inbound, outbound } = splitManager({
       events: [RESULT_EVENT],
@@ -1520,10 +1520,10 @@ describe("zero-setup mode end-to-end via the stub CLI", () => {
     exSpy.mockRestore();
   });
 
-  test("a terms mismatch surfaces as a failed job with the CLI error", async () => {
+  test("a terms mismatch shows up as a failed job with the CLI error", async () => {
     // Zero-setup infers terms from each party's file; a mismatch aborts the
     // exchange. The stub emits the CLI's terminal error event and exits non-zero,
-    // which the manager must surface as a failed job carrying that error.
+    // which the manager must report as a failed job holding that error.
     const manager = makeManager({
       events: [
         {
@@ -1572,7 +1572,7 @@ describe("zero-setup mode end-to-end via the stub CLI", () => {
 });
 
 describe("the single exchange slot", () => {
-  test("the busy rejection carries the occupying exchange's id", async () => {
+  test("the busy rejection holds the occupying exchange's id", async () => {
     // The slot occupant's id rides the error so the route can emit it and the
     // browser can re-attach to the running exchange.
     const manager = makeManager({ delayMs: 5000 });

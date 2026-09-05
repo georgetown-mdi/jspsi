@@ -118,9 +118,8 @@ afterEach(async () => {
 /**
  * A re-read is asked for from two places -- after the destructive reset, and on an
  * explicit retry -- and both sit beside a control the operator must not press
- * twice. Leaving the previous verdict on screen while the fresh read runs makes
- * the button they just pressed look inert, which is an invitation to press it
- * again; the section returns to its in-flight state instead.
+ * twice. The section returns to its in-flight state so the previous verdict does
+ * not sit under a button that looks like it did nothing.
  */
 describe("a re-read of the accounting shows that it is under way", () => {
   test("the reset's re-read replaces the verdict it destroyed, not the buttons beside it", async () => {
@@ -205,11 +204,10 @@ describe("a re-read of the accounting shows that it is under way", () => {
 });
 
 /**
- * The read classifies every failure rather than rejecting, so the surface's
- * rejection handler is the backstop for that contract lapsing rather than a second
- * failure path. What it must not do is leave the section on its spinner with the
- * rejection unhandled: the operator would be told the read is under way by a page
- * that has stopped reading.
+ * The read classifies every failure rather than rejecting, so the rejection
+ * handler is a safety check against that contract lapsing, not a second failure
+ * path. It must not leave the section on its spinner with the rejection
+ * unhandled.
  */
 describe("a read that rejects rather than classifying", () => {
   test("lands on the transient state instead of stranding the spinner", async () => {

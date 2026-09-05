@@ -77,7 +77,7 @@ function madeDir(label: string): string {
 }
 
 /**
- * A job-API Request carrying a loopback `Host`. A synthetic Request sets none,
+ * A job-API Request holding a loopback `Host`. A synthetic Request sets none,
  * and the gate's Host allowlist would 403 every route-driven case without it.
  */
 function jobRequest(url: string, init: RequestInit = {}): Request {
@@ -275,7 +275,7 @@ describe("POST /api/jobs/signing/fingerprint maps each condition", () => {
     );
   });
 
-  test("a completed attempt is a 200 whose envelope carries names, never paths", async () => {
+  test("a completed attempt is a 200 whose envelope has names, never paths", async () => {
     const { dataRoot } = seedManager();
     const response = await postFingerprint({ identity: "Agency A" });
     expect(response.status).toBe(200);
@@ -323,7 +323,7 @@ describe("POST /api/jobs/signing/fingerprint maps each condition", () => {
 
   test("the CLI's exit 64 is a 200 refused envelope, not an HTTP failure", async () => {
     // A refusal is an attempt that RAN, so the client reads it off the body the
-    // way it reads a success -- and the envelope carries the category alone.
+    // way it reads a success -- and the envelope has the category alone.
     seedManager({ STUB_EXIT_CODE: "64" });
     const response = await postFingerprint({ identity: "Agency A" });
     expect(response.status).toBe(200);
@@ -370,7 +370,7 @@ describe("POST /api/jobs/signing/fingerprint maps each condition", () => {
     expect((await first).status).toBe(200);
   });
 
-  test("an unexpected internal fault is an empty-bodied 500, carrying no detail", async () => {
+  test("an unexpected internal fault is an empty-bodied 500, with no detail", async () => {
     const { manager } = seedManager();
     vi.spyOn(manager, "resolveSigningFingerprint").mockRejectedValue(
       new Error("ENOENT: /srv/appliance/data/.psilink-signing-identity.json"),

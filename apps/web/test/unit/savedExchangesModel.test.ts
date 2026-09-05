@@ -19,8 +19,8 @@ import type { ManagedLocalState } from "@psi/managedLocalState";
 // The saved-exchanges run list's display derivation, tested in Node: the side
 // label, the one-line status from `lastRun` and `expires`, the derived backup
 // state, and the spent (handed-off) state. The status is a plain last-run summary --
-// the tiered desync/attack copy is a later item, so a failed run reads neutrally
-// here.
+// the tiered desync/attack copy is a later item, so a failed run displays
+// neutrally here.
 
 const NOW = Date.parse("2026-07-14T12:00:00.000Z");
 
@@ -66,7 +66,7 @@ describe("savedExchangeRow", () => {
     expect(row.status).toMatch(/^Last run succeeded /);
   });
 
-  test("an unexplained auth failure reads as a check-with-partner line, never attack framing", () => {
+  test("an unexplained auth failure displays as a check-with-partner line, never attack framing", () => {
     const row = savedExchangeRow(
       record({
         lastRun: {
@@ -78,13 +78,13 @@ describe("savedExchangeRow", () => {
       undefined,
       NOW,
     );
-    // The list's quiet form of the unexplained tier: the honest lead, not the
-    // attack checklist (that lives on the exchange's own surface).
+    // The list's quiet form of the unexplained tier: the accurate lead, not
+    // the attack checklist (that lives on the exchange's own surface).
     expect(row.status).toMatch(/check with your partner/i);
     expect(row.status).not.toMatch(/attack|tamper|desync|impersonat/i);
   });
 
-  test("a recorded storage failure reads as its specific benign line", () => {
+  test("a recorded storage failure displays as its specific benign line", () => {
     const row = savedExchangeRow(
       record({
         lastRun: {
@@ -100,7 +100,7 @@ describe("savedExchangeRow", () => {
     expect(row.status).toMatch(/re-invite/i);
   });
 
-  test("a consent refusal reads as its own quiet line, not a connection problem", () => {
+  test("a consent refusal displays as its own quiet line, not a connection problem", () => {
     const row = savedExchangeRow(
       record({
         lastRun: {
@@ -117,7 +117,7 @@ describe("savedExchangeRow", () => {
     expect(row.status).not.toMatch(/attack|tamper|desync|connection/i);
   });
 
-  test("a linkage shortfall reads as its own quiet line, not the input file's", () => {
+  test("a linkage shortfall displays as its own quiet line, not the input file's", () => {
     const row = savedExchangeRow(
       record({
         lastRun: {
@@ -135,7 +135,7 @@ describe("savedExchangeRow", () => {
     expect(row.status).not.toMatch(/attack|tamper|desync/i);
   });
 
-  test("a partner no-show reads as the arrival line, never a window or a connection problem", () => {
+  test("a partner no-show displays as the arrival line, never a window or a connection problem", () => {
     const row = savedExchangeRow(
       record({
         lastRun: { at: "2026-07-10T09:00:00.000Z", outcome: "missed" },
@@ -150,7 +150,7 @@ describe("savedExchangeRow", () => {
     expect(row.status).not.toMatch(/attack|tamper|desync/i);
   });
 
-  test("an auth failure on a restored record reads as the benign restore line", () => {
+  test("an auth failure on a restored record displays as the benign restore line", () => {
     const local: ManagedLocalState = {
       imported: { importedAt: "2026-07-09T00:00:00.000Z" },
     };
@@ -191,7 +191,7 @@ describe("savedExchangeRow backup state", () => {
     });
   });
 
-  test("a present marker reads backed-up, carrying its date", () => {
+  test("a present marker displays as backed-up, including its date", () => {
     const local: ManagedLocalState = {
       backup: { backedUpAt: "2026-07-10T09:00:00.000Z" },
     };
@@ -199,10 +199,10 @@ describe("savedExchangeRow backup state", () => {
     expect(row.backup.kind).toBe("backed-up");
   });
 
-  test("a present marker reads backed-up regardless of the last run's instant", () => {
-    // A marker chronologically before the last successful run still reads backed-up:
-    // the rotation would have cleared a stale marker, so a marker present at all is
-    // by construction current.
+  test("a present marker displays as backed-up regardless of the last run's instant", () => {
+    // A marker chronologically before the last successful run still displays
+    // as backed-up: the rotation would have cleared a stale marker, so a
+    // marker present at all is by construction current.
     const local: ManagedLocalState = {
       backup: { backedUpAt: "2026-07-09T09:00:00.000Z" },
     };
@@ -224,13 +224,13 @@ describe("savedExchangeRow spent state", () => {
     };
     const row = savedExchangeRow(record(), local, NOW);
     expect(row.spentAsOf).toBeDefined();
-    // A migration spend carries no hand-off: it is the one an import revives, and
+    // A migration spend has no hand-off: it is the one an import revives, and
     // the row's recovery line says so.
     expect(row.spentHandoff).toBeUndefined();
   });
 
   test("a command-line hand-off is named as one", () => {
-    // The two spends have different recoveries, so the row carries which one it
+    // The two spends have different recoveries, so the row holds which one it
     // was rather than one "handed off" line for both.
     const local: ManagedLocalState = {
       spent: { spentAt: "2026-07-12T09:00:00.000Z", handoff: "command-line" },
@@ -240,7 +240,7 @@ describe("savedExchangeRow spent state", () => {
     expect(row.spentHandoff).toBe("command-line");
   });
 
-  test("a live record carries no spent date", () => {
+  test("a live record has no spent date", () => {
     expect(
       savedExchangeRow(record(), undefined, NOW).spentAsOf,
     ).toBeUndefined();
@@ -258,9 +258,9 @@ describe("savedExchangeRow schedule lines", () => {
     consecutiveMisses: 0,
   };
 
-  test("a record with no schedule carries no schedule lines at all", () => {
+  test("a record with no schedule has no schedule lines at all", () => {
     // Nothing about scheduling exists for an exchange nobody scheduled, so the row
-    // is exactly what it was before schedules were surfaced.
+    // is exactly what it was before schedules were shown.
     expect(savedExchangeRow(record(), undefined, NOW).schedule).toBeUndefined();
   });
 

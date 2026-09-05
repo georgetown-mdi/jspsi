@@ -31,9 +31,9 @@ import { stagesFor } from "@bench/exchangeRun";
 import styles from "@bench/bench.module.css";
 
 // Assertions below derive their expected string from this function, so they pin
-// that a string sink carries the same form the panel does, not what that form is;
+// that a string sink has the same form the panel does, not what that form is;
 // the literal FSI/PDI/marker expectations live in
-// apps/web/test/unit/columnNameDisplay.test.ts, which is load-bearing for all of
+// apps/web/test/unit/columnNameDisplay.test.ts, which is critical for all of
 // them.
 import { isolatedColumnName } from "@components/ColumnName";
 
@@ -46,8 +46,8 @@ import type {
   PreparedExchange,
 } from "@psilink/core";
 
-// Capture what the router seam was navigated to, so the lobby paste test can
-// assert the target and hash.
+// Capture what the router boundary was navigated to, so the lobby paste test
+// can assert the target and hash.
 const navigation = vi.hoisted(() => ({
   calls: [] as Array<unknown>,
 }));
@@ -102,8 +102,9 @@ vi.mock("@psi/rendezvous", async () =>
 
 // Stub the run lifecycle so launching an exchange never dials: record each
 // invocation's options so a test can drive the captured onStages/onStage/
-// onResult/onError seams -- the same seams the real lifecycle fires -- and assert
-// the acceptor's run/completion screens against them (the bench.test.ts pattern).
+// onResult/onError callbacks -- the same callbacks the real lifecycle fires --
+// and assert the acceptor's run/completion screens against them (the
+// bench.test.ts pattern).
 interface CapturedLifecycle {
   exchangeRole: "initiator" | "responder";
   sharedSecret: string;
@@ -193,7 +194,7 @@ async function encodeAcceptToken(
   return encodeInvitation(token);
 }
 
-// A token carrying a future expiry and a disclosed payload subset (the columns
+// A token holding a future expiry and a disclosed payload subset (the columns
 // the inviter will send the acceptor, so the settled ledger's received row names
 // them), for the run tests that assert the captured `expires`, the settled
 // ledger, and jumping past the deadline to swap Try again for start-over.
@@ -253,8 +254,8 @@ function csvFile(content: string): File {
 const app = createAppMount();
 
 afterEach(() => {
-  // Backstop for the fake-Date test below: a failure between useFakeTimers and
-  // its finally must not leak a frozen clock into the rest of the suite.
+  // Safety check for the fake-Date test below: a failure between useFakeTimers
+  // and its finally must not leak a frozen clock into the rest of the suite.
   vi.useRealTimers();
   app.unmount();
   navigation.calls.length = 0;
@@ -384,7 +385,7 @@ describe("acceptor bench: decode gate", () => {
       .toBeInTheDocument();
     const text = document.body.textContent;
     expect(text).toContain("sharedSecret:");
-    // The raw blob is `JSON.stringify(issues)`, which always carries a "code"
+    // The raw blob is `JSON.stringify(issues)`, which always has a "code"
     // key; the readable one-liner never does.
     expect(text).not.toContain('"code"');
   });
@@ -484,15 +485,15 @@ describe("acceptor bench: consent gate and parse-behind-consent", () => {
     await expect.element(accept).toBeDisabled();
   });
 
-  test("a name carrying a control character is refused at the field", async () => {
+  test("a name holding a control character is refused at the field", async () => {
     await reachConsent();
     const accept = page.getByRole("button", { name: "Accept and continue" });
     await userEvent.click(page.getByRole("checkbox"));
 
-    // A name pasted out of a spreadsheet cell, carrying the separator with it.
+    // A name pasted out of a spreadsheet cell, still holding the separator.
     // The run adopts this value as this party's terms identity, which core
     // refuses outright -- so the fault is named at the field the operator can
-    // still fix rather than surfacing once the exchange is under way.
+    // still fix rather than showing up once the exchange is under way.
     await userEvent.fill(page.getByLabelText("Your name"), "County\tHealth");
     await expect
       .element(page.getByText(ACCEPTOR_NAME_CONTROL_CHAR_PROBLEM))
@@ -592,7 +593,7 @@ describe("acceptor bench: consent gate and parse-behind-consent", () => {
 });
 
 describe("acceptor bench: consent-step legal-agreement display", () => {
-  // acceptorTerms carries no agreement, so the display tests mint their own
+  // acceptorTerms has no agreement, so the display tests mint their own
   // agreement-bearing terms; the shared fixture keeps the no-fieldset case.
   const agreementTerms: LinkageTerms = {
     ...acceptorTerms,
@@ -867,7 +868,7 @@ describe("acceptor bench: confirm your columns (verdict, mapper, launch)", () =>
   test("a two-identifier file says which rule to resolve at the disabled button", async () => {
     // A model-side gate with no transport in it: the keys are all satisfiable and
     // the invitation accepts what is marked, so the identifier rule alone closes
-    // the launch -- and the button carries its sentence rather than falling silent.
+    // the launch -- and the button states its sentence rather than falling silent.
     await reachColumns("id,identifier,first_name,last_name\n1,2,Alice,Smith\n");
     const start = page.getByRole("button", { name: "Start the exchange" });
     await expect.element(start).toBeDisabled();
@@ -923,7 +924,7 @@ describe("acceptor bench: confirm your columns (verdict, mapper, launch)", () =>
 
   test("a two-identifier file ties the conflict error to the offending Type controls", async () => {
     // `id` and `identifier` both infer to role: identifier, so the file seeds a
-    // single-identifier conflict the grid surfaces (inferMetadata seeds it; the
+    // single-identifier conflict the grid shows (inferMetadata seeds it; the
     // mutators never create it).
     await reachColumns("id,identifier,first_name,last_name\n1,2,Alice,Smith\n");
     const conflict = page.getByTestId("identifier-conflict");
@@ -931,7 +932,7 @@ describe("acceptor bench: confirm your columns (verdict, mapper, launch)", () =>
     const errorId = conflict.element().getAttribute("id");
     expect(errorId).toBeTruthy();
 
-    // Both offending Type controls carry the control-level error signal and
+    // Both offending Type controls have the control-level error signal and
     // point their description at the visible error element. (exact: true, kept
     // because the labels here name `id` and `identifier`: the isolate closing
     // each name is what separates the two, and an inexact match would not say
@@ -945,7 +946,7 @@ describe("acceptor bench: confirm your columns (verdict, mapper, launch)", () =>
       expect(control.element().getAttribute("aria-describedby")).toBe(errorId);
     }
 
-    // A non-identifier Type control carries no stale error association.
+    // A non-identifier Type control has no stale error association.
     const bystander = page.getByRole("combobox", {
       name: `Type for column ${isolatedColumnName("first_name")}`,
       exact: true,
@@ -974,12 +975,11 @@ describe("acceptor bench: confirm your columns (verdict, mapper, launch)", () =>
 
   test("the ledger's You will send names the extra disclosed column, not the invitation's request", async () => {
     // The invitation requests no payload from the acceptor (acceptorTerms has no
-    // payload.receive), so its terms name nothing to send. But the file carries an
-    // unrecognized `comment` column, which infers to role: payload -- the acceptor
+    // payload.receive), so its terms name nothing to send. The file has an
+    // unrecognized `comment` column that infers to role: payload, so the acceptor
     // transmits it for matched rows. The ledger's "You will send" must name that
     // column (what actually leaves), not read "No additional columns" off the
-    // inviter's empty request. This is the consent-truthfulness defect the security
-    // panel proved false on the ledger.
+    // inviter's empty request.
     await reachColumns("first_name,last_name,comment\nAlice,Smith,ok\n");
     const ledger = document.querySelector(
       'aside[aria-label="This exchange"]',
@@ -1006,7 +1006,7 @@ describe("acceptor bench: confirm your columns (verdict, mapper, launch)", () =>
     // The step's panel and this ledger row name the SAME disclosed set, side by
     // side on the one screen where the operator decides what leaves the machine, so
     // a header escaped in one and verbatim in the other reads two ways at once. The
-    // row carries the step's isolation as characters instead: a ledger value is a
+    // row holds the step's isolation as characters instead: a ledger value is a
     // string sink, where no element can hold it.
     const hostile = "notes\u202Eevil";
     await reachColumns(
@@ -1052,7 +1052,7 @@ describe("acceptor bench: confirm your columns (verdict, mapper, launch)", () =>
     );
   });
 
-  test("Start the exchange launches the minimal run stub carrying the edited spec", async () => {
+  test("Start the exchange launches the minimal run stub holding the edited spec", async () => {
     await reachColumns("first_name,last_name\nAlice,Smith\n");
     await userEvent.click(
       page.getByRole("button", { name: "Start the exchange" }),
@@ -1092,7 +1092,7 @@ describe("acceptor bench: confirm your columns (verdict, mapper, launch)", () =>
     await reachColumns("first_name,last_name\nAlice,Smith\n");
     // The ledger's Customize row navigates to the cleaning sub-section (the
     // acceptor edits only its own standardization there), and the open tab's
-    // row carries aria-current.
+    // row has aria-current.
     await userEvent.click(page.getByRole("button", { name: /Cleaning/ }));
     await expect
       .element(page.getByRole("heading", { name: "Cleaning" }))
@@ -1191,7 +1191,7 @@ describe("acceptor columns step: one column name across the screen", () => {
     );
   }
 
-  test("a header carrying a bidi override reads alike in the grid row and the panel", async () => {
+  test("a header holding a bidi override reads alike in the grid row and the panel", async () => {
     // A right-to-left override (U+202E) and a zero-width joiner (U+200D): the two
     // classes that make a name read differently from its bytes. The name is
     // unrecognized, so it infers to role: payload -- the disclosed set -- while
@@ -1204,7 +1204,7 @@ describe("acceptor columns step: one column name across the screen", () => {
       .toBeInTheDocument();
 
     // The grid's row header and the panel's entry are the SAME string, and it is
-    // the header the operator's file carries -- the disagreement this pins is a
+    // the header the operator's file has -- the disagreement this pins is a
     // name that reads one way in the row the operator marks and another in the
     // sentence stating what that mark sends.
     const panel = page
@@ -1228,7 +1228,7 @@ describe("acceptor columns step: one column name across the screen", () => {
       expect(getComputedStyle(element).unicodeBidi).toBe("isolate");
     }
 
-    // The two control labels are strings, so they carry the isolate as characters
+    // The two control labels are strings, so they have the isolate as characters
     // instead. Read off the DOM rather than through a role query, since what is
     // pinned is the label the app emits.
     const labels = [
@@ -1253,7 +1253,7 @@ describe("acceptor columns step: one column name across the screen", () => {
   test("the quick-fix mapper offers the header isolated and binds it raw", async () => {
     // Neither column infers to a linkage type, so the mapper takes the panel's
     // slot with one native select per missing field. An <option> cannot hold a
-    // <bdi>, so its label carries the isolate as characters -- while its VALUE
+    // <bdi>, so its label has the isolate as characters -- while its VALUE
     // stays the raw header, since that is the identity the remap binds and a
     // display form there would bind a column the file does not have.
     const bidiColumn = "notes\u202Eevil";
@@ -1272,15 +1272,12 @@ describe("acceptor columns step: one column name across the screen", () => {
   });
 
   test("a header behind an unmatched PDI reorders the panel's own sentence", async () => {
-    // The isolate class is the isolation's residual (UAX #9 BD9/X6a), and this
-    // panel puts copy in one text block with the names -- the separators between
-    // them and the sentence's full stop -- so the residual is reachable here;
-    // other sinks of that shape are measured in benchInviterSharing, and
-    // @components/ColumnName carries the limit class both files drive. The
-    // unmatched PDI ends the <bdi>'s isolation after
-    // "pre", and the override written after that break carries the name's tail
-    // past the name listed after it. Bounded by the trust basis
-    // @components/ColumnName records: these are the operator's own headers.
+    // The isolate class is the isolation's residual (UAX #9 BD9/X6a); this panel's
+    // copy sits in one text block with the names, so the residual is reachable here
+    // (other sinks of that shape are measured in benchInviterSharing). The unmatched
+    // PDI ends the <bdi>'s isolation after "pre", so the override written after that
+    // break moves the name's tail past the name listed after it -- within the trust
+    // basis @components/ColumnName records: these are the operator's own headers.
     const residual = "pre\u2069mid\u202Eevil";
     mountStep(["first_name", "last_name", residual, "post"]);
     await expect
@@ -1318,7 +1315,7 @@ describe("acceptor columns step: one column name across the screen", () => {
       first,
       second,
     ]);
-    // Whole and unescaped, so a non-Latin header reads as itself on the
+    // Whole and unescaped, so a non-Latin header displays as itself on the
     // operator's own authoring surface rather than as a run of escapes.
     expect(app.container.textContent).not.toContain("\\u0444");
   });
@@ -1377,7 +1374,7 @@ describe("acceptor columns step: one column name across the screen", () => {
     // The control for the check above: it asserts a layout property, and is worth
     // nothing unless the instrument can see that property break. Stripped of the
     // isolation the panel renders them with, the same names in the same sentence
-    // come out in a visual order the DOM does not hold -- the override carries
+    // come out in a visual order the DOM does not hold -- the override moves
     // "evil" past the name listed after it.
     expect(await unisolatedVisualOrder(RIGHT_TO_LEFT_OVERRIDE)).toEqual([
       "pre",
@@ -1533,7 +1530,7 @@ describe("acceptor columns step: the send summary is gated on the inviting party
 });
 
 describe("acceptor columns step: the columns the invitation will not accept", () => {
-  // An invitation carrying a present-but-empty `payload.receive` is the inviting
+  // An invitation holding a present-but-empty `payload.receive` is the inviting
   // party declaring it takes no column; core mirrors that onto this party as an
   // empty `payload.send` and refuses the run against disclosed metadata, so the
   // conflict is stated on this screen, where the marks that decide it are set.
@@ -1544,7 +1541,7 @@ describe("acceptor columns step: the columns the invitation will not accept", ()
 
   // The name fields satisfy both keys and the unrecognized column infers to role:
   // payload, so this conflict is the only thing that can close the launch. That
-  // column carries a bidi override (U+202E) because the alert names it beside the
+  // column has a bidi override (U+202E) because the alert names it beside the
   // grid row the operator has to change, and the two must name it alike.
   const bidiColumn = "notes\u202Eevil";
 
@@ -1632,9 +1629,10 @@ describe("acceptor columns step: the columns the invitation will not accept", ()
 
 describe("acceptor bench: run and completion", () => {
   // Consent, name, a fully-covered file, then Start the exchange -- the columns
-  // step's launch, which auto-starts the run. The run token carries a future
-  // expiry and an empty disclosed set (the lock-in the hook threads in). Returns
-  // once the captured lifecycle exists so callers can drive its seams right away.
+  // step's launch, which auto-starts the run. The run token has a future expiry
+  // and an empty disclosed set (the commitment the hook threads in). Returns
+  // once the captured lifecycle exists so callers can drive its callbacks right
+  // away.
   async function reachRun(hash?: string) {
     window.location.hash = hash ?? (await encodeRunToken());
     app.render(createElement(AcceptorBench));
@@ -1723,7 +1721,7 @@ describe("acceptor bench: run and completion", () => {
     expect(currentStepLabel()).toBe("Link keys");
   });
 
-  test("completion offers downloads and settles the past-tense ledger", async () => {
+  test("completion offers downloads and fixes the past-tense ledger", async () => {
     await reachRun();
     const call = lifecycleCall(0);
     call.onStages(stagesFor(preparedWith("cascade", 2), "acceptor"));
@@ -1767,9 +1765,9 @@ describe("acceptor bench: run and completion", () => {
         "psilink-record-2026-07-08T14-32.keys.json",
     );
 
-    // The timeline finishes whole (nothing current), and the ledger settles: the
-    // tag names who it was agreed with, rows relabel past tense, and the trust
-    // line changes.
+    // The timeline finishes whole (nothing current), and the ledger becomes
+    // final: the tag names who it was agreed with, rows relabel past tense, and
+    // the trust line changes.
     const rail = document.querySelector('nav[aria-label="Exchange progress"]');
     expect((rail as Element).querySelector('[aria-current="step"]')).toBeNull();
     const ledger = document.querySelector(
@@ -1982,7 +1980,7 @@ describe("acceptor bench: run and completion", () => {
     expect(document.body.textContent).not.toContain(
       "Your records contributed to the match",
     );
-    // And the count it computed itself carries no partner caveat, in the inset or
+    // And the count it computed itself has no partner caveat, in the inset or
     // in the ledger's condensed restatement of it.
     expect(document.body.textContent).not.toContain(
       "psilink does not check a count it is sent",
@@ -2003,7 +2001,7 @@ describe("acceptor bench: run and completion", () => {
     expect(ledger).not.toContain("reported by your partner");
   });
 
-  test("a count the partner reported carries the trust caveat", async () => {
+  test("a count the partner reported has the trust caveat", async () => {
     // The sender seat's number arrived over the partner's count-report leg and is
     // checked against no round of this party's own, so the reminder lands where
     // the number is read rather than only at consent time.
@@ -2028,7 +2026,7 @@ describe("acceptor bench: run and completion", () => {
         ),
       )
       .toBeInTheDocument();
-    // The ledger restates the count in its own words, so it carries the row-sized
+    // The ledger restates the count in its own words, so it has the row-sized
     // form of the same fact.
     expect(
       document.querySelector('aside[aria-label="This exchange"]')?.textContent,
@@ -2148,7 +2146,7 @@ describe("acceptor bench: run and completion", () => {
     expect(link?.getAttribute("href")).toBe("/quick");
   });
 
-  test("a config failure surfaces its message and returns to the columns step", async () => {
+  test("a config failure shows its message and returns to the columns step", async () => {
     await reachRun();
     lifecycleCall(0).onError({
       category: "config",
@@ -2156,7 +2154,7 @@ describe("acceptor bench: run and completion", () => {
     });
 
     // The prepare-time fault names only local config, so the message is
-    // surfaced, and the recovery returns to Confirm your columns with state
+    // shown, and the recovery returns to Confirm your columns with state
     // intact (the acceptor fixes its own settings there).
     await expect
       .element(page.getByText("Could not prepare the exchange"))
@@ -2205,7 +2203,7 @@ describe("acceptor bench: run and completion", () => {
     ).toBeNull();
 
     // Forward then Back does not resurrect the dead entry either. Both entries
-    // now carry the same columns marker, so each move is awaited on its own
+    // now have the same columns marker, so each move is awaited on its own
     // popstate rather than a state change.
     const nextPopState = () =>
       new Promise<void>((resolve) => {

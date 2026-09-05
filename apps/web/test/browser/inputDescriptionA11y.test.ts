@@ -49,7 +49,7 @@ async function waitForInput(selector: string): Promise<HTMLInputElement> {
 }
 
 // Every id token in aria-describedby must resolve to a present element, and one of
-// them must be the description element carrying the expected text. Asserting the
+// them must be the description element containing the expected text. Asserting the
 // relationship -- not the generated uuid -- is what survives a Mantine bump.
 function expectDescribedBy(input: HTMLInputElement, descriptionText: string) {
   const describedBy = input.getAttribute("aria-describedby");
@@ -92,7 +92,7 @@ describe("Mantine Radio/Checkbox description a11y association", () => {
     expectDescribedBy(input, AGREEMENT_DESCRIPTION);
   });
 
-  test("a Checkbox with no description carries no dangling aria-describedby", async () => {
+  test("a Checkbox with no description has no dangling aria-describedby", async () => {
     app.render(
       createElement(AppCheckbox, {
         "aria-label": "Allow several records to match one partner record",

@@ -67,12 +67,12 @@ describe("StepListEditor: a token-embedded regex stays read-only without allowRa
   });
 });
 
-// A window core grades dead ends at a refusal that names the KEY. What carries
-// the operator the rest of the way -- to the element, the step, and the bound --
-// is this render: ParamInput holds its own copy of the empty/optional rule
-// `isStepValid` composes, so the agreement swept in advancedInviteValidation.test.ts
-// (every dead window is one the descriptors reject) only reaches the operator
-// while this copy still marks the offending input.
+// Core's window validation rejects a dead end with a refusal naming the key;
+// getting from that refusal to a marked element, step, and bound is this
+// render's job. ParamInput keeps its own copy of the empty/optional rule
+// `isStepValid` composes, so the invariant checked in
+// advancedInviteValidation.test.ts (every dead window is one the descriptors
+// reject) reaches the operator only while this copy still marks the input.
 describe("StepListEditor: a bound left unfilled is marked on its own input", () => {
   const unfilledStart: EditableStep = {
     function: "substring",
@@ -90,7 +90,7 @@ describe("StepListEditor: a bound left unfilled is marked on its own input", () 
 
     const start = page.getByRole("textbox", { name: "Start position" });
     await expect.element(start).toBeInTheDocument();
-    // Exactly one inline error, carrying a message rather than an empty node.
+    // Exactly one inline error, with a message rather than an empty node.
     const alerts = page.getByRole("alert").elements();
     expect(alerts).toHaveLength(1);
     expect(alerts[0].textContent.length).toBeGreaterThan(0);
@@ -109,7 +109,7 @@ describe("StepListEditor: a bound left unfilled is marked on its own input", () 
     );
   });
 
-  test("a window that reads something carries no inline error", async () => {
+  test("a window that reads something has no inline error", async () => {
     // Not vacuous: the mark above is the unfilled bound's, not every substring's.
     app.render(
       createElement(StepListEditor, {

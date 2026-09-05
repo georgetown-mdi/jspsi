@@ -39,7 +39,7 @@ const COMMAND_HANDOFF = {
   },
 } satisfies JobHandoff;
 
-/** A zero-setup filedrop hand-off whose `--identity` label carries a space, to
+/** A zero-setup filedrop hand-off whose `--identity` label has a space, to
  * exercise the cron (POSIX) vs Windows (cmd) quoting divergence. */
 const SPACED_COMMAND_HANDOFF = {
   mode: "zeroSetup",
@@ -82,7 +82,7 @@ const SIGNED_CONFIG_HANDOFF = {
   usedSigningIdentity: true,
 } satisfies JobHandoff;
 
-/** Stub the same-origin hand-off endpoint at the global fetch seam. A null body
+/** Stub the same-origin hand-off endpoint at the global fetch boundary. A null body
  * makes it 404 (the unavailable case). */
 function stubHandoff(body: unknown | null): void {
   const realFetch = window.fetch.bind(window);
@@ -137,7 +137,7 @@ describe("RecurringHandoff panel", () => {
     expect(text()).toContain("0 2 * * *");
     expect(text()).toContain("schtasks /Create");
 
-    // A Direct run carries no key file to copy.
+    // A Direct run has no key file to copy.
     expect(text()).toContain("no shared secret");
     expect(text()).not.toContain(".psilink.key");
   });
@@ -186,7 +186,7 @@ describe("RecurringHandoff panel", () => {
       .toBeInTheDocument();
 
     const text = () => app.container.textContent;
-    // Copy the identity rather than minting a new one: a fresh key would carry a
+    // Copy the identity rather than minting a new one: a fresh key would have a
     // fingerprint the partner has not pinned.
     expect(text()).toContain("Copy your signing identity into that folder");
     expect(text()).toContain("do not run psilink fingerprint there");

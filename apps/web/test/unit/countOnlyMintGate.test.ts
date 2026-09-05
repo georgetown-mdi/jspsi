@@ -94,7 +94,7 @@ describe("the count-only shape gate at the Generate boundary", () => {
   );
 
   test("blocks Generate on a count-only draft whose columns are marked to send", () => {
-    // The rule this editor's own metadata carries: a marked column authors a
+    // The rule this editor's own metadata holds: a marked column authors a
     // payload send AND is what the run would transmit, and a count-only exchange
     // has room for neither. The payload control names the marks, since clearing
     // them is what the operator does about it.
@@ -114,7 +114,7 @@ describe("the count-only shape gate at the Generate boundary", () => {
     // Every rule above is the count-only algorithm's: under psi the same draft
     // keeps its several keys, its single-pass strategy, its deduplicating term
     // and its marked column, and generates. Nothing here was a rule the
-    // identifier-revealing algorithm carries too.
+    // identifier-revealing algorithm holds too.
     const { draft, seed } = countOnlyDraft([...LINKAGE_COLUMNS, "notes"]);
     const asPsi: AdvancedInviteDraft = {
       ...draft,

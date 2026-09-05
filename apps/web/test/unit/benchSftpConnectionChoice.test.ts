@@ -38,7 +38,7 @@ describe("sftpEndpointForConnection", () => {
     expect("remote" in endpoint).toBe(false);
   });
 
-  test("carries a split pair unmirrored, so the partner's own swap applies once", () => {
+  test("holds a split pair unmirrored, so the partner's own swap applies once", () => {
     // An SFTPEndpoint's pair is defined from the INVITER's side, and the swap
     // that makes the acceptor read where the inviter writes belongs to whoever
     // builds a connection from the endpoint. Mirroring here would apply it twice.
@@ -57,8 +57,8 @@ describe("sftpEndpointForConnection", () => {
   });
 
   test("a half pair reaches the endpoint as neither half", () => {
-    // The pair is emitted only whole. A projection carrying one half is a shape
-    // the appliance cannot author, and the mint's own schema refuses a half pair.
+    // The pair is emitted only whole. A projection holding one half is a shape
+    // the console cannot author, and the mint's own schema refuses a half pair.
     const endpoint = sftpEndpointForConnection({
       host: "sftp.example.gov",
       inboundPath: "/exchange/in",
@@ -78,7 +78,7 @@ describe("splitDirectoryRetainProblem", () => {
   test("blocks a split connection once retain mode is turned back off", () => {
     // The state the authoring form cannot catch: the connection was authored
     // under retain mode, and the toggle on the other card was flipped after. The
-    // block carries the form's own requirement, so both name the same control.
+    // block holds the form's own requirement, so both name the same control.
     const problem = splitDirectoryRetainProblem(split, false);
     expect(problem).toBe(SPLIT_DIRECTORY_RETAIN_REQUIREMENT);
     expect(problem).toContain("Keep every exchange file");

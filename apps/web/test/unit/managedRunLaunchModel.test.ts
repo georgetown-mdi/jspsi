@@ -45,8 +45,8 @@ import type { ManagedLocalState } from "@psi/managedLocalState";
 // The launch surface's failure classification, tested in Node: the pre-connection
 // benign states come from the error; a failed-closed handshake and every other
 // recorded failure are TIERED from the record's own bookkeeping, so the surface shows
-// the tier's specific copy and recovery. No benign tier reads as attack framing; only
-// the unexplained tier follows the doc's confirmation framing.
+// the tier's specific copy and recovery. No benign tier is treated as attack framing;
+// only the unexplained tier follows the doc's confirmation framing.
 
 const NOW = Date.parse("2026-07-14T12:00:00.000Z");
 
@@ -97,7 +97,7 @@ function classifyStateAgainstOneRecord(
   );
 }
 
-/** A classified state's copy, asserted to be there. Every state carries copy except
+/** A classified state's copy, asserted to be there. Every state has copy except
  * the hand-off one, which the surface consumes by settling onto the stored spent
  * state, so a test reading copy off that state is reading prose that does not
  * exist. */
@@ -111,7 +111,7 @@ function withCopy(
   return failure;
 }
 
-/** {@link classifyStateAgainstOneRecord}, narrowed to the states that carry copy --
+/** {@link classifyStateAgainstOneRecord}, narrowed to the states that have copy --
  * what every test drives except the two that drive the hand-off state itself. */
 function classifyAgainstOneRecord(
   error: unknown,
@@ -205,10 +205,9 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
   test("a run that met a handed-off copy refuses outright, with no way back offered", () => {
     // The attended half of the hand-off refusal, in the shape the real refusal
     // leaves: the operator clicked Run on a surface that loaded before the
-    // hand-off, and the critical section stamped the kind before it threw
-    // (managedExchangeRun.ts). What they get is the refusal and where the
-    // exchange runs now -- no retry, no re-invite, and no override that would
-    // take the exchange back by pressing a button on a failed run. Reaching this
+    // hand-off, and the critical section stamped the kind before it threw. What
+    // they get is the refusal and where the exchange runs now -- no retry, no
+    // re-invite, and no override that would take the exchange back. Reaching this
     // kind is what settles the surface onto the spent state.
     const failure = classifyStateAgainstOneRecord(
       new ManagedExchangeSpentError("abc"),
@@ -221,7 +220,7 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
     expect(failure.recovery).toBe("none");
     expect(managedRunRetryable(failure)).toBe(false);
     expect(managedRunReinvites(failure)).toBe(false);
-    // The state carries no copy of its own: the spent surface it settles onto is
+    // The state has no copy of its own: the spent surface it settles onto is
     // what names the hand-off and what the refused run did, and copy authored here
     // would be prose no surface reaches (ManagedRunSurface.tsx).
     expect(failure).not.toHaveProperty("title");
@@ -282,7 +281,7 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
 
   test("a live no-show against a standing missed outcome keeps the no-show state", () => {
     // The repeat case: the run before this one also ended with nobody there, so
-    // the record carries a missed outcome of its own and the live error agrees
+    // the record has a missed outcome of its own and the live error agrees
     // with it. Nothing the tiering derives from that displaces the no-show's copy.
     const failure = classifyAgainstOneRecord(
       new PartnerNoShowError("timed out waiting for the other party"),
@@ -300,11 +299,10 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
   test("an unrelated live failure against a standing missed outcome takes the transport copy", () => {
     // The no-show copy claims nothing was exchanged and nothing left this device.
     // That claim belongs to the failure being classified, not to the record: a
-    // failed run's bookkeeping write is best-effort and can be swallowed, and the
+    // failed run's bookkeeping write is best-effort and can be swallowed, so the
     // host classifies against its pre-run record when the post-failure reload
-    // rejects -- so an earlier run's missed outcome can still be standing while
-    // THIS run failed at the handshake or mid-data-exchange. Neither phase lets the
-    // record license the claim, so both are driven here.
+    // rejects, and an earlier run's missed outcome can still be standing while
+    // THIS run failed. Both phases are driven here.
     for (const dataExchangeStarted of [false, true]) {
       const failure = classifyAgainstOneRecord(
         new Error("data channel dropped"),
@@ -338,17 +336,12 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
   });
 
   test("a hand-off refusal delivered past the data-exchange boundary takes the transport copy", () => {
-    // The third of the same guard, and the one the run surface settles on: it
-    // reads this classified state to put up the spent surface, so a refusal
-    // arriving past the boundary must not reach that state either -- the spent
-    // surface would attest a run that disclosed nothing where the phase cannot say
-    // so.
-    //
-    // The record carries the stamp the real refusal writes before it throws, so
-    // both routes to the kind are driven: the refusal read off the error, and the
-    // tier derived from that standing stamp under a plain mid-exchange failure --
-    // which is what a run meets when its own bookkeeping write is swallowed, or
-    // when the post-failure reload rejects and the pre-run record stands in.
+    // The third of the same guard: the run surface settles on this classified state
+    // to put up the spent surface, so a refusal past the boundary must not reach it
+    // either. Both routes to the kind are driven: read off the error, and derived
+    // from the record's own standing stamp under a plain mid-exchange failure --
+    // what a run meets when its bookkeeping write is swallowed or the post-failure
+    // reload falls back to the pre-run record.
     for (const error of [
       new ManagedExchangeSpentError("abc"),
       new Error("data channel dropped"),
@@ -366,9 +359,9 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
   });
 
   test("a run that could not read its custody entry is that state from the error alone", () => {
-    // The record cannot carry this one: the store that failed the run's custody
+    // The record cannot hold this one: the store that failed the run's custody
     // read is the store the post-failure reload asks next, so the reload rejects
-    // with it and the classification is left the pre-run record, carrying no
+    // with it and the classification is left the pre-run record, holding no
     // stamp at all. Derived from that record alone the state is the retryable
     // transport tier -- a retry offered for a local problem that answers the same
     // way at every attempt, which is what this kind exists to prevent.
@@ -410,14 +403,12 @@ describe("classifyManagedRunFailure: a no-show read against standing desync evid
   };
 
   test("a standing import marker frames the no-show as the restored state", () => {
-    // The desync case the import marker exists to steer to re-invite produces
-    // exactly this shape: the restored copy holds a secret the partnership moved
-    // past, both rendezvous ids derive from that secret, so the dial answers
-    // peer-unavailable to the end of the budget and the run raises a no-show. The
-    // marker survives the run (only a rotation consumes it) and the restored copy
-    // no-shows every time, so the freshest lastRun is itself a no-show and the tier
-    // derivation alone would answer "missed" -- leaving the operator told nothing
-    // is wrong here.
+    // The desync case the import marker exists to steer to re-invite: the restored
+    // copy holds a secret the partnership moved past, so both rendezvous ids derive
+    // from it and the dial answers peer-unavailable to the end of the budget,
+    // raising a no-show every time. The marker survives the run (only a rotation
+    // consumes it), so the freshest lastRun is itself a no-show, and the tier
+    // derivation alone would wrongly answer "missed".
     const failure = classifyAgainstOneRecord(
       new PartnerNoShowError("timed out waiting for the other party"),
       record({
@@ -467,7 +458,7 @@ describe("classifyManagedRunFailure: a no-show read against standing desync evid
   test("this run's own missed stamp does not erase the evidence it is read against", () => {
     // The sequence the host actually takes, with the run's own bookkeeping applied
     // through the real monotonic write: a standing persist failure, then this
-    // run's no-show stamp, which REPLACES `lastRun` with an entry carrying no
+    // run's no-show stamp, which REPLACES `lastRun` with an entry holding no
     // failureKind at all. Read from the reloaded record alone, the storage tier is
     // gone and the operator is told nothing on this device is at fault -- for the
     // one-sided desync that is precisely what produces a no-show every time.
@@ -494,7 +485,7 @@ describe("classifyManagedRunFailure: a no-show read against standing desync evid
     expect(failure.title).not.toMatch(/partner did not arrive/i);
 
     // Where the guarantee ends: it is the LIVE classification's. The stored record
-    // a later visit reads carries the no-show alone, so the list line and the run
+    // a later visit reads holds the no-show alone, so the list line and the run
     // history name that rather than the persist failure standing behind it.
     expect(
       managedRunFailureFromRecord(afterRun, undefined, NOW),
@@ -581,7 +572,7 @@ describe("classifyManagedRunFailure: a no-show read against standing desync evid
   });
 
   test("a no-show with nothing standing keeps the benign state", () => {
-    // The evidence has to be the record's own: a clean record reads as the
+    // The evidence has to be the record's own: a clean record is treated as the
     // no-show, so the desync framings above are never the default reading of an
     // absent partner.
     for (const lastRun of [
@@ -695,8 +686,8 @@ describe("classifyManagedRunFailure: the recorded tiers from the record's bookke
     );
     expect(failure.kind).toBe("consent");
     expect(failure.recovery).toBe("reconfirm");
-    // The copy names settling what this exchange sends, not retrying a connection,
-    // and never reads as attack framing.
+    // The copy names deciding what this exchange sends, not retrying a connection,
+    // and is never treated as attack framing.
     expect(failure.message).toMatch(/sends|send/i);
     expect(failure.message).toMatch(/not a connection problem/i);
     expect(failure.message).not.toMatch(/attack|tamper|desync|impersonat/i);
@@ -705,13 +696,11 @@ describe("classifyManagedRunFailure: the recorded tiers from the record's bookke
 
 describe("classifyManagedRunFailure: the derived benign tiers take this run's boundary", () => {
   // Each tier below is derived from a stored kind whose copy attests what THIS run
-  // disclosed -- that it stopped before connecting, that nothing left this device.
-  // The stamp licenses that for the run that wrote it and no other, and a failed
-  // run's bookkeeping write is best-effort while the host classifies against its
-  // pre-run record when the post-failure reload rejects, so an earlier run's stamp
-  // can still be standing when a failure from mid-data-exchange is classified. Both
-  // directions are driven per tier: before the boundary the tier and its copy are
-  // what the operator gets, past it the generic copy is.
+  // disclosed, licensed only for the run that wrote it -- but a failed run's
+  // bookkeeping write is best-effort, and the host classifies against its pre-run
+  // record when the post-failure reload rejects, so an earlier stamp can still be
+  // standing for a mid-exchange failure. Both directions are driven per tier: before
+  // the boundary the tier and its copy stand, past it the generic copy does.
 
   test("a stored unreadable custody entry gives way past the boundary", () => {
     // The tier whose copy attests non-disclosure most explicitly -- it names the
@@ -750,7 +739,7 @@ describe("classifyManagedRunFailure: the derived benign tiers take this run's bo
   });
 
   test("a stored consent refusal gives way past the boundary", () => {
-    // The record-only tier: no live error carries a disclosure refusal to this
+    // The record-only tier: no live error brings a disclosure refusal to this
     // classification, so the standing stamp is the whole of what it reads.
     const stamped = record({ lastRun: failed("consent") });
     const before = classifyAgainstOneRecord(
@@ -809,8 +798,7 @@ describe("classifyManagedRunFailure: the derived benign tiers take this run's bo
     // secret the partnership may have moved past, and both recover by re-invite
     // whichever side of the boundary this run failed on. Gating them would replace
     // that recovery with a retry the desync does not have, and would put the
-    // unexplained tier's confirmation work out of reach of the failure that needs
-    // it.
+    // unexplained tier's confirmation out of reach of the failure that needs it.
     const restored: ManagedLocalState = {
       imported: { importedAt: "2026-07-13T00:00:00.000Z" },
     };
@@ -848,7 +836,7 @@ describe("classifyManagedRunFailure: the derived benign tiers take this run's bo
 });
 
 describe("managedRunFailureFromRecord: the next-visit tier (no live launch)", () => {
-  test("a stored auth failure surfaces the unexplained tier at the next visit", () => {
+  test("a stored auth failure shows the unexplained tier at the next visit", () => {
     const failure = managedRunFailureFromRecord(
       record({ lastRun: failed("auth") }),
       undefined,
@@ -857,7 +845,7 @@ describe("managedRunFailureFromRecord: the next-visit tier (no live launch)", ()
     expect(failure?.kind).toBe("unexplained");
   });
 
-  test("a stored consent refusal surfaces the consent tier at the next visit", () => {
+  test("a stored consent refusal shows the consent tier at the next visit", () => {
     const failure = managedRunFailureFromRecord(
       record({ lastRun: failed("consent") }),
       undefined,
@@ -867,7 +855,7 @@ describe("managedRunFailureFromRecord: the next-visit tier (no live launch)", ()
     expect(failure?.recovery).toBe("reconfirm");
   });
 
-  test("a stored terms shortfall surfaces its own tier, not the input re-pick", () => {
+  test("a stored terms shortfall shows its own tier, not the input re-pick", () => {
     // The case the split exists for: nobody was present when the unattended run
     // was refused, so the record alone decides what the next visit is told. The
     // remedy it names is a conforming file or re-agreed terms -- never a retry,
@@ -889,7 +877,7 @@ describe("managedRunFailureFromRecord: the next-visit tier (no live launch)", ()
     expect(failure.message).not.toMatch(/attack|tamper|desync|impersonat/i);
   });
 
-  test("a record written before the kind existed still reads as the input tier", () => {
+  test("a record written before the kind existed is still treated as the input tier", () => {
     // A shortfall an earlier build recorded as "input" keeps loading and reading
     // through the generic input state, whose copy covers the column case too.
     const failure = managedRunFailureFromRecord(
@@ -901,7 +889,7 @@ describe("managedRunFailureFromRecord: the next-visit tier (no live launch)", ()
     expect(failure?.recovery).toBe("retry");
   });
 
-  test("a stored storage failure surfaces the storage tier at the next visit", () => {
+  test("a stored storage failure shows the storage tier at the next visit", () => {
     const failure = withCopy(
       managedRunFailureFromRecord(
         record({ lastRun: failed("storage") }),
@@ -914,9 +902,9 @@ describe("managedRunFailureFromRecord: the next-visit tier (no live launch)", ()
     expect(failure.message).toMatch(/could not save its updated secret/);
   });
 
-  test("a stored unreadable custody entry surfaces its own tier at the next visit", () => {
+  test("a stored unreadable custody entry shows its own tier at the next visit", () => {
     // The unattended path: nothing classified a live error, so the record's own
-    // stamp is the whole evidence -- and it must read as the unreadable-record
+    // stamp is the whole evidence -- and it must be treated as the unreadable-record
     // state rather than as the persist failure whose copy and re-invite recovery
     // fit only a rotation that did not save.
     const failure = withCopy(
@@ -931,7 +919,7 @@ describe("managedRunFailureFromRecord: the next-visit tier (no live launch)", ()
     expect(failure.message).not.toMatch(/could not save its updated secret/);
   });
 
-  test("a lapsed record surfaces the expiry tier naming the real lapsed instant", () => {
+  test("a lapsed record shows the expiry tier naming the real lapsed instant", () => {
     const failure = withCopy(
       managedRunFailureFromRecord(
         record({
@@ -946,7 +934,7 @@ describe("managedRunFailureFromRecord: the next-visit tier (no live launch)", ()
     expect(failure.message).toMatch(/2026/);
   });
 
-  test("a never-run or succeeded record surfaces no failure", () => {
+  test("a never-run or succeeded record shows no failure", () => {
     expect(
       managedRunFailureFromRecord(record(), undefined, NOW),
     ).toBeUndefined();
@@ -1016,7 +1004,7 @@ describe("managedRunRetryable and managedRunReinvites", () => {
   });
 
   test("a consent refusal is neither retryable in place nor a direct re-invite", () => {
-    // The remedy is settling what this exchange sends; retrying the same input
+    // The remedy is deciding what this exchange sends; retrying the same input
     // refuses identically, and re-minting the secret does not touch the disclosure.
     const failure = classifyAgainstOneRecord(
       new Error("refused before connecting"),
@@ -1096,7 +1084,7 @@ describe("managedReinviteRecoveryCopy", () => {
 
   test("neither side's copy claims a duplicate is handled automatically", () => {
     // Nothing detects, merges, or retires a superseded record: the copy must not
-    // imply otherwise, and must not read as a block on saving the second one.
+    // imply otherwise, and must not be treated as a block on saving the second one.
     for (const side of ["acceptor", "inviter"] as const)
       expect(prose(side)).not.toMatch(
         /automatic|merge[sd]? (them|the two)|for you\b|cannot save/i,

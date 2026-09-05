@@ -21,10 +21,9 @@ import type { DisclosureAccounting } from "../../src/psi/disclosureAccounting.js
  * The stored shape of a managed exchange's accounting of disclosures: an entry is
  * one run's self-attested exchange record, verbatim, and the append that files it.
  *
- * The verbatim property is the one this suite exists for. The accounting's whole
- * claim is that it is built on the exchange record rather than beside it, so a test
- * that asserted a summary of the record -- rather than deep equality with the
- * record core produced -- would leave a derived-and-drifting store passing.
+ * A test asserting a summary of the record, rather than deep equality with what
+ * core produced, would leave a derived-and-drifting store passing -- so this
+ * suite checks the verbatim property directly.
  */
 
 describe("the disclosure accounting's entries", () => {
@@ -145,29 +144,16 @@ describe("reading a stored accounting", () => {
 });
 
 /**
- * The premise the recovery affordance rests on, driven against the real parsers
- * rather than asserted in prose: a move of the exchange-record version literal
- * invalidates the stored ENTRIES and leaves the ENVELOPE intact, so the stored
- * entries come back whole through the envelope-only read.
- *
- * This is the tripwire. If a future record format is ever reached whose bump also
- * takes the accounting envelope with it -- or whose stored entries the envelope
- * read no longer returns verbatim -- the recovery has no export arm, and this is
- * what fails rather than an operator discovering it while stranded. The
- * complementary check, that the version literal cannot move without the decision
- * being re-taken, is scripts/check-exchange-record-version.mjs.
- *
- * A bump is simulated by presenting a stored entry under a literal that is not the
- * current one, which is parse-identical to the app's own constant moving forward.
- * The simulated literal is derived from core's constant rather than written out,
- * so it stays a NON-current version when core's does move. Its stated limit: a
- * real bump also moves the record's field set, so an entry under it would raise
- * whatever the new field set requires ON TOP of the version issue. That widens
- * what the entry read rejects and reaches the envelope not at all, since the
- * envelope schema looks inside no entry -- which is what these tests pin.
+ * Premise under test: a moved exchange-record version literal invalidates the
+ * stored entries but leaves the envelope intact, so entries come back verbatim
+ * through the envelope-only read -- the recovery this suite exists to pin. The
+ * bump is simulated with a literal derived from core's constant, not hard-coded,
+ * so it stays non-current as core's constant moves. Stated limit: a real bump
+ * also moves the record's field set, so a real entry could fail for more than
+ * the version alone; the envelope schema never looks inside an entry.
  */
 describe("a moved exchange-record version leaves the stored entries recoverable", () => {
-  /** A stored accounting whose entries carry a record version this build does not
+  /** A stored accounting whose entries hold a record version this build does not
    * admit, as an app upgrade that moved the literal would leave at rest. */
   async function accountingFromAnotherRecordVersion(): Promise<unknown> {
     const record = await disclosureRecord();
@@ -204,7 +190,7 @@ describe("a moved exchange-record version leaves the stored entries recoverable"
 
   test("a mix of admissible and inadmissible entries comes back whole", async () => {
     // The realistic post-upgrade shape: runs filed before the bump and runs filed
-    // after it, in one accounting. The export must carry both.
+    // after it, in one accounting. The export must hold both.
     const current = await disclosureRecord();
     const earlier = {
       ...(await disclosureRecord()),
@@ -224,17 +210,14 @@ describe("a moved exchange-record version leaves the stored entries recoverable"
 });
 
 /**
- * Which DIRECTION a refused entry was written in, which is what separates a
- * stranded accounting from a stale page. The predicate reads the refused entry's
- * own version literal, so both directions are driven from core's constant rather
- * than from a hard-coded literal beside it: a version this build is ahead of is
- * the app-upgrade case the destructive recovery exists for, and one it is behind
- * is a page running older code than the build that filed the entry.
+ * Which direction a refused entry's version differs in separates a stranded
+ * accounting (this build is ahead -- the app-upgrade case the destructive
+ * recovery exists for) from a stale page (this build is behind). Both directions
+ * are driven from core's own constant, not a hard-coded literal beside it.
  *
- * Each neighbouring version comes from {@link neighbouringRecordVersion}, which
- * throws rather than falling back when core's literal carries no ordinal to count
- * from: a predicate that silently stopped ordering anything would otherwise leave
- * every case below passing on the same answer.
+ * {@link neighbouringRecordVersion} throws rather than falling back when core's
+ * literal holds no ordinal to count from, so a broken ordering cannot pass
+ * silently.
  */
 describe("telling a stranded accounting from a stale page", () => {
   /** A stored accounting holding exactly these entries. */
@@ -307,7 +290,7 @@ describe("telling a stranded accounting from a stale page", () => {
   });
 });
 
-describe("the envelope-only read is scoped to the envelope, not an escape hatch", () => {
+describe("the envelope-only read is scoped to the envelope, not an override", () => {
   test("an accounting this version can read is returned unchanged by it", async () => {
     const accounting = appendDisclosureRecord(
       undefined,

@@ -31,7 +31,7 @@ import { createAppMount, flushPendingUpdates } from "./renderApp";
 
 import type { JobHandoff } from "@jobs/handoff";
 
-// The bench components touch the router seam.
+// The bench components touch the router boundary.
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
 );
@@ -85,9 +85,9 @@ interface StubOptions {
    * at once, so a start-over test does not sit through the 15 s discard budget. */
   jobStatus?: string;
   /** The POST /api/jobs/sftp/probe response. Defaults to a 200 ok envelope
-   * carrying {@link PROBE_FINGERPRINT}. */
+   * holding {@link PROBE_FINGERPRINT}. */
   probe?: { status?: number; body?: unknown };
-  /** When set, `POST /api/jobs` returns a busy (409) carrying this id (the slot is
+  /** When set, `POST /api/jobs` returns a busy (409) holding this id (the slot is
    * occupied), and the id's status/events routes are served so the client can
    * re-attach to it. `holdProbe` withholds the FIRST status GET (the liveness probe)
    * until `resolveProbe()` is called, so a test can observe the reconnecting interim
@@ -107,12 +107,12 @@ interface StubOptions {
    * availability under `recordUnavailable` below. */
   record?: { createdAt: string; outcome: string };
   /** Why the status route says it is withholding the record pair, for a body that
-   * denies availability. The default is the appliance's definitive denial, which
+   * denies availability. The default is the console's definitive denial, which
    * is what a run that owes no record answers. */
   recordUnavailable?: string;
 }
 
-/** The same-origin job API, stubbed at the global fetch seam. Unmatched URLs fall
+/** The same-origin job API, stubbed at the global fetch boundary. Unmatched URLs fall
  * through to the real fetch. */
 function stubJobApi(options: StubOptions = {}): {
   captured: Array<CapturedRequest>;
@@ -302,7 +302,7 @@ describe("direct exchange confirm and run", () => {
     await reachConfirm();
 
     // The browser-side terms preview renders under the direct-exchange framing: the
-    // honest heading and intro, NOT the invitation flow's false "Exchange proposal"
+    // accurate heading and intro, NOT the invitation flow's false "Exchange proposal"
     // heading or its partner review-and-consent claim (there is no invitation here).
     await expect
       .element(page.getByRole("heading", { name: "Terms your file produces" }))
@@ -336,7 +336,7 @@ describe("direct exchange confirm and run", () => {
         page.getByText("Your partner runs the same step", { exact: false }),
       )
       .toBeInTheDocument();
-    // The disclosure record is surfaced positively.
+    // The disclosure record is shown positively.
     await expect
       .element(page.getByText("writes a disclosure record", { exact: false }))
       .toBeInTheDocument();
@@ -377,13 +377,13 @@ describe("direct exchange confirm and run", () => {
     expect(intent.inputCsv).toBeUndefined();
     expect(intent.identity).toBe("County Health");
     // The strategy is left at the CLI's own default, which a zero-setup run
-    // selects by carrying no flag at all.
+    // selects by including no flag at all.
     expect(intent.linkageStrategy).toBeUndefined();
     expect(intent.sharedSecret).toBeUndefined();
     expect(intent.linkageTerms).toBeUndefined();
     expect(intent.remote).toBeUndefined();
 
-    // The run advances through the appliance's event stream to completion.
+    // The run advances through the console's event stream to completion.
     await vi.waitFor(() =>
       expect(api.captured.some((r) => r.url === "/api/jobs/job-7/events")).toBe(
         true,
@@ -400,7 +400,7 @@ describe("direct exchange confirm and run", () => {
       .toHaveTextContent("Exchange complete");
   });
 
-  test("a terms mismatch surfaces clearly through the job-error path", async () => {
+  test("a terms mismatch shows clearly through the job-error path", async () => {
     const api = stubJobApi({ sftp: CONFIGURED_SFTP });
     app.render(createElement(DirectExchangeBench));
     await reachConfirm();
@@ -454,7 +454,7 @@ describe("direct exchange confirm and run", () => {
       .toBeInTheDocument();
 
     // A settled failed run confirms this recovery until its record ask lands, and
-    // advertises the dialog while it does. This appliance answers that it holds no
+    // advertises the dialog while it does. This console answers that it holds no
     // record, so the wait is for that answer -- pressing ahead of it would be
     // pressing the confirming form.
     await expect
@@ -463,7 +463,7 @@ describe("direct exchange confirm and run", () => {
     await page.getByRole("button", { name: "Start over" }).click();
 
     // Start over returns to the file step AND discards the failed job, freeing the
-    // appliance's single slot (a DELETE of the occupying job).
+    // console's single slot (a DELETE of the occupying job).
     await expect
       .element(page.getByRole("heading", { level: 1, name: "Your file" }))
       .toBeInTheDocument();
@@ -558,7 +558,7 @@ describe("direct exchange confirm and run", () => {
       .element(page.getByText(SINGLE_PASS_DISCLOSURE_TITLE))
       .toBeInTheDocument();
     expect(app.container.textContent).toContain(SINGLE_PASS_DISCLOSURE_BODY);
-    // The preview is the terms the run uses, so the terms panel surfaces the
+    // The preview is the terms the run uses, so the terms panel exposes the
     // strategy too rather than showing the cascade the run does not use.
     expect(app.container.textContent).toContain(
       "This exchange matches in a single pass",
@@ -595,7 +595,7 @@ describe("console direct re-attaches on a busy create", () => {
   } satisfies JobHandoff;
 
   test("a 409 at run re-attaches with recovery copy, not the busy alert", async () => {
-    // The slot is occupied: the create 409s carrying the live occupant's id.
+    // The slot is occupied: the create 409s holding the live occupant's id.
     const api = stubJobApi({
       sftp: CONFIGURED_SFTP,
       conflict: { jobId: "job-live", status: "running" },
@@ -865,12 +865,12 @@ describe("direct exchange file-handling gate", () => {
         page.getByRole("heading", { level: 1, name: "The agreed server" }),
       )
       .toBeInTheDocument();
-    // The disclosure's accessible name carries its collapsed summary, so match on
+    // The disclosure's accessible name has its collapsed summary, so match on
     // the label rather than the whole name.
     await page.getByRole("button", { name: /How files are handled/ }).click();
   }
 
-  test("withholds the control a zero-setup command line cannot carry", async () => {
+  test("withholds the control a zero-setup command line cannot hold", async () => {
     stubJobApi({ sftp: CONFIGURED_SFTP });
     app.render(createElement(DirectExchangeBench));
     await openExchangeFiles();
@@ -1013,7 +1013,7 @@ describe("direct exchange host-key probe (direct ceremony)", () => {
 });
 
 // The Direct seat's own recoveries, which DELETE the run's folder on the
-// appliance. The record ask behind them is this seat's own call site, with its own
+// console. The record ask behind them is this seat's own call site, with its own
 // enabling gate, so its states are driven here rather than inferred from the
 // invitation seats'.
 describe("direct-exchange recoveries against the run's exchange record", () => {
@@ -1022,7 +1022,7 @@ describe("direct-exchange recoveries against the run's exchange record", () => {
 
   /** Run the direct exchange and end it in a terms-mismatch (config) terminal --
    * a non-retryable failure whose recovery is Start over, which discards the run's
-   * folder on the appliance. */
+   * folder on the console. */
   async function runToConfigFailure(
     api: ReturnType<typeof stubJobApi>,
   ): Promise<void> {
@@ -1047,7 +1047,7 @@ describe("direct-exchange recoveries against the run's exchange record", () => {
       .toBeInTheDocument();
   }
 
-  test("offers the record the appliance holds and confirms before destroying it", async () => {
+  test("offers the record the console holds and confirms before destroying it", async () => {
     const api = stubJobApi({
       sftp: CONFIGURED_SFTP,
       jobStatus: "failed",
@@ -1074,7 +1074,7 @@ describe("direct-exchange recoveries against the run's exchange record", () => {
     expect(api.captured.some((r) => r.method === "DELETE")).toBe(false);
   });
 
-  test("a record the appliance cannot read confirms, and links no download", async () => {
+  test("a record the console cannot read confirms, and links no download", async () => {
     const api = stubJobApi({
       sftp: CONFIGURED_SFTP,
       jobStatus: "failed",

@@ -26,13 +26,9 @@ const COLLAPSED_SUMMARY = "None";
 
 const app = createAppMount();
 
-// The panel body is a real ELEMENT, never a bare string: the collapsed-panel poll
-// below reads `firstElementChild`, so an element node is what makes it discriminating.
-// Were the aria-controls id wrongly placed on the Mantine Collapse panel instead of
-// the always-mounted wrapper (the regression this test guards), the panel
-// resolved by getElementById would expose this visible element child and the
-// hidden-state poll would fail; a text-only child has no element child, so the poll
-// would pass vacuously and the regression would slip through. Keep this an element.
+// The panel body must be a real element, never a bare string: the collapsed-panel
+// poll below reads `firstElementChild`, which a text-only child does not have --
+// keep this an element so the poll actually discriminates.
 const PANEL_BODY = () =>
   createElement("p", { "data-testid": "panel-body" }, PANEL_TEXT);
 

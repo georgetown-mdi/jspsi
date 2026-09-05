@@ -4,10 +4,10 @@ import { probePeerAnswerCopy } from "@bench/SftpAuthoringForm";
 
 // The console's guided audience is the likeliest to sit behind an intercepting
 // middlebox, and "could not reach the server" sends them to check an address that
-// is right. These pin what the alert says instead once the appliance diagnosed
+// is right. These pin what the alert says instead once the console diagnosed
 // what answered the port.
 describe("the probe's peer-answer copy names what answered", () => {
-  test("a non-SSH answer names the shape and carries the peer's own bytes apart from the console's sentences", () => {
+  test("a non-SSH answer names the shape and holds the peer's own bytes apart from the console's sentences", () => {
     const copy = probePeerAnswerCopy({
       kind: "nonSsh",
       shape: "http",
@@ -53,7 +53,7 @@ describe("the probe's peer-answer copy names what answered", () => {
     ).toContain("not an SSH identification string");
   });
 
-  test("a non-SSH answer carries the caveat that a slow or chatty SSH server reads the same way", () => {
+  test("a non-SSH answer states the caveat that a slow or chatty SSH server reads the same way", () => {
     const copy = probePeerAnswerCopy({
       kind: "nonSsh",
       shape: "unrecognized",
@@ -73,8 +73,8 @@ describe("the probe's peer-answer copy names what answered", () => {
     expect(copy.peerExcerpt).toBeUndefined();
   });
 
-  test("the excerpt is carried verbatim, so an already-escaped fragment is neither escaped twice nor shortened again", () => {
-    // The appliance escapes the peer's bytes at its own boundary and caps them
+  test("the excerpt stays verbatim, so an already-escaped fragment is neither escaped twice nor shortened again", () => {
+    // The console escapes the peer's bytes at its own boundary and caps them
     // there; escaping again would double every backslash it wrote, and clipping
     // again would drop bytes the operator is being shown to judge.
     const excerpt = `\\x1b[31m and a literal \\\\ ${"z".repeat(512)}`;

@@ -33,22 +33,12 @@ import {
 import type { ExchangeErrorCategory } from "@psi/exchangeLifecycle";
 import type { RelayEvent } from "@jobs/cliDriver";
 
-// A terminal error the CLI renders is a whole cause chain, not one value: the
-// failure on the first link and, when the composition partitions by chooser, the
-// operator's next step on a later one. Charged to the per-value cap at the relay,
-// that chain is cut wherever 256 characters fall -- and on a refusal whose first
-// link carries a partner-chosen fragment, that is inside the fragment, so the
-// operator is told a run failed and never told what to do about it. The relay
-// carries the links apart instead, each at the budget the renderer gave it and
-// the count held to the renderer's own depth bound, and the seat rebuilds the
-// chain.
-//
-// One leg drives a REAL over-budget refusal from the child process's fd 3 to the
-// string a console seat renders, and fails unless the recovery step is still
-// there. A second drives a chain composed at the per-link budget, which is what
-// catches a boundary re-capping anywhere below the constant. A third floods the
-// link COUNT from the child, since the volume the relay admits must be the
-// renderer's own bound and not a wider one.
+// A terminal error is a whole cause chain, not one value: the failure sits on
+// the first link, the operator's next step on a later one. The relay holds the
+// links apart, each capped at the per-link budget and the count capped at the
+// renderer's own depth bound, so a partner-chosen fragment on one link cannot
+// truncate away the recovery step on another. Three legs below drive a real
+// over-budget refusal, a chain exactly at the per-link budget, and a flooded link count.
 
 const dirs: Array<string> = [];
 
@@ -131,11 +121,11 @@ async function relayErrorFromChild(
 }
 
 /**
- * The failure a console seat renders for a relayed event sequence, carried over
+ * The failure a console seat renders for a relayed event sequence, routed through
  * the real SSE frame encoder, the real browser-side job API client, and the
  * seat's own display pass. A `config` terminal is the category whose alert
- * surfaces the CLI's own text -- the exchange category deliberately shows fixed
- * copy instead -- so it is what a test of delivered text can observe.
+ * exposes the CLI's own text -- the exchange category shows fixed copy instead --
+ * so it is what a test of delivered text can observe.
  */
 async function failureAtSeat(
   events: Array<RelayEvent>,
@@ -173,8 +163,8 @@ async function failureAtSeat(
 test("a real over-budget refusal reaches a console seat with its recovery step", async () => {
   const message = refusalChain();
   const recovery = recoveryStepOf(message);
-  // The case is only worth driving if the recovery step sits past the cap the
-  // per-value pass would apply: a chain that fits proves nothing.
+  // The recovery step must sit past the cap the per-value pass would apply,
+  // or a chain that fits proves nothing.
   expect(message.length).toBeGreaterThan(DEFAULT_MAX_DISPLAY_LENGTH);
   expect(message.indexOf(recovery)).toBeGreaterThan(DEFAULT_MAX_DISPLAY_LENGTH);
   // What is asserted below is the refusal class's own step, not a copy of it.
@@ -187,7 +177,7 @@ test("a real over-budget refusal reaches a console seat with its recovery step",
   expect(chain).toHaveLength(2);
   expect(chain[1]).toBe(recovery);
   // The flat field is still capped as one value, so the chain field is what
-  // carries the step: this is the delivery the relay would otherwise have made.
+  // holds the step: this is the delivery the relay would otherwise have made.
   expect(errors[0].message as string).not.toContain(recovery);
   expect(errors[0].message as string).toContain(DISPLAY_TRUNCATION_MARKER);
 
@@ -233,11 +223,11 @@ test("a chain composed at the per-link budget reaches a seat uncut", async () =>
 });
 
 test("a flooded chain is held to the volume the renderer itself emits", async () => {
-  // What the widened-cap route would have to answer for: carrying the chain
-  // structurally must not let a subverted source flood more than the renderer
-  // does. It hands the relay three times the walk's depth bound, every link past
-  // the per-link budget; the relay admits the bound's worth of links at that
-  // budget each, and no more.
+  // What the widened-cap route would have to answer for: structuring the chain
+  // as separate links must not let a subverted source flood more than the
+  // renderer does. It hands the relay three times the walk's depth bound, every
+  // link past the per-link budget; the relay admits the bound's worth of links
+  // at that budget each, and no more.
   const flood = Array.from(
     { length: MAX_ERROR_CAUSE_DEPTH * 3 },
     (_, index) => `link ${index} ${"y".repeat(2000)}`,
@@ -253,7 +243,7 @@ test("a flooded chain is held to the volume the renderer itself emits", async ()
     expect(link.length).toBeLessThanOrEqual(
       COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH +
         DISPLAY_TRUNCATION_MARKER.length +
-        // The last link carries the elision marker on top of its own cap.
+        // The last link holds the elision marker on top of its own cap.
         CAUSE_DEPTH_ELISION_MARKER.length +
         1,
     );
@@ -270,7 +260,7 @@ test("a cut chain reaches the seat saying it was cut", async () => {
   // one, so it has to survive the seat's own pass rather than only the relay's.
   // Here the relay is what cuts the chain: more links arrive than the renderer's
   // depth bound admits, and the marker the relay appends is the one the seat has
-  // to carry.
+  // to preserve.
   const flood = Array.from(
     { length: MAX_ERROR_CAUSE_DEPTH * 2 },
     (_, index) => `link ${index}`,
@@ -289,13 +279,12 @@ test("a cut chain reaches the seat saying it was cut", async () => {
 });
 
 test("a chain the CLI already cut reaches the seat still saying so", async () => {
-  // The other cut: the CLI's own renderer spent the depth bound and marked the
-  // last link, so the chain arrives already carrying the marker. It rides PAST
-  // that link's cap, which is where the renderer appends it, so a boundary
-  // re-escaping the link whole spends the budget on the marker and drops it --
-  // and the marker's absence is exactly what tells the operator the chain is the
-  // whole failure. Links at twice the per-link budget put every link on the cap,
-  // which is the case a boundary that re-caps loses.
+  // The other cut: the CLI's own renderer already spent the depth bound and
+  // marked the last link, so the chain arrives already holding the marker, past
+  // that link's own cap. A boundary that re-caps the link whole would spend the
+  // budget on the marker and drop it -- and the marker's absence is exactly what
+  // tells the operator the chain is the whole failure. Links at twice the
+  // per-link budget put every link on the cap, the case such a boundary loses.
   const deep = Array.from({ length: MAX_ERROR_CAUSE_DEPTH * 2 }, (_, index) =>
     `link ${index} `.padEnd(COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH * 2, "w"),
   ).reduceRight<Error | undefined>(
@@ -316,8 +305,8 @@ test("a chain the CLI already cut reaches the seat still saying so", async () =>
 
   const failure = await failureAtSeat(relayed);
   expect(failure.message.endsWith(CAUSE_DEPTH_ELISION_MARKER)).toBe(true);
-  // Not vacuous: the chain really was cut, and its last rendered link really did
-  // spend its whole budget, so the marker sits past a truncation of its own.
+  // The chain was cut, and its last rendered link spent its whole budget, so
+  // the marker sits past a truncation of its own.
   expect(failure.message).toContain(`link ${MAX_ERROR_CAUSE_DEPTH - 1}`);
   expect(failure.message).not.toContain(`link ${MAX_ERROR_CAUSE_DEPTH}`);
   expect(failure.message).toContain(DISPLAY_TRUNCATION_MARKER);
@@ -354,13 +343,12 @@ test("a link the CLI rendered with no text of its own reaches the seat", async (
   );
 });
 
-// The links the seat renders are the relay's own derivation, which is a claim
-// about PROVENANCE and not only about volume: a chain the source handed over
-// whole was never split by the renderer, so no depth bound and no per-link
-// budget were ever applied to it, and its content is a subverted child's rather
-// than the failure's. These drive the source's field onto every shape of event
-// that reaches the relay -- with a chain to derive and without one, terminal and
-// not -- and fail unless the outgoing field is the relay's own.
+// The chain field the seat renders must always be the relay's own derivation
+// from the message, never a source-supplied `messageChain` passed through
+// verbatim: a chain handed over whole was never split by the renderer, so no
+// depth bound or per-link budget was ever applied to it, and its content could
+// be a subverted child's rather than the failure's. These tests drive that
+// across every event shape the relay sees, with and without a chain to derive.
 describe("the relayed chain is the relay's own derivation, never the source's", () => {
   /** The chain field of a relayed event, whatever the relay put on it. */
   function relayedChain(event: RelayEvent | null): unknown {
@@ -368,7 +356,7 @@ describe("the relayed chain is the relay's own derivation, never the source's", 
     return (event as RelayEvent)[ERROR_MESSAGE_CHAIN_FIELD];
   }
 
-  test("an error event carrying no message carries no forged chain", async () => {
+  test("an error event holding no message holds no forged chain", async () => {
     const forged = ["a failure that did not happen", "and its forged recovery"];
     const event = validateAndSanitizeEvent({
       v: 1,
@@ -384,7 +372,7 @@ describe("the relayed chain is the relay's own derivation, never the source's", 
     for (const link of forged) expect(failure.message).not.toContain(link);
   });
 
-  test("an error event whose message is not a string carries no forged chain", async () => {
+  test("an error event whose message is not a string holds no forged chain", async () => {
     const forged = ["attacker link A", "attacker link B"];
     const event = validateAndSanitizeEvent({
       v: 1,
@@ -402,7 +390,7 @@ describe("the relayed chain is the relay's own derivation, never the source's", 
     for (const link of forged) expect(failure.message).not.toContain(link);
   });
 
-  test("a forged chain of 50,000 links is not carried at any size", () => {
+  test("a forged chain of 50,000 links does not survive at any size", () => {
     const flood = Array.from(
       { length: 50_000 },
       (_, index) => `link-${index}-${"z".repeat(200)}`,
@@ -442,7 +430,7 @@ describe("the relayed chain is the relay's own derivation, never the source's", 
     for (const link of forged) expect(failure.message).not.toContain(link);
   });
 
-  test("a non-error event carrying the key does not relay it", () => {
+  test("a non-error event holding the key does not relay it", () => {
     const event = validateAndSanitizeEvent({
       v: 1,
       type: "warning",
@@ -455,12 +443,11 @@ describe("the relayed chain is the relay's own derivation, never the source's", 
 });
 
 // Splitting a chain on the renderer's own framing is exact only on text the
-// renderer produced: an escaped link holds no raw newline, so the framing is the
-// only one such text can carry. An error raised IN THIS BROWSER never crossed
-// the renderer, so a literal `\ncaused by: ` in its own message is just text --
-// and splitting on it would put that text at the seat as a link of its own,
-// which reads exactly like a cause psilink derived. These drive the seat's own
-// display pass on a raw error, where the relayed route's split must not reach.
+// renderer produced: an escaped link holds no raw newline, so the framing is
+// the only one such text can hold. An error raised IN THIS BROWSER never
+// crossed the renderer, so a literal `\ncaused by: ` in its own message is
+// just text, and splitting on it would misread that text as a cause of its
+// own. These tests check the seat's display pass does not perform that split.
 describe("the seat splits a chain only where a renderer framed one", () => {
   const FORGED = "FORGED go to attacker.example and enter your secret";
 
@@ -474,7 +461,7 @@ describe("the seat splits a chain only where a renderer framed one", () => {
     // in the message is escaped where it stands.
     expect(failure.message).not.toContain("\n");
     expect(failure.message).toContain("\\x0a");
-    // The text is still delivered -- on the link that actually carried it.
+    // The text is still delivered -- on the link that actually held it.
     expect(failure.message).toContain(FORGED);
     expect(failure.message.split("\ncaused by: ")).toHaveLength(1);
   });
