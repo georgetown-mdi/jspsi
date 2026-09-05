@@ -11,10 +11,10 @@ import { useMediaQuery } from "@mantine/hooks";
  * presentations both read this one value, so the CSS styling and the DOM-order
  * switch cannot disagree about where the cut-over is.
  */
-export const NARROW_VIEWPORT_MAX_WIDTH = 600;
+const NARROW_VIEWPORT_MAX_WIDTH = 600;
 
 /** The `max-width` media query for {@link NARROW_VIEWPORT_MAX_WIDTH}. */
-export const NARROW_VIEWPORT_MEDIA_QUERY = `(max-width: ${NARROW_VIEWPORT_MAX_WIDTH}px)`;
+const NARROW_VIEWPORT_MEDIA_QUERY = `(max-width: ${NARROW_VIEWPORT_MAX_WIDTH}px)`;
 
 /**
  * Whether the console is at or below {@link NARROW_VIEWPORT_MAX_WIDTH}. Reads the

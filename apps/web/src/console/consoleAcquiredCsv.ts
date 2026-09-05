@@ -10,7 +10,7 @@ import type { CSVRow } from "@psilink/core";
  * per-column preview samples come through a separate path (the coverage/preview
  * providers), not this shape.
  */
-export interface ConsoleAcquiredProfile {
+interface ConsoleAcquiredProfile {
   fileName: string;
   sizeBytes: number;
   columns: Array<string>;

@@ -42,7 +42,7 @@ export const CLI_BUILT_IN_STUN_URI = "stun:stun.l.google.com:19302";
  * What the panel renders for a record: the composed export and its schedule lines,
  * or the composer's own reason for refusing it.
  */
-export type ManagedCronExportPanelState =
+type ManagedCronExportPanelState =
   | {
       kind: "exportable";
       /** The two files and the invocation the composer produced. */

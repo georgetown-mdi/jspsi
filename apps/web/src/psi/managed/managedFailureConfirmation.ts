@@ -35,19 +35,18 @@ import type { ManagedExchangeRecord } from "./managedExchangeRecord";
  * confirmed a real failure on their side"; `"does-not-add-up"` is "something does not
  * add up" (an unconfirmed identity, no partner-side failure, or a reported second
  * run-place). */
-export type ConfirmationOutcome =
-  "confirmed-partner-failure" | "does-not-add-up";
+type ConfirmationOutcome = "confirmed-partner-failure" | "does-not-add-up";
 
 /** Where the gate routes each outcome: a confirmed partner-side failure proceeds to
  * fast re-invite; anything that does not add up is treated as compromise and routed to
  * the fixed compromise response (notify the partner out-of-band, re-invite),
  * NOT a quiet re-invite. The two share the re-invite ACT but differ in framing and in
  * what the operator does first, so they are distinct routes. */
-export type ConfirmationRoute = "reinvite" | "compromise-response";
+type ConfirmationRoute = "reinvite" | "compromise-response";
 
 /** The composed confirmation the Tier-2 surface renders: the forwardable message the
  * operator copies, and the gate's two labeled outcomes. */
-export interface ManagedFailureConfirmation {
+interface ManagedFailureConfirmation {
   /** The pre-filled out-of-band message the operator forwards to the partner, plain
    * text, interpolating only this record's own local fields. */
   message: string;

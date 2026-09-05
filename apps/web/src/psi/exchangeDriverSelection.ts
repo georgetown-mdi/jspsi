@@ -24,7 +24,7 @@ export type ExchangeDriverSelection =
  * - `saveFileOnly`: a hosted build never runs SFTP here; it only saves an exchange
  *   file for the command-line tool.
  */
-export type SftpConnectionAvailability =
+type SftpConnectionAvailability =
   "runHere" | "authoringRequired" | "saveFileOnly";
 
 /** The SFTP availability for a build: hosted always saves a file; a console runs

@@ -39,7 +39,7 @@ export interface ManagedBackupMarker {
  * - `"backup-needed"` -- no marker (none was ever taken, or the secret rotated since
  *   the last one and cleared it): one actionable "Back up this exchange".
  */
-export type ManagedBackupState =
+type ManagedBackupState =
   { kind: "backed-up"; backedUpAt: string } | { kind: "backup-needed" };
 
 /**

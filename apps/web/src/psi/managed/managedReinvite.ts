@@ -100,7 +100,7 @@ export interface ManagedReinvite {
  * @throws {RangeError} (from {@link rotationWriteBack}) if the policy is not a
  *   positive integer or stamps an expiry outside the representable range.
  */
-export function buildReinviteRotation(
+function buildReinviteRotation(
   freshSecret: string,
   tokenMaxAgeDays: number | undefined,
   now: number,
@@ -120,7 +120,7 @@ export function buildReinviteRotation(
  * strict empty set; only an absent field is omitted, so the token cannot mint a
  * commitment the document did not hold.
  */
-export function buildReinviteToken(
+function buildReinviteToken(
   record: ManagedExchangeRecord,
   location: InvitationLocation,
   freshSecret: string,
@@ -141,7 +141,7 @@ export function buildReinviteToken(
 /** What a re-invite injects: fresh-secret generation and token encoding are
  * core's, and the setup lifetime is bounded here exactly as {@link generateInvitation}
  * bounds it, so none of these can mint an unbounded or effectively-permanent token. */
-export interface ManagedReinviteSeams {
+interface ManagedReinviteSeams {
   /** Mint a fresh setup secret (core's `generateSharedSecret`). */
   generateSecret: () => string;
   /** Encode the token to the shareable string (core's `encodeInvitation`). */

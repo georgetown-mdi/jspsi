@@ -174,7 +174,7 @@ async function spendIfArtifactIsCurrent(
 /** The atomic export step's result: the fresh read-and-mark instant (threaded so the
  * host renders and any follow-on write use the one clock read) and the record read,
  * so the caller need not re-read to know what was exported. */
-export interface ManagedBackupResult {
+interface ManagedBackupResult {
   /** The instant the backup marker was stamped, from the caller's `now`. */
   backedUpAt: Date;
   /** The record the export serialized (the fresh store read). */

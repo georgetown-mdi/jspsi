@@ -37,7 +37,7 @@ import type { Standardization } from "@psilink/core";
  * the profile/coverage routes answer 404. The operator mounts their own data,
  * so this is trusted local input, not a shared-service surface.
  */
-export const JOB_INPUT_DIR_ENV = "JOB_INPUT_DIR";
+const JOB_INPUT_DIR_ENV = "JOB_INPUT_DIR";
 
 export { MAX_INPUT_NAME_LENGTH, isAdmissibleInputName } from "./workInputName";
 
@@ -135,7 +135,7 @@ export function jobInputFilePath(resolvedDir: string, name: string): string {
 }
 
 /** One file in the listing response: an admissible name and its size/mtime. */
-export interface JobInputFileEntry {
+interface JobInputFileEntry {
   name: string;
   sizeBytes: number;
   modifiedAt: number;
@@ -198,7 +198,7 @@ export function listJobInputs(
  * {@link PREVIEW_SAMPLE_SIZE} non-empty values. Held as an array element -- never
  * an object key -- so a column named an `Object.prototype` member (`__proto__`,
  * `constructor`, `prototype`) is ordinary data rather than a prototype-setter hazard. */
-export interface ColumnSample {
+interface ColumnSample {
   column: string;
   values: Array<string>;
 }
@@ -452,7 +452,7 @@ const coverageStandardizationSchema = StandardizationSchema.refine(
   });
 
 /** The validated `POST /api/jobs/inputs/coverage` request body. */
-export interface CoverageRequestBody {
+interface CoverageRequestBody {
   name: string;
   standardization: Standardization;
 }

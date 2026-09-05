@@ -299,20 +299,19 @@ export const keyFileFieldsSchema = z
  * treats it as an optional unknown, and the no-input-content invariant is a
  * property of the type (a handle is a pointer), not a runtime check.
  */
-export const ManagedExchangeRecordSchema: ZodType<ManagedExchangeRecord> =
-  z.object({
-    schemaVersion: z.literal(MANAGED_EXCHANGE_SCHEMA_VERSION),
-    id: z.string().min(1),
-    label: z.string().max(MAX_LABEL_LENGTH),
-    exchangeFile: persistedExchangeFileSchema,
-    side: z.enum(["inviter", "acceptor"]),
-    inputFileHandle: z.custom<FileSystemFileHandle>().optional(),
-    sharedSecret: z.string().regex(SHARED_SECRET_REGEX),
-    expires: z.iso.datetime().optional(),
-    tokenMaxAgeDays: tokenMaxAgeDaysSchema.optional(),
-    schedule: scheduleSchema.optional(),
-    lastRun: lastRunSchema.optional(),
-  });
+const ManagedExchangeRecordSchema: ZodType<ManagedExchangeRecord> = z.object({
+  schemaVersion: z.literal(MANAGED_EXCHANGE_SCHEMA_VERSION),
+  id: z.string().min(1),
+  label: z.string().max(MAX_LABEL_LENGTH),
+  exchangeFile: persistedExchangeFileSchema,
+  side: z.enum(["inviter", "acceptor"]),
+  inputFileHandle: z.custom<FileSystemFileHandle>().optional(),
+  sharedSecret: z.string().regex(SHARED_SECRET_REGEX),
+  expires: z.iso.datetime().optional(),
+  tokenMaxAgeDays: tokenMaxAgeDaysSchema.optional(),
+  schedule: scheduleSchema.optional(),
+  lastRun: lastRunSchema.optional(),
+});
 
 /**
  * Parse and validate a value read from the store as a {@link ManagedExchangeRecord}.

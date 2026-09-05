@@ -167,7 +167,7 @@ export function acceptorColumnsEditorState(
 }
 
 /** Which of the three verdict states holds. */
-export type AcceptorVerdictKind = "blocked" | "partial" | "allClear";
+type AcceptorVerdictKind = "blocked" | "partial" | "allClear";
 
 /**
  * The verdict view-model: which alert to render, its exact visible title, and the
@@ -250,7 +250,7 @@ export function acceptorVerdict(
 }
 
 /** One row of the quick-fix mapper: a missing field type and its human label. */
-export interface AcceptorUnsatisfiedType {
+interface AcceptorUnsatisfiedType {
   type: LinkageField["type"];
   label: string;
 }
@@ -285,7 +285,7 @@ export function acceptorUnsatisfiedTypes(
  * authored, and a file-handling combination core refuses. Passed in so the whole
  * launch chain -- model-side and step-side -- resolves in one place.
  */
-export interface AcceptorLaunchStepBlocks {
+interface AcceptorLaunchStepBlocks {
   /** Whether the browser reports no network. Every accept ends in a live
    * two-party session -- in this browser, or on the console -- so an
    * offline device blocks the launch outright. Only this direction is a block:
@@ -478,7 +478,7 @@ export function acceptorOverlongDisclosedColumns(
  * not send -- core's OVER-declaration. The remedy for it is mostly the partner's, so
  * the entry includes what decides which remedies exist rather than the name alone.
  */
-export interface AcceptorDeclaredColumnGap {
+interface AcceptorDeclaredColumnGap {
   /**
    * The declared name as the notice shows it: partner-controlled text, escaped
    * ({@link sanitizeForDisplay}) at this boundary because this view-model IS its
@@ -503,8 +503,7 @@ export interface AcceptorDeclaredColumnGap {
  * declaration cannot be satisfied locally by disclosing more, since widening the
  * marks cannot make the partner accept a column it declared it takes none of.
  */
-export type AcceptorPayloadDeclarationConflictKind =
-  "acceptsNothing" | "setMismatch";
+type AcceptorPayloadDeclarationConflictKind = "acceptsNothing" | "setMismatch";
 
 /**
  * The disagreement between the payload set the invitation declares for this party
@@ -514,7 +513,7 @@ export type AcceptorPayloadDeclarationConflictKind =
  * them in one refusal -- so both are held here and stated together, rather than
  * one being revealed after the other is cleared.
  */
-export interface AcceptorPayloadDeclarationConflict {
+interface AcceptorPayloadDeclarationConflict {
   kind: AcceptorPayloadDeclarationConflictKind;
   /** The notice's visible title, naming the direction(s) that hold. */
   title: string;
@@ -668,7 +667,7 @@ export function acceptorHasIdentifierConflict(metadata: Metadata): boolean {
  * pending sweep contributes no silent-empty count -- attention is computed only
  * from a resolved map.
  */
-export interface AcceptorCleaningAttention {
+interface AcceptorCleaningAttention {
   /** Whether the tab needs attention (any failing reason present). */
   needsAttention: boolean;
   /** The number of fields failing (silent-empty or invalid), for the amber value.

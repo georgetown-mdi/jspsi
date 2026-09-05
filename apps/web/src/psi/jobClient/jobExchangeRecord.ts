@@ -36,13 +36,13 @@ import type { RecordUnavailableReason } from "@jobs/jobManager";
 /** The console endpoint the shareable record downloads from. The browser never
  * composes the file's path: the console resolves it inside the job's own
  * workdir. */
-export function jobRecordUrl(jobId: string): string {
+function jobRecordUrl(jobId: string): string {
   return `/api/jobs/${jobId}/record`;
 }
 
 /** The console endpoint the private verification keys download from, paired
  * with {@link jobRecordUrl}. */
-export function jobKeysUrl(jobId: string): string {
+function jobKeysUrl(jobId: string): string {
   return `/api/jobs/${jobId}/keys`;
 }
 

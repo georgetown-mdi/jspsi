@@ -7,7 +7,7 @@ import type { FieldValueCoverage } from "@psi/workers/nonEmptyAggregate";
 
 /** The default coverage pending copy: the hosted sweep runs in the browser, so it
  * displays as the near-instant local check it is. */
-export const COVERAGE_PENDING_LABEL =
+const COVERAGE_PENDING_LABEL =
   "Checking how many of your rows produce a value...";
 
 /** The console coverage pending copy: the sweep is a streaming pass over the whole

@@ -25,7 +25,7 @@ const config = await configManager.load();
 
 /** Constructs a PeerJS {@link Peer} on a chosen id; injectable so the
  * register/dial/destroy paths are unit-testable without a real broker. */
-export type PeerFactory = (id: string, options: PeerOptions) => Peer;
+type PeerFactory = (id: string, options: PeerOptions) => Peer;
 
 const defaultPeerFactory: PeerFactory = (id, options) => new Peer(id, options);
 

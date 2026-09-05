@@ -66,7 +66,7 @@ export interface ManagedScheduleWindow {
 
 /** Where an instant sits relative to a window: `"before"` it opens, `"open"`
  * inside it, `"elapsed"` at or after its close. */
-export type ManagedScheduleWindowState = "before" | "open" | "elapsed";
+type ManagedScheduleWindowState = "before" | "open" | "elapsed";
 
 /**
  * What a window's occupancy produced, as the advance rules read it. The run
@@ -79,7 +79,7 @@ export type ManagedScheduleWindowDisposition =
   ManagedExchangeRunOutcome | "unattempted";
 
 /** The schedule state a wake computes, ready for one atomic bookkeeping write. */
-export interface ManagedScheduleCatchUp {
+interface ManagedScheduleCatchUp {
   /** The schedule with `nextWindow` advanced to the first window not yet closed
    * (past a window a recorded success already satisfied) and
    * `consecutiveMisses` holding each window's verdict, applied in order. */
@@ -116,7 +116,7 @@ export interface ManagedScheduleCatchUp {
  * the stored UTC anchor. A weekly "09:00 Tuesdays" is a Tuesday's date here plus
  * an `intervalDays` of 7 -- the recurrence has no weekday of its own.
  */
-export interface LocalWallClockCadence {
+interface LocalWallClockCadence {
   /** Local calendar year of the first agreed window (1 through 9999). */
   year: number;
   /** Local calendar month of the first agreed window, 1 through 12. */

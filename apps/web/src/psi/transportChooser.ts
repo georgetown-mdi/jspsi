@@ -48,12 +48,12 @@ export function isCliTransport(
  * {@link ExchangeDriverSelection} kind as the inviter chooser's UI policy. A console
  * filedrop runs as a server job against the mounted rendezvous directory when
  * `JOB_RENDEZVOUS_DIR` is set, and is disabled otherwise. */
-export type TransportRunMode = ExchangeDriverSelection["kind"];
+type TransportRunMode = ExchangeDriverSelection["kind"];
 
 /** One transport card's placement in the chooser: whether it renders disabled,
  * how a pick would run, and -- for SFTP on a console -- whether a connection
  * still needs authoring before it can run here. */
-export interface TransportOption {
+interface TransportOption {
   transport: Transport;
   disabled: boolean;
   runMode: TransportRunMode;
@@ -67,7 +67,7 @@ export interface TransportOption {
 /** The chooser's single source of truth for which transport cards are offered,
  * which render disabled, and which is the default. The capability note and the
  * card copy are regenerated from these facts so copy cannot drift from behavior. */
-export interface AvailableTransports {
+interface AvailableTransports {
   options: ReadonlyArray<TransportOption>;
   defaultTransport: Transport;
 }
@@ -189,7 +189,7 @@ function capabilityNoteFor(
  * console when `sftpConfigured`, else inviting the operator to author a
  * connection unless `sftpSaveFilePreferred`. Both the SFTP copy and the
  * capability note derive from {@link availableTransports}. */
-export interface TransportChooserCopy {
+interface TransportChooserCopy {
   browserLabel: string;
   browserDescription: string;
   filedropLabel: string;
@@ -208,7 +208,7 @@ export interface TransportChooserCopy {
  * OFFERED (an incoherent pair reports itself unconfigured, disabling the card
  * by that alone) -- they change only what the card SAYS.
  */
-export interface RendezvousShape {
+interface RendezvousShape {
   split?: boolean;
   problem?: string;
 }

@@ -156,7 +156,7 @@ export interface AcquiredExchange {
 /** The `signal` and stage-reporting hooks an {@link Acquire} uses while it
  * loads/prepares and draws in the peer. Every hook no-ops once `signal`
  * aborts. */
-export interface AcquireContext {
+interface AcquireContext {
   signal: AbortSignal;
   /** Activate a stage (e.g. "waiting for peer" immediately before a wait). */
   onStage: (stageId: string) => void;
@@ -256,7 +256,7 @@ export type GenerateOutput<TOutputs extends ExchangeOutputs = ExchangeOutputs> =
   (result: ExchangeResult, prepared: PreparedExchange) => TOutputs;
 
 /** Options for {@link runExchangeLifecycle}. */
-export interface RunExchangeLifecycleOptions<
+interface RunExchangeLifecycleOptions<
   TOutputs extends ExchangeOutputs = ExchangeOutputs,
 > {
   acquire: Acquire;

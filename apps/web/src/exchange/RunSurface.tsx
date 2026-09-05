@@ -318,7 +318,7 @@ function WithheldResultInset() {
  *
  * @internal
  */
-export const REPORTED_COUNT_CAVEAT =
+const REPORTED_COUNT_CAVEAT =
   "Your partner ran the match and sent you this number. psilink does not " +
   "check a count it is sent against a run of its own, so the figure is your " +
   "partner's word for it.";
@@ -499,7 +499,7 @@ export const PENDING_RECORD_CONFIRM_BODY =
  * console's own denial while the dialog is open. The record is settled and
  * there is none, so the question is only about the recovery the operator
  * already pressed. */
-export const NO_RECORD_CONFIRM_TITLE = "Go on and remove this run?";
+const NO_RECORD_CONFIRM_TITLE = "Go on and remove this run?";
 
 /**
  * What that confirm says. It is the copy for a dialog the operator opened over an
@@ -513,7 +513,7 @@ export const NO_RECORD_CONFIRM_BODY =
   "which cannot be undone.";
 
 /** The heading and body of one untaken-record confirm. */
-export interface UntakenRecordConfirm {
+interface UntakenRecordConfirm {
   title: string;
   body: string;
 }

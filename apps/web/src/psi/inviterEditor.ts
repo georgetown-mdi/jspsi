@@ -435,7 +435,7 @@ export function editorReprofiled(
 /** The result of a step-2 column edit: the reconciled session plus any
  * identifier columns the single-identifier rule demoted, for the caller to
  * announce. */
-export interface ColumnEditResult {
+interface ColumnEditResult {
   editor: InviterEditor;
   demotedIdentifiers: Array<string>;
 }

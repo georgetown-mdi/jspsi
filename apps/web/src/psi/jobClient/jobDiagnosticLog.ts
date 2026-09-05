@@ -44,8 +44,7 @@ export function jobDiagnosticLogFileName(jobId: string): string {
  * said one is coming, and a failure that persists would then be treated as a
  * file that never arrives.
  */
-export type JobDiagnosticLogState =
-  "none" | "pending" | "available" | "unanswered";
+type JobDiagnosticLogState = "none" | "pending" | "available" | "unanswered";
 
 /**
  * Where this job's diagnostic log stands, read off `GET /api/jobs/:jobId`.
@@ -106,8 +105,7 @@ export const LOG_AVAILABILITY_UNANSWERED_LIMIT = 5;
  * operator gets told the console went quiet instead of watching a panel that
  * would never arrive.
  */
-export type JobDiagnosticLogWatchOutcome =
-  "available" | "unavailable" | "unanswered";
+type JobDiagnosticLogWatchOutcome = "available" | "unavailable" | "unanswered";
 
 /**
  * Ask the console where this job's log stands until it answers for good, the

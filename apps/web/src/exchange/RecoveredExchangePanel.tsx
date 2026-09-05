@@ -110,7 +110,7 @@ function recoveryLead(
 
 /** The title over the panel's discard confirm where nothing beyond the exchange
  * and its results is at stake. */
-export const DISCARD_CONFIRM_TITLE = "Discard this exchange?";
+const DISCARD_CONFIRM_TITLE = "Discard this exchange?";
 
 /** What that confirm says: the removal is console-only and irreversible, and it
  * covers a run still going. It names no artifact beyond the results, which is why

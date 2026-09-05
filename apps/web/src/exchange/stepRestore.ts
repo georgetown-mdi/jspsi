@@ -21,7 +21,7 @@ export type Section = SpineTarget | "share" | "save";
 
 /** The backing state the inviter's guarded sections read: `share` renders only
  * with a live invitation, `save` only under a CLI transport. */
-export interface SectionPreconditions {
+interface SectionPreconditions {
   hasInvitation: boolean;
   isCliTransport: boolean;
 }

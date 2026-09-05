@@ -38,14 +38,6 @@ import type Peer from "peerjs";
 
 import type { ManagedExchangeSide } from "./managedExchangeRecord";
 
-/** The live rendezvous resources a re-run acquires: the registered peer and the
- * open data channel, the same pair the one-shot flows hand to the exchange
- * lifecycle. */
-export interface ManagedRendezvous {
-  peer: Peer;
-  conn: DataConnection;
-}
-
 /** The two rendezvous flows the re-run dispatches between, injectable so the
  * side dispatch and the per-run peer-id derivation are testable without a broker.
  * The defaults are the real {@link listenAsInviter} / {@link dialAsAcceptor}. */
@@ -82,7 +74,7 @@ export function assertManagedRerunDispatchable(
  * peer with no channel yet (the caller awaits the acceptor's inbound connection);
  * the acceptor returns both the peer and the opened channel.
  */
-export type ManagedRendezvousAcquisition =
+type ManagedRendezvousAcquisition =
   | { side: "inviter"; peer: Peer }
   | { side: "acceptor"; peer: Peer; conn: DataConnection };
 

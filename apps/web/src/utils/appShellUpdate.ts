@@ -22,7 +22,7 @@ import { isInstalledRuntime as installedRuntime } from "./installedRuntime";
 
 /** The worker's URL. It is served from `public/`, so its scope is the origin
  * root -- which is what lets it handle navigations to every route. */
-export const SERVICE_WORKER_URL = "/serviceWorker.js";
+const SERVICE_WORKER_URL = "/serviceWorker.js";
 
 /** The message that makes a waiting worker take over now. Mirrored by
  * `SKIP_WAITING_MESSAGE` in `apps/web/public/serviceWorker.js`. */
@@ -45,7 +45,7 @@ export interface ShellWorker {
 }
 
 /** The subset of `ServiceWorkerRegistration` this module drives. */
-export interface ShellRegistration {
+interface ShellRegistration {
   readonly installing: ShellWorker | null;
   readonly waiting: ShellWorker | null;
   readonly addEventListener: (
@@ -94,7 +94,7 @@ export function subscribeAppShellUpdate(listener: () => void): () => void {
 
 /** The environment `registerAppShell` reads through, injectable so a test can
  * drive both without a browser. */
-export interface RegisterAppShellOptions {
+interface RegisterAppShellOptions {
   /** Reload onto newly activated code. Defaults to the page's own reload. */
   reload?: () => void;
   /** Whether this page is running as an INSTALLED app rather than a browser

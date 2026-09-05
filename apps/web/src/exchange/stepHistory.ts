@@ -32,7 +32,7 @@ export const STEP_STATE_KEY = "psilinkExchangeStep";
 const ROUTER_INDEX_KEY = "__TSR_index";
 
 /** The `history.state` payload an in-console step writes. */
-export interface StepHistoryState {
+interface StepHistoryState {
   [STEP_STATE_KEY]: string;
 }
 

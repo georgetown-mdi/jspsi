@@ -88,14 +88,14 @@ const CREDENTIAL_REF_FIELDS = [
 ] as const;
 
 /** Which SFTP primary auth method a credential feeds. */
-export type SftpCredType = "password" | "private_key";
+type SftpCredType = "password" | "private_key";
 
 /**
  * A file-reference credential given as a typed `@path` (never an inline value):
  * the documented exception for a credential that lives outside any listable
  * mount. Tagged with which primary auth method it feeds.
  */
-export interface AuthoredCredentialRef {
+interface AuthoredCredentialRef {
   kind: "ref";
   ref: string;
   credType: SftpCredType;
@@ -108,7 +108,7 @@ export interface AuthoredCredentialRef {
  * no container-absolute path ever transits the browser. Tagged with which primary
  * auth method it feeds.
  */
-export interface AuthoredMountRefCredential {
+interface AuthoredMountRefCredential {
   kind: "mountRef";
   mount: "secrets";
   subPath: Array<string>;
@@ -125,7 +125,7 @@ export interface AuthoredMountRefCredential {
  * SAME containment chain the file-reference forms do. Tagged with which primary
  * auth method it feeds.
  */
-export interface AuthoredRawCredential {
+interface AuthoredRawCredential {
   kind: "raw";
   value: string;
   credType: SftpCredType;
@@ -138,7 +138,7 @@ export interface AuthoredRawCredential {
  * by the authoring containment chain; no inline value ever reaches a composed
  * job file.
  */
-export type AuthoredCredential =
+type AuthoredCredential =
   AuthoredCredentialRef | AuthoredMountRefCredential | AuthoredRawCredential;
 
 /**
@@ -316,7 +316,7 @@ function validateServerEntry(
  * to. Absent for a file-reference credential (`ref`/`mountRef`), whose file is the
  * operator's own and is never touched.
  */
-export interface ValidatedAuthoredSftpServer {
+interface ValidatedAuthoredSftpServer {
   entry: JobSftpServerEntry;
   credentialWarnings: Array<string>;
   materializedCredentialPath?: string;

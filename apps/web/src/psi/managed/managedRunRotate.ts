@@ -184,7 +184,7 @@ export interface ManagedRotationCriticalSection<THandshake> {
  * though the caller runs it AFTER releasing the lock (the lock covers only
  * through persist, per the spec's window).
  */
-export interface ManagedRotationGate<THandshake> {
+interface ManagedRotationGate<THandshake> {
   /** The handshake's held value, to hand to the data-exchange phase. */
   handshake: THandshake;
 }

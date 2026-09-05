@@ -25,7 +25,7 @@ import type { ManagedReinvite } from "./managedReinvite";
 
 /** The dependencies the re-invite driver injects, defaulted to the real platform
  * wiring but overridable in a test. */
-export interface ManagedReinviteDriverDeps {
+interface ManagedReinviteDriverDeps {
   /** Read this page's location for the fresh webrtc endpoint. */
   location: () => ReturnType<typeof invitationLocation>;
   /** Mint a fresh setup secret. */
@@ -50,7 +50,7 @@ const defaultDeps: ManagedReinviteDriverDeps = {
  * plus the record as it now stands in the store -- rotated to the fresh secret with the
  * consumed failure cleared. The caller adopts {@link record} so every subsequent action
  * derives from the fresh secret, never the stale in-memory copy. */
-export interface ManagedReinviteResult {
+interface ManagedReinviteResult {
   /** The shareable invitation artifacts (link, code, setup expiry). */
   reinvite: ManagedReinvite;
   /** The persisted record after the re-invite rotation. */

@@ -36,7 +36,7 @@ export type SftpCredentialMethod = "password" | "private_key";
  *   to a file on the console. It is held in component state only, never
  *   persisted to browser storage or the query cache.
  */
-export type SftpCredentialSource =
+type SftpCredentialSource =
   | { kind: "mount"; subPath: Array<string> }
   | { kind: "path"; ref: string }
   | { kind: "raw"; value: string };
@@ -125,7 +125,7 @@ export type SftpFormField =
   | "keyboardInteractive";
 
 /** One blocking error on the form: the field and the message. */
-export interface SftpFormError {
+interface SftpFormError {
   field: SftpFormField;
   message: string;
 }
@@ -138,7 +138,7 @@ export interface SftpFormError {
 const SIGNING_FINGERPRINT_SHAPE = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
 
 /** The connection fields a pasted `sftp://user@host:port/path` URL holds. */
-export interface ParsedSftpUrl {
+interface ParsedSftpUrl {
   host: string;
   username?: string;
   port?: number;

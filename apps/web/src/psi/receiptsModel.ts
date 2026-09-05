@@ -377,10 +377,10 @@ export const RETENTION_NOTE_NOTICE =
  * look after it. Held here, not the card, since it follows from what the
  * advisory says.
  */
-export type ReceiptsAdvisorySeverity = "warning" | "info";
+type ReceiptsAdvisorySeverity = "warning" | "info";
 
 /** One non-blocking advisory, with the weight it is shown at. */
-export interface ReceiptsAdvisory {
+interface ReceiptsAdvisory {
   message: string;
   severity: ReceiptsAdvisorySeverity;
 }

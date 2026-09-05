@@ -253,7 +253,7 @@ export async function fetchJobInputProfile(
 /** The default number of rendezvous-probe attempts and the delay between them. A
  * failed probe retries in-page rather than leaving the filedrop transport disabled
  * until a full page reload; a definitive answer (a clean 200) never retries. */
-export const RENDEZVOUS_PROBE_ATTEMPTS = 3;
+const RENDEZVOUS_PROBE_ATTEMPTS = 3;
 const RENDEZVOUS_PROBE_RETRY_MS = 400;
 
 /** One rendezvous probe: the config on a definitive answer, or null when the probe
@@ -409,7 +409,7 @@ function coverageRatesOf(body: unknown): Array<FieldValueCoverage> | null {
  *   sweep may recover, so the readout should stay pending.
  * - `aborted`: the sweep was aborted through its signal (superseded or disposed).
  */
-export type CoverageSweepOutcome =
+type CoverageSweepOutcome =
   | { kind: "rates"; rates: Array<FieldValueCoverage> }
   | { kind: "unavailable" }
   | { kind: "transient" }

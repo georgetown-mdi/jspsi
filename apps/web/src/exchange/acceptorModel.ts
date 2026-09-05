@@ -48,7 +48,7 @@ import type { AcceptableInvitation } from "@psi/acceptInvitation";
  */
 
 /** The acceptor's three spine steps, in order -- the steps the top bar walks. */
-export type AcceptorSpineStepName = "review" | "consent" | "columns";
+type AcceptorSpineStepName = "review" | "consent" | "columns";
 
 /** The acceptor's working states: the three spine steps plus the terminal `launched`
  * state the columns step commits to, which drives the acceptor's run surface.
@@ -56,14 +56,14 @@ export type AcceptorSpineStepName = "review" | "consent" | "columns";
 export type AcceptorStep = AcceptorSpineStepName | "launched";
 
 /** The spine step labels shown in the top-bar stepper. */
-export const ACCEPTOR_STEP_LABELS: Record<AcceptorSpineStepName, string> = {
+const ACCEPTOR_STEP_LABELS: Record<AcceptorSpineStepName, string> = {
   review: "Review the terms",
   consent: "Consent & your file",
   columns: "Confirm your columns",
 };
 
 /** The spine order the top bar renders and the step-state derivation walks. */
-export const ACCEPTOR_STEP_ORDER: ReadonlyArray<AcceptorSpineStepName> = [
+const ACCEPTOR_STEP_ORDER: ReadonlyArray<AcceptorSpineStepName> = [
   "review",
   "consent",
   "columns",
@@ -72,7 +72,7 @@ export const ACCEPTOR_STEP_ORDER: ReadonlyArray<AcceptorSpineStepName> = [
 /** One derived spine entry: the step's label, its position state, and whether it
  * is navigable back (a done step is, per the mockup's done-steps-are-links
  * rule). */
-export interface AcceptorSpineStep {
+interface AcceptorSpineStep {
   step: AcceptorSpineStepName;
   label: string;
   state: RailStepState;
@@ -142,7 +142,7 @@ function acceptorResultsGoTo(output: LinkageTerms["output"]): string {
  * disclosure facts the narrow viewport's condensed "What you will share" bar
  * keeps -- declared here by the producer, so a relabel can never silently drop
  * a row from that trust surface. */
-export interface AcceptorLedgerRow {
+interface AcceptorLedgerRow {
   label: string;
   value?: string | ReadonlyArray<string>;
   muted?: string;
@@ -270,7 +270,7 @@ export function invitingPartyName(token: InvitationToken): string {
 
 /** The completion trust line under the settled ledger for a browser-run accept: the
  * file never left this browser, and the ledger names all the partner received. */
-export const ACCEPTOR_DONE_LEDGER_FOOTER =
+const ACCEPTOR_DONE_LEDGER_FOOTER =
   "Your file never left this browser. The results above are all your partner " +
   "received about your data.";
 
@@ -278,7 +278,7 @@ export const ACCEPTOR_DONE_LEDGER_FOOTER =
  * mounted CSV, never the browser, so the "never left this browser" claim would
  * be false and is dropped, leaving only the accurate statement about what the
  * partner received. */
-export const ACCEPTOR_DONE_SERVER_JOB_LEDGER_FOOTER =
+const ACCEPTOR_DONE_SERVER_JOB_LEDGER_FOOTER =
   "The results above are all your partner received about your data.";
 
 /** The completion trust line under the settled ledger, chosen by how the accept ran:
@@ -395,7 +395,7 @@ export function acceptorNameProblem(name: string): string | undefined {
 
 /** The consent-step legal-agreement display: the three sanitized values plus
  * whether sanitization changed how any of them displays. */
-export interface AcceptorLegalAgreementDisplay {
+interface AcceptorLegalAgreementDisplay {
   /** Agreement identifier, sanitized for display. */
   reference: string;
   /** Stated purpose of the disclosure, sanitized for display. */
@@ -453,7 +453,7 @@ export const ACCEPT_UNSUPPORTED_TITLE = "This console cannot run this exchange";
  * in-tab exchange on the console (WebRTC is the public web app's domain); a
  * split-directory SFTP accept needs the command-line tool; and a file-drop accept
  * needs the console's own mounts to be the shape the invitation names. */
-export interface AcceptUnsupported {
+interface AcceptUnsupported {
   title: string;
   message: string;
 }
@@ -477,7 +477,7 @@ function isSplitDirectoryFiledrop(endpoint: AcceptEndpoint): boolean {
  * when a filedrop exchange cannot run as provisioned. The shape the browser client
  * reports, narrowed to what this decision needs.
  */
-export interface AcceptRendezvous {
+interface AcceptRendezvous {
   configured: boolean;
   split?: boolean;
   problem?: string;

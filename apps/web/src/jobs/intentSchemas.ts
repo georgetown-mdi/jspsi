@@ -294,7 +294,7 @@ export interface JobInputFileReference {
  * disabled choice with core's reason, as it already does for `psi-c` and
  * `deduplicate`.
  */
-export type JobSigningMode = "none" | "certificate";
+type JobSigningMode = "none" | "certificate";
 
 /**
  * The receipt-signing choices a client may set on an exchange job: the mode,

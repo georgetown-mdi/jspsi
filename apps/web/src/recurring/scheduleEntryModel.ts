@@ -71,7 +71,7 @@ export interface ScheduleEntryFields {
 
 /** The field errors an entry has, keyed by the field that shows each one.
  * Empty when every field is usable. */
-export interface ScheduleEntryErrors {
+interface ScheduleEntryErrors {
   firstWindowDate?: string;
   firstWindowTime?: string;
   intervalDays?: string;

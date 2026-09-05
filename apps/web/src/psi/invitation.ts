@@ -41,7 +41,7 @@ import type { LinkageRefusal } from "./linkageRefusal";
  * browser `File` in production; a Node readable stream in tests). Derived from that
  * wrapper's own signature rather than importing papaparse's `LocalFile` directly, so
  * this module takes on no papaparse dependency beyond the one core already owns. */
-export type InvitationCSVInput = Parameters<typeof loadCSVFileOffMainThread>[0];
+type InvitationCSVInput = Parameters<typeof loadCSVFileOffMainThread>[0];
 
 /**
  * Path a PeerJS client dials this app's signaling server at. Matches the dial

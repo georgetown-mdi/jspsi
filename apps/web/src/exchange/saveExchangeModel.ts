@@ -147,7 +147,7 @@ export function saveClosingCopy(
 }
 
 /** One invalid field on the save surface: the field key and the message. */
-export interface SaveExchangeError {
+interface SaveExchangeError {
   field: "host" | "remoteDirectory" | "sharedDirectory";
   message: string;
 }

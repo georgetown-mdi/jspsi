@@ -45,13 +45,13 @@ export const SIDE_LABEL: Record<ManagedExchangeSide, string> = {
 /** The derived backup state a row shows, phrased for the list. `"backed-up"`
  * holds the date phrase for the quiet green line; `"backup-needed"` is the one
  * actionable state. */
-export type SavedExchangeBackup =
+type SavedExchangeBackup =
   { kind: "backed-up"; asOf: string } | { kind: "backup-needed" };
 
 /** The schedule lines a row holds for a record with an agreed schedule: where
  * the recurrence stands at the row's `now`, and the coordination line a run of
  * missed windows earns (see {@link ./scheduleSurfacingModel.ts}). */
-export interface SavedExchangeScheduleLines {
+interface SavedExchangeScheduleLines {
   /** Where the recurrence stands: a window open now, or the next one. */
   dueLine: string;
   /** The escalated coordination line, once the record's consecutive-miss count

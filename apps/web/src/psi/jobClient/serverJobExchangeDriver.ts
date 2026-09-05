@@ -181,7 +181,7 @@ export type JobRunStatus = "running" | "succeeded" | "failed" | "cancelled";
  * `GET /api/jobs/:id`: only the run status. The endpoint returns more
  * (terminal, record availability), but re-attachment reconstructs the run from
  * the event stream, so the status view stays minimal. */
-export interface JobStatusView {
+interface JobStatusView {
   status: JobRunStatus;
 }
 
@@ -367,8 +367,7 @@ function jobStatusViewOf(body: unknown): JobStatusView {
  * panel adopts `id` when it holds no stored attachment, so a browser that never
  * started the exchange still finds it.
  */
-export type SlotOccupancy =
-  { occupied: false } | { occupied: true; id: string };
+type SlotOccupancy = { occupied: false } | { occupied: true; id: string };
 
 /**
  * Probe the console's single exchange slot (`GET /api/jobs/slot`). Fail-safe

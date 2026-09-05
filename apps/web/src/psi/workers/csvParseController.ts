@@ -28,7 +28,7 @@ import { errorFromWorkerEvent } from "./workerEventError";
  * stream in tests). Derived from its signature rather than importing papaparse's
  * `LocalFile`, so this module takes on no papaparse dependency of its own -- the same
  * derivation `invitation.ts` uses. */
-export type CSVParseInput = Parameters<typeof loadCSVFile>[0];
+type CSVParseInput = Parameters<typeof loadCSVFile>[0];
 
 /** The result {@link loadCSVFile} resolves -- `data` plus `meta.fields`. Derived
  * from its return type for the same no-papaparse-import reason. */
@@ -126,7 +126,7 @@ export interface CSVParseWorker {
  * real `Worker` constructor directly (keeping it Node-loadable and the dispatch
  * unit-testable); the browser default is imported lazily -- see
  * {@link loadCSVFileOffMainThread}. */
-export type SpawnCSVParseWorker = () => CSVParseWorker;
+type SpawnCSVParseWorker = () => CSVParseWorker;
 
 /** Whether `file` is a browser File -- the only input a worker can take
  * (structured-cloneable, and read via FileReader in the worker); a Node stream is

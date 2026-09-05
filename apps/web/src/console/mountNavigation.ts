@@ -24,7 +24,7 @@ export function fileSubPath(
 }
 
 /** One breadcrumb: the label to show and the subPath navigating to it lands on. */
-export interface MountBreadcrumb {
+interface MountBreadcrumb {
   label: string;
   subPath: Array<string>;
 }

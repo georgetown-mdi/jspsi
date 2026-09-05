@@ -63,7 +63,7 @@ export interface DisclosureFact {
 }
 
 /** One run's disclosure, as the accounting presents it. */
-export interface DisclosureEntryView {
+interface DisclosureEntryView {
   /** The run's own instant, verbatim from the record's `createdAt`: the ISO-8601
    * value, not the minute-resolution {@link when} the screen shows and the export's
    * first column holds. Not the entry's identity either -- {@link bindingNonce}

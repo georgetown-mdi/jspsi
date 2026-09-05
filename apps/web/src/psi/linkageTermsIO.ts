@@ -34,7 +34,7 @@ import type { ZodError } from "zod";
 
 /** A document format the editor can write. Import auto-detects, so it needs no
  * format argument; export must choose one. */
-export type LinkageTermsFormat = "json" | "yaml";
+type LinkageTermsFormat = "json" | "yaml";
 
 /**
  * Upper bound on an imported document, in characters (UTF-16 code units): a
@@ -47,7 +47,7 @@ export type LinkageTermsFormat = "json" | "yaml";
 export const MAX_IMPORT_CHARS = 1_000_000;
 
 /** A successfully imported, validated set of linkage terms. */
-export interface LinkageTermsImportSuccess {
+interface LinkageTermsImportSuccess {
   success: true;
   terms: LinkageTerms;
 }
@@ -56,12 +56,12 @@ export interface LinkageTermsImportSuccess {
  * inline. The message never echoes a parsed value (an imported document is
  * untrusted free text), consistent with the no-echo parse-error contract the
  * core schema's referential-integrity refines rely on. */
-export interface LinkageTermsImportFailure {
+interface LinkageTermsImportFailure {
   success: false;
   error: string;
 }
 
-export type LinkageTermsImportResult =
+type LinkageTermsImportResult =
   LinkageTermsImportSuccess | LinkageTermsImportFailure;
 
 /**

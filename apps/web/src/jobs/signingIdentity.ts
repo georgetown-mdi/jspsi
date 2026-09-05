@@ -95,9 +95,9 @@ export function assertExportPathDistinct(
  * to the shared spawn boundary ({@link runCapturedCliChild}); only the budget is
  * this driver's.
  */
-export const FINGERPRINT_SIGTERM_MS = 15_000;
+const FINGERPRINT_SIGTERM_MS = 15_000;
 /** The grace before the watchdog escalates SIGTERM to SIGKILL. */
-export const FINGERPRINT_SIGKILL_GRACE_MS = 5_000;
+const FINGERPRINT_SIGKILL_GRACE_MS = 5_000;
 
 /**
  * The reconciled outcome of a fingerprint attempt:

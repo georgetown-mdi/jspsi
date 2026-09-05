@@ -32,7 +32,7 @@ import { recordFileStamp } from "../runOutputs";
 
 /** The console endpoint the receipt downloads from. The browser never composes
  * the file's path: the console resolves it inside the job's own workdir. */
-export function jobReceiptUrl(jobId: string): string {
+function jobReceiptUrl(jobId: string): string {
   return `/api/jobs/${jobId}/receipt`;
 }
 

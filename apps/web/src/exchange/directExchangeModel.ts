@@ -152,7 +152,7 @@ export function directServerBlockedReason(
  * inferred metadata sends and the linkage-terms refusal, if any. Read-only display
  * -- the CLI re-infers over the real file at run time, and a file edited between
  * preview and run desyncs, caught by the runtime two-party terms check. */
-export interface DirectTermsPreview {
+interface DirectTermsPreview {
   /** The inferred linkage terms, with `payload.send` authored from the disclosed
    * columns so the terms display accurately reflects what leaves the machine (the
    * default terms hold no payload block; disclosure rides the metadata at run

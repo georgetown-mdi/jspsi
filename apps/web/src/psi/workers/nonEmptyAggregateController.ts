@@ -33,7 +33,7 @@ export interface AggregateWorker {
 /** Spawns a fresh aggregate worker. Injected so the controller never references the
  * real `Worker` constructor directly (keeping this module Node-loadable and the
  * dispatch testable). */
-export type SpawnAggregateWorker = () => AggregateWorker;
+type SpawnAggregateWorker = () => AggregateWorker;
 
 /** Worker request: seed the rows once, then compute per standardization edit. */
 export type AggregateRequest =

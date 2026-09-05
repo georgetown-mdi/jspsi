@@ -39,7 +39,7 @@ export type AuthoredSftpConnectionRequest = AuthoredSftpServerRequest;
 
 /** One entry in a secrets-mount listing: an admissible segment name and whether it
  * is a directory (navigable) or a regular file (selectable as a credential). */
-export interface MountEntry {
+interface MountEntry {
   name: string;
   kind: "dir" | "file";
 }
@@ -72,7 +72,7 @@ export type SecretsEntriesResult =
  *   a distinct cause from an unreachable console.
  * - `error`: another non-2xx, a network fault, or a malformed success body.
  */
-export type PutSftpConnectionResult =
+type PutSftpConnectionResult =
   | { kind: "ok"; connection: SftpConnectionProjection }
   | { kind: "invalid"; message: string }
   | { kind: "tooLarge" }

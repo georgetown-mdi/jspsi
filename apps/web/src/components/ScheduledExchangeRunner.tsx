@@ -9,7 +9,7 @@ import type { ManagedScheduleRuntimeOptions } from "@psi/managed/managedSchedule
 
 /** The call sites the mount reads its environment through, so a test can drive
  * the gate and the runtime it guards without an installed app. */
-export interface ScheduledExchangeRunnerProps {
+interface ScheduledExchangeRunnerProps {
   /** Whether this page is an installed app runtime. Defaults to
    * {@link isInstalledRuntime}. */
   isInstalledRuntime?: () => boolean;
@@ -22,7 +22,7 @@ export interface ScheduledExchangeRunnerProps {
 
 /** How the runner's chunk is fetched, injectable so the failure a real fetch can
  * land in is drivable. */
-export type ManagedScheduleRuntimeLoader = () => Promise<{
+type ManagedScheduleRuntimeLoader = () => Promise<{
   startManagedScheduleRuntime: (options: ManagedScheduleRuntimeOptions) => void;
 }>;
 

@@ -56,7 +56,7 @@ import type { ManagedExchangeRunResult } from "./managedExchangeRun";
  * needs, passed through the lock. Generic over the handshake value so the
  * platform wiring names its own concrete type (the message connection, the PSI
  * library, the prepared exchange) and a test names a trivial one. */
-export interface ManagedRerunHandshake<THandshake> {
+interface ManagedRerunHandshake<THandshake> {
   rotatedSecret: string;
   handshake: THandshake;
 }
@@ -64,7 +64,7 @@ export interface ManagedRerunHandshake<THandshake> {
 /** The platform operations a re-run injects, each the wiring the pure
  * orchestration cannot own. Split so the run's decisions and ordering are
  * testable without a broker, a database, or WASM. */
-export interface ManagedRerunSeams<TInput, THandshake, TExchange> {
+interface ManagedRerunSeams<TInput, THandshake, TExchange> {
   /**
    * Acquire and validate the input file BEFORE any connection: read it through
    * the persisted handle (attended may prompt once) or the re-selected file, then
@@ -319,7 +319,7 @@ export function rerunFailureLastRun(
 /** The benign outcomes a surface classifies without attack framing. The first
  * six are read before any connection is attempted; `"missed"` is read after a
  * connection attempt found no partner. */
-export type BenignRerunOutcome =
+type BenignRerunOutcome =
   | "expired"
   | "handed-off"
   | "custody-unreadable"

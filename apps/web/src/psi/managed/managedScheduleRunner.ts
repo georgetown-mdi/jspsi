@@ -160,7 +160,7 @@ export interface ManagedScheduleTickSeams {
 }
 
 /** Why a record's tick attempted nothing. */
-export type ManagedScheduleSkipReason =
+type ManagedScheduleSkipReason =
   | "unreadable"
   | "no-schedule"
   | "spent"
@@ -470,7 +470,7 @@ function foldWindowDisposition(
 
 /** What one failed attempt says about its window: the disposition it would leave
  * behind, and whether the window is worth another attempt. */
-export interface ManagedScheduleWindowVerdict {
+interface ManagedScheduleWindowVerdict {
   /** The window's disposition if this is the last attempt. */
   disposition: ManagedScheduleWindowDisposition;
   /** Whether another attempt inside this window can do better. */
@@ -539,7 +539,7 @@ function attemptProvesContact(
  * The verdict also states whether the failure proves the partner was met, for
  * the window's fold to read (see {@link attemptProvesContact}).
  */
-export function managedScheduleWindowVerdict(
+function managedScheduleWindowVerdict(
   error: unknown,
   dataExchangeStarted: boolean,
 ): ManagedScheduleWindowVerdict {

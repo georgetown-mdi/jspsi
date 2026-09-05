@@ -46,7 +46,7 @@ import type { ManagedLocalState } from "@psi/managed/managedLocalState";
  *   input replaced: the file cannot supply every agreed linkage key, and the
  *   same file refuses identically every time. Not `"retry"`.
  * - `"none"` -- nothing to recover (informational; e.g. a missed window). */
-export type ManagedRunRecovery =
+type ManagedRunRecovery =
   "reinvite" | "retry" | "wait" | "confirm" | "reconfirm" | "restate" | "none";
 
 /** The two readings of a record a live launch failure is classified against. They
@@ -54,7 +54,7 @@ export type ManagedRunRecovery =
  * that stamp REPLACES the entry rather than merging into it: a no-show's stamp has
  * no `failureKind` at all, so a kind standing before the run is not in the
  * reloaded record to read. */
-export interface ManagedRunRecordReadings {
+interface ManagedRunRecordReadings {
   /** The record as the STORE held it at the run's launch: the standing evidence
    * this run's own bookkeeping stamp cannot have erased. The no-show state is read
    * against it ({@link missedFailure}). */
@@ -98,7 +98,7 @@ export interface ManagedRunFailureAlert {
  * refused run did. Copy authored here would be prose no surface can reach, and the
  * absent `title` and `message` keep it that way -- a host that renders this state
  * as an alert instead does not typecheck. */
-export interface ManagedRunHandedOffFailure {
+interface ManagedRunHandedOffFailure {
   /** The state's kind, the discriminant the host branches on. */
   kind: "handed-off";
   /** Nothing here is retried and nothing here is decided again. */
@@ -496,7 +496,7 @@ export function managedRunReinvites(failure: ManagedRunFailure): boolean {
 
 /** The re-invite recovery callout's copy: a lead line and the paragraphs below it,
  * in order. */
-export interface ManagedReinviteRecoveryCopy {
+interface ManagedReinviteRecoveryCopy {
   /** The callout's lead line. */
   lead: string;
   /** The paragraphs below the lead, in order. */

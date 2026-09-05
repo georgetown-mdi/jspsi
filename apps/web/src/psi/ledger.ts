@@ -28,7 +28,7 @@ import type { RunOutputs } from "./runOutputs";
  * disclosure facts the narrow viewport's condensed "What you will share" bar
  * keeps -- declared here by the producer, so a relabel can never silently
  * drop a row from that trust surface. */
-export interface InviterLedgerRow {
+interface InviterLedgerRow {
   label: string;
   reference?: string;
   value?: string | ReadonlyArray<string>;
@@ -84,7 +84,7 @@ export function ledgerOutcomeOf(outputs: RunOutputs): LedgerOutcome {
  * naming that; the seat that computed its own count takes the sentence
  * unchanged.
  */
-export function countOnlyLedgerValue(
+function countOnlyLedgerValue(
   intersectionCount: number,
   countReportedByPartner: boolean,
 ): string {

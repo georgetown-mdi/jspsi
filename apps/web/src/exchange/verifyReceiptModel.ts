@@ -86,19 +86,19 @@ import type {
 /** A parsed JSON document that is either the recognized artifact or a named
  * reason it is not. `kind: "ok"` holds the parsed value; every other kind is a
  * pre-verification outcome the page renders as a designed alert state. */
-export type RecordParseResult =
+type RecordParseResult =
   | { kind: "ok"; record: ExchangeRecord }
   | { kind: "malformed"; message: string }
   | { kind: "unrecognized-version"; message: string };
 
-export type KeysParseResult =
+type KeysParseResult =
   | { kind: "ok"; keys: VerificationKeys }
   | { kind: "malformed"; message: string }
   | { kind: "unrecognized-version"; message: string };
 
 /** A parsed dual-signed record: the signed evidence bundle both parties hold,
  * separate from the unsigned record above. */
-export type SignedRecordParseResult =
+type SignedRecordParseResult =
   | { kind: "ok"; record: DualSignedRecord }
   | { kind: "malformed"; message: string }
   | { kind: "unrecognized-version"; message: string };
@@ -109,7 +109,7 @@ export type SignedRecordParseResult =
  * is the private-key-bearing identity file, refused as its own outcome rather
  * than mined for the certificate inside it.
  */
-export type CertificateParseResult =
+type CertificateParseResult =
   | { kind: "ok"; certificate: SigningCertificate; fingerprint: string }
   | { kind: "malformed"; message: string }
   | { kind: "unrecognized-version"; message: string }
@@ -331,7 +331,7 @@ export type VerdictTone = "verified" | "failed" | "incomplete";
 /** The headline for the verdict, accurate about what a failure can and cannot
  * distinguish (a commitment mismatch never asserts tamper alone) and never
  * reporting a not-checked artifact as verified. */
-export interface VerdictHeadline {
+interface VerdictHeadline {
   tone: VerdictTone;
   title: string;
   detail: string;
@@ -595,7 +595,7 @@ export function verdictViewModel(
  * verifier's own by the certificate it exported. Each is optional, and a record
  * checked with neither is checked for internal consistency only.
  */
-export interface SignedRecordAnchors {
+interface SignedRecordAnchors {
   /** The partner's certificate fingerprint, as the verifier pinned it
    * out-of-band. Must satisfy {@link pinnedFingerprintProblem}; empty or
    * whitespace-only is not supplied. */
@@ -615,7 +615,7 @@ export interface SignedRecordAnchors {
  * every check is reported as not performed rather than assumed -- which also holds
  * the verdict short of verified.
  */
-export interface SignedRecordExpectationSources {
+interface SignedRecordExpectationSources {
   record?: ExchangeRecord;
   localTerms?: LinkageTerms;
   partnerTerms?: LinkageTerms;
@@ -708,7 +708,7 @@ export async function verifySignedRecord(
 
 /** One party's slot in the signed verdict: who the record says they are, the
  * fingerprint recomputed from their certificate, and the per-check rows. */
-export interface SignedPartyViewModel {
+interface SignedPartyViewModel {
   /** The handshake role whose slot this is. */
   label: string;
   /** The identity the certificate holds -- free text its holder chose,

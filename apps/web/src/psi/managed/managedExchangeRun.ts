@@ -104,7 +104,7 @@ export class ManagedExchangeCustodyUnreadableError extends Error {
  * {@link runManagedExchange}, plus the record's rotation policy. The persist and
  * lock are this module's; the runner cannot reach the data exchange before the
  * persist resolves, nor the handshake before the input is acquired and validated. */
-export interface ManagedExchangeRunPhases<TInput, THandshake, TExchange> {
+interface ManagedExchangeRunPhases<TInput, THandshake, TExchange> {
   /** The record whose secret this run rotates. Its `id` keys the lock and the
    * field-scoped store writes; `tokenMaxAgeDays` restamps `expires`. */
   record: { id: string; tokenMaxAgeDays?: number };

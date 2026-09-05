@@ -128,7 +128,7 @@ export interface FieldValueCoverage {
  * without compiling on the sweep path, so one mid-edit step does not blank
  * the whole aggregate and an over-length regex never reaches the compiler.
  */
-export interface FieldCoverageAccumulator {
+interface FieldCoverageAccumulator {
   /**
    * Fold one row into every field's tally: for each available field, count
    * the row as produced iff its pipeline yields at least one matchable key

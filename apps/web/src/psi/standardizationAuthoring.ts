@@ -276,7 +276,7 @@ export function functionDisplay(functionName: string): {
  * - `"no-text-default"` -- an emptying rule does precede it, but the `default` it
  *   declares is absent or is not text, which core runs as a pass-through.
  */
-export type InertCoalesceCause = "no-emptying-rule" | "no-text-default";
+type InertCoalesceCause = "no-emptying-rule" | "no-text-default";
 
 /**
  * Why the `coalesce` at a position substitutes nothing there, or `undefined`
@@ -349,8 +349,7 @@ export function pipelineHasInertCoalesce(
  *   `delimiter` params render here too and validate against the descriptor's
  *   dialect-and-length schema).
  */
-export type ParamFieldKind =
-  "number" | "string" | "enum" | "stringArray" | "boolean";
+type ParamFieldKind = "number" | "string" | "enum" | "stringArray" | "boolean";
 
 /**
  * One parameter of a standardization function, reduced to what the editor needs to

@@ -55,12 +55,11 @@ import type {
  * enforces is on the order of an hour, so a minute is slack against it while
  * costing one store read per minute in an idle runtime.
  */
-export const SCHEDULE_TICK_INTERVAL_MS = 60_000;
+const SCHEDULE_TICK_INTERVAL_MS = 60_000;
 
 /** The diagnostic-log prefix an unattended run's notices have, so a line in the
  * console names the run that raised it. */
-export const UNATTENDED_RUN_NOTICE_PREFIX =
-  "scheduled managed exchange run notice:";
+const UNATTENDED_RUN_NOTICE_PREFIX = "scheduled managed exchange run notice:";
 
 /**
  * The notices an unattended run drops: the close-outcome family, which tells an

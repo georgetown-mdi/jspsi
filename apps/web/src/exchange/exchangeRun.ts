@@ -63,9 +63,7 @@ const doneStage: StageDefinition = {
  * protocol-confirmation stage every exchange opens with, and the terminal done
  * stage. Replaced wholesale once `prepare` yields the real tree. The seat only
  * sets the waiting-stage label; it defaults to the inviter's. */
-export function initialStages(
-  seat: ExchangeSeat = "inviter",
-): Array<StageDefinition> {
+function initialStages(seat: ExchangeSeat = "inviter"): Array<StageDefinition> {
   return [
     ...preStagesFor(seat),
     {
@@ -96,7 +94,7 @@ export function stagesFor(
 
 /** One stage the run has entered: the visit closes (gains `completedAt`) when
  * the run moves on -- the status panel's history rows. */
-export interface StageVisit {
+interface StageVisit {
   id: string;
   label: string;
   completedAt?: Date;
@@ -179,7 +177,7 @@ export function runWithFailure(run: ExchangeRun): ExchangeRun {
 }
 
 /** One step of the five-step protocol timeline the top bar shows after create. */
-export interface TimelineStep {
+interface TimelineStep {
   label: string;
   state: "done" | "current" | "pending";
 }

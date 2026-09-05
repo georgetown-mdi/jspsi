@@ -70,7 +70,7 @@ export interface ExchangeDriver<
  * `generateOutput` builds the local result files -- and are absent from
  * {@link ExchangeDriver} by design, so the contract holds for a driver that has
  * neither. */
-export interface BrowserExchangeDriverConfig<
+interface BrowserExchangeDriverConfig<
   TOutputs extends ExchangeOutputs = ExchangeOutputs,
 > {
   acquire: Acquire;

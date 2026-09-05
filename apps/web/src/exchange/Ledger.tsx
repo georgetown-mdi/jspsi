@@ -33,7 +33,7 @@ function shareBarRows(
  * the row shows the em-dash "not decided yet" mark. `shareBar` holds the
  * producer's marker for the narrow condensed bar (see {@link shareBarRows}).
  */
-export interface LedgerRow {
+interface LedgerRow {
   label: string;
   value?: ReactNode;
   muted?: string;

@@ -10,7 +10,7 @@ const RUN_LOCK_POLL_MS = 400;
 
 /** What a surface gating on a run in flight gets: the current reading, and the
  * immediate re-read a click takes before acting on it. */
-export interface ManagedRunInFlight {
+interface ManagedRunInFlight {
   /** Whether a run of this record is in flight anywhere this browser profile can
    * see. */
   inFlight: boolean;

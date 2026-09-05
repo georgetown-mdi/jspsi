@@ -87,7 +87,7 @@ export interface ManagedExchangeArtifactKey {
 /** The browser-only fields the artifact holds alongside the two CLI halves --
  * the fields the CLI's config-plus-key pair does not have. Cleanly separable and
  * ignorable by the CLI toolchain. */
-export interface ManagedExchangeArtifactLocal {
+interface ManagedExchangeArtifactLocal {
   /** The operator's display label. */
   label: string;
   /** This party's side of the partnership, dispatching a re-run. */
@@ -105,7 +105,7 @@ export interface ManagedExchangeArtifactLocal {
  * text, the `.psilink.key` pair, and the separable local fields. The input-file
  * handle is not a member (no file serialization; see the module header).
  */
-export interface ManagedExchangeArtifact {
+interface ManagedExchangeArtifact {
   /** The single recognized artifact-format literal; a reader rejects any other
    * value rather than migrating it. */
   artifactVersion: typeof MANAGED_EXCHANGE_ARTIFACT_VERSION;

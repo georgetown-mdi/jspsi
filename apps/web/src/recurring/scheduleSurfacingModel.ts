@@ -185,7 +185,7 @@ export function repeatedMissCoordination(
  * app that is not running when a window opens meets nothing, and a partner who
  * does not arrive leaves the window a benign miss.
  */
-export const SCHEDULE_ATTENDANCE_NOTE_INSTALLED =
+const SCHEDULE_ATTENDANCE_NOTE_INSTALLED =
   "This app is installed, so it runs this exchange itself at each agreed window while it is open, with nobody present. A window that opens while the app is closed passes without a run, so leave it running (or launch it at sign-in) if you want the schedule met unattended.";
 
 /**
@@ -195,7 +195,7 @@ export const SCHEDULE_ATTENDANCE_NOTE_INSTALLED =
  * assurance that something attended to it -- and names the installed app as
  * the way out: stating a limit, not withholding a capability.
  */
-export const SCHEDULE_ATTENDANCE_NOTE_TAB =
+const SCHEDULE_ATTENDANCE_NOTE_TAB =
   "This is an ordinary browser tab, which never runs this exchange on its own: a window that opens passes without a run unless you run it here. Come back during a window and run this exchange, or install this app and leave it running to have it meet the windows for you.";
 
 /**

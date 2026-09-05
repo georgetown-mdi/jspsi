@@ -96,7 +96,7 @@ type BilateralSettings = Pick<
 >;
 
 /** The inputs the sheet is built from. */
-export interface AcceptKitInput extends AcceptKitExchange {
+interface AcceptKitInput extends AcceptKitExchange {
   /** The release version this build holds, which decides both the image tag
    * the sheet's commands name and the release page it links; see
    * {@link releaseVersion}. Absent, or in any shape but a release version, the

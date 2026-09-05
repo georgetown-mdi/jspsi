@@ -41,7 +41,7 @@ import type { AcquiredCsv, InviterEditor } from "./inviterEditor";
 /** One quiet fact for the Customize menu; `target` is the tab the
  * fact's label opens. `tone` colors the fact only when the surface needs
  * attention (a failing cleaning pipeline); never conveyed by color alone. */
-export interface InviterRailFact {
+interface InviterRailFact {
   label: string;
   fact?: string;
   tone?: "attention";
@@ -61,7 +61,7 @@ function plural(count: number, noun: string): string {
  * double-report. `rates` is null before the first sweep settles, contributing
  * no failing fields.
  */
-export interface InviterCleaningAttention {
+interface InviterCleaningAttention {
   /** Whether the Cleaning tab needs attention (any failing field present). */
   needsAttention: boolean;
   /** The number of fields whose pipeline produces no value in any row, for the
@@ -109,13 +109,13 @@ export function inviterCleaningAttention(
 
 /** The cleaning summary ("3 fields") shared by the Customize fact and the
  * check-your-answers row, so the two surfaces cannot disagree. */
-export function cleaningFact(draft: AdvancedInviteDraft): string {
+function cleaningFact(draft: AdvancedInviteDraft): string {
   return plural(draft.standardization.length, "field");
 }
 
 /** The key-count summary ("2 keys") shared by the Customize fact and the
  * check-your-answers row. */
-export function keysFact(draft: AdvancedInviteDraft): string {
+function keysFact(draft: AdvancedInviteDraft): string {
   return plural(enabledKeys(draft).length, "key");
 }
 
@@ -298,7 +298,7 @@ export interface InviterCreateGates {
 
 /** The create gate and the two sentences that state it: what the step shows
  * beside the button, and what it announces to assistive tech at the button. */
-export interface InviterCreateStatus {
+interface InviterCreateStatus {
   /** Whether every gate is clear, which is what the create action enables on. */
   ready: boolean;
   /** The visible line under the create action. */
@@ -374,7 +374,7 @@ export function inviterCreateStatus(
 /** One check-your-answers row: the term, its display value, and either the
  * section its Change link navigates to or the "set above" mark for the terms
  * owned by step 3 itself. */
-export interface AnswersRow {
+interface AnswersRow {
   label: string;
   value: string;
   mono?: boolean;

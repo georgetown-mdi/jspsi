@@ -101,7 +101,7 @@ export const CRON_EXPORT_KEY_MIME = "application/json";
 
 /** One exported file: the name it must be saved under for the emitted command to
  * find it, its exact contents, and the media type it is written under. */
-export interface ManagedCronExportFile {
+interface ManagedCronExportFile {
   /** The file name the CLI opens this content at. */
   fileName: string;
   /** The file's contents, ready to write verbatim. */

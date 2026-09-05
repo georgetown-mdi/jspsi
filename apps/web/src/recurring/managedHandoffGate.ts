@@ -33,7 +33,7 @@ import type { ManagedSpentHandoff } from "@psi/managed/managedLocalState";
  * `"command-line"` is the export panel on the detail surface, whose download button
  * stands beside its confirmation; `"migration"` is the "Confirm the move" screen,
  * which replaces the screen its own download control lives on. */
-export type ManagedHandoffKind = "command-line" | "migration";
+type ManagedHandoffKind = "command-line" | "migration";
 
 /** The heading the run-in-flight reason is shown under, at both hand-offs. */
 export const RUN_IN_FLIGHT_HANDOFF_TITLE = "Wait for this run to finish";

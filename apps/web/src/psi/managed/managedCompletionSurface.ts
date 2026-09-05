@@ -34,12 +34,12 @@ export interface ManagedBackupExportHook {
  * is wired: `"offer-refresh"` once one exists, so the surface offers "download
  * updated backup"; `"deferred"` while none does, so the surface names the
  * refresh as not-yet-available rather than implying it can be taken. */
-export type ManagedBackupAffordance = "offer-refresh" | "deferred";
+type ManagedBackupAffordance = "offer-refresh" | "deferred";
 
 /** What the completion surface renders after a successful re-run: the backup
  * affordance to show, and -- when it is `"offer-refresh"` -- the hook the action
  * button calls. */
-export interface ManagedRerunCompletion {
+interface ManagedRerunCompletion {
   /** Which backup affordance the surface shows. */
   backupAffordance: ManagedBackupAffordance;
   /** The hook the "download updated backup" action calls; present only when

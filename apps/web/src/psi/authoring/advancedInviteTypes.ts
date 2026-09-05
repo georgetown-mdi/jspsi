@@ -61,7 +61,7 @@ export type FuzzyComparison = NonNullable<
  * survived the editor's arrival-time narrowing, so a later drop attributes to
  * an edit (reversible) rather than the document's own rules (not).
  */
-export type ImportedRuleSetCitation =
+type ImportedRuleSetCitation =
   | { kind: "cited"; ruleSet: BuiltInLinkageRuleSet; honoredAtImport: boolean }
   | { kind: "uncited" };
 

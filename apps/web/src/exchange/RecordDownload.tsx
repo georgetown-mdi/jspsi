@@ -49,7 +49,7 @@ export const TERMINATED_RECORD_KEYS_NOTICE =
 
 /** The lead the seat shows over a completed run's record it is offering here --
  * the run finished, and its own results block did not hold the pair. */
-export const COMPLETED_RECORD_LEAD =
+const COMPLETED_RECORD_LEAD =
   "This console holds the exchange record for this run.";
 
 /** What the seat says under that lead: the same keeping instruction the results

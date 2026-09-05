@@ -149,7 +149,7 @@ export function connectionRows(exchangeFile: ExchangeSpec): Array<ConfigRow> {
  * The section READS the schedule; the operator sets and clears it in the
  * local-fields editor beside it (see {@link ./ManagedExchangeDetail.tsx}).
  */
-export interface ScheduleView {
+interface ScheduleView {
   /** The agreed cadence in words. */
   cadence: string;
   /** Where the recurrence stands at the instant read: a window open now, or the
@@ -208,7 +208,7 @@ export function scheduleView(
  * of disclosures (see {@link ./disclosureAccountingModel.ts}); this entry covers
  * the runs that accounting cannot, the ones that did not complete.
  */
-export interface RunHistoryEntry {
+interface RunHistoryEntry {
   /** ISO 8601 UTC instant of the run. */
   at: string;
   /** The run instant phrased for display. */

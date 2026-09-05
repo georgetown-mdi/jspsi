@@ -33,7 +33,7 @@ import type { ChildProcess } from "node:child_process";
  * hostile child: the read is bounded rather than left to grow, and the overflow
  * is reported as a missing read the caller classifies as an error.
  */
-export const CAPTURED_STDOUT_CAP = 4096;
+const CAPTURED_STDOUT_CAP = 4096;
 
 /**
  * How a captured child ended:
@@ -43,7 +43,7 @@ export const CAPTURED_STDOUT_CAP = 4096;
  *   ended it; `stdout` is the captured text, or undefined when the read
  *   overflowed {@link CAPTURED_STDOUT_CAP}.
  */
-export type CapturedChildOutcome =
+type CapturedChildOutcome =
   | { kind: "spawnFailed" }
   | { kind: "timedOut" }
   | { kind: "exited"; code: number | null; stdout: string | undefined };

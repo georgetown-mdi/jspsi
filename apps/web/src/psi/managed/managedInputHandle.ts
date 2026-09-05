@@ -134,7 +134,7 @@ export interface HandleReadPermissionQuery {
  * governed only by whether the file still exists. Never prompts on `query`; prompts
  * on `request` only where the method exists.
  */
-export const browserHandleReadPermission: HandleReadPermissionQuery = {
+const browserHandleReadPermission: HandleReadPermissionQuery = {
   query: (handle) => {
     const permission = handle as unknown as FileSystemHandlePermission;
     if (permission.queryPermission === undefined)
@@ -167,7 +167,7 @@ export class HandleReadPermissionError extends Error {
 /** How a run acquires its input-file read permission: an unattended (scheduled)
  * run may only proceed on an EXISTING grant and must never prompt; an attended run
  * may request the grant with the operator's gesture. */
-export type ManagedRunAttendance = "unattended" | "attended";
+type ManagedRunAttendance = "unattended" | "attended";
 
 /**
  * Secure read permission for `handle` for a run of the given `attendance`, or
@@ -197,7 +197,7 @@ export async function ensureHandleReadPermission(
  * like the `File`, they are this run's only and are never persisted or retained
  * across runs (the no-second-copy invariant is about the record, which never
  * holds them). */
-export interface AcquiredManagedInput {
+interface AcquiredManagedInput {
   /** The `File` read through the handle at THIS run start (a point-in-time
    * reference; never persisted or retained across runs). */
   file: File;

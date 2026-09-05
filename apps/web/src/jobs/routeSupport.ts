@@ -24,7 +24,7 @@ const log = getLogger("job-api");
  * handler returns as-is, or the resolved {@link JobManager} to proceed with. A
  * disabled API yields 404, indistinguishable from an unknown route.
  */
-export type GateOutcome =
+type GateOutcome =
   | { kind: "response"; response: Response }
   | { kind: "manager"; manager: JobManager };
 
@@ -197,7 +197,7 @@ export const MAX_SIGNING_FINGERPRINT_BODY_BYTES = 4 * 1024;
  *   parseBoundedJson enforces (mapped to 400).
  * - `parsed`: the decoded JSON value.
  */
-export type JobRequestBodyResult = BoundedJsonBodyResult;
+type JobRequestBodyResult = BoundedJsonBodyResult;
 
 /**
  * Read a request body as JSON under a hard byte cap, through the app's one

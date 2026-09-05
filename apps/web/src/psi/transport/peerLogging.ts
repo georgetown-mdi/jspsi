@@ -44,7 +44,7 @@ export function resolvePeerDebugLevel(
 
 /** Console-shaped sink the redacting log function writes to; injectable so a
  * unit test can capture what would reach the real console. */
-export type LogSink = Pick<Console, "log" | "warn" | "error">;
+type LogSink = Pick<Console, "log" | "warn" | "error">;
 
 const REDACTED = "[redacted-peer-id]";
 

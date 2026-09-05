@@ -37,7 +37,7 @@ import type { ExchangeSpec, LinkageField } from "@psilink/core";
  *   The linkage fields the columns cannot produce are included so the caller can
  *   name the missing field types.
  */
-export type ManagedInputRejection =
+type ManagedInputRejection =
   | {
       /** The input could not be read at run start (missing file, gone permission,
        * an absent required handle, or an unreadable/malformed file the CSV parse
