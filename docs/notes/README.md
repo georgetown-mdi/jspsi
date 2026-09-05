@@ -34,6 +34,7 @@ stands, from a direction still open to a decision taken and built.
 | [operator-message-control-characters.md](operator-message-control-characters.md) | Decided and built. |
 | [prebuild-provenance.md](prebuild-provenance.md) | Decided, built, and armed against a fork that attests. |
 | [psi-c-count-only.md](psi-c-count-only.md) | Decided and built. |
+| [rebase-reattestation.md](rebase-reattestation.md) | Decided on the maintainer's ruling and built; the fourth mechanical re-attestation path and the limits it accepts. |
 | [receipt-run-binding.md](receipt-run-binding.md) | Resolved - built. |
 | [receipt-signing-fips-boundary.md](receipt-signing-fips-boundary.md) | Decided. |
 | [record-durability-point.md](record-durability-point.md) | Resolved - built. |
