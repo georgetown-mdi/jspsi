@@ -96,7 +96,7 @@ export const CHECKS = [
   {
     script: "check:merge-gate-identities",
     description:
-      "No gating job is renamed out from under the required check that names it, and no path filter is added to a gating workflow. The branch-rule half needs a token and states a skip without one.",
+      "No gating job is renamed out from under the required check that names it, no path filter is added to a gating workflow, and every workflow declaring a required job is on the list held filter-free. The branch-rule half needs a token and states a skip without one.",
   },
   {
     script: "check:dependabot-ignore-shape",
