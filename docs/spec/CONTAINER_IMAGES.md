@@ -48,11 +48,11 @@ integrity hash (see
 
 The structural invariants are enforced by `scripts/dockerfile-freeze.test.mjs`
 (run by `npm run test:scripts`, a CI static check), over both `Dockerfile` and
-the FIPS variant's `Dockerfile.fips` alike: every install is `npm ci`, the
+the FIPS variant's `Dockerfile.fips` alike. Every install is `npm ci`, the
 lockfile and the root `.npmrc` are copied into the builder before the first
-install, the builder's last npm command empties `node_modules` and carries both
-`--omit=dev` and `--omit=optional`, the runtime stage runs no npm
-at all, every stage builds from the reviewed base digest or from another stage of
+install, the builder's last npm command empties `node_modules` and passes both
+`--omit=dev` and `--omit=optional`, and the runtime stage runs no npm
+at all. Every stage builds from the reviewed base digest or from another stage of
 the same file, each file's OS-package installs are exactly the reviewed set, and
 the copied layout keeps the workspace links and the PSI worker entry where the
 CLI resolves them.
@@ -91,7 +91,7 @@ only what the scope reaches, leaving the build's own dependencies -- `eslint`
 among them -- where the first install put them.
 
 Emptying it is not sufficient on its own. npm omits a package the lockfile flags
-`dev` and keeps one it flags `devOptional`, and `vite` carries the second flag:
+`dev` and keeps one it flags `devOptional`, and `vite` has the second flag:
 `apps/web` declares it a devDependency while `@tanstack/react-start`,
 `@tanstack/router-plugin`, `@tanstack/start-plugin-core`, `@vitest/mocker` and
 `vitefu` each declare it an optional peer. `--omit=optional` is what leaves it,
@@ -107,7 +107,7 @@ unresolvable.
 No check measures the built image's `/app/node_modules` against that scope. The
 freeze test reads the instruction, and the runtime measurements below cover the
 writable set, symlink containment and the setuid inventory rather than the
-package set, so a package the resolved tree carries and this scope does not
+package set, so a package the resolved tree holds and this scope does not
 account for reaches the image unremarked.
 
 The `node:26-alpine` base image is digest-pinned in both stages to its
@@ -124,7 +124,7 @@ literal listed once per stage: a stage re-pinned onto another digest, dropped
 back to the floating tag, or collapsed onto the other stage reddens until the
 literal moves in the same diff. The builder's `FROM` is held as tightly as the
 runtime stage's, because the npm that resolves the tree the runtime stage ships
-is the one the builder's base carries -- a property of the digest rather than of
+is the one the builder's base holds -- a property of the digest rather than of
 anything in this repository, recorded in
 [DEPENDENCY_PINS.md](DEPENDENCY_PINS.md).
 
@@ -146,7 +146,7 @@ Installing it while the image is built moves that fetch onto the machine that
 publishes the image.
 
 It floats: the instruction names no version, so a rebuild takes whatever the
-mirror carries for the pinned base's Alpine release. Measured on the base digest
+mirror holds for the pinned base's Alpine release. Measured on the base digest
 pinned here (Alpine 3.24.1): `samba-client-4.23.8-r0` and 44 dependencies, 45
 packages newly present and none removed. `apk`'s trailing `OK:` line reports the
 post-install total rather than the increment, so it reads
@@ -155,7 +155,7 @@ after, on `aarch64`; the built `arm64` image goes from 520,152,837 to
 574,778,898 bytes, an increase of 54,626,061. The same 63 packages resolve on
 `x86_64`, where the post-install total is 54.2 MiB, so the multi-arch release
 build is not left short a package. An exact version pin was rejected because
-Alpine carries exactly one version of a package per release branch, so a pin
+Alpine has exactly one version of a package per release branch, so a pin
 hard-fails the build the moment the mirror supersedes it:
 `apk add --no-cache --simulate samba-client=4.23.7-r0` on that base answers
 
@@ -187,7 +187,7 @@ operator's setup run.
 
 ## The FIPS variant image's pins
 
-`Dockerfile.fips` builds a second image on Amazon Linux 2023 carrying the
+`Dockerfile.fips` builds a second image on Amazon Linux 2023 with the
 CMVP-validated OpenSSL FIPS provider AWS publishes for that distribution. It is
 published from the same release workflow under the default image's tags with
 `-fips` appended ([RELEASES.md](../RELEASES.md#which-image-has-which-posture));
@@ -218,18 +218,18 @@ moves the install and its own check in step; `FIPS_MODULE_VERSION` appears in no
 name the runtime stage exports from it. That `ENV` is the value the entrypoint's
 per-run report names, and it is trustworthy at run time for exactly one reason:
 the assertion that compares it against the module the loader activates has
-already run in the same stage, so no green build can carry an `ENV` naming a
+already run in the same stage, so no green build can have an `ENV` naming a
 module other than the one installed. A build driven by hand
 with `--build-arg` over the install pins alone therefore installs a different
 NVR, satisfies the `rpm -qf` half, and fails on the module version the loader
-reports -- it goes red, not green. A green build carrying a different module
+reports -- it goes red, not green. A green build with a different module
 takes an override of the module version as well, which is a statement of which
 module was intended. What holds the committed defaults themselves is
 `scripts/dockerfile-freeze.test.mjs`, which pins all three as literals, and no
 CI path passes a build-arg -- `image_smoke.yaml` passes none, and the release
 workflow does not build this image.
 
-**The two tarball hashes are deliberately not `ARG`s.** Each is a literal in the
+**The two tarball hashes are not `ARG`s.** Each is a literal in the
 `RUN` that fetches the tarball, selected by the same `case` arm that selects the
 architecture's tarball name. An `ARG` is overridable at
 `docker build --build-arg`, which is the limit the paragraph above records for
@@ -255,9 +255,9 @@ published snapshots, every snapshot from the packages' first appearance (between
 both certified NVRs, from a content-addressed blobstore.
 
 The module-version pin is the one that cannot be skipped. Ten NVRs share the
-`openssl-fips-provider-latest` package name and carry ten different modules with
+`openssl-fips-provider-latest` package name and hold ten different modules with
 ten different `fips.so` hashes, exactly one of them certified, so the package
-name settles nothing:
+name determines nothing:
 
     3.2.2-1.amzn2023.0.1 -> 3.2.2-799901ad7ab41d45   <- the one certificate 5438 names
     3.2.2-1.amzn2023.0.2 -> 3.2.2-6a2d04a6952ab14a
@@ -268,7 +268,7 @@ The `-certified` name this image uses is a different package with one published
 NVR, so a `dnf update` has nothing to move it to; the assertion is what catches
 a future one that is not certified.
 
-The security policy is the other reason that pin carries the weight, because it
+The security policy is the other reason that pin does the work, because it
 names no package this image installs and does not agree with itself about the
 one it does name. Its installation and administrator-guidance sections (11.1 and
 11.2, p. 65) name `openssl-3.0.8-1.amzn2023.0.17`; its end-of-life section
@@ -283,12 +283,12 @@ value the Crypto Officer reads back, and in all six rows of Tables 2 and 3.
 **The base image digest and the snapshot pin name one release, not two.** The
 snapshot pin covers the package layer and not the base rootfs, and the two are
 coupled: a base far newer than the pinned snapshot can put that snapshot's
-packages in conflict with what the base already carries. The digest in the table
+packages in conflict with what the base already holds. The digest in the table
 above closes that. It is the multi-arch index digest, which is what a
 multi-platform build can resolve -- a platform-specific manifest digest names one
 architecture and fails on the other -- and it was resolved on 2026-08-06 with
 `docker buildx imagetools inspect amazonlinux:2023`, both of whose per-arch
-manifests carry `org.opencontainers.image.created: 2026-08-04`. The rootfs at
+manifests state `org.opencontainers.image.created: 2026-08-04`. The rootfs at
 that digest reports `PRETTY_NAME="Amazon Linux 2023.12.20260727"` on `amd64` and
 `arm64` alike, which is the release `AL2023_RELEASEVER` names, so the base and
 the packages are the same snapshot rather than two compatible ones.
@@ -311,7 +311,7 @@ default image's one:
 
 - `dnf` from the pinned Amazon Linux snapshot, for `tar`, `gzip`, `xz`,
   `findutils`, `libatomic`, `samba-client`, `openssl`, and the provider swap.
-  RPM signatures are verified against the key the base image carries.
+  RPM signatures are verified against the key the base image holds.
 - `nodejs.org`, for the official Node 26 tarball, whose bytes are checked against
   the per-architecture hash committed in the fetching `RUN` rather than against a
   checksum file fetched beside them. Amazon Linux 2023 packages nodejs20,
@@ -331,7 +331,7 @@ one that includes an init system.
 ## What certificate 5021 attests
 
 The provider pins above name CMVP certificate 5021, "Amazon Linux 2023 OpenSSL
-FIPS Provider". Its two sources are the certificate page, which carries
+FIPS Provider". Its two sources are the certificate page, which holds
 `FIPS 140-3`, `Overall Level 1`, `Status: Active`, a `5/25/2030` sunset date,
 and an initial validation on `5/26/2025` by atsec information security
 corporation; and the module's own non-proprietary security policy, document
@@ -344,14 +344,14 @@ the policy attaches to three of the algorithm rows are in
 
 ### The Caveat
 
-The certificate carries one Caveat, quoted here verbatim:
+The certificate states one Caveat, quoted here verbatim:
 
 > When operated in approved mode. No assurance of minimum security of SSPs
 > (e.g., keys, bit strings) that are externally loaded, or of SSPs established
 > with externally loaded SSPs.
 
 Provenance differs from every other row in this section. The Caveat is a field
-of the certificate detail page itself, an HTML page carrying no page numbers,
+of the certificate detail page itself, an HTML page with no page numbers,
 rather than of the 71-page security policy that sources the tables below; there
 is accordingly no page citation for it and none is fabricated.
 
@@ -376,16 +376,16 @@ tested with the processor's cryptographic acceleration on and off:
 | Amazon Linux 2023 | EC2 `c6i.metal` | Intel Xeon Platinum 8375C | No | N/A |
 | Amazon Linux 2023 | AWS Snowball | AMD EPYC 7702 | No | N/A |
 
-Every row carries module version `3.0.8-d694bfa693b76001`, the string the pin
+Every row states module version `3.0.8-d694bfa693b76001`, the string the pin
 table above holds. Table 2 (Tested Module Identification, p. 8) names the same
 three platforms with `fips.so` as the file and `HMAC-SHA-256` as its integrity
 test.
 
 **Six tested environments, and no vendor-affirmed ones.** Section 2.2 is titled
-"Tested and Vendor Affirmed Module Version and Identification" and carries only
+"Tested and Vendor Affirmed Module Version and Identification" and holds only
 the two tested tables; Table 3's caption is followed directly by section 2.3,
 Excluded Components. The second half of that heading is phrased from the table's
-contents deliberately, because an absence is all there is to phrase it from:
+contents, because an absence is all there is to phrase it from:
 this policy states no sentence denying vendor affirmation. Other certificates
 do -- 4985's policy says "No operational environments are vendor affirmed" -- so
 quoting that sentence against 5021 would be a misquotation.
@@ -424,7 +424,7 @@ column reads `SP 800-56C Rev. 2`; section 2.10 (p. 24) states the attribution
 directly -- the module's `KDA OneStep`, `KDA TwoStep` and HKDF are "compliant
 with SP 800-56Cr1 (HKDF) and SP 800-56Cr2 (KDA OneStep, KDA TwoStep)". A
 citation that names this module's HKDF therefore names Cr1 and CAVP certificate
-`A4603`, not the Cr2 row and cert `A3548` that certificate 4985 carries.
+`A4603`, not the Cr2 row and cert `A3548` that certificate 4985 holds.
 
 **Table 5 membership is not the whole answer for three of the five.** The
 policy attaches a condition to AES-GCM, to the SP 800-56Ar3 assurances behind
@@ -456,21 +456,21 @@ Table 5 (p. 10):
 | `ECDSA SigVer (FIPS186-5)` | A4612, A4618, A4629, A4630, A4631, A4632 | `Curve - P-224, P-256, P-384, P-521`; `Hash Algorithm - SHA2-224, SHA2-256, SHA2-384, SHA2-512, SHA2-512/224, SHA2-512/256` | FIPS 186-5 |
 
 A second pair of `SigGen` and `SigVer` rows, at CAVP certificates A4613 and
-A4619, carries the SHA-3 hash algorithms in place of the SHA-2 ones over the
+A4619, lists the SHA-3 hash algorithms in place of the SHA-2 ones over the
 same four curves.
 
-Table 13 (Approved Services, p. 30) carries the services above those rows:
+Table 13 (Approved Services, p. 30) lists the services above those rows:
 signature generation and signature verification with ECDSA, each with the
 approved indicator `OSSL_RH_FIPSINDICATOR_APPROVED`, beside key pair generation
 with ECDSA and public key verification with ECDSA.
 
 **The pre-hashed-message variant is a non-approved service.** Table 7 lists
 `RSA and ECDSA (pre-hashed message)` for signature generation and verification,
-and Table 14 (Non-Approved Services, p. 35) carries the two matching service
+and Table 14 (Non-Approved Services, p. 35) lists the two matching service
 rows. The module therefore separates two signature services over one approved
 algorithm, and which of them a caller reaches is decided by the indicator the
 module sets rather than by Table 5 membership. The AES-GCM condition above
-separates two services the same way, and there the call surface settles which
+separates two services the same way, and there the call surface determines which
 one is reached: every `crypto.subtle` AES-GCM call supplies an external IV
 ([fips-variant-image.md](../notes/fips-variant-image.md)).
 
@@ -478,7 +478,7 @@ one is reached: every `crypto.subtle` AES-GCM call supplies an external IV
 
 Three properties are settled by running the image `image_smoke.yaml` just
 built, not by reading the Dockerfile that produced it: which trees the
-container can write, which files carry a setuid or setgid bit, and where every
+container can write, which files have a setuid or setgid bit, and where every
 symlink under `/app` resolves. All three are outcomes rather than
 instructions -- each is decided by base-image state and by the file modes and
 targets an OS package arrives with as much as by anything this repository
@@ -492,17 +492,17 @@ Either image's container writes `/work` and
 `/run/psilink/sftp-credentials`, and no path under `/app`. The measurement
 creates a file in each of the two writable directories under the account the
 image runs as and requires the same write under `/app` to be refused; a write is
-what settles it, because a mode that reads as writable over a layer that refuses
+what determines it, because a mode that is treated as writable over a layer that refuses
 the write is the case a `stat` cannot tell apart.
 
 Refusing the write into `/app` is only half the claim, since a file the account
 can rewrite in place needs no writable directory around it. The other half is a
-walk of `/app` for any path owned by that account, owned by any group the account
-carries, or other-writable; the expected set is empty. The walk runs as uid 0, so
-no directory mode can hide a path from it -- ownership and mode read the same
-whoever asks.
+walk of `/app` for any path owned by that account, owned by any group the
+account belongs to, or other-writable; the expected set is empty. The walk runs
+as uid 0, so no directory mode can hide a path from it -- ownership and mode
+read the same whoever asks.
 
-Symlinks are outside that walk. Linux carries no `chmod` for one, so a symlink's
+Symlinks are outside that walk. Linux has no `chmod` for one, so a symlink's
 own mode is always 0777 and an other-writable test matches every link in the
 image while none of them is rewritable through that mode. What re-points a link
 is write permission on the directory holding it, which the walk already reaches
@@ -510,7 +510,7 @@ through the directory itself.
 
 Both halves run on both images. They differ in where the account comes from --
 the default image inherits `node` from `node:26-alpine`, the variant creates it
-at the same uid and gid, Amazon Linux 2023 carrying no such account -- and in
+at the same uid and gid, Amazon Linux 2023 having no such account -- and in
 nothing this measurement reads.
 
 ### The symlink containment
@@ -529,7 +529,7 @@ but falls outside `/app`), or dangling (the target does not resolve to a path
 that exists at all).
 
 The resolution runs `readlink -f` on each link and then checks the result with
-`[ -e ]` rather than trusting it alone -- the guard is what actually settles
+`[ -e ]` rather than trusting it alone -- the guard is what actually determines
 the classification. The step never changes directory, so every command runs at
 the image's `WORKDIR`, `/work`, which is empty in the ephemeral container the
 step runs in; a target that does not resolve to a real path therefore fails
@@ -560,7 +560,7 @@ difference in either direction.
 | `Dockerfile.fips` | empty -- no setuid or setgid file |
 
 Both inventories are empty because each runtime stage takes off every bit its
-own OS install brings in, and neither stage's base carries another. Both images
+own OS install brings in, and neither stage's base has another. Both images
 declare `USER node`, so a bit left in place would be a boundary an unprivileged
 process could push against rather than a formality, and neither role
 authenticates a Unix account or mounts a filesystem.
@@ -570,11 +570,11 @@ The default image strips one file. `samba-client` pulls in `linux-pam`, whose
 stage removes it.
 
 The variant strips ten, its Amazon Linux 2023 base and the `samba-client`
-closure recorded above carrying between them eight setuid root -- account, mount
+closure recorded above with between them eight setuid root -- account, mount
 and PAM helpers -- plus `write` setgid `tty` and `utempter` setgid `utmp`. That
-closure is materially larger than Alpine's, bringing `systemd`, `pam`,
+closure is larger than Alpine's, bringing `systemd`, `pam`,
 `cryptsetup-libs`, `device-mapper` and `util-linux` with it. The ten paths are
-named as literals in one `chmod u-s,g-s`, so a path the closure stops carrying
+named as literals in one `chmod u-s,g-s`, so a path the closure stops holding
 fails the build rather than passing unnoticed, and one it gains reddens this
 measurement. Per-file detail on what each was for is in
 [the FIPS variant's setuid and setgid files](#the-fips-variants-setuid-and-setgid-files).
@@ -602,11 +602,11 @@ contract between two things nothing else in the repository connects, so
 `image_smoke.yaml` exercises it on both sides of publication.
 
 **The set is derived, not listed.** `scripts/derive-image-dependencies.mjs`
-reads it out of the scripts: an argument vector is a run of literal tokens
+reads it out of the scripts. An argument vector is a run of literal tokens
 beginning with a word the image's own dispatchers answer to -- the words
 `docker-entrypoint.sh` routes on, and the commands `apps/cli/src/cliParser.ts`
 registers -- on a line that also names the image or an argument-vector
-parameter; a helper script is one `cmd_Setup-PsilinkFileDrop.cmd` redirects into
+parameter. A helper script is one `cmd_Setup-PsilinkFileDrop.cmd` redirects into
 a shell in the image, with the environment and mounts that call site gives it. A
 call site added to a script changes the derived set, and a derived dependency
 with nothing to exercise it fails `npm run check:image-capabilities`, which
@@ -616,16 +616,17 @@ with nothing to exercise it fails `npm run check:image-capabilities`, which
 runs the argument vector and reads back the machine-readable verdict, and pipes
 each helper script in as the `.cmd` pipes it -- so a helper's in-image tools are
 resolved by the run and are enumerated nowhere. Two fixtures decide whether a red
-result is about the image at all, and the script sets up both: a rendezvous
-directory the account the image runs as can write, because a fresh named volume
-belongs to root and the default image runs as uid 1000, and a stub peer that
-accepts and drops each connection on port 445, because both probe paths stop at
-their reachability check when nothing answers and leave `smbclient` unreached.
+result is about the image at all, and the script sets up both. The first is a
+rendezvous directory the account the image runs as can write, because a fresh
+named volume belongs to root and the default image runs as uid 1000. The second
+is a stub peer that accepts and drops each connection on port 445, because both
+probe paths stop at their reachability check when nothing answers and leave
+`smbclient` unreached.
 
 **What a run may claim is bounded by what it treats as evidence.** A doctor
-battery that refuses its input exits 64 having run no check, and an image whose
-CLI carries no `doctor` command answers the same way, so 64 proves nothing; 69 is
-a dependency the battery could not reach and fails the gate. The evidence is the
+run that refuses its input exits 64 having run no check, and an image whose
+CLI has no `doctor` command answers the same way, so 64 proves nothing; 69 is
+a dependency the run could not reach and fails the gate. The evidence is the
 verdict document, whose `version` must be the one the shipped launchers read and
 stop past.
 
@@ -636,7 +637,7 @@ therefore locked to the commit they were built from, and it catches a support
 script that outran the source tree in the same pull request. It is the wrong
 subject for `Setup-PsilinkFileDrop.ps1`, which is fetched on its own and runs the
 floating tag, so a second leg runs against `vdorie/psi-link:latest` on the weekly
-schedule and on demand. That leg is deliberately not a merge gate: the commonest
+schedule and on demand. That leg is not a merge gate: the commonest
 reading of a gap there is that the capability is on the default branch and no
 release has been cut since, whose remedy is a release rather than a held merge.
 Both legs print the digest the reference resolved to rather than the reference
@@ -658,16 +659,17 @@ Invocation is not the only cost: these libraries sit in the image that runs
 every exchange, so an advisory against any of them applies to that image whether
 or not an exchange reaches the code, and none of them is in the release SBOM
 either. Measured on the pinned base at
-`aarch64` (`apk list -I` before and after), they are the samba client libraries
-and their record stores (`samba-client-libs`, `samba-common`, `samba-libs`,
-`samba-util-libs`, `libsmbclient`, `libwbclient`, `libauth-samba`, `ldb`,
-`talloc`, `tdb-libs`, `tevent`, `lmdb`, `gdbm`), an authentication and directory
-stack (`linux-pam`, `libldap`, `libsasl`, `utmps-libs`, `skalibs-libs`), a
-TLS/crypto stack (`gnutls`, `nettle`, `gmp`, `libtasn1`, `p11-kit`, `libffi`),
-compression and archive libraries (`libarchive`, `xz-libs`, `zstd-libs`,
-`lz4-libs`, `libbz2`, `brotli-libs`), and a tail of support libraries
-(`readline`, the `ncurses` set, `popt`, `icu-libs`, `icu-data-en`, `libexpat`,
-`jansson`, `libidn2`, `libunistring`, `acl-libs`, `libcap2`). No `smbd`, `nmbd`
+`aarch64` (`apk list -I` before and after), they fall into five groups. The
+samba client libraries and their record stores are `samba-client-libs`,
+`samba-common`, `samba-libs`, `samba-util-libs`, `libsmbclient`, `libwbclient`,
+`libauth-samba`, `ldb`, `talloc`, `tdb-libs`, `tevent`, `lmdb`, and `gdbm`. The
+authentication and directory stack is `linux-pam`, `libldap`, `libsasl`,
+`utmps-libs`, and `skalibs-libs`. The TLS/crypto stack is `gnutls`, `nettle`,
+`gmp`, `libtasn1`, `p11-kit`, and `libffi`. The compression and archive
+libraries are `libarchive`, `xz-libs`, `zstd-libs`, `lz4-libs`, `libbz2`, and
+`brotli-libs`. The tail of support libraries is `readline`, the `ncurses` set,
+`popt`, `icu-libs`, `icu-data-en`, `libexpat`, `jansson`, `libidn2`,
+`libunistring`, `acl-libs`, and `libcap2`. No `smbd`, `nmbd`
 or `winbindd` is installed, so nothing added listens.
 
 `linux-pam` is where the setgid bit the runtime stage strips comes from. Measured
@@ -709,7 +711,7 @@ The ten files the variant's runtime stage strips, with the bits and modes they
 arrive with, as `image_smoke.yaml` measured them on a build at the base digest
 pinned above before the stripping instruction existed (run 31235317792,
 `amd64`). This is the evidence behind that instruction's literal path list, and
-the record of what an unstripped build of this closure carries:
+the record of what an unstripped build of this closure holds:
 
     -rwsr-xr-x 1 root root 74360 Nov 20  2023 /usr/bin/chage
     -rwsr-xr-x 1 root root 78680 Nov 20  2023 /usr/bin/gpasswd
@@ -726,10 +728,10 @@ Eight are setuid root: the account helpers `chage`, `gpasswd`, `newgrp` and
 `su`, the mount helpers `mount` and `umount`, and the PAM helpers
 `pam_timestamp_check` and `unix_chkpwd`. Two are setgid: `write` to `tty` and
 `utempter` to `utmp`. The measurement reads the built image and does not
-separate what the base rootfs carries from what the package closure adds; no row
+separate what the base rootfs holds from what the package closure adds; no row
 above turns on that split.
 
-Two of these names also appear in the default image's closure, carrying a
+Two of these names also appear in the default image's closure, with a
 different bit there: `unix_chkpwd` lands setgid `shadow` on Alpine, while here it
 is setuid root; and `pam_timestamp_check`, which Alpine's install leaves with
 neither bit, is setuid root here. The same package name on two distributions is
@@ -750,12 +752,12 @@ size run above what `Dockerfile.fips` produces. Nothing has been measured on
 | --- | --- | --- |
 | Image size | 575,506,781 bytes (576 MB) | 1,055,721,059 bytes (1056 MB) |
 | OS packages | 63 | 167 |
-| Packages carrying a GPL-3.0 or LGPL-3.0 term | the 6 samba ones | 39 |
+| Packages with a GPL-3.0 or LGPL-3.0 term | the 6 samba ones | 39 |
 
 Where the 480 MB goes: the two base rootfs are almost the same weight
 (`amazonlinux:2023` 183 MB, `node:26-alpine` 178 MB), but Amazon Linux bundles
-no Node, so the 222 MB tarball is additive, and its dependency closures are
-fatter -- glibc/libgcc/libstdc++ 67 MB, `python3` (in the base image, for `dnf`)
+no Node, so the 222 MB tarball is additive. Its dependency closures are fatter
+too -- glibc/libgcc/libstdc++ 67 MB, `python3` (in the base image, for `dnf`)
 55 MB, the samba client stack 44 MB, `systemd` (a `samba-client` dependency)
 31 MB, `dnf`/`rpm`/`libsolv`/`librepo` 11 MB. The certified `fips.so` itself is
 1.2 MB.
@@ -763,18 +765,18 @@ fatter -- glibc/libgcc/libstdc++ 67 MB, `python3` (in the base image, for `dnf`)
 **The licence consequence is wider than the default image's, and is open.** The
 GPL-3.0/LGPL-3.0 term the table above records against the Alpine image's samba
 packages reappears here on `samba-client`, `samba-client-libs`, `samba-common`,
-`samba-common-libs`, `libsmbclient` and `libwbclient`, and is joined by a GPLv3
+`samba-common-libs`, `libsmbclient` and `libwbclient`. It is joined by a GPLv3
 base userland Alpine's busybox and musl do not have: `bash`, `coreutils-single`,
 `diffutils`, `findutils`, `gawk`, `grep`, `gzip`, `sed`, `tar`, `readline`,
 `gdbm-libs`, `gnupg2-minimal`, `gnutls`, `libtasn1`, `libassuan`, plus the
 LGPL-3.0 samba record stores (`libtalloc`, `libtdb`, `libtevent`, `libldb`).
-Four more carry an unconditional v3 term from elsewhere in the closure:
+Four more have an unconditional v3 term from elsewhere in the closure:
 `binutils`, `elfutils-debuginfod-client`, `libidn2` and `mpfr`. `libgcc`,
-`libstdc++`, `libatomic` and `libgomp` carry
-"GPL-3.0-or-later WITH GCC-exception-3.1", the runtime exception, which is the
+`libstdc++`, `libatomic` and `libgomp` have
+"GPL-3.0-or-later with GCC-exception-3.1", the runtime exception, which is the
 normal case for a linked C++ runtime. The remaining six of the 39 --
 `elfutils-libelf`, `elfutils-libs`, `elfutils-default-yama-scope`, `gmp`,
 `libunistring` and `nettle` -- offer a GPLv2-or-later arm beside the LGPLv3 one,
-so they carry a v3 term only under the arm taken. Whether that breadth changes
+so they have a v3 term only under the arm taken. Whether that breadth changes
 this project's distribution posture is a licensing call rather than a
 measurement, and it is not settled here.

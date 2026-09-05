@@ -40,17 +40,17 @@ A standardized value is the byte string hashed into the PSI set element (see
 record only when their pipelines agree byte for byte: a single differing step
 yields different keys, and the pair matches nothing on that key. Nothing
 reports this. A missed match is indistinguishable from an absent record, so a
-divergence surfaces as a quietly smaller intersection rather than an error.
+divergence shows as a quietly smaller intersection rather than an error.
 
 Three consequences follow, and they are what make these pipelines a protocol
 surface rather than a local formatting choice.
 
 - **A change to any step sequence in this document is wire-affecting.** Both
-  parties must run releases carrying the same sequence. Changing one is a
+  parties must run releases with the same sequence. Changing one is a
   breaking protocol change even though no wire format moves.
 - **Nothing in the handshake detects a divergence.** The two parties exchange
   and hash their linkage terms (the agreed-terms hash covers those, and the
-  terms carry a field's `type` and `constraints`, not its cleaning); each
+  terms state a field's `type` and `constraints`, not its cleaning); each
   party's standardization -- authored or reconstructed -- stays local and is
   neither sent nor committed to. Agreement on the pipelines comes from both
   sides running the same specification, not from a check at run time.
@@ -63,7 +63,7 @@ surface rather than a local formatting choice.
 
 ## When the defaults apply
 
-The defaults are reconstructed when an exchange specification carries no
+The defaults are reconstructed when an exchange specification has no
 `standardization` block. An authored block is authoritative and replaces them
 entirely: there is no per-field merge, no default step is appended to an
 authored pipeline, and a linkage field the block leaves uncovered falls back to
@@ -78,7 +78,7 @@ terms declare the fields:
   transformation, the first `role: linkage` column whose semantic `type` equals
   the field's type (see
   [Linkage participation](PROTOCOL.md#linkage-participation-the-role-axis)). A
-  field that binds to no column yields no transformation and is surfaced as
+  field that binds to no column yields no transformation and is reported as
   unsatisfiable before the exchange runs.
 - The field's **steps** are the pipeline this document lists for the field's
   semantic type. Every type a linkage field may declare has one, so the
@@ -103,7 +103,7 @@ exactly.
 
 The worked examples give the standardized result for a raw cell value. Both
 columns are JSON scalars, so whitespace is visible and `null` is the no-value
-result -- the record carries no value for this field and is dropped from every
+result -- the record has no value for this field and is dropped from every
 linkage key referencing it.
 
 ### `ssn`
@@ -137,7 +137,7 @@ zero-padded to nine for an SSN stored without its leading zero, and anything
 that is not nine digits after padding -- ten digits, say -- is dropped. Three
 placeholder values are then dropped.
 
-The empty-value drop precedes `pad_left` deliberately: without it a blank cell
+The empty-value drop precedes `pad_left` by design: without it a blank cell
 would pad to `"000000000"` and be dropped only as a side effect of that value
 appearing in the placeholder list, so an operator who tuned the list for their
 own data would silently reintroduce the blank-cell match.
@@ -223,7 +223,7 @@ honorifics and generational suffixes removed, matching the
 `allowed_characters: "A-Z "` and `affixes_allowed: false` constraints the
 default name fields declare.
 
-Order carries the meaning here:
+Order determines the meaning here:
 
 - `remove_accents` runs **before** `remove_non_ascii` so an accented letter
   folds to its base letter rather than being deleted -- e-acute becomes `E`,
@@ -233,7 +233,7 @@ Order carries the meaning here:
   hyphen, apostrophe, ampersand, slash, or underscore becomes a token boundary
   instead of vanishing: `"O'Brien"` becomes `"O BRIEN"`, not `"OBRIEN"`. Both
   parties must therefore tokenize identically for a hyphenated name to match.
-- The closing `filter_regex` drops a value carrying no letter at all, which is
+- The closing `filter_regex` drops a value containing no letter at all, which is
   what removes a cell that cleaned to empty or to punctuation alone.
 
 Digits are not punctuation and are not removed: a value containing one keeps
@@ -443,7 +443,7 @@ standardizes to the same value as the five-digit form.
 
 ## Type inference from column names
 
-When an exchange specification carries no `metadata` block, each input column's
+When an exchange specification has no `metadata` block, each input column's
 semantic type, role, and payload default are inferred from its name. The lookup
 is on the whole column name lowercased -- an exact match against the table
 below, never a substring or prefix test -- so `zip` infers but `zip_area` does
@@ -473,15 +473,15 @@ Two rules sit outside the table:
   `is_payload: true`.
 
 A second pass then decides which column indexes this party's own records: a
-header carrying exactly one `identifier`-typed column promotes that column to
-`role: identifier` whatever its name, and a header carrying several leaves the
+header with exactly one `identifier`-typed column promotes that column to
+`role: identifier` whatever its name, and a header with several leaves the
 promotion to a column literally named `id` or `identifier` if one is present,
 and to no column at all otherwise. The operator-facing consequences of that --
-notably that an inferred identifier column is transmitted -- are in
+that an inferred identifier column is transmitted -- are in
 [Input metadata](../EXCHANGE_REFERENCE.md#input-metadata).
 
-Two properties of these assignments are load-bearing for matching. Every
-inferred linkage type carries `is_payload: false`, so a column inferred into
+Two properties of these assignments are critical for matching. Every
+inferred linkage type has `is_payload: false`, so a column inferred into
 matching is not also disclosed to the partner unless the operator says so; and
 matching participation still requires `role: linkage`, so a column inferred
 `identifier` or `payload` never reaches a key however its type reads (see

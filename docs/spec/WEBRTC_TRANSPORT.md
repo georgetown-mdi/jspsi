@@ -15,7 +15,7 @@ broker client and the framing (`apps/cli/src/connection/webrtc/`). None of it is
 psilink's own protocol to define -- it is PeerJS 1.5.5's, measured on the wire
 and recorded here because a second implementation has to match it exactly. The
 library choice and the alternatives weighed are in
-[cli-webrtc-stack.md](../notes/cli-webrtc-stack.md); the internal premises that
+[cli-webrtc-stack.md](../notes/cli-webrtc-stack.md); the internal assumptions that
 pin the libraries are in [DEPENDENCY_PINS.md](DEPENDENCY_PINS.md).
 
 It does not cover the rendezvous peer-id derivation (see
@@ -82,14 +82,14 @@ page it was served over and the CLI has no page for:
 
 Those defaults are one implementation's, not the wire's: a browser peer resolves
 an absent `path` to the web app's own broker mount (`/api/`) rather than to `/`.
-An invitation endpoint therefore carries the mount point resolved -- `psilink
+An invitation endpoint therefore holds the mount point resolved -- `psilink
 invite` records the path it will itself dial, `/` included, even where the
 `ws:`/`wss:` URL wrote none -- so a locator crossing between the two
 applications leaves no field for the consumer to fill in the mount point from a
 default the producer does not share.
 
 The port, and with it the scheme, is not resolved the same way: the endpoint
-carries `port` only when the connection names one, and an omitted port stays
+includes `port` only when the connection names one, and an omitted port stays
 omitted on the wire rather than being filled from the producer's own default.
 The consumer resolves it from its own side instead -- a browser acceptor fills
 an absent port from the page's own protocol, and PeerJS infers `secure` from
@@ -104,27 +104,27 @@ The address is built through the URL API, with `path` assigned as a pathname
 rather than concatenated, so the scheme's default port is left implicit in it.
 `host` and `path` are refused for shape before anything is dialed, because both
 are partner-supplied when the connection came from an invitation endpoint and
-each can otherwise carry the delimiters that move a URL's authority:
+each can otherwise contain the delimiters that move a URL's authority:
 
 | Field | Refused |
 | ----- | ------- |
 | `host` | any of `@ / ? # \` or whitespace, and any value that does not parse as a bare authority (one contributing userinfo, a port, or a path of its own) |
-| `path` | a value not beginning with `/`, or carrying any of `@ ? # \` or whitespace |
+| `path` | a value not beginning with `/`, or containing any of `@ ? # \` or whitespace |
 
 `key` takes no equivalent rule: an invitation endpoint is a strict
-`host`/`port`/`path` allowlist and carries none, and the value is encoded as a
+`host`/`port`/`path` allowlist and has none, and the value is encoded as a
 query parameter rather than interpolated. The finished address is checked
 against the configured host once more before the socket is constructed, so an
 address naming another authority opens nothing.
 
 The server stamps `src` itself from the connecting client's id, so an outbound
-frame carries only `type`, `payload`, and `dst`. Heartbeats (`HEARTBEAT`, no
+frame contains only `type`, `payload`, and `dst`. Heartbeats (`HEARTBEAT`, no
 payload) go up every 5 s. The broker neither queues nor reports an undeliverable
 `OFFER` for a peer that has not registered yet, so the dialer re-offers on a
 timer until it is answered rather than waiting for a signal that never comes.
 
 Message types acted on: `OPEN`, `OFFER`, `ANSWER`, `CANDIDATE`, `LEAVE`,
-`EXPIRE`, `ERROR`, `ID-TAKEN`, `INVALID-KEY`. Two of them carry operator
+`EXPIRE`, `ERROR`, `ID-TAKEN`, `INVALID-KEY`. Two of them hold operator
 meaning: `ID-TAKEN` is the symmetric-role misconfiguration (both parties set the
 same `role`), and an `ERROR` whose payload names an invalid key is the wrong
 `server.key`.
@@ -133,7 +133,7 @@ same `role`), and an `ERROR` whose payload names an invalid key is the wrong
 
 - **`OFFER`** payload: the SDP under `sdp`, a `type` of `data`, a
   `connectionId`, and the DataConnection's `metadata`, `label`, `reliable`, and
-  `serialization`. `serialization` is load-bearing rather than a preference: the
+  `serialization`. `serialization` is critical rather than a preference: the
   receiving PeerJS peer selects its DataConnection subclass from it, so a
   mismatch is a protocol break. It is `binary` (BinaryPack).
 - **`ANSWER`** payload: `sdp`, `type`, and `connectionId` only -- no `label`,
@@ -158,7 +158,7 @@ PeerJS's chunking is a convention inside BinaryPack messages, not a protocol of
 its own. Each datagram is a BinaryPack-packed object; a truthy `__peerData`
 marks it as either a chunk envelope or the close sentinel.
 
-- A chunk envelope carries the message id (`__peerData`, starting at 1 and
+- A chunk envelope holds the message id (`__peerData`, starting at 1 and
   incrementing per logical message), the chunk index, the chunk bytes, and the
   total chunk count. Chunks accumulate by id until the count matches the total.
 - The chunking threshold is 16300 bytes, well under the SCTP ceiling.
@@ -184,7 +184,7 @@ that have not left. Both implementations therefore wait, each on the strongest
 signal its stack exposes, and the wait is the delivery guarantee rather than
 hygiene.
 
-**The web app** waits for the PEER to close the data channel. The peer does that
+**The web app** waits for the peer to close the data channel. The peer does that
 on reading the sentinel, and the ordered channel places the sentinel behind
 every frame already handed to `send`, so the local channel's `close` event is
 the peer's receipt of the final frame. That event is the peer's and not this
@@ -197,14 +197,14 @@ better with.
 **The CLI** cannot leave the connection standing, so it drains to
 acknowledgement and then tears down:
 
-1. Wait until the peer has ACKNOWLEDGED every byte already handed to the
+1. Wait until the peer has acknowledged every byte already handed to the
    channel, then
-2. send the sentinel, wait until it has been TRANSMITTED (not acknowledged -- a
+2. send the sentinel, wait until it has been transmitted (not acknowledged -- a
    peer closes on reading it and stops acknowledging at exactly that point), and
    only then tear down.
 
 The condition in step 1 is the SCTP association's send and unacknowledged queues
-both being empty. It is deliberately not the channel's `bufferedAmount`: that
+both being empty. It is not the channel's `bufferedAmount`: that
 counter reaches zero while chunks are still unacknowledged, and a close gated on
 it loses them -- measured at roughly one frame in three over a loopback channel
 with no packet loss at all. This is the acknowledgement the flushing-close half
@@ -231,15 +231,15 @@ peer's in-band close sentinel, in the same call, before the channel's `closing`
 fires. Both parties closing a healthy exchange therefore each reach `closing` on
 a link of their own closing, which is the signature of a teardown on the one
 ending that lost nothing -- measured on a real pair in Chromium. What separates
-the two is whether the end was PeerJS's own doing: PeerJS clears `open` whenever
+the two is whether the end was PeerJS's own doing. PeerJS clears `open` whenever
 it itself ends the connection -- reading the peer's close sentinel, this side's
-own close call, or its own cleanup on a signaling LEAVE naming this peer, an
+own close call, or its own cleanup on a signaling leave naming this peer, an
 inbound OFFER echoing the live connection, ICE reaching failed or closed, or a
-send error -- so a cleared flag at `closing` means a PeerJS-mediated end and
-reads as the peer's close, exactly as every close read before this
-discrimination existed; only an end that bypasses PeerJS -- this side's raw
+send error. So a cleared flag at `closing` means a PeerJS-mediated end and
+is treated as the peer's close, exactly as every close read before this
+discrimination existed. Only an end that bypasses PeerJS -- this side's raw
 peer-connection teardown -- reports the loss. A partner who ends the link
-through signaling (a relayed LEAVE) mid-drain therefore also reads as the
+through signaling (a relayed leave) mid-drain is therefore also treated as the
 receipt, the same behavior staging had before this discrimination existed; the
 close remains no proof of delivery. So the no-live-peer exit is taken for a
 channel that starts closing on a link already gone with no peer close in hand; a
@@ -249,8 +249,8 @@ A completed `close` arriving with no `closing` before it is still read as the
 peer's, because a link state read after a close has completed no longer says
 whether the link died before the close or in answer to it, and a doubt invented
 about a healthy exchange is the worse error. The reading is therefore inert on a
-stack that never fires `closing`: every close reads as the peer's there, the
-pre-reading behavior -- the stated limit of this discrimination. The
+stack that never fires `closing`: every close is treated as the peer's there,
+the pre-reading behavior -- the stated limit of this discrimination. The
 healthy-exchange reading also assumes the engine dispatches the channel's
 `closing` as a queued task after the synchronous close call, as spec-conforming
 engines do and as Chromium, the one engine the browser suite drives, measures;
@@ -258,13 +258,13 @@ an engine dispatching it synchronously inside the peer connection's close would
 report a spurious loss on every healthy exchange there.
 
 The web wait also ends when the run itself is cancelled. Up to the ceiling the
-wait's length is the PEER's to choose -- it holds the wait simply by keeping ICE
+wait's length is the peer's to choose -- it holds the wait simply by keeping ICE
 alive and never reading the sentinel -- so an operator who cancels does not spend
 it. Nor does the drain gate what the run already has: the web app reports its
 result and its downloads first and drains afterwards, so a peer that never reads
 the sentinel delays neither.
 
-Exactly one exit of the web wait carries a delivery signal: the peer's own close.
+Exactly one exit of the web wait gives a delivery signal: the peer's own close.
 Every other exit leaves the partner's copy in doubt on a run whose result this
 side has already reported, so the web app raises a non-fatal warning on each of
 them. The run's result stands either way; what the operator is told is that the
@@ -288,7 +288,7 @@ told the operator something stronger already.
 
 A close signal is not proof the partner's application read what was behind it: a
 peer that closes without draining its inbound queue is indistinguishable from one
-that read everything, and the PARTNER's peer connection torn down by their page
+that read everything. The partner's peer connection torn down by their page
 rather than by reading the sentinel resets its stream gracefully -- measured in
 Chromium, and pinned in `apps/web/test/browser/webrtcCloseDelivery.test.ts` -- so
 that teardown arrives here as the same close. The state of the link, read
@@ -302,17 +302,17 @@ operator cut.
 
 What no close can cover is a sender whose stack goes away before its bytes do:
 tearing the peer connection down as the close returns delivered nothing at all
--- measured at zero frames of two received, four rounds out of four -- and a
-browser tab closed the instant the results appear does the same thing to a frame
-still buffered. Waiting narrows that window to the delivery itself rather than
+-- measured at zero frames of two received, four rounds out of four. A browser
+tab closed the instant the results appear does the same thing to a frame still
+buffered. Waiting narrows that window to the delivery itself rather than
 leaving it open for the length of the transfer, and a teardown that lands inside
 it while this page keeps running is reported as the loss it is rather than as a
 delivery.
 
 ## ICE
 
-A configured `iceServers` list REPLACES the built-in STUN default rather than
-adding to it, which is what makes a deliberately configured server list the list
+A configured `iceServers` list replaces the built-in STUN default rather than
+adding to it, which is what makes a configured server list the list
 actually used. An empty or absent list means "use the default"; it does not mean
 "no STUN". The consequences for an operator -- the default that applies when
 nothing is configured, what it discloses, and the unreachable-entry idiom for
@@ -331,7 +331,7 @@ options could otherwise move where this side connects.
 
 ## Application-layer encryption
 
-The `webrtc` channel carries `request_encryption: false`: a data channel is
+The `webrtc` channel states `request_encryption: false`: a data channel is
 end-to-end confidential under DTLS against the signaling server and any relay,
 so the application-layer AEAD wraps nothing the transport has not already
 protected, and the web peer refuses a partner that requests it. The rationale
@@ -356,7 +356,7 @@ condition holds.
 `connection.options.peer_timeout_ms`, when set, replaces the rendezvous,
 channel-open, and parked-receive budgets: on this channel the documented "total
 wait for the partner" is three waits, one before the channel exists, one while
-it opens, and one after. It is the only knob an operator has on any of them.
+it opens, and one after. It is the only setting an operator has on any of them.
 
 An interrupt (SIGINT or SIGTERM) does not wait any of them out. The run passes
 the transport an abort signal, and the rendezvous fails and tears down the
@@ -365,7 +365,7 @@ waiting for its partner exits at once rather than at the end of the rendezvous
 budget.
 
 A configured relay adds one wait that is not a ceiling and does not end early.
-werift keeps a TURN allocation alive by re-sending REFRESH on a timer armed from
+werift keeps a TURN allocation alive by re-sending refresh on a timer armed from
 the lifetime the relay granted, and tearing the peer connection down leaves a
 timer that is already waiting armed; a waiting timer holds the process. So a run
 that allocated against a relay returns five sixths of the granted lifetime after
@@ -377,7 +377,7 @@ and in a container the container, which is what a scheduled recurring run has to
 allow for. Nothing werift exposes releases the timer, so the wait is a stated
 limit rather than a budget this transport sets; the measurement, and the release
 paths that were driven against it, are in
-[DEPENDENCY_PINS.md](DEPENDENCY_PINS.md#the-behavioural-premises).
+[DEPENDENCY_PINS.md](DEPENDENCY_PINS.md#the-behavioural-assumptions).
 
 Two bounds are memory rather than time, both on inbound signaling: a signaling
 frame is refused above 256 KiB before it is parsed, and at most 128 remote
@@ -392,6 +392,6 @@ candidates are held while this side's description is not yet applied.
 - [COMMUNICATION.md](../COMMUNICATION.md#message-delivery-and-teardown) - the
   delivery contract every channel owes.
 - [DEPENDENCY_PINS.md](DEPENDENCY_PINS.md) - why `peerjs` and `werift` are
-  exact-pinned, the behavioural premises they rest on, and how to re-verify them.
+  exact-pinned, the behavioural assumptions they rest on, and how to re-verify them.
 - [cli-webrtc-stack.md](../notes/cli-webrtc-stack.md) - the library decision and
   the alternatives weighed.

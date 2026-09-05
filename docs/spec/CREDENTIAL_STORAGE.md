@@ -12,19 +12,19 @@ writable-and-readable-parent pre-flight, and the Windows ACL-narrowing and
 load-check internals. It is the implementation-level complement to the
 **Key file security** overview in
 [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#key-file-security), which says what
-these files protect and carries the operator-facing required permissions,
+these files protect and states the operator-facing required permissions,
 warnings, and remediation commands; this document covers how each write is
 constructed. The same construction governs every owner-only artifact written in
-one shot -- the key file (`.psilink.key`), the signing identity, the
+one shot: the key file (`.psilink.key`), the signing identity, the
 self-attested exchange record and the private verification-keys file beside it
 (see [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md)), the dual-signed receipt, the
-operator config `psilink.yaml`, and the credentials file that carries the
-operator's SMB password to `smbclient` for `doctor probe` -- so it is specified
-once here and referenced from each. Two owner-only artifacts are written on the
+operator config `psilink.yaml`, and the credentials file that holds the
+operator's SMB password to `smbclient` for `doctor probe`. It is therefore
+specified once here and referenced from each. Two owner-only artifacts are written on the
 same principle without taking that construction, and each is specified where it
 diverges: the result CSV, streamed to its destination rather than renamed onto
 it ([Result CSV output](#result-csv-output)), and the `--log-file` descriptor,
-opened in append mode and carrying the extended-ACL strip at that open
+opened in append mode and given the extended-ACL strip at that open
 ([macOS extended-ACL strip](#macos-extended-acl-strip)). This document does not
 cover what the files contain or the threat model (see
 [SECURITY_DESIGN.md](../SECURITY_DESIGN.md)). Intended readers are security
@@ -54,7 +54,7 @@ permissioned file at the destination path.
 Durability across a power loss is a separate property, and it is the platform's
 rather than POSIX's. The temp file's data is `fsync`'d before the rename and the
 parent directory is `fsync`'d after it, so on Linux -- the CLI's production
-target (the Docker image) -- a crash cannot surface the rename while losing the
+target (the Docker image) -- a crash cannot expose the rename while losing the
 file's contents. Because each write flushes its own directory entry before
 returning, two sequential writes are crash-ordered there: if the second's rename
 is durable, the first's is too. That is the guarantee the self-attested exchange
@@ -65,7 +65,7 @@ rotated token from being lost.
 
 Neither half of it is POSIX-grounded. `fsync()` belongs to the File
 Synchronization option, the nature of the transfer it requests is
-implementation-defined, and its RATIONALE states that a null implementation is
+implementation-defined, and its rationale states that a null implementation is
 explicitly intended to be permitted; in the middle ground between the extremes
 it describes, `fsync()` "might or might not actually cause data to be written
 where it is safe from a power failure". What an `fsync()` on a directory
@@ -83,7 +83,7 @@ drive to commit its volatile cache to stable media and does not stop the drive
 reordering writes; databases such as SQLite and Postgres use `F_FULLFSYNC` on
 macOS precisely for that stronger guarantee. So on macOS the crash-ordering
 above holds against process death but not necessarily a true power loss -- a
-power loss may surface a later write while losing an earlier one -- which is
+power loss may show a later write while losing an earlier one -- which is
 recoverable by re-running. Linux, the CLI's production target (the Docker
 image), flushes durably with `fsync`, so the guarantee holds there in full.
 
@@ -95,7 +95,7 @@ On Unix the owner-only guarantee is enforced through the POSIX mode bits
 governed separately from the mode bits, so an ACL entry a file inherits from its
 parent directory's inheritable ACEs grants another principal access that a
 `0600` mode does not remove. Every owner-only artifact written into such a
-directory would otherwise carry it, since each lands either in place or on a
+directory would otherwise hold it, since each lands either in place or on a
 fresh inode that still inherits the directory's ACEs.
 
 Each writer therefore clears the file's extended ACL at the point where it
@@ -136,7 +136,7 @@ content lands in:
 | Call site | Flags | Why |
 | --------- | ----- | --- |
 | Temp-file writers (`writeFileOwnerOnly`, `writeFileAtomic`) | `-h -N` | The path is psilink's own temp path, opened with `O_EXCL` and `O_NOFOLLOW`; a symlink at it is one planted in the create window. `-h` acts on the named entry, so following one cannot redirect the strip onto another file's ACL while the content goes to the temp file. |
-| Streamed result CSV (`createOwnerOnlyWriteStream`) | `-N` | The path is an operator-supplied output path, opened without `O_NOFOLLOW` and `fchmod`'d on the descriptor, so a pre-existing symlink there is deliberately followed (see [Result CSV output](#result-csv-output)). `chmod` resolves the path for the same reason: acting on the link node would clear an ACL that governs nothing while the rows landed in a target whose ACEs still stood. Because the strip re-resolves the path rather than acting on the already-`fchmod`'d descriptor -- Node's `fs` exposes no fd-based ACL API -- a destPath swapped between the `fchmod` and the strip aims the two at different files. |
+| Streamed result CSV (`createOwnerOnlyWriteStream`) | `-N` | The path is an operator-supplied output path, opened without `O_NOFOLLOW` and `fchmod`'d on the descriptor, so a pre-existing symlink there is followed by design (see [Result CSV output](#result-csv-output)). `chmod` resolves the path for the same reason: acting on the link node would clear an ACL that governs nothing while the rows landed in a target whose ACEs still stood. Because the strip re-resolves the path rather than acting on the already-`fchmod`'d descriptor -- Node's `fs` exposes no fd-based ACL API -- a destPath swapped between the `fchmod` and the strip aims the two at different files. |
 | `--log-file` descriptor (`configureLogFile`) | `-N` | The path is an operator-supplied flag value, opened `"a"` with neither `O_NOFOLLOW` nor `O_EXCL`, so a symlink there is followed and the lines land in its target. The strip resolves the path for the same reason the streamed CSV's does, and inherits the same known limitation: it re-resolves the path rather than acting on the open descriptor. |
 | `doctor probe` work directory (`runProbe`) | `-h -N` | The path is one `mkdtemp` created itself, so a symlink at it is one planted in the window after that create. `-h` acts on the named entry, so following one cannot clear an unrelated directory's ACL while the credentials file is created under an inheritable ACE that still stands. |
 
@@ -147,7 +147,7 @@ credentials file, and the result CSV -- and the exported public certificate as
 well. It runs at any mode, including that certificate's public `0644`, because
 an inherited ACE can grant access (write included) that the explicit mode
 withholds. The credentials file is the case where the directory rather than the
-destination carries the ACE: it is written into a `mkdtemp` directory under the
+destination has the ACE: it is written into a `mkdtemp` directory under the
 operator's `TMPDIR`, so an inheritable ACE set there reaches the password
 through it.
 
@@ -164,7 +164,7 @@ cleared.
 
 A refused strip's message does not name that directory: the fail-closed path
 removes it before the message is composed, so `reportedPath` there is
-`os.tmpdir()` -- the surviving parent that carries the inheritable ACE, not the
+`os.tmpdir()` -- the surviving parent that holds the inheritable ACE, not the
 removed `mkdtemp` directory -- and that is the path the generic `ls -le` /
 `chmod -N` remediation copy points the operator at. On a shared or system
 `TMPDIR` (`TMPDIR=/tmp`, say), that parent is not psilink's own: running
@@ -180,9 +180,9 @@ a directory as its operand, and that clearing the ACL there drops both the
 on 2026-09-01: `npx vitest run apps/cli/test/unit/extendedAclCoverage.test.ts`
 on a macOS host, 10 passed and 1 skipped, the skip being the Linux-only "no
 strip is attempted on the host's real platform" leg. Both facts come from the
-"nothing under an inheriting TMPDIR carries an ACE" leg, which pins the
+"nothing under an inheriting TMPDIR has an ACE" leg, which pins the
 inheritance first -- a control directory and a control file created under the
-same root do carry the ACE -- and then finds no ACE on the stripped work
+same root do have the ACE -- and then finds no ACE on the stripped work
 directory, on the credentials file, or on a file created beside it afterwards.
 No CI runner executes those macOS-gated legs, so they run on demand rather than
 continuously, and a regression in them would be caught at the next such run.
@@ -192,7 +192,7 @@ open and the installation of the sink that writes the first line -- the same
 placement, the point where the file's mode is enforced. Its content is the run's
 diagnostics, which at `debug`/`trace` hold partner identity, linkage keys, and
 data categories. That strip runs on a file the open created and one it appends
-to alike, unlike the `0600` mode, which the open applies on creation only: the
+to alike, unlike the `0600` mode, which the open applies on creation only. The
 mode an operator leaves on a file they supplied is a value they can read and set,
 while an ACE grants access the mode cannot express on a file the run is about to
 write those diagnostics into.
@@ -213,12 +213,12 @@ The `--log-file` open is refused on the same terms. The descriptor is released
 and the diagnostic sink is never installed, so no line can reach the file: an
 existing one keeps its content and a file the open created is left behind empty
 and `0600`, as the streamed CSV's is. The command reports it as a usage error
-(exit 64) before any exchange work begins, carrying the strip's refusal as its
+(exit 64) before any exchange work begins, with the strip's refusal as its
 cause, which is how that open reports a log file it cannot open at all.
 
-The refusal names the file and carries the underlying failure as its `cause`, so
+The refusal names the file and attaches the underlying failure as its `cause`, so
 the display sink renders that failure as its own chain link. Which of two
-messages it carries turns on whether `chmod` was spawned at all, which
+messages it states turns on whether `chmod` was spawned at all, which
 `execFileSync` reports through two fields: the exit status of a child that ran
 to completion, and the termination signal of one that died on a kill. A spawned
 child sets one of them whatever else went wrong, so the discriminant is either
@@ -226,19 +226,19 @@ field being present rather than the value in it:
 
 | Failure | Refusal |
 | ------- | ------- |
-| `chmod` was spawned: it carries an exit status (a numeric `status`, `0` included) or a termination signal (a `signal` string). A nonzero exit is one shape; the 5 s timeout is two more, since the kill leaves a signal and no status on a child that dies on it, but the exit status the child chose and no signal on one that ignores `SIGTERM` and finishes afterwards | "Could not clear extended ACLs on _file_", followed by the `ls -le` / `chmod -N` remediation |
-| The strip never ran, carrying neither a status nor a signal: no `/bin/chmod`, an exec the OS refused, or a `process.cwd()` that threw before the command line existed | "Could not run the extended-ACL strip on _file_; no content was written" |
-| Either shape above, at the `doctor probe` work-directory strip: `reportedPath` there is `os.tmpdir()`, not the `mkdtemp` directory the strip operand names, because a refused strip removes that directory before either message is composed | Names the operator's temp root (`os.tmpdir()`), the surviving ancestor that carries the inheritable ACE, in place of _file_ -- not the removed `mkdtemp` directory |
+| `chmod` was spawned: it has an exit status (a numeric `status`, `0` included) or a termination signal (a `signal` string). A nonzero exit is one shape; the 5 s timeout is two more, since the kill leaves a signal and no status on a child that dies on it, but the exit status the child chose and no signal on one that ignores `SIGTERM` and finishes afterwards | "Could not clear extended ACLs on _file_", followed by the `ls -le` / `chmod -N` remediation |
+| The strip never ran, with neither a status nor a signal: no `/bin/chmod`, an exec the OS refused, or a `process.cwd()` that threw before the command line existed | "Could not run the extended-ACL strip on _file_; no content was written" |
+| Either shape above, at the `doctor probe` work-directory strip: `reportedPath` there is `os.tmpdir()`, not the `mkdtemp` directory the strip operand names, because a refused strip removes that directory before either message is composed | Names the operator's temp root (`os.tmpdir()`), the surviving ancestor that holds the inheritable ACE, in place of _file_ -- not the removed `mkdtemp` directory |
 
 Those field shapes are captured from `execFileSync` in the CLI unit tests and
 fed to the classifier rather than modeled there, so a runtime that reshaped them
 reddens the suite instead of silently re-routing a refusal.
 
 The split exists because only the first case puts the remedy in the operator's
-hands: a spawned `chmod -N` may have begun altering an existing destination's
+hands. A spawned `chmod -N` may have begun altering an existing destination's
 ACL before it exited, was killed, or outlived the kill, so the ACL is the
-obstacle to inspect, while sending them after `ls -le` on a host that could not
-run `chmod` at all points them at something that was never in the way. The errno
+obstacle to inspect. Sending them after `ls -le` on a host that could not run
+`chmod` at all points them at something that was never in the way. The errno
 separating the second case's causes rides in on the `cause` rather than being
 enumerated in the message.
 
@@ -274,7 +274,7 @@ pre-flight therefore rejects a writable-but-not-readable parent up front.
 The CLI enforces ACLs on write: it creates an empty placeholder file, narrows
 its ACL with `icacls /inheritance:r /grant:r` to grant Modify (`M`) to the
 current user only, then writes the token into the already-protected file. This
-ensures the token is never on disk while the file still carries inherited ACEs
+ensures the token is never on disk while the file still has inherited ACEs
 (e.g. the default `BUILTIN\Users` read). If the `icacls` call fails (for example
 in a restricted container environment), the placeholder is deleted and an error
 is raised; no key material is written.
