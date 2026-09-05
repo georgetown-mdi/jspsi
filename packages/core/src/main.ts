@@ -340,28 +340,34 @@ export {
   STANDARDIZATION_FUNCTION_NAMES,
   StandardizedDataset,
   StandardizedField,
+  buildKeyStrings,
+  buildStandardizedDataset,
+  runPipeline,
+} from "./standardization";
+export {
   assertFanOutImplemented,
   assertStandardizationMatchesTerms,
   assessLinkageSatisfiability,
-  buildKeyStrings,
-  buildStandardizedDataset,
-  checkValueConstraints,
   coalesceSubstitutesConstant,
   decideLinkageTermsVerdict,
   pipelineAlwaysDrops,
-  runPipeline,
   stepCanEmptyRealizedValue,
-  summarizeDatasetConstraintViolations,
   summarizeLinkageShortfall,
   validateStandardizationAgainstTerms,
-} from "./standardization";
+} from "./linkageSatisfiability";
+export {
+  checkValueConstraints,
+  summarizeDatasetConstraintViolations,
+} from "./valueConstraints";
 export type {
   FieldValue,
+  StandardizationFunctionDescriptor,
+} from "./standardization";
+export type {
   LinkageKeyFitness,
   LinkageTermsStanding,
   LinkageTermsVerdict,
-  StandardizationFunctionDescriptor,
-} from "./standardization";
+} from "./linkageSatisfiability";
 
 // The one display model both acceptance surfaces render the inviter's proposed
 // terms from -- the web consent screen and the CLI accept prompt -- so the

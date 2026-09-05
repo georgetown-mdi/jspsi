@@ -284,7 +284,7 @@ interface NameConstraints {
 const NameConstraintsSchema: z.ZodType<NameConstraints> = z.object({
   // Validated to compile as a character class under the linear-time engine
   // (re2js), the SAME engine that executes it (`checkValueConstraints`,
-  // standardization.ts): a leading `^` is escaped to a literal first so the
+  // valueConstraints.ts): a leading `^` is escaped to a literal first so the
   // class is treated as an allow-list, not a negation. The length check runs
   // before the compile so an oversized value never reaches it -- Zod does
   // not short-circuit chained checks, so the refine still runs after a

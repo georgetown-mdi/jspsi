@@ -13,14 +13,16 @@ import { getDefaultLinkageTerms } from "./defaults/linkageTerms.js";
 import { getDefaultStandardization } from "./defaults/standardization.js";
 import {
   buildStandardizedDataset,
-  assertFanOutImplemented,
-  assertLinkageTermsSatisfiable,
-  assertStandardizationMatchesTerms,
   declaredEffectiveKeyCount,
   declaredKeyWidth,
   localFanOutFactor,
   StandardizedKeyIterable,
 } from "./standardization.js";
+import {
+  assertFanOutImplemented,
+  assertLinkageTermsSatisfiable,
+  assertStandardizationMatchesTerms,
+} from "./linkageSatisfiability.js";
 import { columnValues, inferDateFormat } from "./utils/date.js";
 import {
   redactAndSanitizeForDisplay,

@@ -28,7 +28,7 @@ import {
   InvitationTermDivergenceError,
 } from "../src/exchange";
 import { UsageError } from "../src/errors";
-import { pipelineAlwaysDrops } from "../src/standardization";
+import { pipelineAlwaysDrops } from "../src/linkageSatisfiability";
 import {
   DISPLAY_TRUNCATION_MARKER,
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,

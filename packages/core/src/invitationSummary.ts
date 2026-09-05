@@ -1,15 +1,17 @@
 import { APPLIED_SETTINGS } from "./appliedSettings.js";
 import {
-  coalesceSubstitutesConstant,
-  CONSENT_VERDICT_PARAM_NAMES,
   dateFormatComponents,
   DEFAULT_DATE_OUTPUT_FORMAT,
   describeTransformCoercions,
   FAN_OUT_FUNCTION_NAMES,
+} from "./standardization.js";
+import {
+  coalesceSubstitutesConstant,
+  CONSENT_VERDICT_PARAM_NAMES,
   parseDateInputDropsEveryRecord,
   pipelineAlwaysDrops,
   substringCollapsesParsedDateToConstant,
-} from "./standardization.js";
+} from "./linkageSatisfiability.js";
 import { displayText } from "./utils/sanitizeForDisplay.js";
 import { redactAndSanitizeForDisplay } from "./utils/sanitizeErrorForDisplay.js";
 import { redactAndDisplayPartyIdentity } from "./partyIdentityDisplay.js";

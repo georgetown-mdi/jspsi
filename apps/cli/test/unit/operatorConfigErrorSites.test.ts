@@ -167,7 +167,7 @@ const RECORDED_SITES: readonly ConfigErrorSite[] = [
       "no value at all.",
   },
   {
-    file: "packages/core/src/standardization.ts",
+    file: "packages/core/src/linkageSatisfiability.ts",
     anchor: "assertStandardizationMatchesTerms",
     raises: "StandardizationTermsError",
     interpolates: ['inconsistencies.join("; ")'],
@@ -183,7 +183,7 @@ const RECORDED_SITES: readonly ConfigErrorSite[] = [
       "partner-supplied standardization here would defeat it.",
   },
   {
-    file: "packages/core/src/standardization.ts",
+    file: "packages/core/src/linkageSatisfiability.ts",
     anchor: "assertFanOutImplemented",
     raises: "OperatorConfigError",
     interpolates: ["fanOutDeclaredMessage(declared)"],
