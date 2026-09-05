@@ -367,6 +367,11 @@ Ratified by the owner:
   separate from the web app's, with credentials minted per exchange, and a CLI
   party on a UDP-blocked network completes an exchange with a browser party
   through it.
+- **Repo review 2026-09** (boards 9 and 10) -- Done is: every finding in the
+  2026-09 repo review's consolidated lists, including those its own review
+  rounds raised, is landed or recorded as refused with a reason, and no source
+  or test file the review named as oversized, misnamed, or misplaced remains in
+  that state.
 
 Drafted, pending the owner's ratification:
 
