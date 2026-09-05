@@ -84,23 +84,12 @@ const hostKeyField = z
       : { value: undefined, malformed: true };
   });
 
-// Each party's declared record count -- its rows times the fan-out factor its
-// own standardization declares (docs/spec/PROTOCOL.md, Role resolution and
-// work minimization) -- rides the terms-exchange envelope beside
-// `linkageTerms` (like `save` and `hostKey`), so both parties learn each
-// other's count on the one bidirectional round-trip they always perform. It
-// is per-party, per-run role/bounds metadata, not a linkage term: it stays
-// out of the canonicalized terms and the agreed-terms hash. Both counts feed
-// the both-output role decision (resolveRole / pickRole) and the
-// single-pass frame cap and PSI element bounds (frameSize.ts,
-// psiElementBounds).
-//
-// The `.max(MAX_RECORD_COUNT)` bound is critical beyond input hygiene: it
-// keeps the decoded count small enough that the cell-count gate's `keyCount *
-// recordCount` product stays exact (below 2^53), rather than resting on the
-// `.int()` safe-integer ceiling alone. A count above the bound is a clean
-// `protocol` ConnectionError at decode. See MAX_RECORD_COUNT in
-// connection/frameSize.ts.
+// Each party's declared record count, which rides the terms-exchange envelope
+// and feeds the role decision and every derived single-pass bound
+// (docs/spec/PROTOCOL.md, "The counts ride the terms exchange"). The
+// `.max(MAX_RECORD_COUNT)` bound is what keeps those bounds' products exact,
+// not input hygiene, so it is not relaxed without re-deriving them
+// (connection/frameSize.ts).
 /** @internal exported for the record-count decode-bound test. */
 export const recordCountField = z
   .number()
@@ -108,44 +97,21 @@ export const recordCountField = z
   .nonnegative()
   .max(MAX_RECORD_COUNT);
 
-// The psilink exchange-protocol version, advertised by both parties on the
-// terms exchange and reconciled fail-closed: a partner advertising anything
-// other than this build's exact version aborts the exchange with an
-// actionable "run the same version" diagnosis before the linkage rounds
-// begin. It rides the terms exchange beside `linkageTerms`, `recordCount`,
-// `save`, and `hostKey`; on the authenticated path it rides the AEAD channel
-// and cannot be forged.
-//
-// This is a build-level wire/protocol compatibility marker, distinct from
-// the operator-authored linkage-terms `version` (docs/spec/PROTOCOL.md) and
-// the file-sync MESSAGE_ENVELOPE_VERSION byte (fileSyncConnection.ts).
-// Unlike the fail-soft host-key advisory, the reconcile is fail-closed: a
-// different integer, a garbled or wrong-typed value, and no readable
-// version at all all abort. The field is read as `unknown` rather than a
-// typed number so a garbled value reconciles to the named version skew
-// instead of a generic parse error.
-//
-// Pre-publication, no deployed build predates this field, so an
-// unversioned advertisement identifies a non-conforming peer, not an older
-// psilink. The version is read from a lenient probe before the strict
-// parse (see protocolVersionProbe), so a reshaped sibling field cannot
-// bury the skew diagnosis behind a parse error.
-//
-// Held at 1: pre-publication there are no deployed peers for this reconcile
-// to hold apart, so a wire-format delta -- the ragged single-pass index
-// table a fan-out configuration produces included -- ships within version
-// 1. A bump is reserved for the first wire-incompatible change made once
-// the software is published (docs/spec/PROTOCOL.md, Wire-format deltas).
+// The build-level exchange-protocol version both parties advertise on the
+// terms exchange and reconcile fail-closed. What the reconcile refuses, the
+// three neighbouring identifiers this marker is not, and what a bump is
+// reserved for: docs/spec/PROTOCOL.md ("Protocol-version reconcile at the
+// terms exchange"). Bumping this literal is that reconcile's whole mechanism,
+// so it is changed against that section rather than on its own.
 /** @internal exported for the protocol-version reconcile tests. */
 export const PROTOCOL_VERSION = 1;
 
 /**
  * The operator-facing diagnosis reported -- and sent to the partner as the
  * abort reason -- when a partner advertises anything but this build's exact
- * {@link PROTOCOL_VERSION}, an unreadable or absent advertisement included. It
- * reads correctly from either side: each party names the other as the one on
- * the incompatible version, and both conclude they must run the same build.
- * It is a fixed literal, holding nothing the partner authored.
+ * {@link PROTOCOL_VERSION}. It must stay a fixed literal holding nothing the
+ * partner authored, and must read correctly from either side, since both
+ * parties report it.
  *
  * @internal exported for the protocol-version reconcile tests.
  */
@@ -153,44 +119,26 @@ export const PROTOCOL_VERSION_MISMATCH_MESSAGE =
   "the partner is running an incompatible psilink version; both parties must " +
   "run the same version";
 
-// The optional `save` flag rides the terms exchange so each party advertises
-// its zero-setup `--save` intent to the other on the one round-trip both
-// sides always perform (see exchangeTerms). Recurring/authenticated
-// exchanges leave it unset, so their on-wire terms messages are unchanged;
-// an omitting peer is read as `save: false`. It is advisory: a mismatch
-// never aborts, and one party may save while the other does not.
+// The initiator's opening terms frame. Every field beside `linkageTerms` is
+// per-party envelope metadata rather than an agreed term, so none of it enters
+// the canonical/agreed-terms hash; what each one is for is in
+// docs/spec/PROTOCOL.md ("The counts ride the terms exchange", "Withholding
+// the sender's table from a blind helper", and "Protocol-version reconcile at
+// the terms exchange").
 //
-// The optional `disclosesPayload` flag rides the terms exchange so each
-// party advertises, before linkage, whether its metadata discloses any
-// column to the partner (isDisclosedToPartner). It is per-party role
-// metadata beside `linkageTerms`, not inside them, so it stays out of the
-// canonical/agreed-terms hash. Its one consumer is the single-pass
-// association-table withhold gate: the receiver withholds the sender's
-// table half only when the sender is a non-receiving helper that also
-// discloses no payload, read from the SENDER's advertised flag (see
-// linkViaSinglePassPSI and withholdsSenderAssociationTable in link.ts).
-// Advertising it leaks nothing new: it is consulted only for a helper
-// disclosing payload to a partner already entitled to receive it.
-//
-// It is `.optional()` in the schema beside `save`, but the production
-// caller (runExchange) always passes a definite boolean, so a terms
-// message always holds it. The gate nonetheless defaults an absent value
-// to "discloses payload" (do not withhold), so a non-conforming peer that
-// omits it can never drive the blind path against a helper that needs its
-// table.
-//
-// `recordCount` is required on message 1: it is always the initiator's
-// opening terms, never an abort, so a missing count is a clean decode
-// failure at parse rather than an unenforced assumption.
+// Two optionality choices this schema fixes. `disclosesPayload` is optional
+// even though the production caller always passes a definite boolean, and the
+// withhold gate defaults an absent value to "discloses payload" (do not
+// withhold), so a non-conforming peer that omits it can never drive the blind
+// path against a helper that needs its table. `recordCount` is required here
+// because this frame is never an abort, so a missing count is a clean decode
+// failure rather than an unenforced assumption.
 const termsMessage = z.object({
   linkageTerms: z.unknown(),
   recordCount: recordCountField,
-  // Read as `unknown`, not a typed number, so a present-but-non-matching
-  // value (a foreign integer, or a garbled/wrong-typed value) reconciles to
-  // the actionable version mismatch rather than throwing a generic parse
-  // error. `.optional()` for the same reason: the reconcile refuses an
-  // absent advertisement itself, ahead of this parse. See PROTOCOL_VERSION
-  // and reconcileProtocolVersion.
+  // Read as `unknown` and optional so every non-matching value reaches
+  // reconcileProtocolVersion rather than throwing a generic parse error; the
+  // reconcile refuses an absent advertisement itself, ahead of this parse.
   protocolVersion: z.unknown().optional(),
   save: z.boolean().optional(),
   disclosesPayload: z.boolean().optional(),
@@ -323,17 +271,10 @@ export interface TermsExchangeResult {
  * message-2 slot, which must still hold `linkageTerms`; omit it for the
  * initiator's decision-only frame.
  *
- * The optional `save` intent field is not spread onto an abort frame. An
- * abort ends the exchange before the bootstrap step, so the partner never
- * reads intent held here, and advertising a desire to save while refusing
- * the terms would be self-contradictory.
- *
- * The protocol version is the one field that does ride the responder's
- * abort, because the initiator reconciles that frame's version before it
- * reads the decision and refuses a frame holding no readable version (see
- * {@link reconcileProtocolVersion}). The initiator's decision-only frame
- * closes an exchange whose versions both parties have already reconciled,
- * so it holds none.
+ * The protocol version is the one envelope field that rides the responder's
+ * abort, and the `save` intent is not; which fields an abort frame holds and
+ * why: docs/spec/PROTOCOL.md ("Protocol-version reconcile at the terms
+ * exchange").
  *
  * Exported for the refusals that fire past this exchange, which
  * `runExchange` applies to the terms this function's caller returned: the
@@ -365,16 +306,12 @@ export async function sendAbort(
   }
 }
 
-// A lenient probe that extracts ONLY `protocolVersion` from a raw terms
-// frame, read before the strict envelope parse, so the reconcile below can
-// see the peer's version even when the strict parse would throw -- a
-// future version that reshapes a sibling field can no longer bury the
-// "run the same version" message behind a generic parse failure. Like
-// `termsMessage`, `protocolVersion` is read as `unknown`, so a garbled
-// value still reconciles to the named skew. A non-object frame, or one
-// holding no version, probes to `undefined`, which the reconcile refuses
-// on the same terms as a foreign value; `.catch` covers the non-object
-// case.
+// The lenient probe that extracts ONLY `protocolVersion` from a raw terms
+// frame, read before the strict envelope parse; docs/spec/PROTOCOL.md
+// ("Protocol-version reconcile at the terms exchange") states the ordering
+// guarantee this exists for. A non-object frame, or one holding no version,
+// probes to `undefined`, which the reconcile refuses on the same terms as a
+// foreign value; `.catch` covers the non-object case.
 const protocolVersionProbe = z
   .object({ protocolVersion: z.unknown().optional() })
   .catch({ protocolVersion: undefined });
@@ -405,20 +342,16 @@ export function probeProtocolVersion(rawData: unknown): unknown {
 
 /**
  * Fail-closed reconcile of the partner's advertised {@link PROTOCOL_VERSION}.
- * Only our exact version proceeds; anything else is an incompatible build,
- * so this best-effort sends the partner the abort (so it too fails with
- * the named cause, not a receive timeout) and throws
- * {@link PROTOCOL_VERSION_MISMATCH_MESSAGE}. That covers a different
- * integer, a present-but-garbled/wrong-typed value (the field is read as
- * `unknown` so such a value reaches here rather than throwing a generic
- * parse error), and a partner advertising no readable version at all: no
- * deployed build predates the field, so nothing conforming lands on that
- * leg. The refusal is the same on both message paths and in both
- * directions.
+ * Only this build's exact version proceeds; every other outcome best-effort
+ * sends the partner the abort, so it too fails with the named cause rather
+ * than a receive timeout, and throws
+ * {@link PROTOCOL_VERSION_MISMATCH_MESSAGE}. What "every other outcome"
+ * covers, and why an absent advertisement is among them:
+ * docs/spec/PROTOCOL.md ("Protocol-version reconcile at the terms exchange").
  *
  * Pass `localTerms` when reconciling from the responder's message-2 slot,
  * whose abort frame holds `linkageTerms`; omit it for the initiator's
- * decision-only abort. See {@link PROTOCOL_VERSION}.
+ * decision-only abort.
  */
 async function reconcileProtocolVersion(
   conn: MessageConnection,
@@ -447,19 +380,16 @@ async function reconcileProtocolVersion(
  * role -- it is a local computation over the counts exchanged here, with no
  * further messages.
  *
- * Both parties advertise this build's {@link PROTOCOL_VERSION} on their terms
- * message (message 1 for the initiator, message 2 for the responder, an
- * abort in that slot included) and check the partner's before weighing the
- * terms. Anything but this build's exact version fail-closes with
- * {@link PROTOCOL_VERSION_MISMATCH_MESSAGE}. See
- * {@link reconcileProtocolVersion}.
- *
- * `localRecordCount` (this party's declared record count -- its row count
- * times the fan-out factor its own standardization declares) rides both
- * terms messages, and the partner's is read back as
- * {@link TermsExchangeResult.partnerRecordCount}. It is per-party role and
- * element-bounds metadata held on the envelope beside `linkageTerms`, never
- * inside them, so it does not enter the canonical/agreed-terms hash.
+ * Each optional argument below is a per-party envelope advertisement, none of
+ * which affects whether the terms are agreed. Passing `undefined` omits the
+ * field entirely rather than sending a default, so a party with nothing to
+ * advertise leaves the wire format unchanged. What each one is consumed for:
+ * docs/spec/PROTOCOL.md ("The counts ride the terms exchange" for
+ * `localRecordCount`, "Withholding the sender's table from a blind helper" for
+ * `localDisclosesPayload`, "Protocol-version reconcile at the terms exchange"
+ * for the version this function advertises on its own) and
+ * docs/SECURITY_DESIGN.md for `localSaveIntent` and the host-key
+ * reconciliation `localHostKey` feeds.
  *
  * No width rides the envelope: the per-key candidate widths every derived
  * single-pass bound reads are a function of the agreed terms, which both
@@ -467,37 +397,10 @@ async function reconcileProtocolVersion(
  * without a further field or round-trip (`declaredEffectiveKeyCount`,
  * fanOutFunctions.ts).
  *
- * When `localSaveIntent` is set, this party's zero-setup `--save` intent is
- * advertised on its terms message (message 1 for the initiator, message 2
- * for the responder), and the partner's intent is read back from the
- * message it sends. Left `undefined`, it omits the field entirely, leaving
- * the non-save (recurring/authenticated) wire format unchanged. The
- * returned {@link TermsExchangeResult.partnerSaveIntent} is the partner's
- * advertised value (absent -> `false`); it never affects agreement.
- *
- * When `localDisclosesPayload` is set, this party's payload-intent flag
- * (whether its metadata discloses any column to the partner) is advertised
- * on its terms message, and the partner's is read back as
- * {@link TermsExchangeResult.partnerDisclosesPayload}. It is the
- * authenticated input the single-pass association-table withhold gate
- * reads (see exchange.ts and `withholdsSenderAssociationTable` in
- * link.ts) to decide, in lockstep on both sides, whether a non-receiving
- * helper's table half is withheld at the source. Left `undefined`, it
- * omits the field; it never affects whether the terms are agreed.
- *
- * When `localHostKey` is set, this party's observed SFTP host key
- * (fingerprint + key type) is advertised on its terms message and the
- * partner's is read back, returned as
- * {@link TermsExchangeResult.partnerHostKey} for cross-party reconciliation.
- * Left `undefined`, it omits the field, so the partner reconciles against
- * nothing and a one-sided absence is not a divergence. It never affects
- * whether the terms are agreed.
- *
- * The partner's advertisement is fail-soft: a present-but-malformed value is
- * dropped (read as no host key) rather than aborting. That drop is reported
- * via {@link TermsExchangeResult.partnerHostKeyMalformed} so a caller can
- * tell a non-conforming peer from one that simply observed no host key; an
- * absence leaves the flag `false`.
+ * The partner's host-key advertisement is fail-soft: a present-but-malformed
+ * value is dropped (read as no host key) rather than aborting, and the drop is
+ * reported via {@link TermsExchangeResult.partnerHostKeyMalformed} so a caller
+ * can tell a non-conforming peer from one that observed no host key.
  */
 export async function exchangeTerms(
   conn: MessageConnection,
@@ -716,26 +619,14 @@ export async function exchangeTerms(
 
 /**
  * Establish a fresh persistent shared secret in-band, for a zero-setup
- * exchange in which both parties passed `--save`. The initiator generates
- * the token and transmits it on a dedicated frame; the responder receives
- * it. Both ends return the same value, which the caller persists to its
- * key file as the basis for future recurring exchanges.
+ * exchange in which both parties passed `--save`. Both ends return the same
+ * value, which the caller persists to its key file as the basis for future
+ * recurring exchanges. The frame's placement, its format, and what protects
+ * it are in docs/spec/PROTOCOL.md ("The zero-setup bootstrap frame").
  *
  * Call this only when both parties advertised save intent (see
- * {@link exchangeTerms}). Both sides learn that fact from the terms
- * exchange, so they agree on whether this frame is sent without further
- * negotiation; it follows message 3 of the terms exchange as a brief
- * speaker-stutter, the only frame that follows the terms exchange.
- *
- * The secret is a base64url-encoded 32 random bytes -- the same format as
- * a rotation token (see auth.ts) and {@link SHARED_SECRET_REGEX} -- so it
- * drops straight into the key file. On a zero-setup exchange there is no
- * application-layer AEAD, so this frame is protected only by the
- * transport (SSH for SFTP, DTLS for WebRTC, operator access controls for
- * a file-drop). That is the accepted trust model for `--save` (see
- * docs/SECURITY_DESIGN.md "Bootstrapping a shared secret"). A party that
- * wants the secret never to traverse the server uses `psilink invite`
- * instead.
+ * {@link exchangeTerms}); calling it otherwise leaves one party sending a
+ * frame the other never reads, or awaiting one never sent.
  *
  * @returns the established shared secret, identical on both sides.
  */
@@ -755,14 +646,9 @@ export async function exchangeBootstrapSecret(
 // --- Count-only report leg ---------------------------------------------------
 
 // The count-only round's report frame, over which the receiver reports its
-// tally to the sender on the same channel the rest of the exchange runs on.
-// The count is bounded like every other partner-supplied integer: a
-// non-negative safe integer no larger than the ceiling the caller derives
-// from the two exchanged record counts, since an intersection cannot
-// exceed either party's dataset. That bound rejects an absurd figure; it
-// does not make the number checkable, which psi-c does not offer by
-// design (docs/spec/PROTOCOL.md, PSI-C: the sender's knowledge of the
-// count is trust-contingent).
+// tally to the sender. The bound the caller supplies as `maxCount`, and what
+// it does and does not buy, are in docs/spec/PROTOCOL.md ("Count reporting
+// and entitlement").
 const countReportMessage = (maxCount: number) =>
   z.object({ intersectionCount: recordCountField.max(maxCount) });
 
@@ -774,14 +660,9 @@ const countReportMessage = (maxCount: number) =>
  * Symmetric in its arguments: each party calls it with the same agreed
  * pair (its own entitlement plus the partner's, cross-validated by
  * `validateCompatibility`), so the receiver's decision to send and the
- * sender's decision to await are always the same verdict.
- *
- * In the one-sided case the entitled party is the receiver
- * ({@link resolveRole}), so it already holds the count and no frame is
- * sent. The frame is suppressed entirely rather than sent empty, the same
- * discipline the single-pass table withholding follows: a present-but-empty
- * frame would still mark, by its presence, that a count existed to report
- * (docs/spec/PROTOCOL.md, PSI-C).
+ * sender's decision to await are always the same verdict. Why the frame is
+ * suppressed entirely in the one-sided case rather than sent empty:
+ * docs/spec/PROTOCOL.md ("Count reporting and entitlement").
  */
 export function reportsCountToSender(
   localExpectsOutput: boolean,
@@ -820,15 +701,10 @@ export async function receiveCountReport(
 // --- Role resolution ---------------------------------------------------------
 
 // The work-minimizing PSI role assignment for two both-output parties, from
-// their exchanged declared counts: the party with the smaller declared count
-// becomes the receiver, so a party whose own cleaning fans out is weighed at
-// the records it declares rather than the rows it holds. The receiver's
-// distinct-value set crosses the wire twice (its request, then that request
-// re-encrypted in the reply) and bears the larger share of the curve
-// operations, so placing the smaller dataset there minimizes total work
-// across both linkage strategies. Full derivation: docs/spec/PROTOCOL.md
-// (Role resolution and work minimization). A tie is work-neutral and broken
-// deterministically: initiator -> receiver.
+// their exchanged declared counts, derived in docs/spec/PROTOCOL.md ("Role
+// resolution and work minimization"). Both parties run this over the same
+// inputs, so the tie-break has to be deterministic rather than merely
+// work-neutral, or the two would resolve to the same role.
 function pickRole(
   localCount: number,
   partnerCount: number,
@@ -848,15 +724,10 @@ function pickRole(
  * are agreed each party holds its own count and the partner's, and the
  * role follows without a further message.
  *
- * When exactly one party has `expectsOutput: true`, that party is the
- * receiver regardless of the counts -- it is the only party that learns
- * the result. When both parties expect output the assignment is free, so
- * it minimizes total work: the party with the smaller declared count
- * becomes the receiver, a tie broken in favour of the initiator (see
- * {@link pickRole} and docs/spec/PROTOCOL.md, Role resolution and work
- * minimization). The counts still ride the terms exchange in the
- * one-sided case too -- the role does not consume them there, but the
- * single-pass element bounds do (see exchange.ts, psiElementBounds).
+ * The rule both branches implement is docs/spec/PROTOCOL.md ("Role resolution
+ * and work minimization"). The counts still ride the terms exchange in the
+ * one-sided case, where the role does not consume them but the single-pass
+ * element bounds do (see exchange.ts, psiElementBounds).
  *
  * Call this after a successful {@link exchangeTerms}, whose
  * {@link TermsExchangeResult.partnerRecordCount} supplies

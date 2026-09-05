@@ -16,36 +16,27 @@ import {
 } from "./connection/messageConnection.js";
 import { markPeerWaitTimeout } from "./errors.js";
 
-// Authenticated key exchange that replaces SPAKE2 as the exchange session key
-// source: an ephemeral P-256 Diffie-Hellman pinned to the Noise NNpsk0 pattern
-// (no static keys, psk mixed at position 0, ephemeral-ephemeral DH) plus an
-// explicit, role-asymmetric mutual key confirmation. Every cryptographic
-// operation (keygen, ECDH, HKDF, SHA-256, HMAC) is a crypto.subtle call, so a
-// validated module beneath the platform performs all of them; only the
-// NNpsk0 glue -- key-schedule mixing and the two confirmation tags -- is
-// written here. The full Noise framework is not implemented. The
-// construction follows NNpsk0, pinned by the known-answer vector
-// (test/vectors/kex-vectors.json) rather than wire-compatible with generic
-// Noise. See docs/SECURITY_DESIGN.md ("Key-agreement design"),
-// docs/spec/PROTOCOL.md ("P-256 authenticated key exchange"), and
+// The authenticated key exchange that produces the exchange session key: an
+// ephemeral P-256 Diffie-Hellman pinned to the Noise NNpsk0 pattern plus an
+// explicit, role-asymmetric mutual key confirmation. Only the NNpsk0 glue --
+// key-schedule mixing and the two confirmation tags -- is written here; every
+// cryptographic operation is a crypto.subtle call, and the full Noise
+// framework is not implemented. Construction, key schedule, wire format, and
+// what the vectors pin: docs/spec/PROTOCOL.md ("P-256 authenticated key
+// exchange"). Decision and module boundary: docs/SECURITY_DESIGN.md
+// ("Key-agreement design") and
 // docs/notes/key-establishment-fips-boundary.md.
 
 // The pre-shared secret is psk0, which Noise mandates be 32 bytes.
 const PSK_LEN = 32;
 
 // Wire encoding of an ephemeral public key: the SEC1 uncompressed point
-// `0x04 || X || Y`, 65 bytes over P-256. This encoding is pinned, not merely
-// preferred, and enforcing it is this module's job, not importKey's:
-// crypto.subtle.importKey accepts other encodings of the same point, and not
-// the same ones on every platform (Node admits compressed and parity-correct
-// hybrid forms; Chromium admits only compressed). Full detail:
-// docs/spec/PROTOCOL.md ("Curve and point encoding").
-//
-// Both checks -- length/prefix here, then point validity in importPeerShare
-// -- run on the raw share before import; importPeerShare is the only path
-// from wire bytes to a CryptoKey. kex.test.ts and the browser suite each
-// drive importKey with the alternative encodings on their own platform, so
-// the platform divergence above is measured, not assumed.
+// `0x04 || X || Y`, 65 bytes over P-256. Enforcing it is this module's job,
+// not importKey's, which accepts other encodings of the same point and not
+// the same ones on every platform; docs/spec/PROTOCOL.md ("Curve and point
+// encoding") states the pin and what it rests on. kex.test.ts and the browser
+// suite drive importKey with the alternative encodings on their own platform,
+// so the divergence is measured rather than assumed.
 const PUBLIC_KEY_LEN = 65;
 const UNCOMPRESSED_POINT_PREFIX = 0x04;
 
@@ -59,48 +50,26 @@ const ECDH_P256 = { name: "ECDH", namedCurve: "P-256" } as const;
 // confirmation-tag value, and the block size the Noise chaining HKDF counts in.
 const HASH_LEN = 32;
 
-// Protocol-version tag: the Noise "protocol name" hashed into the initial
-// handshake hash (ck0 = h0), so every derived key and confirmation tag
-// covers it -- a peer on a different tag derives a different h and ck and
-// fails confirmation, never reaching a usable session key. v2 names the
-// suite this file implements (P-256 ECDH in place of X25519) and is
-// wire-incompatible with a v1 peer. The version is reserved for a
-// cryptographic-suite change, not bumped for an additive payload such as the
-// request-encryption flag below: a flag-aware and flag-unaware peer already
-// fail closed at parse (required-field check vs. `.strict()` schema) before
-// any transcript is computed. Full detail: docs/spec/PROTOCOL.md
-// ("Protocol-version tag").
+// The Noise "protocol name", hashed into the initial handshake hash. When it
+// is bumped, docs/spec/PROTOCOL.md ("Protocol-version tag") is what governs:
+// it states what the tag covers, what a bump is reserved for, and what a
+// mismatch does.
 const PROTOCOL_NAME = "psilink-kex-v2:NNpsk0_P256_SHA256";
 
-// Domain-separation labels, namespaced under psilink-kex-v1: and disjoint
-// from every other label in the system (psilink-aead-v1:*,
-// psilink-shared-secret-rotation-v1, the psilink-signing-* labels; full
-// space: docs/spec/PROTOCOL.md). Their namespace version is independent of
-// the suite tag above: the tag already separates one suite's transcript from
-// another's totally, so re-versioning these labels would not separate
-// anything further. The two confirm labels are role-asymmetric -- each side
-// sends the tag for its own role and verifies the opposite role's -- so a
-// reflected confirmation does not verify.
+// Domain-separation labels for the derivations below, in the disjoint label
+// space docs/spec/PROTOCOL.md ("The domain-separation label space")
+// enumerates. Their namespace version does not track the suite tag above; the
+// two confirm labels are role-asymmetric.
 const SESSION_LABEL = "psilink-kex-v1:session";
 const CONFIRM_KEY_LABEL = "psilink-kex-v1:confirm";
 const INITIATOR_CONFIRM_LABEL = "psilink-kex-v1:initiator-confirm";
 const RESPONDER_CONFIRM_LABEL = "psilink-kex-v1:responder-confirm";
 
-// Single generic failure message for every authentication failure, kept
-// non-oracular: it must not hint at which check failed (a malformed share, a
-// contributory-check rejection, and a confirmation mismatch all look
-// identical to the peer). Every throw site uses a ConnectionError of kind
-// "security" -- the trust-boundary classification consumers key on (the
-// web's exchange classifier, the CLI event stream) -- so the type holds the
-// classification and the message never has to.
-//
-// "Non-oracular" also covers the absence of any secret-dependent branch: the
-// only comparison against secret-derived material is the constant-time
-// bytesEqual on the confirmation tag, and the key schedule runs identically
-// regardless of the psk's value. A peer can still distinguish, by wall-clock
-// timing, a failure before computeKexKeys (bad parse/share) from one after it
-// (tag mismatch), but that split is a function of the peer's own
-// (attacker-authored) input, not of any secret, so it leaks nothing.
+// The one message every authentication failure throws, and it must stay
+// non-oracular: no throw site may narrow it to the check that failed, and the
+// ConnectionError's "security" kind is what consumers classify on. What that
+// property covers and what it does not: docs/spec/PROTOCOL.md ("Failure
+// handling").
 const GENERIC_FAILURE = "key exchange authentication failed";
 const TIMEOUT_FAILURE = "key exchange handshake timed out";
 
@@ -112,15 +81,11 @@ const EMPTY = new Uint8Array(0);
 
 // --- Wire message schemas ----------------------------------------------------
 //
-// All schemas use `.strict()` so extra keys fail the parse rather than being
-// silently stripped: a message with unexpected fields means either a peer bug
-// or an attacker fuzzing the parser, and either way should fail fast. `e` is a
-// base64url-encoded 65-byte uncompressed P-256 point; `confirm` is a
-// base64url-encoded 32-byte HMAC-SHA-256 tag. `reqEnc` is this party's request
-// for the additional application-encryption layer: it rides the party's own
-// message (initiator's on msg1, responder's on msg2), is a required field, and
-// is bound into the transcript hash by computeKexKeys, so tampering with it
-// fails the handshake closed.
+// The three handshake messages, whose field encodings are in
+// docs/spec/PROTOCOL.md ("Message flow"). Every schema is `.strict()`, so an
+// unexpected key fails the parse rather than being silently stripped; keep it
+// that way, since the strictness is half of what makes a flag-unaware peer
+// fail closed rather than negotiate.
 
 interface KexMsg1 {
   kexMsg: "1";
@@ -218,17 +183,14 @@ interface SymmetricState {
 }
 
 /**
- * HKDF as defined by the Noise Protocol Framework (rev 34, section 4.3): a
- * chaining HKDF keyed by the running chaining key, returning `numOutputs`
- * 32-byte blocks. Noise's definition -- `temp_key = HMAC(ck, ikm)` then
- * `output_i = HMAC(temp_key, output_{i-1} || byte(i))` -- is exactly RFC 5869
- * HKDF-Extract(salt = ck, ikm) followed by HKDF-Expand with an empty info
- * string, so it is issued as one `crypto.subtle` HKDF `deriveBits` call: the
- * extract-then-expand is a single operation the platform -- and any validated
- * module beneath it -- serves as a unit rather than a chain of HMAC calls
- * assembled here. This differs from the application-level {@link hkdfDerive}
- * (zero salt, named info) on purpose: the Noise key schedule chains the salt.
- * Cross-checked against RFC 5869 test case 3 in kex.test.ts.
+ * The Noise chaining HKDF, keyed by the running chaining key and returning
+ * `numOutputs` 32-byte blocks. It is issued as one `crypto.subtle`
+ * `deriveBits` call rather than a chain of HMAC calls assembled here, so the
+ * platform -- and any validated module beneath it -- serves the
+ * extract-and-expand as a unit; docs/spec/PROTOCOL.md ("Key schedule") states
+ * the equality that makes the two forms interchangeable. It differs from the
+ * application-level {@link hkdfDerive} (zero salt, named info) because the
+ * Noise schedule chains the salt.
  *
  * @internal exported only for the RFC 5869 cross-check test.
  */
@@ -302,25 +264,9 @@ async function mixKeyAndHash(
 /**
  * The pure NNpsk0 key schedule and key-confirmation derivation. Both peers
  * call this with identical arguments after the ephemeral exchange and get
- * identical outputs.
- *
- * Folds in, in order: the pre-shared secret (MixKeyAndHash), both ephemeral
- * public keys and each party's request-encryption flag (MixHash after each
- * party's `e` token; the flags need not be confidential), and the
- * ephemeral-ephemeral DH output (MixKey). The session key and a distinct
- * confirmation key are derived over both the resulting chaining key `ck`
- * (holds the psk and the ECDH secret) and handshake hash `h` (holds the
- * version tag, both ephemeral keys, both flags) -- the critical invariant:
- * deriving from ck||h means the session key has forward secrecy (unlike psk
- * alone) and is transcript-bound (unlike the raw DH output alone). SP
- * 800-56A Rev. 3 section 5.8.1 (KDF over the shared secret plus FixedInfo)
- * and section 5.9 (key confirmation); full schedule: docs/spec/PROTOCOL.md.
- *
- * The two flags enter `h` only, not `ck`, so the confirmation key is
- * independent of them while `h`, the session key, and both confirmation tags
- * depend on both: a flag tampered with on the wire yields a different `h` on
- * the two sides, so the confirmation tags mismatch and the handshake aborts
- * rather than proceed on a disagreed-upon encryption decision.
+ * identical outputs. The mixing order, what each derivation is taken over,
+ * and why that is the critical invariant: docs/spec/PROTOCOL.md ("Key
+ * schedule"), which the steps below implement in the order it states.
  *
  * @internal exported only for the known-answer-vector and RFC cross-check
  *   tests.
@@ -411,16 +357,9 @@ async function generateEphemeral(): Promise<{
 
 // The single path from peer-supplied wire bytes to a usable public key,
 // returning undefined on every rejection so the caller applies its uniform
-// abort-and-fail handling. Two layers, in this order:
-//
-//  1. The pinned canonical encoding: exactly 65 bytes with the uncompressed
-//     0x04 prefix (see the PUBLIC_KEY_LEN comment above).
-//  2. Point validity, by importKey itself: rejects a point not on the curve,
-//     a coordinate at or above the field prime, and both byte strings a peer
-//     might send for the identity. P-256 has cofactor 1, so there is no
-//     small-order subgroup for a low-order share to land in. kex.test.ts and
-//     the browser suite assert each rejection against the real crypto.subtle.
-//     Full detail: docs/spec/PROTOCOL.md ("Point validity, by the platform").
+// abort-and-fail handling. The two validation layers and the split between
+// them are docs/spec/PROTOCOL.md ("Peer-share validation"); kex.test.ts and
+// the browser suite assert each rejection against the real crypto.subtle.
 async function importPeerShare(
   share: Uint8Array<ArrayBuffer>,
 ): Promise<CryptoKey | undefined> {
@@ -433,18 +372,12 @@ async function importPeerShare(
   }
 }
 
-// Computes the ECDH shared secret (SP 800-56A Rev 3 Z, the shared point's X
-// coordinate), returning undefined on any failure.
-//
-// The all-zero result check is a safety check, not the validation: on a
-// cofactor-1 curve an all-zero Z means the shared point was the identity,
-// which importPeerShare has already rejected. It stays because that
-// rejection is a measured platform behavior, not one this project controls
-// -- a platform that admitted the identity point would hand back a shared
-// secret the attacker also knows, costing the handshake its forward secrecy.
-// The compare is constant-time, against a freshly allocated zero buffer
-// rather than a module-level sentinel, so no in-place mutation could weaken
-// it.
+// Computes the ECDH shared secret, returning undefined on any failure. The
+// all-zero result check is a stated safety check rather than the validation,
+// and docs/spec/PROTOCOL.md ("Peer-share validation") says what it rests on
+// and why it stays. The compare is constant-time, against a freshly allocated
+// zero buffer rather than a module-level sentinel, so no in-place mutation
+// could weaken it.
 async function deriveSharedSecret(
   myPrivate: CryptoKey,
   peerPublic: CryptoKey,
@@ -501,20 +434,17 @@ async function receiveHandshake(conn: MessageConnection): Promise<unknown> {
  * `sessionKey` is a 32-byte key suitable for passing to `deriveAeadKey`
  * (exported from `./auth.ts`) to derive channel encryption keys, and to the
  * token-rotation HKDF. Both parties hold the same value after a successful
- * handshake. It has forward secrecy (it mixes a fresh ephemeral P-256 ECDH) and
- * is mutually authenticated by the pre-shared secret.
+ * handshake.
  */
 interface KexResult {
   /** 32-byte session key. */
   sessionKey: Uint8Array<ArrayBuffer>;
   /**
    * The negotiated decision to wrap the post-handshake connection in an
-   * additional application-encryption layer: `own request OR peer request`.
-   * Both parties compute the same value (each holds both flags before
-   * `computeKexKeys`), and it is transcript-bound, so a tampered flag aborts
-   * the handshake rather than yielding a split decision. The caller applies
-   * the extra AEAD layer when this is `true` and a session key is in hand.
-   * It is `false` only when neither party requested the layer.
+   * additional application-encryption layer, identical on both ends. The
+   * caller applies the extra AEAD layer when this is `true` and a session key
+   * is in hand. How it is negotiated and what binds it: docs/spec/PROTOCOL.md
+   * ("Request-encryption flag").
    */
   applyEncryption: boolean;
 }
@@ -523,29 +453,11 @@ interface KexResult {
 
 /**
  * Executes a 3-message authenticated P-256 key exchange over an established
- * connection. Full message flow, wire encoding, and construction: the module
- * header and docs/spec/PROTOCOL.md ("P-256 authenticated key exchange").
+ * connection. Message flow, wire encoding, and construction:
+ * docs/spec/PROTOCOL.md ("P-256 authenticated key exchange").
  *
- * Message flow (initiator sends first throughout):
- *   1. Initiator -> Responder : `{ kexMsg: "1", e: e_I, reqEnc: req_I }`
- *   2. Responder -> Initiator : `{ kexMsg: "2", e: e_R, confirm: MAC_R,
- *      reqEnc: req_R }`
- *   3. Initiator -> Responder : `{ kexMsg: "3", confirm: MAC_I }` or
- *      `{ kexMsg: "abort" }`
- *
- * The responder confirms first (in msg2); the initiator verifies it before
- * sending its own confirmation in msg3, so a mismatched pre-shared secret
- * fails closed before any non-handshake frame is sent. The connection's
- * inbound queue buffers any frame that arrives early, so a fast peer cannot
- * race ahead of a receive.
- *
- * `req_I` and `req_R` are each party's `requestEncryption` flag, riding the
- * party's own message and bound into the transcript hash by
- * `computeKexKeys`; the returned {@link KexResult.applyEncryption} is
- * `req_I OR req_R`, identical on both ends. A flag flipped on the wire
- * produces a different transcript hash on the two sides, so the confirmation
- * tags mismatch and the handshake aborts rather than settle on a different
- * decision than agreed.
+ * The connection's inbound queue buffers any frame that arrives early, so a
+ * fast peer cannot race ahead of a receive.
  *
  * `psk` is the raw 32-byte pre-shared secret; a caller holding a base64url
  * token decodes it to bytes first (a wrong length is a caller error, thrown
@@ -556,9 +468,7 @@ interface KexResult {
  * `"responder"`s deadlock on receive -- neither yields a false session.
  *
  * @throws {ConnectionError} of kind `"security"`, message `"key exchange
- *   authentication failed"`, on any authentication failure. The message is
- *   generic on purpose, to avoid hinting which check failed; the kind is the
- *   trust-boundary marker consumers classify on.
+ *   authentication failed"`, on any authentication failure.
  * @throws {Error} `"key exchange handshake timed out"` if a peer does not
  *   respond within 30 seconds -- a transport fault, not a security
  *   classification.
