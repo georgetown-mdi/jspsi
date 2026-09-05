@@ -7,14 +7,12 @@ import type { Arguments } from "yargs";
 import YAML from "yaml";
 import type { ConnectionConfig } from "@psilink/core";
 
-// The exchange is the only thing standing in here: runProtocol is mocked so the
-// handshake "succeeds" and the exchange completes -- its post-handshake hook
-// writes the config and its post-exchange hook rewrites it -- with no
-// connection opened. Everything between the argv and the file on disk is real,
-// which is the point: the accept budget reaches that file, if it reaches it at
-// all, through the connection the command builds and the bootstrap persists
-// (twice), so an assertion on either one alone could pass while the file still
-// carried it.
+// Only runProtocol is mocked: the handshake "succeeds" through its
+// post-handshake and post-exchange hooks, with no connection opened.
+// Everything from argv to the file on disk is real, so the accept budget
+// reaches the file only through the connection the command builds and the
+// bootstrap writes twice -- asserting on just one write could miss a stale
+// value left by the other.
 vi.mock("../../src/protocol", () => ({ runProtocol: vi.fn() }));
 
 import { handler as inviteHandler } from "../../src/commands/invite";
@@ -64,16 +62,11 @@ const OBSERVED_RECEIVED_COLUMNS = ["notes"];
 
 /**
  * Drive one online `psilink invite` to completion against the mocked exchange,
- * returning the FINAL configuration on disk (raw, as YAML.parse yields it -- NOT
- * through the schema, which materializes its own option defaults and would
- * report a field the command never wrote) and the connection the run itself was
- * conducted over.
- *
- * Both of the bootstrap's writes are driven: the acceptance hook's, and the
- * post-exchange rewrite that re-serializes the connection block once the
- * received-payload set is known. The second is the one a later mutation of the
- * persisted connection would ride, so a file read after only the first would
- * assert nothing about what the operator is left holding.
+ * returning the FINAL configuration on disk (raw, as YAML.parse yields it --
+ * not through the schema, which would fill in defaults the command never
+ * wrote) and the connection the run itself was conducted over. Both of the
+ * bootstrap's writes are driven, since only the second reflects a later
+ * mutation of the persisted connection.
  */
 async function inviteOnline(
   url: string,
@@ -159,7 +152,7 @@ test("an online file-sync invite writes no peer_timeout_ms from its accept wait"
 });
 
 test("an online webrtc invite writes no peer_timeout_ms from its accept wait", async () => {
-  // Same claim on the channel whose connection block carries nothing but the
+  // Same claim on the channel whose connection block holds nothing but the
   // shared timeouts: the accept budget was the whole of its options block, so
   // stripping it must leave no block at all rather than an empty one.
   const { saved, ran } = await inviteOnline("wss://peers.example.org/psi");

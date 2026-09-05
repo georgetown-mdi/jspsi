@@ -16,14 +16,11 @@ import { inProcessOnly } from "../sftpBackendGate";
 // The terminal close against the partner server this defect lives on: one that
 // accepts the client's disconnect and then goes quiet, consuming the FIN and
 // sending neither FIN nor reset. ssh2-sftp-client's end() settles only from the
-// ssh2 Client's 'close', which such a partner never produces, so an exchange that
-// has already fully succeeded would otherwise never finish teardown -- and the
-// half-open socket it leaves behind, a ref'd handle, keeps the process alive.
-//
-// Only the in-process backend can be made to withhold its close (a native sshd
-// cannot), so this runs there and stands up its own server to reach the session
-// controls -- the shared globalSetup server hands the workers only its connection
-// details.
+// ssh2 Client's 'close', which such a partner never produces, so an exchange
+// that has already fully succeeded would otherwise never finish teardown, and
+// the half-open socket left behind (a ref'd handle) keeps the process alive.
+// Only the in-process backend can be made to withhold its close, so this runs
+// there with its own server.
 
 // Generous headroom over the adapter's own teardown bounds (5 s for the
 // partner's close, then 1 s for the forced one). The assertion is that teardown
@@ -138,7 +135,7 @@ for (const [mode, connectionPerPoll] of [
 
       expect(closeMs).toBeLessThan(BOUNDED_TEARDOWN_MS);
       // The exchange still reports success: the bounded teardown neither failed
-      // it nor surfaced the deliberate close as a mid-exchange fault.
+      // it nor reported this by-design close as a mid-exchange fault.
       expect(failures).toEqual([]);
       expect(received).toEqual({ message: "delivered before teardown" });
       expect(logs.filter((entry) => entry.level === "ERROR")).toEqual([]);
@@ -153,7 +150,7 @@ for (const [mode, connectionPerPoll] of [
     `the process exits after a bounded teardown in ${mode}, against a server ` +
       `that withholds its close`,
     async () => {
-      // The load-bearing assertion, and the reason it is a child process: an
+      // The critical assertion, and the reason it is a child process: an
       // in-process check that close() settled passes even when the teardown left a
       // live half-open socket behind, and this runner's own handles mask the leak.
       // Only a separate process can show that a completed run actually finishes.

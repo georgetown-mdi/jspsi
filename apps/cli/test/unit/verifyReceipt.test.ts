@@ -63,9 +63,9 @@ const localPayloadSent: CommittedPayload = {
   columns: ["dose"],
   rows: [["10mg"]],
 };
-// The run binder the record fixture and the dual-signed record fixture below both
-// carry, so the two artifacts pair as one run. One constant, so a fixture cannot
-// drift into an accidental cross-run pair.
+// The run binder both the record fixture and the dual-signed record fixture
+// below hold, so the two artifacts pair as one run. One constant, so a fixture
+// cannot drift into an accidental cross-run pair.
 const RECEIPT_BINDER = "YmluZGVy";
 const baseInputs: ExchangeRecordInputs = {
   outcome: "completed",
@@ -196,7 +196,7 @@ describe("formatVerificationReport", () => {
     expect(exitCode).toBe(RECEIPT_VERIFICATION_FAILED_EXIT_CODE);
   });
 
-  test("warnings are surfaced as notes", () => {
+  test("warnings are reported as notes", () => {
     const { lines } = formatVerificationReport(report("incomplete"), [
       "a duplicate identifier value",
     ]);
@@ -205,7 +205,7 @@ describe("formatVerificationReport", () => {
 
   test("a warning with control bytes is sanitized before display", () => {
     // A reconstruction warning interpolates a column name drawn from the
-    // supplied files; a crafted name carrying an ANSI/control sequence must be
+    // supplied files; a crafted name holding an ANSI/control sequence must be
     // neutralized at the display boundary, not echoed to the terminal raw.
     const esc = String.fromCharCode(0x1b);
     const bel = String.fromCharCode(0x07);
@@ -282,7 +282,7 @@ describe("formatVerificationReport: the recorded result size", () => {
     const out = lines.join("\n");
     expect(out).toContain("result size: not checked (no matched pairs to");
     // Each way a figure ends up with no pair count behind it is named, so the
-    // line is not read as the one cause the matched-pairs line above explains.
+    // line is not treated as the one cause the matched-pairs line above explains.
     expect(out).toContain("the matched-pairs line above names the cause");
     expect(out).toContain("is not shaped as a pairing has no count");
     expect(out).toContain("count-only exchange records no such table at all");
@@ -429,7 +429,7 @@ describe("formatSignedRecordReport", () => {
   });
 
   test("an unanchored slot a pinned value does match is not reported as matching none", () => {
-    // Both slots carry one certificate, so the pin that anchored the responder's
+    // Both slots hold one certificate, so the pin that anchored the responder's
     // slot matches the initiator's certificate too: what leaves that slot
     // unanchored is each value claiming a single slot, not a pin that missed.
     const { lines } = formatSignedRecordReport(
@@ -484,7 +484,7 @@ describe("formatSignedRecordReport", () => {
     expect(out).not.toContain("certificate fingerprint :");
   });
 
-  test("a failed outcome carries no note asserting the signatures verified", () => {
+  test("a failed outcome has no note asserting the signatures verified", () => {
     const failed = report();
     failed.outcome = "failed";
     failed.responder.signature = "failed";
@@ -708,7 +708,7 @@ describe("formatSignedRecordReport", () => {
     );
   });
 
-  test("record-carried text with control bytes is sanitized before display", () => {
+  test("record-held text with control bytes is sanitized before display", () => {
     // The identity and the binder both come out of the record verbatim -- the
     // identity free text chosen by whoever minted the certificate, the binder a
     // value only the two parties could derive -- and an auditor may be handed
@@ -908,9 +908,9 @@ describe("readExchangeRecordFile / readVerificationKeysFile", () => {
   });
 
   test("reject an unrecognized record version with a clear error", async () => {
-    // The version a record written before the run binder carries: refused here,
-    // naming the version this build recognizes, rather than read as a record whose
-    // absent binder leaves a receipt unpaired.
+    // The version a record written before the run binder has: refused here,
+    // naming the version this build recognizes, rather than treated as a record
+    // whose absent binder leaves a receipt unpaired.
     const dir = tmp();
     const { record } = await buildExchangeRecord(baseInputs);
     const bumped = { ...record, version: "psilink-exchange-record/v1" };
@@ -975,7 +975,7 @@ describe("handler", () => {
   }
 
   /** Both artifacts of one exchange -- the record with its keys file beside it,
-   * and the dual-signed record carrying that exchange's agreed-terms hash -- plus
+   * and the dual-signed record holding that exchange's agreed-terms hash -- plus
    * the responder's fingerprint (the pin a verifier holds for its partner), the
    * initiator's (what an auditor holding both would pin), and the path to the
    * initiator's own signing identity, which anchors its own slot. */
@@ -1076,7 +1076,7 @@ describe("handler", () => {
     expect(exits).toEqual([64]);
     expect(stderr).toContain("does not exist");
     // The run would otherwise have printed an INCOMPLETE verdict reporting the
-    // fingerprint trust as not established, which reads as an auditor's run
+    // fingerprint trust as not established, which is treated as an auditor's run
     // rather than as a mistyped path.
     expect(stdout).toBe("");
   });
@@ -1123,9 +1123,9 @@ describe("handler", () => {
     expect(stdout).toBe("");
   });
 
-  test("a --config-file carrying only the pin is accepted for it", async () => {
+  test("a --config-file holding only the pin is accepted for it", async () => {
     // The signed verdict directs the operator to "--config-file with
-    // signing.partner_fingerprint set", so a config carrying exactly that must
+    // signing.partner_fingerprint set", so a config holding exactly that must
     // verify; refusing it for the linkage_terms this run does not need would
     // contradict the command's own guidance.
     const { recordPath, signedPath, identityPath, pin } =
@@ -1150,7 +1150,7 @@ describe("handler", () => {
 
   test("a configured identity file that does not exist warns instead of vanishing", async () => {
     // signing.identity_file was written by the operator, so a typo'd path must
-    // not read as "no identity configured"; the named-file arm is a usage error
+    // not treated as "no identity configured"; the named-file arm is a usage error
     // and this configured arm degrades with a diagnostic.
     const { recordPath, signedPath, pin } = await exchangeArtifacts();
     const missing = join(tmp(), "no-such-identity.json");
@@ -1189,7 +1189,7 @@ describe("handler", () => {
 
   test("a --config-file defining no linkage_terms says so beside the line it explains", async () => {
     // The terms half of that config supplied nothing, and the agreed-terms line
-    // otherwise reads as though no config had been named at all.
+    // otherwise would be treated as though no config had been named at all.
     const { recordPath } = await exchangeArtifacts();
     const configPath = writeYaml("signing:\n  mode: certificate\n");
     const { stdout, exits } = await runVerify({
@@ -1259,7 +1259,7 @@ describe("handler", () => {
     // null when it was committed, the result file wrote it as an empty cell, and
     // nothing in the retained files distinguishes that from a committed empty
     // string. The received-payload commitment therefore cannot reproduce -- and
-    // the verdict names the reason instead of leaving a bare mismatch to read as
+    // the verdict names the reason instead of leaving a bare mismatch treated as
     // tampering.
     const dir = tmp();
     const { record, keys } = await buildExchangeRecord({
@@ -1405,7 +1405,7 @@ describe("handler", () => {
     // with the field left out. A half-supplied pair is the shape that must not
     // half-check: expected identities are unordered and matched onto the two
     // certificates as a bijection, so anchoring one name would leave the other
-    // certificate's check reading as performed against a name nobody supplied.
+    // certificate's check treated as performed against a name nobody supplied.
     // The verdict says the check was not performed, and names what would supply
     // it, on both sources.
     const { identity: _unnamed, ...unnamedPartnerTerms } =

@@ -254,7 +254,7 @@ describe("a matching marker that cannot be removed", () => {
 });
 
 describe("every skipped record explains itself", () => {
-  test("padded and inapplicable skips all carry a meaning", () => {
+  test("padded and inapplicable skips all have a meaning", () => {
     const reports = [
       runMountChecks(path.join(os.tmpdir(), "psilink-no-such-dir"), INPUT),
       runMountChecks(tempDirectory(), { marker: "", token: "" }),

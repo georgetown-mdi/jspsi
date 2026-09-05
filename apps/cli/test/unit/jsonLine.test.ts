@@ -4,13 +4,10 @@ import { asciiSafeJsonLine } from "../../src/util/jsonLine";
 
 // The encoder behind the probe's two machine-readable stdout lines
 // (apps/cli/src/commands/probeHostKey.ts: probeJsonLine and
-// probeDiagnosisJsonLine). What it promises is a pair: the emitted TEXT is
-// printable ASCII throughout, and the document that text parses to is the one
-// `JSON.stringify` alone would have produced -- which is what keeps a
-// consumer's own display escape a single pass.
-//
-// The bytes under test are built by code point rather than written as literals,
-// so this file stays readable ASCII and each case names the byte it drives.
+// probeDiagnosisJsonLine). It promises a pair: the emitted TEXT is printable
+// ASCII throughout, and it parses to the same document a bare
+// `JSON.stringify` would produce. Bytes below are built by code point rather
+// than written as literals, so this file stays readable ASCII.
 
 /** Printable ASCII throughout, the property that makes a line safe to print as
  * it stands. Asserted on the emitted text rather than on any field of it. */
@@ -18,7 +15,7 @@ const PRINTABLE_ASCII_ONLY = /^[\x20-\x7e]*$/;
 
 const byte = (code: number): string => String.fromCharCode(code);
 
-/** DEL, and the C1 control the peer's own latin1 decoding can carry: the two
+/** DEL, and the C1 control the peer's own latin1 decoding can produce: the two
  * ranges `JSON.stringify` leaves raw. */
 const DEL = byte(0x7f);
 const C1_CSI = byte(0x9b);
@@ -30,7 +27,7 @@ const LINE_SEPARATOR = byte(0x2028);
 
 describe("asciiSafeJsonLine emits printable ASCII", () => {
   test("DEL and the C1 range are escaped, where JSON.stringify leaves them raw", () => {
-    // The premise this encoder exists for, driven rather than asserted in prose.
+    // The reason this encoder exists, driven rather than asserted in prose.
     const bare = JSON.stringify({ excerpt: `a${DEL}b${C1_CSI}c` });
     expect(bare).toContain(DEL);
     expect(bare).toContain(C1_CSI);
@@ -102,7 +99,7 @@ describe("asciiSafeJsonLine changes no part of the document", () => {
     expect(asciiSafeJsonLine({ a: "x", b: undefined })).toBe('{"a":"x"}');
   });
 
-  test("the line is one line whatever the value carried", () => {
+  test("the line is one line whatever the value held", () => {
     const line = asciiSafeJsonLine({
       excerpt: `a\nb\r\nc${LINE_SEPARATOR}d${byte(0x2029)}e`,
     });

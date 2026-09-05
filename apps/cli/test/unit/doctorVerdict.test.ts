@@ -20,7 +20,7 @@ function report(checks: DoctorCheckRecord[]): DoctorReport {
 }
 
 describe("the JSON verdict is the launcher-facing contract", () => {
-  test("carries exactly version, mode, overall, and the check list", () => {
+  test("has exactly version, mode, overall, and the check list", () => {
     const parsed = JSON.parse(
       verdictJson(report([{ id: "tcp_445", status: "ok", summary: "open." }])),
     ) as Record<string, unknown>;
@@ -34,7 +34,7 @@ describe("the JSON verdict is the launcher-facing contract", () => {
     expect(parsed["mode"]).toBe("probe");
   });
 
-  test("a check carries only id, status, and any meaning/action", () => {
+  test("a check has only id, status, and any meaning/action", () => {
     // summary, detail, and blocksRun exist for the human rendering and for the
     // roll-up; a consumer must not start depending on them through the JSON.
     const [check] = verdictOf(
@@ -88,11 +88,11 @@ describe("the JSON verdict is the launcher-facing contract", () => {
     // its map callback in. An unnecessary directive is itself a typecheck
     // failure, so a shape that started admitting one of these stops this
     // passing.
-    // @ts-expect-error a check object carries no summary
+    // @ts-expect-error a check object has no summary
     const withSummary: DoctorCheck = { id: "a", status: "ok", summary: "s" };
-    // @ts-expect-error a check object carries no detail
+    // @ts-expect-error a check object has no detail
     const withDetail: DoctorCheck = { id: "b", status: "ok", detail: "d" };
-    // @ts-expect-error a check object carries no blocksRun
+    // @ts-expect-error a check object has no blocksRun
     const withBlocks: DoctorCheck = { id: "c", status: "ok", blocksRun: true };
     expect([withSummary.id, withDetail.id, withBlocks.id]).toEqual([
       "a",
@@ -103,13 +103,12 @@ describe("the JSON verdict is the launcher-facing contract", () => {
 });
 
 describe("the JSON verdict line is printable ASCII", () => {
-  // A launcher that cannot classify a line prints it -- to a terminal, or into a
-  // log a person later reads -- and a check's meaning and action interpolate the
-  // operator's own SMB_* values, which readSmbProbeInput validates against the
-  // C0 controls and DEL and nothing above them. The line therefore has to be
-  // safe as BYTES, which bare JSON.stringify does not make it: it escapes
-  // U+0000-U+001F, the quote and the backslash, and passes DEL, the C1 range and
-  // U+2028/U+2029 through.
+  // A launcher that cannot classify a line prints it -- to a terminal, or into
+  // a log a person later reads -- and a check's meaning and action interpolate
+  // the operator's own SMB_* values, which readSmbProbeInput validates only
+  // against the C0 controls and DEL. The line has to be safe as BYTES, which
+  // bare JSON.stringify does not guarantee: it escapes U+0000-U+001F, the quote
+  // and the backslash, but passes DEL, the C1 range, and U+2028/U+2029 through.
   const DEL = String.fromCharCode(0x7f);
   const C1_CSI = String.fromCharCode(0x9b);
   const PRINTABLE_ASCII_ONLY = /^[\x20-\x7e]*$/;
@@ -130,7 +129,7 @@ describe("the JSON verdict line is printable ASCII", () => {
 
   test("a DEL and a C1 byte in a meaning are escaped, not passed through", () => {
     const meaning = `'a${DEL}b${C1_CSI}c' names a file, not a folder.`;
-    // The premise, driven rather than asserted in prose.
+    // The assumption, driven rather than asserted in prose.
     const bare = JSON.stringify({ meaning });
     expect(bare).toContain(DEL);
     expect(bare).toContain(C1_CSI);
@@ -142,7 +141,7 @@ describe("the JSON verdict line is printable ASCII", () => {
     expect(PRINTABLE_ASCII_ONLY.test(line)).toBe(true);
   });
 
-  test("an action carrying the same bytes is escaped the same way", () => {
+  test("an action containing the same bytes is escaped the same way", () => {
     const line = lineWith("m", `check ${DEL}${C1_CSI} and run this again.`);
     expect(line).toContain(
       `"action":"check \\u007f\\u009b and run this again."`,
@@ -411,7 +410,7 @@ describe("tool output behind a failure is bounded", () => {
 
 describe("a key marker straddling the MEANING/ACTION wrap", () => {
   // The wrap re-flows on whitespace at 76 columns and every marker the
-  // redaction matches carries spaces, so a marker split across two rendered
+  // redaction matches has spaces, so a marker split across two rendered
   // lines matches neither of them: the pass ahead of the re-flow is what these
   // pin, at the lines the rendering hands its sink.
   const KEY_MARKER = "-----BEGIN RSA PRIVATE KEY-----";

@@ -69,11 +69,9 @@ vi.mock("@psilink/core", async (importActual) => {
     // Stub prepareForExchange so the handler tests below reach the post-exchange
     // advisory without the PSI stack or data-shape fragility. loadCSVFile stays
     // real so it consumes the input stream (a mock would leave a dangling
-    // createReadStream whose async open races the afterEach cleanup). Only the
-    // handler tests exercise this path; loadConfig never calls it. The shape
-    // carries the empty linkageFields and linkageKeys the value-constraint sweep
-    // (warnOnValueConstraints) reads -- it scopes to key-referenced fields, so it
-    // walks both -- so the sweep is a no-op here.
+    // createReadStream whose async open races the afterEach cleanup). The shape
+    // has the empty linkageFields and linkageKeys the value-constraint sweep
+    // (warnOnValueConstraints) reads, so the sweep is a no-op here.
     // A FRESH object per call (not a shared mockReturnValue ref), matching the real
     // prepareForExchange: prepareDataset mutates the returned object (it sets
     // expectedPayloadColumns from a committed payload.receive), so a shared ref
@@ -165,8 +163,8 @@ const minimalLinkageTerms = {
 };
 
 // A canonical partner pin: 43 unpadded base64url characters, the shape
-// SigningConfigSchema admits, so a certificate-mode config carrying it is held up
-// by whatever else the run refuses rather than by the pin gate.
+// SigningConfigSchema admits, so a certificate-mode config containing it is
+// held up by whatever else the run refuses rather than by the pin gate.
 const PARTNER_FINGERPRINT = "iWD-ZB69Oz6gOpaX_OoC7sD8ohIZj2lETC9qbl-IbPg";
 
 const minimalSFTPConfig = {
@@ -213,14 +211,11 @@ test("builder: exchange's command-specific option help reaches the rendered help
 });
 
 // --- parseArgs: CLI credential overrides resolved at parse time --------------
-// exchange resolves an @path credential flag eagerly in parseArgs: it never
-// persists a config, so there is no reference to preserve, and the override is
-// layered on AFTER the config-load resolution (resolveExchangeSpecRefs). Without
-// this, an @path credential from the flag would reach the live SFTP connection
-// unresolved. This pins that seam for each of the three credential siblings the
-// eager resolution covers -- the server password, the SSH private key, and its
-// passphrase -- so a future edit that broke the @path resolution for any one
-// of them is caught.
+// exchange resolves an @path credential flag eagerly in parseArgs, layered on
+// AFTER the config-load resolution (resolveExchangeSpecRefs), so an unresolved
+// @path credential from the flag never reaches the live SFTP connection. This
+// pins that boundary for the three credential siblings the eager resolution
+// covers: the server password, the SSH private key, and its passphrase.
 
 test("parseArgs resolves an @path server-password to the file contents", () => {
   const passwordRef = path.join(dir, "sftp-password");
@@ -235,7 +230,7 @@ test("parseArgs resolves an @path server-password to the file contents", () => {
   expect(args.serverPassword).toBe("S3cr3tSFTPPassw0rd");
 });
 
-test("parseArgs carries a literal server-password through unchanged", () => {
+test("parseArgs passes a literal server-password through unchanged", () => {
   const argv = {
     _: [],
     $0: "psilink",
@@ -263,7 +258,7 @@ test("parseArgs resolves an @path server-private-key-passphrase and private key 
   expect(args.serverPrivateKeyPassphrase).toBe("unlock-me");
 });
 
-test("parseArgs carries a literal passphrase through unchanged", () => {
+test("parseArgs passes a literal passphrase through unchanged", () => {
   const argv = {
     _: [],
     $0: "psilink",
@@ -297,7 +292,7 @@ test("injects expires from key file when present", () => {
 });
 
 test("injects sharedSecret from key file even when a top-level authentication block is present in config", () => {
-  // A top-level authentication block in psilink.yaml carries no injected fields
+  // A top-level authentication block in psilink.yaml has no injected fields
   // (those come from the key file); an empty one must not break loading.
   const configWithAuth = {
     ...minimalSFTPConfig,
@@ -311,7 +306,7 @@ test("injects sharedSecret from key file even when a top-level authentication bl
 
 // --- rule-set citation drift -------------------------------------------------
 
-/** A filedrop config carrying `terms`, plus the key file the load needs. */
+/** A filedrop config containing `terms`, plus the key file the load needs. */
 function writeConfigWithTerms(terms: LinkageTerms): void {
   fs.writeFileSync(
     configFile,
@@ -348,7 +343,7 @@ test("loadConfig stays silent on a config whose rules still fit its citation", (
   expect(citationWarnings()).toEqual([]);
 });
 
-test("loadConfig stays silent on a config carrying no citation", () => {
+test("loadConfig stays silent on a config containing no citation", () => {
   const terms = getDefaultLinkageTerms("Test Party");
   const [first, second, ...rest] = terms.linkageKeys;
   delete terms.linkageRuleSet;
@@ -380,13 +375,11 @@ test("throws a UsageError on malformed YAML in config file", () => {
 });
 
 // A YAML parse failure embeds a snippet of the offending source in its message,
-// which can carry an inline credential; loadConfig must report only the path.
-// Mirrors the accept-side guard in accept.test.ts ("validateAccept: a
-// malformed-YAML config does not echo an inline credential"). Two distinct parse
-// failures reach the catch by different routes: a syntax error throws a
-// YAMLParseError that reproduces the malformed line, while an unresolved alias
-// throws a plain ReferenceError (not a YAMLError) that echoes the alias name --
-// the path-only guard must close both.
+// which can hold an inline credential; loadConfig must report only the path.
+// Mirrors the accept-side guard in accept.test.ts. A syntax error throws a
+// YAMLParseError that reproduces the malformed line; an unresolved alias throws
+// a plain ReferenceError that echoes the alias name instead -- the path-only
+// guard must close both.
 test.each([
   [
     "syntax error (tab indentation on a password line)",
@@ -414,21 +407,17 @@ test.each([
     // Still a usage error pointing the operator at the config path to fix.
     expect((caught as Error).message).toContain(configFile);
     expect((caught as Error).message).toContain("could not be parsed as YAML");
-    // The credential must not appear anywhere in the surfaced message.
+    // The credential must not appear anywhere in the reported message.
     expect((caught as Error).message).not.toContain(SECRET);
   },
 );
 
 // divergesFromAgreedTerms (signingIdentityDivergence.ts) reports no divergence
-// when termsIdentity is absent or empty, so assertIdentityMatchesAgreedTerms --
-// the exchange path's disposition of it -- lets such a run through. Absent is a
-// shape this path reaches: terms may omit the identity, and the silence is right
-// there -- no configured name exists for a certificate to diverge from, and a
-// run that would sign under one is refused outright before it starts (see the
-// certificate-mode gate below). Empty is not, and neither is terms missing
-// altogether: the schema refuses both. Pin all three directly, so a schema
-// change admitting a blank label -- which divergesFromAgreedTerms reads as
-// absence and passes over -- fails here.
+// when termsIdentity is absent or empty, so assertIdentityMatchesAgreedTerms
+// lets such a run through. Absent is reachable (terms may omit identity; a run
+// that would sign under one is refused earlier by the certificate-mode gate).
+// Empty and missing terms are both schema-refused. Pin all three directly, so a
+// schema change admitting a blank label -- treated as absence -- fails here.
 
 test("a config with no linkage_terms is refused, not silently accepted", () => {
   fs.writeFileSync(
@@ -457,9 +446,9 @@ test("a config with an empty linkage_terms.identity is refused, not silently acc
   );
 });
 
-test("a config whose linkage_terms omit the identity loads, carrying none", () => {
+test("a config whose linkage_terms omit the identity loads, holding none", () => {
   // The third shape, and the admissible one: the field is optional, so this
-  // config is accepted and its terms carry no identity at all -- which is what
+  // config is accepted and its terms have no identity at all -- which is what
   // makes divergesFromAgreedTerms's absent branch reachable rather than dead.
   // Nothing stands a label in it.
   const { identity: _named, ...unnamedTerms } = minimalLinkageTerms;
@@ -517,7 +506,7 @@ test("throws a UsageError at config load when a preserved @path credential file 
   saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
   expect(() => loadConfig(baseOptions())).toThrow(UsageError);
   expect(() => loadConfig(baseOptions())).toThrow("@-file reference");
-  // The missing credential file is surfaced as a credential-access failure, not
+  // The missing credential file is reported as a credential-access failure, not
   // re-wrapped as an "invalid exchange spec" (a schema error it is not).
   let message = "";
   try {
@@ -589,14 +578,12 @@ test("filedrop config injects sharedSecret from key file", () => {
 });
 
 // --- connection_per_poll ignored-warning -------------------------------------
-// connection_per_poll is SFTP-only, so a non-sftp config that carries it (or a
-// CLI --connection-per-poll against one) must draw the ignored-warning rather
-// than silently no-op. The persisted case is the mode's documented primary home
-// and only the merged connection.options carries it; the CLI case is dropped off
-// sftp by applyConnectionOverrides, so only the raw flag carries it -- loadConfig
+// connection_per_poll is SFTP-only, so a non-sftp config that has it (or a CLI
+// --connection-per-poll against one) must draw the ignored-warning rather than
+// silently no-op: the persisted case via connection.options, the CLI case via
+// the raw flag once applyConnectionOverrides drops it off sftp -- loadConfig
 // reads both. The signature `will be ignored ... only supported on sftp`
-// distinguishes this warning from the wasteful-short-interval advisory, which
-// also names --connection-per-poll but fires only on sftp.
+// distinguishes this from the same-flag wasteful-short-interval advisory.
 
 /** Whether any collected warning is the connection_per_poll ignored-warning. */
 function warnedConnectionPerPollIgnored(): boolean {
@@ -625,7 +612,7 @@ test("a persisted connection_per_poll: true in a filedrop config warns it is ign
 
 test("a CLI --connection-per-poll against a filedrop config warns it is ignored", () => {
   // applyConnectionOverrides drops the flag off sftp, so the merged config never
-  // carries it here; the raw CLI intent is the only carrier and must still warn.
+  // has it here; only the raw CLI intent does, and it must still warn.
   fs.writeFileSync(configFile, YAML.stringify(minimalFiledropConfig));
   saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
   loadConfig({ ...baseOptions(), connectionPerPoll: true });
@@ -761,7 +748,7 @@ test("an authentication block placed under connection is ignored", () => {
 
 // --- webrtc channel ----------------------------------------------------------
 
-test("a webrtc config loads, carrying its role and server through", () => {
+test("a webrtc config loads, passing its role and server through", () => {
   fs.writeFileSync(
     configFile,
     YAML.stringify({
@@ -950,7 +937,7 @@ test("a file-sync config reports none of the webrtc drops", () => {
 
 // --- token_max_age_days and load-time expiry ---------------------------------
 
-test("loadConfig surfaces token_max_age_days from the authentication block", () => {
+test("loadConfig exposes token_max_age_days from the authentication block", () => {
   // End-to-end: a policy field in psilink.yaml reaches result.authentication
   // (camelized), where protocol.ts reads it to stamp the rotated token's expiry.
   const config = {
@@ -1224,10 +1211,8 @@ test("handler: a result file the exchange could not write exits 73, not 69", asy
   // not reach disk, and a supervisor that retries conducts a SECOND exchange with
   // this party's data. runProtocol stamps that error with the persistence-loss
   // code (protocol.test.ts drives the real stamp against a real write failure);
-  // what is measured here is the code the COMMAND reports, which is where the
-  // published contract is either delivered or discarded. A boundary that maps
-  // every non-usage error to 69 passes every other test in this file and fails
-  // this one.
+  // what is measured here is the code the COMMAND reports. A boundary that maps
+  // every non-usage error to 69 passes every other test here and fails this one.
   fs.writeFileSync(configFile, YAML.stringify(minimalFiledropConfig));
   saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
   const input = path.join(dir, "in.csv");
@@ -1304,7 +1289,7 @@ test("handler suppresses the advisory when a successful exchange refreshes the t
 // The comparison itself is unit-tested in exchangeSigning.test.ts; these cover
 // the wiring -- that the handler hands the run's terms identity to the signing
 // resolver, and that a divergence stops the run ahead of the exchange that would
-// carry credentials, terms, and data.
+// hold credentials, terms, and data.
 
 // Seed a certificate-mode config whose identity file is bound to `bound`, and
 // return the argv a run of it takes. The config's terms identity is "Test Party".
@@ -1335,9 +1320,9 @@ async function signedExchangeRun(bound: string): Promise<Arguments> {
 }
 
 test("handler exits 64 on a divergent signing identity, before runProtocol", async () => {
-  // The seam is the CLI's own (assertIdentityMatchesAgreedTerms, inside
+  // The call site is the CLI's own (assertIdentityMatchesAgreedTerms, inside
   // resolveSigningPersist), and what is pinned here is that it is reached on the
-  // exchange path ahead of the run that carries credentials, terms, and data,
+  // exchange path ahead of the run that holds credentials, terms, and data,
   // and that its remedy reaches the operator through the command's own error
   // sink as a usage error (exit 64) rather than a transport failure.
   const argv = await signedExchangeRun("Someone Else");
@@ -1387,7 +1372,7 @@ test("handler compares the signing identity against --identity when it is given"
 });
 
 test("handler takes the run's identity from the configuration", async () => {
-  // The label is the config's when it carries one; an empty string is refused by
+  // The label is the config's when it has one; an empty string is refused by
   // the schema (see the empty-identity config case above) rather than reaching
   // here, and no lookup stands behind either -- partyIdentity.test.ts pins that
   // across the whole CLI source.
@@ -1435,7 +1420,7 @@ test("handler treats a blank --identity as absent, falling back to the config", 
   expect(vi.mocked(prepareForExchange).mock.calls[0][1]).toBe("Test Party");
 });
 
-test("handler exits 64 on an --identity still carrying the init placeholder", async () => {
+test("handler exits 64 on an --identity still holding the init placeholder", async () => {
   // The optional-identity path refuses this one value rather than reading it as
   // a label or dropping it to absence, and the refusal is a local usage fault:
   // exit 64, decided before the protocol runs, not the top-level printer's 1.
@@ -1466,9 +1451,9 @@ test("handler exits 64 on an --identity still carrying the init placeholder", as
   }
 });
 
-test("handler runs a configuration carrying no identity, sending none", async () => {
+test("handler runs a configuration with no identity, sending none", async () => {
   // `linkage_terms.identity` is optional, so a configuration that names this
-  // party nothing runs -- the terms carry no identity rather than a label the
+  // party nothing runs -- the terms have no identity rather than a label the
   // operator never chose, and nothing is read off the account psilink runs as.
   const { identity: _dropped, ...unnamedTerms } = minimalLinkageTerms;
   fs.writeFileSync(
@@ -1527,7 +1512,7 @@ test("handler trims a supplied --identity before using it", async () => {
 // then proceeds, and the pre-existing-key and fail-closed exit paths.
 
 // A 43-char base64url secret distinct from TOKEN_A/TOKEN_B, to prove the
-// provisioned key carries the invitation's secret.
+// provisioned key has the invitation's secret.
 const INVITE_SECRET = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAg";
 
 function inviteToken(expires?: string): InvitationToken {
@@ -1542,7 +1527,7 @@ function inviteToken(expires?: string): InvitationToken {
 test("handler: --invitation provisions the key file when none exists and the exchange proceeds", async () => {
   // No key file at the key path: provisioning writes the composing party's copy
   // (secret and expiry) and the exchange reaches runProtocol, which is mocked to
-  // resolve. The written key must carry the invitation's secret and expiry.
+  // resolve. The written key must have the invitation's secret and expiry.
   const expires = new Date(Date.now() + 3_600_000).toISOString();
   const encoded = await encodeInvitation(inviteToken(expires));
   fs.writeFileSync(configFile, YAML.stringify(minimalFiledropConfig));
@@ -1721,7 +1706,7 @@ test.each(ERROR_CLASS_EXIT_CODES)(
 
 test("handler: the prepare-time guard completes before runProtocol on an sftp config", async () => {
   // The disclosure property the docs state is that every prepare-time guard
-  // settles before the run that carries credentials, terms, and data -- that is
+  // settles before the run that holds credentials, terms, and data -- that is
   // runProtocol, not the first connection. An sftp config keeps the unpinned
   // first-use host-key path live (stubbed above), which is exactly the shape
   // where a probe can open a socket ahead of the guard, so pin the ordering
@@ -1772,10 +1757,10 @@ async function seedSigningIdentity(bound: string): Promise<string> {
 test("handler: certificate mode with no partner pin exits 64 before runProtocol", async () => {
   // The gate is core's alone (assertCertificateModePinsPartner, raised inside
   // prepareForExchange), so this drives the REAL prepare rather than the
-  // top-of-file stub: what is pinned here is that the one seam is reached on the
-  // CLI's exchange path, ahead of the run that carries credentials, terms, and
-  // data, and that its remedy reaches the operator through the command's own
-  // error sink as a usage error (exit 64) rather than a transport failure.
+  // top-of-file stub: what is pinned here is that the one call site is reached
+  // on the CLI's exchange path, ahead of the run that holds credentials, terms,
+  // and data, and that its remedy reaches the operator through the command's
+  // own error sink as a usage error (exit 64) rather than a transport failure.
   const core =
     await vi.importActual<typeof import("@psilink/core")>("@psilink/core");
   fs.writeFileSync(
@@ -1816,14 +1801,13 @@ test("handler: certificate mode with no partner pin exits 64 before runProtocol"
 });
 
 test("handler: certificate mode with an unnamed party exits 64 before runProtocol", async () => {
-  // The sibling of the pin gate above, and pinned the same way: the refusal is
-  // core's alone (assertCertificateModeNamesLocalParty, inside
-  // prepareForExchange), so this drives the REAL prepare rather than the
-  // top-of-file stub. `linkage_terms.identity` is optional, so the terms below
-  // are a shape the schema admits and only the signing configuration makes
-  // unrunnable -- the seam has to be reached on the exchange leg ahead of the run
-  // that carries credentials, terms, and data, and its remedy has to reach the
-  // operator as a usage error (exit 64).
+  // The sibling of the pin gate above: the refusal is core's alone
+  // (assertCertificateModeNamesLocalParty, in prepareForExchange), so this
+  // drives the REAL prepare, not the stub. `linkage_terms.identity` is
+  // optional, so only the signing configuration makes the terms below
+  // unrunnable -- the call site has to be reached ahead of the run that holds
+  // credentials, terms, and data, and its remedy has to reach the operator as
+  // exit 64.
   const core =
     await vi.importActual<typeof import("@psilink/core")>("@psilink/core");
   const { identity: _named, ...unnamedTerms } = minimalLinkageTerms;
@@ -1901,19 +1885,14 @@ test("handler: an unnamed party that signs nothing runs unchanged", async () => 
   }
 });
 
-// --- handler: the local preparation precedes host-key trust -----------------
+// --- handler: the local preparation precedes host-key trust ------------------
 // An exchange refused from local inputs alone must not have connected to the
-// server first, and on an unpinned sftp config the first-use host-key step is
-// what would connect: its probe opens a real transport. So both steps that
-// carry those refusals -- the preparation, with its linkage-satisfiability gate
-// and outbound-consent surface, and the signing resolution, whose identity file
-// can be missing or bound to another party -- run ahead of that step, and the
-// checks below hold that order rather than the comments beside any of them. A
-// refusal the parsed configuration alone decides, a certificate-mode run naming
-// no signing identity, runs ahead of both in turn. All of them stub
-// establishHostKeyTrust (as the whole file does), so what they pin is the order
-// of the STEPS; that the probe is what the host-key one opens is
-// hostKeyTrust.test.ts's.
+// server first: on an unpinned sftp config, the first-use host-key step is
+// what would connect. Preparation (its linkage-satisfiability gate and
+// outbound-consent surface), signing resolution (a missing or mismatched
+// identity file), and a config-only refusal (certificate mode naming no
+// identity) must all run ahead of it -- the tests below pin only that STEP
+// order.
 
 /** Write the sftp config, key file, and CSV the two ordering checks drive the
  * handler over; the default CSV satisfies the config's lone ssn key. */
@@ -1994,13 +1973,12 @@ test("handler: an input that cannot satisfy the agreed terms exits 64 with no ho
 
 test("handler: certificate mode naming no identity file is refused before either", async () => {
   // A run the parsed configuration alone shows cannot finish, so it is refused
-  // ahead of BOTH steps: the preparation whose consent surface can stop for an
-  // answer, and the first-use host-key step whose probe connects and whose
-  // accepted pin is written into psilink.yaml. The config below is unpinned sftp
-  // and pins the partner's certificate, so the missing identity file is the only
-  // thing that makes it unrunnable. The host-key step is stubbed file-wide, so
-  // what the config-file assertion adds is that nothing else on the handler's
-  // path wrote it either.
+  // ahead of BOTH steps: the preparation, whose consent surface can stop for an
+  // answer, and the first-use host-key step, whose probe connects and writes an
+  // accepted pin into psilink.yaml. The config below is unpinned sftp and pins
+  // the partner's certificate, so the missing identity file is the only thing
+  // that makes it unrunnable; the host-key step is stubbed file-wide, so the
+  // config-file assertion adds that nothing else on the handler's path wrote it.
   fs.writeFileSync(
     configFile,
     YAML.stringify({
@@ -2065,7 +2043,7 @@ function writeSigningExchangeInputs(identityFile: string): string {
 }
 
 test("handler: the signing identity resolves before host-key trust", async () => {
-  // Both refusals the resolution carries -- an identity file that is not there
+  // Both refusals the resolution has -- an identity file that is not there
   // or will not parse, and one bound to a party other than this run's terms
   // identity -- read this party's own configuration and its own file, so they
   // are settled before the step that connects. The identity seeded here loads
@@ -2175,7 +2153,7 @@ const ssnAndNameDobTerms: LinkageTerms = {
 };
 
 // The last-name+dob key alone: the terms a last_name+dob CSV satisfies in full,
-// for the tests whose subject is the lock-in rather than coverage.
+// for the tests whose subject is the commitment rather than coverage.
 const nameDobTerms: LinkageTerms = {
   ...ssnAndNameDobTerms,
   linkageFields: [
@@ -2194,7 +2172,7 @@ function writeInput(contents: string): string {
 }
 
 // prepareDataset takes where an outbound-payload confirmation would be recorded
-// and how the surface asking for it is routed. None of the specs below carries a
+// and how the surface asking for it is routed. None of the specs below has a
 // consent record, so the confirmation is a no-op and the context is inert; the
 // gate itself is covered in outboundPayloadConsent.test.ts.
 function consentContext(): { configPath: string; logFile: string | undefined } {
@@ -2217,7 +2195,7 @@ test("prepareDataset: refuses (UsageError) naming the field when the CSV satisfi
   );
   // The field is named on a labelled link of its own -- terms content is
   // partner-chosen on the sibling accept path -- so it is the rendered chain the
-  // operator reads that has to carry it, not the summary.
+  // operator reads that has to hold it, not the summary.
   expect(sanitizeErrorForDisplay(err)).toContain(
     "unsatisfied field: ssn (ssn)",
   );
@@ -2262,7 +2240,7 @@ test("prepareDataset: an explicit standardization remap satisfies a field the co
 
   // ...but a remap binding ssn <- ssn_source makes the field producible, so the
   // same CSV proceeds with no block and no warning. This is the exchange-path
-  // wrinkle accept does not have: a committed config can carry a column remap.
+  // wrinkle accept does not have: a committed config can hold a column remap.
   // The remap binds only a `role: linkage` column (matching participation is the
   // explicit linkage role), so the config roles ssn_source linkage while leaving
   // its type non-ssn -- the remap, not the type fallback, is what binds it.
@@ -2349,12 +2327,12 @@ test("prepareDataset: an explicit metadata type that retypes the column away blo
   );
 });
 
-// --- prepareDataset: recurring payload lock-in -------------------------------
+// --- prepareDataset: recurring payload commitment ----------------------------
 
-test("prepareDataset: a committed payload.receive locks in the expected received columns", async () => {
-  // A recurring config that declares what it expects to receive locks that set in
+test("prepareDataset: a committed payload.receive fixes the expected received columns", async () => {
+  // A recurring config that declares what it expects to receive fixes that set
   // as prepared.expectedPayloadColumns; runExchange then verifies the partner's
-  // transmitted payload matches it exactly (the recurring half of the lock-in).
+  // transmitted payload matches it exactly (the recurring half of the commitment).
   const input = writeInput("last_name,dob\nLovelace,1815-12-10\n");
   const terms: LinkageTerms = {
     ...nameDobTerms,
@@ -2369,7 +2347,7 @@ test("prepareDataset: a committed payload.receive locks in the expected received
   expect(prepared.expectedPayloadColumns).toEqual(["diagnosis", "notes"]);
 });
 
-test("prepareDataset: a config without payload.receive locks in nothing (lazy)", async () => {
+test("prepareDataset: a config without payload.receive fixes nothing (lazy)", async () => {
   const input = writeInput("last_name,dob\nLovelace,1815-12-10\n");
   const prepared = await prepareDataset(
     { linkageTerms: nameDobTerms },
@@ -2380,9 +2358,9 @@ test("prepareDataset: a config without payload.receive locks in nothing (lazy)",
   expect(prepared.expectedPayloadColumns).toBeUndefined();
 });
 
-test("prepareDataset: the top-level expectedPayloadColumns is the canonical lock-in source", async () => {
+test("prepareDataset: the top-level expectedPayloadColumns is the canonical commitment source", async () => {
   // The local expectedPayloadColumns field (written by an offline accept from the
-  // invitation's disclosedPayloadColumns) is the canonical lock-in and takes
+  // invitation's disclosedPayloadColumns) is the canonical commitment and takes
   // precedence over the negotiated payload.receive. Distinct from payload.receive
   // so it does not trip the validateCompatibility mirror against an inviter that
   // advertised no payload.send.
@@ -2400,9 +2378,9 @@ test("prepareDataset: the top-level expectedPayloadColumns is the canonical lock
   expect(prepared.expectedPayloadColumns).toEqual(["diagnosis", "notes"]);
 });
 
-test("prepareDataset: an empty expectedPayloadColumns locks in the strict empty set", async () => {
+test("prepareDataset: an empty expectedPayloadColumns fixes the strict empty set", async () => {
   // An offline accept of an invitation that disclosed nothing persists the empty
-  // set; it is a strict "receive nothing" lock-in, not the absent/lazy case.
+  // set; it is a strict "receive nothing" commitment, not the absent/lazy case.
   const input = writeInput("last_name,dob\nLovelace,1815-12-10\n");
   const prepared = await prepareDataset(
     { linkageTerms: nameDobTerms, expectedPayloadColumns: [] },
@@ -2413,10 +2391,10 @@ test("prepareDataset: an empty expectedPayloadColumns locks in the strict empty 
   expect(prepared.expectedPayloadColumns).toEqual([]);
 });
 
-// --- prepareDataset: recurring terms lock-in ---------------------------------
+// --- prepareDataset: recurring terms commitment ------------------------------
 
 test("prepareDataset: the config's expectedPartnerDeduplicate is restored onto the run", async () => {
-  // The terms-side half of an acceptance's lock-in, written into the config by
+  // The terms-side half of an acceptance's commitment, written into the config by
   // every accept path and restored here so a RECURRING run holds the partner to
   // what the invitation declared. Both booleans, because `false` is the
   // declaration a hostile inviter widens away from by presenting `true`.
@@ -2436,10 +2414,10 @@ test("prepareDataset: the config's expectedPartnerDeduplicate is restored onto t
 });
 
 test("prepareDataset: a config with no declaration binds nothing (the two-config case)", async () => {
-  // An exchange both parties authored from their own documents carries no
+  // An exchange both parties authored from their own documents has no
   // declaration between them, so the partner's presented value is unconstrained
   // and the differing pair that makes one of them the "many" side still runs.
-  // This party's own linkage_terms.deduplicate is NOT read as a binding.
+  // This party's own linkage_terms.deduplicate is NOT treated as a binding.
   const input = writeInput("last_name,dob\nLovelace,1815-12-10\n");
   const prepared = await prepareDataset(
     { linkageTerms: { ...nameDobTerms, deduplicate: true } },

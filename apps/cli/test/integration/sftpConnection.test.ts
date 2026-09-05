@@ -30,28 +30,12 @@ import { inProcessOnly } from "../sftpBackendGate";
 log.setLevel(log.levels.DEBUG);
 
 // The test SFTP server serves a fresh per-run directory; this file rendezvouses
-// under it. SFTP_LOCAL_DIRECTORY is the host directory the server serves (where
-// the oversize-read test plants its file straight onto disk), and SFTP_PATH is
-// the matching remote path the raw-op tests connect to -- which differs by
-// backend, so both come from the running server rather than a fixed path.
-// ensureNamespace creates the host directory before any party connects, since
-// the connection does not create remote directories.
-//
-// SFTP_PATH carries NO exchange rendezvous: it is used only by the raw-op tests
-// (list/get/put against planted files) and the crashed-adapter contract
-// assertions, none of which drive a poll loop on it. The persistent
-// serverConn/clientConn pair -- the only long-lived exchange in this file --
-// rendezvouses in its OWN dedicated mkdtemp directory (pairPath, created in
-// beforeAll), never SFTP_PATH. That per-exchange isolation is the root-cause
-// de-flake for two prior flake sources: an exchange poll straddling a test
-// boundary (a mid-flight list() reading a later test's files as foreign and
-// tripping the directory-exclusivity guard "must be dedicated to a single
-// exchange") or a lock left behind by stop()-without-close() outliving the test
-// on a SHARED path. With every exchange confined to
-// its own directory, neither residue can reach another test. So, for any future
-// test: one that stands up its own exchange MUST use freshRendezvous() (below)
-// or its own dedicated directory, never SFTP_PATH; re-introducing shared-
-// namespace exchange use re-opens that flake.
+// under it. SFTP_LOCAL_DIRECTORY and SFTP_PATH are the host and remote paths the
+// raw-op tests use (list/get/put and the crashed-adapter assertions, none of
+// which poll); every other exchange in this file -- the persistent
+// serverConn/clientConn pair included -- MUST use freshRendezvous() or its own
+// dedicated directory instead, or a stray poll or leftover lock can trip a
+// later test's directory-exclusivity guard.
 const srv = sftpServer();
 const NS = "sftp";
 const SFTP_LOCAL_DIRECTORY = localPath(srv, NS);
@@ -99,21 +83,10 @@ async function waitFor(
 }
 
 // A freshly-created, exclusively-owned rendezvous directory under the served
-// root, for tests that stand up their own connections. Every exchange in this
-// file -- the persistent serverConn/clientConn pair included (it gets its own
-// pairPath dir in beforeAll) -- rendezvouses in such a private directory rather
-// than a shared one. The hazard this forecloses: an exchange tears down with
-// stop() (or, for the persistent pair across the first tests, desynchronize())
-// rather than close(), and stop() halts only the next poll -- so a mid-flight
-// list() can straddle the test boundary and read a later exchange's files as
-// foreign, and a lock a prior rendezvous left behind (swept only by close())
-// outlives the test. On a SHARED path either residue trips a later test's
-// directory-exclusivity guard -- a window the restricted-crypto native-sshd
-// profile widens via its slower handshake. A dedicated mkdtemp directory per
-// exchange removes the sharing in both directions.
-// Returns the remote path to connect to and records the host directory for
-// teardown in afterAll, so the per-test directories do not pile up under the
-// served root over the run.
+// root, for tests that stand up their own connections (see the file header:
+// every exchange here must use one rather than share SFTP_PATH). Returns the
+// remote path and records the host directory for teardown in afterAll, so
+// per-test directories do not pile up under the served root.
 const rendezvousDirs: string[] = [];
 
 async function freshRendezvous(): Promise<string> {
@@ -151,7 +124,7 @@ beforeAll(async () => {
   await cleanServer();
   // Dedicate the persistent pair its own rendezvous directory (see file header):
   // a fresh, exclusively-owned mkdtemp under the served root, so the pair's poll
-  // and any lock it leaves behind stay off SFTP_PATH and cannot surface in a
+  // and any lock it leaves behind stay off SFTP_PATH and cannot show up in a
   // later raw-op or contract test.
   pairLocalDir = await fs.mkdtemp(path.join(srv.backingDir, "pair-"));
   pairPath = remotePath(srv, path.basename(pairLocalDir));
@@ -232,14 +205,10 @@ test("basic synchronization", async () => {
 });
 
 test("message deliverable", async () => {
-  // Stagger the rendezvous so the server arrives a tick ahead of the client (an
-  // explicit arrival order, distinct from the simultaneous Promise.all race the
-  // first test exercises), but await BOTH parties' synchronize() before any
-  // send(). Without that, under a slow handshake -- the timing-sensitive
-  // restricted-crypto native-sshd profile -- send() below can run before the
-  // client commits its peerId and throw "not synchronized". Awaiting both
-  // removes that ordering race at the root: it does not depend on the handshake
-  // landing within a tick, and the send()/poll() peerId guards stay intact.
+  // Stagger the rendezvous so the server arrives a tick ahead of the client, but
+  // await both parties' synchronize() before send(): under a slow handshake (the
+  // restricted-crypto native-sshd profile), send() before the client commits its
+  // peerId throws "not synchronized".
   const serverSyncPromise = serverConn.synchronize();
   const clientSyncPromise = new Promise<void>((resolve, reject) => {
     setImmediate(() => {
@@ -268,10 +237,10 @@ test("message deliverable", async () => {
 });
 
 test("public-key authentication connects and runs a rendezvous", async () => {
-  // Net-new coverage: public-key auth is a distinct connect path (a private key
-  // rather than a password) and the representative method for unattended
-  // transfers, which the password-driven tests above never exercise. Both
-  // backends surface a per-party private key, so this leg runs on either.
+  // Public-key auth is a distinct connect path (a private key rather than a
+  // password) and the representative method for unattended transfers, which the
+  // password-driven tests above never exercise. Both backends expose a per-party
+  // private key, so this leg runs on either.
   const keyServerSFTP = new SSH2SFTPClientAdapter();
   const keyServerConn = new FileSyncConnection(keyServerSFTP, {
     verbose: -1,
@@ -332,12 +301,10 @@ test("public-key authentication connects and runs a rendezvous", async () => {
 });
 
 test("terminal frame is received when sender closes before receiver polls", async () => {
-  // Regression guard for the terminal-frame deletion race: the sender's
-  // close() must drain (wait for the receiver to consume the last sent file)
-  // before running cleanup. This test sends a message, starts the receiver
-  // polling concurrently with sender close(), and verifies the message arrives.
-  // Without the drain, cleanup() deletes the file before the receiver polls and
-  // the message is lost.
+  // Regression guard for the terminal-frame deletion race: the sender's close()
+  // must drain (wait for the receiver to consume the last sent file) before
+  // running cleanup. Without the drain, cleanup() deletes the file before the
+  // receiver polls and the message is lost.
 
   const senderSFTP = new SSH2SFTPClientAdapter();
   const senderConn = new FileSyncConnection(senderSFTP, {
@@ -375,7 +342,6 @@ test("terminal frame is received when sender closes before receiver polls", asyn
     receiverConn.once("data", resolve);
   });
 
-  // Start the receiver polling concurrently with sender close().
   // The drain in close() holds cleanup until the receiver consumes the file.
   receiverConn.start();
   await senderConn.close();
@@ -389,21 +355,13 @@ test("terminal frame is received when sender closes before receiver polls", asyn
 });
 
 test("lock starter aborts on a stuck mid-arrival joiner over real SFTP", async () => {
-  // End-to-end recovery path on the real SFTP transport. A joiner writes its
-  // sentinel and deletes the starter's hello, then crashes before renaming the
-  // sentinel to its own hello. The starter must observe the orphaned sentinel
-  // over real SFTP and abort on the bounded recovery window with the actionable
-  // error -- not poll to the full peer timeout. (The happy-path sentinel
-  // put/delete/rename runs under the hood whenever a real joiner arrives second
-  // in the lock tests above; this exercises the failure side, which those do
-  // not.)
-  //
-  // Runs on its own freshRendezvous() directory, not the shared `sftp`
-  // namespace: the planted `-joining.json` sentinel and the starter's polling
-  // would otherwise outlive this test as residue/a late poll and trip another
-  // exchange's directory-exclusivity guard on the shared path -- the same
-  // cross-test residue race fixed for the other self-connecting tests, which
-  // left this pair sharing SFTP_PATH.
+  // End-to-end recovery path on real SFTP: a joiner writes its sentinel, deletes
+  // the starter's hello, then crashes before renaming the sentinel to its own
+  // hello. The starter must observe the orphaned sentinel and abort within the
+  // bounded recovery window with the actionable error, not poll to the full
+  // peer timeout. Runs on its own freshRendezvous() directory, not the shared
+  // `sftp` namespace (see the file header), or the sentinel and polling here
+  // could trip another exchange's directory-exclusivity guard.
   const remote = await freshRendezvous();
 
   const abortSFTP = new SSH2SFTPClientAdapter();
@@ -503,14 +461,11 @@ test("get returns a file at or under maxBytes unchanged", async () => {
 });
 
 test("connection-per-poll: an op after the idle release re-establishes with no reported drop", async () => {
-  // The whole idle boundary against a real server: releaseForIdle drives the ssh2
-  // Client's own end() and awaits its 'close', which is what clears
-  // ssh2-sftp-client's session property, and the next operation re-establishes
-  // through the pinned host key and stored credentials. The unit tests model that
-  // sequence; this runs it, so a future ssh2 that stopped emitting 'close' on
-  // end(), or a re-establishment that quietly stopped happening, fails here.
-  // Neither the release nor the re-establishment is a session loss, so the run
-  // must report no reconnection at all.
+  // releaseForIdle drives the ssh2 Client's own end() and awaits its 'close',
+  // which clears ssh2-sftp-client's session property; the next operation then
+  // re-establishes through the pinned host key and stored credentials. Neither
+  // the release nor the re-establishment counts as a reconnection, so the run
+  // must report none.
   const remote = await freshRendezvous();
   const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
   const conn = new FileSyncConnection(adapter, {
@@ -540,27 +495,14 @@ test("connection-per-poll: an op after the idle release re-establishes with no r
 });
 
 inProcessOnly(
-  "ssh2 hands back a raw SFTP wrapper carrying zero 'error' listeners of its own",
+  "ssh2 hands back a raw SFTP wrapper holding zero 'error' listeners of its own",
   async () => {
-    // CONTRACT ASSERTION pinning the load-bearing premise of the wrapper-crash fix
-    // (SSH2SFTPClientAdapter.attachFatalErrorListener), checked WITHOUT the adapter
-    // so it isolates ssh2's own behavior. The fix attaches the process's only guard
-    // against a hostile/dead server's malformed SFTP packet (which drives ssh2's
-    // doFatalSFTPError -> sftp.emit('error', err)); Node turns an 'error' emit on a
-    // listener-free EventEmitter into an uncaught exception that crashes the CLI.
-    // That guard is only sufficient if ssh2 itself leaves the handed-back wrapper
-    // with NO 'error' listener -- which today it does, because Client.sftp()'s
-    // onReady calls removeListeners() to strip its setup-time 'error'/'exit'/'close'
-    // handlers before handing the wrapper back (node_modules/ssh2/lib/client.js),
-    // and ssh2-sftp-client attaches 'error' handlers only to the SSH Client and to
-    // per-operation streams, never to the wrapper itself.
-    //
-    // If a future ssh2 stops stripping that listener (or otherwise retains one),
-    // the wrapper would arrive with a listener already attached and this assertion
-    // fails RED -- the only place that detects ssh2 silently changing the emit/
-    // listener lifecycle the fix depends on. The companion assertion in the test
-    // below (listenerCount === 1 after the ADAPTER connects) catches the same drift
-    // from the other side: zero-from-ssh2 here, exactly-the-adapter's-one there.
+    // CONTRACT ASSERTION for the wrapper-crash fix (attachFatalErrorListener):
+    // checked without the adapter, to isolate ssh2's own behavior. The fix is a
+    // correct guard only if ssh2 hands back the SFTP wrapper with zero 'error'
+    // listeners of its own -- true today because Client.sftp()'s onReady strips
+    // its setup-time listeners before returning the wrapper. If a future ssh2
+    // stops doing that, this assertion fails.
     const raw = new Ssh2SftpClient();
     try {
       await raw.connect({
@@ -571,8 +513,8 @@ inProcessOnly(
       });
       // Reach the raw ssh2 SFTPWrapper exactly as the adapter does: ssh2-sftp-client
       // stores it on `this.sftp`. This is the same internal coupling the adapter
-      // documents; pinning it here means an upgrade that breaks the premise fails in
-      // this test rather than silently in production.
+      // documents; pinning it here means an upgrade that breaks the assumption fails
+      // in this test rather than silently in production.
       const wrapper = (raw as unknown as { sftp: EventEmitter }).sftp;
       expect(wrapper.listenerCount("error")).toBe(0);
     } finally {
@@ -584,23 +526,12 @@ inProcessOnly(
 inProcessOnly(
   "a fatal 'error' on the raw SFTP wrapper does not crash and fails terminally",
   async () => {
-    // Regression guard for the wrapper-crash vector. After a real connect, the raw
-    // ssh2 SFTPWrapper carries no 'error' listener of its own: ssh2's Client.sftp()
-    // strips its setup-time listener before handing the wrapper back, and
-    // ssh2-sftp-client attaches 'error' handlers only to the SSH Client and to
-    // per-operation streams. A hostile/dead server that returns a malformed SFTP
-    // reply drives ssh2's doFatalSFTPError -> sftp.emit('error', err); on a
-    // listener-free EventEmitter Node turns that into an uncaught exception that
-    // crashes the CLI, skipping lock/temp-file cleanup and the typed exit-code
-    // mapping. The adapter must attach a guarded 'error' listener in connect() so
-    // the emit is handled. This runs against the real ssh2-sftp-client wrapper
-    // lifecycle (a real connect over the in-process server), so it locks in the
-    // fix on the actual object whose listeners the bug is about.
-    //
-    // Determinism: Node throws on an 'error' event ONLY when the emitter has zero
-    // listeners, so listener-presence plus a handled synthetic emit is a sufficient
-    // and non-flaky proof -- no need to synthesize a malformed packet on the wire
-    // (which would be timing-dependent). The synthetic Error mirrors doFatalSFTPError's
+    // Regression guard for the wrapper-crash vector: a hostile/dead server's
+    // malformed SFTP reply drives ssh2's doFatalSFTPError -> sftp.emit('error'),
+    // and on a listener-free EventEmitter Node turns that into an uncaught
+    // exception that crashes the CLI, skipping cleanup and the typed exit-code
+    // mapping. The adapter attaches a guarded 'error' listener in connect() so
+    // the emit is handled; the synthetic Error below mirrors doFatalSFTPError's
     // shape (a plain Error with level 'sftp-protocol').
     const crashSFTP = new SSH2SFTPClientAdapter();
     await crashSFTP.connect({
@@ -616,17 +547,12 @@ inProcessOnly(
         crashSFTP as unknown as { client: { sftp: EventEmitter } }
       ).client.sftp;
 
-      // The guarded listener is present: this is what keeps Node from throwing on
-      // the 'error' event. Without the fix this count is 0 and the emit below would
-      // crash the process. The count is EXACTLY 1, not >= 1, and the exactness is
-      // load-bearing against ssh2 upgrade drift: the crash fix rests on ssh2's
-      // Client.sftp() stripping its own setup-time 'error' listener (removeListeners
-      // in onReady, node_modules/ssh2/lib/client.js) before handing the wrapper
-      // back, so the only listener after connect() is the adapter's own. If a future
-      // ssh2 stops stripping it the count becomes 2 and this assertion fails RED --
-      // a deliberate tripwire, not an off-by-one. The "ssh2 leaves zero of its own"
-      // half of the premise is pinned independently by the raw-wrapper test above,
-      // which connects WITHOUT the adapter.
+      // The guarded listener is present, which is what keeps Node from throwing
+      // on the 'error' event; without the fix this count is 0. The count must be
+      // exactly 1, not >= 1: the fix rests on ssh2's Client.sftp() stripping its
+      // own setup-time 'error' listener before handing the wrapper back, so the
+      // only listener after connect() is the adapter's own. If a future ssh2
+      // stops stripping it, the count becomes 2 and this assertion fails.
       expect(wrapper.listenerCount("error")).toBe(1);
 
       // A baseline operation works before the session is killed, so the terminal
@@ -642,9 +568,9 @@ inProcessOnly(
 
       // The adapter is left in a clean, terminal state: a subsequent operation
       // rejects promptly with the typed terminal error (a UsageError the poll loop
-      // and rendezvous gate treat as terminal) carrying the fatal cause, rather than
-      // hanging forever or surfacing an uncaught throw. Prompt -- it must not wait
-      // out the 60 s liveness deadline, which the default test timeout would catch.
+      // and rendezvous gate treat as terminal) holding the fatal cause, rather than
+      // hanging forever or throwing uncaught. Prompt -- it must not wait out the
+      // 60 s liveness deadline, which the default test timeout would catch.
       const listErr = await crashSFTP.list(SFTP_PATH).catch((e: unknown) => e);
       expect(listErr).toBeInstanceOf(TransportOperationStalledError);
       expect(listErr).toBeInstanceOf(UsageError);
@@ -774,8 +700,8 @@ test("the peer-identification diagnosis leaves a real SSH server's probe alone",
   // The control for the non-SSH peers the unit suite drives with bare listeners:
   // the probe dials through the adapter that diagnoses every dial, and against a
   // server that really does speak SSH it returns the fingerprint and adds
-  // nothing -- the deliberate verify(false) refusal the probe rests on is not
-  // read as a peer that failed to identify itself.
+  // nothing -- the probe's verify(false) refusal is not treated as a peer that
+  // failed to identify itself.
   const conn = new FileSyncConnection(new SSH2SFTPClientAdapter(), {
     verbose: -1,
     pollingFrequency: 10,
@@ -811,19 +737,11 @@ function wrongFingerprint(real: string): string {
 
 test("a wrong pinned host-key fingerprint is rejected before auth over real SFTP", async () => {
   // The control under test: when connection.server.host_key_fingerprint is set,
-  // core installs an ssh2 hostVerifier that runs BEFORE authentication and aborts
-  // fail-closed on a mismatch (fileSyncConnection's enforce path). This was
-  // verified manually during security review but not pinned in CI; the regression
-  // it guards is the verifier silently un-wiring, or the rejection moving to the
-  // handshake instead of the pin check while CI stays green.
-  //
-  // Valid credentials are supplied (serverAuth), so if the verifier ever let the
-  // handshake reach userauth this connect would SUCCEED; the only thing that can
-  // fail it is the deliberately-wrong pin. ssh2 invokes the verifier at host-key
-  // verification and reaches userauth only after verify(true), so the rejection
-  // necessarily precedes auth (the probe test above pins that ordering directly,
-  // connecting with credentials present that are never sent); a failure here is
-  // therefore attributable to the host-key check, not to credentials.
+  // core installs an ssh2 hostVerifier that runs before authentication and
+  // aborts fail-closed on a mismatch. Valid credentials are supplied, so the
+  // only thing that can fail this connect is the wrong pin; ssh2 invokes the
+  // verifier at host-key verification and reaches userauth only after
+  // verify(true), so the rejection necessarily precedes auth.
   const conn = new FileSyncConnection(new SSH2SFTPClientAdapter(), {
     verbose: -1,
     pollingFrequency: 10,
@@ -855,7 +773,7 @@ test("a wrong pinned host-key fingerprint is rejected before auth over real SFTP
   // A rejection, not a resolved connection: catches a regression that stopped
   // rejecting at the pin check (pinning the wrong key would then connect).
   expect(err).toBeInstanceOf(Error);
-  // The mismatch surface specifically -- not the no-pin refusal ("no
+  // Specifically the pin mismatch -- not the no-pin refusal ("no
   // host_key_fingerprint is pinned") and not an unrelated connect/auth error --
   // so a regression that rejected at the handshake instead of the pin check is
   // caught.
@@ -868,29 +786,14 @@ test("a wrong pinned host-key fingerprint is rejected before auth over real SFTP
 inProcessOnly(
   "the host-key probe and verify(false) rejections strand no Client listener",
   async () => {
-    // CONTRACT ASSERTION for the "no leaked event listeners" half of the teardown
-    // re-verification: the first-use host-key probe and both verify(false)
-    // host-key rejections (the pinned-mismatch enforce path and the no-pin
-    // fail-closed default) tear the raw transport down OUTSIDE
-    // ssh2-sftp-client's own end() (the probe ends explicitly after a host-denied
-    // connect; an open() rejection never reaches a session), so each must leave the
-    // underlying ssh2 Client with no stranded 'error'/'end'/'close' handler. (The
-    // other half -- a late verify() against a destructed protocol cannot escape
-    // settleVerify into an unhandled rejection -- is pinned deterministically by the
-    // core unit test "probeHostKeyFingerprint swallows a late verify() throw on a
-    // torn-down handshake".)
-    //
-    // ssh2-sftp-client's constructor attaches exactly three permanent "global"
-    // listeners to its ssh2 Client -- one each for 'error'/'end'/'close', gated by
-    // globalListener (node_modules/ssh2-sftp-client/src/index.js; #189 routes them
-    // through the adapter's logger instead of the console). Every per-operation
-    // listener it adds (addTempListeners in connect()/end()/each op) is removed in the
-    // same promise's .finally(). So after any connect-then-teardown the Client must
-    // carry exactly those three and nothing more; a count above the fresh-construction
-    // baseline means a teardown path leaked a handler. The exact-count check is a
-    // deliberate upgrade tripwire, like the wrapper-listener assertions above: if a
-    // future ssh2-sftp-client stops removing a temp listener, the count climbs and
-    // this fails RED rather than regressing the routing silently.
+    // CONTRACT ASSERTION: the first-use host-key probe and both verify(false)
+    // host-key rejections tear the raw transport down outside ssh2-sftp-client's
+    // own end(), so each must leave the underlying ssh2 Client with no stranded
+    // 'error'/'end'/'close' handler. ssh2-sftp-client's constructor attaches
+    // exactly three permanent listeners to its ssh2 Client (one each for
+    // 'error'/'end'/'close'); every per-operation listener it adds is removed in
+    // the same promise's .finally(). So after any connect-then-teardown the
+    // Client must hold exactly those three and nothing more.
 
     // Reach the underlying ssh2 Client the way ssh2-sftp-client stores it (this.client)
     // through the adapter's own client field -- the same internal coupling the
@@ -904,17 +807,16 @@ inProcessOnly(
       close: c.listenerCount("close"),
     });
 
-    // Baseline: a freshly constructed, never-connected adapter carries the
+    // Baseline: a freshly constructed, never-connected adapter holds the
     // constructor's three global listeners and nothing else.
     const baseline = counts(clientOf(new SSH2SFTPClientAdapter()));
     expect(baseline).toEqual({ error: 1, end: 1, close: 1 });
 
     // What a dial adds and keeps: the adapter's own persistent
-    // transport-lifecycle watch, one 'end' and one 'close', attached once per
-    // adapter and living as long as the Client does (see
-    // ssh2SftpAdapter.watchTransportLifecycle). It is not a temp listener, so
-    // every path below is held to this rather than to the fresh-construction
-    // baseline -- and to it EXACTLY, so the tripwire keeps its force.
+    // transport-lifecycle watch, one 'end' and one 'close' (see
+    // ssh2SftpAdapter.watchTransportLifecycle), attached once per adapter and
+    // living as long as the Client does. It is not a temp listener, so every
+    // path below is held to this baseline exactly.
     const dialed = {
       error: baseline.error,
       end: baseline.end + 1,
@@ -963,12 +865,12 @@ inProcessOnly(
     expect(counts(clientOf(openAdapter))).toEqual(dialed);
     await openConn.close().catch(() => {});
 
-    // Path 3 -- the no-pin fail-closed path: the DEFAULT posture for an unpinned
+    // Path 3 -- the no-pin fail-closed path: the default posture for an unpinned
     // config drives a different verifier closure that also ends in verify(false).
-    // It tears down identically to Path 2 today, but it is the security-critical
-    // default, so it earns its own tripwire against a future change that lets only
-    // the no-pin verifier diverge (e.g. drops its settleVerify). Omit the pin (and
-    // hence serverAuth, which would add it) so this exercises the no-pin branch.
+    // It tears down identically to Path 2 today; the security-critical default
+    // still gets its own check here so the no-pin verifier cannot silently
+    // diverge. Omit the pin (and hence serverAuth) so this exercises the no-pin
+    // branch.
     const noPinAuth =
       srv.usera.password !== undefined
         ? { password: srv.usera.password }

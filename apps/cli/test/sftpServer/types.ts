@@ -1,16 +1,15 @@
 // The pluggable test-server interface backing the CLI integration suite. One
-// implementation runs an SFTP server inside the test process (the default); the
-// other spawns a native OpenSSH sshd as an unprivileged child. The conformance
-// suite drives the production SSH2SFTPClientAdapter against whichever backend the
-// PSILINK_SFTP_BACKEND environment variable selects, reading every server-shaped
-// detail (host, port, credentials, served directory, remote-path root) from the
-// handle rather than hardcoding it, so the same tests run unchanged against both.
+// implementation runs an SFTP server inside the test process (the default);
+// the other spawns a native OpenSSH sshd as an unprivileged child. The
+// conformance suite drives the production SSH2SFTPClientAdapter against
+// whichever backend PSILINK_SFTP_BACKEND selects, reading every
+// server-shaped detail from the handle instead of hardcoding it.
 
 /**
  * One party's credentials for the shared rendezvous directory. The two parties
  * are distinct (distinct usernames and key material); `password` is present only
  * on backends that authenticate by password, `privateKey` only on backends that
- * authenticate by public key. A backend may surface both (the in-process server
+ * authenticate by public key. A backend may expose both (the in-process server
  * does) so the suite can drive either method against it.
  */
 export interface SftpPartyCredentials {
@@ -68,7 +67,7 @@ export interface SftpServerHandle {
 
 /** A started test SFTP server: its connection handle plus a teardown. */
 export interface SftpTestServer {
-  /** Connection details surfaced to the conformance suite. */
+  /** Connection details exposed to the conformance suite. */
   handle: SftpServerHandle;
   /** Stop listening and remove the served directory. */
   stop(): Promise<void>;
@@ -88,23 +87,21 @@ export interface SftpFaultInjection {
   /** Answer the next READ with a malformed DATA packet (the read-path fatal-error case). */
   malformedDataOnNextRead: boolean;
   /**
-   * Answer the next READDIR with a well-formed NAME batch carrying this single
-   * over-length filename, then EOF, so the directory-listing length bound is
-   * exercised against real wire bytes. Null leaves READDIR normal.
+   * Answer the next READDIR with a well-formed NAME batch containing this
+   * single over-length filename, then EOF, so the directory-listing length
+   * bound is exercised against real wire bytes. Null leaves READDIR normal.
    *
-   * Assigning a filename the backend's NAME batch budget cannot carry THROWS at
-   * the assignment, naming the budget and the wall behind it: a reply that wide
-   * is refused by the client as a fatal protocol error and the SFTP session goes
-   * with it, so the case would read a torn session rather than the bound it
-   * armed. Put a reply at or past the wall on the wire deliberately through
-   * {@link nameReplyFilenameBytesOnNextReaddir}.
+   * Assigning a filename past the backend's NAME batch budget throws at
+   * assignment instead: a reply that wide is a fatal protocol error that
+   * tears the session, so use {@link nameReplyFilenameBytesOnNextReaddir} to
+   * put a reply at or past that wall on the wire.
    */
   oversizeNameOnNextReaddir: string | null;
   /**
    * Answer the next READDIR with a NAME batch of one entry whose filename is
    * this many bytes and whose longname is empty, then EOF, so a case can put a
    * reply of a chosen width on the wire and read whether the pinned stack still
-   * carries it. The reply goes through the server's public `name()` API, so it is
+   * delivers it. The reply goes through the server's public `name()` API, so it is
    * encoded and framed by the stack itself, and the width it produced is reported
    * in {@link lastNameReplyPayloadBytes}. Null leaves READDIR normal.
    */
@@ -122,47 +119,37 @@ export interface SftpFaultInjection {
   /** Fail RENAME with the generic-failure status this many times, then succeed. */
   renameFailuresRemaining: number;
   /**
-   * Cap each READDIR to at most this many entries (realistic batching); 0 leaves
-   * the width to the backend.
+   * Cap each READDIR to at most this many entries (realistic batching); 0
+   * leaves the width to the backend.
    *
-   * Whatever this is set to, the backend also keeps every NAME reply inside what
-   * one SFTP packet delivers and resumes the listing from where the previous
-   * batch ended, so a directory too wide for a single packet -- a full
-   * `MAX_DIRECTORY_ENTRIES` listing included -- arrives over as many round trips
-   * as it takes, and no value here can lose a reply. A cap wider than one
-   * packet's worth is therefore an upper bound on a batch rather than a promise
-   * of that many entries per round trip.
+   * The backend still keeps every NAME reply inside one SFTP packet and
+   * resumes the listing where the previous batch ended, so no value here can
+   * lose a reply -- a cap wider than one packet is an upper bound on a
+   * batch, not a promise of that many entries per round trip.
    */
   readdirBatchSize: number;
   /**
-   * Answer this many further READDIRs with an EMPTY NAME batch -- no entry, and
-   * no end-of-directory status -- before serving the directory normally. Each
-   * such reply advances the listing by nothing while telling the client there is
-   * more to come, which is the progress-free flood the adapter's readdir
-   * round-trip cap exists for and the ONLY shape that reaches it: a conformant
-   * server's every non-EOF batch carries at least one name, so the entry-count
-   * bound refuses such a listing long before the round-trip one could bite.
-   * Decremented per batch served, so a case arms exactly the number of
-   * round trips it means to drive; 0 leaves READDIR normal.
+   * Answer this many further READDIRs with an empty NAME batch -- no entry
+   * and no end-of-directory status -- before serving the directory normally.
+   * This is the only shape that reaches the adapter's readdir round-trip
+   * cap: a conformant server's every non-EOF batch contains at least one
+   * name, so the entry-count bound would refuse such a listing first.
+   * Decremented per batch served; 0 leaves READDIR normal.
    */
   emptyNonEofReaddirBatches: number;
 }
 
 /**
- * Deterministic staging of a RENAME torn by a session drop, and of the partner
- * consumption that can follow it. Every flag is OFF by default and each arming
- * flag is one-shot: the RENAME that fires it clears it, so a recovery's re-issue
- * of the same rename is served normally.
+ * Deterministic staging of a RENAME torn by a session drop, and of the
+ * partner consumption that can follow it. Every flag is off by default and
+ * each arming flag is one-shot: the RENAME that fires it clears it, so a
+ * recovery's re-issue of the same rename is served normally.
  *
  * The op-count drops ({@link SftpSessionControls.dropActiveAfterOps} and
- * {@link SftpSessionControls.maxOps}) cannot stage this: they arm the teardown as
- * a request is counted and defer it to the check phase, so whether the request's
- * own filesystem work lands before the connection goes is a race against that
- * request's fs callback. These controls cut at a named point inside the RENAME
- * handler instead, so what landed at the server is decided rather than raced.
- *
- * In-process only, like the fault hooks: a native sshd can neither be told where
- * inside a request to cut nor made to hold a reply for another request.
+ * {@link SftpSessionControls.maxOps}) race the request's own filesystem
+ * callback instead of staging this deterministically; these controls cut at
+ * a named point inside the RENAME handler instead. In-process only, like the
+ * fault hooks.
  */
 export interface SftpRenameTearControls {
   /**
@@ -193,13 +180,12 @@ export interface SftpRenameTearControls {
    */
   holdProbeUntilDestinationConsumed: boolean;
   /**
-   * Fail any STAT/LSTAT of {@link tornDestination} with a generic error, which
-   * is a different answer from "the server reported it absent": the publishing
-   * party's landed-confirmation probe cannot settle the publish either way, so
-   * the publish stays undetermined with its message file still on the server.
-   * Deterministic where the real shape of that state is a race -- a probe torn,
-   * expired, or refused on a dead session -- and it is the arm the
-   * clean-directory remedy exists for.
+   * Fail any STAT/LSTAT of {@link tornDestination} with a generic error,
+   * distinct from "the server reported it absent": the publishing party's
+   * landed-confirmation probe cannot determine the publish either way, so it
+   * stays undetermined with its message file still on the server. Models the
+   * race between a probe torn, expired, or refused on a dead session -- the
+   * arm the clean-directory remedy exists for.
    */
   refuseProbeOfTornDestination: boolean;
   /**
@@ -251,17 +237,15 @@ export interface SftpRequestMeterReading {
 
 /**
  * Server-side accounting of the SFTP requests in flight on the channels the
- * backend is serving, so a suite driving a concurrent fan can read what that fan
- * actually put on the wire from the end that owns it, rather than from the
- * client library's internals.
+ * backend is serving, so a suite driving a concurrent fan can read what that
+ * fan put on the wire from the end that owns it, not the client library's
+ * internals.
  *
  * Counts requests of the {@link import("./sessionControls").COUNTED_SFTP_OPS}
- * set as they arrive and reply writes as they are issued, across every session
- * the backend is serving at once. A reply written straight onto the channel by a
- * fault injection, bypassing the backend's reply methods, is not counted as an
- * answer, and a withheld reply is likewise never answered -- either leaves its
- * request outstanding for the rest of the window, which is what a suite driving
- * those injections should expect to read.
+ * set as they arrive and reply writes as they are issued. A reply written
+ * straight onto the channel by a fault injection is not counted as an
+ * answer, and a withheld reply is likewise never answered -- either leaves
+ * its request outstanding for the window.
  */
 export interface SftpRequestMeter {
   /** The window's counts as they stand now. */
@@ -276,18 +260,15 @@ export interface SftpRequestMeter {
 
 /**
  * Opt-in session-lifecycle controls the in-process backend exposes so the
- * connection-per-poll and mid-exchange-recovery tests can drive a server that
- * drops sessions the way the real partner's does. Every control is OFF by
- * default (a zero cap, no armed drop, a fresh handshake count), so a suite that
- * never touches them runs exactly as before. All durations are milliseconds.
+ * connection-per-poll and mid-exchange-recovery tests can drive a server
+ * that drops sessions the way the real partner's does. Every control is off
+ * by default, so a suite that never touches them runs exactly as before. All
+ * durations are milliseconds.
  *
- * The standing caps model the partner's server policy: they apply to EVERY
- * session while set, so a held session is dropped again on each re-dial (the
- * operator's actual thrash) while a connection-per-poll cycle that stays under
- * the bound is never dropped. The one-shot drops instead target a single active
- * session, for a within-batch or mid-rendezvous drop the re-dial recovers from.
- * Set the standing caps before the exchange starts; each newly established
- * session reads them as it comes up.
+ * The standing caps model the partner's server policy and apply to every
+ * session while set (a held session is dropped again on each re-dial). The
+ * one-shot drops instead target a single active session, for a drop the
+ * re-dial recovers from. Set the standing caps before the exchange starts.
  */
 export interface SftpSessionControls {
   /**
@@ -312,158 +293,125 @@ export interface SftpSessionControls {
   /**
    * Accept the client's disconnect and then go quiet: while set, each newly
    * accepted connection's socket is stopped from ever closing itself, so a
-   * client that disconnects is left in half-close -- its FIN is consumed, no FIN
-   * or reset comes back, and its ssh2 `Client` never emits `'close'`. This is the
-   * partner server the connection-per-poll idle release must force closed from
-   * its own side. Read as each connection is accepted, so it governs every
-   * connection established while it is set and leaves earlier ones untouched;
-   * false by default. In-process only, like the fault hooks: a native sshd cannot
-   * be told to withhold its close.
+   * client that disconnects is left in half-close -- no FIN or reset comes
+   * back, and its ssh2 `Client` never emits `'close'`. Models the partner
+   * server the connection-per-poll idle release must force closed itself.
+   * Read as each connection is accepted; false by default. In-process only,
+   * like the fault hooks.
    */
   withholdCloseOnDisconnect: boolean;
   /**
-   * Accept the TCP connection and never complete the SSH handshake: while set,
-   * each newly accepted connection's socket is stopped from ever writing, so a
-   * dial hangs, established but never ready, until the client's own connect
-   * deadline (ssh2's `readyTimeout`) expires. The mute takes hold as the
-   * connection is accepted, which is after ssh2 has written the server's
-   * identification string, so the client hears that one line and nothing after
-   * it -- the key exchange never reaches it. This is the partner server a dial
-   * spends its whole budget against. Read as each connection is accepted, so it
-   * governs every connection established while it is set and leaves earlier ones
-   * untouched; false by default. In-process only, like the fault hooks: a native
-   * sshd cannot be told to stall its handshake.
+   * Accept the TCP connection and never complete the SSH handshake: while
+   * set, each newly accepted connection's socket is stopped from ever
+   * writing, so a dial hangs, established but never ready, until the
+   * client's own connect deadline (ssh2's `readyTimeout`) expires. The mute
+   * takes hold after ssh2 has written the server's identification string, so
+   * the client hears that one line and the key exchange never reaches it.
+   * Read as each connection is accepted; false by default. In-process only,
+   * like the fault hooks.
    */
   stallHandshakeOnConnect: boolean;
   /**
-   * Stop stalling handshakes entirely: clear {@link stallHandshakeOnConnect} so
-   * later connections handshake normally, and hand the real write back to every
-   * socket already muted. Clearing the flag alone does neither of those for a
-   * connection already accepted under it. The backend's own `stop()` calls this
-   * before ending its connections, for the same reason it stops withholding
-   * closes: a muted socket cannot answer the disconnect that ends it.
+   * Stop stalling handshakes entirely: clear {@link stallHandshakeOnConnect}
+   * and hand the real write back to every muted socket -- clearing the flag
+   * alone does neither for a connection already accepted under it. The
+   * backend's own `stop()` calls this first, since a muted socket cannot
+   * answer the disconnect that ends it.
    *
-   * A session {@link vanishActiveSession} muted is in that pool as well, and is
-   * released WHOLE here -- its closers with its write, and it counts as vanished
-   * no longer -- so unstalling one connection's dial cannot leave another's
-   * session answering again but still impossible to close. Re-arm a vanish that
-   * is still wanted afterwards.
+   * A session {@link vanishActiveSession} muted is released whole here too,
+   * so unstalling one dial cannot leave another session answering but still
+   * impossible to close. Re-arm a vanish that is still wanted afterwards.
    */
   stopStallingHandshakes(): void;
   /**
    * How many connections {@link stallHandshakeOnConnect} is holding
-   * mid-handshake right now. A case drives a parked dial only once the
-   * connection behind it is counted here: a client's socket exists from the
-   * moment it starts connecting, which is before this server has accepted
-   * anything, so a case that reads the socket alone can act on a handshake the
-   * stall has not reached yet -- and then measures an ordinary handshake in
-   * flight instead of a stalled one.
+   * mid-handshake right now. A case must wait for this count before acting
+   * on a parked dial: a client's socket exists before this server has
+   * accepted anything, so reading the socket alone can catch a handshake
+   * the stall has not reached yet.
    *
-   * A session {@link vanishActiveSession} silenced is muted in the same pool and
-   * is not counted, matching what {@link closeStalledConnections} reaches.
+   * A session {@link vanishActiveSession} silenced is not counted here,
+   * matching what {@link closeStalledConnections} reaches.
    */
   stalledConnectionCount(): number;
   /**
    * Close every connection {@link stallHandshakeOnConnect} is holding
-   * mid-handshake, from the server's own side: the socket really goes, so a
-   * client parked on that dial hears a peer close rather than a teardown it
-   * drove itself. It is the control arm for a case comparing the two: it ends a
-   * parked dial the partner's way, at the same handshake stage, which nothing
-   * the client does to its own socket can produce.
+   * mid-handshake, from the server's own side, so a client parked on that
+   * dial hears a peer close rather than a teardown it drove itself -- the
+   * same handshake stage a client's own socket cannot produce.
    *
-   * The stall itself is left armed, so a later dial parks the same way. A
-   * session {@link vanishActiveSession} silenced is muted in the same pool and
-   * is skipped: a vanished session the server can still close is not the black
-   * hole its cases measure over.
-   *
+   * The stall itself stays armed, so a later dial parks the same way. A
+   * session {@link vanishActiveSession} silenced is skipped, since a session
+   * the server can still close is not the black hole those cases measure.
    * In-process only, like the fault hooks.
    */
   closeStalledConnections(): void;
   /**
-   * Make the currently established session VANISH: from this call on, nothing
-   * the server produces for it reaches the wire and the server can no longer
-   * close it, so a client with an operation outstanding never gets its reply and
-   * a client with nothing outstanding sees a session that simply went quiet. No
-   * FIN, no reset, no ssh2 `'end'` or `'close'` -- the partner appliance that
-   * stopped answering without hanging up, which the adapter can only discover by
-   * its own liveness deadline.
+   * Make the currently established session vanish: from this call on,
+   * nothing the server produces for it reaches the wire and the server can
+   * no longer close it -- no FIN, no reset, no ssh2 `'end'` or `'close'` --
+   * so a client can only discover the loss through its own liveness
+   * deadline.
    *
-   * Distinct from {@link withholdCloseOnDisconnect}, which is armed before a
-   * connection is accepted and fires only in response to the client's own
-   * disconnect: this one is invoked mid-exchange against a live session that has
-   * asked for nothing. It composes with the caps -- a capped session that is
-   * also vanished is ended server-side while the client hears nothing of it.
+   * Distinct from {@link withholdCloseOnDisconnect}, which fires only in
+   * response to the client's own disconnect: this is invoked mid-exchange
+   * against a live session that asked for nothing, and composes with the
+   * caps.
    *
    * Throws when no session is established or its socket cannot be reached,
-   * rather than silently doing nothing: a test whose vanish quietly missed would
-   * assert "the client heard nothing" against a server that was answering all
-   * along. In-process only, like the fault hooks.
+   * rather than silently doing nothing. In-process only, like the fault
+   * hooks.
    */
   vanishActiveSession(): void;
   /**
-   * Bring every vanished session back: hand the real write and the real closers
-   * back to each socket {@link vanishActiveSession} silenced, so the connection
-   * can be closed from either side again. The backend's own `stop()` calls this
-   * before ending its connections -- a vanished socket cannot answer that end(),
-   * which would leave `server.close()` waiting forever -- and a test calls it
-   * before its own teardown for the same reason.
+   * Bring every vanished session back: hand the real write and closers back
+   * to each socket {@link vanishActiveSession} silenced, so the connection
+   * can be closed from either side again. The backend's own `stop()` calls
+   * this first, since a vanished socket cannot answer `end()` and would
+   * leave `server.close()` waiting forever.
    *
-   * A socket the withheld-close or stalled-handshake control silenced as well is
-   * released here too: each replaced method is held in one place, so whichever
-   * of these releases reaches a socket first hands the real one back. That keeps
-   * teardown terminating regardless of the order the controls are stopped in;
+   * A socket the withheld-close or stalled-handshake control also silenced
+   * is released here too, since each replaced method is held in one place;
    * re-arm a control that is still wanted afterwards.
-   *
-   * The release runs whole or not at all in the other direction too: because the
-   * vanish silences its socket in the pools those two controls draw from,
-   * {@link stopWithholdingCloses} and {@link stopStallingHandshakes} each finish
-   * the vanish release they reach rather than leaving half of one standing.
+   * {@link stopWithholdingCloses} and {@link stopStallingHandshakes} each
+   * finish this release in turn, rather than leaving half of it standing.
    */
   restoreVanishedSessions(): void;
   /**
-   * Stop withholding closes entirely: clear {@link withholdCloseOnDisconnect} so
-   * later connections close normally, and hand the real closers back to every
-   * socket already silenced. Clearing the flag alone does neither of those for a
-   * connection already established under it. The backend's own `stop()` calls
-   * this before ending its connections; a test calls it before its own teardown,
-   * since a client's `end()` awaits a close a silenced server never sends -- and
-   * a teardown typically dials once more (the pre-drain reconnect), which the
-   * flag would silence in turn.
+   * Stop withholding closes entirely: clear
+   * {@link withholdCloseOnDisconnect} and hand the real closers back to
+   * every silenced socket -- clearing the flag alone does neither for a
+   * connection already established under it. The backend's own `stop()`
+   * calls this first, since a client's `end()` awaits a close a silenced
+   * server never sends.
    *
-   * A session {@link vanishActiveSession} silenced is in that pool as well, and
-   * is released WHOLE here -- its write with its closers, and it counts as
-   * vanished no longer -- so releasing one connection's withheld close cannot
-   * leave another's session closable but still mute. Re-arm a vanish that is
-   * still wanted afterwards.
+   * A session {@link vanishActiveSession} silenced is released whole here
+   * too (write with closers), so releasing one connection's withheld close
+   * cannot leave another session closable but still mute. Re-arm a vanish
+   * that is still wanted afterwards.
    */
   stopWithholdingCloses(): void;
   /**
    * Arm a one-shot drop keyed to the `ops`th further SFTP operation, then
-   * disarm -- a within-batch or mid-rendezvous drop the re-dial recovers from,
-   * distinct from the standing {@link maxOps} cap. The drop is armed as that op
-   * is counted and may pre-empt its own reply (a mid-request cut), so it is not
-   * guaranteed to complete. Which it is turns on the opcode: the teardown is
-   * deferred to the check phase, so a request the backend answers from a
-   * filesystem callback is cut mid-flight, while one it answers synchronously (a
-   * READDIR served from the handle's cached names, a directory CLOSE) is
-   * answered first and the cut lands with that client's wire empty -- a party
-   * with nothing outstanding to tear may never observe the drop as a lost
-   * session at all. "The active session" is the single-active-session
-   * appliance model: the counter is server-wide, not per-connection, so if a
-   * connection-per-poll re-dial overlaps the prior connection (a new session
-   * comes up before the old one closes), the count spans both and the drop may
-   * land on a different connection than the one active when it was armed. A
-   * value <= 0 disarms it.
+   * disarm -- distinct from the standing {@link maxOps} cap. The drop is
+   * armed as that op is counted and may pre-empt its own reply: an op the
+   * backend answers from a filesystem callback is cut mid-flight, while one
+   * answered synchronously lands the cut with the client's wire already
+   * empty, so a party with nothing outstanding may never observe it as a
+   * lost session.
+   *
+   * "The active session" is server-wide, not per-connection, so an
+   * overlapping connection-per-poll re-dial can land the drop on a
+   * different connection than the one active when it was armed. A value
+   * <= 0 disarms it.
    */
   dropActiveAfterOps(ops: number): void;
   /**
    * Arm a one-shot drop of the active session `ms` from now, on wall-clock
    * regardless of traffic, then disarm. A no-op when no session is currently
-   * established; a value <= 0 cancels any pending one-shot timer. "The active
-   * session" is the single-active-session appliance model: the target is fixed
-   * to the connection active when this is armed, so if a connection-per-poll
-   * re-dial replaces it before the timer fires, the drop still lands on the
-   * original connection, not the current one.
+   * established; a value <= 0 cancels any pending timer. The target is
+   * fixed to the connection active when armed, so a later connection-per-poll
+   * re-dial does not redirect it.
    */
   dropActiveAfterMs(ms: number): void;
   /**

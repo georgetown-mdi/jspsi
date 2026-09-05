@@ -206,7 +206,7 @@ test("the refusal names no path of its own beyond the illustrative one", async (
   expect(message).not.toContain(os.homedir());
 });
 
-test("certificate mode with no pin resolves (the run is refused before this seam)", async () => {
+test("certificate mode with no pin resolves (the run is refused before this boundary)", async () => {
   const identityPath = path.join(dir, "signing-identity.json");
   saveSigningIdentity(identityPath, identity, { exclusive: true });
   const config: SigningConfig = {
@@ -227,8 +227,8 @@ test("certificate mode with no pin resolves (the run is refused before this seam
 // The loaded certificate is bound to "Party A" throughout; only the terms
 // identity handed to the resolver varies. A diverging run cannot leave both
 // parties holding a verifiable receipt on either handshake role -- driven end to
-// end in packages/core/test/signedReceiptEndToEnd.test.ts -- so this seam refuses
-// it before any credential, terms, or data are sent.
+// end in packages/core/test/signedReceiptEndToEnd.test.ts -- so this boundary
+// refuses it before any credential, terms, or data are sent.
 
 /** A certificate-mode block over the identity saved for this test. */
 function certificateModeOver(
@@ -376,9 +376,9 @@ test("resolves when the loaded identity matches the run's terms identity", async
   ).resolves.not.toBeNull();
 });
 
-test("resolves when the run carries no terms identity", async () => {
+test("resolves when the run has no terms identity", async () => {
   // Nothing to diverge from. A certificate-mode run that names no party is
-  // unrunnable for its own reason and is refused ahead of this seam, by core's
+  // unrunnable for its own reason and is refused ahead of this boundary, by core's
   // assertCertificateModeNamesLocalParty inside prepareForExchange -- so this
   // branch must not restate that refusal in a second spelling.
   const config = certificateModeOver(path.join(dir, "signing-identity.json"));

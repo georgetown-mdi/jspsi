@@ -34,7 +34,7 @@ import { inProcessOnly } from "../sftpBackendGate";
 // The second is whether a plain retry works: the answer is measured here, in the
 // same directory the failed attempt left behind, rather than asserted.
 //
-// Only the in-process backend can tear a RENAME at a named point inside its
+// Only the in-process backend can tear a rename at a named point inside its
 // handler (see test/sftpServer/types.ts), so this runs there against its own
 // server instance.
 
@@ -100,7 +100,7 @@ interface AttemptOutcome {
   parties: PartyOutcome[];
   /** Every operator-visible line the attempt produced, in emission order. */
   logs: string[];
-  /** The destination of the RENAME the server tore, when the attempt staged one. */
+  /** The destination of the rename the server tore, when the attempt staged one. */
   tornDestination: string | undefined;
 }
 
@@ -111,7 +111,7 @@ interface AttemptOptions {
   tag: string;
   keyFiles: { receiver: string; sender: string };
   /**
-   * Armed once BOTH parties have completed their handshake, so the tear lands on
+   * Armed once both parties have completed their handshake, so the tear lands on
    * a PSI message publish rather than on a rendezvous or handshake write, and
    * lands where the generic advisory's own precondition (a rotated token) holds.
    */
@@ -247,7 +247,7 @@ inProcessOnly(
         },
       });
 
-      // The staging really produced the condition, and produced it on a MESSAGE
+      // The staging really produced the condition, and produced it on a message
       // publish: a message's name ends in its byte count, where every other
       // publish this exchange makes ends in a word token.
       expect(first.tornDestination).toMatch(/-\d+\.json$/);
@@ -266,7 +266,7 @@ inProcessOnly(
       for (const keyFile of Object.values(keyFiles))
         expect(loadKeyFile(keyFile)!.sharedSecret).not.toBe(INITIAL_SECRET);
 
-      // Everything the operator sees, in the order stderr carries it: the
+      // Everything the operator sees, in the order stderr shows it: the
       // advisory runProtocol would emit, then the rendered terminal error. It is
       // absent only because the error suppresses it, which is what keeps the
       // operator from being given two recoveries. Read from the party the tear
@@ -296,13 +296,12 @@ inProcessOnly(
       expect(causeLinks.join("\n")).toContain("_rename");
 
       // What the suppressed advisory would have prescribed, measured: a plain
-      // retry, same directory, no re-invite, both parties on the token the failed
-      // attempt rotated. In THIS shape of the condition the torn publish's
-      // destination was consumed before the tear, so the failed party's abort
-      // marker is the only residue -- asserted, so the retry below is measured
-      // against a known directory -- and entry recognize-and-sweeps a leftover
-      // marker under any id, leaving both parties a clean slate to run a whole
-      // fresh exchange on.
+      // retry, same directory, no re-invite, both parties on the token the
+      // failed attempt rotated. In this shape of the condition the torn
+      // publish's destination was consumed before the tear, so the failed
+      // party's abort marker is the only residue, and entry recognizes and
+      // sweeps a leftover marker under any id, leaving both parties a clean
+      // slate to run a whole fresh exchange on.
       const residue = await fsp.readdir(
         path.join(srv.handle.backingDir, shared),
       );
@@ -324,11 +323,11 @@ inProcessOnly(
 
       // That success does not make a retry the recovery to prescribe: the
       // publishing party cannot tell this shape from the one where its message
-      // landed and was NOT consumed, which leaves that message in the directory
+      // landed and was not consumed, which leaves that message in the directory
       // for the clean-entry guard to refuse. That arm is the sibling case below,
       // driven rather than argued. So the remedy names a clean directory, which
-      // works whichever shape the publish was in: both parties fresh, carrying
-      // the same key files forward.
+      // works whichever shape the publish was in: both parties fresh, reusing
+      // the same key files.
       const clean = "undetermined-publish-clean";
       await fsp.mkdir(path.join(srv.handle.backingDir, clean), {
         recursive: true,
@@ -373,14 +372,14 @@ function causeChain(error: unknown): Error[] {
 }
 
 inProcessOnly(
-  "a torn publish left UNCONSUMED is refused at entry by a plain retry, and a " +
+  "a torn publish left unconsumed is refused at entry by a plain retry, and a " +
     "clean directory runs",
   async () => {
     // The other arm of the same indeterminate publish, and the one the
-    // clean-directory remedy exists for. Here the publish landed and was NOT
+    // clean-directory remedy exists for. Here the publish landed and was not
     // consumed, so its message file is still in the directory: the entry guard
     // refuses it on both sides -- the widened abort-marker sweep matches only the
-    // control grammar, so a leftover MESSAGE is untouched by it -- which is why a
+    // control grammar, so a leftover message is untouched by it -- which is why a
     // plain retry is not the remedy and a restart in a clean directory is.
     const srv = await startInProcessSftpServer();
     const work = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-unconsumed-"));
@@ -420,7 +419,7 @@ inProcessOnly(
         },
       });
 
-      // The staging produced the condition on a MESSAGE publish, and the
+      // The staging produced the condition on a message publish, and the
       // publishing party got the undetermined outcome rather than a determined
       // failure.
       expect(first.tornDestination).toMatch(/-\d+\.json$/);
@@ -433,7 +432,7 @@ inProcessOnly(
       expect(publisher!.exitCode).toBe(69);
       expect(publisher!.rendered).toContain(REMEDY);
 
-      // The residue this arm leaves, asserted BEFORE the retry so that retry is
+      // The residue this arm leaves, asserted before the retry so that retry is
       // measured against a known directory: the message file the publish landed,
       // plus whatever abort marker the failing party wrote.
       const tornName = first.tornDestination!.split("/").pop()!;
@@ -446,7 +445,7 @@ inProcessOnly(
       ]);
 
       // The plain retry the generic advisory would have prescribed: refused at
-      // entry by BOTH parties, terminally and with the leftover message named.
+      // entry by both parties, terminally and with the leftover message named.
       const retry = await runAttempt({
         srv,
         remoteDir: `${srv.handle.remoteRoot}/${shared}`,
@@ -470,7 +469,7 @@ inProcessOnly(
       ).toContain(tornName);
 
       // And the remedy the publish actually prescribed works: both parties
-      // fresh in a clean directory, carrying the same key files forward.
+      // fresh in a clean directory, reusing the same key files.
       const clean = "unconsumed-publish-clean";
       await fsp.mkdir(path.join(srv.handle.backingDir, clean), {
         recursive: true,

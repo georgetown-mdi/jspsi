@@ -42,13 +42,11 @@ import { captureFd3 } from "../eventStreamTestSupport";
 import { establishHostKeyTrust } from "../../src/hostKeyTrust";
 import { captureProcessExit } from "../exitCapture";
 
-// The handler hands the resolved connection to runProtocol; mock it so the happy
-// path can be driven to that hand-off without opening a transport. Hoisted above
-// the imports by vitest; only the @path-resolution handler test below invokes the
-// mock -- the other handler tests exit on an argument error before reaching it.
-// Only runProtocol is stubbed: the refusal messages the handler raises are real
-// constants from the same module, and asserting a copy of one would pass while
-// the operator saw something else.
+// The handler hands the resolved connection to runProtocol; mock it so the
+// happy path can be driven to that hand-off without opening a transport.
+// Hoisted above the imports by vitest. Only runProtocol is stubbed -- the
+// refusal messages the handler raises are the module's real constants, so an
+// assertion here matches what the operator actually sees, not a copy of it.
 vi.mock("../../src/protocol", async (importActual) => ({
   ...(await importActual<typeof import("../../src/protocol")>()),
   runProtocol: vi.fn(),
@@ -118,7 +116,7 @@ async function driveCompletedExchange(
     bootstrap,
   });
   // The bootstrap outcome reaches the caller through the hook alone, so the
-  // resolved result carries only what RunProtocolResult declares.
+  // resolved result contains only what RunProtocolResult declares.
   return { observedReceivedPayloadColumns };
 }
 
@@ -132,8 +130,8 @@ test("builder: zero-setup's --save-scoped config/key help reaches the rendered h
   const help = (await builder(yargs([])).getHelp()).replace(/\s+/g, " ");
   expect(help).toContain("where to write psilink.yaml when --save is given");
   expect(help).toContain("where to write .psilink.key when --save is given");
-  // zero-setup intentionally keeps the shared URL wording for server-*, so the
-  // default text remains (it did not override those).
+  // zero-setup keeps the shared URL wording for server-*, so the default text
+  // remains (it did not override those).
   expect(help).toContain("overrides the port in URL");
 });
 
@@ -216,7 +214,7 @@ test("invalid server URL with two positionals throws a parse error", () => {
 
 test("a malformed credential-bearing server URL does not echo the credential", () => {
   // A typo the WHATWG parser rejects (here, a bad port) on a credentialed URL
-  // reaches the parse-error site. The operator-facing render must carry neither
+  // reaches the parse-error site. The operator-facing render must contain neither
   // the password nor the username -- not via the message, and not via the parse
   // error's enumerable `input` property on the attached cause. Assert at the
   // render boundary (sanitizeErrorForDisplay, the sole path exitWithError uses)
@@ -259,16 +257,11 @@ test("createConnection filedrop: non-localhost authority throws a UsageError", (
 
 test("createConnection filedrop: the non-localhost error echoes the redacted URL", () => {
   // The rejection echoes the URL through redactUrlCredentials, mirroring
-  // connectionFromURL's twin branch, so the message stays credential-free if the
-  // parse/validation order is ever reworked. A file:// URL cannot carry userinfo
-  // today -- the WHATWG parser rejects `file://user:pass@host` with
-  // ERR_INVALID_URL and the username/password setters are no-ops on a file URL --
-  // so redactUrlCredentials(server) equals server.href for every constructible
-  // file:// URL and no assertion here can distinguish the two. This pins the
-  // message to the redacted form, which is credential-free by construction, and
-  // documents the convention the twin builders share. The string `.toThrow`
-  // arg requires an actual throw whose message contains the substring, so the
-  // assertion cannot pass vacuously.
+  // connectionFromURL's twin branch. A file:// URL cannot hold userinfo (the
+  // WHATWG parser rejects `file://user:pass@host`), so here
+  // redactUrlCredentials(server) always equals server.href and this assertion
+  // cannot distinguish redacted from unredacted -- it only pins the message to
+  // the credential-free redacted form and documents the convention.
   const server = new URL("file://host/mnt/share");
   expect(() => createConnection(server, baseOptions)).toThrow(
     `got: ${redactUrlCredentials(server)}`,
@@ -477,7 +470,7 @@ async function termsFromZeroSetupRun(
 
 test("handler: no --identity asks nothing and sends no identity", async () => {
   // The quick path's whole property: a run given no label completes without a
-  // question and without a stand-in. The terms carry no `identity` key at all --
+  // question and without a stand-in. The terms have no `identity` key at all --
   // not the account psilink runs as, not an empty string -- so a partner reads
   // this party as one that named itself none.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zeroidentity-"));
@@ -494,11 +487,11 @@ test("handler: no --identity asks nothing and sends no identity", async () => {
   }
 });
 
-test("handler: an --identity still carrying the init placeholder exits 64", async () => {
-  // This path may run unnamed, but not under the template's placeholder: read as
-  // a label it would send the words asking for a name, and read as absence it
-  // would silently unname a run whose operator typed a value believing it named
-  // them. It stops before the connection is opened.
+test("handler: an --identity still holding the init placeholder exits 64", async () => {
+  // This path may run unnamed, but not under the template's placeholder: treated
+  // as a label it would send the words asking for a name, and treated as absence
+  // it would silently unname a run whose operator typed a value believing it
+  // named them. It stops before the connection is opened.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zeroidentity-"));
   const exitSpy = captureProcessExit();
   vi.mocked(runProtocol).mockClear();
@@ -528,11 +521,11 @@ test("handler: a supplied --identity rides into the terms, trimmed", async () =>
 // --- handler: @path credential is resolved for the live exchange -------------
 
 test("handler hands the resolved credential to the exchange while persisting nothing here", async () => {
-  // The seam the persistence change turns on: the handler must connect with the
-  // resolved secret (liveConnection) even though createConnection -- the form
-  // --save would persist -- still carries the @path. runProtocol is mocked to
-  // capture the connection it receives; process.exit is trapped so an unexpected
-  // failure surfaces as a thrown test error rather than killing the run.
+  // The boundary the persistence change turns on: the handler must connect with
+  // the resolved secret (liveConnection) even though createConnection -- the
+  // form --save would persist -- still holds the @path. runProtocol is mocked
+  // to capture the connection it receives; process.exit is trapped so an
+  // unexpected failure shows as a thrown test error rather than killing the run.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerohandler-"));
   const exitSpy = captureProcessExit();
   try {
@@ -623,9 +616,9 @@ test("handler: a result file the exchange could not write exits 73, not 69", asy
   }
 });
 
-test("handler with --save carries the first-use pin into the written config", async () => {
+test("handler with --save persists the first-use pin into the written config", async () => {
   // The save-with-config path: establishHostKeyTrust mutates the ORIGINAL
-  // connection in memory (emulated by the mock here), and the handler must carry
+  // connection in memory (emulated by the mock here), and the handler must pass
   // that mutated object into buildSaveSpec -> saveConfig so the confirmed pin
   // lands on disk. Guards the buildSaveSpec(connection) object choice against a
   // refactor that would persist the unmutated clone and silently re-prompt every
@@ -682,12 +675,10 @@ test("handler with --save carries the first-use pin into the written config", as
 
 // --- handler: the dataset preparation precedes host-key trust ----------------
 // A zero-setup run refused from its own input alone must not have connected to
-// the server first, and on an sftp URL the first-use host-key step is what would
-// connect: its probe opens a real transport. So the preparation that carries
-// those refusals runs ahead of that step, and the two checks below hold that
-// order rather than the comment beside it. Both stub establishHostKeyTrust (as
-// the whole file does), so what they pin is the order of the two STEPS; that the
-// probe is what the second one opens is hostKeyTrust.test.ts's.
+// the server first; on an sftp URL, host-key trust is the step that would
+// connect. The two checks below pin the order of prepare then host-key trust
+// (both stub establishHostKeyTrust) -- that the probe is what host-key trust
+// opens is hostKeyTrust.test.ts's.
 
 test("handler: the dataset is prepared before host-key trust", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zeroprepare-"));
@@ -735,7 +726,7 @@ test("handler: an input the prepare refuses exits 64 with no host-key probe", as
   // The ordering above is a call order, which a handler that STARTED host-key
   // trust without awaiting it would satisfy just as well -- and then the probe
   // would have connected anyway. So the refusing case is driven too, over the
-  // same sftp URL: a header naming a transmitted column too long to carry is
+  // same sftp URL: a header naming a transmitted column too long to send is
   // refused from this party's own file, and must end the run there, exit 64,
   // with the host-key step -- and so the probe inside it -- never entered.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerorefusal-"));
@@ -781,7 +772,7 @@ test("handler: an input the prepare refuses exits 64 with no host-key probe", as
 });
 
 test("handler: a credential @path naming a missing file exits 64 with no host-key probe", async () => {
-  // The same invariant over the other local refusal the connect path carries: a
+  // The same invariant over the other local refusal the connect path holds: a
   // `--server-password @path` whose file is not there is decided from this
   // party's own filesystem, so it must end the run before the host-key step --
   // whose probe opens a real transport -- is entered. The credential values are
@@ -831,7 +822,7 @@ test("handler: the first-use pin reaches the connection the exchange dials", asy
   // The other half of reading the credential files early: the connection handed
   // to runProtocol is still cloned AFTER the host-key step, so the pin that step
   // writes onto the original is what the real open() enforces. A clone taken at
-  // the read instead would carry the resolved credential and no pin, and dial an
+  // the read instead would hold the resolved credential and no pin, and dial an
   // unverified server -- so the run driven here supplies both.
   const FP = "SHA256:" + "D".repeat(43);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zeropin-"));
@@ -950,14 +941,13 @@ test("handler --save: the selected strategy flows into the saved config (single-
   }
 });
 
-test("handler: zero-setup surfaces the single-pass disclosure note at selection", async () => {
+test("handler: zero-setup shows the single-pass disclosure note at selection", async () => {
   // The selection note is the ONLY single-pass disclosure surface for a
   // zero-setup party (there is no accept-side consent prompt), so pin that it
-  // actually fires -- the config-content test above would still pass if the note
-  // emission were deleted. It is a diagnostic, so getLogger("psilink").info now
-  // routes to stderr (configureStderrLogging keeps stdout for result data); spy
-  // on process.stderr.write to capture it, and setLevel to info so the note is
-  // emitted regardless of the level a prior test left behind.
+  // fires -- the config-content test above would still pass if the emission
+  // were deleted. It is a diagnostic (routed to stderr by
+  // configureStderrLogging), so spy on process.stderr.write and setLevel to
+  // info so the note emits regardless of a prior test's level.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zeronote-"));
   const stderrChunks: string[] = [];
   const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(((
@@ -996,13 +986,12 @@ test("handler: zero-setup surfaces the single-pass disclosure note at selection"
 });
 
 test("handler: a zero-setup retain run states no consent fact about the retained files", async () => {
-  // The coupling the retainedFiles consent copy rests on, pinned rather than
-  // asserted in prose. That note tells a reader "what you send stays encrypted
-  // there", which holds only on the authenticated accept paths that render it:
-  // this one takes --retain-files too and runs its PSI frames over the bare
-  // transport, with no application-layer encryption to promise, and it renders no
-  // consent fact at all. Wiring consent facts into this path trips this test,
-  // which is the point -- the note's claim has to be re-examined first.
+  // The coupling the retainedFiles consent note rests on: it tells a reader
+  // "what you send stays encrypted there", true only on the authenticated
+  // accept paths that render it. This path takes --retain-files too but runs
+  // its PSI frames over the bare transport with no encryption to promise, so it
+  // must render no consent fact at all -- wiring one in here should trip this
+  // test, prompting the note's claim to be re-examined.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zeroretain-"));
   const stderrChunks: string[] = [];
   const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(((
@@ -1043,7 +1032,7 @@ test("handler: a zero-setup retain run states no consent fact about the retained
     const emitted = stderrChunks.join("");
     expect(emitted).not.toContain(CONSENT_FACTS.retainedFiles.note);
     // A fragment as well as the whole sentence: a surface that wrapped or
-    // re-flowed the copy would still carry this clause, and the whole-string
+    // re-flowed the copy would still contain this clause, and the whole-string
     // assertion alone would pass over it.
     expect(emitted).not.toContain("stays where the two of you meet");
     expect(emitted).not.toContain("exchange files (enforced)");
@@ -1058,7 +1047,7 @@ test("handler: a zero-setup retain run states no consent fact about the retained
 // --- handler: webrtc is refused for the reason it cannot work ----------------
 
 test("handler refuses a webrtc URL by naming the missing rendezvous secret", async () => {
-  // Deferred deliberately rather than unimplemented: the two parties find each
+  // Deferred by design rather than unimplemented: the two parties find each
   // other at signaling ids derived from a shared secret, and a zero-setup
   // exchange is defined by not having one. The refusal has to say that, and it
   // has to come before any file is read or written.
@@ -1109,14 +1098,11 @@ test("handler refuses a webrtc URL by naming the missing rendezvous secret", asy
  *  in for the secret the initiator generates in-band when both parties save. */
 const SECRET = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
-/** The fixture the save-failure tests share: a temp directory holding an input
- *  CSV, plus the process spies each of them reads. `configFile` and `keyFile`
- *  are ordinary paths the run is told to write; the `unwritable*` pair sits
- *  under a dangling symlink, which reads as absent to the conflict gate (`lstat`
- *  resolves through it and reports ENOENT) yet fails the write that follows -- a
- *  real fault, not a stubbed writer, and one no file mode or process uid can
- *  mask. Pairing an ordinary config path with the unwritable key path drives the
- *  provisioner past its config write into the key failure. */
+/** The fixture the save-failure tests share: a temp directory holding an
+ *  input CSV, plus the process spies each test reads. `configFile` and
+ *  `keyFile` are ordinary paths; the `unwritable*` pair sits under a dangling
+ *  symlink, treated as absent by the conflict gate (`lstat` reports ENOENT)
+ *  but fails the write that follows -- a real fault, not a stubbed writer. */
 function saveFailureFixture(): {
   dir: string;
   input: string;
@@ -1171,7 +1157,7 @@ test("handler --save: a save that cannot reach disk warns on fd 3 and exits 73, 
   // config/key write failed. That is the persistence-loss class, and a
   // supervisor reading the transport-failure code would retry -- which for a
   // zero-setup run means conducting a SECOND exchange and re-sending this
-  // party's records. Both machine channels carry it: the warning names what is
+  // party's records. Both machine channels send it: the warning names what is
   // missing, the exit code says do not re-run.
   const f = saveFailureFixture();
   getLogger("psilink").setLevel("error");
@@ -1225,15 +1211,12 @@ test("handler --save: a save that cannot reach disk warns on fd 3 and exits 73, 
 });
 
 test("handler --save: a failed key save whose rollback also fails names the config as written, not lost", async () => {
-  // The both-saved corner where the two files end in DIFFERENT states: the
-  // config was written, the key file then failed, and the rollback of that
-  // config failed too, so the config is on disk. A notice that reported it as
-  // unsaved would misstate what persisted and send the operator into the
-  // conflict its own 'psilink invite' advice would hit.
-  //
-  // The key-write failure is real (the dangling-symlink path). Its rollback is
-  // stubbed: no portable filesystem state makes a removal fail while the write
-  // that placed the file, in the same directory moments earlier, succeeds.
+  // The both-saved corner where the two files end in DIFFERENT states: config
+  // written, key file failed, and the rollback of that config failed too, so
+  // the config stays on disk -- a notice reporting it as unsaved would misstate
+  // what persisted. The key-write failure is real (the dangling-symlink path);
+  // its rollback is stubbed, since no portable filesystem state makes a removal
+  // fail right after the same write succeeds.
   const f = saveFailureFixture();
   getLogger("psilink").setLevel("error");
   const realRmSync = fs.rmSync;
@@ -1336,14 +1319,13 @@ test("handler --save: a config that appeared after the pre-flight is the same lo
   }
 });
 
-test("handler --save: a completed exchange carrying no bootstrap result reports the loss rather than saving in silence", async () => {
-  // The hook's internal-contradiction branch. runProtocol drove the
+test("handler --save: a completed exchange holding no bootstrap result reports the loss rather than saving in silence", async () => {
+  // The hook's internal-contradiction branch: runProtocol drove the
   // completed-exchange hook -- so the exchange finished and its results are
   // written -- yet handed it no bootstrap result, though this command always
-  // passes a boolean --save intent. There is nothing to provision from, and the
-  // config path here is an ordinary writable one, so a run that skipped the save
-  // in silence would exit clean with nothing on disk and no way for a supervisor
-  // to tell. It takes the same persistence-loss report as a failed write.
+  // passes a boolean --save intent. There is nothing to provision from, so a
+  // silent skip must not exit clean with nothing on disk; this takes the same
+  // persistence-loss report as a failed write.
   const f = saveFailureFixture();
   getLogger("psilink").setLevel("error");
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) =>
@@ -1385,15 +1367,12 @@ test("handler --save: a completed exchange carrying no bootstrap result reports 
 });
 
 test("handler --save: the save rides the pre-terminal hook, not the return from runProtocol", async () => {
-  // WHERE the save happens is the contract, not just that it happens: run after
-  // runProtocol returns, the warning above lands BEHIND the run's terminal
-  // event, which the stream spec forbids and a supervisor that stops reading
-  // there discards outright. So a runProtocol that completes its exchange but
-  // never invokes the hook must leave nothing on disk -- and its resolved result
-  // holds no bootstrap material a post-return save could provision from. This is
-  // the one test the hook's invocation is visible to -- every other --save test
-  // drives it and would pass just as well with the save back on the
-  // post-return path.
+  // WHERE the save happens is the contract, not just that it happens: run
+  // after runProtocol returns, it would land behind the run's terminal event,
+  // which the stream spec forbids -- a supervisor that stops reading there
+  // would miss it. So a runProtocol that completes but never invokes the hook
+  // must leave nothing on disk. This is the one test the hook's invocation is
+  // visible to; every other --save test would pass just as well on either path.
   const f = saveFailureFixture();
   vi.mocked(runProtocol).mockImplementation((async () => ({
     observedReceivedPayloadColumns: [],

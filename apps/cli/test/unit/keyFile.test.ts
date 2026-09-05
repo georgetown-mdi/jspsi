@@ -19,7 +19,7 @@ import {
 // 43-char base64url token satisfying the sharedSecret format constraint.
 const TOKEN = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
-// A distinct 43-char base64url secret, to prove the provisioned key carries the
+// A distinct 43-char base64url secret, to prove the provisioned key holds the
 // token's secret rather than a coincidental default.
 const INVITE_SECRET = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM";
 
@@ -102,7 +102,7 @@ test("loadKeyFile does not echo file content on an invalid-JSON key file", () =>
   // path-only: Node's JSON.parse echoes a snippet of the source start in its
   // message (here exactly the leading 10 chars), so a file that begins with the
   // secret would otherwise leak it. The 10-char marker leads the file so the old
-  // (content-echoing) path would surface it; the guard must not.
+  // (content-echoing) path would expose it; the guard must not.
   const keyPath = path.join(dir, ".psilink.key");
   const MARKER = "LEAKME1234";
   fs.writeFileSync(keyPath, `${MARKER} not json`);
@@ -149,14 +149,13 @@ test("saveKeyFile rejects a malformed sharedSecret before writing to disk", () =
   expect(() => saveKeyFile(keyPath, { sharedSecret: "too-short" })).toThrow(
     "base64url-encoded 32-byte value",
   );
-  // No file should have been written.
   expect(fs.existsSync(keyPath)).toBe(false);
 });
 
 // --- provisionKeyFileFromInvitation ------------------------------------------
 
 test("provisionKeyFileFromInvitation writes the token's secret and expiry, owner-only", async () => {
-  // The inviter-side (composing-party) copy carries BOTH the shared secret and
+  // The inviter-side (composing-party) copy holds BOTH the shared secret and
   // the invitation's expiry -- matching `psilink invite`, contrast accept's copy
   // which strips the expiry. Owner-only permissions match saveKeyFile's write.
   const keyPath = path.join(dir, ".psilink.key");
@@ -195,19 +194,16 @@ test("provisionKeyFileFromInvitation errors when a key file already exists and l
   await expect(
     provisionKeyFileFromInvitation(encoded, keyPath),
   ).rejects.toThrow("already exists");
-  // The pre-existing file is byte-for-byte unchanged.
   expect(fs.readFileSync(keyPath, "utf8")).toBe(existing);
 });
 
 test("provisionKeyFileFromInvitation refuses even when a concurrent writer wins the race after the pre-check passes", async () => {
-  // Defeat detectFileConflicts's pre-check by making its lstatSync report ENOENT
-  // exactly once (the path is genuinely free at that instant), then create the
-  // real key file -- simulating a second process that provisions between the
-  // pre-check and this call's write -- before letting lstatSync behave normally
-  // again. The write-side guard (the exclusive create in saveKeyFile) must be the
-  // one that catches this: it should refuse with the identical "already exists"
-  // UsageError the pre-check itself raises, and must not overwrite the
-  // concurrent writer's content.
+  // Defeat detectFileConflicts's pre-check by making lstatSync report ENOENT
+  // once, then write the real key file before it returns to normal --
+  // simulating a second process that provisions between the pre-check and this
+  // call's write. The write-side guard (saveKeyFile's exclusive create) must
+  // catch this and refuse with the same "already exists" UsageError the
+  // pre-check raises, without overwriting the concurrent writer's content.
   const keyPath = path.join(dir, ".psilink.key");
   const concurrentWriterContent =
     JSON.stringify({ sharedSecret: TOKEN }) + "\n";
@@ -295,7 +291,7 @@ test("buildRotatedKeyFile uses the exact 86_400_000 ms-per-day formula", () => {
 });
 
 test("buildRotatedKeyFile rejects a non-positive tokenMaxAgeDays", () => {
-  // Belt-and-suspenders against a caller bypassing schema validation: 0 or a
+  // Defense-in-depth against a caller bypassing schema validation: 0 or a
   // negative would stamp an immediately-expired token. UsageError -> exit 64.
   expect(() => buildRotatedKeyFile(TOKEN, 0, FIXED_NOW)).toThrow(UsageError);
   expect(() => buildRotatedKeyFile(TOKEN, -5, FIXED_NOW)).toThrow(UsageError);
@@ -307,7 +303,7 @@ test("buildRotatedKeyFile rejects a non-integer tokenMaxAgeDays", () => {
 });
 
 test("buildRotatedKeyFile rejects a tokenMaxAgeDays that overflows the date range", () => {
-  // Backstop for a caller bypassing the config-schema cap (MAX_TOKEN_MAX_AGE_DAYS):
+  // A safety check for a caller bypassing the config-schema cap (MAX_TOKEN_MAX_AGE_DAYS):
   // a value whose `now + N days` stamp leaves the representable Date range fails
   // as a UsageError (exit 64) here, not as an opaque RangeError from toISOString()
   // after a handshake. ~1e8 days overflows the Date range; ~5e6 days stays in

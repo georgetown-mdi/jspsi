@@ -1,17 +1,16 @@
-// Child process for the process-exit assertion in transitionWaitBound.test.ts. It
-// opens a real SFTP connection against a server the PARENT runs, releases the
-// session, waits for the parent to arm the stalling handshake, drives an operation
-// whose re-establishing dial then parks, and closes over it: whether this process
-// exits is the assertion, and only a separate process can carry it. An in-process
-// promise-settlement check passes even when the parked dial's live socket is left
-// behind -- that socket is a ref'd handle, so a completed run would never exit --
-// and the test runner's own handles mask it.
+// Child process for the process-exit assertion in transitionWaitBound.test.ts.
+// It opens a real SFTP connection against a server the parent runs, releases
+// the session, waits for the parent to arm the stalling handshake, drives an
+// operation whose re-establishing dial then parks, and closes over it: whether
+// this process exits is the assertion, since an in-process check can pass even
+// with the parked dial's live socket (a ref'd handle) left behind, masked by
+// the test runner's own handles.
 //
-// Every connection parameter arrives in the environment so the file is a plain
-// script with no argument parsing, and the two sides synchronize through a file the
-// parent creates rather than through stdin, which would itself be a ref'd handle
-// this process must not hold. Deliberately no process.exit(): the exit code must
-// come from a drained event loop.
+// Every connection parameter arrives in the environment so this is a plain
+// script with no argument parsing, and the two sides synchronize through a
+// file the parent creates rather than through stdin, which would itself be a
+// ref'd handle this process must not hold. No process.exit(), by design: the
+// exit code must come from a drained event loop.
 import fs from "node:fs";
 
 import logLibrary from "loglevel";

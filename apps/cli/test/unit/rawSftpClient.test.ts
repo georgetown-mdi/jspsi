@@ -24,13 +24,12 @@ afterEach(() => {
   logLibrary.setLevel(originalRootLevel, false);
 });
 
-// Fire the three teardown events the constructor's callbacks handle -- including
+// Fires the three teardown events the constructor's callbacks handle -- including
 // the read ECONNRESET that flaked the suite -- with console.error/console.log
-// spied, and assert neither was touched. Returns nothing; the assertions are the
-// point. Reading the callbacks the constructor actually stored (rather than
-// asserting on the routing in the abstract) means a raw client reverted to the
-// bare `new Ssh2SftpClient()` -- whose default callbacks call console.error/
-// console.log at fire time -- re-fails this.
+// spied, and asserts neither was touched. Reading the callbacks the constructor
+// actually stored, rather than asserting on the routing in the abstract, means a
+// client reverted to the bare `new Ssh2SftpClient()` -- whose defaults call
+// console.error/console.log -- re-fails this.
 function expectTeardownStaysOffConsole(): void {
   const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
   const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -46,23 +45,12 @@ function expectTeardownStaysOffConsole(): void {
   expect(logSpy).not.toHaveBeenCalled();
 }
 
-// Regression guard for the native-hardening console flake: a bare
-// `new Ssh2SftpClient()` leaves ssh2-sftp-client's default callbacks writing
-// `Global error listener: read ECONNRESET` (and the end/close lines) to the
-// console on teardown, which the integration sentinel catches only best-effort.
-// createRawSftpClient must route those off the console at the source.
-// The suppression must be DETERMINISTIC, not contingent on the suite's log level:
-// the whole point of routing (over draining) is that the line never reaches the
-// console regardless of timing OR verbosity. The integration suite's noisiest
-// files raise the ROOT log level (mixedConnection/sftpConnection set it to DEBUG);
-// forks isolation keeps them in separate processes, but the property that makes
-// this safe is local -- createRawSftpClient's named logger pins its own level at
-// creation and does NOT track later root changes, so its trace stays a no-op even
-// when root is raised. Assert that directly by forcing root to the MOST verbose
-// level (stronger than the DEBUG the suite reaches) and confirming the teardown
-// still touches no console sink. If the helper ever switched to a logger that
-// tracked root (e.g. getLoggerForVerbosity) or this logger were bumped, this fails
-// red -- turning the determinism claim into a check rather than a comment.
+// Regression guard: a bare `new Ssh2SftpClient()` writes its default teardown
+// lines to the console, which the integration sentinel catches only best-effort.
+// createRawSftpClient must route those off console at the source,
+// deterministically -- its named logger pins its level at creation and never
+// tracks later root changes. Forcing root here to the most verbose level and
+// confirming teardown stays silent turns that claim into a check.
 test("teardown stays off the console even at the most verbose root level", () => {
   logLibrary.setLevel(logLibrary.levels.TRACE, false);
   expectTeardownStaysOffConsole();

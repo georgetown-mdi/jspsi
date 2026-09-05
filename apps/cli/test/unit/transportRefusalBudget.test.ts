@@ -52,12 +52,9 @@ const linksOf = (rendered: string): string[] => rendered.split(CAUSE_SEPARATOR);
 
 // "This link was truncated" as a length comparison rather than a marker search,
 // because one first-party fragment (the over-long filename preview) ends with
-// the marker by construction and would read as a truncation that never happened.
-// The two are equivalent: sanitizeForDisplay appends a code point only when its
-// whole escape fits, an escape runs to at most ten characters, so a truncated
-// link retains more than COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH - 10 characters and
-// then carries the marker on top -- longer than the cap in every case, while an
-// untruncated link is within it by definition.
+// the marker by construction and would be treated as a truncation that never
+// happened. A truncated link exceeds COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH; an
+// untruncated one does not.
 const truncatedLinks = (rendered: string): string[] =>
   linksOf(rendered).filter(
     (link) => link.length > COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
@@ -65,7 +62,7 @@ const truncatedLinks = (rendered: string): string[] =>
 
 // The class-uniform recovery step, read off a minimal construction of the class
 // rather than restated here: what each site is asserted to deliver is then the
-// sentence the class actually carries, and an edit to that sentence cannot leave
+// sentence the class actually holds, and an edit to that sentence cannot leave
 // a stale copy passing here.
 const recoveryStepOf = (error: Error): string =>
   linksOf(sanitizeErrorForDisplay(error))[1];
@@ -206,16 +203,12 @@ for (const site of CLI_SITES) {
 
   test(`no link truncates at the ${site.name} with every fragment at its ordinary size`, () => {
     const rendered = sanitizeErrorForDisplay(site.raise());
-    // A first-party link fits its budget by measurement, not by construction:
-    // growing the fixed copy of a summary, a label, or the recovery sentence
-    // past its budget puts the cap back on the operator's text, so it fails
-    // here rather than silently deleting the next step. truncatedLinks only
-    // flags a link over the renderer's 1024-character cap, which a
-    // composition-site clip (256 characters) never reaches, so a link ending
-    // with the marker is checked here too. Excluded: the entry-name preview
-    // (filenameTooLongError), which carries the marker BY CONSTRUCTION at any
-    // length over MAX_FILENAME_LENGTH, this site's own trigger, rather than
-    // from filling its budget.
+    // truncatedLinks only flags a link over the renderer's 1024-character cap,
+    // which a composition-site clip (256 characters) never reaches, so a link
+    // ending with the marker is checked here too -- except the entry-name
+    // preview (filenameTooLongError), which has the marker BY CONSTRUCTION at
+    // any length over MAX_FILENAME_LENGTH, this site's own trigger, rather
+    // than from filling its budget.
     expect(truncatedLinks(rendered)).toEqual([]);
     expect(linksOf(rendered).length).toBeLessThan(MAX_ERROR_CAUSE_DEPTH);
     for (const link of linksOf(rendered)) {
@@ -225,16 +218,13 @@ for (const site of CLI_SITES) {
   });
 }
 
-// The renderer's per-link cap is kept rather than widened, and no CLI fragment
-// is left to spend it: the listing, frame-size, and liveness guards each cut
-// their fragments at their COMPOSITION site, to the per-value budget a chooser's
-// own value is given everywhere else, so none reaches the renderer at a size the
-// renderer has to cut. Driven at the widest a partner can make the directory --
-// an offline-accept config seeds it from the invitation endpoint, whose schema
-// is what bounds it -- and at a width no bound covers at all, since neither the
-// operator's own path nor a peer-supplied inbound filename answers to one. The
-// assertion is on the link as it RENDERS: a bound held only inside the builder
-// is one the escape at the boundary can still overrun.
+// Each fragment is cut at its COMPOSITION site (listing, frame-size, and
+// liveness guards) to the per-value budget given everywhere else, so nothing
+// reaches the renderer at a size it must cut. Driven at the widest a partner
+// can make the directory (from the invitation endpoint's schema) and at an
+// unbounded width (the operator's own path, a peer-supplied filename),
+// asserting on the link as it RENDERS: a bound held only in the builder could
+// still be overrun at the escape boundary.
 const ENDPOINT_WIDTH_PATH = "/rv/" + "p".repeat(MAX_ENDPOINT_PATH_LENGTH - 4);
 const COMPOSITION_CLIPPED_SITES: Array<{
   label: string;
@@ -311,7 +301,7 @@ for (const site of COMPOSITION_CLIPPED_SITES) {
   });
 }
 
-// A link carries ONE chooser, which is what the per-fragment table above cannot
+// A link holds ONE chooser, which is what the per-fragment table above cannot
 // measure: the listing guard is the one CLI site naming two of them -- the
 // server's entry name and the operator's directory -- so each delivery below
 // fills one chooser's budget and asserts the OTHER's link arrives whole. Two
@@ -320,7 +310,7 @@ for (const site of COMPOSITION_CLIPPED_SITES) {
 const DIRECTORY_LINK = `directory: ${RENDEZVOUS_PATH}`;
 const REFUSED_WIDTH_NAME = "n".repeat(MAX_FILENAME_LENGTH + 1);
 // The entry-name link the guard composes for it: the leading slice it relays,
-// carrying the marker the slicing itself earns.
+// holding the marker the slicing itself earns.
 const REFUSED_WIDTH_NAME_LINK = `entry name: ${REFUSED_WIDTH_NAME.slice(0, 64)}${DISPLAY_TRUNCATION_MARKER}`;
 
 const TWO_CHOOSER_DELIVERIES: Array<[string, () => Error, string]> = [
@@ -529,7 +519,7 @@ for (const site of LIVENESS_DELIVERIES) {
 
 test("the liveness guard redacts each fragment before it clips it", () => {
   // Redaction before the clip is what keeps the fail-closed dangling rule
-  // inside the fragment that carried the marker. Reversing the two leaves a
+  // inside the fragment that held the marker. Reversing the two leaves a
   // BEGIN with its END clipped off, which the renderer's own per-link pass then
   // consumes to the end of the link -- taking the marker that said the fragment
   // was cut, and every byte composed behind it, with it. A key block wider than

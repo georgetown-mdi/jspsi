@@ -11,21 +11,21 @@ import type {
   Ssh2SftpClientInternals,
 } from "../../src/connection/sftpClientInternals";
 
-// The close-seam resolvers over the ssh2 / ssh2-sftp-client internals view.
+// The close-member resolvers over the ssh2 / ssh2-sftp-client internals view.
 //
 // The RESOLVED arms are driven against the pinned library on every real-server
 // leg -- test/integration/terminalCloseBound.test.ts,
 // heldSessionWithheldClose.test.ts, teardownQueuedSignal.test.ts, and
 // ephemeralSessionExchange.test.ts all reach them -- so what is worth pinning
-// here is what a server cannot show: that a resolved seam is bound to the
-// receiver it was read off, and which seam is NAMED when several are gone at
+// here is what a server cannot show: that a resolved member is bound to the
+// receiver it was read off, and which member is NAMED when several are gone at
 // once. The order decides the one thing the operator is told on an upgrade that
 // relocates more than one member, and it is not visible from any single
 // unavailable arm.
 //
 // The unavailable arms are the process's own dependency tree rather than
 // anything on the wire (docs/TESTING.md, "What the real-server legs cannot
-// reach"), so they are modelled, and modelled only over the seams the adapter
+// reach"), so they are modelled, and modelled only over the members the adapter
 // already reaches: no case here supposes a member the adapter never reads.
 
 type MutableSocket = Ssh2ClientSocket & { destroyCalledOn?: unknown };
@@ -60,7 +60,7 @@ function internals(
 }
 
 describe("resolveTerminalCloseSeam", () => {
-  test("resolves destroy bound to the socket it was read off, and carries that socket", () => {
+  test("resolves destroy bound to the socket it was read off, and holds that socket", () => {
     const { value, sock } = internals();
 
     const seam = resolveTerminalCloseSeam(value);
@@ -94,7 +94,7 @@ describe("resolveTerminalCloseSeam", () => {
 });
 
 describe("resolveEndedTransportCloseSeams", () => {
-  test("resolves once and removeListener bound to the client, over the terminal seam", () => {
+  test("resolves once and removeListener bound to the client, over the terminal member", () => {
     const { value, sock } = internals();
 
     const seams = resolveEndedTransportCloseSeams(value);
@@ -124,13 +124,13 @@ describe("resolveEndedTransportCloseSeams", () => {
   test.each([
     ["once", "client.once()"],
     ["removeListener", "client.removeListener()"],
-  ] as const)("names %s's seam when it is gone", (member, missing) => {
+  ] as const)("names %s when it is gone", (member, missing) => {
     const { value } = internals({ client: { [member]: undefined } });
 
     expect(resolveEndedTransportCloseSeams(value)).toEqual({ missing });
   });
 
-  test("reports the terminal seam's own unavailability unchanged", () => {
+  test("reports the terminal member's own unavailability unchanged", () => {
     const sock = socket();
     delete sock.destroy;
 
@@ -141,7 +141,7 @@ describe("resolveEndedTransportCloseSeams", () => {
 });
 
 describe("resolveTransportCloseSeams", () => {
-  test("resolves end bound to the client, over the ended-transport seams", () => {
+  test("resolves end bound to the client, over the ended-transport members", () => {
     const { value, sock } = internals();
 
     const seams = resolveTransportCloseSeams(value);
@@ -164,9 +164,9 @@ describe("resolveTransportCloseSeams", () => {
   });
 });
 
-describe("the order the seams are resolved in", () => {
-  // Which seam an operator is NAMED on an upgrade that relocated several at
-  // once. Each row removes everything from its own seam onward, so the reported
+describe("the order the members are resolved in", () => {
+  // Which member an operator is NAMED on an upgrade that relocated several at
+  // once. Each row removes everything from its own member onward, so the reported
   // name is the first still-checked one; read top to bottom the rows are the
   // resolution order itself.
   const order = [
@@ -178,7 +178,7 @@ describe("the order the seams are resolved in", () => {
   ] as const;
 
   test.each(order.map((missing, index) => ({ missing, index })))(
-    "reports $missing first once it and every seam after it are gone",
+    "reports $missing first once it and every member after it are gone",
     ({ missing, index }) => {
       const sock = socket();
       const gone = new Set(order.slice(index));

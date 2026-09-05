@@ -46,7 +46,7 @@ export default async function setup({
   fs.writeFileSync(sentinelSink, "");
   provide("consoleSentinelSink", sentinelSink);
   const backend = selectedBackend();
-  // Surface the native profile (other than the default baseline) so a CI leg's
+  // Report the native profile (other than the default baseline) so a CI leg's
   // log makes clear which hardened configuration ran.
   const profile =
     backend === "native" ? selectedNativeProfile() : ("baseline" as const);

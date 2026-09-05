@@ -30,15 +30,11 @@ vi.mock("@openmined/psi.js", () => ({
 }));
 
 // Default runExchange mock implementation. Polls the drop directory until it
-// is empty before resolving: the receiver's poller deletes each message file
-// after consuming it, so an empty directory is a deterministic signal that the
-// peer has consumed the final key-exchange message - no fixed sleep required. .hello
-// and -lock.json files from synchronize() are ignored; after the lock race the
-// winner's lock file remains until cleanup() runs in the finally block (after
-// runExchange returns), so it may still be present while this mock polls for
-// .json files. These files are harmless residue and will not be consumed by
-// the message poller. The wait is on the peer, so it takes the same backstop as
-// the peer budget the two-party cases run under rather than one of its own.
+// is empty, since the receiver deletes each message file after consuming it -
+// an empty directory means the peer consumed the final key-exchange message.
+// .hello and -lock.json files from synchronize() are ignored: they are
+// harmless residue the message poller never consumes. The wait shares the
+// peer-wait safety check the two-party cases run under.
 async function defaultRunExchange(): Promise<unknown> {
   const { readdir } = await import("node:fs/promises");
   const deadline = Date.now() + PEER_WAIT_HANG_BACKSTOP_MS;
@@ -63,11 +59,10 @@ async function defaultRunExchange(): Promise<unknown> {
 
 // Block a mocked runExchange until BOTH key files hold a rotated (non-original)
 // token. The recovery-path tests throw from runExchange to land a synthetic
-// fault in runProtocol's catch; waiting for both rotations first guarantees the
-// key exchange has finished on both sides (and its last message file is off
-// disk) before either party's doCleanup runs, so no cleanup races the peer's
-// still-pending receive. Bounded so a lone arrival cannot hang, on the same
-// peer-wait backstop the two-party cases run under.
+// fault in runProtocol's catch; waiting for both rotations first guarantees
+// the key exchange finished on both sides before either party's doCleanup
+// runs. Bounded so a lone arrival cannot hang, on the same peer-wait safety
+// check the two-party cases run under.
 async function waitForBothKeysRotated(
   keyFileA: string,
   keyFileB: string,
@@ -101,12 +96,11 @@ function expectNoGenericRecoveryAdvisory(errors: readonly string[]): void {
 }
 
 // Poll dropDir until B's rendezvous (-hello) file appears, then backdate every
-// entry's mtime by 3 s. Party B is started first; making its mtime strictly
-// older than A's forces B to be the responder even on coarse-mtime filesystems
-// (FAT/some NFS), where same-bucket timestamps would fall back to UUID
-// comparison and could assign roles unexpectedly. The ENOENT tolerance covers a
-// file that raced ahead of B's synchronize and was already deleted. The wait is
-// on the other party, so it takes the shared peer-wait backstop.
+// entry's mtime by 3 s. Party B starts first; an older mtime forces B to be
+// the responder even on coarse-mtime filesystems (FAT/some NFS), where
+// same-bucket timestamps fall back to UUID comparison and could assign roles
+// unexpectedly. The ENOENT tolerance covers a file deleted by B's synchronize
+// before this loop reaches it. The wait shares the peer-wait safety check.
 async function backdateDropDirRendezvousFile(dropDir: string): Promise<void> {
   const deadline = Date.now() + PEER_WAIT_HANG_BACKSTOP_MS;
   for (;;) {
@@ -162,7 +156,7 @@ vi.mock("@psilink/core", async (importActual) => {
     // the case where one was owed and its build threw. Core marks the error
     // inside runExchange, which is mocked here, so both accessors are mocked
     // alongside it; their defaults are the real ones' answers for an error
-    // carrying neither mark, which is every other test in this file.
+    // holding neither mark, which is every other test in this file.
     exchangeRecordFromFailure: vi.fn().mockReturnValue(undefined),
     exchangeRecordOwedButUnbuilt: vi.fn().mockReturnValue(false),
     describeExchangeStages: vi.fn().mockReturnValue([]),
@@ -171,13 +165,11 @@ vi.mock("@psilink/core", async (importActual) => {
 });
 
 // Replace the SFTP adapter with a transport mock whose connect() drives the
-// configured hostVerifier with a fixed ssh-ed25519 key blob (as ssh2 would) and
-// rejects with ssh2's host-denied message when the verifier refuses -- the same
-// harness core's fileSyncConnection host-key tests use. This lets an
-// sftp-channel runProtocol exercise the REAL host-key verification wrap in core
-// (the security classification under test) with no live SSH connection. Only
-// the sftp-channel test below constructs this class; every other test in this
-// file runs filedrop, which never touches the adapter.
+// configured hostVerifier with a fixed ssh-ed25519 key blob (as ssh2 would)
+// and rejects with ssh2's host-denied message when the verifier refuses, the
+// same harness core's fileSyncConnection host-key tests use. This exercises
+// the real host-key verification wrap in core with no live SSH connection;
+// only the sftp-channel test below constructs this class.
 vi.mock("../../src/connection/ssh2SftpAdapter", () => {
   // A raw OpenSSH ssh-ed25519 host-key blob: uint32 len + "ssh-ed25519" +
   // uint32 len + 32 key bytes, matching what ssh2 hands hostVerifier.
@@ -308,43 +300,13 @@ const signingIdentityFixture = await generateSigningIdentity("test-party", {
 // Values unused because runExchange and buildOutputTable are mocked.
 const minimalPrepared = {} as unknown as PreparedExchange;
 
-// The peer budget every two-party case in this file gives both parties, and the
-// 20 s bound each of those cases carries as its own timeout. Neither is a timing
-// assertion: the two parties start together and meet in milliseconds, and each
-// case settles its outcome through the mocked runExchange, so nothing here waits
-// for either to elapse on a healthy run.
-//
-// The budget bounds every wait before the exchange, and the teardown drain and
-// close, which core caps at min(their own bound, this). At the default -- one
-// hour -- a party still waiting on a partner that failed its own rendezvous
-// outlives its case's bound and is killed by vitest with a generic message in
-// place of the core layer's own diagnosable timeout; sized near the milliseconds
-// a rendezvous actually costs, it settles the outcome by how promptly a loaded
-// machine schedules the two parties against each other instead. Under a full
-// unit-project run on an idle ten-core container the two-party cases here
-// measure single-digit to low-hundred milliseconds apiece, and 1.6 s at worst
-// across 28 runs with unrelated builds competing for the same cores, so both
-// values stay an order of magnitude clear of the worst measured case and a later
-// tightening has that measurement to start from.
-//
-// The bound sits five seconds above the budget rather than at it, so a run that
-// burns the whole budget still surfaces that budget's own diagnosable timeout.
-// Each case spells the bound as a literal third argument to test(), because
-// prettier keeps a test's callback hugged only for a numeric-literal timeout;
-// the cases that also hold both parties at a barrier spell the same 20 s as
-// BOTH_ARMED_HANG_BACKSTOP_MS + 5_000, the wait their run actually sits in.
-//
-// A second group carries that same 20 s for a different reason: the four cases
-// that point a filedrop connection at a path which does not exist, to end the
-// run after the part they assert about. The local-FS connect reads that ENOENT
-// as the transient a share whose permissions are still settling raises, and
-// re-attempts it maxReconnectAttempts times on a fixed one-second delay, so each
-// of them spends three seconds inside a retry schedule none of them is about.
-// The floor is timer-driven and barely moves under load -- 3.01 s idle, 3.15 s
-// at worst pinned to a contended core -- but it leaves the 5 s default under two
-// seconds for everything else the case does, the thinnest margin in this file,
-// and what the default buys once that runs out is a bare test timeout in place
-// of the rejection the case reads.
+// PEER_WAIT_HANG_BACKSTOP_MS bounds every peer wait a two-party case makes,
+// including teardown; it is not a timing assertion since the mocked
+// runExchange resolves for both parties in milliseconds. Each case sets its
+// own vitest timeout five seconds above this budget so an exhausted budget
+// still shows the diagnosable timeout instead of a generic vitest kill. A
+// second group needs the same 20 s because a filedrop connection pointed at a
+// nonexistent path spends about three seconds in its ENOENT retry schedule.
 const PEER_WAIT_HANG_BACKSTOP_MS = 15_000;
 
 // Both parties of every two-party case: a 1 ms poll so the rendezvous and key
@@ -355,37 +317,25 @@ const TWO_PARTY_OPTIONS = {
   peerTimeoutMs: PEER_WAIT_HANG_BACKSTOP_MS,
 };
 
-// The peer budget for the lone-party cases that wait for a partner who never
-// arrives: each spends it in full, so it is what that case costs, and core
-// races every single transport op against a fresh copy of it as well. That
-// second role is what sizes it. A budget near the cost of one loaded transport
-// op is spent by that op instead, and the run then reports a stalled-transport
-// error rather than the peer-silence timeout these cases read their advice off
-// -- a misreport, not a failure of the thing under test. On a container whose
-// cores are contended a single local-FS op has been measured at 196 ms, so this
-// stands an order of magnitude above it, and short enough that a case spending
-// it once still costs about two seconds.
-//
-// A case whose party reaches teardown holding a frame no peer ever consumed
-// spends it a second time, the terminal-frame drain capping itself at min(its
-// own bound, this): the entry-hello residue cases below measure about four
-// seconds apiece and so spell a 20 s bound of their own, vitest's 5 s default
-// leaving a budget spent twice under a second.
+// LONE_PARTY_PEER_BUDGET_MS is the peer-wait budget for lone-party cases that
+// wait for a partner who never arrives; each spends it in full, and core also
+// races every transport op against a copy of it. It must stay well above the
+// cost of one transport op, or a slow op reports a stalled-transport error
+// instead of the peer-silence timeout the case is testing. A case whose party
+// reaches teardown holding an unconsumed frame spends this budget a second
+// time, in the terminal-frame drain.
 const LONE_PARTY_PEER_BUDGET_MS = 2_000;
 
 let tmpDir: string;
 let dropDir: string;
 
 // fd-3 sentinel and capture: wrap writeSync so a write to the machine-interface
-// descriptor (EVENT_STREAM_FD = 3) is captured into a buffer -- never delivered
-// to the real descriptor, which the test process does not own -- while every
-// other fd passes straight through to the real implementation. A test that runs
-// under --event-stream drains the capture with takeFd3Lines() and asserts on the
-// parsed events; afterEach then asserts the capture is EMPTY, which pins two
-// requirements at once: a flag-off run writes nothing to fd 3 across every
-// scenario in this file, and a flag-on test must account for every line it
-// caused (so an unexpected extra emission -- a double terminal event -- fails
-// the test that produced it).
+// descriptor (EVENT_STREAM_FD = 3) is captured into a buffer instead of
+// reaching the real descriptor, which the test process does not own; every
+// other fd passes through unchanged. A test run under --event-stream drains
+// the capture with takeFd3Lines() and asserts on the parsed events; afterEach
+// then asserts the capture is EMPTY, pinning that a flag-off run writes
+// nothing to fd 3 and a flag-on test accounts for every line it caused.
 const EVENT_STREAM_FD = 3;
 let fd3Chunks: Buffer[];
 let realWriteSync: typeof fs.writeSync;
@@ -460,7 +410,7 @@ afterEach(async () => {
 // --- Peer-silence guidance ---------------------------------------------------
 
 // The receiver names its own cause locally, but the remote sender only sees the
-// inactivity timeout, so it surfaces guidance about likely receiver-side causes.
+// inactivity timeout, so it shows guidance about likely receiver-side causes.
 // runProtocol threads this text to fromEventConnection's inactivityHint, which
 // the core layer appends to the peer-silence error (the append mechanism is
 // pinned in packages/core/test/messageConnection.test.ts). This pins the wording
@@ -574,7 +524,7 @@ test.skipIf(process.getuid?.() === 0)(
 
 test("rejects before opening a connection when keyFilePath parent exists but is a regular file", async () => {
   // statSync resolves the parent successfully but isDirectory() returns false.
-  // Without the dedicated branch in runProtocol the failure would not surface
+  // Without the dedicated branch in runProtocol the failure would not show
   // until saveKeyFile attempted fs.mkdirSync on a non-directory path.
   const fileParent = path.join(tmpDir, "not-a-dir");
   fs.writeFileSync(fileParent, "");
@@ -679,7 +629,7 @@ test("does not mutate the caller-supplied auth object when trimming whitespace f
 test.skipIf(process.platform === "win32")(
   "rejects before opening a connection when keyFilePath parent is a dangling symlink",
   async () => {
-    // statSync follows symlinks, so a dangling-symlink parent surfaces as
+    // statSync follows symlinks, so a dangling-symlink parent shows as
     // ENOENT. The lstat probe distinguishes "dangling symlink" from "missing
     // path" and the message must include the dangling-symlink hint.
     // symlink semantics differ on Win
@@ -757,9 +707,9 @@ test("authentication=null runs the exchange without authentication and without e
   // No assertion on key files: no rotation occurs when auth is null.
 }, 20_000);
 
-// --- The resolved run shape, named at the pre-round seam ---------------------
+// --- The resolved run shape, named at the pre-round boundary ---------------------
 
-// A runExchange that fires the pre-round seam with one resolved shape and then
+// A runExchange that fires the pre-round boundary with one resolved shape and then
 // finishes like the default, or with `settled` where the configuration under test
 // ends somewhere else. Both parties get it -- runProtocol's rendering is
 // per-party -- so each renders the shape handed to it, and only the party under
@@ -859,7 +809,7 @@ test("names a deduplicating cardinality and warns on an over-bound projection", 
   expect(lines[2].message).toBe(pairTableAdvisory);
 }, 20_000);
 
-test("leaves the pre-round seam silent on a one-to-one run", async () => {
+test("leaves the pre-round boundary silent on a one-to-one run", async () => {
   // The cardinality that adds no multiplicity is the one every consent surface
   // already describes, so naming it here would be noise on the ordinary run.
   vi.mocked(runExchange).mockImplementation(
@@ -1030,16 +980,13 @@ test("writes the self-attested record and verification keys when runExchange ret
 }, 20_000);
 
 test("a record the run was asked for and could not write warns on fd 3 and exits 73", async () => {
-  // The unattended case: records are enabled, the exchange and its results
-  // succeed, and the record write fails (here on a path whose parent is a
-  // regular file). A supervisor that discards stderr -- or an operator at
-  // --log-level error, which suppresses the warn -- would otherwise read a clean
-  // exit 0 for a run that produced no audit artifact. Both machine channels must
-  // carry it: a warning event ahead of the terminal event, and the
-  // persistence-loss exit code (73, EX_CANTCREAT) -- asserted as the literal the
-  // exit-code contract in docs/CLI.md publishes, not as 69, which tells a
-  // supervisor the exchange did not happen and may be retried. The terminal
-  // event stays `result`: the exchange succeeded and must not be re-run.
+  // The unattended case: records are enabled, the exchange succeeds, and the
+  // record write fails (here on a path whose parent is a regular file). A
+  // supervisor that discards stderr would otherwise see a clean exit 0 for a
+  // run that produced no audit artifact. Both machine channels must send it: a
+  // warning event ahead of the terminal event, and exit code 73 (EX_CANTCREAT,
+  // per docs/CLI.md) rather than 69, which tells a supervisor to retry. The
+  // terminal event stays `result` since the exchange itself succeeded.
   const blocker = path.join(tmpDir, "blocker");
   fs.writeFileSync(blocker, "x");
   vi.mocked(runExchange).mockImplementation(runExchangeWithAudit as never);
@@ -1162,8 +1109,8 @@ test("a result file that could not be written fails with the persistence-loss ex
   // The terminal form of the same loss: the exchange completed and only local
   // result generation failed (here the output path's parent is a regular file),
   // so re-running would re-send this party's data for an exchange that already
-  // happened. The run fails -- there is no result -- but it carries 73 to the
-  // command boundary rather than the 69 a transport fault gets, and the terminal
+  // happened. The run fails -- there is no result -- but it reaches the command
+  // boundary with 73 rather than the 69 a transport fault gets, and the terminal
   // event's `output` category names the finer distinction for a reader of fd 3.
   const blocker = path.join(tmpDir, "blocker");
   fs.writeFileSync(blocker, "x");
@@ -1219,11 +1166,11 @@ test("a result file that could not be written fails with the persistence-loss ex
 test("a partner-shaped output-phase fault exits 69, not the local write-loss code", async () => {
   // The other half of the same boundary. buildOutputTable's integrity checks run
   // in the output phase but refuse PARTNER-controlled shapes -- here a payload
-  // carrying no row for a record the association table matched, thrown by the real
-  // core function -- and 73's published meaning is that what failed is a local
-  // write on this machine. Such a fault stays 69; only the result file failing to
-  // reach disk is stamped. The terminal event's `output` category still covers it,
-  // since the exchange did complete and must not be re-run.
+  // holding no row for a record the association table matched, thrown by the
+  // real core function -- and 73's published meaning is that what failed is a
+  // local write on this machine. Such a fault stays 69; only the result file
+  // failing to reach disk is stamped. The terminal event's `output` category
+  // still covers it, since the exchange did complete and must not be re-run.
   const { buildOutputTable: coreBuildOutputTable } =
     await vi.importActual<typeof import("@psilink/core")>("@psilink/core");
   const payloadMissingAMatchedRow: PartnerPayload = {
@@ -1396,7 +1343,7 @@ function runBothHalves(output: string) {
   ]);
 }
 
-test("reports a count-only exchange's count instead of reading as withheld", async () => {
+test("reports a count-only exchange's count instead of treating it as withheld", async () => {
   // A count-only run hands back no association table for anyone, so it lands in the
   // same no-result-file branch a withheld table does -- and must not be reported the
   // same way: this party received exactly what its terms promised.
@@ -1444,19 +1391,14 @@ test("caveats a count-only count the partner reported rather than computed", asy
 // --- Expired token via runProtocol -------------------------------------------
 
 test("runProtocol rejects an expired token without rotating, and the tagged recovery hint suppresses the generic catch advisory", async () => {
-  // runProtocol checks the pre-handshake expiry (assertSharedSecretReadyForHandshake)
-  // BEFORE opening any connection, so each party trips the same check independently
-  // with no rendezvous I/O. Both parties supply the same expired token, so both
-  // reject deterministically with the "expired" hint. (Before that check was
-  // hoisted ahead of connect(), an expired token first drove the file-drop
-  // rendezvous, and the losing side could race into a "peer appears to have
-  // abandoned the handshake; retry" error instead -- a misleading hint for a dead
-  // credential, and the source of a ~1-in-10 flake in this assertion.) The error
-  // carries `psilinkRecoveryHintEmitted: true` (set in auth.ts), so the runProtocol
-  // catch must NOT log either of its generic advisory lines - those would
-  // contradict the specific "obtain a new invitation" message. Also verifies that
-  // no token rotation occurred: the original key file contents must be unchanged
-  // after the failure.
+  // runProtocol checks the pre-handshake expiry
+  // (assertSharedSecretReadyForHandshake) before opening any connection, so
+  // each party trips the same check independently with no rendezvous I/O and
+  // both reject deterministically with the "expired" hint. The error holds
+  // `psilinkRecoveryHintEmitted: true` (set in auth.ts), so the runProtocol
+  // catch must NOT log either generic advisory line - both would contradict
+  // the specific "obtain a new invitation" message. Also verifies no token
+  // rotation occurred: key file contents are unchanged after the failure.
   const keyFileA = path.join(tmpDir, "a.key");
   const keyFileB = path.join(tmpDir, "b.key");
   saveKeyFile(keyFileA, {
@@ -1522,16 +1464,10 @@ test("runProtocol rejects an already-expired token before opening any connection
   // The regression guard for hoisting the pre-handshake expiry check ahead of
   // connect(). A LONE party with an expired token must reject at once with the
   // "expired" hint, WITHOUT entering the file-drop rendezvous: it writes no
-  // hello/lock files and never waits for a peer. Were the check moved back inside
-  // authenticateConnection (which runs only after the connection is open), this
-  // lone party would instead write its hello and block at the rendezvous until
-  // peerTimeoutMs, then reject with a timeout rather than "expired" -- failing the
-  // message and empty-directory assertions below. The lone-party peerTimeoutMs
-  // keeps that regression mode fast rather than letting it hang the suite; the
-  // healthy path never opens a connection, so it spends none of it. This is also
-  // why the two-party expired-token test above is now deterministic: neither side
-  // reaches the rendezvous, so its loser can no longer race into a "peer abandoned
-  // the handshake" error in place of "expired".
+  // hello/lock files and never waits for a peer. Were the check inside
+  // authenticateConnection instead, this party would write its hello and
+  // block at the rendezvous until peerTimeoutMs, then reject with a timeout
+  // instead of "expired", failing the assertions below.
   const keyFile = path.join(tmpDir, "lone.key");
   saveKeyFile(keyFile, {
     sharedSecret: TOKEN_A,
@@ -1723,12 +1659,10 @@ test("entryHelloResidueGuidance leads with the diagnosis and recovery, filename 
 
 // A configured peer_id is not bounded to a uuid's 36 characters, and this
 // clause shares one 256-character cause-chain link with the core layer's own
-// peer-silence sentence -- so the budget the fixed text leaves for the filename
-// is small, and every word of it is one the operator does not get to read. This
-// drives the real composite through the real renderer at a name half again a
-// uuid's length: a text that grows past the budget truncates the very filename
-// the recovery step names, which is a measurement, not something a comment can
-// promise.
+// peer-silence sentence, so the budget the fixed text leaves for the filename
+// is small. This test drives the real composite through the real renderer at
+// a name half again a uuid's length, since a text that grows past the budget
+// truncates the filename the recovery step names.
 test("the residue guidance renders in full for a configured peer_id longer than a uuid", async () => {
   const err = await runIntoLeftoverPeerHello(
     "acme-health-2026-partner-exchange-north-region-01",
@@ -1743,20 +1677,19 @@ test("the residue guidance renders in full for a configured peer_id longer than 
 }, 20_000);
 
 // The residue filename is partner-chosen text that reaches the operator only
-// through this guidance, and the escaping happens at ONE altitude: the fragment
-// is composed RAW into the error and sanitizeErrorForDisplay escapes the whole
-// chain once where it is shown. Twice is not cosmetic -- sanitizeForDisplay
-// doubles a literal backslash on every pass, so one backslash in the name would
-// reach the operator as four and the name they are told to remove would not be
-// the name on disk. Both halves are asserted, because the presence check alone
-// passes on the doubled output too.
+// through this guidance, and the escaping happens at ONE altitude: the
+// fragment is composed RAW into the error and sanitizeErrorForDisplay escapes
+// the whole chain once where it is shown. Twice is not cosmetic --
+// sanitizeForDisplay doubles a literal backslash on every pass, so one
+// backslash in the name would reach the operator as four. Both halves are
+// asserted, because the presence check alone passes on the doubled output too.
 test.each([
   ["a literal backslash", "back\\slash"],
   ["a non-ASCII code point", "你好"],
   ["a control byte", "\x1b[31mred"],
   ["an astral code point", "\u{1f600}"],
 ])(
-  "a residue filename carrying %s is escaped once at the rendered boundary",
+  "a residue filename containing %s is escaped once at the rendered boundary",
   async (_, leftoverId) => {
     const err = await runIntoLeftoverPeerHello(leftoverId);
 
@@ -1824,7 +1757,7 @@ async function runPartyToKeyExchangeTimeout(
       channel: "filedrop",
       path: dropDir,
       options: {
-        // Not the shared backstop: this budget is the thing under test, waited
+        // Not the shared safety check: this budget is the thing under test, waited
         // out in full on every healthy run, so each case below spends it and
         // measures ~1.6 s for that reason rather than for a loaded runner.
         pollIntervalMs: 1,
@@ -1927,7 +1860,7 @@ test("the both-swept advice is absent when the sweep could not delete every file
 test("the both-swept advice is absent from a flagged retain-mode run", async () => {
   // Retain mode keeps the transcript -- cleanup() deletes nothing -- so the
   // folder this run leaves behind still holds the rendezvous files, and the
-  // advice's premise that it is now empty (and so its "run it again" recovery,
+  // advice's assumption that it is now empty (and so its "run it again" recovery,
   // which the next run's entry guard rejects) does not hold. Retain mode is
   // itself a retain signal, so the sweep needs --force-retain-sweep too.
   const err = await runPartyToKeyExchangeTimeout(
@@ -1988,7 +1921,7 @@ test("both key files hold the same rotated token after a successful exchange", a
   expect(loadedA?.sharedSecret).toBe(loadedB?.sharedSecret);
   // The token must differ from the original (it was rotated).
   expect(loadedA?.sharedSecret).not.toBe(TOKEN_A);
-  // Rotation tokens carry no expiry.
+  // Rotation tokens have no expiry.
   expect(loadedA?.expires).toBeUndefined();
   expect(loadedB?.expires).toBeUndefined();
 }, 20_000);
@@ -2047,7 +1980,7 @@ test("a token_max_age_days policy stamps expires onto both rotated key files", a
   const loadedA = loadKeyFile(keyFileA);
   const loadedB = loadKeyFile(keyFileB);
 
-  // Both rotated tokens carry a stamped expiry of ~now + 30 days, where "now" is
+  // Both rotated tokens hold a stamped expiry of ~now + 30 days, where "now" is
   // the rotation moment somewhere between `before` and `after`.
   expect(loadedA?.expires).toBeDefined();
   expect(loadedB?.expires).toBeDefined();
@@ -2063,25 +1996,20 @@ test("a token_max_age_days policy stamps expires onto both rotated key files", a
 // --- Abort-marker echo suppression via runProtocol ---------------------------
 //
 // These pin the orchestrator-side gate that DECIDES whether to write an abort
-// marker -- `conn.abortArmed && signalReceived === undefined && !errIsPeerAbort(err)`
-// in runProtocol's catch. The core test (fileSyncAbortMarker.test.ts) exercises
-// the connection's seal-vs-write machinery by calling sealAbort()/writeAbortMarker()
-// directly; nothing else drives the protocol-level gate, so a regression that
-// dropped the `!errIsPeerAbort` term (making two peers reflect markers at each
-// other) or the `abortArmed` term would pass the rest of the suite. Both tests run
-// a REAL two-party handshake to the armed state (only runExchange is mocked), then
-// inject the fault by throwing from runExchange -- which lands in the same catch a
-// real mid-exchange fault would, but deterministically. The injection keys on the
-// rendezvous-assigned ROLE, not the party, so the outcome is independent of who
-// wins the rendezvous. A barrier in the mock holds both parties past the handshake
-// before either fails, so the first teardown cannot strand the other's handshake.
+// marker -- `conn.abortArmed && signalReceived === undefined &&
+// !errIsPeerAbort(err)` in runProtocol's catch; the core test
+// (fileSyncAbortMarker.test.ts) exercises the connection's seal-vs-write
+// machinery directly, so nothing else drives this gate. Both tests run a REAL
+// two-party handshake to the armed state, then inject the fault by throwing
+// from runExchange, keyed on the rendezvous-assigned role so a barrier can
+// hold both parties past the handshake before either fails.
 
-// The barrier's bound is a hang backstop for a party that never arrives, not a
-// budget for how long the other party's rendezvous may take. The two are started
-// together and meet within milliseconds, but a loaded machine can stretch the
-// second party's rendezvous past a bound sized near that: the party already
-// through then gives up, tears down, and strands the one still arriving, which
-// fails the run for the scheduling rather than for what the test injected.
+// BOTH_ARMED_HANG_BACKSTOP_MS bounds a party that never arrives, not how long
+// the other party's rendezvous may take. The two start together and meet
+// within milliseconds, but a loaded machine can stretch the second party's
+// rendezvous past a bound sized near that: the party already through then
+// gives up, tears down, and strands the one still arriving, failing the run
+// for scheduling rather than for what the test injected.
 const BOTH_ARMED_HANG_BACKSTOP_MS = 15_000;
 
 // Holds the calling party inside the mocked runExchange until BOTH parties have
@@ -2099,15 +2027,12 @@ function runAbortParty(keyFilePath: string, name: string): Promise<unknown> {
     connection: {
       channel: "filedrop",
       path: dropDir,
-      // Bound peerTimeoutMs: when a party fails it tears down without consuming a
-      // trailing handshake frame the peer may have left, so the peer's teardown
-      // drain would otherwise wait a full (default, very long) peerTimeoutMs.
-      // The bound is a backstop for that drain, not a budget for the rendezvous
-      // and handshake it also bounds: every wait before runExchange is capped by
-      // this value, so a bound sized near the happy path (tens of milliseconds)
-      // fails BOTH parties on a loaded machine before either reaches the barrier
-      // -- for the scheduling rather than for the fault the test injects, and
-      // reported as the runExchangeEntries assertion below.
+      // Bound peerTimeoutMs: when a party fails it tears down without consuming
+      // a trailing handshake frame the peer may have left, so the peer's
+      // teardown drain would otherwise wait the full default peerTimeoutMs. The
+      // bound is a safety check for that drain, not a budget for the rendezvous
+      // and handshake it also bounds, so it must stay well above the happy-path
+      // cost of both to avoid failing on scheduling alone.
       options: { pollIntervalMs: 1, peerTimeoutMs: 2_000 },
     },
     auth: { sharedSecret: TOKEN_A, keyFilePath },
@@ -2328,7 +2253,7 @@ test(
   { timeout: BOTH_ARMED_HANG_BACKSTOP_MS + 5_000 },
   async () => {
     // A pin-mismatch/verification failure is its own hard security failure,
-    // surfaced on its own path (a distinct error kind/message); the softer
+    // reported on its own path (a distinct error kind/message); the softer
     // "partner may not be configured to sign" warning must not also fire and
     // dilute it.
     const keyFileA = path.join(tmpDir, "a.key");
@@ -2547,7 +2472,7 @@ test(
 // the run had disclosed -- and core could not build it, so there is nothing to
 // write and nothing to hand back. Core warns at the build, on the operator log
 // alone, which an unattended run discards; these two pin that the machine stream
-// carries the fact, and only when it is true.
+// states the fact, and only when it is true.
 
 test(
   "a terminated run whose record could not be built reports the loss on the stream",
@@ -2766,7 +2691,7 @@ test("runProtocol suppresses the generic advisory when a tagged error is wrapped
   // error that a later catch wraps with `new Error(..., { cause: innerErr })`.
   // The runProtocol catch walks the cause chain so the wrap does not lose the
   // suppression. This test simulates that wrap by having runExchange throw a
-  // wrapped error whose `cause` carries the tag.
+  // wrapped error whose `cause` holds the tag.
   const keyFileA = path.join(tmpDir, "a.key");
   const keyFileB = path.join(tmpDir, "b.key");
   saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
@@ -2819,7 +2744,7 @@ test("runProtocol suppresses the generic advisory for a terminal FrameSizeExceed
   // A terminal transport/directory UsageError thrown during the data exchange
   // reaches the catch with tokenRotated=true, where the generic "retry without
   // re-inviting" advisory would otherwise fire and contradict the error's own
-  // terminal refusal. FrameSizeExceededError carries a class-level
+  // terminal refusal. FrameSizeExceededError has a class-level
   // psilinkRecoveryHintEmitted tag, so the hint-walker must suppress the generic
   // advisory -- this pins that the class tag is honored end to end, not just the
   // Object.assign tags the other tests cover.
@@ -2868,13 +2793,14 @@ test("runProtocol suppresses the generic advisory for a terminal FrameSizeExceed
 }, 20_000);
 
 test("runProtocol suppresses the generic advisory for the reply-cap internal fault", async () => {
-  // The single-pass reply-cap backstop fires mid-data-exchange, so it reaches the
-  // catch with tokenRotated=true -- the one window where the generic "retry
-  // without re-inviting" advisory does fire -- and its own message prescribes the
-  // opposite: report the fault, because a retry rebuilds the same reply and
-  // refuses it again. InternalConsistencyError carries the class-level
-  // psilinkRecoveryHintEmitted tag, so the hint-walker suppresses the generic
-  // advisory and the operator is left the fault's own remedy alone.
+  // The single-pass reply-cap safety check fires mid-data-exchange, so it
+  // reaches the catch with tokenRotated=true -- the one window where the
+  // generic "retry without re-inviting" advisory does fire -- and its own
+  // message prescribes the opposite: report the fault, because a retry
+  // rebuilds the same reply and refuses it again. InternalConsistencyError
+  // has the class-level psilinkRecoveryHintEmitted tag, so the hint-walker
+  // suppresses the generic advisory and leaves the operator the fault's own
+  // remedy alone.
   const keyFileA = path.join(tmpDir, "a.key");
   const keyFileB = path.join(tmpDir, "b.key");
   saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
@@ -3042,23 +2968,21 @@ test("runProtocol logs recovery message when an error occurs after tokenRotated=
 }, 20_000);
 
 test.skipIf(process.platform === "win32")(
-  "runProtocol suppresses the generic authStarted advisory when the thrown error already carries the specific saveKeyFile recovery hint",
+  "runProtocol suppresses the generic authStarted advisory when the thrown error already holds the specific saveKeyFile recovery hint",
   async () => {
     // When saveKeyFile fails, runProtocol throws a wrapped error whose message
     // already says "authentication succeeded and the shared token was rotated,
     // but the updated token could not be saved...". The generic authStarted
     // advisory ("the partner may have already derived...while this side did
-    // not") contradicts this -- it understates a definite local rotation.
-    // The wrapped error sets `psilinkRecoveryHintEmitted: true` to suppress the
-    // generic advisory; this test verifies neither generic hint is logged.
+    // not") contradicts this: it understates a definite local rotation. The
+    // wrapped error sets `psilinkRecoveryHintEmitted: true` to suppress it.
     //
-    // To force saveKeyFile to fail AFTER the key exchange rotates (and not at the
-    // pre-flight in runProtocol), we use a keyFilePath that pre-flight
-    // accepts (a non-existent regular file path) but pre-create a directory
-    // at saveKeyFile's tmp-file path (`${keyFilePath}.tmp.${pid}`) so the
-    // initial unlinkSync inside saveKeyFile throws EISDIR/EPERM and aborts
-    // the save. This isolates the failure to saveKeyFile while leaving
-    // pre-flight green.
+    // To force saveKeyFile to fail AFTER the key exchange rotates (not at the
+    // pre-flight in runProtocol), this uses a keyFilePath pre-flight accepts (a
+    // non-existent regular file path) but pre-creates a directory at
+    // saveKeyFile's tmp-file path (`${keyFilePath}.tmp.${pid}`), so the initial
+    // unlinkSync inside saveKeyFile throws EISDIR/EPERM and aborts the save,
+    // isolating the failure to saveKeyFile while leaving pre-flight green.
     //
     // Gated on POSIX: Windows `unlinkSync` on a directory can return EACCES,
     // EPERM, or "operation not permitted" depending on filesystem driver and
@@ -3104,7 +3028,7 @@ test.skipIf(process.platform === "win32")(
     const [, resultB] = await Promise.allSettled([aPromise, bPromise]);
     expect(resultB.status).toBe("rejected");
     const msg = ((resultB as PromiseRejectedResult).reason as Error).message;
-    // The thrown error carries the saveKeyFile-specific recovery hint.
+    // The thrown error holds the saveKeyFile-specific recovery hint.
     expect(msg).toContain(
       "authentication succeeded and the shared token was rotated",
     );
@@ -3120,7 +3044,7 @@ test("runProtocol logs an 'error in flight when SIGINT arrived' error when inter
   // When the signal arrives mid-runExchange and the caller swallows the
   // resulting error (so the CLI handler's process.exit(69) does not race the
   // signal handler's process.exit(130)), the in-flight error must still be
-  // surfaced at error level so its diagnostic information is not lost even
+  // reported at error level so its diagnostic information is not lost even
   // under `--log-level=error`.
   const exitSpy = vi.spyOn(process, "exit").mockReturnValue(undefined as never);
 
@@ -3196,9 +3120,9 @@ test("runProtocol logs an 'error in flight when SIGINT arrived' error when inter
 
 test("runProtocol sanitizes a hostile cause chain in the signal in-flight log", async () => {
   // The in-flight error is swallowed on the signal path (the process exits on
-  // the signal), so this log is the only place its cause surfaces. A hostile
-  // cause -- a partner-chosen message-file path carrying control/ANSI bytes --
-  // must be neutralized here, and the chain surfaced, like the per-command
+  // the signal), so this log is the only place its cause shows. A hostile
+  // cause -- a partner-chosen message-file path containing control/ANSI bytes
+  // -- must be neutralized here, and the chain shown, like the per-command
   // catches.
   const exitSpy = vi.spyOn(process, "exit").mockReturnValue(undefined as never);
 
@@ -3363,7 +3287,7 @@ test("SIGINT mid-synchronize exits with 130 and cleans up the hello file (starte
   // it stands at the instant the handler calls exit, which is the ordering the
   // case is about. A directory read taken later, once the interrupted run has
   // been polled to completion, is satisfied by a cleanup that finished after the
-  // exit too, and so cannot carry that claim.
+  // exit too, and so cannot support that claim.
   let helloFilesAtExit: string[] | undefined;
   const exitSpy = vi.spyOn(process, "exit").mockImplementation((code) => {
     if (code === 130 && helloFilesAtExit === undefined)
@@ -3638,14 +3562,13 @@ test("runProtocol resolves (does not reject) when interrupted by SIGTERM mid-run
 // --- Application-layer AEAD encryption ----------------------------------------
 
 test("authenticated exchange runs through EncryptedMessageConnection: wire bytes are binary AEAD frames, not cleartext", async () => {
-  // After the key exchange, runProtocol must wrap mc in EncryptedMessageConnection and run
-  // the PSI exchange through it. This is asserted at the wire level: at least one
-  // PSI frame written to the drop directory is an encrypted binary AEAD frame,
-  // the cleartext probe never appears on the wire, and the peer decrypts the frame
-  // back to its original form (proving a real AES-GCM round-trip through the
-  // decorator, not a no-op pass-through). FileSyncConnection and
-  // authenticateConnection are the real implementations here, so the session
-  // key, the per-direction keys, and the envelopes are all genuine.
+  // After the key exchange, runProtocol must wrap mc in EncryptedMessageConnection
+  // and run the PSI exchange through it. Asserted at the wire level: at least one
+  // PSI frame written to the drop directory is an encrypted binary AEAD frame, the
+  // cleartext probe never appears on the wire, and the peer decrypts the frame
+  // back to its original form (a real AES-GCM round-trip, not a no-op
+  // pass-through). FileSyncConnection and authenticateConnection are real here,
+  // so the session key, the per-direction keys, and the envelopes are genuine.
   const keyFileA = path.join(tmpDir, "a.key");
   const keyFileB = path.join(tmpDir, "b.key");
   saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
@@ -3722,15 +3645,13 @@ test("authenticated exchange runs through EncryptedMessageConnection: wire bytes
     //    the decorator performed a real AES-GCM round-trip, not a pass-through.
     expect(received).toEqual({ probe: CANARY });
 
-    // Collect every non-empty body the transport wrote, normalized to its on-disk
-    // bytes. A protocol frame is written either as a single Buffer (a hello or
-    // ack) or, for a message, as a [header, payload] chunk list the transport
-    // writes back-to-back -- FileSyncConnection.send streams the 10-byte header
-    // and the payload as two chunks rather than concatenating them (the
-    // peak-shaving framing). Assert every src is one of those two shapes -- never
-    // a string or a stream, either of which could slip a cleartext frame past the
-    // canary check below -- rather than silently filtering, so a future write that
-    // smuggled bytes fails this test loudly.
+    // Collect every non-empty body the transport wrote, normalized to its
+    // on-disk bytes. A protocol frame is written either as a single Buffer (a
+    // hello or ack) or, for a message, as a [header, payload] chunk list
+    // (FileSyncConnection.send streams the 10-byte header and payload as two
+    // chunks rather than concatenating them). Assert every src is one of
+    // those two shapes -- never a string or a stream -- so a future write
+    // that smuggled bytes fails this test loudly instead of silently.
     const writtenSrcs = putSpy.mock.calls.map((call) => call[0]);
     const wireBuffers: Buffer[] = [];
     for (const src of writtenSrcs) {
@@ -3755,14 +3676,13 @@ test("authenticated exchange runs through EncryptedMessageConnection: wire bytes
     // 3. At least one message frame is a binary-typed envelope whose payload is
     //    itself an AEAD envelope -- the PSI frame went out encrypted, not as a
     //    cleartext protocol frame. The file-sync envelope is
-    //    `version || type || seq || payload`; the key-exchange handshake frames
-    //    are MESSAGE_TYPE_OBJECT (JSON), while an encrypted AEAD frame rides a
+    //    `version || type || seq || payload`; key-exchange handshake frames are
+    //    MESSAGE_TYPE_OBJECT (JSON), while an encrypted AEAD frame rides a
     //    MESSAGE_TYPE_BINARY envelope. Checking the inner payload's leading
-    //    AEAD_ENVELOPE_VERSION (not merely the outer cleartext MESSAGE_TYPE_BINARY
-    //    discriminator, which any Uint8Array send would set) keeps this specific
-    //    to the AEAD layer: a future raw-binary path that bypassed the decorator
-    //    would fail it. The min length is the file-sync header plus the AEAD
-    //    minimum (1-byte version + 12-byte IV + 16-byte tag).
+    //    AEAD_ENVELOPE_VERSION, not just the outer MESSAGE_TYPE_BINARY
+    //    discriminator, keeps this specific to the AEAD layer. The min length is
+    //    the file-sync header plus the AEAD minimum (1-byte version + 12-byte IV
+    //    + 16-byte tag).
     const aeadFrames = wireBuffers.filter(
       (buf) =>
         buf.length >= MESSAGE_HEADER_BYTES + 1 + 12 + 16 &&
@@ -3780,12 +3700,12 @@ test("authenticated exchange runs through EncryptedMessageConnection: wire bytes
 
 test("runProtocol invokes onAuthenticated after the rotated key is saved and before the exchange begins", async () => {
   // The hook must fire at the moment of acceptance: after saveKeyFile has
-  // rotated the on-disk token, but before runExchange runs. Party A carries the
+  // rotated the on-disk token, but before runExchange runs. Party A has the
   // hook; party B does not (exercising the no-hook path alongside). The hook
-  // reads the key file (which must already show the rotated token) and inspects
-  // the recorded exchange events (A's exchange must not have started yet).
-  // Moving the hook after runExchange would flip the second assertion; moving it
-  // before saveKeyFile would flip the first.
+  // reads the key file (which must already show the rotated token) and
+  // inspects the recorded exchange events (A's exchange must not have started
+  // yet). Moving the hook after runExchange would flip the second assertion;
+  // moving it before saveKeyFile would flip the first.
   const keyFileA = path.join(tmpDir, "a.key");
   const keyFileB = path.join(tmpDir, "b.key");
   saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
@@ -4032,7 +3952,7 @@ test("a throw from onAuthenticated is non-fatal: the exchange still runs and the
   // The data exchange is the irreplaceable operation; a config-write failure at
   // acceptance must not abort it. A's hook throws, but A's exchange still
   // completes and the failure is reported at error level (captured in
-  // mockState.errors), not silently swallowed. Party B carries no hook.
+  // mockState.errors), not silently swallowed. Party B has no hook.
   const keyFileA = path.join(tmpDir, "a.key");
   const keyFileB = path.join(tmpDir, "b.key");
   saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
@@ -4080,7 +4000,7 @@ test("a throw from onAuthenticated is non-fatal: the exchange still runs and the
   expect(
     mockState.errors.some((m) => m.includes("simulated config write failure")),
   ).toBe(true);
-  // ...and is surfaced in the resolved result so the caller can fix its message.
+  // ...and is shown in the resolved result so the caller can fix its message.
   const valueA = (resultA as PromiseFulfilledResult<RunProtocolResult>).value;
   expect(valueA.onAuthenticatedError).toBeInstanceOf(Error);
   expect((valueA.onAuthenticatedError as Error).message).toBe(
@@ -4209,7 +4129,7 @@ test("an async onAuthenticated that rejects is non-fatal: the exchange still run
       m.includes("simulated async config write failure"),
     ),
   ).toBe(true);
-  // ...and is surfaced in the resolved result, just like a synchronous throw.
+  // ...and is shown in the resolved result, just like a synchronous throw.
   const valueA = (resultA as PromiseFulfilledResult<RunProtocolResult>).value;
   expect(valueA.onAuthenticatedError).toBeInstanceOf(Error);
   expect((valueA.onAuthenticatedError as Error).message).toBe(
@@ -4226,8 +4146,8 @@ test("a hook that throws a falsy value still reports a defined onAuthenticatedEr
   saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
   saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
 
-  // `throw undefined` via a variable so the intent is explicit (and not read as
-  // a thrown literal). This is the worst case the coercion guards against.
+  // `throw undefined` via a variable so the intent is explicit (and not treated
+  // as a thrown literal). This is the worst case the coercion guards against.
   const nothing: unknown = undefined;
   const throwFalsyHook = () => {
     throw nothing;
@@ -4371,7 +4291,7 @@ test("an expired shared secret under --event-stream emits exactly one terminal e
 
   // The events were flushed before the rejection propagated (emit precedes the
   // rethrow), so they are already in the capture here. The metrics summary
-  // precedes the classified terminal error; both carry the schema version.
+  // precedes the classified terminal error; both have the schema version.
   const lines = takeFd3Lines();
   expect(lines).toHaveLength(2);
   expect(lines[0].type).toBe("metrics");
@@ -4413,9 +4333,9 @@ test("a main-try failure under --event-stream emits exactly one terminal error e
   expect(lines[1].v).toBe(1);
 }, 20_000);
 
-test("a count-only run's terminal event carries the count beside resultWritten:false", async () => {
+test("a count-only run's terminal event includes the count beside resultWritten:false", async () => {
   // The outcome a supervisor reading only fd 3 would otherwise misreport: a
-  // count-only run writes no result file, so its terminal event carries the same
+  // count-only run writes no result file, so its terminal event has the same
   // resultWritten:false a withheld helper's does. The count is what separates
   // them, and it must ride the machine event rather than only the human log.
   mockCountOnlyRun("sender");
@@ -4468,7 +4388,7 @@ test("a count-only run's terminal event carries the count beside resultWritten:f
 test("a receiver seat's count-only event reports the count as computed here", async () => {
   // The other seat of the same pairing: this party ran the count-only round under
   // a mode the wire enforces, so its event states the provenance as false rather
-  // than omitting the field. Omission is reserved for a run carrying no count at
+  // than omitting the field. Omission is reserved for a run having no count at
   // all, so a consumer separating the two seats reads this value, not the field's
   // presence.
   mockCountOnlyRun("receiver");
@@ -4516,7 +4436,7 @@ test("a receiver seat's count-only event reports the count as computed here", as
   expect(lines[2].countReportedByPartner).toBe(false);
 }, 20_000);
 
-test("a withheld result's terminal event carries no count at all", async () => {
+test("a withheld result's terminal event has no count at all", async () => {
   // The other side of the same discriminant: a helper whose terms give it no
   // output table has no count either, so the field is absent rather than zero.
   vi.mocked(runExchange).mockImplementation((async () => {
@@ -4561,11 +4481,11 @@ test("a withheld result's terminal event carries no count at all", async () => {
   expect(lines[lines.length - 1].resultWritten).toBe(false);
   expect("intersectionCount" in lines[lines.length - 1]).toBe(false);
   // With no count there is nothing to qualify, so the provenance field is absent
-  // rather than a false that would read as a locally computed count.
+  // rather than a false that would be treated as a locally computed count.
   expect("countReportedByPartner" in lines[lines.length - 1]).toBe(false);
 }, 20_000);
 
-test("an emitter passed instead of the flag carries every event, and no second stream is opened", async () => {
+test("an emitter passed instead of the flag receives every event, and no second stream is opened", async () => {
   // The object-reuse branch, which the online bootstrap takes: that caller opens
   // the stream itself (it emits persistence warnings from outside this frame)
   // and hands the emitter over. runProtocol must drive THAT object -- opening
@@ -4622,7 +4542,7 @@ test("an emitter passed instead of the flag carries every event, and no second s
   }
 
   // The whole run reported through the caller's object, terminal event included.
-  // A matched run passes no count, so the terminal call carries the written flag
+  // A matched run passes no count, so the terminal call has the written flag
   // and an absent count (the builder omits the field entirely for it).
   expect(emitted.map((e) => e.event)).toEqual(["stages", "metrics", "result"]);
   expect(emitted[2].args).toEqual([true, undefined]);
@@ -4639,7 +4559,7 @@ test("an emitter passed instead of the flag carries every event, and no second s
  *  than the empty default. */
 const OBSERVED_PARTNER_COLUMNS = ["dob", "zip"];
 
-/** Complete both parties' exchanges with a partner payload carrying `columns`,
+/** Complete both parties' exchanges with a partner payload holding `columns`,
  *  which runProtocol then hands the pre-terminal hook and returns. */
 function mockExchangeObserving(columns: string[]): void {
   vi.mocked(runExchange).mockImplementation((async () => {
@@ -4650,13 +4570,13 @@ function mockExchangeObserving(columns: string[]): void {
 
 test("a loss reported from the pre-terminal hook precedes the metrics and terminal events", async () => {
   // The ordering the whole hook exists for, measured on the REAL stream. The
-  // online bootstrap's last write -- crystallizing the observed received-payload
-  // set -- can fail, and the warning naming that loss is only useful ahead of the
-  // terminal event: the spec makes the terminal event last, and a supervisor that
-  // stops there discards anything behind it (apps/web's job manager drops
-  // post-terminal events outright). Driven exactly as the bootstrap drives it:
-  // the caller opens the stream, hands runProtocol the emitter, and reports from
-  // the hook with that same object.
+  // online bootstrap's last write -- crystallizing the observed
+  // received-payload set -- can fail, and the warning naming that loss is
+  // only useful ahead of the terminal event: the spec makes the terminal
+  // event last, and a supervisor that stops there discards anything behind
+  // it (apps/web's job manager drops post-terminal events outright). Driven
+  // as the bootstrap drives it: the caller opens the stream and hands
+  // runProtocol the emitter.
   mockExchangeObserving(OBSERVED_PARTNER_COLUMNS);
   const emitter = openEventStreamWithFdWired();
   let seen: string[] | undefined;
@@ -4711,7 +4631,7 @@ test("a throw from the pre-terminal hook does not fail the completed exchange", 
   // The hook reports its own losses, so a throw escaping it is a defect -- but
   // the exchange has already happened and cannot be undone by a local write, so
   // it must not turn a completed run into a failure. It still reports: an
-  // unattended run that swallowed it silently would read as a clean success.
+  // unattended run that swallowed it silently would display as a clean success.
   mockExchangeObserving(OBSERVED_PARTNER_COLUMNS);
   const emitter = openEventStreamWithFdWired();
   let seen: string[] | undefined;
@@ -4762,7 +4682,7 @@ test("a throw from the pre-terminal hook does not fail the completed exchange", 
     "metrics",
     "result",
   ]);
-  // The cause stays on the human log; the stream warning carries first-party
+  // The cause stays on the human log; the stream warning has first-party
   // prose only, so no pre-rendered error text reaches it double-escaped.
   expect(String(lines[1].message)).not.toContain("let one escape");
   expect(mockState.errors.some((line) => line.includes("let one escape"))).toBe(
@@ -4776,7 +4696,7 @@ test("a hostile stage label and terms warning reach the human log neutralized", 
   // The onStage/onWarning strings can derive from partner-authored linkage-key
   // and column names. Drive both callbacks with the repo's hostile patterns (a
   // bidi override and an ANSI ESC sequence) through a real two-party run and
-  // assert the captured stderr lines carry only the visible escapes.
+  // assert the captured stderr lines have only the visible escapes.
   const hostileStageId = "user\u202eEVIL stage";
   const hostileWarning = "column \x1b[31mEVIL\x1b[0m mismatch";
 
@@ -4934,7 +4854,7 @@ test("a mismatched shared secret under --event-stream emits category security an
     await connB.close().catch(() => {});
   }
 
-  // The real handshake failure: the generic non-oracular message, carried by a
+  // The real handshake failure: the generic non-oracular message, held by a
   // security-kind ConnectionError.
   expect(resA.status).toBe("rejected");
   const reasonA = (resA as PromiseRejectedResult).reason as unknown;
@@ -4953,7 +4873,7 @@ test("a mismatched shared secret under --event-stream emits category security an
   expect(lines[1].v).toBe(1);
 
   // The exit code stays 69: feed the real captured error through the real
-  // command exit mapper (a ConnectionError is not a UsageError and carries no
+  // command exit mapper (a ConnectionError is not a UsageError and has no
   // exitCode of its own).
   const exitSpy = vi.spyOn(process, "exit").mockReturnValue(undefined as never);
   try {
@@ -5017,7 +4937,7 @@ test("an SFTP host-key mismatch under --event-stream emits category security and
 test("a host-key divergence under --event-stream emits a warning event and still warns on stderr", async () => {
   // The divergence notice is the one control that catches a one-sided SFTP
   // interception, and a supervisor that discards child stderr on success (the
-  // appliance job runner) would otherwise lose it -- so it must ride the fd-3
+  // console job runner) would otherwise lose it -- so it must ride the fd-3
   // stream as a structured warning event, in addition to the human warn line.
   const divergence =
     "Both observed key type 'ssh-ed25519', but this party observed " +
@@ -5139,7 +5059,7 @@ test("a terms-exchange warning under --event-stream reaches the fd-3 warning eve
   expect(warning).toBeDefined();
   expect(warning!.v).toBe(1);
   // Numbers and first-party prose only, and short of the per-value display cap,
-  // so both sinks carry the notice whole: neither escape rewrites or cuts it.
+  // so both sinks hold the notice whole: neither escape rewrites or cuts it.
   expect(warning!.message).toBe(widthNotice);
   // Present on the human log too, under the terms-exchange prefix.
   expect(
@@ -5151,13 +5071,12 @@ test("a terms-exchange warning under --event-stream reaches the fd-3 warning eve
 
 test("a terms-exchange warning past the per-value cap reaches stderr as whole as it reaches fd 3", async () => {
   // A terms warning is a COMPOSITION -- first-party explanation and recovery
-  // text around fragments each escaped and capped where they were interpolated
-  // -- so both CLI sinks carry one text and neither may deliver less of it than
-  // the other. Charging the stderr line to the per-value cap deletes the
-  // recovery clause a composed warning ends on while fd 3 relays the whole of
-  // it, which is the operator at the terminal reading less than the supervisor
-  // reading the machine channel. No warning core composes today is this wide,
-  // so the width is driven here rather than waited for.
+  // text around fragments each escaped and capped where they were
+  // interpolated -- so both CLI sinks must hold one text; neither may
+  // deliver less of it than the other. Capping the stderr line at the
+  // per-value cap would delete the recovery clause a composed warning ends
+  // on while fd 3 relays the whole of it. No warning core composes today is
+  // this wide, so the width is manufactured here.
   const partnerKeys = Array.from(
     { length: 12 },
     (_, index) => `partner_linkage_key_${index}`,
@@ -5225,7 +5144,7 @@ test("a terms-exchange warning past the per-value cap reaches stderr as whole as
 
 test("a failed onAuthenticated hook under --event-stream emits a warning event before the success terminal event", async () => {
   // The run completes and writes its result, so the terminal event is a success:
-  // a supervisor that discards stderr would read the whole stream as a clean
+  // a supervisor that discards stderr would treat the whole stream as a clean
   // provisioning while the configuration never reached disk. The warning event is
   // what tells it the setup is half provisioned, and it must arrive before the
   // terminal event like every other non-terminal line.
@@ -5236,7 +5155,7 @@ test("a failed onAuthenticated hook under --event-stream emits a warning event b
 
   mockFd3Open();
   try {
-    // Party A runs flag-on and carries the throwing hook; party B flag-off and
+    // Party A runs flag-on and has the throwing hook; party B flag-off and
     // hookless, so every captured fd-3 line is A's.
     await Promise.all([
       runProtocol({
@@ -5280,8 +5199,8 @@ test("a failed onAuthenticated hook under --event-stream emits a warning event b
     "result",
   ]);
   expect(String(lines[0].message)).toContain("did not complete");
-  // The cause stays on the human log, which the warning event deliberately does
-  // not repeat (its own escape pass would double-escape rendered error text).
+  // The cause stays on the human log, which the warning event does not repeat
+  // (its own escape pass would double-escape rendered error text).
   expect(String(lines[0].message)).not.toContain("simulated config write");
   expect(
     mockState.errors.some((m) => m.includes("simulated config write failure")),
@@ -5292,7 +5211,7 @@ test("a failed onAuthenticated hook under --event-stream emits a warning event b
 
 test("a successful run under --event-stream reports stage timing and counters", async () => {
   // Drive two real stage transitions through the mocked runExchange so the
-  // stream carries a stageEnd (with a duration) for each completed stage, then a
+  // stream sends a stageEnd (with a duration) for each completed stage, then a
   // metrics summary, then the success terminal event. recordsProcessed reflects
   // this party's own input row count; a clean filedrop run retried/reconnected
   // zero times.
@@ -5476,8 +5395,9 @@ test("summarizes the forced idle-boundary releases apart from the reconnects", a
   // (the first, then every tenth), so a run whose last one falls between those
   // states its true total nowhere -- and an operator who left the run unattended
   // cannot tell afterwards how the partner's server behaved. The teardown summary
-  // reports it, apart from the reconnect line and in terms that cannot be read as a
-  // dropped session. Forced on the (real) file-drop client via its metric getter.
+  // reports it, apart from the reconnect line and in terms that cannot be
+  // mistaken for a dropped session. Forced on the (real) file-drop client via
+  // its metric getter.
   const forcedSpy = vi
     .spyOn(LocalFSClient.prototype, "forcedReleaseCount", "get")
     .mockReturnValue(7);
@@ -5528,14 +5448,14 @@ test("summarizes the forced idle-boundary releases apart from the reconnects", a
 }, 20_000);
 
 test("summarizes the declined idle releases as a line apart from the forced ones", async () => {
-  // The mode's other per-cycle outcome: the release gave up its wait for another
-  // session transition and closed nothing, so the session it exists to release was
-  // held across the idle gap. Its WARN is paced exactly like the forced release's
-  // and states its true total nowhere else, so the teardown summary carries it --
-  // as its own line, because the two report opposite outcomes and a reader who saw
-  // them merged could not tell a boundary this side ended from one it never
-  // reached. Both forced on the (real) file-drop client via its metric getters,
-  // with distinct totals so neither line can be reporting the other's count.
+  // The mode's other per-cycle outcome: the release gave up its wait for
+  // another session transition and closed nothing, so the session it exists
+  // to release was held across the idle gap. Its WARN is paced exactly like
+  // the forced release's and states its true total nowhere else, so the
+  // teardown summary reports it as its own line -- the two report opposite
+  // outcomes, so a reader who saw them merged could not tell which boundary
+  // this side ended. Both forced on the (real) file-drop client via distinct
+  // metric getters and totals.
   const forcedSpy = vi
     .spyOn(LocalFSClient.prototype, "forcedReleaseCount", "get")
     .mockReturnValue(3);
@@ -5662,7 +5582,7 @@ test("summarizes the boundaries the partner closed on request as the forced tota
 test("summarizes the poll cycles a declined cycle-start re-dial skipped", async () => {
   // The dialing half of what the declined release reports for the releasing half:
   // one stuck transition declines both signals of the same cycle, and a cycle that
-  // carried no session at all is what the operator needs to see. Its inline WARN is
+  // had no session at all is what the operator needs to see. Its inline WARN is
   // paced like every other, so the run total is stated nowhere else. Distinct
   // totals here, so neither line can be reporting the other's count.
   const skippedSpy = vi
@@ -5719,14 +5639,13 @@ test("summarizes the poll cycles a declined cycle-start re-dial skipped", async 
 }, 20_000);
 
 test("summarizes the held idle boundaries as a line apart from the forced and declined ones", async () => {
-  // The mode's third per-cycle outcome, and the only one with no inline line at
-  // all: a boundary held for an operation this side had issued is ordinary, so it
-  // is never warned per occurrence. The run total is still the operator's only
-  // signal that the mode stopped delivering per-cycle sessions -- an operation with
-  // no bound of its own holds every remaining boundary -- so the teardown summary
-  // carries it, as its own line naming its own cause: neither a session this side
-  // closed nor a release that gave up its wait. Three distinct totals, so no line
-  // can be reporting another's count.
+  // The mode's third per-cycle outcome, and the only one with no inline line
+  // at all: a boundary held for an operation this side had issued is
+  // ordinary, so it is never warned per occurrence. The run total is still
+  // the operator's only signal that the mode stopped delivering per-cycle
+  // sessions, so the teardown summary reports it as its own line naming its
+  // own cause: neither a session this side closed nor a release that gave up
+  // its wait.
   const forcedSpy = vi
     .spyOn(LocalFSClient.prototype, "forcedReleaseCount", "get")
     .mockReturnValue(3);
@@ -5811,7 +5730,7 @@ test("held boundaries exceeding their stretches state the stretch count", async 
   // What separates one unbounded operation holding twenty boundaries from twenty
   // that each settled in between: the first has stopped the mode for the rest of
   // the run, the second is the mode working. The boundary count alone cannot say
-  // which, so the sub-clause carries the stretches whenever they say something it
+  // which, so the sub-clause states the stretches whenever they say something it
   // does not.
   const heldSpy = vi
     .spyOn(LocalFSClient.prototype, "heldBoundaryCount", "get")
@@ -5905,7 +5824,7 @@ test("held boundaries equal to their stretches omit the stretch sub-clause", asy
 test("a held boundary with no session drop leaves the reconnect total and the metrics event untouched", async () => {
   // A held boundary closed nothing, so nothing was lost. The reconnect total stays
   // what it would have been -- here zero, so the line does not appear at all -- and
-  // the machine metrics event carries its own three counters and nothing else.
+  // the machine metrics event has its own three counters and nothing else.
   // Neither held count reaches either: they are an operator-facing line only.
   const heldSpy = vi
     .spyOn(LocalFSClient.prototype, "heldBoundaryCount", "get")

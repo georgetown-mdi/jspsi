@@ -21,22 +21,15 @@ import type { MessageConnection } from "@psilink/core";
 
 /**
  * The CLI WebRTC transport end to end: two real werift peers, real ICE, real
- * DTLS/SCTP, meeting through the repository's real vendored PeerJS broker.
+ * DTLS/SCTP, meeting through the repository's real vendored PeerJS broker --
+ * measuring behavior no type signature states, like when candidates fire and
+ * what a close with bytes still buffered delivers.
  *
- * werift is exactly the class of dependency this project settles by driving
- * rather than by reading, and every premise the transport rests on is a
- * behaviour no type signature states -- when candidates fire, what a configured
- * `iceServers` list does, what `bufferedAmount` reports, and whether a close
- * with bytes still buffered delivers them. This suite is where those are held.
- *
- * ICE is host-candidates-only by construction: the tests configure a single
- * unreachable STUN entry, which is both the no-STUN idiom the transport
- * documents and the only workable choice in a firewalled container. Leaving
- * `iceServers` empty would select werift's built-in Google default, which
- * cannot be reached from here. The two tests that must drive that default --
- * whether a configured list suppresses it, and which endpoint it addresses --
- * intercept the resolver instead, so the default is exercised without a packet
- * leaving the machine.
+ * ICE stays host-candidates-only, the only workable choice in a firewalled
+ * container; an empty `iceServers` list would select werift's built-in
+ * Google default instead. The two tests that must drive that default
+ * intercept the DNS resolver, so it runs without a packet leaving the
+ * machine.
  */
 
 /**
@@ -156,7 +149,7 @@ test("a frame past the chunk threshold arrives byte-identical in both directions
 }, 120_000);
 
 test("the final frame is delivered before the clean close", async () => {
-  // The delivery contract's load-bearing half: `send` resolves on local
+  // The delivery contract's critical half: `send` resolves on local
   // hand-off, so a close that tore the channel down without draining would lose
   // a frame this size outright. The receiver reads AFTER the sender has closed,
   // so nothing but the drain can have delivered it.
@@ -184,8 +177,8 @@ test("the final frame is delivered before the clean close", async () => {
 
 test("a configured iceServers list is the list the peer connection is built with", async () => {
   // `getConfiguration()` echoes its input, so this asserts PASS-THROUGH -- that
-  // a deliberately configured list reaches werift unchanged -- not suppression
-  // of the built-in default, which no readable API can show.
+  // a configured list reaches werift unchanged -- not suppression of the
+  // built-in default, which no readable API can show.
   const sharedSecret = generateSharedSecret();
   const configured = [
     { urls: ["stun:127.0.0.1:3478", "stun:127.0.0.1:3479"] },
@@ -267,7 +260,7 @@ async function stunHostsLookedUp(
 }
 
 test("a configured iceServers list suppresses werift's built-in Google STUN default", async () => {
-  // The privacy-relevant half of the replace-not-add premise, which
+  // The privacy-relevant half of the replace-not-add assumption, which
   // `getConfiguration()` cannot show: an operator who configures their own STUN
   // is not also silently disclosing their public IP to Google's default. Held by
   // werift's own DNS resolution -- the default resolves stun.l.google.com, a
@@ -339,7 +332,7 @@ async function builtInStunRequests(): Promise<Array<Buffer>> {
 test("the built-in default is the endpoint the warning and the export panel name", async () => {
   // WERIFT_BUILT_IN_STUN_URI is a first-party copy of a library fact, and the
   // operator reads it as a confidentiality statement before handing a secret to a
-  // scheduler. Driving the library is the only honest way to hold it: a peer with
+  // scheduler. Driving the library is the only correct way to hold it: a peer with
   // no configured list must address its binding requests to exactly this host and
   // this port.
   const requests = await builtInStunRequests();
@@ -378,15 +371,14 @@ test("an over-cap inbound frame fails the connection closed", async () => {
 }, 120_000);
 
 test("closing after the partner has vanished still returns, on the flush ceiling", async () => {
-  // The drain waits for the peer to acknowledge, and a peer that is simply gone
-  // never does: werift keeps reporting the connection up for about thirty
-  // seconds afterwards, and `bufferedAmount` stays pinned at its peak the whole
-  // time. So the ceiling is what guarantees a close terminates at all -- an
-  // unattended run must not hang on a partner that crashed.
+  // The drain waits for the peer to acknowledge, and a peer that is simply
+  // gone never does: werift keeps reporting the connection up for about
+  // thirty seconds, with `bufferedAmount` pinned at its peak. The ceiling is
+  // what ends the close instead of the peer-loss signal.
   //
-  // The partner is torn down at the SESSION, not through its message
-  // connection: a connection close would send the in-band sentinel, which this
-  // side would act on, and the peer would not have vanished at all.
+  // The partner is torn down at the session, not through its message
+  // connection, so no close sentinel reaches this side -- otherwise the peer
+  // would not have vanished at all.
   const common = partyOptions(generateSharedSecret());
   const [vanishing, acceptor] = await Promise.all([
     openWebRtcPeerSession({ ...common, role: "inviter" }),

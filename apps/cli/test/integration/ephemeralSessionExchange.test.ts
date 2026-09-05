@@ -224,7 +224,7 @@ inProcessOnly(
           // Let the loop cycle with nothing to read: each cycle releases its
           // session at the idle boundary, the server withholds the close, and the
           // release forces it. Two such boundaries have to be behind us before the
-          // message is sent, so what carries it is a session dialed after them.
+          // message is sent, so what sends it is a session dialed after them.
           // Two boundaries land in about eleven seconds (each costs the release's
           // own close bound); the bound here is generous headroom over that, not a
           // timing assertion.
@@ -522,7 +522,7 @@ inProcessOnly(
         DEFAULT_MAX_RECONNECT_ATTEMPTS,
       );
       // The failure reached the caller as the rendezvous rejection and nothing
-      // else; a party that also surfaced it as a connection error would report the
+      // else; a party that also raised it as a connection error would report the
       // same drop twice.
       expect(failures).toEqual([]);
       // The operator is warned that the budget is spent before the drop that ends
@@ -553,7 +553,7 @@ inProcessOnly(
     // rendezvous that precedes it -- FileSyncConnection.synchronize() -- holds one
     // session across its waits, so a party that waits for a late peer against a
     // server enforcing a maximum session duration is dropped mid-rendezvous. What
-    // carries the exchange through is the mode's uncapped recovery re-dial (the
+    // gets the exchange through is the mode's uncapped recovery re-dial (the
     // cumulative max_reconnect_attempts budget is gated off here), so the exchange
     // completes rather than failing terminally.
     const srv = await startInProcessSftpServer();
@@ -660,7 +660,7 @@ inProcessOnly(
       );
 
       // The exchange completed: both rendezvous resolved, the message crossed, and
-      // nothing surfaced as an error.
+      // nothing showed up as an error.
       expect(failures).toEqual([]);
       expect(outcome.delivered).toEqual({
         message: "across the rendezvous cap",
@@ -696,7 +696,7 @@ inProcessOnly(
       // still there after the last. The lock and the joining sentinel are not
       // asserted here: this snapshot is taken while the waiter is still the sole
       // party, so neither can exist yet and their absence would prove nothing.
-      // The assertion that carries them is the post-rendezvous one below.
+      // The assertion that includes them is the post-rendezvous one below.
       expect(outcome.acrossTheCuts).toContain(`${waiter.id}-hello.json`);
       expect(
         outcome.acrossTheCuts.filter((name) => name.endsWith("-hello.json")),
@@ -759,7 +759,7 @@ inProcessOnly(
 
 // Drops to force inside the poll loop. Above DEFAULT_MAX_RECONNECT_ATTEMPTS, so
 // the exchange below survives more session losses than the budget a held session
-// spends them from allows -- the mode's uncapped recovery is what carries it.
+// spends them from allows -- the mode's uncapped recovery is what gets it through.
 const POLL_LOOP_DROPS = DEFAULT_MAX_RECONNECT_ATTEMPTS + 2;
 
 inProcessOnly(
@@ -882,7 +882,7 @@ inProcessOnly(
             // would spend this arming instead. The sender issues one only from
             // the send() below, which this loop has already awaited -- checked
             // rather than assumed, since a drop spent there lands on the wrong
-            // party and surfaces only as this wait timing out.
+            // party and shows up only as this wait timing out.
             expect(outstandingOperations(senderAdapter)).toBe(0);
             const before = receiverAdapter.midExchangeReconnectCount;
             srv.sessionControls.dropActiveAfterOps(1);
@@ -903,7 +903,7 @@ inProcessOnly(
       );
 
       // Every message crossed, each on the far side of a drop, and nothing
-      // surfaced as an error.
+      // showed up as an error.
       expect(failures).toEqual([]);
       expect(received).toEqual(
         Array.from({ length: POLL_LOOP_DROPS }, (_, i) => ({ message: i })),
@@ -1052,8 +1052,8 @@ inProcessOnly(
       );
 
       // No dial completed while the partner was stalling, so the cycles that ran
-      // then genuinely failed to establish a session -- and none of them was
-      // surfaced as an error to the caller.
+      // then failed to establish a session -- and none of them was shown as an
+      // error to the caller.
       expect(outcome.handshakesDuringStall).toBe(0);
       expect(outcome.failuresDuringStall).toBe(0);
       expect(received).toEqual([{ message: "after the failed dials" }]);
@@ -1287,10 +1287,10 @@ inProcessOnly(
       // the peer to read.
       expect(outcome.afterClose).toContain(`${failing.id}-abort.json`);
       // The waiting peer fast-failed on the marker rather than riding out its
-      // peer-inactivity budget, which would surface as a transport error instead.
+      // peer-inactivity budget, which would show up as a transport error instead.
       expect(waitingErrors).toHaveLength(1);
       expect(waitingErrors[0]).toBeInstanceOf(PeerAbortError);
-      // Nothing about the released session surfaced to the closing party: close()
+      // Nothing about the released session showed up to the closing party: close()
       // is best-effort and must stay non-throwing, the marker write included.
       expect(failingErrors).toEqual([]);
     } finally {
@@ -1312,7 +1312,7 @@ inProcessOnly(
     // recovery chokepoint that re-establishes for every other operation. Issued
     // after an idle boundary it reaches no session at all, and the file it was to
     // remove is what survives -- so the assertion here is the directory, not a
-    // counter. The rename is torn deliberately, with the release driven inside the
+    // counter. The rename is torn by design, with the release driven inside the
     // tear, because the two orderings that produce this state (a send resuming
     // from the protocol continuation, a failing publish) are both races the loop
     // will not stage on demand.
@@ -1395,7 +1395,7 @@ inProcessOnly(
       // before its drain re-issues the cleanup the released session could not
       // perform.
       expect(outcome.afterClose.filter(isProtocolTemp)).toEqual([]);
-      // The sweep never surfaced to the caller: safeDelete's contract is
+      // The sweep never showed up to the caller: safeDelete's contract is
       // unchanged by the record it now leaves.
       expect(failures).toEqual([]);
     } finally {
@@ -1435,7 +1435,7 @@ inProcessOnly(
       throw new Error("the partner's server refused the rename");
     };
     // Retain mode requires the lockless rendezvous and timestamped filenames,
-    // and both parties must agree: the hello envelope carries the flags and a
+    // and both parties must agree: the hello envelope holds the flags and a
     // mismatch is a terminal rendezvous failure.
     const retainOptions = {
       verbose: -1 as const,

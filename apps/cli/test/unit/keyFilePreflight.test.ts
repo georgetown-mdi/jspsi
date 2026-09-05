@@ -131,7 +131,7 @@ test("creates the parent directory when it does not yet exist", () => {
   const result = preflightKeyFilePath(keyFilePath, log);
   expect(result).toBe(keyFilePath);
   expect(fs.existsSync(createdParent)).toBe(true);
-  // The mkdir side effect is surfaced to the user.
+  // The mkdir side effect is shown to the user.
   expect(
     infos.some((m) => m.includes("created keyFilePath parent directory")),
   ).toBe(true);
@@ -197,7 +197,7 @@ test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
     // Ownership is named beside permissions: the container account does not
     // own a mounted directory, and chmod alone does not fix that case.
     expect((caught as Error).message).toContain("owner");
-    // The raw lstat errno must not be surfaced.
+    // The raw lstat errno must not be shown.
     expect((caught as Error).message).not.toContain("lstat");
   },
 );
@@ -205,14 +205,12 @@ test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
 test.skipIf(process.platform === "win32")(
   "falls through to friendly guidance when the key-path lstat fails with ELOOP",
   () => {
-    // A symlink loop in a non-final path component makes lstat on the child key
-    // path throw ELOOP -- the other code the implementation notes name for (B),
-    // distinct from the EACCES case above. Like EACCES, the guard must not
-    // rethrow the raw errno; here it falls through to statSync(parent), which
-    // re-hits the loop and wraps it as the friendly "is not accessible"
-    // message while preserving the underlying ELOOP hint. ELOOP is a path-
-    // resolution limit, not a permission check, so it fires for root too -- no
-    // getuid guard needed.
+    // A symlink loop in a non-final path component makes lstat on the child
+    // key path throw ELOOP, distinct from the EACCES case above. The guard
+    // does not rethrow the raw errno; it falls through to statSync(parent),
+    // which re-hits the loop and wraps it as the friendly "is not accessible"
+    // message while preserving the ELOOP hint. ELOOP is a path-resolution
+    // limit, not a permission check, so it fires for root too.
     const { log } = makeLogger();
     const loopA = path.join(dir, "loop-a");
     const loopB = path.join(dir, "loop-b");
@@ -235,13 +233,11 @@ test.skipIf(process.platform === "win32")(
 test.skipIf(process.platform === "win32")(
   "rejects a key path whose final component exceeds NAME_MAX up front",
   () => {
-    // A >255-byte final component makes lstat throw ENAMETOOLONG. Unlike EACCES/
-    // ELOOP, that is NOT a parent/ancestor condition the downstream checks
-    // reproduce -- the parent is fine, and the short-named write probe and
-    // parent read-open both pass -- so the guard must rethrow it and halt
-    // pre-flight here, not swallow it and let saveKeyFile's write of the long
-    // name fail post-handshake after the secret has rotated. Pins the (B) fall-
-    // through allowlist against re-broadening to swallow-everything.
+    // A >255-byte final component makes lstat throw ENAMETOOLONG. Unlike
+    // EACCES/ELOOP, downstream checks do not reproduce it -- the parent is
+    // fine, and the write probe and parent read-open both pass -- so the guard
+    // must rethrow it and halt pre-flight, not let saveKeyFile's write of the
+    // long name fail post-handshake after the secret has rotated.
     const { log } = makeLogger();
     const longLeaf = "k".repeat(300);
     let caught: unknown;
@@ -300,7 +296,7 @@ test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
     // A missing parent under a non-writable ancestor: statSync(parent) is
     // ENOENT, then mkdirSync fails with EACCES for a non-symlink reason, so
     // this exercises the "cannot be created" arm with an empty dangling hint
-    // (distinct from the dangling-symlink case, which carries the hint).
+    // (distinct from the dangling-symlink case, which holds the hint).
     const { log } = makeLogger();
     const readOnlyDir = path.join(dir, "readonly");
     fs.mkdirSync(readOnlyDir);

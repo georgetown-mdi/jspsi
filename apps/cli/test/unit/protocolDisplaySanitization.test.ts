@@ -205,13 +205,12 @@ test("routes a partner-seeded filedrop path through sanitizeForDisplay before lo
 
 // --- Cleanup error sinks (render sanitizeErrorForDisplay, not the raw Error) --
 //
-// conn.close() is non-throwing by design -- FileSyncConnection swallows a failed
-// end() and logs it through its own logger -- so the protocol-layer cleanup
-// catches (the debug `mc.close()` sink and the warn `failed to close connection`
-// sink) are defensive against an unexpected close() rejection. Spy close() to
-// reject so those catches run, and synchronize() to reject so doCleanup is
-// reached promptly after a successful open (opened === true, which selects the
-// warn branch).
+// conn.close() is non-throwing by design -- FileSyncConnection swallows a
+// failed end() internally -- so these protocol-layer catches (the debug
+// `mc.close()` sink and the warn `failed to close connection` sink) guard
+// against an unexpected close() rejection. Spy close() to reject so they run,
+// and synchronize() to reject so cleanup runs after a successful open (opened
+// === true, the warn branch).
 
 test("renders a hostile close error through sanitizeErrorForDisplay in the cleanup logs", async () => {
   const syncSpy = vi

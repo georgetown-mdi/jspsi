@@ -70,7 +70,7 @@ vi.mock("@psilink/core", async (importActual) => {
       ) => {
         // The linked pair below hands each party its own connection object, so
         // identity is what attributes a captured handshake to the side that ran
-        // it -- the argument list itself carries no party name.
+        // it -- the argument list itself has no party name.
         mockState.handshakes.push({
           side: connection === pair.inviter ? "inviter" : "acceptor",
           role,
@@ -489,7 +489,7 @@ test("a webrtc connection with no role is refused before anything is dialed", as
 });
 
 test("a host the resolver admits but the authority parse refuses exits 64", async () => {
-  // A host carrying its own port is free of every delimiter the resolver's shape
+  // A host holding its own port is free of every delimiter the resolver's shape
   // refusal names, so it reaches the rendezvous line, where the authority parse
   // -- which refuses a host contributing a port, because that silently drops the
   // configured one -- is what stops it. That raise sits inside the run rather

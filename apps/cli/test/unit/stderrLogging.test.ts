@@ -108,7 +108,7 @@ test("configureStderrLogging: error output stays on stderr", () => {
   expect(stdout).toBe("");
 });
 
-// --- lifecycle: the standard prefix is preserved, close() restores the seam --
+// --- lifecycle: the standard prefix is preserved, close() restores the prior sink --
 
 test("configureStderrLogging: keeps the [ISO] [LEVEL] [CONTEXT] prefix", () => {
   // setLogPrefixer wraps the sink leaf, so each line keeps its timestamped

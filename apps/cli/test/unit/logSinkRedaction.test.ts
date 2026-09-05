@@ -15,7 +15,7 @@ import {
   snapshotDiagnosticSinkAndLevel,
 } from "../loggingTestSupport";
 
-// The private-key redaction backstop at the operator-facing log sinks. It runs
+// The private-key redaction safety check at the operator-facing log sinks. It runs
 // in core's log prefixer, so it covers both CLI routings -- stderr and
 // --log-file -- and every logger, including the ones built at import time before
 // a command installs its sink. These assertions read the RENDERED bytes each
@@ -62,10 +62,11 @@ function logToBothSinks(...args: unknown[]): { stderr: string; file: string } {
   };
 }
 
-// A key sliced into a log line carries whatever structure the thing that carried
-// it left behind, so the delivery shapes here are the ones the renderer's own
-// backstop tests enumerate: real line breaks, CRLF, a lone CR, folded spaces,
-// tabs, no separator at all, and literal backslash-n from a JSON scalar.
+// A key sliced into a log line has whatever structure the thing that held it
+// left behind, so the delivery shapes here are the ones the renderer's own
+// safety-check tests enumerate: real line breaks, CRLF, a lone CR, folded
+// spaces, tabs, no separator at all, and literal backslash-n from a JSON
+// scalar.
 const ARMOR_LINES = [
   "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtz",
   "c2gtZWQyNTUxOQAAACBQ1n3QqzB2rN0m8oL7vC5xY6aJ4kD1gH2sF3dP9uT8iQ",
@@ -118,12 +119,11 @@ test("key material in a later log argument is redacted at both sinks", () => {
 });
 
 test("the pass reaches only within one argument, not across the joined line", () => {
-  // The stated limit, pinned so widening or narrowing it is a visible decision:
-  // a marker in one argument and the body in the next is two strings when the
-  // pass runs, exactly as a key split across two cause-chain links is two links
-  // for the per-link pass. Joining first would close it at the cost of letting a
-  // dangling marker consume every argument behind it -- the suppression this
-  // pass exists not to introduce.
+  // A stated limit, pinned so widening or narrowing it is a visible decision: a
+  // marker in one argument and the body in the next are two separate strings
+  // to the pass, just as a split key is two separate links to the per-link
+  // cause-chain pass. Joining first would let a dangling marker consume every
+  // argument behind it.
   const { stderr, file } = logToBothSinks(BEGIN_MARKER, ARMOR_LINES[0]);
   for (const rendered of [stderr, file]) {
     expect(rendered).toContain("[redacted private key]");

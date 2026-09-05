@@ -164,7 +164,7 @@ describe("withSlowOperationWarning", () => {
   });
 
   test("escapes a control/ANSI sequence in the partner-supplied path", async () => {
-    // The path can carry a peer-supplied filename (a get/put of a partner file);
+    // The path can hold a peer-supplied filename (a get/put of a partner file);
     // a hostile server must not reach the operator's terminal through it.
     vi.useFakeTimers();
     try {
@@ -257,11 +257,11 @@ describe("createBoundedPutSource chunk list", () => {
   });
 });
 
-// The stalled-operation builder is the shared seam every per-operation liveness
-// bound routes through -- the capped get/put stalls, the listing stalls, and the
-// adapter's dead-session error. Its `path` carries a peer-supplied filename on a
-// read/write/delete op, so it is escaped at this one point. Mirrors the
-// sanitizeForDisplay categories.
+// The stalled-operation builder is the shared call site every per-operation
+// liveness bound routes through -- the capped get/put stalls, the listing
+// stalls, and the adapter's dead-session error. Its `path` holds a
+// peer-supplied filename on a read/write/delete op, so it is escaped at this
+// one point. Mirrors the sanitizeForDisplay categories.
 describe("transportOperationStalledError", () => {
   test("is a typed, terminal (TransportOperationStalledError) error", () => {
     const err = transportOperationStalledError(
@@ -302,7 +302,7 @@ describe("transportOperationStalledError", () => {
       "no progress",
     );
     // Read per link, not over the joined chain: the renderer's own cause
-    // separator carries the one newline it emits, so the joined form would fail
+    // separator holds the one newline it emits, so the joined form would fail
     // on framing this test is not about. The same removal the CLI integration
     // console sentinel makes before it inspects a captured line.
     for (const link of linksOf(err)) expect(link).not.toContain("\n");

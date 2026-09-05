@@ -47,13 +47,11 @@ import { writeExchangeRecord } from "../../src/recordFile";
 import { writeOutput } from "../../src/util/dataIo";
 
 // The CLI's own artifacts for the both-sided deduplicating cardinality: the
-// result file it writes and the exchange record it persists beside it. The
-// cardinality is resolved and matched in core, whose tests drive the rounds; what
-// is checked here is that the CLI's two writers carry the shape those rounds
-// produce -- one result row per PAIR, so a cluster of m of this party's records
-// and n of the partner's occupies m * n rows with no column naming the cluster,
-// and one attested size, which is that pair count rather than either party's
-// matched-record count.
+// result file it writes and the exchange record it persists beside it. Checked
+// here: the CLI's two writers hold the shape those rounds produce -- one result
+// row per PAIR, so a cluster of m of this party's records and n of the partner's
+// occupies m * n rows with no column naming the cluster, and one attested size,
+// that pair count rather than either party's matched-record count.
 
 // This party's rows. "Carol" is held twice on each side, so the pair it
 // contributes is the two groups' product; "Henry" matches once, and "Alice"
@@ -143,7 +141,7 @@ test("a both-sided result writes a cluster's whole product and attests the pair 
   expect(written.headers).toEqual(EXPECTED_HEADERS);
   expect(written.rows).toEqual(EXPECTED_ROWS);
   // The block's own rows are the product rather than a pairing of one of ours to
-  // one of theirs: each of our two clustered records carries both partner rows.
+  // one of theirs: each of our two clustered records holds both partner rows.
   expect(
     written.rows.filter((row) => row[0] === "A1").map((row) => row[1]),
   ).toEqual(["0", "1"]);

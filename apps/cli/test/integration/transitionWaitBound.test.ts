@@ -13,19 +13,14 @@ import { inProcessOnly } from "../sftpBackendGate";
 
 // The unattended failures the bounded session-transition wait exists for, driven
 // against the real stack rather than a mock: a teardown, an idle release and a
-// mid-exchange recovery re-dial, each enqueued behind a dial that will not settle.
-// The partner is a server that accepts the TCP connection and never completes the
-// SSH handshake, so the dial ahead of them spends its whole budget -- four
-// attempts at the 30 s connect deadline plus the inter-attempt delays, about two
-// minutes at the defaults, more than an order of magnitude past the bound each of
-// these waits is held to. The last group also drives the other way a queued
-// transition ends without running: reaching the front of the queue with the
-// teardown latch already set.
-//
-// Only the in-process backend can be made to stall its handshake (a native sshd
-// cannot), so this runs there and stands up its own server to reach the session
-// controls -- the shared globalSetup server hands the workers only its connection
-// details.
+// mid-exchange recovery re-dial, each enqueued behind a dial that will not
+// settle. The partner accepts the TCP connection and never completes the SSH
+// handshake, so the dial ahead of them spends its whole budget -- about two
+// minutes at the defaults, more than an order of magnitude past the bound each
+// wait is held to. The last group also drives the other way a queued transition
+// ends without running: reaching the front of the queue with the teardown latch
+// already set. Only the in-process backend can be made to stall its handshake,
+// so this runs there with its own server.
 
 // The adapter's acquire bound is 10 s. Each wait is asserted to land between these:
 // above the floor because the waiter did wait the bound out rather than declining on
@@ -122,8 +117,8 @@ inProcessOnly(
       // the retry loop reads the teardown latch between attempts, so nothing minted
       // a fresh socket behind the close.
       expect(dials()).toBe(dialsAtOpen + 1);
-      // The deliberate close is neither counted nor warned as a mid-exchange drop,
-      // and a completed exchange would still report success.
+      // The close is not counted or warned as a mid-exchange drop, and a
+      // completed exchange would still report success.
       expect(adapter.reconnectCount).toBe(0);
       expect(adapter.midExchangeReconnectCount).toBe(0);
       expect(logs.filter((entry) => entry.level === "ERROR")).toEqual([]);
@@ -133,9 +128,9 @@ inProcessOnly(
       // Nor as a partner-side dial failure. The destroy settles the parked dial with
       // the same error a genuine peer close produces, so the re-dial riding it must
       // not report a transient failure of the partner's and promise a retry on a
-      // next tick this closing run does not have. Only the real stack can carry this
-      // one: a mock dial that stayed parked through the destroy never reaches the
-      // line at all.
+      // next tick this closing run does not have. Only the real stack can prove
+      // this: a mock dial that stayed parked through the destroy never reaches
+      // the line at all.
       expect(
         logs.filter((entry) =>
           entry.message.includes("ephemeral SFTP re-dial failed"),
@@ -154,7 +149,7 @@ inProcessOnly(
 inProcessOnly(
   "the process exits after a teardown enqueued behind a re-dial that will not settle",
   async () => {
-    // The load-bearing half, and the reason it is a child process: an in-process
+    // The critical half, and the reason it is a child process: an in-process
     // check that close() settled passes even when the teardown left a live socket
     // behind, and this runner's own handles mask the leak. The parked dial holds a
     // ref'd TCP handle, so only a separate process can show that a run whose
@@ -348,7 +343,7 @@ inProcessOnly(
       // exchange over a release that released nothing.
       expect(failures).toEqual([]);
       expect(logs.filter((entry) => entry.level === "ERROR")).toEqual([]);
-      // Neither the declined releases nor the deliberate close was counted as a
+      // Neither the declined releases nor the close was counted as a
       // mid-exchange drop. The merged reconnect total is not asserted here: the
       // parked dial re-attempts on its own connect-retry budget while it holds, and
       // that re-attempt is a reconnection this counter is meant to see.

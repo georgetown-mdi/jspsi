@@ -42,11 +42,10 @@ vi.mock("../../src/onlineBootstrap", async () => {
 
 // Wrap loadConfigLinkageSource as a PASSTHROUGH spy, leaving every other config
 // export (saveConfig included) genuine: each test below reads its real config
-// file, and only the algorithm-gate case replaces the read for one call. That
-// substitution is the only way to reach the gate at all -- AlgorithmSchema admits
-// exactly the implemented pair today, so a config naming anything else is refused
-// by the parse on the way in, and the gate holds the line for the member added to
-// the enum ahead of its run path.
+// file, and only the algorithm-gate case replaces the read for one call --
+// AlgorithmSchema admits exactly the implemented pair today, so only this
+// substitution reaches the gate at all, for the member added to the enum ahead
+// of its run path.
 vi.mock("../../src/config", async () => {
   const actual =
     await vi.importActual<typeof import("../../src/config")>(
@@ -92,7 +91,7 @@ silentLog.setLevel("silent");
 let optionsCounter = 0;
 // Minimal options pointing config/key at fresh, non-existent temp paths so the
 // conflict gate passes and validateInvite reaches the step under test. The
-// identity is part of that minimum: every run mints terms carrying one, and a
+// identity is part of that minimum: every run mints terms holding one, and a
 // run without it stops at the identity gate before the step under test.
 function testOptions(
   overrides: Partial<CommonBootstrapOptions> = {},
@@ -161,13 +160,12 @@ test("a `-`-leading positional is kept as the offline input file", () => {
 // --- validateInvite (the no-commit phase) ------------------------------------
 
 test("validateInvite: an unusable URL is rejected with no side effect", async () => {
-  // A ws:/wss: URL names where the coordination server is and nothing else; an
-  // API key or user on it would otherwise be dropped silently and surface only
-  // as the broker's own rejection mid-run, so it is refused where it was typed.
-  // Online dispatch validates the URL before reading input or minting a token,
-  // so this aborts before the caller can disclose anything: the input file
-  // named here does not exist, and its (exit-69) read error is what would
-  // surface instead if the URL were checked second.
+  // A ws:/wss: URL names where the coordination server is and nothing else;
+  // an API key or user on it would otherwise be dropped silently and show up
+  // only as the broker's own rejection mid-run, so it is refused where it was
+  // typed. Online dispatch validates the URL before reading input or minting a
+  // token, so this aborts before the caller can disclose anything: checked
+  // second, the (nonexistent) input file's exit-69 read error would show instead.
   for (const raw of [
     "wss://someone@peers.example.org/psi",
     "wss://peers.example.org/psi?key=private",
@@ -208,10 +206,9 @@ test("validateInvite: a missing or blank --identity is refused", async () => {
   // testOptions points the config at a path that does not exist, so this is the
   // authoring path: the terms come from the input and nothing but the flag can
   // name this party. The refusal lands ahead of that (nonexistent) input file
-  // the path would otherwise fail on, and ahead of the token whose terms would
-  // carry the label. The blank cases are the scripted `--identity "$ORG"` with
-  // ORG unset; there is nothing for psilink to stand in, so they refuse exactly
-  // as the absent flag does.
+  // and ahead of the token whose terms would hold the label. The blank cases
+  // are the scripted `--identity "$ORG"` with ORG unset -- nothing for psilink
+  // to stand in, so they refuse exactly as the absent flag does.
   for (const identity of [undefined, "", "   "])
     await expect(
       validateInvite({
@@ -242,7 +239,7 @@ test("validateInvite: a non-positive accept-timeout is rejected", async () => {
 
 test("onlineWaitInvalidationNotice: states the invitation is void on cancel/timeout and points at re-invite", () => {
   const notice = onlineWaitInvalidationNotice(900);
-  // The accept-timeout bound is surfaced so the user knows how long the wait lasts.
+  // The accept-timeout bound is shown so the user knows how long the wait lasts.
   expect(notice).toContain("900s");
   // Each pre-acceptance exit that voids the invitation is named.
   expect(notice).toContain("Ctrl-C");
@@ -341,7 +338,7 @@ test("validateInvite: online still aborts on a pre-existing config file", async 
 
 // --- connection_per_poll ignored on a non-sftp online URL --------------------
 // A file:// URL resolves to filedrop, which holds no session, so an online invite
-// carrying --connection-per-poll must warn it is ignored rather than silently
+// with --connection-per-poll must warn it is ignored rather than silently
 // drop it. connectionFromURL applies the override only on sftp, so on filedrop
 // the raw flag is the sole carrier of the operator's intent; validateInvite reads
 // it and warns. On sftp the mode is valid, so the ignored-warning stays silent.
@@ -464,7 +461,7 @@ test("validateInvite: online webrtc emits the coordination server as a credentia
   for (const leak of ["hunter2", "alice", "key", "secure", "turn", "stun"])
     expect(encodedEndpoint).not.toContain(leak);
   // The acceptor seeds its connection block from the embedded endpoint and
-  // stamps the complementary role, which no invitation can carry.
+  // stamps the complementary role, which no invitation can hold.
   const { connection, seeded } = connectionFromEndpoint(
     token.connectionEndpoint,
   );
@@ -479,7 +476,7 @@ test("validateInvite: online webrtc emits the coordination server as a credentia
 });
 
 test("validateInvite: the online webrtc connection takes the inviter end of the rendezvous", async () => {
-  // The URL carries no role, so the invitation's own side is stamped by the
+  // The URL has no role, so the invitation's own side is stamped by the
   // command that mints it; without one `psilink exchange` refuses to dial.
   const { input, options } = onlineFixture();
   const ready = await validateInvite({
@@ -497,7 +494,7 @@ test("validateInvite: the online webrtc connection takes the inviter end of the 
   expect(ready.connection.role).toBe("inviter");
   // --accept-timeout bounds this run's rendezvous wait, but not through the
   // connection the bootstrap persists: that budget is applied to the live
-  // connection alone, so nothing here carries it into the saved config.
+  // connection alone, so nothing here writes it into the saved config.
   expect(ready.connection.options?.peerTimeoutMs).toBeUndefined();
   // A default-scheme port is normalized away by the URL parser, and `secure`
   // stays unset so the connection's TLS default stands.
@@ -505,7 +502,7 @@ test("validateInvite: the online webrtc connection takes the inviter end of the 
   expect(ready.connection.server.secure).toBeUndefined();
 });
 
-test("validateInvite: a plaintext webrtc invite warns that the endpoint cannot carry the scheme", async () => {
+test("validateInvite: a plaintext webrtc invite warns that the endpoint cannot hold the scheme", async () => {
   // An endpoint has no `secure` field, so an acceptor seeded from this one
   // dials TLS and meets nobody; the operator is told while they can still act.
   const { input, options } = onlineFixture();
@@ -619,7 +616,7 @@ test("validateInvite: a webrtc URL the dial would refuse fails before the token 
 
 test("handler: a webrtc URL the dial would refuse prints no invitation", async () => {
   // The end-to-end half of the ordering invariant above: the refusal is an
-  // exit-64 usage error, and stdout -- which carries the invitation and nothing
+  // exit-64 usage error, and stdout -- which holds the invitation and nothing
   // else -- stays empty. A check on validateInvite alone could not see a token
   // printed by the handler around it.
   const { input, options } = onlineFixture();
@@ -648,9 +645,9 @@ test("handler: a webrtc URL the dial would refuse prints no invitation", async (
 });
 
 test("validateInvite: a webrtc invite reports every dropped --server-* flag", async () => {
-  // The credential flags are the drop most worth reporting: the server block is
-  // merged on sftp alone, so each is parsed and discarded here, and from the
-  // terminal that looks exactly like one that was used.
+  // The credential flags matter most here: the server block is merged on sftp
+  // alone, so each is parsed and discarded, and from the terminal that looks
+  // exactly like one that was used.
   const { input, options } = onlineFixture();
   const log = getLogger("invite-ws-credential-flags-test");
   log.setLevel("silent");
@@ -898,11 +895,11 @@ test("persistedPeerBudgetNotice: names the recorded budget when one was written"
   expect(notice).not.toContain(`${DEFAULT_PEER_TIMEOUT_MS / 1000}s`);
 });
 
-test("validateInvite: online carries the disclosed-columns subset from the inferred metadata", async () => {
+test("validateInvite: online includes the disclosed-columns subset from the inferred metadata", async () => {
   // An input with non-linkage columns: `notes` infers as an `other` payload column
   // and `member_id` as an `_id` row-identifier, both transmitted; the name/dob/ssn
-  // linkage columns are not. The token must carry exactly that disclosed subset so
-  // the acceptor's consent and lock-in derive from the wire's own predicate.
+  // linkage columns are not. The token must hold exactly that disclosed subset so
+  // the acceptor's consent and commitment derive from the wire's own predicate.
   const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-disc-"));
   const input = path.join(dir, "input.csv");
   fs.writeFileSync(
@@ -965,10 +962,10 @@ test("validateInvite: offline infer-from-input persists the disclosed subset as 
   );
 });
 
-test("validateInvite: an all-linkage input carries an empty disclosed subset", async () => {
+test("validateInvite: an all-linkage input has an empty disclosed subset", async () => {
   // onlineFixture's CSV is first_name,last_name,dob,ssn -- all linkage columns, so
   // nothing is disclosed. The metadata is known (inferred from the input), so the
-  // field is carried as the EMPTY set, locking the acceptor in to "receive nothing"
+  // field is written as the EMPTY set, locking the acceptor in to "receive nothing"
   // (a later non-empty payload aborts) rather than reconciling lazily.
   const { input, options } = onlineFixture();
   const ready = await validateInvite({
@@ -1007,8 +1004,8 @@ function fixtureWithTrailingColumn(name: string): {
   };
 }
 
-/** A disclosed column name one character past the carriable ceiling: inferred as
- *  an `other` payload column, so it is transmitted and its name is carried. */
+/** A disclosed column name one character past the length ceiling: inferred as
+ *  an `other` payload column, so it is transmitted and its name is included. */
 const OVERLONG_COLUMN = "n".repeat(MAX_NAME_LENGTH + 1);
 
 test("validateInvite: online refuses an over-long disclosed column name before minting", async () => {
@@ -1032,7 +1029,7 @@ test("validateInvite: online refuses an over-long disclosed column name before m
   expect(message).toMatch(/metadata column 5 /);
   expect(message).toContain(`${MAX_NAME_LENGTH}-character limit`);
   // The offending name is located, not echoed: it is longer than any message that
-  // would carry it.
+  // would hold it.
   expect(message).not.toContain(OVERLONG_COLUMN);
   expect(fs.existsSync(options.configFile)).toBe(false);
   expect(fs.existsSync(options.keyFile)).toBe(false);
@@ -1065,7 +1062,7 @@ test("handler: the offline infer path refuses an over-long disclosed name, writi
     expect(exit).toHaveBeenCalledWith(64);
     expect(fs.existsSync(options.configFile)).toBe(false);
     expect(fs.existsSync(options.keyFile)).toBe(false);
-    // The invitation is the only thing stdout ever carries, and it was never
+    // The invitation is the only thing stdout ever holds, and it was never
     // minted.
     expect(stdout).toBe("");
     expect(stderr).toMatch(/metadata column 5 /);
@@ -1106,11 +1103,11 @@ test("validateInvite: --linkage-strategy single-pass authors single-pass terms a
       linkageStrategy: "single-pass",
       log,
     });
-    // The selection flows into the authored terms the invitation carries, so the
+    // The selection flows into the authored terms the invitation holds, so the
     // mandatory-consistency check sees single-pass on both sides.
     const token = await decodeInvitation(ready.invitation);
     expect(token.linkageTerms.linkageStrategy).toBe("single-pass");
-    // The disclosure tradeoff is surfaced at the point of selection.
+    // The disclosure tradeoff is shown at the point of selection.
     const info = infoSpy.mock.calls.map((c) => String(c[0])).join("\n");
     expect(info).toContain("consented disclosure tradeoff");
     expect(info).toContain("docs/EXCHANGE_REFERENCE.md");
@@ -1141,7 +1138,7 @@ test("validateInvite: omitting --linkage-strategy authors cascade with no disclo
   }
 });
 
-test("validateInvite: offline infer-from-input also carries the selected single-pass strategy and notes the disclosure", async () => {
+test("validateInvite: offline infer-from-input also applies the selected single-pass strategy and notes the disclosure", async () => {
   const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-sp-offline-"));
   tmpDirs.push(dir);
   const input = writeCsv(dir, "first_name,last_name,dob,ssn");
@@ -1310,20 +1307,12 @@ test("validateInvite: a retain-mode config declares it on the token", async () =
 });
 
 test("validateInvite: a webrtc config declares nothing, whatever its options say", async () => {
-  // The config-as-source mint reads the connection block without validating it
-  // (an unfinished one must still mint) and emits no endpoint, so the token
-  // schema's endpoint-paired refusal -- which only fires once a webrtc endpoint
-  // is on the token -- never gets a chance to run either. The reader's own
-  // channel gate is what keeps this config from stating a mode no run of the
-  // token could be in. The file is written raw, not through saveConfig: saveConfig
-  // performs no schema validation, and ConnectionConfigSchema would not refuse
-  // this pairing anyway -- a webrtc connection's options parse through
-  // SharedOptionsSchema, which has no retainFiles field, so retain_files is
-  // silently dropped rather than rejected. What blocks this pairing at psilink's
-  // own authoring sites (saveConfig's caller included) is the type system typing
-  // WebRTCConnectionConfig.options as SharedOptions, not a runtime refusal; a
-  // hand-authored file is outside that check, which is the case this test
-  // constructs directly.
+  // Config-as-source mint reads the connection block without validating it, so
+  // this pairing mints without ever reaching the endpoint-paired refusal (which
+  // only fires for a webrtc endpoint already on the token) or any other check --
+  // ConnectionConfigSchema does not forbid retain_files under webrtc; only the
+  // WebRTCConnectionConfig.options type does, at psilink's own authoring sites.
+  // The file is hand-written raw (not through saveConfig) to reach this case.
   const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-webrtc-"));
   tmpDirs.push(dir);
   const configPath = path.join(dir, "psilink.yaml");
@@ -1408,7 +1397,7 @@ test("validateInvite: online filedrop emits the shared-path endpoint", async () 
 
 test("validateInvite: a split online invite emits the pair verbatim, acceptor mirror-swaps", async () => {
   // --outbound-path makes the connection split (URL path = inbound, override =
-  // outbound). The endpoint carries the inviter's pair unswapped; the acceptor's
+  // outbound). The endpoint holds the inviter's pair unswapped; the acceptor's
   // connectionFromEndpoint lands the inviter's outbound on the acceptor's inbound,
   // making the two parties mirror images.
   const { input, options } = onlineFixture();
@@ -1431,7 +1420,7 @@ test("validateInvite: a split online invite emits the pair verbatim, acceptor mi
   expect(connection.server.outboundPath).toBe("/inviter-in");
 });
 
-test("validateInvite: an offline invitation carries no endpoint (field stays optional)", async () => {
+test("validateInvite: an offline invitation has no endpoint (field stays optional)", async () => {
   // Only the online producer emits an endpoint; an offline invitation omits it
   // and still encodes/decodes cleanly, so no regression for tokens minted
   // elsewhere (the field is optional).
@@ -1453,7 +1442,7 @@ test("validateInvite: an offline invitation carries no endpoint (field stays opt
 
 // --- validateInvite: offline, config as the linkage-terms source -------------
 
-// Terms an inviter's config would carry after being generated from an input
+// Terms an inviter's config would hold after being generated from an input
 // with first/last name, dob, and ssn columns: passing that metadata drops the
 // default keys (and the ssn4 field) the input cannot satisfy, so the terms
 // reference exactly firstName, lastName, dateOfBirth, and ssn.
@@ -1464,7 +1453,7 @@ function defaultTerms(): LinkageTerms {
   );
 }
 
-// A pre-existing config carrying `terms` (and optionally an explicit
+// A pre-existing config holding `terms` (and optionally an explicit
 // `standardization` and/or `metadata`) is written to a temp dir; the helper
 // returns the paths so a test can point its options at them. The connection is a
 // placeholder -- invite does not use it.
@@ -1490,7 +1479,7 @@ function withConfig(
 
 // A count-only config in exactly the shape the specification admits: the default
 // terms narrowed to one linkage key, which is the only one of the five count-only
-// rules the defaults break (they are already cascade, non-deduplicating, and carry
+// rules the defaults break (they are already cascade, non-deduplicating, and have
 // no payload). The declared linkage fields are left alone -- a declared field no
 // key references is admitted.
 function countOnlyTerms(): LinkageTerms {
@@ -1522,7 +1511,7 @@ test("validateInvite: derives terms from a config when no input file is given", 
     if (ready.mode !== "offlineFromConfig") return;
     expect(ready.configPath).toBe(configPath);
     expect(ready.linkageTerms).toEqual(terms);
-    // The minted invitation carries the config's terms, not inferred ones.
+    // The minted invitation holds the config's terms, not inferred ones.
     const token = await decodeInvitation(ready.invitation);
     expect(token.linkageTerms).toEqual(terms);
   } finally {
@@ -1531,7 +1520,7 @@ test("validateInvite: derives terms from a config when no input file is given", 
 });
 
 test("validateInvite: a reused config supplies the identity, so no flag is needed", async () => {
-  // The label this invitation carries is the config's, chosen when that file was
+  // The label this invitation holds is the config's, chosen when that file was
   // authored, so there is nothing here for the operator to name -- and demanding
   // it would refuse a re-invite over terms they already settled. A blank value
   // is the same case as no flag (the scripted `--identity "$ORG"` with ORG
@@ -1599,7 +1588,7 @@ test("validateInvite: --identity over a reused config is reported, not applied",
     });
     expect(ready.mode).toBe("offlineFromConfig");
     if (ready.mode !== "offlineFromConfig") return;
-    // The token the partner reads carries the config's label, not the flag's.
+    // The token the partner reads holds the config's label, not the flag's.
     expect(ready.linkageTerms.identity).toBe("Agency Config");
     const token = await decodeInvitation(ready.invitation);
     expect(token.linkageTerms.identity).toBe("Agency Config");
@@ -1620,7 +1609,7 @@ test("validateInvite: --identity over a reused config is reported, not applied",
   }
 });
 
-test("validateInvite: a config still carrying the init placeholder is refused, minting nothing", async () => {
+test("validateInvite: a config still holding the init placeholder is refused, minting nothing", async () => {
   // The template's identity is a well-formed label every schema accepts, so an
   // operator who fills in the connection block and passes over this field would
   // otherwise mint an invitation -- and a partnership every later run sends --
@@ -1654,7 +1643,7 @@ test("validateInvite: a config still carrying the init placeholder is refused, m
   }
 });
 
-test("validateInvite: a config carrying no identity is refused, flag or not", async () => {
+test("validateInvite: a config holding no identity is refused, flag or not", async () => {
   // Inviting authors a partnership the partner reads a name off, and this path
   // persists the configuration unchanged -- so a label given for this one
   // invocation would name the partnership in the invitation and nowhere after
@@ -1729,7 +1718,7 @@ test("validateInvite: --identity over a reused config redacts a planted key mark
 });
 
 test("validateInvite: a config citing a rule set its own keys left is reported at the mint", async () => {
-  // The citation the config carries rides the token to the partner, so a hand
+  // The citation the config holds rides the token to the partner, so a hand
   // edit that took the keys out of the cited set is named here rather than after
   // the invitation has left. The mint is not blocked by it.
   const terms = defaultTerms();
@@ -1761,7 +1750,7 @@ test("validateInvite: a config citing a rule set its own keys left is reported a
 });
 
 test("validateInvite: a drifted citation on accepted terms offers the mint's own remedy", async () => {
-  // The config carries an acceptance's record, so these terms are agreed with
+  // The config holds an acceptance's record, so these terms are agreed with
   // the party that invited this operator: restoring the cited set's rules would
   // edit that agreement single-handedly. What this operator is doing is minting
   // an invitation of their own, where declining to reuse the terms and accepting
@@ -1801,7 +1790,7 @@ test("validateInvite: a drifted citation on accepted terms offers the mint's own
 
 test("validateInvite: config-as-source threads the disclosed subset for the send commitment", async () => {
   // A config with an explicit metadata block: the disclosed set is derived from
-  // it, carried on the token, AND threaded to the handler so it is persisted into
+  // it, held on the token, AND threaded to the handler so it is persisted into
   // the reused config's disclosed_payload_columns (closing the init-config gap and
   // refreshing a stale prior commitment on re-invite).
   const terms = defaultTerms();
@@ -1835,7 +1824,7 @@ test("validateInvite: config-as-source threads the disclosed subset for the send
   }
 });
 
-test("validateInvite: config-as-source with no metadata block carries no commitment (lazy)", async () => {
+test("validateInvite: config-as-source with no metadata block has no commitment (lazy)", async () => {
   // Without a metadata block the transmitted set is unknown at mint, so nothing is
   // committed and the handler removes any stale field rather than freezing one.
   const terms = defaultTerms();
@@ -1920,7 +1909,7 @@ function deadKeyTerms(): LinkageTerms {
 
 // The mint refusal rendered the way the CLI's error boundary renders it
 // (`sanitizeErrorForDisplay` in `runOrExit`): the names sit on cause links, which
-// the error's own `.message` does not carry.
+// the error's own `.message` does not hold.
 async function mintRefusal(params: {
   terms: LinkageTerms;
   header: string;
@@ -1981,7 +1970,7 @@ test("validateInvite: a config plus a disagreeing input is refused before mintin
 
 test("validateInvite: a config whose key cleaning drops every record is refused before minting", async () => {
   // The column the key needs is present, so the field-coverage verdict passes;
-  // the key is still self-defeating, and an invitation carrying it would mint,
+  // the key is still self-defeating, and an invitation holding it would mint,
   // reach a partner, and then be refused by this party's own `psilink exchange`.
   const { rendered, configPath, dir } = await mintRefusal({
     terms: deadKeyTerms(),
@@ -2005,7 +1994,7 @@ test("validateInvite: a config whose key cleaning drops every record is refused 
 });
 
 test("validateInvite: a config declaring no linkage key never reaches the mint gate", async () => {
-  // The third blocking shape the mint gate grades. A configuration cannot carry
+  // The third blocking shape the mint gate grades. A configuration cannot hold
   // it: the terms schema floors linkageKeys at one entry, so the config parse
   // refuses the document before the gate sees it. The gate still grades the shape
   // (it consumes core's whole verdict), which is what keeps a terms document
@@ -2035,7 +2024,7 @@ test("validateInvite: a config whose payload.send over-declares is rejected befo
   // An explicit metadata block gates `secret` off (role: ignored), but the
   // hand-authored payload.send still lists it. The over-declaration must be
   // caught at the mint boundary, before the token or the partner's consent
-  // screen can carry a column whose values never flow.
+  // screen can show a column whose values never flow.
   const terms: LinkageTerms = {
     ...defaultTerms(),
     payload: { send: [{ name: "secret" }] },
@@ -2066,7 +2055,7 @@ test("validateInvite: a config whose payload.send over-declares is rejected befo
 
 test("validateInvite: a config's explicit standardization lets an otherwise-unsatisfying input pass", async () => {
   const terms = defaultTerms();
-  // The config maps tax_id -> ssn explicitly; the input carries tax_id (inferred
+  // The config maps tax_id -> ssn explicitly; the input has tax_id (inferred
   // as an identifier, not ssn) rather than an ssn column, so without the
   // standardization the ssn field would be unsatisfiable. The remap binds only a
   // `role: linkage` column (matching participation is the explicit linkage role),
@@ -2185,7 +2174,7 @@ test("validateInvite: offline config-source refuses an algorithm with no run pat
     }
     expect(thrown).toBeInstanceOf(UsageError);
     // Named by what this build runs, not by the value handed to it: the algorithm
-    // can be adopted from a partner's document, so the message carries only the
+    // can be adopted from a partner's document, so the message states only the
     // fixed enum literals.
     expect(String(thrown)).toMatch(/not yet implemented/);
     expect(String(thrown)).not.toMatch(/psi-x/);
@@ -2195,10 +2184,10 @@ test("validateInvite: offline config-source refuses an algorithm with no run pat
 });
 
 // The count-only shape refusals at the CLI's authoring boundary. The four
-// terms-carried rules are refused as the config's linkage terms are read (the
-// shared schema), which is before the token is minted and is where the operator
-// meets them; the fifth reads this party's own metadata, which no linkage-terms
-// document carries, so it is refused at the mint boundary itself.
+// rules the terms alone state are refused as the config's linkage terms are
+// read (the shared schema), which is before the token is minted and is where
+// the operator meets them; the fifth reads this party's own metadata, which no
+// linkage-terms document states, so it is refused at the mint boundary itself.
 test.each([
   {
     rule: "more than one linkage key",
@@ -2255,7 +2244,7 @@ test.each([
 );
 
 test("validateInvite: offline config-source refuses a count-only config whose metadata sends a column", async () => {
-  // The one count-only rule the terms cannot carry: this party's own metadata
+  // The one count-only rule the terms cannot state: this party's own metadata
   // marks `notes` for transmission, which a count-only exchange makes no room
   // for. Refused before the token is minted, and ahead of the algorithm gate, so
   // the operator is told which marking to clear rather than only that the
@@ -2292,13 +2281,12 @@ test("validateInvite: offline config-source refuses a count-only config whose me
 });
 
 test("validateInvite: an explicit empty payload pair still names the count-only rule, not the generic disclosure one", async () => {
-  // The shape rules permit an explicit `payload: {send: [], receive: []}` (both
-  // empty), so this document passes the terms-shape refine. But
+  // The shape rules permit an explicit `payload: {send: [], receive: []}`, so
+  // this document passes the terms-shape refine. But
   // assertPayloadSendDisclosed's own empty-send fast path requires
-  // output.shareWithPartner: false, and these terms carry shareWithPartner:
-  // true (the default), so with metadata marking a column disclosed it would
-  // fall through to the generic "payload.send must name exactly the columns..."
-  // message unless the count-only-specific check runs first.
+  // output.shareWithPartner: false, and these terms have shareWithPartner:
+  // true (the default), so metadata marking a column disclosed falls through
+  // to the generic disclosure message unless the count-only check runs first.
   const metadata = inferMetadata([
     "first_name",
     "last_name",
@@ -2361,14 +2349,12 @@ test("validateInvite: a psi config with the same metadata and shape still mints"
 test.each(["cascade", "single-pass"] as const)(
   "validateInvite: offline config-source mints a deduplicating %s term",
   async (linkageStrategy) => {
-    // Both strategies match a deduplicating cardinality, so both mint. The mint
-    // boundary reads core's own verdict on the pair rather than restating one --
-    // the sibling of the psi-c mint gate above -- so a strategy that stopped
-    // matching would be refused here BEFORE the token is disclosed, never minting
-    // an invitation the config's own `psilink exchange` would then reject (exit
-    // 64). Acceptance derives the accepting party's own deduplicate as false, so
-    // the accepted pair is the one-sided one both strategies run
-    // (linkageCardinality.test.ts runs it end to end from terms core derives).
+    // Both strategies match a deduplicating cardinality, so both mint; a
+    // strategy that stopped matching would be refused here BEFORE the token is
+    // disclosed, never minting an invitation the config's own `psilink
+    // exchange` would then reject (exit 64). Acceptance derives its own
+    // deduplicate as false, so the accepted pair is the one-sided one both
+    // strategies run (linkageCardinality.test.ts covers it end to end).
     const terms: LinkageTerms = {
       ...defaultTerms(),
       deduplicate: true,
@@ -2393,15 +2379,12 @@ test.each(["cascade", "single-pass"] as const)(
 );
 
 test("validateInvite: offline config-source refuses a fan-out standardization before minting", async () => {
-  // The mint-boundary counterpart of the run-side fan-out refusal (these default
-  // terms are cascade, which matches one value per record, so a splitting
-  // record's candidate set has no round to enter): a config whose hand-authored
-  // standardization declares `split_on` must be refused BEFORE the token is
-  // disclosed, so `invite` never mints an invitation the config's own `psilink
-  // exchange` would then reject (exit 64).
-  // The standardization is otherwise consistent with the terms, so it passes the
-  // earlier consistency gate and reaches this one. An OperatorConfigError: a
-  // standardization is only ever this party's own authoring.
+  // The mint-boundary counterpart of the run-side fan-out refusal (cascade
+  // terms match one value per record, so a splitting record's candidate set
+  // has no round to enter): a config whose hand-authored standardization
+  // declares `split_on` must be refused BEFORE the token is disclosed, not
+  // left for the config's own `psilink exchange` to reject later (exit 64).
+  // An OperatorConfigError, since a standardization is only this party's own authoring.
   const terms = defaultTerms();
   const { dir, configPath, keyPath } = withConfig(terms, [
     {
@@ -2426,7 +2409,7 @@ test("validateInvite: offline config-source refuses a fan-out standardization be
 });
 
 test("validateInvite: offline config-source refuses a fan-out element transform before minting", async () => {
-  // The second authoring surface only this config-as-source path can carry: a
+  // The second authoring surface only this config-as-source path can hold: a
   // linkage key whose element transform declares `split_on`, refused at the same
   // mint boundary. A plain UsageError, not an OperatorConfigError -- an acceptor
   // adopts element transforms verbatim from the partner's invitation, so the
@@ -2472,7 +2455,7 @@ test("validateInvite: offline config-source refuses a fan-out element transform 
 test("validateInvite: offline config-source mints a fan-out under single-pass", async () => {
   // The admitted half of the same gate, and the path an operator is sent to: the
   // web editor authors no fan-out, so a config naming single-pass is where one is
-  // written, and the mint must carry it rather than refuse it. Both authoring
+  // written, and the mint must accept it rather than refuse it. Both authoring
   // surfaces at once -- the config's own standardization and a key's element
   // transform.
   const base = defaultTerms();
@@ -2520,7 +2503,7 @@ test("validateInvite: offline config-source mints a fan-out under single-pass", 
 
 test("validateInvite: a config's explicit metadata lets an otherwise-unsatisfying input pass", async () => {
   const terms = defaultTerms();
-  // The config's metadata types tax_id as ssn; the input carries tax_id, which
+  // The config's metadata types tax_id as ssn; the input has tax_id, which
   // name inference would type as an identifier (not ssn). Without honoring the
   // config metadata the ssn field would look unsatisfiable and invite would
   // refuse, even though the exchange (which uses the metadata) can produce it.
@@ -2598,7 +2581,7 @@ test("validateInvite: with no config and an input file, terms are inferred and w
 
 test("validateInvite: offline warns that a --server-* override is ignored", async () => {
   // The offline path writes a placeholder connection block, so a --server-*
-  // override cannot take effect; it must be surfaced rather than silently dropped.
+  // override cannot take effect; it must be shown rather than silently dropped.
   const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-override-"));
   tmpDirs.push(dir);
   const input = writeCsv(dir, "first_name,last_name,dob,ssn");
@@ -2657,7 +2640,7 @@ test("validateInvite: online does not warn about a --server-* override (it is ap
 test("validateInvite: offline warns that a connection-options override is ignored", async () => {
   // The offline path writes a placeholder connection block with no `options`
   // block, so a --peer-timeout (or any connection-options) override cannot take
-  // effect; it must be surfaced, with a remedy distinct from the server warning's
+  // effect; it must be shown, with a remedy distinct from the server warning's
   // -- pointing at connection.options.
   const dir = fs.mkdtempSync(
     path.join(tmpdir(), "psilink-invite-opt-override-"),
@@ -2798,7 +2781,7 @@ test("validateInvite: omitting --expires-in keeps the one-hour default", async (
 test("validateInvite: a zero --expires-in is rejected before any token is minted", async () => {
   // A non-existent input would itself error once read; the duration is parsed at
   // the very top of validateInvite, so the duration rejection -- not the missing
-  // input -- is what surfaces, proving no token is minted on a bad override.
+  // input -- is what shows, proving no token is minted on a bad override.
   const promise = validateInvite({
     resolved: { mode: "offline", input: "/nonexistent/psilink-input.csv" },
     options: testOptions(),
@@ -2813,7 +2796,7 @@ test("validateInvite: a zero --expires-in is rejected before any token is minted
 test("validateInvite: an --expires-in beyond the one-year maximum is rejected before any token is minted", async () => {
   // Nonexistent input, as in the zero case: the override is bounded at the top
   // of validateInvite, so the ceiling rejection -- not the missing input -- is
-  // what surfaces, proving no token is minted.
+  // what shows, proving no token is minted.
   const promise = validateInvite({
     resolved: { mode: "offline", input: "/nonexistent/psilink-input.csv" },
     options: testOptions(),
@@ -2905,14 +2888,12 @@ test("validateInvite: online warns when --expires-in is shorter than --accept-ti
 // --- handler: repeated single-value flag -------------------------------------
 
 test("handler: a repeated --accept-timeout is rejected (exit 64) before validation runs", async () => {
-  // The concrete instance `psilink invite --accept-timeout 60 --accept-timeout
-  // 120`: the handler reads accept-timeout via singleValue before
+  // `psilink invite --accept-timeout 60 --accept-timeout 120`: the handler
+  // reads accept-timeout via singleValue before
   // resolveInvitePositionals/validateInvite, so the repeat fails with a clean
   // usage error (exit 64) instead of reaching the `acceptTimeout <= 0` /
-  // `acceptTimeout > lifetimeSeconds` comparisons in validateInvite with an array
-  // operand. A valid input file is present, so without the guard validateInvite
-  // would mint and print the token and write both files; the guard means none of
-  // that happens -- which is exactly what the assertions below check.
+  // `acceptTimeout > lifetimeSeconds` comparisons with an array operand. A
+  // valid input file is present, so the guard alone stops the mint, print, and write.
   const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-dup-"));
   const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
   const exit = vi
@@ -2990,7 +2971,7 @@ test("handler: an --accept-timeout above the 7d ceiling is rejected (exit 64) be
   // (exit 64) before resolveInvitePositionals/validateInvite -- so the offline
   // commit never mints or prints the token or writes either file, exactly as the
   // bare-integer case above. The flag-named, max-stating message content is
-  // asserted at the shared seam (cli.test.ts). One day past the 7d cap.
+  // asserted at the shared boundary (cli.test.ts). One day past the 7d cap.
   const overCeiling = `${MAX_TIMEOUT_SECONDS / 86_400 + 1}d`;
   const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-cap-"));
   const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -3140,7 +3121,7 @@ test("handler: offline-from-config persists the disclosed subset into the reused
     // The branch ran to completion: the key was written and no usage-error exit.
     expect(exit).not.toHaveBeenCalledWith(64);
     expect(fs.existsSync(keyPath)).toBe(true);
-    // The reused config now carries the send commitment, equal to the disclosed set.
+    // The reused config now holds the send commitment, equal to the disclosed set.
     const parsed = YAML.parse(fs.readFileSync(configPath, "utf8")) as {
       disclosed_payload_columns?: string[];
     };
@@ -3198,7 +3179,7 @@ test("handler: offline-from-config removes an acceptor-era outbound consent reco
   }
 });
 
-test("handler: an offline invitation's placeholder connection carries no role", async () => {
+test("handler: an offline invitation's placeholder connection has no role", async () => {
   // `role` is a WebRTC-only field: the placeholder block an offline invite writes
   // is sftp, so the stamp `psilink invite` applies must leave it alone rather
   // than write a field that channel's schema does not define.
@@ -3226,7 +3207,7 @@ test("handler: an offline invitation's placeholder connection carries no role", 
       record: false,
     } as unknown as Arguments);
     expect(exit).not.toHaveBeenCalledWith(64);
-    // Read the connection block itself: `metadata` carries a `role` of its own
+    // Read the connection block itself: `metadata` has a `role` of its own
     // (the column's linkage/payload role), so a whole-file search would confuse
     // the two.
     const written = YAML.parse(fs.readFileSync(configFile, "utf8")) as {
@@ -3287,12 +3268,11 @@ test("handler: offline infer-from-input writes the disclosed subset into the fre
 
 test("handler: the invitation reaches stdout and never a diagnostic line", async () => {
   // The invitation encodes the setup shared secret, and every diagnostic line
-  // this command emits goes through the process-wide sink an operator can point
-  // at a file with --log-file. So the delivery is the stdout line, and the accept
-  // template names the invitation by placeholder: a template interpolating it
-  // would put the secret wherever that routing leads. Driven through the real
-  // handler at the noisiest level, so this covers every line the run emits rather
-  // than the one printInvitation happens to compose today.
+  // goes through the process-wide sink an operator can point at a file with
+  // --log-file, while the accept template names the invitation by placeholder
+  // -- so a template interpolating it would put the secret wherever that
+  // routing leads. Driven through the real handler at the noisiest level, so
+  // this covers every line the run emits, not just today's printInvitation.
   const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-secret-"));
   const input = writeCsv(dir, "first_name,last_name,dob,ssn");
   const configFile = path.join(dir, "psilink.yaml");
@@ -3318,7 +3298,7 @@ test("handler: the invitation reaches stdout and never a diagnostic line", async
     } as unknown as Arguments);
     expect(exit).not.toHaveBeenCalledWith(64);
 
-    // The stdout emission carries the invitation and nothing else, so it is what
+    // The stdout emission holds the invitation and nothing else, so it is what
     // the operator copies and what a redirect captures.
     expect(printed).toHaveLength(1);
     const invitation = printed[0];
@@ -3327,11 +3307,11 @@ test("handler: the invitation reaches stdout and never a diagnostic line", async
 
     const diagnostics = stderrWrites.join("");
     expect(diagnostics).not.toContain(invitation);
-    // The secret itself, not only the whole encoding: a later line carrying the
+    // The secret itself, not only the whole encoding: a later line holding the
     // token's fields rather than its string form would pass the check above.
     expect(diagnostics).not.toContain(token.sharedSecret);
     // The partner still learns what to run -- with the invitation named rather
-    // than carried, and with the identity accepting requires named where they
+    // than included, and with the identity accepting requires named where they
     // meet the command.
     expect(diagnostics).toContain(
       "psilink accept --identity <YOUR NAME, YOUR ORGANIZATION> " +
@@ -3348,15 +3328,12 @@ test("handler: the invitation reaches stdout and never a diagnostic line", async
 // --- handler: the exit status a failed config write leaves behind -----------
 
 test("handler: online invite whose config write failed keeps exit 73 and says so", async () => {
-  // The unattended half of the outcome: a wrapper gating on exit status must not
-  // read a rotated key with no configuration as a completed setup. The
-  // persistence-loss code is set where the write failed (runProtocol's hook
-  // handling), so the mocked runOnlineBootstrap stands in for that run by
-  // leaving 73 behind, and what is asserted here is that the handler carries it
-  // through untouched -- a summary that assigned the exit code itself would
-  // overwrite exactly this. No connection is opened; --log-level error is the
-  // level the summary is written at, and the level the underlying error it
-  // points back to is shown at.
+  // A wrapper gating on exit status must not read a rotated key with no
+  // configuration as a completed setup. The persistence-loss code (73) is set
+  // where the write failed (runProtocol's hook), mocked here via
+  // runOnlineBootstrap; the handler must pass it through untouched rather than
+  // have its own summary overwrite it. --log-level error is the level both the
+  // summary and the underlying error it points back to are shown at.
   const { input, options } = onlineFixture();
   const runOnlineBootstrapMock = vi.mocked(runOnlineBootstrap);
   runOnlineBootstrapMock.mockImplementation(async () => {
@@ -3446,10 +3423,10 @@ test("handler: a clean config write leaves the exchange's own exit 73 in place",
 });
 
 test("handler: online hands the accept budget to the run and reports what was saved", async () => {
-  // The two ends of the split, at the seam where they part: the accept timeout
-  // reaches the bootstrap as this run's budget alone, and the summary states the
-  // budget the configuration on disk carries so the operator learns it without
-  // opening the file.
+  // The two ends of the split, at the boundary where they part: the accept
+  // timeout reaches the bootstrap as this run's budget alone, and the summary
+  // states the budget the configuration on disk holds so the operator learns
+  // it without opening the file.
   const { input, options } = onlineFixture();
   const runOnlineBootstrapMock = vi.mocked(runOnlineBootstrap);
   runOnlineBootstrapMock.mockImplementation(async () => ({}));
@@ -3473,7 +3450,7 @@ test("handler: online hands the accept budget to the run and reports what was sa
     expect(exit).not.toHaveBeenCalled();
     const params = runOnlineBootstrapMock.mock.lastCall?.[0];
     expect(params?.runOnlyPeerTimeoutSeconds).toBe(300);
-    // Nothing carried the same budget into the connection that bootstrap
+    // Nothing wrote the same budget into the connection that bootstrap
     // persists.
     expect(params?.connection.options?.peerTimeoutMs).toBeUndefined();
     expect(stderr).toContain(persistedPeerBudgetNotice(undefined, 300, "sftp"));
@@ -3522,9 +3499,9 @@ test("handler: a webrtc online invite reports the webrtc peer-budget defaults, n
 });
 
 test("handler: a failed config write reports no saved peer budget", async () => {
-  // Nothing was written, so the summary that names what the file carries must
+  // Nothing was written, so the summary that names what the file holds must
   // not run at all: the honest report is the write failure the outcome line
-  // already carries.
+  // already states.
   const { input, options } = onlineFixture();
   const runOnlineBootstrapMock = vi.mocked(runOnlineBootstrap);
   runOnlineBootstrapMock.mockImplementation(async () => ({
@@ -3559,7 +3536,7 @@ test("handler: a failed config write leaves --peer-timeout's warning unfalsified
   // The one combination where the flag's warning could become a lie: it is
   // raised while the invitation is printed, long before the write it names can
   // fail. Non-promissory, it survives the failure -- and the summary that would
-  // assert the file carries the value does not run, so nothing claims a write
+  // assert the file holds the value does not run, so nothing claims a write
   // that never happened.
   const { input, options } = onlineFixture();
   const runOnlineBootstrapMock = vi.mocked(runOnlineBootstrap);
@@ -3597,7 +3574,7 @@ test("handler: a failed config write leaves --peer-timeout's warning unfalsified
 });
 
 test("handler: a webrtc online invite tells the partner to accept, with no URL and no second command", async () => {
-  // The partner types no coordination server: the invitation's endpoint carries
+  // The partner types no coordination server: the invitation's endpoint holds
   // it, so their accept writes the connection block and dials it in that one
   // command, while this one waits. Echoing the inviter's URL here would invite
   // the partner to retype a locator they already hold, on a command that

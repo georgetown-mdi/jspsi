@@ -18,7 +18,7 @@ export const APPENDED_MARKERS = ["ext-info-c", "kex-strict-c-v00@openssh.com"];
 /**
  * The key-exchange algorithms a decoded SSH_MSG_KEXINIT payload offers.
  *
- * The packet carries ten name-lists in wire order (RFC 4253 7.1); only the
+ * The packet contains ten name-lists in wire order (RFC 4253 7.1); only the
  * first is read, and the rest are skipped to nothing, so this decodes exactly
  * one packet.
  */
@@ -40,24 +40,22 @@ export function decodeOfferedKexAlgorithms(payload: Buffer): string[] {
  * handshake -- the offer of a re-dial following a dropped session, or of a
  * cycle-start re-dial in a live connection-per-poll exchange.
  *
- * `offers` records what the dials said and `accepted` counts them, and a case
- * about HOW MANY dials there were must read the second: a client that abandons
- * the handshake -- as one whose key exchange finds nothing in common does --
- * can have its socket destroyed with its own SSH_MSG_KEXINIT still unread here
- * (measured), so that dial is accepted and counted while its offer never
- * decodes. A case about WHAT was offered therefore reads offers a dial that
- * completes produced, and waits on `offers.length` rather than on `accepted()`.
+ * `offers` records what a dial that completes its handshake said; `accepted`
+ * counts every dial, including one that abandons the handshake with its own
+ * SSH_MSG_KEXINIT still unread here (measured). A case about how many dials
+ * there were reads `accepted()`; a case about what was offered reads `offers`
+ * and waits on `offers.length`.
  *
  * {@link pointAt} sends later dials to a different upstream, which from the
  * client's side is one endpoint answering with a different policy than the one
  * it agreed on.
  *
- * `close` WAITS for the connections it relayed to end, because destroying a
- * socket whose client ended its own session gracefully resets a connection the
- * ssh2 client is still finishing with, and the adapter reports that reset on the
- * console (measured, and the integration console sentinel fails the file on it).
- * A case that ends with a session still live passes `destroyLiveSessions`, since
- * the wait would hang the runner instead.
+ * `close` waits for the connections it relayed to end: destroying a socket
+ * whose client already ended its session gracefully resets a connection the
+ * ssh2 client is still finishing with, which the adapter reports on the
+ * console (measured) and the integration console sentinel fails the file on.
+ * A case that ends with a session still live passes `destroyLiveSessions`, or
+ * the wait would hang the runner.
  */
 export function createKexinitRecordingRelay(initial: {
   host: string;

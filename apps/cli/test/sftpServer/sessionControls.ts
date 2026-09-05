@@ -75,7 +75,7 @@ interface TrackedSession {
  * gets its own recorder rather than sharing one id space.
  */
 export interface SftpSessionRequestRecorder {
-  /** Note an arriving request of `op` carrying request id `reqid`. */
+  /** Note an arriving request of `op` holding request id `reqid`. */
   received(op: string, reqid: number): void;
   /** Note the reply being written for request id `reqid`. */
   answered(reqid: number): void;
@@ -193,7 +193,7 @@ export function createSftpSessionControls(): SftpSessionControlHub {
   };
 
   // Stop a socket ever writing. Nothing the server produces reaches the wire,
-  // while reads still drain, so the TCP connection is genuinely established and
+  // while reads still drain, so the TCP connection is established and
   // stays open. `true` is write()'s "buffered, keep writing" answer, so the
   // server's own protocol code sees a healthy socket.
   const muteWrites = (socket: ControlledSocket): void => {
@@ -209,14 +209,12 @@ export function createSftpSessionControls(): SftpSessionControlHub {
     mutedSockets.delete(socket);
   };
 
-  // Hand every vanished socket back BOTH halves the vanish took. A vanish mutes
-  // a socket's write and silences its closers in one act, and it silences them
-  // in the pools the withheld-close and stalled-handshake controls draw from, so
-  // a release of either of those reaches a vanished socket too and has to finish
-  // the job: a socket answering again while still impossible to close -- or the
-  // reverse -- is neither the black hole a case measured over nor a real socket,
-  // and nothing read from it would mean anything. Every release path ends here,
-  // so a vanished socket is wholly silenced or wholly its own.
+  // Hand every vanished socket back both halves the vanish took. A vanish
+  // mutes a socket's write and silences its closers in one act, drawing on
+  // the same pools the withheld-close and stalled-handshake controls use, so
+  // a release of either reaches a vanished socket too and must finish the
+  // job -- half-released is neither the black hole a case measured nor a
+  // real socket. Every release path ends here.
   const releaseVanished = (): void => {
     for (const socket of vanishedSockets) {
       restoreWrites(socket);

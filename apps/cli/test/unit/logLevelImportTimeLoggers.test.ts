@@ -13,18 +13,12 @@ import {
   snapshotDiagnosticSinkAndLevel,
 } from "../loggingTestSupport";
 
-// --log-level must govern the loggers that already exist when a command parses
-// its flags, not only the ones the command builds afterwards. Two are
-// constructed at import time -- `file-utils` in the CLI and `cleaning` in core --
-// so no command bootstrap can precede them, and between them they carry the
+// --log-level must govern loggers that already exist when a command parses its
+// flags, not only ones it builds afterwards. `file-utils` (CLI) and `cleaning`
+// (core) are constructed at import time and between them hold the
 // file-handling and data-cleaning warnings an operator silences or turns up.
-//
-// These cases drive the real `fingerprint` command, whose identity load emits one
-// of those warnings (`warnIfFileOverPermissive` -> the `file-utils` logger) when
-// the identity file is group/world-readable, and read what the operator sees: the
-// stderr sink, and the --log-file. A case that built its own logger after the
-// level was applied would exercise the path that already worked and pass either
-// way, so each one goes through the command.
+// These cases drive the real `fingerprint` command rather than a freshly built
+// logger, since only the pre-existing one proves the level reaches it.
 
 let dir: string;
 let identityPath: string;
@@ -98,10 +92,9 @@ function captureThroughSink(emit: () => void): string {
   return lines.join("\n");
 }
 
-// The import-time logger is in loglevel's registry before any command runs, and
-// at loglevel's own default level -- the state that made --log-level miss it.
-// Pinning that here is what makes the cases below meaningful: they act on a
-// logger that predates the flag rather than one built under it.
+// The import-time logger is in loglevel's registry before any command runs, at
+// loglevel's own default level -- the state that made --log-level miss it. The
+// cases below act on that pre-existing logger, not one built under the flag.
 test("the file-utils logger exists before any command runs, at loglevel's default", () => {
   expect(Object.keys(logLibrary.getLoggers())).toContain("file-utils");
   expect(logLibrary.getLogger("file-utils").getLevel()).toBe(
@@ -112,8 +105,8 @@ test("the file-utils logger exists before any command runs, at loglevel's defaul
 posixTest(
   "a default run shows the import-time logger's warning on stderr",
   async () => {
-    // Without this the silent cases would prove nothing: the warning really does
-    // reach the operator on a run that did not ask for silence.
+    // The baseline: without --log-level, the warning reaches the operator, so
+    // the silenced cases below have something to contrast against.
     const { result, stderr } = await runFingerprint({});
     expect(stderr).toContain("[WARN] [file-utils]");
     expect(stderr).toContain("restrict to 0600");

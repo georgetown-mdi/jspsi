@@ -83,23 +83,20 @@ beforeAll(async () => {
 // to set an explicit order, one party is delayed a tick by using setImmediate
 
 // All tests in this file share one SFTP_PATH rendezvous directory and reuse the
-// module-level connections. A test that crashes mid-protocol -- e.g. a transient
-// SFTP rename failure in the joiner fast-path -- intentionally leaves its
-// <uuid>-joining.json sentinel behind (it is the peer's cross-process recovery
-// signal; see fileSyncConnection synchronize()). Without per-test cleanup that
-// stray sentinel trips the next test's session-start hygiene guard, turning one
-// transient flake into three red tests. Reset the directory and the shared
-// connection state after every test so a single failure cannot cascade to its
-// siblings.
+// module-level connections. A test that crashes mid-protocol can leave its
+// <uuid>-joining.json sentinel behind (the peer's cross-process recovery
+// signal; see fileSyncConnection synchronize()), which trips the next test's
+// session-start hygiene guard and turns one flake into three red tests. Reset
+// the directory and the shared connection state after every test so a failure
+// cannot cascade to its siblings.
 afterEach(async () => {
-  // Quiesce any poller before touching the directory. The message-exchange
-  // tests call start() then stop() inline, but a failure between the two -- the
-  // flaky scenario this branch targets -- would leave a poller running. stop()
-  // (idempotent, and a no-op for the tests that never start one) clears
+  // Quiesce any poller before touching the directory: a failure between a
+  // message-exchange test's start() and stop() would otherwise leave a poller
+  // running. stop() (idempotent, a no-op for tests that never start one) clears
   // pollerActive, so the next scheduled poll does not fire and any in-flight
-  // poll swallows its result instead of racing the cleanServer() below and
-  // re-throwing through the module-level on("error") handlers into the next
-  // test (see fileSyncConnection poll()'s shutdown guard).
+  // poll swallows its result instead of racing cleanServer() below and
+  // re-throwing into the next test (see fileSyncConnection poll()'s shutdown
+  // guard).
   sftpConn.stop();
   localConn.stop();
   await cleanServer();
@@ -129,11 +126,10 @@ test("lock synchronization with race condition", async () => {
 test("joiner rendezvous recovers from a transient rename failure", async () => {
   // End-to-end guard for acceptance criterion (a): a transient SSH_FX_FAILURE on
   // the joiner's atomic <id>-joining.json -> <id>-hello.json rename must recover
-  // transparently rather than crash the rendezvous (the original flake). The
-  // mocked unit tests pin the adapter's retry contract in isolation; this drives
-  // it through the real adapter and a real server so an adapter<->core wiring
-  // regression (e.g. the predicate stops matching the real numeric code) is
-  // caught here, where the unit tests would not see it.
+  // transparently rather than crash the rendezvous. The mocked unit tests pin
+  // the adapter's retry contract in isolation; this drives it through the real
+  // adapter and a real server so an adapter<->core wiring regression (e.g. the
+  // predicate stops matching the real numeric code) is caught here.
   await sftpAdapter.put(
     Buffer.from(
       JSON.stringify({ locklessRendezvous: false, retainFiles: false }),

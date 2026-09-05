@@ -10,14 +10,13 @@ import { startInProcessSftpServer } from "../sftpServer";
 import { serverAuth } from "../sftpServer/testContext";
 import { inProcessOnly } from "../sftpBackendGate";
 
-// ssh2 DEFERS a Client.connect() issued on a socket it still considers WRITABLE:
-// the attempt is registered behind once('close', ...) and no readyTimeout is armed
-// for it, so nothing on psilink's side bounds it (measured unsettled at 45 s on
-// the pinned versions). Nothing in this repo may dial into that state, and what
-// keeps it out of reach is psilink's own dial gates plus the forced closes, which
-// leave an ended transport DESTROYED rather than writable -- a property of this
-// code, not of the library, and one that a dependency bump or a change to those
-// gates can silently take away.
+// ssh2 defers a Client.connect() issued on a socket it still considers writable:
+// the attempt sits behind once('close', ...) with no readyTimeout armed, so
+// nothing on psilink's side bounds it (measured unsettled at 45 s on the pinned
+// versions). psilink's own dial gates and forced closes keep a dial from
+// reaching that state by leaving an ended transport destroyed rather than
+// writable -- a property of this code, not the library, that a dependency bump
+// or a change to those gates could take away.
 //
 // So the census below is the claim as a check: every dial the adapter's three
 // dial paths issue is recorded with the state of the socket beneath it at entry,
@@ -139,8 +138,8 @@ inProcessOnly(
             },
           });
 
-          // The gate that keeps a dial off a LIVE socket, driven where it is
-          // load-bearing: with a session set, ensureConnected returns without
+          // The gate that keeps a dial off a live socket, driven where it is
+          // critical: with a session set, ensureConnected returns without
           // dialing at all. Removing it would show up here as a dial recorded on
           // a writable socket rather than as nothing at all.
           await expect(adapter.ensureConnected()).resolves.toBe(true);
@@ -236,25 +235,22 @@ inProcessOnly(
 );
 
 inProcessOnly(
-  "a mid-exchange recovery re-dial for a HIGH-LEVEL operation torn in flight " +
+  "a mid-exchange recovery re-dial for a high-level operation torn in flight " +
     "is issued on a socket ssh2 would not defer behind",
   async () => {
-    // The same dial path as the case above, reached from the other side of the
-    // library's own asymmetry. A raw-wrapper operation is torn by the transport's
-    // 'close', so recovery runs after the whole lifecycle sequence; a high-level
-    // one (get, the put family, delete, rename, exists) is torn by the 'end' that
-    // precedes it, so recovery runs while the dead transport still owes its
-    // 'close' and its socket has not yet been retired. That is the state this
-    // census exists for: a dial issued there is failed by the library and the
-    // handshake it started is abandoned, and the next dial finds the abandoned
-    // socket WRITABLE -- the deferring state. The recovery retires the transport
-    // before it dials, and this is that property as a check.
+    // The same dial path as the case above, from the other side of the library's
+    // own asymmetry: a raw-wrapper operation is torn by the transport's 'close',
+    // so recovery runs after the full lifecycle; a high-level one (get, the put
+    // family, delete, rename, exists) is torn by the 'end' that precedes it, so
+    // recovery runs while the socket has not yet been retired and would
+    // otherwise be writable -- the deferring state this census exists for. The
+    // recovery retires the transport before it dials.
     const srv = await startInProcessSftpServer();
     const dir = await fsp.mkdtemp(
       path.join(srv.handle.backingDir, "inflight-"),
     );
     const remote = `${srv.handle.remoteRoot}/${path.basename(dir)}`;
-    // Large enough that the cut lands inside the READ run rather than at the
+    // Large enough that the cut lands inside the read run rather than at the
     // operation's first opcode.
     await fsp.writeFile(
       path.join(dir, "transfer.bin"),
@@ -310,9 +306,9 @@ inProcessOnly(
   async () => {
     // The same dial path in the state this census exists for. The partner drops
     // the session and withholds its close, so ssh2-sftp-client's session property
-    // stays SET over a transport ssh2 has already ended -- the state a dial would
+    // stays set over a transport ssh2 has already ended -- the state a dial would
     // be deferred behind if the socket were still writable. The recovery forces
-    // that transport closed before it dials, so what it dials over is a DESTROYED
+    // that transport closed before it dials, so what it dials over is a destroyed
     // socket; this is that property as a check.
     const srv = await startInProcessSftpServer();
     const dir = await fsp.mkdtemp(
@@ -320,9 +316,9 @@ inProcessOnly(
     );
     const remote = `${srv.handle.remoteRoot}/${path.basename(dir)}`;
     // The torn operation is never answered, so the adapter's own per-operation
-    // deadline is what ends it; lowered through the @internal seam so this case
-    // does not spend the production minute waiting for a rejection it only needs
-    // to have happened.
+    // deadline is what ends it; lowered through the @internal `stallDeadlineMs`
+    // option so this case does not spend the production minute waiting for a
+    // rejection it only needs to have happened.
     const adapter = new SSH2SFTPClientAdapter({ stallDeadlineMs: 3_000 });
     const dials = recordDials(adapter);
     const conn = new FileSyncConnection(adapter, {

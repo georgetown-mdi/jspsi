@@ -121,7 +121,7 @@ test("what goes on the wire decodes back to what was sent", async () => {
   expect(decoded).toHaveLength(2);
 });
 
-test("a send on a gone channel surfaces as a terminal transport error", async () => {
+test("a send on a gone channel raises a terminal transport error", async () => {
   const { channel, session } = harness();
   const connection = webRtcMessageConnection(session);
   channel.sendThrows = true;

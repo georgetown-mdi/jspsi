@@ -9,7 +9,7 @@ import { isNativeUnavailable } from "../../src/psiBackend";
 
 // Pins the classification the WASM fallback depends on: which native-load errors
 // are the ordinary "no prebuild here" case (resolve null, fall back quietly)
-// versus a genuinely broken addon that must surface. Getting this wrong either
+// versus a genuinely broken addon that must be reported. Getting this wrong either
 // hides a real regression -- a present-but-broken prebuild silently treated as
 // "absent" -- or warns on every run of a platform that simply has no prebuild.
 describe("isNativeUnavailable", () => {
@@ -36,7 +36,7 @@ describe("isNativeUnavailable", () => {
     // than the prebuild requires (verified real-world: ERR_DLOPEN_FAILED with a
     // "GLIBC_2.38 not found" message). A prebuild exists but won't load here, so
     // it must NOT be swallowed as "no prebuild" -- the selector still falls back
-    // to WASM, but the CLI surfaces it at warn instead of hiding it.
+    // to WASM, but the CLI reports it at warn instead of hiding it.
     const dlopen = Object.assign(
       new Error(
         "/lib/aarch64-linux-gnu/libc.so.6: version `GLIBC_2.38' not found",
@@ -49,7 +49,7 @@ describe("isNativeUnavailable", () => {
   test("treats an exports-map subpath rejection as a genuine failure", () => {
     // If a future vendored package adds an `exports` map without listing the
     // native subpath, resolution throws ERR_PACKAGE_PATH_NOT_EXPORTED -- not the
-    // "no prebuild" case, so it surfaces rather than being mislabeled. Pinning
+    // "no prebuild" case, so it is reported rather than being mislabeled. Pinning
     // current behavior; flip this if the classifier is taught to absorb it.
     expect(isNativeUnavailable({ code: "ERR_PACKAGE_PATH_NOT_EXPORTED" })).toBe(
       false,
@@ -63,15 +63,12 @@ describe("isNativeUnavailable", () => {
   });
 
   test("node-gyp-build still throws the message the classifier keys on", () => {
-    // The quiet path above keys on a substring of node-gyp-build's no-match
-    // error -- an external contract, not a language guarantee. A future
-    // node-gyp-build reword, or a Node that stabilizes the experimental
-    // require.addon resolver node-gyp-build can dispatch to instead of its
-    // string-throwing JS path, would silently flip a genuine "no prebuild here"
-    // from quiet to a warning on every unsupported-platform run. Pin the
-    // contract at its source: invoke the node-gyp-build the vendored package
-    // actually loads (resolved through it, not a hoisted copy) against a dir
-    // with no prebuilds, and assert both the message and the classification.
+    // The quiet path above keys on a substring of node-gyp-build's error
+    // message -- an external contract, not a language guarantee, that a
+    // reword or a future require.addon resolver could silently change. Pin it
+    // at the source: invoke the node-gyp-build the vendored package actually
+    // resolves (not a hoisted copy) against a dir with no prebuilds, and
+    // assert both the message and the classification.
     const requireFrom = createRequire(import.meta.url);
     const nodeGypBuild = createRequire(
       requireFrom.resolve("@openmined/psi.js/package.json"),

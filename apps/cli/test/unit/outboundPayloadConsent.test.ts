@@ -80,7 +80,7 @@ function metadataDisclosing(columns: string[]): Metadata {
   ];
 }
 
-/** A config on disk carrying `consent`, plus operator content to preserve. */
+/** A config on disk holding `consent`, plus operator content to preserve. */
 function writeConfig(consent: Record<string, unknown> | undefined): void {
   fs.writeFileSync(
     configFile,
@@ -187,7 +187,7 @@ test("an exchange that transmits nothing is not asked about", async () => {
 test("pending, interactive, confirmed: the set is recorded and the spec updated", async () => {
   // The deferred confirmation the acceptance's forward reference promises. What is
   // recorded is the set resolved from THIS run's metadata, and the spec is updated
-  // in place so the prepare-time backstop reads the answer just given.
+  // in place so the prepare-time safety check reads the answer just given.
   writeConfig({ status: "pending" });
   promptConfirmMock.mockResolvedValue(true);
   const spec: ExchangeDataSpec = {
@@ -207,7 +207,7 @@ test("pending, interactive, confirmed: the set is recorded and the spec updated"
     "Nothing is sent until you confirm what this exchange will send:",
   );
   // The columns reach the terminal the question is asked on, one per line, so a
-  // name carrying the list separator cannot be misread as two -- the treatment the
+  // name containing the list separator cannot be misread as two -- the treatment the
   // acceptance display gives the same fact, under the same label.
   expect(promptWrites).toContain("columns you will send (enforced):");
   expect(promptWrites).toContain("\n    - diagnosis\n");
@@ -261,7 +261,7 @@ test("pending, non-interactive: refused with the set and how to confirm it", asy
 test("a column shaped like armor reads the same in the log and at the prompt", async () => {
   // The surface's two sinks run different passes -- core's prefixer strips key
   // material per log argument, and writePromptLine runs none -- so a name left
-  // to the sinks would read as the replacement in the log and verbatim at the
+  // to the sinks would display as the replacement in the log and verbatim at the
   // question it is answered against. Both sinks are captured on ONE run and
   // compared line for line. A decline is what makes that comparison exact: the
   // run ends at the refusal, so the log holds the surface and nothing after it.
@@ -361,10 +361,10 @@ test("a narrowed set is asked about too", async () => {
 // --- Through prepareDataset --------------------------------------------------
 
 test("prepareDataset: an unattended run refuses a set widened since the accept", async () => {
-  // End to end over the real command seam: a config accepted with one CSV, run
+  // End to end through prepareDataset: a config accepted with one CSV, run
   // against another whose extra column inferMetadata makes transmittable by
   // default. The refusal is raised while the dataset is being prepared -- before
-  // the run that carries credentials, terms, and data -- and carries the exit-64
+  // the run that holds credentials, terms, and data -- and has the exit-64
   // classification a UsageError gets, distinct from a transport failure.
   const input = path.join(dir, "in.csv");
   fs.writeFileSync(input, "first_name,diagnosis,ssn_note\nAda,A,S\n");

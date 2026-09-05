@@ -132,8 +132,8 @@ test("a probe failure propagates unchanged and pins nothing", async () => {
 
 test("is a no-op when a list of host_key_fingerprints is already pinned", async () => {
   // First-use trust gates on the pin being unset (=== undefined), which is
-  // value-agnostic: a config already carrying multiple pins (a staged rotation)
-  // is just as "pinned" as one carrying a single string and must not re-prompt.
+  // value-agnostic: a config already holding multiple pins (a staged rotation)
+  // is just as "pinned" as one holding a single string and must not re-prompt.
   const conn = sftpConn([FP, "SHA256:" + "B".repeat(42) + "A"]);
   const deps = makeDeps({ confirm: true });
   process.stdin.isTTY = false;
@@ -207,7 +207,7 @@ test("a wrong pre-pin is still what reaches the connection for verification (fai
   // skipping the prompt; the mismatch check itself lives in core's open() (see
   // fileSyncConnection.ts) and is exercised there, not here. This test proves
   // the CLI plumbing hands a WRONG pre-pin through unmodified -- exactly the
-  // value a stored (config-file) pin would carry -- so it reaches the identical
+  // value a stored (config-file) pin would hold -- so it reaches the identical
   // core verification path rather than being silently accepted or altered.
   const wrong = "SHA256:" + "C".repeat(42) + "A";
   const base = sftpConn();
@@ -281,7 +281,7 @@ test("interactive confirm (save-with-config) pins in memory and writes no file",
   );
   expect(deps.probeCalls).toBe(1);
   expect(deps.confirmCalls).toBe(1);
-  // The in-memory connection now carries the confirmed pin (so open() enforces).
+  // The in-memory connection now has the confirmed pin (so open() enforces).
   if (conn.channel === "sftp") expect(conn.server.hostKeyFingerprint).toBe(FP);
 });
 
@@ -435,13 +435,12 @@ test("the trust prompt names a conforming key type verbatim", async () => {
 });
 
 // --- the refusals at the rendered boundary -----------------------------------
-// Both refusals are partitioned by WHO CHOSE THE BYTES on each link, because
-// sanitizeErrorForDisplay caps every cause-chain link separately: on a link that
-// mixes first-party text with a fragment somebody else chose, that chooser
-// spends the budget and the operator loses the step they have to act on. These
-// assertions therefore run at the RENDERED boundary through the real renderer --
-// the raw `.message` is only the summary, and a regex over it passes on text the
-// operator never sees.
+// Both refusals are partitioned by who chose the bytes on each link:
+// sanitizeErrorForDisplay caps every cause-chain link separately, so a
+// partner-chosen fragment sharing a link with first-party text can spend the
+// budget and cost the operator their actionable step. These assertions run
+// at the rendered boundary, through the real renderer -- not the raw
+// `.message`, which a regex could pass on text the operator never sees.
 
 // The renderer's own cause-link separator, read back out of a two-link render
 // rather than restated here, so splitting a rendered chain into its links cannot
@@ -471,16 +470,12 @@ const RECOVERY_WITHOUT_CONFIG =
   "Run once from an interactive terminal to review and pin the presented key, " +
   "or pin it out-of-band by setting connection.server.host_key_fingerprint in " +
   "a saved configuration.";
-// This refusal is raised AFTER the probe, which is itself a connection -- so
-// what it can honestly assure the operator of is what that connection
-// disclosed, not that none was opened. The probe hands ssh2 no password,
-// private key, or passphrase (pinned in packages/core/test/
-// fileSyncConnection.test.ts) and refuses at host-key verification, before
-// userauth -- the ssh2 premise recorded in docs/spec/DEPENDENCY_PINS.md, and
-// exercised over a real server by
-// apps/cli/test/integration/sftpConnection.test.ts -- so no credential was
-// sent; and the decline returns ahead of every persist arm, so nothing was
-// written (the check above).
+// Raised after the probe, itself a connection: this can only accurately
+// assure what that connection disclosed, not that none was opened. ssh2
+// refuses at host-key verification, before userauth (the assumption recorded
+// in docs/spec/DEPENDENCY_PINS.md), so no credential was sent; and the
+// decline returns ahead of every persist arm, so nothing was written (the
+// check above).
 const DECLINED_SUMMARY =
   "the presented host key was not trusted; no credential was sent and nothing " +
   "was written. Obtain and verify the server's fingerprint out-of-band, then " +
@@ -532,13 +527,11 @@ const ORDINARY_HOST = "sftp.example.org";
 const ORDINARY_CONFIG_PATH = "/etc/psilink.yaml";
 
 // The sizes the configured host arrives in. On the acceptor route it is the
-// PARTNER's, copied verbatim out of the invitation endpoint into the written
-// config (connectionFromEndpoint), and SFTPServerSchema bounds `server.host` by
-// `min(1)` alone -- no maximum, no format -- so the invitation schema's own
-// MAX_ENDPOINT_HOST_LENGTH bounds only what an INVITATION can carry, and a
-// hand-written or partner-derived config admits any length above it.
-// Each row carries whether the delivery is wide enough to overrun its own link,
-// so a delivery that stops overrunning stops measuring what it was added for.
+// partner's, copied verbatim from the invitation endpoint into the written
+// config (connectionFromEndpoint); SFTPServerSchema bounds `server.host` only
+// by `min(1)`, so MAX_ENDPOINT_HOST_LENGTH bounds only what an INVITATION can
+// hold, and a hand-written or partner-derived config admits any length above
+// it. Each row states whether its host overruns its own link.
 const HOSTS: Array<[string, string, boolean]> = [
   ["an ordinary host", ORDINARY_HOST, false],
   [
@@ -548,7 +541,7 @@ const HOSTS: Array<[string, string, boolean]> = [
   ],
   // Between the invitation bound and the flood: sized off the renderer's own
   // link budget so it overruns that link whatever the budget is, and short
-  // enough that a config carrying it looks unremarkable.
+  // enough that a config holding it looks unremarkable.
   [
     "a host past a link's display budget",
     "h".repeat(COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH + 100),
@@ -624,7 +617,7 @@ for (const [hostLabel, host, hostOverruns] of HOSTS)
     expect(links[1]).toBe(RECOVERY_WITHOUT_CONFIG);
     expect(links[2]?.startsWith(HOST_LABEL)).toBe(true);
     expect(links[2]?.includes(DISPLAY_TRUNCATION_MARKER)).toBe(hostOverruns);
-    // Nothing to name, so nothing is named: the ephemeral shape carries no
+    // Nothing to name, so nothing is named: the ephemeral shape has no
     // config path at all, so no link -- and no empty or `undefined` label --
     // is grown for one.
     expect(rendered).not.toContain(CONFIG_LABEL);
@@ -750,7 +743,7 @@ test("a control-laden host is escaped at the boundary and cannot forge a link", 
       `\\x0acaused by: forged\\x00\\u202e`,
   );
   // Non-forgeable framing: the separator's newline is the only one the render
-  // contains, so a host carrying `caused by: ` text of its own adds no link and
+  // contains, so a host holding `caused by: ` text of its own adds no link and
   // cannot pass its bytes off as a further step in the chain.
   expect(links.length).toBe(4);
   expect(rendered.split("\n").length).toBe(links.length);
@@ -810,7 +803,7 @@ test("a sliced key in the config path is redacted on the config path's own link"
   expect(links[3]).toBe(`${HOST_LABEL}${ORDINARY_HOST}`);
 });
 
-// Every link carries its `cause` the way the two-argument Error constructor
+// Every link has its `cause` the way the two-argument Error constructor
 // would, so a sink that enumerates or serializes a refusal rather than rendering
 // it through sanitizeErrorForDisplay sees the same shape at every depth as it
 // does at the top.

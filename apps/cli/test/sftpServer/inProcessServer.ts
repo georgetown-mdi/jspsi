@@ -40,16 +40,14 @@ const RESPONSE_DATA = 103;
 const REMOTE_ROOT = "/psi";
 
 /**
- * The widest SFTP packet the pinned stack carries, measured against the real
- * client rather than read out of it: a NAME reply declaring this many payload
- * bytes is delivered whole, and one declaring a byte more is refused by the
- * client as a fatal protocol error that takes the SFTP session down with it. The
- * server that wrote it is told nothing either way, so a backend that wrote one
- * would lose the session it was serving without ever seeing why.
+ * The widest SFTP packet the pinned stack delivers, measured against the
+ * real client rather than read out of it: a NAME reply declaring this many
+ * payload bytes arrives whole, and one declaring a byte more is refused as a
+ * fatal protocol error that takes the SFTP session down with it, with the
+ * server told nothing either way.
  *
  * Both sides of the wall are driven in
- * `test/integration/sftpStackPremises.test.ts`, so a bump that moves it fails
- * there rather than as broken batching in whichever suite ran first.
+ * `test/integration/sftpStackPremises.test.ts`.
  *
  * @internal
  */
@@ -65,8 +63,8 @@ export const READDIR_BATCH_BUDGET_BYTES = MAX_DELIVERED_SFTP_PAYLOAD_BYTES / 2;
 
 // A NAME reply's own header (type, request id, entry count), and per entry the
 // length prefixes and attribute block SFTPv3 frames around it. Both are
-// deliberately over-counted: predicting another library's encoder to the byte is
-// what the budget's margin exists to avoid needing.
+// over-counted: predicting another library's encoder to the byte is what the
+// budget's margin exists to avoid needing.
 const NAME_PACKET_HEADER_BYTES = 16;
 const NAME_ENTRY_FRAMING_BYTES = 64;
 
@@ -88,9 +86,9 @@ function nameBatchAdmits(packedBytes: number, entryBytes: number): boolean {
 
 // The malformed-packet injection rides one documented ssh2 internal: the public
 // name()/data() server APIs only ever emit well-formed packets, so a malformed
-// reply has to be written through the protocol/stream seam, exactly as a real
+// reply has to be written through the protocol/stream boundary, exactly as a real
 // hostile server would put it on the wire. docs/spec/CHANNEL_SECURITY.md documents this
-// premise and a committed adapter test already depends on the same internal.
+// assumption and a committed adapter test already depends on the same internal.
 interface RawChannelSftp {
   _protocol: { channelData(id: unknown, data: Buffer): void };
   outgoing: { id: unknown };
@@ -147,14 +145,13 @@ function malformedDataPacket(reqid: number): Buffer {
   return frame(RESPONSE_DATA, reqid, body);
 }
 
-// Two DISTINCT parties. Each has a password AND a keypair so the suite can drive
-// either auth method against the same backend; the keypairs are also distinct so
-// public-key auth is a genuine credential check, not a rubber stamp.
+// Two distinct parties, each with a password and a keypair, so the suite can
+// drive either auth method against the backend; the keypairs also differ so
+// public-key auth is a real credential check, not a rubber stamp.
 //
-// ECDSA, not ed25519: ssh2's generateKeyPairSync intermittently emits an ed25519
-// OpenSSH private key it cannot parse back ("Malformed OpenSSH private key"); the
-// key type is irrelevant to what these tests exercise, and ecdsa has not
-// reproduced the fault.
+// ECDSA, not ed25519: ssh2's generateKeyPairSync intermittently emits an
+// ed25519 OpenSSH private key it cannot parse back ("Malformed OpenSSH
+// private key"); ecdsa has not reproduced the fault.
 function makeKeyPair(): { private: string; public: string } {
   return generateKeyPairSync("ecdsa", { bits: 256 });
 }
@@ -250,14 +247,12 @@ export async function startInProcessSftpServer(): Promise<InProcessSftpServer> {
 
   const server = new Server({ hostKeys: [hostKey.private] }, (client) => {
     clients.add(client);
-    // The earliest point a control can reach the socket: a connection accepted
-    // while the withheld-close control is armed keeps its socket for the whole
-    // exchange, so that control has to reach it here rather than at the
-    // disconnect it is meant to ignore. ssh2 writes the server's identification
-    // string on the accepted socket and emits this only once the client's has
-    // arrived, so the stalled-handshake control's mute takes hold on a
-    // connection that has already exchanged identification lines -- which is the
-    // stall a case driving it measures against.
+    // The earliest point a control can reach the socket: a connection
+    // accepted while the withheld-close control is armed keeps its socket
+    // for the whole exchange, so that control has to reach it here rather
+    // than at the disconnect it is meant to ignore. The stalled-handshake
+    // control's mute takes hold once ssh2 has written the server's
+    // identification string, which is the stall a case measures against.
     sessionControls.onConnectionAccepted(
       (client as unknown as SocketBearingConnection)._sock,
     );
@@ -267,8 +262,8 @@ export async function startInProcessSftpServer(): Promise<InProcessSftpServer> {
     // round-trips in a full PSI exchange, stretching a ~3s exchange to tens of
     // seconds on a CI runner (macOS loopback masks it, Linux does not).
     (client as unknown as NoDelayConnection).setNoDelay(true);
-    // A peer reset (the adversarial tests deliberately abort mid-stream) surfaces
-    // as an 'error' on the connection; without a listener it would crash the test
+    // A peer reset (the adversarial tests abort mid-stream) appears as an
+    // 'error' on the connection; without a listener it would crash the test
     // process. There is nothing to recover here -- the connection is going away.
     client.on("error", () => {});
     client.on("close", () => clients.delete(client));
@@ -358,7 +353,7 @@ export async function startInProcessSftpServer(): Promise<InProcessSftpServer> {
 
   const port = await new Promise<number>((resolve, reject) => {
     // Before the server is listening a 'listen' failure (e.g. the loopback port
-    // races away) arrives as an 'error' event; surface it as a rejected start
+    // races away) arrives as an 'error' event; report it as a rejected start
     // rather than an uncaught crash.
     const onStartupError = (err: Error): void => reject(err);
     server.once("error", onStartupError);
@@ -484,13 +479,12 @@ function attachSftpHandlers(
   tearSession: () => void,
   requests: SftpSessionRequestRecorder,
 ): () => void {
-  // A forced session drop (the session-control tests cut a connection mid-batch)
-  // can land while an fs callback below is still pending; when that callback then
-  // writes its reply, the channel is already ended. ssh2's send path no-ops a
-  // write to a closed channel today, but a synchronous throw on that path would
-  // escape the connection-level error handler and crash the test worker, so wrap
-  // every server reply write to swallow it. The full drop-path interaction is
-  // validated in the CI-only SFTP integration suite.
+  // A forced session drop (the session-control tests cut a connection
+  // mid-batch) can land while an fs callback below is still pending; when
+  // that callback then writes its reply, the channel is already ended.
+  // ssh2's send path no-ops a write to a closed channel today, but a
+  // synchronous throw there would crash the test worker, so wrap every
+  // server reply write to swallow it.
   const replyMethods = ["status", "data", "name", "attrs", "handle"] as const;
   const guarded = sftp as unknown as Record<
     (typeof replyMethods)[number],
@@ -499,9 +493,9 @@ function attachSftpHandlers(
   for (const method of replyMethods) {
     const original = guarded[method];
     guarded[method] = (...args: unknown[]): void => {
-      // Every server reply carries its request id first, so this is also where
+      // Every server reply holds its request id first, so this is also where
       // the request meter learns a request is no longer outstanding. Noted
-      // before the write, so a reply the channel can no longer carry still
+      // before the write, so a reply the channel can no longer send still
       // clears the request the server has finished with.
       requests.answered(args[0] as number);
       try {
@@ -661,7 +655,7 @@ function attachSftpHandlers(
     if (inject.withholdOn === "OPENDIR") return;
     const dirPath = resolve(p);
     fs.readdir(dirPath, (err, names) => {
-      // ENOENT is a missing path; anything else (notably ENOTDIR when a file is
+      // ENOENT is a missing path; anything else (ENOTDIR when a file is
       // opened as a directory) is a generic failure, matching OpenSSH and the
       // OPEN handler's own dispatch rather than masking it as NO_SUCH_FILE.
       if (err)
@@ -713,7 +707,7 @@ function attachSftpHandlers(
       return;
     }
     if (inject.emptyNonEofReaddirBatches > 0) {
-      // A NAME reply carrying no entry and no end-of-directory status: the batch
+      // A NAME reply holding no entry and no end-of-directory status: the batch
       // advances the listing by nothing while telling the client there is more
       // to come. Written through the server's own name() so the frame is the
       // stack's, not this file's.
@@ -723,7 +717,7 @@ function attachSftpHandlers(
     if (h.pos >= h.names.length) return sftp.status(reqid, STATUS_CODE.EOF);
 
     // Realistic batching, bounded by the caller's cap where one is set AND by
-    // what a single NAME packet carries, resuming from the handle's stored
+    // what a single NAME packet holds, resuming from the handle's stored
     // position: a directory wider than one packet is served over as many round
     // trips as it takes, the way a real server answers one.
     const cap = inject.readdirBatchSize || h.names.length;
@@ -735,7 +729,7 @@ function attachSftpHandlers(
     let packed = NAME_PACKET_HEADER_BYTES;
     while (h.pos < h.names.length && entries.length < cap) {
       const name = h.names[h.pos];
-      // Carry the full stat shape attrsFromStat reads -- a `{ size: number }`
+      // Keep the full stat shape attrsFromStat reads -- a `{ size: number }`
       // annotation would narrow mode/atime/mtime away and force every entry to
       // report Date.now() instead of its real timestamps.
       let st: { size: number; mode?: number; atime?: Date; mtime?: Date };
@@ -762,7 +756,7 @@ function attachSftpHandlers(
   });
 
   // STAT follows symlinks; LSTAT must not (SFTP spec). No symlinks exist in the
-  // backing dir today, but keeping the contract honest avoids a future test that
+  // backing dir today, but keeping the contract correct avoids a future test that
   // plants one silently getting dereferenced.
   const onStat = (op: "STAT" | "LSTAT", statFn: typeof fs.stat) => {
     const answer = (reqid: number, p: string): void => {
@@ -795,7 +789,7 @@ function attachSftpHandlers(
       }
       // A generic failure rather than NO_SUCH_FILE: what the probe must not be
       // able to conclude is that the destination is absent, so the publish stays
-      // undetermined instead of being settled either way.
+      // undetermined instead of being decided either way.
       if (
         renameTear.refuseProbeOfTornDestination &&
         renameTear.tornDestination === p

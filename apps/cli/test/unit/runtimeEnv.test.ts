@@ -29,7 +29,7 @@ describe("formatRuntimeEnv", () => {
   });
 
   test("omits the container limit for the unconstrained sentinel", () => {
-    // cgroup v2's "max" surfaces as UINT64_MAX (~2^64), far above host memory.
+    // cgroup v2's "max" shows as UINT64_MAX (~2^64), far above host memory.
     const line = formatRuntimeEnv({
       ...base,
       constrainedMemBytes: 2 ** 64,

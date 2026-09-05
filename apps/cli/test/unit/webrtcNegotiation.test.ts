@@ -14,16 +14,11 @@ import type { RTCPeerConnection } from "werift";
 
 /**
  * The negotiation state machine against a scripted broker and a scripted peer
- * connection: which signaling frame goes out, in what order, and in response to
- * what.
- *
- * These orderings are the ones a live run cannot show. werift inlines its ICE
- * candidates in the SDP, so a peer whose trickled candidates are all dropped
- * still connects on loopback -- the candidate-queue rule the transport exists to
- * honour is invisible to an end-to-end test and fails only in the field, on the
- * day the inlined set is not enough. The live path is exercised in
- * test/integration/webrtc/transport.test.ts; this is where the wire ORDER is
- * held.
+ * connection: which signaling frame goes out, in what order, and in response
+ * to what. werift inlines its ICE candidates in the SDP, so a peer whose
+ * trickled candidates are all dropped still connects on loopback -- the
+ * candidate-queue rule is invisible to an end-to-end test and only fails in
+ * the field. The live path is test/integration/webrtc/transport.test.ts.
  */
 
 const CANDIDATE_A = {
@@ -40,7 +35,7 @@ const CANDIDATE_B = {
 /**
  * werift hands the negotiation an `RTCIceCandidate` instance whose `toJSON`
  * produces the browser-shaped payload; the transport converts through that
- * method, so a scripted candidate has to carry it too.
+ * method, so a scripted candidate has to include it too.
  */
 function asIceCandidate(fields: Record<string, unknown>): unknown {
   return { ...fields, toJSON: () => fields };
@@ -116,7 +111,7 @@ class ScriptedPeer {
   readonly channels: Array<FakeChannel> = [];
   /** How many times the session closed this connection. */
   closeCalls = 0;
-  // The SCTP queues the session's drain premise asserts on.
+  // The SCTP queues the session's drain assumption asserts on.
   readonly sctp = { sctp: { outboundQueue: [], sentQueue: [] } };
   /** Fired during setLocalDescription, as werift does. */
   candidatesDuringSetLocal: Array<Record<string, unknown>> = [];
@@ -276,7 +271,7 @@ async function settlementOf(
 
 // --- the dialer's offer -----------------------------------------------------
 
-test("the acceptor's OFFER carries the payload a browser PeerJS peer parses", async () => {
+test("the acceptor's OFFER contains the payload a browser PeerJS peer parses", async () => {
   const { socket, peer, session, inviterId } = await startRendezvous({
     role: "acceptor",
   });
@@ -352,7 +347,7 @@ test("the offer is re-sent while the partner has not answered", async () => {
   });
   await new Promise((resolve) => setTimeout(resolve, 80));
   expect(socket.ofType(BROKER_MESSAGE.offer).length).toBeGreaterThan(1);
-  // Each repeat carries the candidates again: the ones already sent were
+  // Each repeat includes the candidates again: the ones already sent were
   // dropped along with the offer they belonged to.
   expect(socket.ofType(BROKER_MESSAGE.candidate).length).toBeGreaterThan(1);
   // Same connection id throughout, which a peer that already has the
@@ -391,13 +386,12 @@ test("the retry stops once the answer lands", async () => {
 // --- which ceiling governs which wait ---------------------------------------
 
 /**
- * The two ceilings measure different things, and only unequal values tell them
- * apart: the rendezvous budget covers a partner who has not arrived (human
- * timescale, ten minutes), the channel-open ceiling a partner who is present
- * and negotiating but whose channel never comes up (thirty seconds). The dialer
- * creates its channel before it has offered, so the two are trivially confused
- * there -- and confusing them cuts a ten-minute rendezvous to thirty seconds and
- * blames a network path for an operator who started late.
+ * The two ceilings measure different things, and only unequal values tell
+ * them apart: the rendezvous budget covers a partner who has not arrived (ten
+ * minutes), the channel-open ceiling a partner present and negotiating whose
+ * channel never comes up (thirty seconds). The dialer creates its channel
+ * before it has offered, so confusing the two cuts a ten-minute rendezvous to
+ * thirty seconds and blames a network path for an operator who started late.
  */
 
 test("the dialer's channel-open ceiling does not run before it is answered", async () => {
@@ -464,7 +458,7 @@ test("the inviter answers an offer and adopts its connection id", async () => {
   expect(answer.dst).toBe(acceptorId);
   const payload = answer.payload as Record<string, unknown>;
   expect(payload.sdp).toEqual({ type: "answer", sdp: "v=0\r\nanswer\r\n" });
-  // The answer carries no label/reliable/serialization -- the offer settled all
+  // The answer contains no label/reliable/serialization -- the offer settled all
   // three -- and reuses the id the dialer chose.
   expect(payload.connectionId).toBe("dc_fromtheirside");
   expect(payload).not.toHaveProperty("serialization");
@@ -556,7 +550,7 @@ test("a signaling frame from any id but the derived partner is ignored", async (
   await session;
 });
 
-test("a signaling frame carrying no src is dropped", async () => {
+test("a signaling frame containing no src is dropped", async () => {
   // The honest broker stamps src on every relayed frame, so a src-less frame is
   // not peer traffic; the one party that can plant one is a hostile signaling
   // server, and it must not be able to apply an offer.
@@ -695,18 +689,12 @@ test("broker signaling after the channel opens is ignored", async () => {
 // --- what an abort leaves behind --------------------------------------------
 
 /**
- * The rendezvous is the only step of a webrtc run that can wait ten minutes, so
- * `runProtocol` hands it the interrupt signal to end an operator's Ctrl-C
- * quickly. What makes ending it early safe is the teardown underneath: the
- * broker socket is closed, releasing the derived id the run registered, and the
- * peer connection with it. Both are asserted against the real session rather
- * than a mocked transport, which is the only place the wiring exists.
- *
- * A webrtc open is two phases -- registering with the signaling server, then
- * waiting for the partner -- and each reports its own cancellation, which is why
- * the wording is pinned below rather than left to whichever listener happens to
- * be installed first. The three tests are the three windows an abort can land
- * in, so neither phase's message can go unreachable unnoticed.
+ * The rendezvous can wait up to ten minutes, so `runProtocol` hands it the
+ * interrupt signal for a quick Ctrl-C. Ending it early closes the broker
+ * socket (releasing the derived id) and the peer connection, asserted against
+ * the real session where that wiring lives. A webrtc open is two phases --
+ * registering, then waiting for the partner -- each with its own cancellation
+ * wording; the three tests below cover the three windows an abort can land in.
  */
 
 test("an abort after registration names the rendezvous and tears both down", async () => {
@@ -762,12 +750,11 @@ test("an abort inside the dialer's offer does not wait out the rendezvous", asyn
 
 test("a broker failure inside the acceptor's offer rejects rather than going unhandled", async () => {
   // The acceptor awaits its own offer before it awaits the rendezvous, so a
-  // failure latched in that window rejects a promise nothing is waiting on yet.
-  // Unhandled, that rejection terminates the process at exit 1 -- past this
-  // function's own teardown, past runProtocol's catch, and past the classified
-  // error a supervisor reads -- instead of failing the exchange the ordinary
-  // way. A terminal broker ERROR delivered while createOffer is in flight is one
-  // of the several failures that reach fail() there.
+  // failure latched in that window rejects a promise nothing is waiting on
+  // yet. Unhandled, that terminates the process at exit 1 instead of failing
+  // the exchange the ordinary way. A terminal broker ERROR delivered while
+  // createOffer is in flight is one of several failures that reach fail()
+  // there.
   const unhandled: unknown[] = [];
   const record = (reason: unknown): void => {
     unhandled.push(reason);

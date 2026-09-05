@@ -28,28 +28,13 @@ import {
 import type { KexPrimitive } from "../../src/connection/sftpKexCapability";
 import { inProcessOnly } from "../sftpBackendGate";
 
-// What the SFTP client actually OFFERS, read off the wire from the client's own
+// What the SFTP client actually offers, read off the wire from the client's own
 // SSH_MSG_KEXINIT, with the platform-capability verdict forced to "this process
-// cannot perform X25519".
-//
-// The unit suite pins the OPTIONS the constraint produces; only the installed
-// ssh2 can say what those options mean, and every claim about that is settled by
-// driving it here rather than by reading its source (CLAUDE.md). Nothing below
-// predicts ssh2's behaviour: each listener answers the SSH identification string
-// and then decodes the one unencrypted packet ssh2 sends, so what is asserted is
-// the byte sequence ssh2 put on the socket. The dials that have to complete a
-// handshake -- the host-key probe and the recovery re-dial -- read the same
-// packet from a relay in front of the suite's real server.
-//
-// Why the verdict is forced rather than produced by a FIPS host: the only lever
-// available in this image is `crypto.setFips(true)`, and it is NOT a model of a
-// FIPS host. Measured on this image (node 26.5.1 / openssl 3.5.7), it leaves
-// OpenSSL with no usable algorithms at all -- `createHash("sha256")`,
-// `createCipheriv("aes-128-gcm", ...)` and `generateKeyPairSync("ec",
-// {namedCurve: "prime256v1"})` all throw
-// `error:0308010C:digital envelope routines::unsupported`, so a handshake it
-// "fixed" would still die at the first hash. A real FIPS provider keeps those and
-// drops only X25519, which is what the forced verdict below models.
+// cannot perform X25519" -- driven against the real installed ssh2 rather than
+// modeled, per CLAUDE.md's settle-by-driving-the-tool rule. The verdict is
+// forced rather than produced by `crypto.setFips(true)`, which on this image
+// breaks every algorithm ssh2 needs, not only X25519, so it is not a model of a
+// real FIPS host.
 
 const forcedMissingPrimitive: KexPrimitive = {
   primitive: "X25519",
@@ -59,9 +44,9 @@ const forcedMissingPrimitive: KexPrimitive = {
   },
 };
 
-// Only the host VERDICT is replaced; the constraint itself, the adapter, and ssh2
-// are the real ones. This is the seam that lets the adapter's own dial path be
-// driven on a host that can perform X25519 perfectly well.
+// Only the host verdict is replaced; the constraint itself, the adapter, and ssh2
+// are the real ones. This is the boundary that lets the adapter's own dial path
+// be driven on a host that can perform X25519 perfectly well.
 vi.mock("../../src/connection/sftpKexCapability", async (importOriginal) => {
   const actual =
     await importOriginal<
@@ -169,9 +154,9 @@ function createKexinitReader(): {
 
 /**
  * A listener that answers the identification string and then sends one
- * `SSH_MSG_DISCONNECT` carrying a description of the caller's choosing -- the
+ * `SSH_MSG_DISCONNECT` holding a description of the caller's choosing -- the
  * server-controlled text ssh2 renders into its `Client` error message. Written
- * on the wire rather than through ssh2's `Server`, which offers no seam for the
+ * on the wire rather than through ssh2's `Server`, which offers no hook for the
  * description.
  */
 function createDisconnectingServer(description: string): {
@@ -327,7 +312,7 @@ describe("the offer shapes an operator's own algorithms.kex takes", () => {
   // The describe above drives the default shape -- no operator algorithms.kex at
   // all. The other two shapes the constraint accepts reach ssh2 as a filtered
   // list and as a merged modifier, and each has to arrive on the wire withholding
-  // X25519 while still carrying what ssh2 appends outside its filtering.
+  // X25519 while still including what ssh2 appends outside its filtering.
 
   test("an explicit list is offered filtered, markers and all", async () => {
     const [offered, logs] = await withCapturedLogs(() =>
@@ -348,9 +333,10 @@ describe("the offer shapes an operator's own algorithms.kex takes", () => {
   });
 
   test("a modifier's own append cannot re-add what the constraint removed", async () => {
-    // ssh2 applies `remove` after `append`/`prepend` -- the premise merging the
-    // constraint's removal into an operator's modifier rests on, and the reason
-    // an operator cannot put an unperformable algorithm back by naming it.
+    // ssh2 applies `remove` after `append`/`prepend` -- the assumption merging
+    // the constraint's removal into an operator's modifier rests on, and the
+    // reason an operator cannot put an unperformable algorithm back by naming
+    // it.
     const offered = await offeredByAdapter({
       kex: {
         append: ["curve25519-sha256"],
@@ -379,7 +365,7 @@ describe("the offer shapes an operator's own algorithms.kex takes", () => {
 
 describe("what ssh2 makes of a kex value psilink must not forward", () => {
   // The measured ssh2 behaviour the refusal and the empty-list replacement exist
-  // for: these values are read as *unspecified* and restore the full defaults,
+  // for: these values are treated as *unspecified* and restore the full defaults,
   // X25519 included. Driven against bare ssh2 because the constraint's whole job
   // is that they never reach it from psilink.
   let bare: string[];
@@ -412,7 +398,7 @@ describe("the constrained offer against a real SFTP server", () => {
       // approved remainder behind it, which is what this dial lands on.
       const server = inject("sftpServer");
       const adapter = new SSH2SFTPClientAdapter();
-      // The pin serverAuth carries belongs to a connection's `server` block
+      // The pin serverAuth holds belongs to a connection's `server` block
       // rather than to ssh2's own options, so it stays out of the dial.
       const { hostKeyFingerprint, ...auth } = serverAuth(server.usera);
       try {
@@ -623,19 +609,13 @@ describe("a server that accepts only algorithms this process cannot perform", ()
 });
 
 describe("a real OpenSSH server that accepts only what this process cannot perform", () => {
-  // The describe above drives the refusal against an in-process `ssh2.Server`,
-  // which composes its failure text the way ssh2's own client does. A real
-  // OpenSSH sshd answers the same negotiation with an SSH_MSG_DISCONNECT of its
-  // own, described `no matching key exchange method found` -- `method`, not the
+  // A real OpenSSH sshd answers this negotiation with an SSH_MSG_DISCONNECT
+  // described `no matching key exchange method found` -- `method`, not the
   // `algorithm` the fragment matches -- so which text reaches `error.message` is
   // a race between ssh2's local negotiation failure and the server's disconnect,
-  // and it is settled here rather than reasoned about. It decides the whole
-  // control on the deployment this exists for: were the server's text to win,
-  // the fast-fail would never fire against OpenSSH at all.
-  //
-  // The suite's own server on this profile IS that sshd (its policy accepts
-  // curve25519 only), so the dial goes to it through the relay, which counts the
-  // dials it accepts.
+  // settled here rather than reasoned about. The suite's server on this profile
+  // is that sshd (its policy accepts curve25519 only), reached through the
+  // relay, which counts the dials it accepts.
   serverOffersNoPerformableKex(
     "ends the dial at the first refusal, naming the primitive",
     async () => {

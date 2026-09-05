@@ -41,7 +41,7 @@ afterEach(() => {
 
 // --- buildSaveSpec -----------------------------------------------------------
 
-test("buildSaveSpec carries the connection, terms and metadata, omitting standardization", () => {
+test("buildSaveSpec includes the connection, terms and metadata, omitting standardization", () => {
   const connection = { channel: "filedrop", path: "/mnt/share" } as const;
   const linkageTerms = getDefaultLinkageTerms("Test Party");
   const metadata = [{ name: "ssn", type: "ssn" }];
@@ -56,12 +56,12 @@ test("buildSaveSpec carries the connection, terms and metadata, omitting standar
   expect(spec.linkageTerms).toBe(linkageTerms);
   expect(spec.metadata).toBe(metadata);
   expect(spec.standardization).toBeUndefined();
-  // No observation passed: nothing is locked in, the recurring path stays lazy.
+  // No observation passed: nothing is committed, the recurring path stays lazy.
   expect(spec.expectedPayloadColumns).toBeUndefined();
 });
 
-test("buildSaveSpec records a non-empty observed received set as the lock-in", () => {
-  // A zero-setup --save party crystallizes the payload columns it observed in the
+test("buildSaveSpec records a non-empty observed received set as the commitment", () => {
+  // A zero-setup --save party fixes the payload columns it observed in the
   // first exchange so a later `psilink exchange` fails closed on a divergence.
   const prepared = {
     linkageTerms: getDefaultLinkageTerms("Test Party"),
@@ -81,7 +81,7 @@ test("buildSaveSpec leaves an empty observation lazy, not a strict receive-nothi
   // The partner transmits an empty payload both when it discloses nothing AND on a
   // zero-match first exchange; the two are indistinguishable here, so persisting []
   // (strict "receive nothing") would false-abort a later matching run. An empty
-  // observation therefore records no lock-in (absent field, reconciled lazily).
+  // observation therefore records no commitment (absent field, reconciled lazily).
   const prepared = {
     linkageTerms: getDefaultLinkageTerms("Test Party"),
     metadata: [],
@@ -249,7 +249,6 @@ test("we-saved-partner-did-not: aborts without clobbering a config that appeared
       log,
     }),
   ).toThrow(UsageError);
-  // The pre-existing file is left untouched, not clobbered.
   expect(fs.readFileSync(configFile, "utf8")).toContain("preexisting");
 });
 

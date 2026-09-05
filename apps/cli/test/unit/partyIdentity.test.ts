@@ -112,7 +112,7 @@ test("a run that may go unnamed refuses the placeholder rather than dropping it"
   }
 });
 
-test("a real label carrying the placeholder's text is a name like any other", () => {
+test("a real label containing the placeholder's text is a name like any other", () => {
   // The match is the whole trimmed value, not a substring or a case-folded one:
   // an organization whose name happens to contain those words -- or an operator
   // who edited the field to something built from them -- must not be refused.
@@ -124,7 +124,7 @@ test("a real label carrying the placeholder's text is a name like any other", ()
 });
 
 test("the placeholder refusal names the flag that supplies an identity", () => {
-  // Same obligation the empty-value refusal carries: the message is the only
+  // Same obligation the empty-value refusal has: the message is the only
   // place this path tells the operator how to name the party.
   expect(IDENTITY_STILL_PLACEHOLDER).toContain(
     '--identity "name, org, contact"',
@@ -139,13 +139,12 @@ test("the refusal names the flag that supplies an identity", () => {
 });
 
 test("nothing the CLI ships resolves a party name from the account", () => {
-  // The account psilink runs as is not a label the operator chose -- in the
-  // published image it is the image's own -- so the fallback is gone rather than
-  // guarded, and the user-database read that raised the unmapped-uid failure is
-  // gone with it. This is a source check: it holds for every path, including the
-  // ones no test drives, which is what makes "no lookup remains" checkable at
-  // all. It sees only this workspace's own sources, so it says nothing about a
-  // dependency that reads the user database for its own reasons.
+  // The account psilink runs as is not a label the operator chose, so the
+  // fallback and the user-database read behind it are gone rather than
+  // guarded. This is a source check: it holds for every path, including the
+  // ones no test drives. It sees only this workspace's own sources, so it
+  // says nothing about a dependency that reads the user database for its
+  // own reasons.
   const offenders = cliSources()
     .filter((source) => /\buserInfo\b|\baccountUserName\b/.test(source.text))
     .map((source) => source.name);
@@ -158,7 +157,7 @@ test("an invitation's configured identity is returned", () => {
   );
 });
 
-test("an invitation over a configuration carrying no identity is refused", () => {
+test("an invitation over a configuration holding no identity is refused", () => {
   // Inviting authors a partnership the partner reads a name off, so it is one of
   // the two commands that will not proceed unnamed; the refusal names the file
   // and the field, since the flag cannot stand in on this path.
@@ -173,7 +172,7 @@ test("an invitation over a configuration carrying no identity is refused", () =>
   expect((raised as Error).message).toContain("linkage_terms.identity");
 });
 
-test("a whitespace-only configured identity is refused, not carried", () => {
+test("a whitespace-only configured identity is refused, not held", () => {
   // The terms schema's non-empty rule admits "   ", so without this the
   // invitation is minted "named" and renders an empty inviter heading to the
   // partner reading it -- while the same command's --identity path trims to
@@ -189,11 +188,11 @@ test("a whitespace-only configured identity is refused, not carried", () => {
   }
 });
 
-test("an invitation over a configuration still carrying the placeholder is refused", () => {
+test("an invitation over a configuration still holding the placeholder is refused", () => {
   // The driving case: the operator fills in the connection block and passes over
   // this field, and the invitation -- certificate mode included -- would go out
   // naming the party the template's instruction to name it. The refusal has to
-  // carry the field and the file, since the flag cannot stand in on this path.
+  // name the field and the file, since the flag cannot stand in on this path.
   for (const form of PLACEHOLDER_FORMS) {
     const raised = refusalFrom(() =>
       resolveInvitationIdentity(form, "/work/psilink.yaml"),
@@ -264,7 +263,7 @@ test("a kept configuration's identity is returned verbatim", () => {
   ).toBe("  Test Party  ");
 });
 
-test("an acceptance over a configuration carrying no identity is refused", () => {
+test("an acceptance over a configuration holding no identity is refused", () => {
   // The acceptance keeps the file rather than writing one, so there is nowhere
   // to put a label supplied for this run; the refusal names the file and the
   // field instead of accepting one the partnership would not go on sending.
@@ -283,7 +282,7 @@ test("an acceptance over a configuration carrying no identity is refused", () =>
   expect(message).toContain('--identity "name, org, contact" cannot stand in');
 });
 
-test("an acceptance over a configuration still carrying the placeholder is refused", () => {
+test("an acceptance over a configuration still holding the placeholder is refused", () => {
   // One wording for both files-supply-the-label commands: the placeholder is not
   // a name whichever command reads it, and neither can replace it from the
   // command line.
@@ -314,10 +313,10 @@ test("the kept-configuration refusal escapes its path exactly once", () => {
   expect(rendered).not.toContain(String.raw`C:\\\\work`);
 });
 
-test("an optional identity is trimmed, and blank reads as absent", () => {
+test("an optional identity is trimmed, and blank counts as absent", () => {
   // The runs that may go unnamed take this instead of the refusal: a label rides
   // into the terms, and anything blank -- what `--identity "$ORG"` sends with ORG
-  // unset -- leaves the terms carrying none rather than an empty label.
+  // unset -- leaves the terms holding none rather than an empty label.
   expect(optionalIdentity("  Jane Smith, Agency A  ")).toBe(
     "Jane Smith, Agency A",
   );
@@ -357,7 +356,7 @@ test("no way to ask leaves the flag standing alone", async () => {
 });
 
 test("an answer takes the treatment a flag value takes", async () => {
-  // One resolution for both sources: trimmed, blank read as absence, and the
+  // One resolution for both sources: trimmed, blank treated as absence, and the
   // template's placeholder refused -- so typing at the question is not a way
   // around a guard the flag is held to.
   await expect(

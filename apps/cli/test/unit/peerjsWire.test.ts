@@ -18,7 +18,7 @@ import {
 // --- wire fixtures ----------------------------------------------------------
 //
 // These hex strings were captured from the installed `peerjs` 1.5.5 and
-// `peerjs-js-binarypack` 2.1.0 -- the exact pins the web app carries -- by
+// `peerjs-js-binarypack` 2.1.0 -- the exact pins the web app holds -- by
 // packing the shapes PeerJS itself puts on the wire. They are the cross-
 // implementation vectors for the framing: a bump that changes the encoding, the
 // chunk envelope's keys, or the close sentinel fails here rather than at a
@@ -95,7 +95,7 @@ test("chunk message ids start at 1 and increment per logical frame", () => {
     return first.messageId;
   });
   // Zero is not a usable id: the receive dispatch keys off __peerData being
-  // truthy, so an id of 0 would be read as a plain application frame.
+  // truthy, so an id of 0 would be treated as a plain application frame.
   expect(ids).toEqual([1, 2, 3]);
 });
 
@@ -181,7 +181,7 @@ test.each([
   }
 });
 
-test("a malformed BinaryPack body fails as a protocol error carrying no peer bytes", () => {
+test("a malformed BinaryPack body fails as a protocol error holding no peer bytes", () => {
   // A str32 header declaring a length the body cannot supply.
   const truncated = new Uint8Array([0xd9, 0xff, 0xff, 0xff, 0xff, 0x41]);
   let thrown: unknown;

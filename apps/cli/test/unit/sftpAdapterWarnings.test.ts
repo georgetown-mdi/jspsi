@@ -28,21 +28,18 @@ import {
 // each builder renders at every variant boundary, and the ESCAPING ALTITUDE each
 // composes at.
 //
-// Nothing here reaches ssh2 or a server, and nothing here pins a latch or a
-// cadence: which condition fires a line, how often it repeats, and which counter
-// it reads are the adapter's and the ledger's, and stay pinned in
-// ssh2SftpAdapter.test.ts. What that leaves for this file is the two properties a
-// behavioural test reads through rather than states -- the singular/plural and
-// mode pivots a count or a budget swings the sentence on, and which altitude a
-// fragment is escaped at.
+// Nothing here reaches ssh2 or a server, and nothing here pins which condition fires
+// a line, how often it repeats, or which counter it reads -- those stay pinned in
+// ssh2SftpAdapter.test.ts. This file owns two things a behavioral test reads through
+// rather than states: the singular/plural and mode pivots a count or budget swings
+// the sentence on, and which altitude a fragment is escaped at.
 //
-// The altitude rule is CONTRIBUTING.md's (Code Conventions): a fragment
-// interpolated into an `Error` message or `cause` is composed RAW, because
-// sanitizeErrorForDisplay escapes the whole rendered chain once where it is
-// shown; a value reaching a `log.*` sink without ever becoming an `Error` is
-// escaped with sanitizeForDisplay AT that call site. Escaping at both doubles a
-// literal backslash on every pass, so one backslash in a partner filename would
-// reach the operator as four.
+// The altitude rule is CONTRIBUTING.md's (Code Conventions): a fragment in an
+// `Error` message or `cause` is composed raw, since sanitizeErrorForDisplay escapes
+// the whole rendered chain once at the sink; a value reaching a `log.*` sink without
+// becoming an `Error` is escaped with sanitizeForDisplay at that call site instead.
+// Escaping at both doubles a literal backslash on every pass -- one backslash in a
+// partner filename would reach the operator as four.
 
 // Every link of a composed error's cause chain, unrendered: what the builder
 // actually put in the error, before any display sink has escaped it.
@@ -56,7 +53,7 @@ const rawChain = (err: unknown): string => {
   return links.join("\n");
 };
 
-// A fragment carrying both treatments the double-escape rule is about: a literal
+// A fragment containing both treatments the double-escape rule is about: a literal
 // backslash (doubled by every pass of sanitizeForDisplay) and a control character
 // (which one pass renders as an escape of its own).
 const HOSTILE_FRAGMENT = "/remote/a\\b\u001b[31m-ack.json";
@@ -229,7 +226,7 @@ describe("the recovered-session line, connection-per-poll", () => {
     );
   });
 
-  test("reads the re-dial as this mode working, uncharged and unbudgeted", () => {
+  test("treats the re-dial as this mode working, uncharged and unbudgeted", () => {
     // The split from the held-session line: same drop, different cause, remedy
     // and bound, so neither line's reading appears in the other.
     const message = sessionRecoveredEphemeralWarning(1);
@@ -247,14 +244,14 @@ describe("the recovered-session line, connection-per-poll", () => {
 });
 
 describe("the recovered-session line, held session", () => {
-  test("the first drop reads as one drop rather than a running total", () => {
+  test("the first drop displays as one drop rather than a running total", () => {
     expect(sessionRecoveredHeldWarning(1, 3)).toContain(
       "The SFTP session dropped mid-exchange and was transparently re-dialed; " +
         "the exchange continues.",
     );
   });
 
-  test("a later drop reads as the running total it is", () => {
+  test("a later drop displays as the running total it is", () => {
     expect(sessionRecoveredHeldWarning(2, 3)).toContain(
       "The SFTP session has now dropped mid-exchange 2 times this exchange; " +
         "this drop was transparently re-dialed and the exchange continues.",
@@ -330,7 +327,7 @@ describe("the idle boundary that closed nothing", () => {
     );
   });
 
-  test("the release that ended no transport carries no count and names the ssh2 changelog", () => {
+  test("the release that ended no transport has no count and names the ssh2 changelog", () => {
     // The one degraded outcome with no run total, so it has no pivot to swing on.
     expect(idleReleaseDidNotCloseWarning()).toBe(
       "The connection-per-poll idle release did not close the SFTP session " +
@@ -412,7 +409,7 @@ describe("the undetermined publish", () => {
     );
   });
 
-  test("carries the re-issue's own error only as the cause", () => {
+  test("holds the re-issue's own error only as the cause", () => {
     const cause = new Error("_rename: No such file or directory");
     const err = indeterminatePublishError(cause, "/remote/id-hello.json");
     expect(err.cause).toBe(cause);

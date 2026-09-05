@@ -7,15 +7,12 @@ import {
 
 import { createWorkerThreadHandle } from "../../src/psiWorkerHost";
 
-// createWorkerThreadHandle is the SINGLE definition of the host-side worker wiring
-// (see psiWorkerHost.ts): production spawns a real worker through it, the integration
-// test wraps a real worker through it, and these tests wrap a fake through it. That is
-// deliberate -- a hand-rolled mirror of this wiring is exactly what drifted from
-// production once before (a broken exit handler that shipped untested). Driving a fake
-// worker also reaches the paths a real worker cannot exercise on demand: a
-// 'messageerror' (a reply that fails structured-clone deserialization) never fires for
-// today's cloneable payloads, so only a fake can prove it is routed rather than
-// silently dropped, which would hang the pending call.
+// createWorkerThreadHandle is the single definition of the host-side worker wiring
+// (psiWorkerHost.ts). Production, the integration test, and these tests all wrap a
+// worker through it; a hand-rolled mirror once drifted from production unnoticed.
+// A fake also reaches paths a real worker cannot trigger on demand --
+// 'messageerror' never fires for today's cloneable payloads -- so only a fake
+// proves it routes rather than silently drops, hanging the pending call.
 
 // A stand-in for a worker_threads Worker: records posted requests and terminate()
 // calls, and lets a test emit the worker's events on demand.
@@ -83,7 +80,7 @@ describe("createWorkerThreadHandle", () => {
     );
   });
 
-  test("an expected exit after terminate() is not surfaced as a fault", () => {
+  test("an expected exit after terminate() is not reported as a fault", () => {
     const fake = new FakeWorker();
     const handle = createWorkerThreadHandle(fake);
     const onError = vi.fn();

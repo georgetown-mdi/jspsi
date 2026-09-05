@@ -14,13 +14,12 @@ type MutuallyAssignable<A, B> = [A] extends [B]
     : false
   : false;
 
-// core's endpoint producer names the channels it can mint a locator for, and the
-// CLI's runProtocol names the channels its transport can run; the invite path
-// passes one to the other unchanged. Both narrow the same ConnectionConfig union
-// by hand (the allowlist convention), and core cannot import the CLI type, so
-// nothing on that side holds the two in step. This is that check, on the side
-// that can see both: a channel added to one union and not the other makes the
-// annotation below a type error before it can be a mismatch at runtime.
+// core's endpoint producer names the channels it can mint a locator for, and
+// the CLI's runProtocol names the channels its transport can run; the invite
+// path passes one to the other unchanged. Both narrow the same ConnectionConfig
+// union by hand, and core cannot import the CLI type, so nothing holds the
+// two in step. This check does: a channel added to one union and not the
+// other is a type error here before it is a mismatch at runtime.
 const UNIONS_AGREE: MutuallyAssignable<
   ProtocolConnectionConfig,
   EndpointSourceConnectionConfig

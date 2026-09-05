@@ -113,7 +113,7 @@ test("renderConfigTemplate: every exchange-spec section is represented", async (
       `${snakeKey}:`,
     );
   }
-  // Opt-in sections that carry no default are commented out, not active.
+  // Opt-in sections that have no default are commented out, not active.
   expect(template).toContain("# authentication:");
   expect(template).toContain("# signing:");
   expect(template).toContain("# retention_disposition:");
@@ -406,7 +406,7 @@ test("handler: the identity it writes unasked is one no resolver accepts", async
     UsageError,
   );
 
-  // A template written WITH --identity carries the operator's own label, and
+  // A template written WITH --identity has the operator's own label, and
   // that one resolves -- the guard refuses the placeholder, not the field.
   const named = path.join(dir, "named.yaml");
   await withStdin(streamOf(""), () =>
@@ -440,7 +440,7 @@ test("handler: at a terminal with no --identity, it asks and writes the answer",
   expect(promptFreeTextMock).toHaveBeenCalledTimes(1);
   expect(promptFreeTextMock).toHaveBeenCalledWith(INIT_IDENTITY_QUESTION);
   // Why psilink asks rather than naming the party itself, on the terminal the
-  // question is asked on -- and never on stdout, which carries result data.
+  // question is asked on -- and never on stdout, which holds result data.
   expect(stderrWrites.join("")).toContain(IDENTITY_PROMPT_PREAMBLE);
   expect(stdoutWrites.join("")).toBe("");
   const { identity } = parseExchangeSpec(
@@ -456,7 +456,7 @@ test("handler: at a terminal with no --identity, it asks and writes the answer",
 
 test("handler: with no terminal it asks nothing and writes the placeholder", async () => {
   // The unattended path -- a pipe, a container run without -t, CI -- is
-  // untouched by the question: nothing is asked and the scaffold carries the
+  // untouched by the question: nothing is asked and the scaffold has the
   // placeholder, so a scripted init behaves as it did before there was a prompt.
   const dir = scratchDir();
   const configFile = path.join(dir, "psilink.yaml");
@@ -605,8 +605,8 @@ test("handler: an input file infers metadata and standardization into the file",
 
 test("handler: a file appearing after the check fails closed (exit 64)", async () => {
   // The post-decision exclusive-write race: decideOverwrite returns "create"
-  // (path free), but a file appears before the write. writeFileOwnerOnly surfaces
-  // that as FileExistsError, which the handler must map to a fail-closed usage
+  // (path free), but a file appears before the write. writeFileOwnerOnly exposes
+  // that as a FileExistsError, which the handler must map to a fail-closed usage
   // error rather than clobber. Forced via the write mock since a real filesystem
   // race is not reproducible in a unit test.
   const dir = scratchDir();

@@ -72,7 +72,7 @@ interface Invocation {
   authFile?: { path: string; contents: string; mode: number };
 }
 
-/** The `-c` command an invocation carried, if any. */
+/** The `-c` command an invocation contains, if any. */
 function commandOf(args: string[]): string | undefined {
   const index = args.indexOf("-c");
   return index === -1 ? undefined : args[index + 1];
@@ -185,7 +185,7 @@ describe("a healthy file drop", () => {
 });
 
 describe("the credential never becomes an argv value", () => {
-  test("no argument on any invocation carries the password", async () => {
+  test("no argument on any invocation contains the password", async () => {
     const probeDeps = deps(healthyReply);
     await runProbe(INPUT, probeDeps);
     expect(probeDeps.calls.length).toBeGreaterThan(3);
@@ -211,7 +211,7 @@ describe("the credential never becomes an argv value", () => {
 });
 
 describe("the subdirectory is entered with -D, never a -c command", () => {
-  test("every command after the subdirectory check carries -D", async () => {
+  test("every command after the subdirectory check includes -D", async () => {
     const probeDeps = deps(healthyReply);
     await runProbe(INPUT, probeDeps);
     const staged = probeDeps.calls.filter((call) =>
@@ -362,7 +362,7 @@ describe("a transport that dies without a verdict is not a server refusal", () =
   });
 
   test("a wedged server mentioning negotiation is not read as a dialect refusal", async () => {
-    // Only a refusal carries an NT_STATUS token, so classifying on the token
+    // Only a refusal has an NT_STATUS token, so classifying on the token
     // rather than the word keeps a server that died mid-negotiation from being
     // reported as a dialect disagreement the operator would chase.
     const report = await runProbe(
@@ -453,7 +453,7 @@ describe("inputs that change the shape of the run", () => {
     for (const call of probeDeps.calls) expect(call.args).not.toContain("-D");
   });
 
-  test("an oversized exchange folder carries the entry-count advisory", async () => {
+  test("an oversized exchange folder has the entry-count advisory", async () => {
     const report = await runProbe(
       INPUT,
       deps((args) =>
@@ -468,7 +468,7 @@ describe("inputs that change the shape of the run", () => {
     expect(overallOf(report)).toBe("ok");
   });
 
-  test("an oversized share root carries the same advisory", async () => {
+  test("an oversized share root has the same advisory", async () => {
     const report = await runProbe(
       { ...INPUT, subdirectory: "" },
       deps((args) =>
@@ -556,7 +556,7 @@ describe("smbclient output parsing", () => {
 });
 
 describe("every skipped record explains itself", () => {
-  test("padded, inapplicable, and incomplete skips all carry a meaning", async () => {
+  test("padded, inapplicable, and incomplete skips all have a meaning", async () => {
     const reports = [
       await runProbe(
         INPUT,
@@ -606,7 +606,7 @@ describe("local cleanup does not depend on the remote", () => {
     expect(fs.existsSync(authDir as string)).toBe(false);
   });
 
-  test("signal cleanup is registered for the battery and removed after", async () => {
+  test("signal cleanup is registered for the run and removed after", async () => {
     const before = process.listenerCount("SIGINT");
     const beforeTerm = process.listenerCount("SIGTERM");
     let during = -1;

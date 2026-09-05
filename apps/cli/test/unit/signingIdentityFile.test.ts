@@ -63,7 +63,7 @@ test("loadSigningIdentity does not echo file content on an invalid-JSON file", a
   // report path-only: Node's JSON.parse echoes a snippet of the source start in
   // its message (here exactly the leading 10 chars), so a file that begins with
   // the key would otherwise leak it. The 10-char marker leads the file so the old
-  // (content-echoing) path would surface it; the guard must not.
+  // (content-echoing) path would expose it; the guard must not.
   const idPath = path.join(dir, "leaky.json");
   const MARKER = "LEAKME1234";
   fs.writeFileSync(idPath, `${MARKER} not json`, { mode: 0o600 });
@@ -119,7 +119,7 @@ test("loadSigningCertificate does not import the private key beside it", async (
 });
 
 test("both loaders reject an unrecognized identity-file version", async () => {
-  // The certificate carries its own version, but a document that is not a
+  // The certificate has its own version, but a document that is not a
   // signing identity of a recognized format is not mined for one here while
   // loadSigningIdentity refuses it, so the two refusals are pinned together.
   const idPath = path.join(dir, "future.json");

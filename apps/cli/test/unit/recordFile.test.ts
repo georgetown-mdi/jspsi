@@ -5,7 +5,7 @@ import path from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 // Capture writeExchangeRecord's logger so the non-fatal "audit record could not
-// be written" WARN is asserted (proving the failure is surfaced) rather than
+// be written" WARN is asserted (proving the failure is reported) rather than
 // leaked to the suite output, and so the INFO lines the successful writes emit
 // can be asserted for what they tell the operator. getLogger is the only
 // @psilink/core export replaced; everything else stays real.
@@ -153,7 +153,7 @@ test("writeExchangeRecord writes both files, parseable and owner-only", () => {
     parseVerificationKeys(JSON.parse(fs.readFileSync(keysFilePath, "utf8"))),
   ).toEqual(keys);
 
-  // A completed run's line carries none of the terminated tail: it has no
+  // A completed run's line contains none of the terminated tail: it has no
   // disclosure-before-a-failure to report.
   expect(
     logCapture.infos.find((m) =>
@@ -169,14 +169,12 @@ test("writeExchangeRecord writes both files, parseable and owner-only", () => {
 });
 
 test("writeExchangeRecord is non-fatal when the destination is unwritable", () => {
-  // A record path whose parent is a regular file cannot be created; the helper
-  // must warn rather than throw, so a successful exchange is never failed by an
-  // audit-write problem. It still reports the loss to its caller: the returned
-  // message is what reaches the machine-interface stream and the exit code on an
-  // unattended run whose stderr nobody reads, so a silent undefined here would
-  // be the failure this return value exists to prevent. It names the
-  // destination, and no cause -- the caller's sink escapes it once, so the
-  // already-escaped cause in the log line above must not be folded into it.
+  // A record path whose parent is a regular file cannot be created; the helper warns
+  // rather than throws, so a successful exchange is never failed by an audit-write
+  // problem. The return value still reports the loss to the caller -- what an
+  // unattended run's machine-interface stream and exit code show when nobody reads
+  // stderr. It names the destination, not the cause: the caller's sink already
+  // escapes the log line's cause once.
   const blocker = path.join(dir, "blocker");
   fs.writeFileSync(blocker, "x");
   const recordFilePath = path.join(blocker, "rec.json"); // parent is a file
@@ -193,7 +191,7 @@ test("writeExchangeRecord is non-fatal when the destination is unwritable", () =
   expect(failure).toContain(recordFilePath);
   expect(failure).toContain("need not be re-run");
   expect(fs.existsSync(recordFilePath)).toBe(false);
-  // The non-fatal failure is surfaced as a WARN (asserting it both proves the
+  // The non-fatal failure is reported as a WARN (asserting it both proves the
   // diagnostic fired and keeps it off the suite output).
   expect(
     logCapture.warnings.some((m) =>

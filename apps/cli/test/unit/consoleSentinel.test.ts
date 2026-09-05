@@ -35,7 +35,7 @@ describe("ConsoleSentinel", () => {
   });
 
   it("treats a level-mismatched matcher as not accepting the line", () => {
-    // The level filter is load-bearing: an entry scoped to one level must not
+    // The level filter is critical: an entry scoped to one level must not
     // accept a same-text line emitted at another level, or the gate has a hole.
     const allowlist: ConsoleAllowEntry[] = [
       {
@@ -61,7 +61,7 @@ describe("ConsoleSentinel", () => {
   });
 
   it("credits every matcher that accepts a line, not just the first", () => {
-    // evaluate() deliberately does not short-circuit: a line covered by two
+    // evaluate() does not short-circuit by design: a line covered by two
     // matchers credits both, so neither is misreported as a dead entry.
     const allowlist: ConsoleAllowEntry[] = [
       { id: "first", levels: ["warn"], match: /shared/, reason: "matches" },
@@ -156,14 +156,12 @@ describe("ConsoleSentinel", () => {
     sentinel.restore();
   });
 
-  it("surfaces an async-late line at the flush, not at the synchronous boundary", async () => {
-    // Models the "Global ... listener" teardown lines: emitted on an async event
-    // a tick after the test that triggered the teardown returns. This proves the
-    // flush is what catches such a line -- absent at the synchronous boundary,
-    // present after flushPendingConsole. (The file-level vs per-test SCOPING that
-    // keeps the line from being blamed on the next test is a property of the
-    // integration setup's afterAll placement, exercised by the integration run,
-    // not this unit.)
+  it("shows an async-late line at the flush, not at the synchronous boundary", async () => {
+    // Models the "Global ... listener" teardown lines, which fire a tick after
+    // the triggering test returns. Proves the flush catches such a line --
+    // absent at the synchronous boundary, present after flushPendingConsole.
+    // Cross-test attribution (the afterAll placement) is exercised by the
+    // integration run, not this unit.
     const fake = fakeConsole();
     const sentinel = new ConsoleSentinel([]);
     sentinel.install(fake);
@@ -342,7 +340,7 @@ describe("ConsoleSentinel", () => {
     sentinel.restore();
   });
 
-  it("fails an ALLOWLISTED line that carries an unescaped byte", () => {
+  it("fails an ALLOWLISTED line that contains an unescaped byte", () => {
     // The byte gate is what the allowlist cannot express: a matcher accepts a
     // line by its intended text, which says nothing about the bytes an
     // interpolated partner value smuggled into it. An allowlisted line that
@@ -372,10 +370,10 @@ describe("ConsoleSentinel", () => {
   });
 
   it("fails a forged log line whose bytes are printable ASCII plus a bare newline", () => {
-    // A partner value of printable ASCII and a newline carries no byte the
+    // A partner value of printable ASCII and a newline contains no byte the
     // escape rewrites, so only the framing-aware gate catches it: the renderer
     // emits `\ncaused by: ` and nothing else, and a bare newline outside that
-    // sequence is the log-line spoofing this backstop exists to catch.
+    // sequence is the log-line spoofing this safety check exists to catch.
     const allowlist: ConsoleAllowEntry[] = [
       {
         id: "intended",

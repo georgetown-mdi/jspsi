@@ -17,31 +17,28 @@ import { startInProcessSftpServer } from "../sftpServer";
 import { serverAuth } from "../sftpServer/testContext";
 import { inProcessOnly } from "../sftpBackendGate";
 
-// What the adapter does with a partner server that goes SILENT rather than
+// What the adapter does with a partner server that goes silent rather than
 // failing: nothing closes, nothing resets, and no further byte arrives, so the
 // client can learn of it only from its own liveness deadline -- and a stall is
-// deliberately never a reconnect trigger (docs/spec/CHANNEL_SECURITY.md). The
-// recorded outcome is the deliverable, so each case observes the ssh2 Client, the
-// socket beneath it, and the server's own request meter rather than reasoning
-// about the adapter.
+// never a reconnect trigger (docs/spec/CHANNEL_SECURITY.md). Each case observes
+// the ssh2 Client, the socket beneath it, and the server's own request meter,
+// rather than reasoning about the adapter.
 //
-// Two shapes of that silence run here, one per control. The VANISH silences the
-// whole session: a live session that stops answering mid-exchange, which the
-// first group drives. The WITHHELD REPLY silences one request: the server accepts
-// it, answers every other request on the same channel, and never writes that
-// one's status -- which is what strands a single metadata round trip or a single
-// transfer, and is the group at the end of this file.
+// Two shapes of that silence run here, one per control. The vanish silences
+// the whole session: a live session that stops answering mid-exchange, which
+// the first group drives. The withheld reply silences one request: the server
+// accepts it, answers every other request on the same channel, and never
+// writes that one's status -- which strands a single metadata round trip or a
+// single transfer, the group at the end of this file.
 //
-// Only the in-process backend offers either (a native sshd cannot be told to stop
-// answering), so these run there and stand up their own server to reach the
-// session controls -- the shared globalSetup server hands the workers only its
-// connection details. The withheld-close partner, which is the nearest neighbour
-// and a materially different case (it fires only in answer to the client's own
-// disconnect, and it ends the transport), is heldSessionWithheldClose.test.ts and
+// Only the in-process backend offers either, so these run there with their
+// own server. The withheld-close partner -- the nearest neighbour, but a
+// different case: it fires only in answer to the client's own disconnect, and
+// it ends the transport -- is heldSessionWithheldClose.test.ts and
 // ephemeralSessionExchange.test.ts.
 
 // The per-operation liveness deadline, lowered through the adapter's @internal
-// test seam. Neither a vanished session nor a withheld reply ever answers, so
+// test hook. Neither a vanished session nor a withheld reply ever answers, so
 // this is what ends an operation outstanding across either; at the production
 // 60 s these cases would wait a minute longer for the same rejection.
 const STALL_DEADLINE_MS = 3_000;
@@ -295,7 +292,7 @@ inProcessOnly(
       expect(census.heard).toEqual([]);
       expect(census.bytesFromServer()).toBe(0);
       // The server did receive the request and did write its reply -- the wire is
-      // what did not carry it, which is what makes this different from a server
+      // what did not deliver it, which is what makes this different from a server
       // that stopped serving.
       const meter = srv.sessionControls.requests.read();
       expect(meter.receivedByOp).toEqual({ OPENDIR: 1 });
@@ -531,13 +528,13 @@ inProcessOnly(
 );
 
 // The vanish silences its socket in the same pools the withheld-close and
-// stalled-handshake controls draw from, so stopping either of those is a release
-// path that reaches a vanished session it was never aimed at. These two cases
-// hold that release to all-or-nothing over the wire: afterwards the vanished
-// session both answers again AND can be hung up by the server, the two halves
-// the vanish took together. A half-released session -- answering but unclosable,
-// or closable but mute -- is neither the black hole a case measures over nor a
-// working session, so anything read from it would mean nothing.
+// stalled-handshake controls draw from, so stopping either reaches a vanished
+// session it was never aimed at. These two cases hold that release to
+// all-or-nothing over the wire: afterwards the vanished session both answers
+// again and can be hung up by the server, the two halves the vanish took
+// together. A half-released session -- answering but unclosable, or closable
+// but mute -- is neither the black hole a case measures over nor a working
+// session.
 inProcessOnly(
   "unstalling another connection's dial releases a vanished session whole",
   async () => {
@@ -693,7 +690,7 @@ interface WithheldReplyCase {
   opcode: string;
   /** The operation the adapter names in the stall it raises. */
   operation: string;
-  /** The withheld-response clause that stall carries. */
+  /** The withheld-response clause that stall holds. */
   detail: string;
   /** Whatever the driven operation needs, planted under the served directory. */
   plant?: (dir: string) => Promise<void>;

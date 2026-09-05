@@ -25,7 +25,7 @@ import type {
 import { writeOutput } from "../../src/util/dataIo";
 
 // The result CSV's RFC 4180 round trip. Partner payloads and identifier columns
-// carry ordinary real-world values, so a comma, a double quote, and a newline all
+// contain ordinary real-world values, so a comma, a double quote, and a newline all
 // reach the result; each must survive both of writeOutput's branches and come
 // back unchanged from loadCSVFile, the reader `verify-receipt` re-supplies a
 // retained result through.
@@ -48,7 +48,7 @@ const metadata: Metadata = [
   { name: "dose", type: "first_name", role: "payload", isPayload: true },
 ];
 
-// Our identifier values carry the comma and the quote, so the escaping is
+// Our identifier values contain the comma and the quote, so the escaping is
 // exercised on the result's first column and not only on partner values.
 const inputRows: CSVRow[] = [
   { pid: COMMA_VALUE, dose: "10mg" },
@@ -76,7 +76,7 @@ const partnerPayload: PartnerPayload = {
 };
 
 // The values the reader must yield, row for row: result rows are in our matched
-// order ([0, 2]), so the first carries the partner's row 1 and the second the
+// order ([0, 2]), so the first holds the partner's row 1 and the second the
 // partner's row 0.
 const EXPECTED_HEADERS = ["pid", "row_id", "note", "blank"];
 const EXPECTED_ROWS = [
@@ -178,7 +178,7 @@ test("writeOutput: each field is quoted once, not escaped a second time", async 
   expect(text).toContain(`"${COMMA_VALUE}"`);
   expect(text).toContain('"she said ""hi"""');
   expect(text).not.toContain(`"""${COMMA_VALUE}"""`);
-  // The header row carries no special characters, so it is written bare.
+  // The header row contains no special characters, so it is written bare.
   expect(text.startsWith(`${EXPECTED_HEADERS.join(",")}\n`)).toBe(true);
 });
 
@@ -197,7 +197,7 @@ test("writeOutput: the stdout branch and the OUTPUT_FILE branch write identical 
 });
 
 test("writeOutput: a written result re-supplies its record's commitments", async () => {
-  // The end-to-end consequence of the round trip: a result carrying all three
+  // The end-to-end consequence of the round trip: a result containing all three
   // characters, read back and reshaped the way `verify-receipt` reshapes it, opens
   // every commitment. The commitments bind the canonical encoding of the LOGICAL
   // values, so an escaping fault on either side -- a dropped quote splitting a

@@ -115,7 +115,7 @@ test("parseDurationFlag: a malformed value yields parseDuration's message prefix
 test("parseFineDuration: accepts a millisecond unit", () => {
   expect(parseFineDuration("100ms")).toBe(100);
   expect(parseFineDuration("1ms")).toBe(1);
-  // The `ms` alternative wins over `m`, so `100ms` is not read as 100 minutes.
+  // The `ms` alternative wins over `m`, so `100ms` is not treated as 100 minutes.
   expect(parseFineDuration("100ms")).not.toBe(100 * 60_000);
 });
 

@@ -4,40 +4,22 @@ import { describe, expect, test, vi } from "vitest";
 
 import type { KexPrimitive } from "../../src/connection/sftpKexCapability";
 
-// How each of the two dial paths classifies a key-exchange negotiation that found
-// nothing the two ends have in common: terminal on a process that cannot perform
-// one of the primitives its offer needed, retryable everywhere else. The
-// permanent case is permanent for the life of the process -- the capability
-// verdict is memoized because a crypto provider is not swapped under a running
-// program -- so a re-attempt puts the same withheld offer to the same server. At
-// the connect loop an operator who raised max_reconnect_attempts waits a second
-// per attempt for the diagnostic the first attempt already had; at the
-// connection-per-poll cycle-start re-dial, which the unattended scheduled run
-// takes cycle after cycle, the whole run waits out the peer-inactivity ceiling
-// for it and then reports peer silence instead.
-//
-// The verdict is the whole condition, and these drive both of its values, because
-// the message fragment alone cannot carry the classification: ssh2 renders a
-// server's SSH_MSG_DISCONNECT description into the same message and a disconnect
-// precedes host-key verification, so a server or an on-path attacker writes the
-// fragment verbatim. What that party gets on a host that CAN perform everything
-// ssh2 offers is what it got before the classification existed, driven on both
-// paths below: the full reconnect budget at the connect loop, and a skipped cycle
-// with another tick to come at the re-dial.
-//
-// What the offer itself looks like on the wire under the same forced verdict is
-// driven in test/integration/sftpKexOffer.test.ts, which also drives this
-// classification against a real OpenSSH sshd whose policy accepts nothing this
-// process can perform.
+// How each of the two dial paths classifies a key-exchange negotiation that
+// found nothing the two ends have in common: terminal on a process that
+// cannot perform one of the offered primitives, retryable everywhere else.
+// The verdict decides, not the message fragment alone -- ssh2 renders a
+// server's SSH_MSG_DISCONNECT into the same message, so a server or an
+// on-path attacker can write it verbatim; driven on the wire in
+// test/integration/sftpKexOffer.test.ts.
 
 const forcedVerdict = vi.hoisted(() => ({
   unavailable: [] as readonly KexPrimitive[],
 }));
 
 // Only the host VERDICT is replaced; the classification, the diagnostic, and the
-// adapter are the real ones. Defaulting to "every primitive available" is what
-// makes this seam neutral for a case that does not set it, and it is the reading
-// any host running this suite supplies on its own.
+// adapter are the real ones. Defaulting to "every primitive available" keeps
+// unavailableKexPrimitives neutral for a case that does not set it, and it is
+// the reading any host running this suite supplies on its own.
 vi.mock("../../src/connection/sftpKexCapability", async (importOriginal) => {
   const actual =
     await importOriginal<
@@ -67,7 +49,7 @@ const MISSING: KexPrimitive = {
   },
 };
 
-// The message ssh2-sftp-client surfaces when the two ends share no key-exchange
+// The message ssh2-sftp-client shows when the two ends share no key-exchange
 // algorithm, measured against the pinned versions (docs/spec/DEPENDENCY_PINS.md,
 // "Upgrading the SFTP Stack", which names confirming this fragment as a per-bump
 // obligation).
@@ -136,7 +118,7 @@ describe("a key exchange this process cannot perform", () => {
     }
   });
 
-  test("still surfaces the diagnostic naming the primitive, ssh2's error one link down", async () => {
+  test("still reports the diagnostic naming the primitive, ssh2's error one link down", async () => {
     vi.useFakeTimers();
     forcedVerdict.unavailable = [MISSING];
     const { adapter } = countingDialer(NEGOTIATION_FAILURE);
@@ -225,7 +207,7 @@ describe("the same negotiation failure on a host that can perform everything", (
 
 // A faithful stand-in for the ssh2 Client ssh2-sftp-client exposes on `.client`:
 // the EventEmitter surface the adapter's transport-lifecycle watch attaches to,
-// the socket seams the idle release drives, and the no-ops connect() would
+// the socket call sites the idle release drives, and the no-ops connect() would
 // otherwise warn about.
 const releasableClient = () =>
   Object.assign(new EventEmitter(), {
@@ -328,7 +310,7 @@ describe("a cycle-start re-dial into a key exchange this process cannot perform"
     }
   });
 
-  test("carries the diagnostic naming the primitive, ssh2's error one link down", async () => {
+  test("includes the diagnostic naming the primitive, ssh2's error one link down", async () => {
     forcedVerdict.unavailable = [MISSING];
     try {
       // What the operator reads in place of the peer-silence error the ceiling
@@ -400,7 +382,7 @@ describe("a cycle-start re-dial into a key exchange this process cannot perform"
     forcedVerdict.unavailable = [MISSING];
     try {
       // An abandoning teardown destroys the transport under a dial in flight, and
-      // that rejection carries the same error a genuine peer close does. This run
+      // that rejection has the same error a genuine peer close does. This run
       // has no next tick to promise, so it stays silent -- and the verdict must
       // not turn the teardown's own doing into a reported failure.
       const fixture: CyclingAdapter = cyclingAdapter(() => {

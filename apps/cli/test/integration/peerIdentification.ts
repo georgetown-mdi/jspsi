@@ -25,7 +25,7 @@ export const displayLinks = (error: unknown): string[] =>
 
 /**
  * How many times one failure was diagnosed, counted by the recovery step the
- * diagnosis composes. That link rather than the peer's excerpt: a chain carrying
+ * diagnosis composes. That link rather than the peer's excerpt: a chain holding
  * two diagnoses outruns the display boundary's cause-depth cap, which drops the
  * second excerpt while both recovery steps still render (measured -- a wrapper
  * re-applied around the probe leaves one excerpt link and two recovery steps).
@@ -46,7 +46,7 @@ export function expectNonSshAnswerDiagnosis(
   expect(links[0]).toContain("did not identify itself");
   expect(links[0]).toContain("an HTTP response");
   // The peer's bytes ride a link of their own, and no first-party sentence
-  // carries them.
+  // contains them.
   const peerLinks = links.filter((link) =>
     link.startsWith(
       "first bytes the peer sent; PEM private-key blocks replaced:",

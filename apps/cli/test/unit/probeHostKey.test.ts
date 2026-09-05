@@ -27,7 +27,7 @@ snapshotDiagnosticSinkAndLevel();
 const FP = "SHA256:" + "A".repeat(43);
 
 // An injectable probe recording the config it was handed, so a test can assert
-// both the emitted line and that the minimal config carried no credential.
+// both the emitted line and that the minimal config held no credential.
 function makeDeps(presented: PresentedHostKey): ProbeHostKeyDeps & {
   lastConfig?: SFTPConnectionConfig;
 } {
@@ -60,7 +60,7 @@ function hostKeyBlobNaming(keyType: string): Uint8Array {
 
 describe("buildProbeConfig parses the URL into a minimal connection", () => {
   test("keeps host and port, and never a credential or the URL's userinfo", () => {
-    // Even a URL carrying userinfo and a path yields host+port plus a fixed
+    // Even a URL holding userinfo and a path yields host+port plus a fixed
     // placeholder username: no password/path is composed, and the username is a
     // placeholder ssh2 requires -- never the URL's "user", and never sent.
     const config = buildProbeConfig(
@@ -120,7 +120,7 @@ describe("probeHostKeyLines formats and validates the presented key", () => {
       fingerprint: FP,
       key_type: "ssh-ed25519",
     });
-    // The probe connection carried no credential -- the verifier refuses before
+    // The probe connection held no credential -- the verifier refuses before
     // auth -- and no URL-derived username.
     expect(deps.lastConfig?.server.password).toBeUndefined();
     expect(deps.lastConfig?.server.username).not.toBe("user");
@@ -142,7 +142,7 @@ describe("probeHostKeyLines formats and validates the presented key", () => {
     expect(result.summary).toContain("ssh-ed25519");
   });
 
-  test("neither output form carries a rejected key type's bytes", async () => {
+  test("neither output form holds a rejected key type's bytes", async () => {
     // Both forms print whatever the probe observed, and what it observes is
     // keyTypeFromBlob's output -- so the type is taken from the real primitive
     // over a hostile blob rather than from a string chosen here. The console
@@ -174,7 +174,7 @@ describe("probeHostKeyLines formats and validates the presented key", () => {
     expect(human.summary).toContain(FP);
   });
 
-  test("both output forms carry a conforming key type verbatim", async () => {
+  test("both output forms hold a conforming key type verbatim", async () => {
     const keyType = keyTypeFromBlob(
       hostKeyBlobNaming("ecdsa-sha2-nistp521-cert-v01@openssh.com"),
     );
@@ -203,13 +203,12 @@ describe("probeHostKeyLines formats and validates the presented key", () => {
   });
 
   test("a private-key marker in the probed host cannot delete the verify step", async () => {
-    // The host is the one fragment of this summary that can still carry a real
-    // marker: a percent-encoded --sftp-url decodes back to literal spaces, so
-    // the URL parse is no bound here (the key type's charset bound already rules
-    // out the other). It sits ahead of the out-of-band verification step, and
-    // the log sink redacts the whole line it is given, so the fragment is
-    // redacted where it is interpolated instead. Asserted on the bytes stderr
-    // wrote, not on the returned string.
+    // The host is the one fragment here that can still hold a real marker: a
+    // percent-encoded --sftp-url decodes back to literal spaces, so URL parsing
+    // does not strip it (the charset bound covers the other fields). The log sink
+    // redacts the whole rendered line ahead of the out-of-band verification step,
+    // so the marker is redacted where it is interpolated. Asserted on the bytes
+    // stderr wrote, not the returned string.
     const marker = "-----BEGIN OPENSSH PRIVATE KEY-----";
     const human = await probeHostKeyLines(
       {
@@ -270,7 +269,7 @@ describe("probeHostKeyLines formats and validates the presented key", () => {
   });
 
   // The exit-69 path's machine form. A caller that discards this command's stderr
-  // -- the console's probe driver does, since stderr can carry server-controlled
+  // -- the console's probe driver does, since stderr can hold server-controlled
   // bytes -- would otherwise see an unreachable host where the dial in fact
   // reached a peer that answered wrongly.
   test("the diagnosis line names a non-SSH answer, its shape, and the peer's own bytes", () => {
@@ -299,13 +298,13 @@ describe("probeHostKeyLines formats and validates the presented key", () => {
     expect(line.includes("\r")).toBe(false);
   });
 
-  test("a peer that closed having sent nothing carries no excerpt to carry", () => {
+  test("a peer that closed having sent nothing has no excerpt at all", () => {
     expect(
       JSON.parse(probeDiagnosisJsonLine({ kind: "closed-unanswered" })),
     ).toEqual({ diagnosis: "closed_unanswered" });
   });
 
-  test("the success line carries no diagnosis key, so the two shapes cannot collide", async () => {
+  test("the success line has no diagnosis key, so the two shapes cannot collide", async () => {
     const result = await probeHostKeyLines(
       {
         sftpUrl: "sftp://sftp.example.org",
@@ -358,7 +357,7 @@ describe("the --json lines are safe to print as they stand", () => {
     expect(line.includes(C1_CSI)).toBe(false);
   });
 
-  test("every byte a latin1-decoded answer can carry leaves the line printable ASCII", () => {
+  test("every byte a latin1-decoded answer can hold leaves the line printable ASCII", () => {
     const everyByte = Array.from({ length: 256 }, (_, code) => byte(code)).join(
       "",
     );
@@ -406,13 +405,12 @@ describe("the --json lines are safe to print as they stand", () => {
 });
 
 // A peer that answers the port with PEM-shaped bytes reaches both routes with
-// its private-key material already stripped: the strip runs where the excerpt is
-// produced, ahead of the bound that clips it (driven in
+// its private-key material already stripped: the strip runs where the excerpt
+// is produced, ahead of the bound that clips it (driven in
 // test/unit/sftpPeerIdentification.test.ts, and from the wire through to this
 // line in test/integration/backendAgnostic/hostKeyProbePeerIdentification.test.ts).
-// What is asserted here is that neither route treats those bytes a second time,
-// which is what let two consumers of one excerpt disagree about it.
-describe("both routes carry the producer's excerpt as it stands", () => {
+// This checks that neither route treats those bytes a second time.
+describe("both routes hold the producer's excerpt as it stands", () => {
   const PRODUCED_EXCERPT = "HTTP/1.0 200 OK\r\n\r\n[redacted private key]";
 
   test("the machine route emits it byte for byte", () => {
@@ -426,7 +424,7 @@ describe("both routes carry the producer's excerpt as it stands", () => {
     expect(parsed.excerpt).toBe(PRODUCED_EXCERPT);
   });
 
-  test("the human route carries the same bytes, escaped once at its sink", () => {
+  test("the human route holds the same bytes, escaped once at its sink", () => {
     const rendered = sanitizeErrorForDisplay(
       explainPeerIdentificationFailure(
         new Error("Connection lost before handshake"),

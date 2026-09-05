@@ -26,7 +26,7 @@ import { inProcessOnly } from "../sftpBackendGate";
 // waiting for it.
 //
 // The contract has a second side, driven by the last case here. A rejected send()
-// does NOT mean the peer has nothing: a publish that landed durably and was
+// does not mean the peer has nothing: a publish that landed durably and was
 // consumed by the partner inside the sender's recovery window leaves the sender
 // with the same reading a publish that never landed leaves, so its send() rejects
 // over a message the partner has already delivered to its application. What the
@@ -34,12 +34,12 @@ import { inProcessOnly } from "../sftpBackendGate";
 // outcome is not a determined non-delivery -- and that the sequence slot the
 // publish spent is not silently reused underneath it.
 //
-// Both parties connect and synchronize BEFORE the drop is armed, so no connection
+// Both parties connect and synchronize before the drop is armed, so no connection
 // is established under a standing control, but unlike the withheld-close exercise
 // in heldSessionWithheldClose.test.ts neither party is left ungoverned: the op
 // counter behind dropActiveAfterOps is server-wide (see test/sftpServer/types.ts),
 // so the cut lands on whichever party's session is serving the counted operation.
-// That is deliberate. A real partner cuts the session it cuts, and the contract
+// That is by design. A real partner cuts the session it cuts, and the contract
 // asserted here is the one that must hold either way -- the sender torn mid-write
 // and the receiver torn mid-read are both mid-message drops.
 //
@@ -50,8 +50,9 @@ import { inProcessOnly } from "../sftpBackendGate";
 const TEST_TIMEOUT_MS = 120_000;
 
 // The per-operation liveness deadline, lowered through the adapter's @internal
-// test seam, so a cut this exercise cannot recover from surfaces as the failure it
-// is rather than spending the production minute per party on the way there.
+// `stallDeadlineMs` option, so a cut this exercise cannot recover from shows up
+// as the failure it is rather than spending the production minute per party on
+// the way there.
 const STALL_DEADLINE_MS = 3_000;
 
 // How long a message that the sender reports as sent is given to reach the peer.
@@ -61,13 +62,12 @@ const STALL_DEADLINE_MS = 3_000;
 const DELIVERY_DEADLINE_MS = 20_000;
 
 // SFTP operation counts after the rendezvous at which to cut. send() writes
-// through a list (its consume gate), a put (OPEN/WRITE/CLOSE) and a rename, while
-// the receiver's poll loop lists, gets and removes over the same counter, so these
-// indices reach into both parties' high-level operations. They are the positions at
-// which the measured interleaving on this backend places the cut inside a
-// high-level operation on one side or the other; the contract below is asserted at
-// each rather than a per-position outcome, so an interleaving that shifts costs
-// this case its aim, never its truth.
+// through a list (its consume gate), a put (OPEN/WRITE/CLOSE) and a rename,
+// while the receiver's poll loop lists, gets and removes over the same
+// counter, so these indices reach into both parties' high-level operations at
+// the positions where the measured interleaving on this backend places the cut
+// inside one. The contract below is asserted at each rather than per position,
+// so an interleaving that shifts costs this case its aim, never its truth.
 const CUT_POINTS = [11, 14, 15, 16];
 
 interface ExchangeOutcome {
@@ -109,7 +109,7 @@ async function exchangeCutBy(
     verbose: -1,
     pollingFrequency: 10,
   });
-  // Both parties surface a terminal drop through the delivery race below, so the
+  // Both parties report a terminal drop through the delivery race below, so the
   // emitter's own 'error' is drained here rather than left to throw unhandled.
   sender.on("error", () => {});
   receiver.on("error", () => {});
@@ -231,18 +231,18 @@ inProcessOnly(
           ),
         ),
       ).toEqual([]);
-      // The set is not vacuous: at least one position carried the message through
-      // its drop on a send() that resolved, so the contract above is satisfied by
-      // delivery and not only by rejection.
+      // The set is not vacuous: at least one position delivered the message
+      // through its drop on a send() that resolved, so the contract above is
+      // satisfied by delivery and not only by rejection.
       expect(
         outcomes.filter(
           (outcome) => outcome.sendRejection === undefined && outcome.delivered,
         ).length,
       ).toBeGreaterThanOrEqual(1);
 
-      // Each survived drop is reported to the operator as one, and no seam the
-      // recovery drives degraded on the way (every degradation warns that this
-      // build and the installed SFTP library disagree).
+      // Each survived drop is reported to the operator as one, and none of the
+      // call sites the recovery drives degraded on the way (every degradation
+      // warns that this build and the installed SFTP library disagree).
       expect(
         logs.filter((entry) =>
           entry.message.includes("dropped mid-exchange and was transparently"),
@@ -279,7 +279,7 @@ const REMEDY =
   "exchange fresh.";
 
 // How many times the divergence is driven. It is staged rather than swept -- the
-// tear cuts inside the RENAME handler once its filesystem work has landed, and the
+// tear cuts inside the rename handler once its filesystem work has landed, and the
 // sender's landed-confirmation probe of that destination is held until the
 // receiver's consume-delete of it has been served -- so every run reaches the same
 // state, and the repeat shows that rather than searching for it.
@@ -323,7 +323,7 @@ inProcessOnly(
       expect(outcomes.filter((outcome) => outcome.redials < 1)).toEqual([]);
 
       // What the caller is told about it. A rejection over a message the partner
-      // holds must not read as a determined non-delivery, so it carries the
+      // holds must not be treated as a determined non-delivery, so it has a
       // distinguishable type -- with the transport's own error as its cause, so
       // the detail the operator would have been given is still there. Read at the
       // display boundary, over the real names and the real transport error this
@@ -339,10 +339,10 @@ inProcessOnly(
         expect(publishLink).toContain(
           "the message may or may not have reached the partner",
         );
-        // The rejection carries the recovery, and is tagged so the CLI's generic
+        // The rejection holds the recovery, and is tagged so the CLI's generic
         // advisory does not print a contradicting one beside it -- which makes
-        // this the only next step the operator gets, and its survival of the cap
-        // load-bearing.
+        // this the only next step the operator gets, and makes its survival of
+        // the cap critical.
         expect(
           (outcome.sendRejection as { psilinkRecoveryHintEmitted?: unknown })
             .psilinkRecoveryHintEmitted,
@@ -357,10 +357,10 @@ inProcessOnly(
 
       // And what it costs the session: the rejected publish spent its sequence
       // number, because the partner has already delivered a message under it. A
-      // send() that reused it would be read as a second message rather than as a
-      // retry of the first, so the next send() is refused instead. That refusal
-      // suppresses the CLI's generic advisory too, and prescribes the SAME
-      // recovery as the rejection above -- one condition, one remedy.
+      // send() that reused it would be treated as a second message rather than
+      // as a retry of the first, so the next send() is refused instead. That
+      // refusal suppresses the CLI's generic advisory too, and prescribes the
+      // same recovery as the rejection above -- one condition, one remedy.
       for (const outcome of outcomes) {
         expect(outcome.retryRejection).toBeInstanceOf(UsageError);
         const rendered = sanitizeErrorForDisplay(outcome.retryRejection);

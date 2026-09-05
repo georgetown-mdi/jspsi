@@ -18,14 +18,12 @@ import {
   snapshotDiagnosticSinkAndLevel,
 } from "../loggingTestSupport";
 
-// The cross-party host-key divergence warning is the composition the redaction
-// assignment exists for: the two parties' observed key types and fingerprints
-// are named AHEAD of the rekey-versus-interception explanation and the
-// out-of-band-confirm instruction, and the party the warning is ABOUT chooses
-// half of them. Both of its sinks redact the whole line they are given, and that
-// pass is fail-closed past a BEGIN marker with no END. These assertions read the
+// The cross-party host-key divergence warning mixes partner-chosen fields
+// (key type, fingerprint) with fixed text (the interception explanation, the
+// re-pin instruction). Both sinks redact the whole line they are given,
+// fail-closed past a BEGIN marker with no END. These assertions read the
 // bytes each sink actually emitted -- stderr, the --log-file, and the fd-3
-// warning event -- with a marker planted in each server-chosen fragment.
+// warning event -- with a marker planted in each partner-chosen fragment.
 
 snapshotDiagnosticSinkAndLevel();
 
@@ -143,14 +141,10 @@ for (const [where, partner] of PLANTED) {
 }
 
 test("a benign divergence reaches the event stream whole, not truncated", () => {
-  // The warning-event cap is a cap on a COMPOSITION, not on one value: the
-  // per-value default cuts this warning mid-explanation, taking the instruction
-  // an appliance supervisor that discards stderr has nothing else to read. The
-  // fragments are flooded to their own display cap here, so the size is held by
-  // this assertion rather than by the copy's current length. All FOUR the
-  // composition interpolates are flooded, both parties' key types and both
-  // fingerprints, which is the worst case the cap has to admit; the two sides
-  // differ so the reconciliation still finds a divergence to warn about.
+  // The warning-event cap applies to the composed message, not to each field.
+  // All four interpolated fields (both key types, both fingerprints) are
+  // flooded here, the worst case the cap must admit; the two sides still
+  // differ, so reconciliation still finds a divergence to warn about.
   const flooded: PresentedHostKey = {
     fingerprint: "‮".repeat(100),
     keyType: "‮".repeat(64),

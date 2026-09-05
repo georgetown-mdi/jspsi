@@ -32,12 +32,11 @@ afterEach(() => {
 
 // --- the error every sink is driven with -------------------------------------
 // A refusal composed the way the partitioned ones are: the summary on the
-// error's own message, the step the operator has to act on a cause link of its
-// own. sanitizeErrorForDisplay caps each link separately, so a summary sharing
-// its link with a fragment somebody else chose spends the budget on that
-// fragment -- which is why the step cannot ride there, and why what delivers it
-// is the sink rendering the whole chain. Synthesized rather than raised from a
-// flow that composes this shape: the subject here is the sinks.
+// error's own message, the step the operator has to act on a cause link of
+// its own. sanitizeErrorForDisplay caps each link separately, so a summary
+// sharing its link with a fragment somebody else chose spends the budget on
+// that fragment. Synthesized rather than raised from a flow that composes
+// this shape: the subject here is the sinks.
 
 // The fragment somebody else chose, sized off the renderer's own link budget so
 // it overruns that link whatever the budget is.
@@ -72,12 +71,12 @@ const CAUSE_SEPARATOR = sanitizeErrorForDisplay(
   new Error("a", { cause: new Error("b") }),
 ).slice(1, -1);
 
-test("the driven error carries its recovery step only on a cause link", () => {
+test("the driven error has its recovery step only on a cause link", () => {
   const error = partitionShapedError();
   expect(error.message).not.toContain(RECOVERY_STEP);
   const links = sanitizeErrorForDisplay(error).split(CAUSE_SEPARATOR);
   expect(links).toHaveLength(2);
-  // The summary link truncates, so there was never room to carry the step on it.
+  // The summary link truncates, so there was never room to hold the step on it.
   expect(links[0]).toContain(DISPLAY_TRUNCATION_MARKER);
   expect(links[1]).toBe(RECOVERY_STEP);
 });
@@ -210,7 +209,7 @@ const SINK_PROBES: SinkProbe[] = [
 ];
 
 test.each(SINK_PROBES)(
-  "$name delivers a recovery step carried on a cause link",
+  "$name delivers a recovery step held on a cause link",
   async ({ drive }) => {
     const delivered = await drive(partitionShapedError());
     expect(delivered).toHaveLength(1);

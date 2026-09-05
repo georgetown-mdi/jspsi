@@ -17,47 +17,25 @@ import type { KexPrimitive } from "../../src/connection/sftpKexCapability";
 import { inProcessOnly } from "../sftpBackendGate";
 
 // A live connection-per-poll exchange whose partner's SFTP endpoint changes its
-// key-exchange policy underneath it: it accepts the handshake the exchange opens
-// on, and from the flip onward offers only key exchanges built on a primitive
-// this process cannot perform. What that re-dial's rejection is classified as is
-// driven here against the real stack rather than against a stubbed client,
-// because the diagnostic REPLACES ssh2's message and keeps ssh2's own one cause
-// link down, so only a real dial produces the error that actually arrives at the
-// cycle-start re-dial.
-//
-// Both arms of the classification run, and the ONLY thing that differs between
-// them is the platform-capability verdict: the offer on the wire withholds every
-// X25519 algorithm either way -- by the capability constraint under a forced
-// verdict in one, by the operator's own algorithms.kex under an empty verdict in
-// the other -- so the server refuses the identical offer with the identical
-// message, and what decides "end the exchange" against "skip this cycle" is the
-// verdict alone. Each arm holds that reading of the wire as a check of its own:
-// the relay decodes every dial's own SSH_MSG_KEXINIT, so what a cycle-start
-// re-dial offered is read from the socket alongside the classification it
-// produced.
-//
-// Why a second listener rather than a control on the suite's own server: measured
-// against the pinned ssh2, a Server's `algorithms.kex` is read ONCE, as the
-// Server is constructed, and not again per connection -- an accessor on the
-// config object fires before the first client arrives and never after -- so a
-// listener cannot be told to change its policy mid-exchange. The flip is instead
-// a relay that hands later connections to a restricted listener of its own,
-// which is the same thing from the client's side: one endpoint, one port, a key
-// exchange it agreed on and then would not.
-//
-// Why the verdict is forced rather than produced by a FIPS host, and what the
-// forced verdict models: sftpKexOffer.test.ts, which drives the constrained
-// offer itself.
+// key-exchange policy underneath it: it accepts the exchange's opening
+// handshake, then from the flip onward offers only key exchanges built on a
+// primitive this process cannot perform. Both arms below hit the identical wire
+// refusal; only the platform-capability verdict differs, deciding "end the
+// exchange" against "skip this cycle". A relay hands later connections to a
+// second listener rather than reconfiguring the suite's own server, because
+// ssh2's Server reads `algorithms.kex` once at construction and cannot change
+// policy mid-exchange. Why the verdict is forced rather than produced by a FIPS
+// host: sftpKexOffer.test.ts.
 
 const forcedVerdict = vi.hoisted(() => ({
   unavailable: [] as readonly KexPrimitive[],
 }));
 
-// Only the host VERDICT is replaced; the classification, the diagnostic, the
+// Only the host verdict is replaced; the classification, the diagnostic, the
 // adapter, and ssh2 are the real ones. It defaults to "this process can perform
 // everything", which is the reading any host running this suite supplies on its
-// own, so the transient arm inherits the neutral seam and the permanent arm sets
-// it.
+// own, so the transient arm inherits the neutral reading and the permanent arm
+// sets it.
 vi.mock("../../src/connection/sftpKexCapability", async (importOriginal) => {
   const actual =
     await importOriginal<
@@ -88,7 +66,7 @@ const FLIP_TEST_TIMEOUT_MS = 120_000;
 
 // The peer-inactivity budget for both arms. Generous, and asserted against
 // rather than waited on: the ceiling ending the run is the failure the permanent
-// arm exists to rule out, and its error is a different type carrying different
+// arm exists to rule out, and its error is a different type with different
 // text.
 const PEER_TIMEOUT_MS = 30_000;
 
@@ -179,7 +157,7 @@ async function startKexRestrictedListener(): Promise<{
 }
 
 /**
- * What every dial through the relay must have carried: the constrained offer,
+ * What every dial through the relay must have held: the constrained offer,
  * identical from dial to dial. A cycle-start re-dial enters `connectLocked` with
  * the RETAINED connect options, already constrained, so constraining them again
  * has to be a no-op -- a compounded or dropped constraint is an offer differing
@@ -306,7 +284,7 @@ inProcessOnly(
       expect(outcome.dialsAfterTheEnd).toBe(0);
       // What the cycle-start re-dial OFFERED, read off the socket: the dial
       // the exchange opened on and every cycle-start re-dial that completed one
-      // carry the same X25519-free offer, both markers included, under the
+      // hold the same X25519-free offer, both markers included, under the
       // forced verdict this arm classifies on.
       expect(outcome.cycleStartRedials).toBeGreaterThanOrEqual(1);
       expectOneConstrainedOfferThroughout(outcome.offersUpToTheFlip);
@@ -342,7 +320,7 @@ inProcessOnly(
     // algorithms.kex instead, so the wire is identical to the arm above: the same
     // server refuses the same offer with the same message. The classification is
     // conditioned on the verdict rather than on that message, so this cycle is
-    // skipped and the next tick carries the exchange on.
+    // skipped and the next tick continues the exchange.
     const srv = await startInProcessSftpServer();
     const restricted = await startKexRestrictedListener();
     const relay = createKexinitRecordingRelay(srv.handle);
@@ -425,7 +403,7 @@ inProcessOnly(
       );
 
       // The exchange rode the refusals out and delivered on a session dialed
-      // after them; nothing surfaced to the caller.
+      // after them; nothing reached the caller.
       expect(delivered).toEqual({ message: "past the refused cycles" });
       expect(failures).toEqual([]);
       // Each refused cycle told the operator what it did and what happens next,

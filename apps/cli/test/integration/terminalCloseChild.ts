@@ -1,17 +1,15 @@
 // Child process for the terminal-close process-exit assertion in
 // terminalCloseBound.test.ts. It opens a real SFTP connection against a server
-// the PARENT runs with its close withheld, closes it, and then does nothing:
-// whether this process exits is the assertion, and only a separate process can
-// carry it. An in-process promise-settlement check passes even when a live
-// half-open socket is left behind -- that socket is a ref'd handle, so a
-// completed run would never exit -- and the test runner's own handles mask it.
+// the parent runs with its close withheld, closes it, and does nothing further:
+// whether this process exits is the assertion, since an in-process check can
+// pass even with a live half-open socket (a ref'd handle) left behind, masked
+// by the test runner's own handles.
 //
-// Every connection parameter arrives in the environment so the file is a plain
-// script with no argument parsing, and the session mode it selected is echoed
-// back on stdout so the parent's per-mode case cannot silently run the other mode
-// (an unset variable defaults, and a defaulted one looks exactly like a passing
-// case). Deliberately no process.exit(): the exit code must come from a drained
-// event loop.
+// Every connection parameter arrives in the environment so this is a plain
+// script with no argument parsing; the session mode it selected is echoed back
+// on stdout, since an unset variable defaults and a defaulted one would look
+// like a passing case for the other mode. No process.exit(), by design: the
+// exit code must come from a drained event loop.
 import logLibrary from "loglevel";
 import { FileSyncConnection } from "@psilink/core";
 

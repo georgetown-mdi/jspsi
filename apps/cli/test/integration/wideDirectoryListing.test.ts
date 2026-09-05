@@ -22,27 +22,20 @@ import {
 import { serverAuth } from "../sftpServer/testContext";
 import { inProcessOnly } from "../sftpBackendGate";
 
-// A directory filled to the enforced listing bound is the widest one the adapter
-// accepts, so it is the width the test backend has to be able to SERVE before a
-// case can drive anything at it. A single SFTP NAME packet does not carry a
-// listing that wide, and one too wide never arrives at all, so what is held here
-// is that the backend answers such a listing the way a real server does -- over
-// as many round trips as it takes -- with no test having to know the batch knob
-// or set it to a width that happens to fit.
+// A directory filled to the enforced listing bound is the widest one the
+// adapter accepts, so the test backend must be able to serve that width: a
+// single SFTP NAME packet cannot carry a listing this wide, so the backend
+// batches across round trips the way a real server would.
 //
-// The knob is driven alongside the default because it is the footgun: a cap
-// wider than one packet must still deliver every entry rather than being taken
-// literally and losing the reply.
+// The batch-size knob is driven alongside the default because it is a
+// hazard: a cap wider than one packet must still deliver every entry rather
+// than losing the reply.
 //
-// Each of the three enforced bounds is then driven one step PAST, where the
-// adapter refuses instead of enumerating: an entry too many, a served name a
-// character too long, and a flood of batches that carry neither an entry nor
-// end-of-directory. Being able to serve the bound is what makes crossing it a
-// measurement of the refusal rather than of the backend.
-//
-// Only the in-process backend exposes the batch knob and the server-side request
-// meter these read (see test/sftpServer/types.ts), so these run there and stand
-// up their own instance.
+// Each of the three enforced bounds -- entry count, filename length, and
+// round-trip count -- is driven one step past, where the adapter refuses
+// instead of enumerating. Only the in-process backend exposes the batch knob
+// and request meter these need (see test/sftpServer/types.ts), so these
+// tests run there and start their own instance.
 
 const TEST_TIMEOUT_MS = 300_000;
 
@@ -268,7 +261,7 @@ inProcessOnly(
 inProcessOnly(
   `a served name one character past ${MAX_FILENAME_LENGTH} is refused`,
   async () => {
-    // The name bound is the one an honest filesystem cannot cross -- every
+    // The name bound is the one a real filesystem cannot cross -- every
     // mainstream one caps a component at 255 -- so it is reached through the
     // backend's oversize-name injection rather than by planting a file: a
     // synthesized READDIR name is the only way a real server produces one, and

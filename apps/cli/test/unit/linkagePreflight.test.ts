@@ -291,7 +291,7 @@ test("terms declaring no linkage key at all are refused", () => {
 // enumeration can ask for more cause links than the renderer walks, exactly as
 // the field enumeration can. The remedy must still arrive whole, and the keys
 // past the depth bound must be counted rather than dropped into a list that
-// reads as complete.
+// displays as complete.
 test("the dead-key refusal reports the keys it could not name, with the total", () => {
   const total = 20;
   const terms: LinkageTerms = {
@@ -332,7 +332,7 @@ test("the dead-key refusal reports the keys it could not name, with the total", 
 
 // --- escaping ----------------------------------------------------------------
 
-// A partner-authored name carrying the two bytes the escape exists for: a literal
+// A partner-authored name holding the two bytes the escape exists for: a literal
 // backslash, which every sanitizing pass doubles (so a second pass is visible in
 // the output), and an ESC, which opens an ANSI sequence on a terminal. Key names
 // come from the invitation on the accept path and field names from its terms, so
@@ -412,7 +412,7 @@ test("the disclosed set is resolved from the column names when no metadata is su
   expect(warns[0]).toContain("will accept no payload columns");
   expect(warns[0]).toContain("\n  - diagnosis");
 
-  // Same set, same message, whichever half of the pair carries it.
+  // Same set, same message, whichever half of the pair holds it.
   const supplied = makeLogger();
   warnColumnsTheInvitationWillNotAccept({
     metadata: inferMetadata(columnNames),
@@ -499,7 +499,7 @@ function unsatisfiableTerms(fieldCount: number): LinkageTerms {
 
 // linkageFields is bounded only at MAX_LINKAGE_ENTRIES, so the enumeration can
 // ask for more cause links than the renderer walks. What the operator must not
-// get is a list that reads as complete while the rest was dropped past the depth
+// get is a list that displays as complete while the rest was dropped past the depth
 // bound, so the last link the renderer reaches reports the overflow and the
 // total instead of naming one more field.
 test("the refusal reports the details it could not name, with the total", () => {

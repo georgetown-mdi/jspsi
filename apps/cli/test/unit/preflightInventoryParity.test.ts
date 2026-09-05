@@ -19,13 +19,11 @@ import type { PreflightId } from "@psilink/testkit/preflightInventory";
 import type { ConnectionConfig } from "@psilink/core";
 
 // This is the CLI half of the preflight parity inventory
-// (`@psilink/testkit/preflightInventory`, whose header carries the whole
-// argument and the closure test's stated limit). What lives here is the half no
-// shared package can hold: `packages/` cannot import `apps/`, so binding a row
-// to the code that enforces it in THIS app belongs in this app's test tree. The
-// console half is apps/web/test/unit/preflightInventoryParity.test.ts, held to
-// the same set, so the two are compared against one reference and therefore
-// against each other.
+// (`@psilink/testkit/preflightInventory`, whose header holds the whole
+// argument and the closure test's stated limit). `packages/` cannot import
+// `apps/`, so binding a row to its enforcing code belongs in this app's test
+// tree. The console half is apps/web/test/unit/preflightInventoryParity.test.ts,
+// compared against the same inventory and so against each other.
 
 /** The CLI modules whose whole purpose is preflight. Every function they export
  * is a preflight check and must be claimed by a row. */

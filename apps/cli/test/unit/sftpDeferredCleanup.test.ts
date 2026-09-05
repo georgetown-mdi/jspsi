@@ -11,8 +11,8 @@ import {
 
 // The ceiling on the whole re-issue drain, duplicated from the module for the
 // same reason the adapter's own liveness bounds are duplicated in its suite (it
-// is a liveness backstop, not a seam), so the cases below can sit either side of
-// it.
+// is a liveness safety check, not a hook), so the cases below can sit either
+// side of it.
 const DRAIN_BOUND_MS = 5_000;
 
 // A remote path naming the protocol's own in-flight write, temp-<uuidv4()>.tmp:
@@ -22,7 +22,7 @@ const DRAIN_BOUND_MS = 5_000;
 const protocolTempPath = (dir = "/remote"): string =>
   `${dir}/temp-${randomUUID()}.tmp`;
 
-// A remote path whose DIRECTORY carries bytes no operator's terminal may see
+// A remote path whose DIRECTORY contains bytes no operator's terminal may see
 // raw: an ESC that would drive an ANSI sequence and a CRLF that would spoof a
 // second log line. The basename is a real temp, so the record admits it and the
 // debug lines below render it -- which is what makes this the shape that pins
@@ -76,13 +76,12 @@ const settleQueue = async (turns = 10): Promise<void> => {
 
 describe("what the record admits", () => {
   test("admits only the protocol's own in-flight temp shapes", () => {
-    // safeDelete is a public transport method core calls with the shared
-    // rendezvous lock path and with names read back from a listing of the
-    // directory the PEER writes into, not just with this party's own temp. A
-    // record is keyed on a PATH and re-issued at an arbitrary later point, so
-    // admitting one of those would let a transiently-failed delete remove
-    // whatever has since come to occupy that name. The temp shape's per-file v4
-    // UUID is what makes deferral sound, so it is the only shape admitted.
+    // safeDelete is a public transport method core also calls with the shared
+    // rendezvous lock path and with peer-written names read from a directory
+    // listing, not just this party's own temp. A record is keyed on a path and
+    // re-issued later, so admitting one of those risks deleting whatever has
+    // since come to occupy that name. Only the temp shape's per-file v4 UUID
+    // makes deferral safe.
     const { record } = makeRecord();
 
     const refused = [
@@ -286,7 +285,7 @@ describe("the drain", () => {
   test("keeps the record when the transport says it cannot drain", async () => {
     // A fatal SFTP protocol error, a latched teardown, and no live session all
     // reach the record as one refusal: it keeps for the next re-establishment
-    // rather than issuing onto a session that cannot carry it.
+    // rather than issuing onto a session that cannot send it.
     const { record, issued } = makeRecord({ canDrain: () => false });
     const kept = protocolTempPath();
     record.record(kept);

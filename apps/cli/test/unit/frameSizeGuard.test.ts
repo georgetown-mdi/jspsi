@@ -51,9 +51,9 @@ describe("frameSizeExceededError", () => {
     expect(err.message).not.toMatch(/is \d+ bytes/);
   });
 
-  // The path carries the peer-supplied filename on a get(); a hostile server
-  // must not be able to drive the operator's terminal through it. Mirrors the
-  // sanitizeForDisplay categories.
+  // The path holds the peer-supplied filename from a get() call; a hostile
+  // server must not be able to drive the operator's terminal through it.
+  // Mirrors the sanitizeForDisplay categories.
   test("an ordinary path passes through unchanged", () => {
     const err = frameSizeExceededError("/drop/peer-7-42.json", 100, 250);
     expect(sanitizeErrorForDisplay(err)).toContain(
@@ -70,9 +70,9 @@ describe("frameSizeExceededError", () => {
   test("escapes a newline so the path cannot spoof a log line", () => {
     const err = frameSizeExceededError("/drop/ok.json\nFAKE: clear", 100);
     // Read per link, not over the joined chain: the renderer's own cause
-    // separator carries the one newline it emits, so the joined form would fail
-    // on framing this test is not about. The same removal the CLI integration
-    // console sentinel makes before it inspects a captured line.
+    // separator contains the one newline it emits, so the joined form would
+    // fail on framing this test is not about. The same removal the CLI
+    // integration console sentinel makes before it inspects a captured line.
     for (const link of linksOf(err)) expect(link).not.toContain("\n");
     expect(sanitizeErrorForDisplay(err)).toContain("\\x0a");
   });
@@ -152,7 +152,7 @@ describe("createCappedSink", () => {
     await expect(result).rejects.toBeInstanceOf(FrameSizeExceededError);
   });
 
-  test("fail() surfaces a genuine transport error when the cap never fires", async () => {
+  test("fail() exposes a genuine transport error when the cap never fires", async () => {
     const { result, fail } = createCappedSink("/p/x.bin", 32);
     const transportErr = new Error("connection reset");
     fail(transportErr);
@@ -186,15 +186,12 @@ describe("createCappedSink", () => {
   });
 
   test("the idle stall tears down the upstream read stream, not just the sink", async () => {
-    // Regression: the idle path must destroy the sink WITH an error so the
-    // server-side transfer is aborted. ssh2-sftp-client's get(path, dst) pipes
-    // the read stream into the sink and destroys that read stream only when its
-    // own promise settles -- and the promise rejects via the sink's 'error'
-    // event. A bare sink.destroy() emits 'close', not 'error', so the read
-    // stream would keep running until session teardown. This models ssh2's
-    // wiring (pipe a real Readable in; tear it down on the sink's 'error') and
-    // asserts the source is destroyed once the idle deadline fires. With a bare
-    // destroy() the source would still be live here.
+    // Regression: the idle path must destroy the sink WITH an error, not just
+    // close it -- ssh2-sftp-client's get(path, dst) tears down the upstream
+    // read stream only when its promise rejects via the sink's 'error' event,
+    // not 'close'. Models that wiring (pipe a real Readable in; tear it down
+    // on the sink's 'error') and asserts the source is destroyed once the idle
+    // deadline fires.
     vi.useFakeTimers();
     try {
       const { sink, result } = createCappedSink("/p/stall.bin", 32, 1_000);
