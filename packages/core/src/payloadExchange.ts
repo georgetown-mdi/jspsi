@@ -24,6 +24,7 @@ import {
   receiveParsed,
 } from "./connection/messageConnection.js";
 import { singleIssueArray } from "./utils/singleIssueArray.js";
+import { loneSurrogateIndex } from "./utils/wellFormedString.js";
 import { OutboundDisclosureRefusalError, UsageError } from "./errors.js";
 
 /** The payload received from the exchange partner after PSI linkage. */
@@ -71,8 +72,15 @@ export interface PartnerPayload {
 // `z.string().nullable()` for a cell, the inner `z.array(...)` for a row --
 // and the differential in test/payloadExchange.test.ts holds the two to the
 // same accepted set.
+// A received cell and column name go verbatim into the CommittedPayload the
+// receipt MAC and the record commitments are canonically encoded over
+// (toCommittedPayload), and that encoder terminates on an unpaired UTF-16
+// surrogate -- which JSON escapes on the way out and restores on the way in,
+// so one crosses the wire intact. Both are held to the shared well-formedness
+// rule here, at the parse, rather than at an encode that runs after the
+// exchange has disclosed. See docs/spec/CANONICAL_ENCODING.md, "Strings".
 const isPayloadCell = (cell: unknown): boolean =>
-  typeof cell === "string" || cell === null;
+  cell === null || (typeof cell === "string" && loneSurrogateIndex(cell) < 0);
 const isPayloadRow = (row: unknown): boolean =>
   Array.isArray(row) && row.every(isPayloadCell);
 
@@ -153,13 +161,16 @@ const payloadWireSchema = z.discriminatedUnion("hasData", [
       // name at intake, so an honest sender never emits a `""` column (e.g.
       // from a trailing-comma CSV header); it instead refuses a partner who
       // hand-crafts `[""]` to suppress this party's record (the
-      // exchange-record `.min(1)` remains the on-disk safety check).
+      // exchange-record `.min(1)` remains the on-disk safety check). The
+      // well-formedness scan stated at `isPayloadCell` rides in the same pass,
+      // a name being committed exactly as a cell is.
       columns: singleIssueArray<string>(
         (value) =>
           typeof value === "string" &&
           value.length >= 1 &&
-          value.length <= MAX_NAME_LENGTH,
-        `each column name must be a string of 1 to ${MAX_NAME_LENGTH} characters`,
+          value.length <= MAX_NAME_LENGTH &&
+          loneSurrogateIndex(value) < 0,
+        `each column name must be a string of 1 to ${MAX_NAME_LENGTH} characters with no unpaired UTF-16 surrogate`,
       ),
       rowIndices: singleIssueArray<number>(
         (value) => Number.isSafeInteger(value) && (value as number) >= 0,
@@ -167,7 +178,7 @@ const payloadWireSchema = z.discriminatedUnion("hasData", [
       ),
       rows: singleIssueArray<Array<string | null>>(
         isPayloadRow,
-        "each payload row must be an array of strings or nulls",
+        "each payload row must be an array of strings or nulls with no unpaired UTF-16 surrogate",
       ),
     })
     .superRefine((v, ctx) => {

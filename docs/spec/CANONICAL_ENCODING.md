@@ -219,6 +219,13 @@ every parse path, so an exchange refuses such a document where the partner's
 terms are read rather than at the agreed-terms hash, which is computed after
 the exchange has disclosed.
 
+A received payload frame MUST be well-formed UTF-16 the same way -- every
+column name and every cell -- and the payload wire schema
+(`packages/core/src/payloadExchange.ts`) refuses one that is not where the
+frame is parsed. Those names and values are committed verbatim by the receipt
+MACs and by the record's payload commitments, which are likewise computed after
+the exchange has disclosed.
+
 ### Absent versus null
 
 `null` is a value; an absent member is the absence of a key. They are distinct

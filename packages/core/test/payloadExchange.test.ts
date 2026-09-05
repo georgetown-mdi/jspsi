@@ -1381,11 +1381,21 @@ test("exchangePayloads: a columnless frame holding no rows parses, committing no
 // which frames parse. This corpus checks that second half by comparing the
 // real receive path against a plain reference schema on every frame, each
 // round-tripped through JSON first, so only a JSON body's shapes are in scope.
+// The well-formedness half of the rule, read from an independent oracle:
+// String.prototype.isWellFormed, which the package's own scan cannot use (it
+// compiles against the ES2022 lib) and which is therefore not the
+// implementation restated. Declared here because the same lib setting hides it
+// from the type checker.
+const isWellFormed = (value: string): boolean =>
+  (value as unknown as { isWellFormed: () => boolean }).isWellFormed();
+
+const wellFormed = (schema: z.ZodString) => schema.refine(isWellFormed);
+
 const referenceFrameSchema = z.object({
   hasData: z.literal(true),
-  columns: z.array(z.string().min(1).max(MAX_NAME_LENGTH)),
+  columns: z.array(wellFormed(z.string().min(1).max(MAX_NAME_LENGTH))),
   rowIndices: z.array(z.number().int().nonnegative()),
-  rows: z.array(z.array(z.string().nullable())),
+  rows: z.array(z.array(wellFormed(z.string()).nullable())),
 });
 
 // One column, one matched row, one cell. Every frame below keeps its collections
@@ -1417,6 +1427,18 @@ const elementShapeCorpus: Array<{ label: string; frame: unknown }> = [
     frame: frameWith({ columns: ["x".repeat(MAX_NAME_LENGTH + 1)] }),
   },
   { label: "a numeric column name", frame: frameWith({ columns: [1] }) },
+  {
+    label: "a column name holding a lone high surrogate",
+    frame: frameWith({ columns: ["diagnosis\ud800"] }),
+  },
+  {
+    label: "a column name holding a lone low surrogate",
+    frame: frameWith({ columns: ["\udc00diagnosis"] }),
+  },
+  {
+    label: "a column name holding a surrogate pair",
+    frame: frameWith({ columns: ["diagnosis😀"] }),
+  },
   { label: "a null column name", frame: frameWith({ columns: [null] }) },
   {
     label: "a columns collection that is not an array",
@@ -1434,6 +1456,18 @@ const elementShapeCorpus: Array<{ label: string; frame: unknown }> = [
     frame: frameWith({ rowIndices: 0 }),
   },
   { label: "a numeric cell", frame: frameWith({ rows: [[5]] }) },
+  {
+    label: "a cell holding a lone high surrogate",
+    frame: frameWith({ rows: [["P-1\ud800"]] }),
+  },
+  {
+    label: "a cell holding a lone low surrogate",
+    frame: frameWith({ rows: [["\udfffP-1"]] }),
+  },
+  {
+    label: "a cell holding a surrogate pair",
+    frame: frameWith({ rows: [["P-1😀"]] }),
+  },
   { label: "a boolean cell", frame: frameWith({ rows: [[true]] }) },
   { label: "an object cell", frame: frameWith({ rows: [[{}]] }) },
   { label: "an array cell", frame: frameWith({ rows: [[["A"]]] }) },
