@@ -1,3 +1,4 @@
+import { isIP } from "node:net";
 import { connect } from "node:tls";
 
 import type { BrokerLocation } from "./brokerClient";
@@ -94,11 +95,18 @@ export const probeSignalingCertificate: SignalingCertificateProbe = (
       resolve(undefined);
       return;
     }
-    // `servername` is left to tls.connect, which derives SNI from `host` and
-    // omits it for an IP literal, where SNI is not defined.
+    // SNI is what an endpoint holding more than one certificate selects by, so
+    // a probe that sends a different one answers about a different certificate.
+    // Measured on Node 26: `tls.connect` sends no server name unless
+    // `servername` is given, while the `WebSocket` dial does send the host's.
+    // RFC 6066 excludes an IP literal, which Node enforces by throwing on one.
+    const port = location.port;
     let socket: TLSSocket;
     try {
-      socket = connect({ host, port: location.port });
+      socket =
+        isIP(host) === 0
+          ? connect({ host, port, servername: host })
+          : connect({ host, port });
     } catch {
       resolve(undefined);
       return;
