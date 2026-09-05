@@ -17,8 +17,8 @@ import {
   generateSharedSecret,
 } from "@psilink/core";
 
-import { WAITING_STAGE_ID, stagesFor } from "@bench/exchangeRun";
-import { AcceptorBench } from "@bench/AcceptorBench";
+import { WAITING_STAGE_ID, stagesFor } from "@exchange/exchangeRun";
+import { AcceptorScreen } from "@exchange/AcceptorScreen";
 
 import { createAppMount } from "./renderApp";
 
@@ -36,11 +36,11 @@ import type {
 // screens hand off correctly for a full UI journey to Done with a
 // downloadable result.
 
-// Entry point: AcceptorBench, mounted directly. That is exactly the component
+// Entry point: AcceptorScreen, mounted directly. That is exactly the component
 // the /accept route renders (routes/accept.tsx), matching the suite's mount
 // idiom (direct createRoot, the router boundary mocked).
 
-// AcceptorBench's recovery links and lobby touch the router boundary; the
+// AcceptorScreen's recovery links and lobby touch the router boundary; the
 // journey never navigates.
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
@@ -150,7 +150,7 @@ afterEach(() => {
 
 test("acceptor journey reaches Done with a downloadable result driven only through the UI", async () => {
   window.location.hash = await encodeRunToken();
-  app.render(createElement(AcceptorBench));
+  app.render(createElement(AcceptorScreen));
 
   // Review the terms -> Continue. The decode-to-terms handoff is the acquire
   // phase's own state reaching the first rendered screen.

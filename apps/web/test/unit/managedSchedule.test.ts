@@ -1051,7 +1051,7 @@ describe("localCadenceFromAnchor", () => {
   test("reads to the minute, so an anchor finer than that does not round-trip", () => {
     // The cadence holds no seconds, which is why an entry surface holding a
     // stored anchor at this resolution passes it through rather than resolving
-    // the reading back (see ../../src/bench/scheduleEntryModel.ts).
+    // the reading back (see ../../src/recurring/scheduleEntryModel.ts).
     withTimeZone("UTC", () => {
       const cadence = localCadenceFromAnchor("2026-03-03T14:00:30.500Z");
       expect(cadence).toEqual({

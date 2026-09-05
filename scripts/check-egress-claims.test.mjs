@@ -578,7 +578,7 @@ describe("scanned files", () => {
     expect(isScannedFile("apps/web/public/logo.svg")).toBe(true);
     expect(isScannedFile("apps/web/public/index.html")).toBe(true);
     expect(isScannedFile("apps/web/public/site.webmanifest")).toBe(true);
-    expect(isScannedFile("apps/web/src/bench/tokens.css")).toBe(true);
+    expect(isScannedFile("apps/web/src/styles/tokens.css")).toBe(true);
   });
 
   it("scans a test file that lands under a shipped-source root", () => {
@@ -655,7 +655,7 @@ describe("scanned files", () => {
         "https://evil.example/e",
       ],
       [
-        "apps/web/src/bench/tokens.css",
+        "apps/web/src/styles/tokens.css",
         "a { b: c } // https://evil.example/f\n",
         "https://evil.example/f",
       ],
@@ -673,7 +673,7 @@ describe("scanned files", () => {
     // comment rules rather than the whole grammar fails the other way -- a
     // backslash line continuation inside a string is enough to make one take
     // real declarations, and the literals in them, out of the scan.
-    const path = "apps/web/src/bench/tokens.css";
+    const path = "apps/web/src/styles/tokens.css";
     const source =
       "/* see https://commented.example/x */\n" +
       "a { background: url(https://evil.example/y) }\n";
@@ -848,7 +848,7 @@ describe("literal extraction", () => {
     expect(
       urlsIn(
         "@font-face { src: url(https://fonts.example/i.woff2); }\n",
-        "apps/web/src/bench/tokens.css",
+        "apps/web/src/styles/tokens.css",
       ),
     ).toEqual(["https://fonts.example/i.woff2"]);
     expect(
@@ -898,7 +898,7 @@ describe("literal extraction", () => {
   });
 
   it("reads a URL inside a quoted CSS data URI", () => {
-    const path = "apps/web/src/bench/tokens.css";
+    const path = "apps/web/src/styles/tokens.css";
     const source =
       "  --bench-check: url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\"/>');\n";
     expect(urlsIn(source, path)).toEqual(["http://www.w3.org/2000/svg"]);

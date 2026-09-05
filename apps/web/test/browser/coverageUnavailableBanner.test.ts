@@ -9,8 +9,8 @@ import { createElement } from "react";
 import { declaredFieldsFor, editorFromCsv } from "@psi/inviterModel";
 import { columnSamplesFromRows } from "@psi/columnSamples";
 
-import { AcceptorCleaningStep } from "@bench/AcceptorCleaningStep";
-import { CleaningTab } from "@bench/CleaningTab";
+import { AcceptorCleaningStep } from "@exchange/AcceptorCleaningStep";
+import { CleaningTab } from "@exchange/CleaningTab";
 
 import { createAppMount } from "./renderApp";
 

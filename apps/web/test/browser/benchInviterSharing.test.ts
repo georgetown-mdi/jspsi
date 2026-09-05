@@ -19,8 +19,8 @@ import {
   editorWithColumnType,
   inviterLedgerRows,
 } from "@psi/inviterModel";
-import { Ledger } from "@bench/Ledger";
-import { MatchingSharingSection } from "@bench/MatchingSharingSection";
+import { Ledger } from "@exchange/Ledger";
+import { MatchingSharingSection } from "@exchange/MatchingSharingSection";
 
 // The expectations derive their form from this function, so they pin that the
 // section's string sink has the same form its chips do, not what that form

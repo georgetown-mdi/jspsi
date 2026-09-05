@@ -5,7 +5,7 @@ import { DEFAULT_PEER_TIMEOUT_MS } from "@psilink/core";
 import {
   SERVER_JOB_PEER_WINDOW_BODY,
   peerWindowDurationPhrase,
-} from "@bench/BenchRunSurface";
+} from "@exchange/RunSurface";
 
 describe("SERVER_JOB_PEER_WINDOW_BODY", () => {
   test("is composed from DEFAULT_PEER_TIMEOUT_MS, never a hardcoded duration", () => {

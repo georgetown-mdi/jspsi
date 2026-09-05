@@ -17,7 +17,7 @@ import {
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
 } from "@psi/managedExchangeRecord";
-import { managedCronExportPanelState } from "@bench/managedCronExportModel";
+import { managedCronExportPanelState } from "@recurring/managedCronExportModel";
 
 import type { ExchangeLocator, WebRTCExchangeLocator } from "@psilink/core";
 import type {

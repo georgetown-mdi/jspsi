@@ -27,7 +27,7 @@ import {
   signedVerdictViewModel,
   verdictViewModel,
   verifySignedRecord,
-} from "@bench/verifyReceiptModel";
+} from "@exchange/verifyReceiptModel";
 
 import type {
   AssociationTable,

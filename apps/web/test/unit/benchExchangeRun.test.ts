@@ -18,9 +18,9 @@ import {
   stagesFor,
   timeOfDayLabel,
   timelineSteps,
-} from "@bench/exchangeRun";
+} from "@exchange/exchangeRun";
 
-import type { ExchangeRun } from "@bench/exchangeRun";
+import type { ExchangeRun } from "@exchange/exchangeRun";
 import type { PreparedExchange } from "@psilink/core";
 
 // stagesFor and describeExchangeStages beneath it read only the linkage terms

@@ -16,7 +16,7 @@ import {
   disclosureFacts,
   storedDisclosureAccountingDocument,
   storedDisclosureAccountingFileName,
-} from "../../src/bench/disclosureAccountingModel.js";
+} from "../../src/recurring/disclosureAccountingModel.js";
 import {
   DISCLOSURE_ACCOUNTING_VERSION,
   appendDisclosureRecord,
@@ -25,7 +25,7 @@ import {
 import { disclosureRecord } from "../utils/disclosureFixtures.js";
 
 import type { DisclosureAccounting } from "../../src/psi/disclosureAccounting.js";
-import type { DisclosureFact } from "../../src/bench/disclosureAccountingModel.js";
+import type { DisclosureFact } from "../../src/recurring/disclosureAccountingModel.js";
 import type { ExchangeRecord } from "@psilink/core";
 
 /**

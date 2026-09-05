@@ -34,8 +34,8 @@ import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
 import { deriveManagedFailureTier } from "@psi/managedFailureTiers";
 import { failedRun } from "@psi/managedRunRotate";
 import { importManagedExchange } from "@psi/managedExchangeImport";
-import { managedRunFailureFromRecord } from "@bench/managedRunLaunchModel";
-import { savedExchangeRows } from "@bench/savedExchangesModel";
+import { managedRunFailureFromRecord } from "@recurring/managedRunLaunchModel";
+import { savedExchangeRows } from "@recurring/savedExchangesModel";
 import { withManagedExchangeLock } from "@psi/managedExchangeLock";
 
 import type {

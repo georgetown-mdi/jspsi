@@ -13,8 +13,8 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (file) => readFileSync(resolve(root, file), "utf8");
 
 const SOURCE_FILE = "apps/cli/src/connection/webrtc/weriftPeer.ts";
-const WEB_COPY_FILE = "apps/web/src/bench/managedCronExportModel.ts";
-const PANEL_FILE = "apps/web/src/bench/ManagedCronExportPanel.tsx";
+const WEB_COPY_FILE = "apps/web/src/recurring/managedCronExportModel.ts";
+const PANEL_FILE = "apps/web/src/recurring/ManagedCronExportPanel.tsx";
 const DOCS = [
   "docs/CLI.md",
   "docs/spec/DEPENDENCY_PINS.md",

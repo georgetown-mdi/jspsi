@@ -13,7 +13,7 @@ import {
   IDENTITY_LABEL_REQUIRED_REASON,
   RECEIPTS_DEFAULT,
 } from "@psi/receiptsModel";
-import { ReceiptsCard } from "@bench/ReceiptsCard";
+import { ReceiptsCard } from "@console/ReceiptsCard";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 
@@ -130,8 +130,8 @@ const SINGLE_MOUNT_RENDEZVOUS: JobRendezvousConfig = {
 };
 
 /**
- * The card wired the way both benches wire it -- `AcceptorBench` directly and
- * `InviterBench` through `ReviewCreateSection` -- with a bare `useState` setter as
+ * The card wired the way both benches wire it -- `AcceptorScreen` directly and
+ * `InviterScreen` through `ReviewCreateSection` -- with a bare `useState` setter as
  * `onChange`. That is the contract the concurrent-edit tests turn on: the setter
  * REPLACES the whole draft, so whatever the card passes is the whole of what
  * survives.

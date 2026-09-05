@@ -6,7 +6,7 @@ import {
   fetchJobExchangeRecordOffer,
   jobRecordDownloads,
 } from "@psi/jobExchangeRecord";
-import { untakenRecordConfirm } from "@bench/BenchRunSurface";
+import { untakenRecordConfirm } from "@exchange/RunSurface";
 
 import type { JobExchangeRecordOffer } from "@psi/jobExchangeRecord";
 

@@ -219,7 +219,7 @@ export class JobApiRequestError extends Error {
  * rejoined by the renderer's own framing, or the escaped flat field when the
  * relay derived no chain (see {@link errorMessageOf}). Anything else renders
  * through the escaping renderer instead (`sanitizedFailureMessage` in
- * `@bench/useInviterExchange`). */
+ * `@exchange/useInviterExchange`). */
 export class RelayedTerminalError extends Error {
   constructor(message: string) {
     super(message);

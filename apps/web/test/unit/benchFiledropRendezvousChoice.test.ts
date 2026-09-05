@@ -7,7 +7,7 @@ import {
   acceptKitEndpointForRendezvous,
   filedropEndpointForRendezvous,
   splitRendezvousRetainProblem,
-} from "@bench/filedropRendezvousChoice";
+} from "@console/filedropRendezvousChoice";
 
 import type { InvitationToken } from "@psilink/core";
 import type { JobRendezvousConfig } from "@psi/workInputClient";

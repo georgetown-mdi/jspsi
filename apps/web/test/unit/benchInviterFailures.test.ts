@@ -7,7 +7,7 @@ import {
 } from "@psilink/core";
 
 import { JobApiRequestError } from "@psi/serverJobExchangeDriver";
-import { failureFor } from "@bench/useInviterExchange";
+import { failureFor } from "@exchange/useInviterExchange";
 
 import type { CSVRow, LinkageTerms, Metadata } from "@psilink/core";
 import type { JobInputSource } from "@psi/serverJobExchangeDriver";

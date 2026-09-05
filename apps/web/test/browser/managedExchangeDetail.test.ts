@@ -28,8 +28,8 @@ import {
   persistManagedExchangeScheduleAdvance,
   updateManagedExchangeLocalFields,
 } from "@psi/managedExchangeStore";
-import { ManagedExchangeDetail } from "@bench/ManagedExchangeDetail";
-import { disclosureEntries } from "@bench/disclosureAccountingModel";
+import { ManagedExchangeDetail } from "@recurring/ManagedExchangeDetail";
+import { disclosureEntries } from "@recurring/disclosureAccountingModel";
 
 import {
   disclosureRecord,

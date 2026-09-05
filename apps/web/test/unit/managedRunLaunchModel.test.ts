@@ -11,7 +11,7 @@ import {
   managedRunFailureFromRecord,
   managedRunReinvites,
   managedRunRetryable,
-} from "@bench/managedRunLaunchModel";
+} from "@recurring/managedRunLaunchModel";
 
 import {
   MANAGED_EXCHANGE_SCHEMA_VERSION,
@@ -39,7 +39,7 @@ import type {
 import type {
   ManagedRunFailure,
   ManagedRunFailureAlert,
-} from "@bench/managedRunLaunchModel";
+} from "@recurring/managedRunLaunchModel";
 import type { ManagedLocalState } from "@psi/managedLocalState";
 
 // The launch surface's failure classification, tested in Node: the pre-connection

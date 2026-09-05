@@ -21,12 +21,12 @@ import {
   maxAgeCadenceNote,
   maxAgeDaysError,
   webrtcLocatorFromEndpoint,
-} from "@bench/manageOfferModel";
+} from "@exchange/manageOfferModel";
 
 import type {
   ManagedDepositInputs,
   ManagedExchangeDocumentParts,
-} from "@bench/manageOfferModel";
+} from "@exchange/manageOfferModel";
 import type { WebRTCEndpoint } from "@psilink/core";
 
 // The inviter's own signaling location (window.location-derived) is already the

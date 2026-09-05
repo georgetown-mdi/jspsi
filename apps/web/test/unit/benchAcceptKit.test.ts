@@ -6,10 +6,10 @@ import {
   INVITATION_PLACEHOLDER,
   acceptKitFileName,
   buildAcceptKit,
-} from "@bench/acceptKit";
+} from "@exchange/acceptKit";
 import { generateInvitation } from "@psi/invitation";
 
-import type { AcceptKitEndpoint } from "@bench/acceptKit";
+import type { AcceptKitEndpoint } from "@exchange/acceptKit";
 import type { InvitationLocation } from "@psi/invitation";
 
 const FILEDROP: AcceptKitEndpoint = { channel: "filedrop", path: "psilink" };

@@ -14,19 +14,19 @@ import "@mantine/core/styles.css";
 import { encodeInvitation, generateSharedSecret } from "@psilink/core";
 
 import { deepLinkFor, tokenFromInput } from "@psi/invitation";
-import { AcceptorBench } from "@bench/AcceptorBench";
+import { AcceptorScreen } from "@exchange/AcceptorScreen";
 
 import { createAppMount } from "./renderApp";
 
 import type { InvitationToken, LinkageTerms } from "@psilink/core";
 
-// AcceptorBench reads the token from window.location.hash and links home, so a
+// AcceptorScreen reads the token from window.location.hash and links home, so a
 // plain-anchor Link is all this test exercises of the router boundary.
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
 );
 
-// AcceptorBench transitively imports the rendezvous and lifecycle modules, and
+// AcceptorScreen transitively imports the rendezvous and lifecycle modules, and
 // this test never launches an exchange (it stops at the decoded review screen),
 // so both are stubbed.
 vi.mock("@psi/rendezvous", async () =>
@@ -74,7 +74,7 @@ afterEach(() => {
 // The cutover collapsed the acceptor onto the primary /accept route (ssr: false),
 // the path the inviter's deep link points at (ACCEPT_ROUTE_PATH). This pins the
 // end-to-end landing: a real minted deep link's fragment, extracted the way a
-// pasted link is (tokenFromInput), decodes on the AcceptorBench the /accept route
+// pasted link is (tokenFromInput), decodes on the AcceptorScreen the /accept route
 // mounts. The fragment is the only carrier of the token, so this also proves the
 // fragment survives from the minted link to the acceptor's decode.
 describe("deep-link landing on the bench acceptor", () => {
@@ -88,10 +88,10 @@ describe("deep-link landing on the bench acceptor", () => {
     const token = tokenFromInput(deepLink);
     expect(token).toBe(encoded);
 
-    // The /accept route runs client-side and mounts AcceptorBench, which reads the
+    // The /accept route runs client-side and mounts AcceptorScreen, which reads the
     // token from the fragment. Set the fragment and mount the same component.
     window.location.hash = token;
-    app.render(createElement(AcceptorBench));
+    app.render(createElement(AcceptorScreen));
 
     // The decoded terms render: the inviter identity heading proves the token rode
     // the fragment through to a successful decode, not a "cannot accept" error.

@@ -8,7 +8,7 @@ import {
   linkageTermsRows,
   runHistoryEntries,
   scheduleView,
-} from "@bench/managedDetailModel";
+} from "@recurring/managedDetailModel";
 import {
   buildManagedExchangeRecord,
   composeManagedExchangeFile,

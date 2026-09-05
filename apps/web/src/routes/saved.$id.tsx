@@ -1,6 +1,6 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 
-import { ManagedRunSurface } from "@bench/ManagedRunSurface";
+import { ManagedRunSurface } from "@recurring/ManagedRunSurface";
 import { isConsoleBuild } from "@utils/clientConfig";
 
 export const Route = createFileRoute("/saved/$id")({

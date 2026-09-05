@@ -19,13 +19,14 @@ import {
 import {
   UNDESCRIBABLE_RECORD_CONFIRM_BODY,
   UNTAKEN_RECORD_CONFIRM_BODY,
-} from "@bench/BenchRunSurface";
-import { BenchLobby } from "@bench/BenchLobby";
-import { DIRECT_LINKAGE_STRATEGY_AGREEMENT_NOTICE } from "@bench/directExchangeModel";
-import { DirectExchangeBench } from "@bench/DirectExchangeBench";
-import { RETAIN_MODE_BILATERAL_NOTICE } from "@bench/exchangeFilesModel";
-import { SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT } from "@bench/filedropRendezvousChoice";
-import { UNDESCRIBABLE_RECORD_LEAD } from "@bench/RecordDownload";
+} from "@exchange/RunSurface";
+import { Lobby } from "@exchange/Lobby";
+
+import { DIRECT_LINKAGE_STRATEGY_AGREEMENT_NOTICE } from "@exchange/directExchangeModel";
+import { DirectExchangeScreen } from "@exchange/DirectExchangeScreen";
+import { RETAIN_MODE_BILATERAL_NOTICE } from "@console/exchangeFilesModel";
+import { SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT } from "@console/filedropRendezvousChoice";
+import { UNDESCRIBABLE_RECORD_LEAD } from "@exchange/RecordDownload";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 
@@ -298,7 +299,7 @@ async function reachConfirm() {
 describe("direct exchange confirm and run", () => {
   test("previews the inferred terms, gates Run on the affirmation, and runs a zero-setup job", async () => {
     const api = stubJobApi({ sftp: CONFIGURED_SFTP });
-    app.render(createElement(DirectExchangeBench));
+    app.render(createElement(DirectExchangeScreen));
     await reachConfirm();
 
     // The browser-side terms preview renders under the direct-exchange framing: the
@@ -402,7 +403,7 @@ describe("direct exchange confirm and run", () => {
 
   test("a terms mismatch shows clearly through the job-error path", async () => {
     const api = stubJobApi({ sftp: CONFIGURED_SFTP });
-    app.render(createElement(DirectExchangeBench));
+    app.render(createElement(DirectExchangeScreen));
     await reachConfirm();
     await page.getByRole("checkbox").click();
     await page.getByRole("button", { name: "Run the exchange" }).click();
@@ -430,7 +431,7 @@ describe("direct exchange confirm and run", () => {
 
   test("Start over after a terminal failure frees the slot and re-enables Run", async () => {
     const api = stubJobApi({ sftp: CONFIGURED_SFTP, jobStatus: "failed" });
-    app.render(createElement(DirectExchangeBench));
+    app.render(createElement(DirectExchangeScreen));
     await reachConfirm();
     await page.getByRole("checkbox").click();
     await page.getByRole("button", { name: "Run the exchange" }).click();
@@ -501,7 +502,7 @@ describe("direct exchange confirm and run", () => {
 
   test("an invalid identity names the fault at the field and blocks Run", async () => {
     stubJobApi({ sftp: CONFIGURED_SFTP });
-    app.render(createElement(DirectExchangeBench));
+    app.render(createElement(DirectExchangeScreen));
     await reachConfirm();
     // Affirm first, so the identity guard is the only thing gating Run.
     await page.getByRole("checkbox").click();
@@ -537,7 +538,7 @@ describe("direct exchange confirm and run", () => {
 
   test("single-pass discloses its tradeoff, reshapes the preview, and rides the run", async () => {
     const api = stubJobApi({ sftp: CONFIGURED_SFTP });
-    app.render(createElement(DirectExchangeBench));
+    app.render(createElement(DirectExchangeScreen));
     await reachConfirm();
 
     // The default is the CLI's, and it raises no disclosure of its own.
@@ -601,7 +602,7 @@ describe("console direct re-attaches on a busy create", () => {
       conflict: { jobId: "job-live", status: "running" },
       handoff: REATTACH_HANDOFF,
     });
-    app.render(createElement(DirectExchangeBench));
+    app.render(createElement(DirectExchangeScreen));
     await reachConfirm();
     await page.getByRole("checkbox").click();
     await page.getByRole("button", { name: "Run the exchange" }).click();
@@ -675,7 +676,7 @@ describe("console direct re-attaches on a busy create", () => {
       sftp: CONFIGURED_SFTP,
       conflict: { jobId: "job-live", status: "running", holdProbe: true },
     });
-    app.render(createElement(DirectExchangeBench));
+    app.render(createElement(DirectExchangeScreen));
     await reachConfirm();
     await page.getByRole("checkbox").click();
     await page.getByRole("button", { name: "Run the exchange" }).click();
@@ -727,7 +728,7 @@ describe("console direct re-attaches on a busy create", () => {
       sftp: CONFIGURED_SFTP,
       conflict: { jobId: "job-live", probeStatus: 404 },
     });
-    app.render(createElement(DirectExchangeBench));
+    app.render(createElement(DirectExchangeScreen));
     await reachConfirm();
     await page.getByRole("checkbox").click();
     await page.getByRole("button", { name: "Run the exchange" }).click();
@@ -748,7 +749,7 @@ describe("console direct re-attaches on a busy create", () => {
 describe("direct exchange transport step", () => {
   test("with no rendezvous mount the shared-directory option is disabled", async () => {
     stubJobApi({ sftp: CONFIGURED_SFTP, rendezvous: { configured: false } });
-    app.render(createElement(DirectExchangeBench));
+    app.render(createElement(DirectExchangeScreen));
     await page.getByRole("button", { name: "Select clients.csv" }).click();
     await page.getByRole("button", { name: "Use this file" }).click();
     await expect
@@ -773,7 +774,7 @@ describe("direct exchange transport step", () => {
         folderName: "agency-a-agency-b",
       },
     });
-    app.render(createElement(DirectExchangeBench));
+    app.render(createElement(DirectExchangeScreen));
     await page.getByRole("button", { name: "Select clients.csv" }).click();
     await page.getByRole("button", { name: "Use this file" }).click();
     await page
@@ -791,7 +792,7 @@ describe("direct exchange transport step", () => {
       sftp: { configured: false },
       rendezvous: { configured: true, locator: "rendezvous" },
     });
-    app.render(createElement(DirectExchangeBench));
+    app.render(createElement(DirectExchangeScreen));
     await page.getByRole("button", { name: "Select clients.csv" }).click();
     await page.getByRole("button", { name: "Use this file" }).click();
     await page
@@ -820,7 +821,7 @@ describe("direct exchange transport step", () => {
         outboundFolderName: "to-partner",
       },
     });
-    app.render(createElement(DirectExchangeBench));
+    app.render(createElement(DirectExchangeScreen));
     await page.getByRole("button", { name: "Select clients.csv" }).click();
     await page.getByRole("button", { name: "Use this file" }).click();
     await page
@@ -872,7 +873,7 @@ describe("direct exchange file-handling gate", () => {
 
   test("withholds the control a zero-setup command line cannot hold", async () => {
     stubJobApi({ sftp: CONFIGURED_SFTP });
-    app.render(createElement(DirectExchangeBench));
+    app.render(createElement(DirectExchangeScreen));
     await openExchangeFiles();
 
     // The direct flow composes no configuration document, and `unexpected_files`
@@ -891,7 +892,7 @@ describe("direct exchange file-handling gate", () => {
 
   test("states the bilateral agreement as soon as retain mode goes on", async () => {
     stubJobApi({ sftp: CONFIGURED_SFTP });
-    app.render(createElement(DirectExchangeBench));
+    app.render(createElement(DirectExchangeScreen));
     await openExchangeFiles();
     expect(app.container.textContent).not.toContain(
       RETAIN_MODE_BILATERAL_NOTICE,
@@ -915,7 +916,7 @@ describe("direct exchange file-handling gate", () => {
 
   test("an inadmissible draft blocks Continue, in core's own words", async () => {
     stubJobApi({ sftp: CONFIGURED_SFTP });
-    app.render(createElement(DirectExchangeBench));
+    app.render(createElement(DirectExchangeScreen));
     await openExchangeFiles();
 
     // A party name needs timestamped filenames, which core requires and the card
@@ -975,7 +976,7 @@ describe("direct exchange host-key probe (direct ceremony)", () => {
   test("the interstitial and out-of-band affirmation gate the fill", async () => {
     // SFTP unconfigured so the authoring form (with its probe) is reachable.
     stubJobApi({ sftp: { configured: false } });
-    app.render(createElement(DirectExchangeBench));
+    app.render(createElement(DirectExchangeScreen));
     await openDirectServerForm();
 
     await page
@@ -1026,7 +1027,7 @@ describe("direct-exchange recoveries against the run's exchange record", () => {
   async function runToConfigFailure(
     api: ReturnType<typeof stubJobApi>,
   ): Promise<void> {
-    app.render(createElement(DirectExchangeBench));
+    app.render(createElement(DirectExchangeScreen));
     await reachConfirm();
     await page.getByRole("checkbox").click();
     await page.getByRole("button", { name: "Run the exchange" }).click();
@@ -1107,7 +1108,7 @@ describe("direct-exchange recoveries against the run's exchange record", () => {
 describe("console lobby direct-exchange card", () => {
   test("offers a third card that links to the direct-exchange route", async () => {
     stubJobApi();
-    app.render(createElement(BenchLobby));
+    app.render(createElement(Lobby));
     const link = page.getByRole("link", { name: "Run a direct exchange" });
     await expect.element(link).toBeInTheDocument();
     await expect.element(link).toHaveAttribute("href", "/direct");
@@ -1117,7 +1118,7 @@ describe("console lobby direct-exchange card", () => {
 describe("console lobby recurring-exchange surface", () => {
   test("offers no /saved recurring-exchange pointer", async () => {
     stubJobApi();
-    app.render(createElement(BenchLobby));
+    app.render(createElement(Lobby));
     // The lobby is fully rendered once its heading is present; the recurring
     // pointer is not a console concept, so neither framing nor the /saved link
     // stands.

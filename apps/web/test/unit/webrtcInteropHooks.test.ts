@@ -5,8 +5,8 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { dialAsAcceptor, listenAsInviter } from "../../src/psi/rendezvous.js";
 import { authenticateExchange } from "../../src/psi/authenticateExchange.js";
 import { openPeerMessageConnection } from "../../src/psi/peerMessageConnection.js";
-import { useAcceptorExchange } from "../../src/bench/useAcceptorExchange.js";
-import { useInviterExchange } from "../../src/bench/useInviterExchange.js";
+import { useAcceptorExchange } from "../../src/exchange/useAcceptorExchange.js";
+import { useInviterExchange } from "../../src/exchange/useInviterExchange.js";
 import { waitForIncomingConnection } from "../../src/psi/waitForConnection.js";
 
 import type * as PsilinkCore from "@psilink/core";
@@ -20,7 +20,7 @@ import type {
   RendezvousRole,
   WebRTCEndpoint,
 } from "@psilink/core";
-import type { AcceptorLaunch } from "../../src/bench/useAcceptorExchange.js";
+import type { AcceptorLaunch } from "../../src/exchange/useAcceptorExchange.js";
 import type { DataConnection } from "peerjs";
 import type { GeneratedInvitation } from "../../src/psi/invitation.js";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
@@ -169,7 +169,7 @@ vi.mock("@psilink/core", async (importOriginal) => {
     describeExchangeStages: vi.fn(() => []),
   };
 });
-vi.mock("../../src/bench/acceptorExchange.js", () => ({
+vi.mock("../../src/exchange/acceptorExchange.js", () => ({
   prepareAcceptorExchange: vi.fn(() => ({})),
 }));
 vi.mock("../../src/psi/rendezvous.js", () => ({

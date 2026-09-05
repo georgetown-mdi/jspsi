@@ -4,8 +4,8 @@ import {
   JobApiRequestError,
   RelayedTerminalError,
 } from "@psi/serverJobExchangeDriver";
-import { isExchangeBusyError, reattachOnBusy } from "@bench/reattachOnBusy";
-import { failureFor } from "@bench/useInviterExchange";
+import { isExchangeBusyError, reattachOnBusy } from "@exchange/reattachOnBusy";
+import { failureFor } from "@exchange/useInviterExchange";
 import { writeAttachment } from "@psi/consoleJobAttachment";
 
 import type {

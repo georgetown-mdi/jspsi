@@ -8,7 +8,7 @@ import {
 import {
   savedExchangeRow,
   savedExchangeRows,
-} from "@bench/savedExchangesModel";
+} from "@recurring/savedExchangesModel";
 
 import type {
   ManagedExchangeRecord,

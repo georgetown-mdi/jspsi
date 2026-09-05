@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { restorablePosition, restorableSection } from "@bench/stepRestore";
+import { restorablePosition, restorableSection } from "@exchange/stepRestore";
 
 describe("restorableSection", () => {
   // A start-over clears the invitation but leaves the loaded file and terms, so

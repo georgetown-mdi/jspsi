@@ -20,7 +20,7 @@ import "@mantine/core/styles.css";
 // history layer is plain JS and holds the whole index contract.
 import { createBrowserHistory } from "@tanstack/react-router";
 
-import { InviterBench } from "@bench/InviterBench";
+import { InviterScreen } from "@exchange/InviterScreen";
 
 import { createAppMount } from "./renderApp";
 
@@ -58,7 +58,7 @@ describe("console steps under the router's patched history", () => {
       actions.push(action.type),
     );
     try {
-      app.render(createElement(InviterBench));
+      app.render(createElement(InviterScreen));
       await expect
         .element(page.getByLabelText("Your name"))
         .toBeInTheDocument();

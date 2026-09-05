@@ -23,9 +23,9 @@ import {
   acceptorColumnsEditorState,
   acceptorInitialColumnsState,
   acceptorVerdict,
-} from "@bench/acceptorColumnsModel";
+} from "@exchange/acceptorColumnsModel";
 
-import { AcceptorColumnsStep } from "@bench/AcceptorColumnsStep";
+import { AcceptorColumnsStep } from "@exchange/AcceptorColumnsStep";
 
 // The grid labels its controls through this helper, so a query for one derives the
 // expected label from it rather than restating the isolate as literal characters.

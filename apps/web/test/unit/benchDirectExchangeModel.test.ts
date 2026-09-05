@@ -12,7 +12,7 @@ import { disclosedColumnNames } from "@psi/metadataEditing";
 import {
   CONNECTION_TUNING_DEFAULT,
   connectionTuningProblems,
-} from "@bench/connectionTuningModel";
+} from "@console/connectionTuningModel";
 import {
   DEFAULT_PREVIEW_IDENTITY,
   DIRECT_LINKAGE_STRATEGY_DEFAULT,
@@ -20,14 +20,14 @@ import {
   directLinkageStrategyIntentFields,
   directServerBlockedReason,
   previewInferredTerms,
-} from "@bench/directExchangeModel";
+} from "@exchange/directExchangeModel";
 import {
   EXCHANGE_FILES_DEFAULT,
   ZERO_SETUP_EXCHANGE_FILES,
   exchangeFilesProblems,
-} from "@bench/exchangeFilesModel";
+} from "@console/exchangeFilesModel";
 
-import type { DirectServerGates } from "@bench/directExchangeModel";
+import type { DirectServerGates } from "@exchange/directExchangeModel";
 
 const LINKABLE_COLUMNS = [
   "ssn",

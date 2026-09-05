@@ -1,10 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { BenchLobby } from "@bench/BenchLobby";
+import { Lobby } from "@exchange/Lobby";
 import { seo } from "@utils/seo";
 
 export const Route = createFileRoute("/quick")({
-  component: BenchLobby,
+  component: Lobby,
   head: () => ({
     meta: seo({
       title: "psilink - private record linkage",

@@ -19,7 +19,7 @@ import {
 import { generateJobId, writeJobFile } from "@jobs/workdir";
 import { JobInputNotFoundError } from "@jobs/workInputs";
 import { createServerJobExchangeDriver } from "@psi/serverJobExchangeDriver";
-import { failureFor } from "@bench/useInviterExchange";
+import { failureFor } from "@exchange/useInviterExchange";
 
 import {
   STUB_CLI_PATH,

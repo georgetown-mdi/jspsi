@@ -4,7 +4,7 @@ title: "Announcing an Outcome in the Console"
 
 # Announcing an outcome: one polite region, and focus reserved for repair
 
-_Status: decided and built, by a 3-panelist design panel deciding 2-1. The convention is realized in `apps/web/src/components/useDeferredAnnouncement.ts` and its callers, including the SFTP authoring form's host-key probe (`apps/web/src/bench/SftpAuthoringForm.tsx`). The structural properties that probe's failure surface has to hold are specified in [CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md); this note records why the mechanism is the one it is. See [docs/notes/README.md](README.md)._
+_Status: decided and built, by a 3-panelist design panel deciding 2-1. The convention is realized in `apps/web/src/components/useDeferredAnnouncement.ts` and its callers, including the SFTP authoring form's host-key probe (`apps/web/src/console/SftpAuthoringForm.tsx`). The structural properties that probe's failure surface has to hold are specified in [CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md); this note records why the mechanism is the one it is. See [docs/notes/README.md](README.md)._
 
 An outcome surface in the console -- a probe result, a listing settle, a verdict -- has to reach an operator who is not looking at it. Two mechanisms had grown up side by side: a visually-hidden polite live region owned by the component holding the outcome, and, on the SFTP authoring form's host-key probe, a `role="alert"` on the visible alert plus a programmatic focus move onto it. Both are defensible in isolation; having both meant the same class of event announced by different means on different screens, and neither reading of the DOM told a reviewer which one a new surface should adopt. This note records the settlement.
 

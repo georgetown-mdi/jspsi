@@ -13,11 +13,11 @@ import {
   saveExchangeError,
   saveLeadCopy,
   saveTrustFooter,
-} from "@bench/saveExchangeModel";
+} from "@exchange/saveExchangeModel";
 
 import type { LinkageTerms, Metadata } from "@psilink/core";
 import type { GeneratedInvitation } from "@psi/invitation";
-import type { SaveExchangeFields } from "@bench/saveExchangeModel";
+import type { SaveExchangeFields } from "@exchange/saveExchangeModel";
 
 const terms = {
   identity: "Dana",

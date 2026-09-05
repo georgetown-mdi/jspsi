@@ -79,7 +79,7 @@
   <rect class="box b-app" x="440" y="62" width="320" height="412" rx="8"></rect>
   <text class="b-title" x="460" y="94">apps/web <tspan class="b-sub">browser + TanStack Start server</tspan></text>
   <rect class="node n-app" x="460" y="112" width="280" height="46" rx="5"></rect>
-  <text class="n-title" x="474" y="131">Invite / accept bench</text>
+  <text class="n-title" x="474" y="131">Invite / accept screens</text>
   <text class="n-sub" x="474" y="147">React UI</text>
   <rect class="node n-app" x="460" y="172" width="280" height="46" rx="5"></rect>
   <text class="n-title" x="474" y="191">WebRTC connection</text>

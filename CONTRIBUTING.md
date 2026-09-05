@@ -164,9 +164,8 @@ not add one. Rationale and what the report covers: [docs/TESTING.md](docs/TESTIN
           received cell against an empty string (`docs/spec/EXCHANGE_RECORD.md`).
       bubble up | paper over | knob | legible -> raise / hide / setting / clear
       appliance | bench              -> console (prose and user-visible text only)
-          The `/bench` route segments, `apps/web/src/bench`, identifiers, CSS
-          classes, storage keys and test selectors are renamed by the console
-          split, not by this rule.
+          The `/bench` route segments are compatibility redirects for links
+          issued before the primary routes existed, and keep the word.
       battery                        -> the checks / the run
           The doctor code's own words (`apps/cli/src/doctor`): "the checks" for the
           set, "the run" for one execution of them ("stopped the battery" becomes

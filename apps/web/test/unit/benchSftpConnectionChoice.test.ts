@@ -4,8 +4,8 @@ import {
   sftpConnectionLabel,
   sftpEndpointForConnection,
   splitDirectoryRetainProblem,
-} from "@bench/sftpConnectionChoice";
-import { SPLIT_DIRECTORY_RETAIN_REQUIREMENT } from "@bench/sftpConnectionForm";
+} from "@console/sftpConnectionChoice";
+import { SPLIT_DIRECTORY_RETAIN_REQUIREMENT } from "@console/sftpConnectionForm";
 
 describe("sftpEndpointForConnection", () => {
   test("authors the endpoint from the connection's locator fields verbatim", () => {

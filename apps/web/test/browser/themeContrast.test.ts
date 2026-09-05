@@ -17,11 +17,11 @@ import {
 import { IconCheck, IconCopy } from "@tabler/icons-react";
 
 // tokens.css defines the --bench-* custom properties bench.module.css reads
-// (--bench-accent among them); BenchPage.tsx imports it as a side effect in
+// (--bench-accent among them); AppPage.tsx imports it as a side effect in
 // the real app, so the anchor-inside-.page case below needs it too, or
 // --bench-accent resolves to nothing and masks the rule this test targets.
-import "@bench/tokens.css";
-import benchStyles from "@bench/bench.module.css";
+import "@styles/tokens.css";
+import benchStyles from "@styles/app.module.css";
 
 import { createAppMount } from "./renderApp";
 

@@ -21,7 +21,7 @@ import {
   listManagedLocalState,
   markManagedExchangeBackedUp,
 } from "@psi/managedLocalState";
-import { SavedExchanges } from "@bench/SavedExchanges";
+import { SavedExchanges } from "@recurring/SavedExchanges";
 import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
 
 import { createAppMount } from "./renderApp";

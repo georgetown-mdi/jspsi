@@ -12,13 +12,13 @@ import {
   parseSftpUrl,
   sftpFormError,
   sftpFormFromLocator,
-} from "@bench/sftpConnectionForm";
+} from "@console/sftpConnectionForm";
 
 import type {
   SftpConnectionFormValues,
   SftpCredentialMethod,
   SftpFormField,
-} from "@bench/sftpConnectionForm";
+} from "@console/sftpConnectionForm";
 
 // A valid literal OpenSSH SHA256 host-key fingerprint (matches core's regex).
 const FINGERPRINT = `SHA256:${"A".repeat(43)}`;

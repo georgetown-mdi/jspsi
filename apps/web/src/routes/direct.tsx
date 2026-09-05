@@ -1,13 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { DirectExchangeBench } from "@bench/DirectExchangeBench";
+import { DirectExchangeScreen } from "@exchange/DirectExchangeScreen";
 import { seo } from "@utils/seo";
 
 export const Route = createFileRoute("/direct")({
-  // DirectExchangeBench reads the console build flag and calls the console's
+  // DirectExchangeScreen reads the console build flag and calls the console's
   // same-origin job API, so this route renders client-side only.
   ssr: false,
-  component: DirectExchangeBench,
+  component: DirectExchangeScreen,
   head: () => ({
     meta: seo({
       title: "Direct exchange - psilink",

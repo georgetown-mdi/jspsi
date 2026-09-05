@@ -21,21 +21,21 @@ import {
   acceptorPayloadDeclarationConflict,
   acceptorUnsatisfiedTypes,
   acceptorVerdict,
-} from "@bench/acceptorColumnsModel";
+} from "@exchange/acceptorColumnsModel";
 
 import {
   CONFIG_EXCHANGE_FILES,
   EXCHANGE_FILES_DEFAULT,
   exchangeFilesProblems,
-} from "@bench/exchangeFilesModel";
+} from "@console/exchangeFilesModel";
 import {
   CONNECTION_TUNING_DEFAULT,
   connectionTuningProblems,
-} from "@bench/connectionTuningModel";
+} from "@console/connectionTuningModel";
 import {
   SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT,
   splitRendezvousRetainProblem,
-} from "@bench/filedropRendezvousChoice";
+} from "@console/filedropRendezvousChoice";
 
 import { OFFLINE_EXCHANGE_REASON } from "@psi/offlineExchangeGate";
 
@@ -45,7 +45,7 @@ import {
 } from "@psi/metadataEditing";
 
 import type { CSVRow, LinkageTerms, Metadata } from "@psilink/core";
-import type { AcceptorColumnsState } from "@bench/acceptorColumnsModel";
+import type { AcceptorColumnsState } from "@exchange/acceptorColumnsModel";
 import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
 
 // Two single-element keys, one per name field, so a CSV can satisfy both, one, or

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 
-import { acceptorInitialColumnsState } from "@bench/acceptorColumnsModel";
-import { prepareAcceptorExchange } from "@bench/acceptorExchange";
+import { acceptorInitialColumnsState } from "@exchange/acceptorColumnsModel";
+import { prepareAcceptorExchange } from "@exchange/acceptorExchange";
 
 import type { CSVRow, LinkageTerms, Metadata } from "@psilink/core";
 import type { AcceptorDataEdits } from "@psi/acceptInvitation";

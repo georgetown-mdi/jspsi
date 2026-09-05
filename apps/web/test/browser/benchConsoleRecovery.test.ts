@@ -9,9 +9,9 @@ import { createElement } from "react";
 // Load Mantine's stylesheet so components render with their real geometry.
 import "@mantine/core/styles.css";
 
-import { DISCARD_CONFIRM_BODY } from "@bench/RecoveredExchangePanel";
-import { InviterBench } from "@bench/InviterBench";
-import { UNTAKEN_RECORD_CONFIRM_BODY } from "@bench/BenchRunSurface";
+import { DISCARD_CONFIRM_BODY } from "@exchange/RecoveredExchangePanel";
+import { InviterScreen } from "@exchange/InviterScreen";
+import { UNTAKEN_RECORD_CONFIRM_BODY } from "@exchange/RunSurface";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 
@@ -202,7 +202,7 @@ afterEach(async () => {
 describe("console inputs disabled state", () => {
   test("a 404 on the inputs listing shows the API-disabled picker state", async () => {
     stubRecoveryApi({ inputsStatus: 404 });
-    app.render(createElement(InviterBench));
+    app.render(createElement(InviterScreen));
     // The distinct informational state, not the red transient fault. The title and
     // the named env var are unique to it (the file section's sample-data copy also
     // links the deployment guide, so that link alone would not disambiguate).
@@ -239,7 +239,7 @@ describe("console strand recovery panel", () => {
   test("renders for a live persisted id and discards it (cancel + DELETE) after a confirm, clearing the record", async () => {
     persistAttachment("job-live");
     const api = stubRecoveryApi({ jobId: "job-live", status: "running" });
-    app.render(createElement(InviterBench));
+    app.render(createElement(InviterScreen));
 
     await expect
       .element(
@@ -297,7 +297,7 @@ describe("console strand recovery panel", () => {
   test("cancelling the discard confirm removes nothing and keeps the record", async () => {
     persistAttachment("job-live");
     const api = stubRecoveryApi({ jobId: "job-live", status: "running" });
-    app.render(createElement(InviterBench));
+    app.render(createElement(InviterScreen));
 
     await expect
       .element(
@@ -337,7 +337,7 @@ describe("console strand recovery panel", () => {
   test("a finished re-attach heads finished and renders the download rows", async () => {
     persistAttachment("job-done");
     const api = stubRecoveryApi({ jobId: "job-done", status: "succeeded" });
-    app.render(createElement(InviterBench));
+    app.render(createElement(InviterScreen));
 
     // The probe reads succeeded, so the panel heads as finished immediately.
     await expect
@@ -371,7 +371,7 @@ describe("console strand recovery panel", () => {
     // replay then delivers a FAILURE terminal (e.g. a peer-timeout while away).
     persistAttachment("job-fail");
     const api = stubRecoveryApi({ jobId: "job-fail", status: "running" });
-    app.render(createElement(InviterBench));
+    app.render(createElement(InviterScreen));
 
     await vi.waitFor(() =>
       expect(
@@ -409,7 +409,7 @@ describe("console strand recovery panel", () => {
     // A non-404 fault on the status probe: unreachable, NOT a confirmed removal.
     persistAttachment("job-live");
     const api = stubRecoveryApi({ jobId: "job-live", statusCode: 503 });
-    app.render(createElement(InviterBench));
+    app.render(createElement(InviterScreen));
 
     // Let the probe resolve. The blip must not delete the orphan nor clear the
     // record -- the next mount has to be able to recover a still-live exchange.
@@ -432,7 +432,7 @@ describe("console strand recovery panel", () => {
   test("a 404 probe deletes the orphan id and renders nothing", async () => {
     persistAttachment("job-gone", "acceptor", "filedrop");
     const api = stubRecoveryApi({ jobId: "job-gone", statusCode: 404 });
-    app.render(createElement(InviterBench));
+    app.render(createElement(InviterScreen));
 
     // The id is gone: the panel best-effort DELETEs it (bounding a
     // restart-orphaned workdir), clears the record, and renders nothing.
@@ -458,7 +458,7 @@ describe("console strand recovery panel", () => {
   test("unmounting the panel does NOT cancel the running exchange", async () => {
     persistAttachment("job-live");
     const api = stubRecoveryApi({ jobId: "job-live", status: "running" });
-    app.render(createElement(InviterBench));
+    app.render(createElement(InviterScreen));
 
     await expect
       .element(
@@ -480,7 +480,7 @@ describe("console strand recovery panel", () => {
   test("Stop this exchange POSTs a cancel", async () => {
     persistAttachment("job-live");
     const api = stubRecoveryApi({ jobId: "job-live", status: "running" });
-    app.render(createElement(InviterBench));
+    app.render(createElement(InviterScreen));
 
     await page.getByRole("button", { name: "Stop this exchange" }).click();
 
@@ -501,7 +501,7 @@ describe("console strand recovery panel", () => {
       status: "succeeded",
       handoff: RECOVERY_HANDOFF,
     });
-    app.render(createElement(InviterBench));
+    app.render(createElement(InviterScreen));
 
     await expect
       .element(
@@ -549,7 +549,7 @@ describe("console strand recovery panel", () => {
       status: "running",
       handoff: RECOVERY_HANDOFF,
     });
-    app.render(createElement(InviterBench));
+    app.render(createElement(InviterScreen));
 
     await expect
       .element(
@@ -586,7 +586,7 @@ describe("console strand recovery panel", () => {
         outcome: "receipt-swap-terminated",
       },
     });
-    app.render(createElement(InviterBench));
+    app.render(createElement(InviterScreen));
 
     await expect
       .element(page.getByText("An exchange started from this console stopped"))
@@ -613,7 +613,7 @@ describe("console strand recovery panel", () => {
         outcome: "receipt-swap-terminated",
       },
     });
-    app.render(createElement(InviterBench));
+    app.render(createElement(InviterScreen));
 
     // Press only once the ask has landed, so the confirm under test is the
     // record-aware one rather than a race with the generic copy.
@@ -644,7 +644,7 @@ describe("console strand recovery panel", () => {
       status: "failed",
       handoff: RECOVERY_HANDOFF,
     });
-    app.render(createElement(InviterBench));
+    app.render(createElement(InviterScreen));
 
     await expect
       .element(page.getByText("An exchange started from this console stopped"))
@@ -659,7 +659,7 @@ describe("console strand recovery panel", () => {
   test("a finished run with no hand-off shows no dangling graduation toggle", async () => {
     persistAttachment("job-done");
     const api = stubRecoveryApi({ jobId: "job-done", status: "succeeded" });
-    app.render(createElement(InviterBench));
+    app.render(createElement(InviterScreen));
 
     await expect
       .element(
@@ -698,7 +698,7 @@ describe("console lobby occupancy probe (no stored attachment)", () => {
       status: "running",
       slotOccupied: true,
     });
-    app.render(createElement(InviterBench));
+    app.render(createElement(InviterScreen));
 
     // The panel appears from the probe alone, with the neutral lead ("started
     // here") rather than the inaccurate "you started here" -- another browser may
@@ -756,7 +756,7 @@ describe("console lobby occupancy probe (no stored attachment)", () => {
       status: "succeeded",
       slotOccupied: true,
     });
-    app.render(createElement(InviterBench));
+    app.render(createElement(InviterScreen));
 
     await expect
       .element(
@@ -790,7 +790,7 @@ describe("console lobby occupancy probe (no stored attachment)", () => {
       status: "failed",
       slotOccupied: true,
     });
-    app.render(createElement(InviterBench));
+    app.render(createElement(InviterScreen));
 
     await expect
       .element(page.getByText("An exchange started from this console stopped"))
@@ -831,7 +831,7 @@ describe("console lobby occupancy probe (no stored attachment)", () => {
 
   test("a free slot with empty storage renders nothing", async () => {
     const api = stubRecoveryApi({ slotOccupied: false });
-    app.render(createElement(InviterBench));
+    app.render(createElement(InviterScreen));
 
     // The probe ran and reported free, so nothing is recovered.
     await vi.waitFor(() =>
@@ -865,7 +865,7 @@ describe("console strand recovery panel run warnings", () => {
     // browser that attaches afterwards -- including one that never saw the launch.
     persistAttachment("job-live", "acceptor", "filedrop");
     const api = stubRecoveryApi({ jobId: "job-live", status: "running" });
-    app.render(createElement(InviterBench));
+    app.render(createElement(InviterScreen));
 
     await vi.waitFor(() =>
       expect(

@@ -18,19 +18,19 @@ import {
 import {
   ACCEPT_UNSUPPORTED_TITLE,
   acceptUnsupported,
-} from "@bench/acceptorModel";
+} from "@exchange/acceptorModel";
 import {
   SERVER_JOB_KEEP_OPEN_BODY,
   UNDESCRIBABLE_RECORD_CONFIRM_BODY,
   UNTAKEN_RECORD_CONFIRM_BODY,
-} from "@bench/BenchRunSurface";
+} from "@exchange/RunSurface";
 import {
   TERMINATED_RECORD_LEAD,
   UNDESCRIBABLE_RECORD_LEAD,
-} from "@bench/RecordDownload";
-import { AcceptorBench } from "@bench/AcceptorBench";
-import { RETAIN_MODE_BILATERAL_NOTICE } from "@bench/exchangeFilesModel";
-import { SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT } from "@bench/filedropRendezvousChoice";
+} from "@exchange/RecordDownload";
+import { AcceptorScreen } from "@exchange/AcceptorScreen";
+import { RETAIN_MODE_BILATERAL_NOTICE } from "@console/exchangeFilesModel";
+import { SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT } from "@console/filedropRendezvousChoice";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 
@@ -143,7 +143,7 @@ afterEach(async () => {
 describe("console acceptor unsupported-shape gate", () => {
   test("a single-directory filedrop is blocked when no rendezvous mount is configured", async () => {
     window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
-    app.render(createElement(AcceptorBench));
+    app.render(createElement(AcceptorScreen));
 
     // The terms still render (transparency), but with no rendezvous mount the accurate
     // block replaces the Continue action and names the env var to set.
@@ -169,7 +169,7 @@ describe("console acceptor unsupported-shape gate", () => {
 
   test("a webrtc invitation is out of scope on the console, pointing at the web app", async () => {
     window.location.hash = await encodeToken(WEBRTC_ENDPOINT);
-    app.render(createElement(AcceptorBench));
+    app.render(createElement(AcceptorScreen));
 
     await expect
       .element(page.getByText("Invitation from County Health Department"))
@@ -194,14 +194,14 @@ describe("console acceptor unsupported-shape gate", () => {
 
 describe("console acceptor never renders the recurring-save offer", () => {
   // The offer's only acceptor render site is gated on a webrtc endpoint reaching the
-  // launched step (AcceptorBench: `endpoint.channel === "webrtc" && launched`). A
+  // launched step (AcceptorScreen: `endpoint.channel === "webrtc" && launched`). A
   // console build classifies a webrtc accept as unsupported and stops it at the review
   // step, so the offer -- whose /saved link is gated out of the console build -- never
   // mounts. Pin the webrtc accept blocked at review, before the launched step, with no
   // offer panel.
   test("a webrtc invitation is blocked at review with no offer", async () => {
     window.location.hash = await encodeToken(WEBRTC_ENDPOINT);
-    app.render(createElement(AcceptorBench));
+    app.render(createElement(AcceptorScreen));
 
     // The unsupported block replaces the Continue action, so the flow never reaches the
     // launched step the offer needs.
@@ -283,7 +283,7 @@ describe("console acceptor shared-folder confirmation", () => {
   test("names this console's own mounted folder, never the invitation's locator", async () => {
     stubRendezvousMounted(APPLIANCE_FOLDER_NAME);
     window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
-    app.render(createElement(AcceptorBench));
+    app.render(createElement(AcceptorScreen));
 
     // With a rendezvous mount configured the accept is runnable: the Continue action
     // replaces the unsupported block. Advancing reaches the consent step.
@@ -307,7 +307,7 @@ describe("console acceptor shared-folder confirmation", () => {
   test("asks for the same confirmation where this console cannot name its mount", async () => {
     stubRendezvousMounted();
     window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
-    app.render(createElement(AcceptorBench));
+    app.render(createElement(AcceptorScreen));
 
     await page
       .getByRole("button", { name: "Continue: consent & your file" })
@@ -329,7 +329,7 @@ describe("console acceptor shared-folder confirmation", () => {
   test("a split accept confirms BOTH folders, naming which leg is read and which written", async () => {
     stubRendezvousReport(splitRendezvousBody());
     window.location.hash = await encodeToken(SPLIT_FILEDROP_ENDPOINT);
-    app.render(createElement(AcceptorBench));
+    app.render(createElement(AcceptorScreen));
 
     await page
       .getByRole("button", { name: "Continue: consent & your file" })
@@ -361,7 +361,7 @@ describe("console acceptor shared-folder confirmation", () => {
   test("asks for the same two-folder confirmation where this console cannot name its mounts", async () => {
     stubRendezvousReport(splitRendezvousBody(false));
     window.location.hash = await encodeToken(SPLIT_FILEDROP_ENDPOINT);
-    app.render(createElement(AcceptorBench));
+    app.render(createElement(AcceptorScreen));
 
     await page
       .getByRole("button", { name: "Continue: consent & your file" })
@@ -589,7 +589,7 @@ describe("console acceptor file-handling gate", () => {
   test("offers the whole card, including what only a composed config holds", async () => {
     stubServerJobAccept();
     window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
-    app.render(createElement(AcceptorBench));
+    app.render(createElement(AcceptorScreen));
     await openExchangeFiles();
 
     // An accept the console conducts composes a configuration document, so the
@@ -602,7 +602,7 @@ describe("console acceptor file-handling gate", () => {
   test("states the bilateral agreement as soon as retain mode goes on", async () => {
     stubServerJobAccept();
     window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
-    app.render(createElement(AcceptorBench));
+    app.render(createElement(AcceptorScreen));
     await openExchangeFiles();
     expect(app.container.textContent).not.toContain(
       RETAIN_MODE_BILATERAL_NOTICE,
@@ -621,7 +621,7 @@ describe("console acceptor file-handling gate", () => {
   test("an inadmissible draft blocks the launch and says why", async () => {
     stubServerJobAccept();
     window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
-    app.render(createElement(AcceptorBench));
+    app.render(createElement(AcceptorScreen));
     await openExchangeFiles();
 
     // Retain mode requires the lockless rendezvous; turning that off is a
@@ -663,7 +663,7 @@ describe("console acceptor file-handling gate", () => {
   test("a split rendezvous blocks the launch until retain mode is on", async () => {
     stubServerJobAccept({ rendezvous: splitRendezvousBody() });
     window.location.hash = await encodeToken(SPLIT_FILEDROP_ENDPOINT);
-    app.render(createElement(AcceptorBench));
+    app.render(createElement(AcceptorScreen));
     await reachAcceptColumns();
 
     // Every filedrop exchange on a split console holds the inbound/outbound
@@ -688,7 +688,7 @@ describe("console acceptor server-job keep-open callout", () => {
   test("holds the callout while the console runs the accept, then clears it once the run settles", async () => {
     const api = stubServerJobAccept();
     window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
-    app.render(createElement(AcceptorBench));
+    app.render(createElement(AcceptorScreen));
 
     // Review -> consent: the rendezvous mount makes the filedrop accept runnable.
     await page
@@ -748,7 +748,7 @@ describe("console acceptor re-attaches on a busy create", () => {
       handoff: REATTACH_HANDOFF,
     });
     window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
-    app.render(createElement(AcceptorBench));
+    app.render(createElement(AcceptorScreen));
     await reachAcceptStart();
 
     // The busy create re-attaches to the occupying exchange under recovery-style
@@ -812,7 +812,7 @@ describe("console acceptor re-attaches on a busy create", () => {
       conflict: { jobId: "job-live", status: "running", holdProbe: true },
     });
     window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
-    app.render(createElement(AcceptorBench));
+    app.render(createElement(AcceptorScreen));
     await reachAcceptStart();
 
     // The moment the 409 is known -- before the probe settles -- the surface heads
@@ -874,7 +874,7 @@ describe("console acceptor run warnings", () => {
   test("puts the console's preflight warnings in front of the accepting operator", async () => {
     const api = stubServerJobAccept();
     window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
-    app.render(createElement(AcceptorBench));
+    app.render(createElement(AcceptorScreen));
     await reachAcceptStart();
 
     await vi.waitFor(() => expect(api.hasEventStream()).toBe(true));
@@ -917,7 +917,7 @@ describe("console acceptor run warnings", () => {
   test("keeps the warning up when the run it preceded then fails", async () => {
     const api = stubServerJobAccept();
     window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
-    app.render(createElement(AcceptorBench));
+    app.render(createElement(AcceptorScreen));
     await reachAcceptStart();
 
     await vi.waitFor(() => expect(api.hasEventStream()).toBe(true));
@@ -955,7 +955,7 @@ describe("console acceptor recoveries against the run's exchange record", () => 
     api: ReturnType<typeof stubServerJobAccept>,
   ): Promise<void> {
     window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
-    app.render(createElement(AcceptorBench));
+    app.render(createElement(AcceptorScreen));
     await reachAcceptStart();
     await vi.waitFor(() => expect(api.hasEventStream()).toBe(true));
     api.emitEvent({

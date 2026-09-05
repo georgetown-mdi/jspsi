@@ -70,7 +70,7 @@ const SEAT_FILE = resolve(repoRoot, "apps/web/src/psi/runWarnings.ts");
 // silently uncovered.
 const RAW_ROWS_SEAT_FILE = resolve(
   repoRoot,
-  "apps/web/src/bench/useInviterExchange.ts",
+  "apps/web/src/exchange/useInviterExchange.ts",
 );
 
 // Loading the flat config and the typescript-eslint parser for the first time is
@@ -94,10 +94,10 @@ const SEAT_FILE_FIRST_PARSE = resolve(
 // that stops offering the slot, fails here rather than leaving a short list
 // reporting zero.
 const APP_SEAT_FILES = [
-  "apps/web/src/bench/useDirectExchange.ts",
-  "apps/web/src/bench/useAcceptorExchange.ts",
-  "apps/web/src/bench/useInviterExchange.ts",
-  "apps/web/src/bench/RecoveredExchangePanel.tsx",
+  "apps/web/src/exchange/useDirectExchange.ts",
+  "apps/web/src/exchange/useAcceptorExchange.ts",
+  "apps/web/src/exchange/useInviterExchange.ts",
+  "apps/web/src/exchange/RecoveredExchangePanel.tsx",
 ].map((seat) => resolve(repoRoot, seat));
 
 // Linting those from disk is a second real pass over the app's sources, so it

@@ -200,7 +200,7 @@ export async function registerAppShell(
  * Apply the waiting update: reload the page, and tell the waiting worker to
  * take over as that page unloads. The order is what makes the apply
  * recoverable -- the reload can still be stopped, by the confirmation a live
- * exchange arms (`apps/web/src/bench/useUnloadGuard.ts`), and a stopped one
+ * exchange arms (`apps/web/src/exchange/useUnloadGuard.ts`), and a stopped one
  * leaves the update waiting and this function ready to run again.
  *
  * The takeover is armed once and stays armed: an operator who declines the

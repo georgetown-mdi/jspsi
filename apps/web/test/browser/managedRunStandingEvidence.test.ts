@@ -15,7 +15,7 @@ import {
   getManagedExchange,
   recordManagedExchangeLastRun,
 } from "@psi/managedExchangeStore";
-import { ManagedRunSurface } from "@bench/ManagedRunSurface";
+import { ManagedRunSurface } from "@recurring/ManagedRunSurface";
 import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
 import { storageFailureRun } from "@psi/managedRunRotate";
 

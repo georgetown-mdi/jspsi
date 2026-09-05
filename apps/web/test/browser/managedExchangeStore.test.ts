@@ -41,7 +41,7 @@ import {
   markManagedExchangeBackedUp,
 } from "@psi/managedLocalState";
 import { DISCLOSURE_ACCOUNTING_VERSION } from "@psi/disclosureAccounting";
-import { buildManagedDeposit } from "@bench/manageOfferModel";
+import { buildManagedDeposit } from "@exchange/manageOfferModel";
 
 import {
   disclosureRecord,

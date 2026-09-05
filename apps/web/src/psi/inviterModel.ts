@@ -842,7 +842,7 @@ export function identifierProblem(draft: AdvancedInviteDraft): boolean {
 /** A byte count as a compact size label, e.g. `8.4 MB`, `512 KB`, `2.1 GB`. The
  * ladder floors at 1 KB and runs to GB, since CLI-scale console inputs reach
  * gigabytes; called from the inviter's and acceptor's file cards
- * ({@link fileCardMeta}, `AcceptorBench`) and the server-file picker
+ * ({@link fileCardMeta}, `AcceptorScreen`) and the server-file picker
  * (`ServerFilePicker`). */
 export function byteSizeLabel(sizeBytes: number): string {
   if (sizeBytes >= 1024 ** 3) return `${(sizeBytes / 1024 ** 3).toFixed(1)} GB`;

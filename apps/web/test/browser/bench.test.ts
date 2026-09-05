@@ -13,12 +13,13 @@ import "@mantine/core/styles.css";
 
 import { decodeInvitation } from "@psilink/core";
 
-import { BENCH_STEP_STATE_KEY } from "@bench/stepHistory";
-import { BenchLobby } from "@bench/BenchLobby";
+import { BENCH_STEP_STATE_KEY } from "@exchange/stepHistory";
+import { Lobby } from "@exchange/Lobby";
+
 import { InvitationFileError } from "@psi/invitation";
-import { InviterBench } from "@bench/InviterBench";
-import { stagesFor } from "@bench/exchangeRun";
-import styles from "@bench/bench.module.css";
+import { InviterScreen } from "@exchange/InviterScreen";
+import { stagesFor } from "@exchange/exchangeRun";
+import styles from "@styles/app.module.css";
 
 // The ledger and demotion-notice expectations derive their form from this
 // function, so they pin that those sinks have the same form step 2's chips do,
@@ -170,7 +171,7 @@ afterEach(async () => {
 // Review & create, then the real mint (the lifecycle beneath it is stubbed,
 // so nothing dials).
 async function createSealedInvitation() {
-  app.render(createElement(InviterBench));
+  app.render(createElement(InviterScreen));
   await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
   await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
   const fileInput = document.querySelector('input[type="file"]');
@@ -205,7 +206,7 @@ async function createSealedInvitation() {
 // through to the review step, ready to choose a transport. Shared by the
 // command-line-transport tests below.
 async function reachReviewCreate() {
-  app.render(createElement(InviterBench));
+  app.render(createElement(InviterScreen));
   await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
   await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
   const fileInput = document.querySelector('input[type="file"]');
@@ -251,7 +252,7 @@ function preparedWith(
 
 describe("console quick path", () => {
   test("renders the quick-path structure with one main and one h1", async () => {
-    app.render(createElement(BenchLobby));
+    app.render(createElement(Lobby));
 
     await expect
       .element(page.getByRole("heading", { level: 1 }))
@@ -287,7 +288,7 @@ describe("console quick path", () => {
   });
 
   test("applies the bench surface tokens", async () => {
-    app.render(createElement(BenchLobby));
+    app.render(createElement(Lobby));
 
     await expect
       .element(page.getByRole("heading", { level: 1 }))
@@ -303,7 +304,7 @@ describe("console quick path", () => {
   });
 
   test("the sample-data line sits at the small-print size", async () => {
-    app.render(createElement(BenchLobby));
+    app.render(createElement(Lobby));
 
     const demoLink = page.getByRole("button", {
       name: "Start with sample data",
@@ -325,7 +326,7 @@ describe("console quick path", () => {
 
 describe("inviter bench", () => {
   test("renders the empty spine: landmarks, placeholder ledger, quiet facts", async () => {
-    app.render(createElement(InviterBench));
+    app.render(createElement(InviterScreen));
 
     await expect
       .element(page.getByRole("heading", { level: 1 }))
@@ -381,7 +382,7 @@ describe("inviter bench", () => {
   });
 
   test("derives terms on read and tracks step-2 edits in the ledger", async () => {
-    app.render(createElement(InviterBench));
+    app.render(createElement(InviterScreen));
 
     await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
     await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
@@ -476,7 +477,7 @@ describe("inviter bench", () => {
   });
 
   test("reports a two-identifier file in the rail's Problems block", async () => {
-    app.render(createElement(InviterBench));
+    app.render(createElement(InviterScreen));
 
     await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
     await userEvent.fill(page.getByLabelText("Your name"), "Dana");
@@ -515,7 +516,7 @@ describe("inviter bench", () => {
   });
 
   test("review restates the proposal, gates on problems, and create seals", async () => {
-    app.render(createElement(InviterBench));
+    app.render(createElement(InviterScreen));
 
     await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
     await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
@@ -619,8 +620,8 @@ describe("inviter bench", () => {
     expect(expiresRow?.querySelector("dd")?.textContent).toMatch(/20\d\d/);
   });
 
-  test("a silent-empty cleaning field shows up from anywhere on the console", async () => {
-    app.render(createElement(InviterBench));
+  test("a silent-empty cleaning field shows up from anywhere on the bench", async () => {
+    app.render(createElement(InviterScreen));
 
     await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
     await userEvent.fill(page.getByLabelText("Your name"), "Dana");
@@ -703,7 +704,7 @@ describe("inviter bench", () => {
   });
 
   test("browser Back walks bench steps in place, preserving the file and terms", async () => {
-    app.render(createElement(InviterBench));
+    app.render(createElement(InviterScreen));
 
     await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
     await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
@@ -798,7 +799,7 @@ describe("inviter bench", () => {
       return indexedDbOpen(...args);
     };
     try {
-      app.render(createElement(InviterBench));
+      app.render(createElement(InviterScreen));
       await expect
         .element(page.getByLabelText("Your name"))
         .toBeInTheDocument();
@@ -837,7 +838,7 @@ describe("inviter bench", () => {
   });
 
   test("a history entry naming no live section is ignored, not rendered blank", async () => {
-    app.render(createElement(InviterBench));
+    app.render(createElement(InviterScreen));
 
     await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
     await userEvent.fill(page.getByLabelText("Your name"), "Dana");
@@ -920,7 +921,7 @@ describe("inviter bench", () => {
     const unloadPrompted = () =>
       !window.dispatchEvent(new Event("beforeunload", { cancelable: true }));
 
-    app.render(createElement(InviterBench));
+    app.render(createElement(InviterScreen));
     await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
     // No file yet: leaving loses nothing, so no prompt.
     expect(unloadPrompted()).toBe(false);
@@ -976,7 +977,7 @@ describe("inviter bench", () => {
   });
 
   test("the sample-data entry shows only until a file is read, then disappears", async () => {
-    app.render(createElement(InviterBench));
+    app.render(createElement(InviterScreen));
 
     // On the empty step 1 the under-dropzone entry is present.
     const sampleEntry = page.getByRole("button", {
@@ -1000,7 +1001,7 @@ describe("inviter bench", () => {
     const before = window.location.href;
     window.history.replaceState(window.history.state, "", "/exchange?demo=1");
     try {
-      app.render(createElement(InviterBench));
+      app.render(createElement(InviterScreen));
 
       // The seed lands on step 1 with the sample file read, the sample name
       // filled, and the default-terms callout showing -- Continue is enabled.
@@ -1053,7 +1054,7 @@ describe("inviter bench", () => {
     const before = window.location.href;
     window.history.replaceState(window.history.state, "", "/exchange?demo=1");
     try {
-      app.render(createElement(InviterBench));
+      app.render(createElement(InviterScreen));
       await expect
         .element(page.getByText("psilink-sample-inviter.csv"))
         .toBeInTheDocument();
@@ -1101,7 +1102,7 @@ describe("inviter bench", () => {
     const before = window.location.href;
     window.history.replaceState(window.history.state, "", "/exchange?demo=1");
     try {
-      app.render(createElement(InviterBench));
+      app.render(createElement(InviterScreen));
       await expect
         .element(page.getByText("psilink-sample-inviter.csv"))
         .toBeInTheDocument();
@@ -1144,7 +1145,7 @@ describe("inviter bench", () => {
   });
 
   test("customize tabs: reorder keys, author an agreement, the gated setting stays inert", async () => {
-    app.render(createElement(InviterBench));
+    app.render(createElement(InviterScreen));
 
     await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
     await userEvent.fill(page.getByLabelText("Your name"), "Dana");
@@ -1272,7 +1273,7 @@ describe("inviter bench", () => {
   });
 
   test("intake reports rejections and gates on an in-flight parse", async () => {
-    app.render(createElement(InviterBench));
+    app.render(createElement(InviterScreen));
 
     await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
     await userEvent.fill(page.getByLabelText("Your name"), "Dana");
@@ -1311,7 +1312,7 @@ describe("inviter bench", () => {
   });
 
   test("a failed mint leaves the terms editable and create retryable", async () => {
-    app.render(createElement(InviterBench));
+    app.render(createElement(InviterScreen));
 
     await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
     await userEvent.fill(page.getByLabelText("Your name"), "Dana");
@@ -1369,7 +1370,7 @@ describe("inviter bench", () => {
   });
 
   test("a failed re-read discards the prior file; a good re-read swaps it", async () => {
-    app.render(createElement(InviterBench));
+    app.render(createElement(InviterScreen));
 
     await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
     await userEvent.fill(page.getByLabelText("Your name"), "Dana");
@@ -2331,7 +2332,7 @@ describe("console at a narrow viewport", () => {
 
   async function reachMatchingSharingNarrow() {
     await page.viewport(400, 800);
-    app.render(createElement(InviterBench));
+    app.render(createElement(InviterScreen));
     await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
     await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
     const fileInput = document.querySelector('input[type="file"]');

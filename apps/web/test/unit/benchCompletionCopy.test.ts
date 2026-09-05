@@ -9,7 +9,7 @@ import {
   TERMINATED_RECORD_NOTICE,
   UNDESCRIBABLE_RECORD_LEAD,
   UNDESCRIBABLE_RECORD_NOTICE,
-} from "@bench/RecordDownload";
+} from "@exchange/RecordDownload";
 import {
   PENDING_RECORD_CONFIRM_BODY,
   UNDESCRIBABLE_RECORD_CONFIRM_BODY,
@@ -20,13 +20,13 @@ import {
   UNTAKEN_RECORD_CONFIRM_TITLE,
   completionOutcome,
   untakenRecordConfirm,
-} from "@bench/BenchRunSurface";
+} from "@exchange/RunSurface";
 import {
   RECEIPT_MISSING_LEAD,
   RECEIPT_MISSING_NOTICE,
   RECEIPT_UNANSWERED_LEAD,
   RECEIPT_UNANSWERED_NOTICE,
-} from "@bench/ReceiptDownload";
+} from "@exchange/ReceiptDownload";
 
 import type { RunOutputs } from "@psi/runOutputs";
 

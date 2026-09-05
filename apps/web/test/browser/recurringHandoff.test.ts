@@ -9,7 +9,7 @@ import { createElement } from "react";
 // Load Mantine's stylesheet so components render with their real geometry.
 import "@mantine/core/styles.css";
 
-import { RecurringHandoff } from "@bench/RecurringHandoff";
+import { RecurringHandoff } from "@recurring/RecurringHandoff";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 

@@ -8,7 +8,7 @@ import { createElement } from "react";
 
 import "@mantine/core/styles.css";
 
-import { ManageExchangeOffer } from "@bench/ManageExchangeOffer";
+import { ManageExchangeOffer } from "@exchange/ManageExchangeOffer";
 
 import { createAppMount } from "./renderApp";
 

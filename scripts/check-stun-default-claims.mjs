@@ -55,7 +55,7 @@ const SOURCE = {
 /** First-party source holding its own copy because it cannot import SOURCE. */
 const CODE_COPIES = [
   {
-    file: "apps/web/src/bench/managedCronExportModel.ts",
+    file: "apps/web/src/recurring/managedCronExportModel.ts",
     name: "CLI_BUILT_IN_STUN_URI",
   },
 ];
@@ -71,7 +71,7 @@ const CLAIM_TEXTS = [
   { file: "docs/CLI.md", stated: true },
   { file: "docs/spec/DEPENDENCY_PINS.md", stated: true },
   { file: "docs/notes/cli-webrtc-stack.md", stated: true },
-  { file: "apps/web/src/bench/ManagedCronExportPanel.tsx", stated: false },
+  { file: "apps/web/src/recurring/ManagedCronExportPanel.tsx", stated: false },
 ];
 
 /**

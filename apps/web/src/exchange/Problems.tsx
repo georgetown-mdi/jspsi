@@ -1,0 +1,37 @@
+import styles from "@styles/app.module.css";
+
+import type { RailProblem } from "@psi/inviterModel";
+
+/**
+ * The work column's error summary: it appears only when something needs
+ * attention, and each entry links to the surface that can fix it.
+ */
+export function Problems({
+  problems,
+}: {
+  problems: ReadonlyArray<RailProblem>;
+}) {
+  if (problems.length === 0) return null;
+  return (
+    <section className={styles.problems} aria-label="Problems">
+      <h2>Problems</h2>
+      <ul>
+        {problems.map((problem) => (
+          <li key={problem.key ?? problem.label}>
+            {problem.onSelect !== undefined ? (
+              <button
+                type="button"
+                className={styles.stepLink}
+                onClick={problem.onSelect}
+              >
+                {problem.label}
+              </button>
+            ) : (
+              problem.label
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}

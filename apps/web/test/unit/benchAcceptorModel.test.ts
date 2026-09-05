@@ -21,7 +21,7 @@ import {
   acceptorSpine,
   acceptorTransportNote,
   invitingPartyName,
-} from "@bench/acceptorModel";
+} from "@exchange/acceptorModel";
 
 import { isolatedColumnName } from "@components/ColumnName";
 

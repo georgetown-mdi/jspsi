@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import { disclosedColumnNames } from "@psilink/core";
 
-import { acceptorServerJobConfig } from "@bench/useAcceptorExchange";
+import { acceptorServerJobConfig } from "@exchange/useAcceptorExchange";
 
 import type {
   InvitationToken,

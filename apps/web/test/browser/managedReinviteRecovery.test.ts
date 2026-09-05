@@ -17,7 +17,7 @@ import {
 } from "@psi/managedLocalState";
 import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
 import { failedRun } from "@psi/managedRunRotate";
-import { managedRunFailureFromRecord } from "@bench/managedRunLaunchModel";
+import { managedRunFailureFromRecord } from "@recurring/managedRunLaunchModel";
 import { reinviteManagedExchange } from "@psi/managedReinviteDriver";
 
 import type { NewManagedExchange } from "@psi/managedExchangeRecord";

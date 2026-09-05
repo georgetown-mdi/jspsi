@@ -8,13 +8,13 @@ import {
   ZERO_SETUP_EXCHANGE_FILES,
   exchangeFilesOptions,
   exchangeFilesProblems,
-} from "@bench/exchangeFilesModel";
+} from "@console/exchangeFilesModel";
 import { composeConfigDocument, zeroSetupOptionsArgv } from "@jobs/intent";
 import { PEER_ID_SHAPE_MESSAGE } from "@psi/peerIdLabel";
 
 import { validIntent } from "../utils/jobFixtures";
 
-import type { ExchangeFilesDraft } from "@bench/exchangeFilesModel";
+import type { ExchangeFilesDraft } from "@console/exchangeFilesModel";
 
 const draft = (
   overrides: Partial<ExchangeFilesDraft> = {},

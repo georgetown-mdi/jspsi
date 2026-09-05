@@ -7,7 +7,7 @@ import {
   SUPERSEDED_HANDOFF_TITLE,
   handedOffImportReason,
   supersededHandoffReason,
-} from "@bench/managedHandoffGate";
+} from "@recurring/managedHandoffGate";
 
 // The refusals the managed hand-offs show. What happened is one explanation at
 // both hand-offs; what to DO about it is only useful if it names something the

@@ -6,7 +6,7 @@ import {
   benchStepStateForPush,
   stepFromPopState,
   unloadGuardArmed,
-} from "@bench/stepHistory";
+} from "@exchange/stepHistory";
 
 describe("bench step history state", () => {
   test("benchStepState tags an entry with the step", () => {

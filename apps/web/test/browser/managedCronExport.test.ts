@@ -24,8 +24,8 @@ import {
   getManagedLocalState,
   markManagedExchangeBackedUp,
 } from "@psi/managedLocalState";
-import { CLI_BUILT_IN_STUN_URI } from "@bench/managedCronExportModel";
-import { ManagedRunSurface } from "@bench/ManagedRunSurface";
+import { CLI_BUILT_IN_STUN_URI } from "@recurring/managedCronExportModel";
+import { ManagedRunSurface } from "@recurring/ManagedRunSurface";
 import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
 import { dispatchManagedCronExport } from "@psi/managedExchangeExport";
 

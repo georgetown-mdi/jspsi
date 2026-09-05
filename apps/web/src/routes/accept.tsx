@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { AcceptorBench } from "@bench/AcceptorBench";
+import { AcceptorScreen } from "@exchange/AcceptorScreen";
 import { seo } from "@utils/seo";
 
 export const Route = createFileRoute("/accept")({
@@ -8,7 +8,7 @@ export const Route = createFileRoute("/accept")({
   // decoding and rendering happen client-side only. The inviter's deep link
   // points here (ACCEPT_ROUTE_PATH in psi/invitation.ts).
   ssr: false,
-  component: AcceptorBench,
+  component: AcceptorScreen,
   head: () => ({
     meta: seo({
       title: "Accept an invitation - psilink",

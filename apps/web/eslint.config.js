@@ -99,9 +99,9 @@ const seatWarningSinkBan = {
 // non-acquired shapes (a prepared/minted invitation, a worker request, the
 // controller's own field).
 const rawRowsConsumers = [
-  "src/bench/AcceptorBench.tsx",
-  "src/bench/InviterBench.tsx",
-  "src/bench/useInviterExchange.ts",
+  "src/exchange/AcceptorScreen.tsx",
+  "src/exchange/InviterScreen.tsx",
+  "src/exchange/useInviterExchange.ts",
   "src/psi/inviterModel.ts",
   "src/psi/nonEmptyAggregate.worker.ts",
   "src/psi/nonEmptyAggregateController.ts",

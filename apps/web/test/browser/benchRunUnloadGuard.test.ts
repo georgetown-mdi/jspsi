@@ -13,8 +13,8 @@ import "@mantine/core/styles.css";
 
 import { encodeInvitation, generateSharedSecret } from "@psilink/core";
 
-import { AcceptorBench } from "@bench/AcceptorBench";
-import { InviterBench } from "@bench/InviterBench";
+import { AcceptorScreen } from "@exchange/AcceptorScreen";
+import { InviterScreen } from "@exchange/InviterScreen";
 
 import { createAppMount } from "./renderApp";
 
@@ -118,7 +118,7 @@ afterEach(() => {
 
 describe("leaving the page during a live console exchange", () => {
   test("the inviting seat confirms while the run is live, and not once it completes", async () => {
-    app.render(createElement(InviterBench));
+    app.render(createElement(InviterScreen));
     await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
     // Nothing is loaded and nothing is running, so nothing is asked.
     expect(unloadWouldBeConfirmed()).toBe(false);
@@ -168,7 +168,7 @@ describe("leaving the page during a live console exchange", () => {
 
   test("the accepting seat confirms while the run is live, and not once it fails", async () => {
     window.location.hash = await encodeAcceptToken();
-    app.render(createElement(AcceptorBench));
+    app.render(createElement(AcceptorScreen));
     await expect
       .element(page.getByText("Invitation from County Health Department"))
       .toBeInTheDocument();

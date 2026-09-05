@@ -49,7 +49,7 @@ import {
 } from "@psi/inviterModel";
 
 import { OFFLINE_EXCHANGE_REASON } from "@psi/offlineExchangeGate";
-import { SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT } from "@bench/filedropRendezvousChoice";
+import { SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT } from "@console/filedropRendezvousChoice";
 
 // The send-row expectation derives its form from this function, so it pins that
 // the row holds the same form the step's chips do, not what that form is; the

@@ -14,9 +14,12 @@ const srcDir = resolve(dirname(fileURLToPath(import.meta.url)), "src");
 // here keeps any `@`-aliased server-graph import resolvable regardless of
 // Nitro's inline-vs-externalize decision.
 const serverAliases = {
-  "@bench": resolve(srcDir, "bench"),
   "@components": resolve(srcDir, "components"),
+  "@console": resolve(srcDir, "console"),
+  "@exchange": resolve(srcDir, "exchange"),
   "@jobs": resolve(srcDir, "jobs"),
+  "@recurring": resolve(srcDir, "recurring"),
+  "@styles": resolve(srcDir, "styles"),
   "@utils": resolve(srcDir, "utils"),
   "@psi": resolve(srcDir, "psi"),
   "@theme": resolve(srcDir, "theme"),

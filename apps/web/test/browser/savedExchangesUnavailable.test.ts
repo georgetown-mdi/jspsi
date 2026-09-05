@@ -8,7 +8,7 @@ import { createElement } from "react";
 
 import "@mantine/core/styles.css";
 
-import { SavedExchanges, SavedExchangesHome } from "@bench/SavedExchanges";
+import { SavedExchanges, SavedExchangesHome } from "@recurring/SavedExchanges";
 
 import { createAppMount } from "./renderApp";
 

@@ -4,7 +4,7 @@ import {
   APPLIANCE_FILE_ASSURANCE,
   BROWSER_ONLY_FILE_ASSURANCE,
   fileAssuranceLine,
-} from "@bench/fileAssurance";
+} from "@exchange/fileAssurance";
 import { ConfigManager } from "@utils/clientConfig";
 
 describe("BROWSER_ONLY_FILE_ASSURANCE", () => {

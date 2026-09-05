@@ -1,10 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { InviterBench } from "@bench/InviterBench";
+import { InviterScreen } from "@exchange/InviterScreen";
 import { seo } from "@utils/seo";
 
 export const Route = createFileRoute("/exchange")({
-  component: InviterBench,
+  component: InviterScreen,
   head: () => ({
     meta: seo({
       title: "Create an exchange - psilink",

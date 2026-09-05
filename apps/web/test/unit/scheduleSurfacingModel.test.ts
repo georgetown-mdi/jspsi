@@ -13,11 +13,11 @@ import {
   scheduleCadenceLine,
   scheduleDueLine,
   scheduleDueness,
-} from "@bench/scheduleSurfacingModel";
+} from "@recurring/scheduleSurfacingModel";
 import { withTimeZone } from "../utils/hostTimeZone";
 
 import type { ManagedExchangeSchedule } from "@psi/managedExchangeRecord";
-import type { ScheduleDueness } from "@bench/scheduleSurfacingModel";
+import type { ScheduleDueness } from "@recurring/scheduleSurfacingModel";
 
 // The schedule's display derivation in Node, with the clock injected: where
 // the recurrence stands at an instant, the cadence in words, and the

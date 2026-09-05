@@ -10,8 +10,8 @@ import { editorFromCsv, editorWithAuthoredDraft } from "@psi/inviterModel";
 
 import { buildAdvancedTerms, draftFromTerms } from "@psi/advancedInvite";
 
-import { KeysTab } from "@bench/KeysTab";
-import { consoleAcquiredCsv } from "@bench/consoleAcquiredCsv";
+import { KeysTab } from "@exchange/KeysTab";
+import { consoleAcquiredCsv } from "@console/consoleAcquiredCsv";
 
 import { createAppMount } from "./renderApp";
 

@@ -76,7 +76,7 @@ export const Route = createRootRoute({
 
 function RootComponent() {
   // Every route renders on the console, which supplies its own page surface and
-  // landmarks (see BenchPage/BenchShell), so the root gives the whole viewport to
+  // landmarks (see AppPage/WorkShell), so the root gives the whole viewport to
   // the route Outlet with no shared wrapper.
   return (
     <RootDocument>

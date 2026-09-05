@@ -18,7 +18,7 @@ import {
   resetDisclosureAccounting,
 } from "@psi/disclosureAccountingStore";
 import { DISCLOSURE_ACCOUNTING_VERSION } from "@psi/disclosureAccounting";
-import { ManagedRunSurface } from "@bench/ManagedRunSurface";
+import { ManagedRunSurface } from "@recurring/ManagedRunSurface";
 import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
 
 import { disclosureRecord } from "../utils/disclosureFixtures";

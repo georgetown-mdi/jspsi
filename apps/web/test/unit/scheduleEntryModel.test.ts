@@ -12,7 +12,7 @@ import {
   scheduleEntryFieldsFrom,
   scheduleEntryUnchanged,
   scheduleEntryUsable,
-} from "@bench/scheduleEntryModel";
+} from "@recurring/scheduleEntryModel";
 import {
   MAX_SCHEDULE_WINDOW_SECONDS,
   scheduleSchema,
@@ -20,7 +20,7 @@ import {
 import { catchUpManagedSchedule } from "@psi/managedSchedule";
 import { withTimeZone } from "../utils/hostTimeZone";
 
-import type { ScheduleEntryFields } from "@bench/scheduleEntryModel";
+import type { ScheduleEntryFields } from "@recurring/scheduleEntryModel";
 
 // Schedule entry in Node, with the clock injected: what the operator types, what
 // is wrong with it, what it resolves to, and the one problem an opted-in

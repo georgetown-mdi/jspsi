@@ -9,9 +9,9 @@ import "@mantine/core/styles.css";
 
 import { joinErrorCauseChain } from "@psilink/core";
 
-import { FailureMessage } from "@bench/BenchRunSurface";
+import { FailureMessage } from "@exchange/RunSurface";
 import { RelayedTerminalError } from "@psi/serverJobExchangeDriver";
-import { failureFor } from "@bench/useInviterExchange";
+import { failureFor } from "@exchange/useInviterExchange";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 

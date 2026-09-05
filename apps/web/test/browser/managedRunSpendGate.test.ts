@@ -16,7 +16,7 @@ import {
   RUN_IN_FLIGHT_HANDOFF_TITLE,
   SUPERSEDED_HANDOFF_TITLE,
   supersededHandoffReason,
-} from "@bench/managedHandoffGate";
+} from "@recurring/managedHandoffGate";
 import {
   clearManagedExchanges,
   createManagedExchange,
@@ -24,7 +24,7 @@ import {
   getManagedExchange,
   persistManagedExchangeRotation,
 } from "@psi/managedExchangeStore";
-import { ManagedRunSurface } from "@bench/ManagedRunSurface";
+import { ManagedRunSurface } from "@recurring/ManagedRunSurface";
 import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
 import { getManagedLocalState } from "@psi/managedLocalState";
 import { managedExchangeLockName } from "@psi/managedExchangeLock";

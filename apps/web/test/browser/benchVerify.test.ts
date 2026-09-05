@@ -19,7 +19,7 @@ import {
   signReceiptContent,
 } from "@psilink/core";
 
-import { VerifyReceiptBench } from "@bench/VerifyReceiptBench";
+import { VerifyReceiptScreen } from "@exchange/VerifyReceiptScreen";
 
 import { createAppMount } from "./renderApp";
 
@@ -211,7 +211,7 @@ async function uploadTo(label: string, file: File): Promise<void> {
 // The page mounts its dropzones after the first render; wait for the heading so
 // the file inputs exist before the first upload.
 async function mountVerifyBench() {
-  app.render(createElement(VerifyReceiptBench));
+  app.render(createElement(VerifyReceiptScreen));
   await expect
     .element(page.getByRole("heading", { level: 1 }))
     .toHaveTextContent("Verify a receipt");

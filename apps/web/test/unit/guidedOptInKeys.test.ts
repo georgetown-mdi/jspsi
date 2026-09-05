@@ -19,9 +19,9 @@ import {
 import {
   EMPTY_SAVE_FIELDS,
   exchangeFileInputFor,
-} from "@bench/saveExchangeModel";
-import { composeManagedDocument } from "@bench/manageOfferModel";
-import { inviterServerJobConfig } from "@bench/useInviterExchange";
+} from "@exchange/saveExchangeModel";
+import { composeManagedDocument } from "@exchange/manageOfferModel";
+import { inviterServerJobConfig } from "@exchange/useInviterExchange";
 
 import {
   buildAdvancedTerms,

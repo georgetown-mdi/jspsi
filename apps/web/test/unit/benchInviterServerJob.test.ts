@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { inviterServerJobConfig } from "@bench/useInviterExchange";
+import { inviterServerJobConfig } from "@exchange/useInviterExchange";
 
 import type { LinkageTerms, Metadata, Standardization } from "@psilink/core";
 

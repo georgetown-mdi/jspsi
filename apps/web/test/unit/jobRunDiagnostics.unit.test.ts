@@ -6,7 +6,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import {
   DIAGNOSTIC_LOG_UNANSWERED_LEAD,
   DIAGNOSTIC_LOG_UNANSWERED_NOTICE,
-} from "@bench/DiagnosticLogPanel";
+} from "@exchange/DiagnosticLogPanel";
 import { JOB_FILE_NAMES, jobCreateIntentSchema } from "@jobs/intent";
 import {
   LOG_AVAILABILITY_UNANSWERED_LIMIT,
@@ -23,7 +23,7 @@ import {
   runDiagnosticsWithControl,
 } from "@psi/runDiagnosticsModel";
 import { RelayedTerminalError } from "@psi/serverJobExchangeDriver";
-import { failureFor } from "@bench/useInviterExchange";
+import { failureFor } from "@exchange/useInviterExchange";
 import { resolveWorkdirFile } from "@jobs/workdir";
 
 import {

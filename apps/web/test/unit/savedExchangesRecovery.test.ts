@@ -4,7 +4,7 @@ import {
   UNREADABLE_RECORD_LABEL,
   recoveryRow,
   recoveryRows,
-} from "@bench/savedExchangesRecovery";
+} from "@recurring/savedExchangesRecovery";
 
 import type { ManagedExchangeDiagnosticEntry } from "@psi/managedExchangeStore";
 

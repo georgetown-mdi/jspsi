@@ -292,10 +292,10 @@ a benign coordination failure, never a desync or an attack. The operational
 framing is in
 [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#where-the-schedule-is-agreed-and-where-it-lives).
 
-Entry is implemented in `apps/web/src/bench/scheduleEntryModel.ts` (the
+Entry is implemented in `apps/web/src/recurring/scheduleEntryModel.ts` (the
 validation, the resolution, and the cross-field condition) over the arithmetic in
 `apps/web/src/psi/managedSchedule.ts`; the form itself is the local-fields editor
-in `apps/web/src/bench/ManagedExchangeDetail.tsx`, which writes the schedule
+in `apps/web/src/recurring/ManagedExchangeDetail.tsx`, which writes the schedule
 through the store's one local-fields edit alongside the label and the max-age
 policy.
 

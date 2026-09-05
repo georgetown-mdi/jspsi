@@ -10,11 +10,11 @@ import { editorFromCsv, editorWithAuthoredDraft } from "@psi/inviterModel";
 
 import { buildAdvancedTerms, draftFromTerms } from "@psi/advancedInvite";
 
-import { CONNECTION_TUNING_DEFAULT } from "@bench/connectionTuningModel";
-import { EXCHANGE_FILES_DEFAULT } from "@bench/exchangeFilesModel";
+import { CONNECTION_TUNING_DEFAULT } from "@console/connectionTuningModel";
+import { EXCHANGE_FILES_DEFAULT } from "@console/exchangeFilesModel";
 import { RECEIPTS_DEFAULT } from "@psi/receiptsModel";
 import { RUN_DIAGNOSTICS_DEFAULT } from "@psi/runDiagnosticsModel";
-import { ReviewCreateSection } from "@bench/ReviewCreateSection";
+import { ReviewCreateSection } from "@exchange/ReviewCreateSection";
 
 import { createAppMount } from "./renderApp";
 

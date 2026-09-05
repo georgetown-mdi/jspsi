@@ -14,8 +14,8 @@ import {
   createManagedExchange,
 } from "@psi/managedExchangeStore";
 import { AppShellStatus } from "@components/AppShellStatus";
-import { ManagedRunSurface } from "@bench/ManagedRunSurface";
-import { SavedExchanges } from "@bench/SavedExchanges";
+import { ManagedRunSurface } from "@recurring/ManagedRunSurface";
+import { SavedExchanges } from "@recurring/SavedExchanges";
 import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
 
 import { restoreConnectivity, setConnectivity } from "./connectivity";

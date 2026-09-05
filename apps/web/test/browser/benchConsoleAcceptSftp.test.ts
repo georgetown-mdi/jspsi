@@ -18,10 +18,10 @@ import {
 import {
   ACCEPT_UNSUPPORTED_TITLE,
   acceptUnsupported,
-} from "@bench/acceptorModel";
-import { AcceptorBench } from "@bench/AcceptorBench";
-import { SERVER_JOB_KEEP_OPEN_BODY } from "@bench/BenchRunSurface";
-import { SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT } from "@bench/filedropRendezvousChoice";
+} from "@exchange/acceptorModel";
+import { AcceptorScreen } from "@exchange/AcceptorScreen";
+import { SERVER_JOB_KEEP_OPEN_BODY } from "@exchange/RunSurface";
+import { SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT } from "@console/filedropRendezvousChoice";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 
@@ -265,7 +265,7 @@ describe("console SFTP accept unsupported-shape gate", () => {
   test("a split-directory SFTP endpoint is refused at review, pointing at the CLI", async () => {
     stubSftpAccept();
     window.location.hash = await encodeToken(SPLIT_SFTP_ENDPOINT);
-    app.render(createElement(AcceptorBench));
+    app.render(createElement(AcceptorScreen));
 
     await expect
       .element(page.getByText("Invitation from County Health Department"))
@@ -293,7 +293,7 @@ describe("console SFTP accept: author-then-launch", () => {
   test("blocks launch until the operator authors a connection with a fingerprint", async () => {
     stubSftpAccept();
     window.location.hash = await encodeToken(SFTP_ENDPOINT);
-    app.render(createElement(AcceptorBench));
+    app.render(createElement(AcceptorScreen));
     await reachColumnsStep();
 
     // The partner-named server is shown, and launch is blocked with an explanatory
@@ -316,7 +316,7 @@ describe("console SFTP accept: author-then-launch", () => {
   test("authors from the operator's own fields and runs on the console", async () => {
     const api = stubSftpAccept();
     window.location.hash = await encodeToken(SFTP_ENDPOINT);
-    app.render(createElement(AcceptorBench));
+    app.render(createElement(AcceptorScreen));
     await reachColumnsStep();
 
     // The partner-supplied locator is shown before authoring.
@@ -400,7 +400,7 @@ describe("console SFTP accept: author-then-launch", () => {
   test("a split-provisioned console does not gate a single-directory SFTP accept", async () => {
     stubSftpAccept(SPLIT_RENDEZVOUS);
     window.location.hash = await encodeToken(SFTP_ENDPOINT);
-    app.render(createElement(AcceptorBench));
+    app.render(createElement(AcceptorScreen));
     await reachColumnsStep();
 
     await page.getByRole("button", { name: "Set up connection" }).click();

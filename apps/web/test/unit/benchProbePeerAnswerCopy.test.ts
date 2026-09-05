@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { probePeerAnswerCopy } from "@bench/SftpAuthoringForm";
+import { probePeerAnswerCopy } from "@console/SftpAuthoringForm";
 
 // The console's guided audience is the likeliest to sit behind an intercepting
 // middlebox, and "could not reach the server" sends them to check an address that
