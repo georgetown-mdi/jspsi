@@ -13,7 +13,7 @@
 //
 // Scope: this fires ONLY on the contradiction. A spawn that correctly passes the
 // flag is allowed; a spawn whose prompt never claims worktree isolation is allowed
-// (a solo writer or a read-only reviewer deliberately sharing /workspace is fine);
+// (a solo writer or a read-only reviewer sharing /workspace by design is fine);
 // an instruction to CREATE a detached /tmp worktree by hand is not a claim of
 // present isolation and does not match. So the false-positive surface is narrow and
 // a legitimate call is never wedged by a stray mention of the word.
@@ -27,7 +27,7 @@
 import { eventForTools } from "./lib/event.mjs";
 
 // Present-tense assertions that the agent's current working directory IS an
-// isolated worktree. Kept deliberately narrow: each targets a claim of STATE
+// isolated worktree. Kept narrow: each targets a claim of STATE
 // ("you are in ...", "this/your worktree", "isolated worktree"), not an
 // instruction to build one ("create a /tmp worktree", "git worktree add"), which
 // describes the agent making its own and is a legitimate un-flagged pattern.

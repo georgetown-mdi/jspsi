@@ -46,7 +46,7 @@ describe("splitPipelines", () => {
     expect(splitPipelines("find . | xargs rm")).toEqual(["find . | xargs rm"]);
   });
 
-  it("leaves a lone & inside the stage that carries it", () => {
+  it("leaves a lone & inside the stage that holds it", () => {
     expect(splitPipelines("build 2>&1 & rm tree")).toEqual([
       "build 2>&1 & rm tree",
     ]);
@@ -76,8 +76,9 @@ describe("splitSegments", () => {
     ]);
   });
 
-  // The two splitters compose into what the flat form used to split on in one
-  // pass, so a hook reading stages and a hook reading segments see the same set.
+  // The two splitters compose into what a single flat regex would split on
+  // in one pass, so a hook reading stages and a hook reading segments see the
+  // same set.
   it("matches a single pass over every separator including the pipe", () => {
     const flat = (command) => command.split(/\s*(?:&&|\|\||[;|\n])\s*/);
     for (const command of [

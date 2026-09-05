@@ -62,7 +62,7 @@ describe("block-model-drop-sendmessage hook", () => {
     expect(status).toBe(0);
   });
 
-  it("allows a send carrying the override marker", () => {
+  it("allows a send holding the override marker", () => {
     const { status } = send({
       to: "agent-7",
       message: "[accept-model-drop] Stop after the current file.",

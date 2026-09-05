@@ -8,7 +8,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 // error may be rendered at an operator-facing sink. Operator-facing escaping
 // happens at ONE altitude -- the sink -- so an omission there puts a partner- or
 // server-controlled error message on the terminal verbatim, with whatever ANSI,
-// CR/LF, bidi or confusable bytes it carries. The ban is a set of esquery
+// CR/LF, bidi or confusable bytes it contains. The ban is a set of esquery
 // selectors, and a selector that stops matching fails silently: it keeps
 // reporting zero problems, which is indistinguishable from clean source. These
 // cases are what makes its coverage executable.
@@ -27,7 +27,7 @@ const eslint = new ESLint({
 
 /**
  * Messages the display-sink ban reports for `source` linted as `filePath`. A
- * source that does not parse throws rather than reading as zero problems.
+ * source that does not parse throws rather than counting as zero problems.
  */
 async function banHits(filePath, source) {
   const [result] = await eslint.lintText(source, { filePath });
@@ -62,7 +62,7 @@ const LINTER_WARM_UP_TIMEOUT_MS = 30_000;
 const CORE_FILE_FIRST_PARSE = resolve(repoRoot, "packages/core/src/main.ts");
 
 // Each entry is a statement body appended to a preamble that declares the
-// bindings it uses, so a case reads as the line a contributor would write.
+// bindings it uses, so a case looks like the line a contributor would write.
 const BANNED = [
   ["a bare error value at console.error", "console.error(err);"],
   ["a bare error value at a logger", "log.error(err);"],

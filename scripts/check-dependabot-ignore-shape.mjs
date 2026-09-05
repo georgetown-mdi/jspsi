@@ -5,7 +5,7 @@
 // updates for several orgs. That suppression is only sound over pins that float
 // within their major: an exact pin (actions/checkout@v7.0.1), a commit sha, or a
 // branch name under a covered org sits under an ignore that suppresses every
-// update it could ever receive, so it freezes with no pull request to surface a
+// update it could ever receive, so it freezes with no pull request to expose a
 // fix. This fails the build on that pairing instead.
 //
 // The rule:
@@ -28,7 +28,7 @@
 //
 // Glob reading: `*` matches across `/`, so `github/*` covers the subpath action
 // `github/codeql-action/init`. Whether that is Dependabot's own reading is
-// unsettled -- see the open premise in docs/spec/DEPENDENCY_PINS.md. The
+// unsettled -- see the open assumption in docs/spec/DEPENDENCY_PINS.md. The
 // inclusive reading is the fail-closed one: it requires more pins to be bare
 // majors, so the rule stays correct if the narrower reading turns out to be
 // Dependabot's.
@@ -39,7 +39,7 @@
 //   - A reference naming no ref at all. Rule C of check-action-pin-drift.mjs
 //     owns that shape, and a test here holds that delegation.
 //   - The npm and docker Dependabot blocks, whose ignore and exclude-patterns
-//     lists carry different rationales.
+//     lists contain different rationales.
 //   - What `@v7` resolves to. The ref is read as text, so a tag named like a
 //     bare major that in fact points at a frozen commit is outside this.
 
@@ -62,7 +62,7 @@ const FLOATING_MAJOR = /^v\d+$/;
 /**
  * The `ignore` entries the `github-actions` update block declares, as
  * `{dependencyName, updateTypes}` pairs in config order, or null when the source
- * carries no `github-actions` block at all. A null `updateTypes` is an entry
+ * has no `github-actions` block at all. A null `updateTypes` is an entry
  * naming no update type.
  */
 export function githubActionsIgnoreEntries(source) {

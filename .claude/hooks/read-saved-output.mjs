@@ -21,19 +21,19 @@
 // than lexical: only the harness writes that sentence at position zero.
 //
 // STATED LIMITS.
-//   - The anchor is deliberately strict, so a change to the notice's wording or
+//   - The anchor is strict by design, so a change to the notice's wording or
 //     framing makes this hook SILENT rather than noisy. That is the direction to
 //     fail in: the session still sees the harness's own notice and can read the
 //     file itself, while a loosened match resumes misfiring on quoted text.
-//   - What a PostToolUse payload carries for a persisted result is the harness's
+//   - What a PostToolUse payload holds for a persisted result is the harness's
 //     business and is not asserted here: every string-valued candidate field is
-//     tried, and no field carrying the notice means no readback. Measured on the
+//     tried, and no field containing the notice means no readback. Measured on the
 //     2026-08-31 harness by running a command with 60KB of output, the rendered
 //     notice reads `Output too large (60.5KB). Full output saved to: <path>`
 //     inside a <persisted-output> element; the payload's own shape was not
-//     observable from inside a session, so a payload that never carries it
+//     observable from inside a session, so a payload that never contains it
 //     leaves this hook inert rather than wrong.
-//   - The readback carries the LAST READBACK_BYTES bytes of the file and says so
+//   - The readback holds the LAST READBACK_BYTES bytes of the file and says so
 //     when there was more, since the verdict it exists to deliver sits at the
 //     end. The file itself stays on disk for a targeted read of the rest.
 //

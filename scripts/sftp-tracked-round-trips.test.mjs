@@ -48,7 +48,7 @@ import { descendants } from "./lib/typeScriptSources.mjs";
 // answers. A best-effort close written as `sftp.close(handle, (err) => { if
 // (err) reject(err); })` and fired after the operation has already settled would
 // therefore read as bracketed and never reach the allowance list. The mention
-// test is deliberate: it is what carries coverage through listOnce's
+// test is by design: it is what propagates coverage through listOnce's
 // opendir/readdir callback chain and createExclusiveOnce's open ->
 // code-4-exists -> close handshake, which a reachability test would reclassify.
 //
@@ -56,11 +56,11 @@ import { descendants } from "./lib/typeScriptSources.mjs";
 // rules. A site the propagation cannot reach is reported unbracketed, so a
 // new promise-plumbing idiom shows up as a failure to be answered (by extending
 // the rules here, or by bracketing the site) rather than passing unseen; a call
-// the site rules do not reach has no such backstop and simply passes.
+// the site rules do not reach has no such safety check and simply passes.
 
 const SELF = "scripts/sftp-tracked-round-trips.test.mjs";
 
-// The round trips deliberately issued outside the bracket, matched by the method
+// The round trips issued outside the bracket by design, matched by the method
 // they are issued from and the callee they issue. Each reason states why the
 // bracket must not cover it.
 const ALLOWED_OUTSIDE_THE_BRACKET = [
@@ -122,7 +122,7 @@ function identifierNamesIn(node) {
 /**
  * The set of nodes the tracked() bracket covers, computed by marking each
  * `this.tracked(...)` argument and propagating along the ways this adapter
- * carries a pending promise. A site is covered only where the propagation
+ * passes a pending promise. A site is covered only where the propagation
  * reaches it, save the settler-mention rule below; see the header.
  */
 export function trackedCoverage(sourceFile) {

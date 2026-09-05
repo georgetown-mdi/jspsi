@@ -97,7 +97,7 @@ function filesUnder(dir) {
 /**
  * Whether core's dist is at least as new as every source its build reads.
  *
- * Only an optimization, and deliberately a cheap one: a false verdict costs a
+ * Only an optimization, and a cheap one by design: a false verdict costs a
  * redundant build, and a true verdict that is wrong is corrected within seconds
  * by the watcher's first pass, which rebuilds unconditionally. What it buys is
  * that the common warm start does not pay a full core build before the dev
@@ -123,7 +123,7 @@ export function coreBuildIsCurrent(root = repoRoot) {
 
 /**
  * Bring core's dist up to date, then run its watcher and the app's dev server
- * until one of them exits, and resolve to the exit code the loop should carry.
+ * until one of them exits, and resolve to the loop's exit code.
  *
  * `runToCompletion` runs one npm invocation and resolves to its exit code;
  * `startWatcher` starts a long-running one and returns `{ kill, exited }`. They

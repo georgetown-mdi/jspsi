@@ -30,13 +30,13 @@
 //     PRIVACY.md). It is a different list, for exchanges a browser runs itself,
 //     and it happens to include the same Google server. Tying it here would fuse
 //     two independent decisions -- what the hosted app configures, and what the
-//     command-line tool falls back to -- so those files are deliberately not
-//     enumerated.
+//     command-line tool falls back to -- so those files are not enumerated, by
+//     design.
 //   - A copy in a file no list below names. A new surface that states the
 //     default is covered only once it is added to CODE_COPIES or CLAIM_TEXTS.
 //   - Prose that describes the default without writing the endpoint ("the
 //     built-in default STUN server"). Nothing there can drift, so nothing is
-//     read; each `stated` entry must still carry at least one claim that does
+//     read; each `stated` entry must still hold at least one claim that does
 //     write it, so the claim cannot be quietly dropped.
 //   - A claim split across two sentences ("the built-in default is used. It is
 //     `host:19302`."). A claim is read from the word "built-in" to the end of
@@ -62,7 +62,7 @@ const CODE_COPIES = [
 
 /**
  * Prose read for endpoints written as the built-in default. A `stated` file must
- * carry at least one such claim, so the sentence cannot be quietly dropped; the
+ * hold at least one such claim, so the sentence cannot be quietly dropped; the
  * others normally write no endpoint at all -- they interpolate a constant -- and
  * are read so that a literal written back into the prose is still held to the
  * source rather than escaping the tie by leaving the constant unused.

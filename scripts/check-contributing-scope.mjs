@@ -2,7 +2,7 @@
 // CONTRIBUTING.md scope guard, run by static_checks.yaml on every PR.
 //
 // CONTRIBUTING.md is the pre-contribution quickstart, not a reference (see its
-// "Scope of this document" section). This is a mechanical BACKSTOP for two tells
+// "Scope of this document" section). This is a mechanical SAFETY CHECK for two tells
 // that deeper material has crept back in; it is not a complete guard -- doc-tier
 // placement is otherwise a review call, and the charter plus the CLAUDE.md rule
 // are the primary mechanism.
@@ -22,7 +22,7 @@
 //      from tripping it; fenced code blocks are skipped so a command example is
 //      never scanned.
 //
-// This is deliberately structural, not a line-count gate: a length threshold
+// This is structural by design, not a line-count gate: a length threshold
 // rewards gaming, these name the actual smells.
 
 import { readFileSync } from "node:fs";

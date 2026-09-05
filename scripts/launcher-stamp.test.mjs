@@ -5,14 +5,14 @@ import { describe, expect, it } from "vitest";
 
 import { WORKFLOW_DIR, workflowDocument } from "./lib/workflows.mjs";
 
-// The launchers carry the image as a digest, and the release workflow is what
+// The launchers hold the image as a digest, and the release workflow is what
 // fills that digest in. Both halves of that arrangement are silent when they
 // break: a launcher whose placeholder line was reworded still reads fine, and a
-// substitution that no longer matches anything still exits 0 -- leaving a
+// substitution that matches nothing still exits 0 -- leaving a
 // release whose published launcher refuses to run in the operator's hands, or,
 // worse, one that runs an image nobody pinned.
 //
-// So the seam is pinned from both sides here: each launcher carries the
+// So the boundary is pinned from both sides here: each launcher holds the
 // placeholder line exactly once, and the release workflow's stamp step names
 // that same path and that same line literally. A rename on either side fails
 // this test rather than the release.
@@ -56,7 +56,7 @@ const releaseWorkflow = read(RELEASE_WORKFLOW);
 const releaseDocument = workflowDocument(repoRoot, RELEASE_WORKFLOW);
 
 // Every `run:` script in the workflow, joined. The stamp step is identified by
-// the literals it must carry rather than by its name, so renaming the step does
+// the literals it must hold rather than by its name, so renaming the step does
 // not quietly move the assertions off it.
 const runScripts = Object.values(releaseDocument.jobs)
   .flatMap((job) => job.steps ?? [])
@@ -68,7 +68,7 @@ describe("the launcher digest stamp", () => {
     describe(launcher.path, () => {
       const source = read(launcher.path);
 
-      it("carries the placeholder on exactly one line", () => {
+      it("holds the placeholder on exactly one line", () => {
         // Exactly one, because the release step substitutes a whole line and
         // asserts the same count: a second occurrence -- a launcher comparing
         // its own digest against a literal copy of the token, say -- would make
@@ -82,7 +82,7 @@ describe("the launcher digest stamp", () => {
       });
 
       it("refuses an unstamped copy rather than falling back to a tag", () => {
-        // The refusal is what makes the pin load-bearing; without it an
+        // The refusal is what makes the pin critical; without it an
         // unstamped copy would run whatever a floating tag resolves to today.
         // Held here as the absence of any floating tag in the file: a `:latest`
         // reference is the shape that regression takes.
@@ -111,7 +111,7 @@ describe("the release workflow's stamp step", () => {
     });
   }
 
-  it("fails the release when a launcher does not carry the placeholder", () => {
+  it("fails the release when a launcher does not hold the placeholder", () => {
     // The step counts the placeholder line before substituting and exits
     // non-zero on anything but one occurrence, so a rename cannot no-op.
     expect(stamp).toMatch(/exit 1/);

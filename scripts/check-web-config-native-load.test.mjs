@@ -156,7 +156,7 @@ describe("the check, driven through an injected load", () => {
     expect(calls).toHaveLength(1);
   });
 
-  it("names the rewrite when the config carries a refused construct", () => {
+  it("names the rewrite when the config contains a refused construct", () => {
     const { load } = loader([
       refused,
       refused,

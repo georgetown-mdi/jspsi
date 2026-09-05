@@ -46,7 +46,7 @@ describe("the EB certificate download hook's two copies", () => {
   it("are both executable in the git index (mode 100755)", () => {
     // Read from the index rather than the filesystem: what EB actually deploys
     // is the committed blob's mode, not whatever the working tree happens to
-    // carry locally.
+    // hold locally.
     const output = execFileSync("git", ["ls-files", "-s", ...HOOK_TREES], {
       cwd: repoRoot,
       encoding: "utf8",

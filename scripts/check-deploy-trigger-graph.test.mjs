@@ -55,7 +55,7 @@ describe("reading the deploy trigger", () => {
     );
   });
 
-  it("throws when the push trigger carries no paths list", () => {
+  it("throws when the push trigger has no paths list", () => {
     expect(() =>
       readTriggerPaths(
         parseWorkflow("fixture.yaml", "on:\n  push:\n    branches: [main]\n"),
@@ -146,7 +146,7 @@ describe("normalizing what a build reports", () => {
 describe("collecting the graph from a build", () => {
   // The recorded module ids and the sourcemap sources cover different passes of
   // the same build -- rolldown's environments and Nitro's server rollup -- so a
-  // collection that lost either half would read as a smaller, still-passing
+  // collection that lost either half would look like a smaller, still-passing
   // graph. This drives the union over a prepared tree with the build injected.
   function prepare(root) {
     writeFile(root, "apps/web/src/peerServer.ts", "");
@@ -228,7 +228,7 @@ describe("holding the graph against the filter", () => {
     ).toEqual({ uncovered: [], undeclared: [], productGaps: [] });
   });
 
-  // The premise the deploy filter's broker entry rests on: the local `npm start`
+  // The assumption the deploy filter's broker entry rests on: the local `npm start`
   // entry beside src/contrib is in no deployed import graph. If it ever enters
   // one, edits to it stop triggering a deploy.
   it("reports a tracked source the filter does not match", () => {

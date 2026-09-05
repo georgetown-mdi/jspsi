@@ -90,7 +90,7 @@ describe("fetchAllItems pagination", () => {
     expect(result).toHaveLength(total);
     expect(total).toBeGreaterThan(PAGE_SIZE);
 
-    // Each item carries numeric id, node id, title, and the extracted fields
+    // Each item has numeric id, node id, title, and the extracted fields
     // (status / Epic / Order) the listing promises.
     const last = result[total - 1];
     expect(last.id).toBe(numericIdFromNodeId(nodes[total - 1].id));
@@ -144,7 +144,7 @@ describe("mapFetchedNode cross-project guard", () => {
   });
 
   it("treats a node resolved on a different project as missing, noting the resolved project", () => {
-    // The core foot-gun: a numeric id whose item lives on board 10, read under
+    // The core hazard: a numeric id whose item lives on board 10, read under
     // board 9, must not come back as a board-9 item.
     const r = mapFetchedNode(contentNode(10), 123, 9);
     expect(r.type).toBe("missing");
@@ -426,7 +426,7 @@ describe("graphql request bounds", () => {
     // No options: the production timeout, budget, and backoff defaults apply.
     const body = await graphql("query { x }", { a: 1 });
 
-    // An HTTP 200 carrying both data and errors is a partial result, which
+    // An HTTP 200 holding both data and errors is a partial result, which
     // fetchItems relies on being returned rather than thrown.
     expect(body.data).toEqual({ i0: null });
     expect(body.errors).toHaveLength(1);

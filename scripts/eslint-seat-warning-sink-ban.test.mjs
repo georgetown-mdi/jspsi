@@ -14,7 +14,7 @@ import {
 // run surface that offers the exchange driver an `onWarning` slot must fold the
 // message through `appendSanitizedRunWarning`, the one display boundary the
 // surfaces share. The manager's rendezvous preflight composes its warnings RAW on
-// the premise that the boundary escapes them exactly once -- so a seat that
+// the assumption that the boundary escapes them exactly once -- so a seat that
 // escapes again shows one backslash in a partner filename as four, and a seat
 // that escapes not at all puts a partner's ESC, bidi override, or confusable
 // straight into the operator's page. A unit test of the boundary cannot see
@@ -27,7 +27,7 @@ import {
 // apps/web/src, so the scope, the selector, and the rule wiring are exercised as
 // CI runs them rather than restated here -- with one transform: the type-aware
 // layer is stripped off the real config before it is used (withoutTypeAwareLayer,
-// imported from ./eslint-strip-type-aware-layer.mjs). The blocks that carry the
+// imported from ./eslint-strip-type-aware-layer.mjs). The blocks that hold the
 // ban are transformed by nothing, so the selector, the `files` scoping, and flat
 // config's replace-semantics across the broad src block and the rawRows
 // allowlist block are the real ones.
@@ -59,14 +59,14 @@ async function banHits(filePath, source) {
 }
 
 // A path inside the guarded tree, which is what selects the config blocks that
-// carry the ban -- a path outside apps/web/src matches none of them and reports
+// hold the ban -- a path outside apps/web/src matches none of them and reports
 // zero however the text is written. Only the path is borrowed: every case below
 // lints the text it hands in, which the canary proves.
 const SEAT_FILE = resolve(repoRoot, "apps/web/src/bench/runWarnings.ts");
 
 // A real seat that also sits in the rawRows allowlist block, whose separate
 // `no-restricted-syntax` options REPLACE (not merge with) the broad src block's.
-// Without the ban re-carried there, a quarter of the console's seats would be
+// Without the ban restated there, a quarter of the console's seats would be
 // silently uncovered.
 const RAW_ROWS_SEAT_FILE = resolve(
   repoRoot,
@@ -199,7 +199,7 @@ describe("the seat warning-sink ban", () => {
     await banHits(SEAT_FILE, fixture("run({});"));
   }, LINTER_WARM_UP_TIMEOUT_MS);
 
-  it("carries the ban to every path it lints, with no type-aware rule", async () => {
+  it("reaches every path it lints, with no type-aware rule", async () => {
     for (const path of [
       SEAT_FILE,
       RAW_ROWS_SEAT_FILE,

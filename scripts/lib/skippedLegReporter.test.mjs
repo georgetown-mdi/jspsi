@@ -7,7 +7,7 @@ import SkippedLegReporter, {
 
 // The shapes below mirror what vitest hands a reporter's onTestRunEnd: a test
 // module exposing its project, its repo-relative id, and children.allTests(),
-// each test carrying options.mode and a result() whose state is "skipped" for a
+// each test holding options.mode and a result() whose state is "skipped" for a
 // skipIf, a test.skip, a skipped suite, and a runtime ctx.skip (the last keeping
 // mode "run" and putting its reason in result().note). Driven from a real run in
 // this repo, not from the vitest type declarations.

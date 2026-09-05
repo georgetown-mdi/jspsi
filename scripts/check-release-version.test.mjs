@@ -21,7 +21,7 @@ const readRoot = (relative) =>
 const committedVersion = manifestVersion(readRoot("apps/cli/package.json"));
 
 describe("the tag a release publishes under", () => {
-  it("names the version its release-tag shape carries", () => {
+  it("names the version its release-tag shape has", () => {
     expect(taggedVersion("v1.2.3")).toBe("1.2.3");
     expect(taggedVersion("v10.0.11")).toBe("10.0.11");
   });
@@ -44,7 +44,7 @@ describe("the tag a release publishes under", () => {
   });
 });
 
-describe("the version a manifest carries", () => {
+describe("the version a manifest has", () => {
   it("reads a release version", () => {
     expect(manifestVersion('{"name":"psilink","version":"0.4.2"}')).toBe(
       "0.4.2",
@@ -75,7 +75,7 @@ describe("the agreement the check holds", () => {
     expect(violation).toContain("0.1.0");
   });
 
-  it("fails a manifest carrying no version, naming the tag", () => {
+  it("fails a manifest having no version, naming the tag", () => {
     const [violation] = agreementViolations("v0.2.0", undefined);
     expect(violation).toContain("v0.2.0");
     expect(violation).toContain("apps/cli/package.json");
@@ -132,8 +132,8 @@ describe("the check as the release workflow runs it", () => {
   });
 
   it("refuses to pass when it is handed no tag at all", () => {
-    // A step whose env assignment is dropped or renamed must not read as a
-    // release whose versions agree.
+    // A step whose env assignment is dropped or renamed must not be treated as
+    // a release whose versions agree.
     expect(runCheck(undefined).status).toBe(2);
     expect(runCheck("").status).toBe(2);
   });

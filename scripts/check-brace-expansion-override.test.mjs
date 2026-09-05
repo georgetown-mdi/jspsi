@@ -357,7 +357,7 @@ describe("the verdict", () => {
 });
 
 describe("what it refuses to answer for", () => {
-  it("refuses a lockfile carrying no packages map", () => {
+  it("refuses a lockfile containing no packages map", () => {
     const verdict = assess(OVERRIDE, { lockfileVersion: 1 });
     expect(verdict.ok).toBe(false);
     expect(verdict.lines.join("\n")).toContain("no `packages` map");

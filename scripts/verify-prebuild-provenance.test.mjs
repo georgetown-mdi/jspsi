@@ -26,7 +26,7 @@ import {
   verifyArgv,
 } from "./verify-prebuild-provenance.mjs";
 
-// What these cover, and what they deliberately do not. They drive this repo's
+// What these cover, and what they do not, by design. They drive this repo's
 // own wiring -- arming, the offline digest binding, argv construction, and how
 // a failure propagates and is named -- across an injected verifier boundary.
 // They do NOT model what `gh attestation verify` decides: reimplementing the
@@ -128,7 +128,7 @@ describe("resolveTarballName", () => {
 
   // The name reaches the verifier's argv as the path being verified, so it is
   // held to the whitespace-free class the free-text marker fields are, for the
-  // same reason: every marker the failure-cause recognizer carries contains a
+  // same reason: every marker the failure-cause recognizer holds contains a
   // space.
   it.each([
     ["openmined-psi.js-2.0.6-seclink.3.tgz"],
@@ -143,7 +143,7 @@ describe("resolveTarballName", () => {
     ["a space", "openmined-psi.js-2.0.6 seclink.3.tgz"],
     ["a tab", "openmined-psi.js-2.0.6\tHTTP 401.tgz"],
     ["a newline", "openmined-psi.js-2.0.6\ndial tcp.tgz"],
-  ])("refuses a tarball name carrying %s", (_, name) => {
+  ])("refuses a tarball name containing %s", (_, name) => {
     expect(resolveTarballName([name]).problem).toMatch(/no vendored prebuild/);
   });
 });
@@ -208,7 +208,7 @@ describe("marker shape", () => {
     ["a tab", "refs/heads/master\tHTTP 401"],
     ["nothing", ""],
     ["a non-string", 7],
-  ])("refuses a source ref carrying %s", (_, source_ref) => {
+  ])("refuses a source ref containing %s", (_, source_ref) => {
     expect(markerProblems({ ...ARMED, source_ref }).join("\n")).toMatch(
       /source_ref/,
     );
@@ -316,7 +316,7 @@ describe("what a verifier failure is reported as", () => {
   it("names an unreachable trust root as a network failure", () => {
     // This one is the reason the recognizer reads gh's own wording and not
     // only the Go transport strings: the fetch that fails is the TUF trust
-    // root, and the message it surfaces carries no network words at all.
+    // root, and the message it shows contains no network words at all.
     const problem = failure({
       status: 1,
       stderr: VERIFIER_STDERR.unreachableTrustRoot,
@@ -387,11 +387,11 @@ describe("what a verifier failure is reported as", () => {
     ["a bare exit status", 0],
     ["a bare non-zero status", 1],
     ["nothing at all", undefined],
-    ["an outcome carrying none of the fields", {}],
+    ["an outcome containing none of the fields", {}],
     ["an outcome whose fields are all null", { status: null, signal: null }],
   ])("refuses to read %s as a verified artifact", (_, outcome) => {
     // The verifier contract is an object; a caller still returning the older
-    // bare status would destructure to `status: undefined`, which reads as a
+    // bare status would destructure to `status: undefined`, which is treated as a
     // clean exit unless this branch catches it first.
     const result = check({ marker: ARMED, runVerifier: () => outcome });
     expect(result.ok).toBe(false);

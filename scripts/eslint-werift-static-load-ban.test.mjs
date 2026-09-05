@@ -31,7 +31,7 @@ const eslint = new ESLint({
 /**
  * no-restricted-syntax messages the werift static-load ban reports for
  * `source` linted as `filePath`. A source that does not parse throws rather
- * than reading as zero problems.
+ * than counting as zero problems.
  */
 async function banHits(filePath, source) {
   const [result] = await eslint.lintText(source, { filePath });

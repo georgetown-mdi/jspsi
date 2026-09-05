@@ -9,12 +9,12 @@ import { describe, expect, it } from "vitest";
 // `strict-allow-scripts` a package with no verdict fails the install outright,
 // so the map's completeness is what keeps every install from grounding. Two ways
 // the map rots with no diagnostic at all. An entry naming a package the tree no
-// longer installs matches nothing, so it reads as a live verdict while governing
+// longer installs matches nothing, so it displays as a live verdict while governing
 // nothing. An entry spelled in a form npm cannot honor is either dropped from
 // the policy or kept and matched against nothing.
 //
-// What these properties hold is narrower than npm's own unreviewed set, and
-// deliberately so: npm decides from a live tree, reading each package's source
+// What these properties hold is narrower than npm's own unreviewed set, by
+// design: npm decides from a live tree, reading each package's source
 // from its dependency edges and each extracted package.json from disk, while
 // this reads the committed lockfile. Where the lockfile cannot answer, the check
 // refuses the input rather than guessing at it -- an `overrides` form it does
@@ -39,8 +39,8 @@ const CANONICAL_VERSION = new RegExp(`^${VERSION}$`);
 const SEMVER_VERSION = new RegExp(`^v?${VERSION}${BUILD}$`);
 const canonical = (version) => version.replace(/^v/, "").replace(/\+.*$/, "");
 
-// A key npm-package-arg reads as a registry name. A key carrying a scheme or a
-// path shape npm reads as a source spec instead and matches against what an
+// A key npm-package-arg treats as a registry name. A key with a scheme or a
+// path shape npm treats as a source spec instead and matches against what an
 // entry resolved to, which this check does not model.
 const PACKAGE_NAME_KEY = /^(?:@[^/@\s]+\/)?[^./@\s][^/@\s]*$/;
 
@@ -121,7 +121,7 @@ function policyEntries(allowScripts) {
 // tarball URL spelled in the registry's own <name>/-/<name>-<version>.tgz shape
 // fails the install under a name-keyed `true` and under a name-keyed `false`
 // alike, reported exactly as with no verdict at all -- while the lockfile entry
-// npm writes carries that URL in `resolved`, which the identity below would
+// npm writes has that URL in `resolved`, which the identity below would
 // otherwise read a name and version out of. A git source is the same class in
 // npm's model and is treated as one here unmeasured, for want of a reachable git
 // host to measure it against; the assumption costs a refusal, never a verdict.
@@ -132,8 +132,8 @@ const REGISTRY_OVERRIDE_SPEC = new RegExp(
   `^${COMPARATOR_SET}(?:\\s*\\|\\|\\s*${COMPARATOR_SET})*$`,
 );
 
-// A scheme, a path shape, or the bare `owner/repo` npm reads as a git host
-// shorthand. npm-package-arg reads `owner/repo` as either a hosted git spec or a
+// A scheme, a path shape, or the bare `owner/repo` npm treats as a git host
+// shorthand. npm-package-arg treats `owner/repo` as either a hosted git spec or a
 // directory depending on what is on disk, and both readings are non-registry, so
 // the class does not turn on which one it picks. The one scheme it excludes is
 // `npm:`, an alias that resolves from the registry under another name: which
@@ -184,12 +184,12 @@ const NM = "node_modules/";
 const installedAs = (path) => path.slice(path.lastIndexOf(NM) + NM.length);
 
 /**
- * The name and version a registry tarball URL carries, or `null` when it carries
+ * The name and version a registry tarball URL holds, or `null` when it holds
  * none. npm reads both out of this URL and neither out of the entry's own `name`
  * and `version` fields: those come from the tarball's package.json, which its
  * publisher controls and could use to claim another package's verdict. An
  * aliased dependency ("h3-v2": "npm:h3@2") makes the install directory
- * untrustworthy the same way, since it carries a name the registry never
+ * untrustworthy the same way, since it has a name the registry never
  * published -- and this lockfile installs several.
  *
  * A registry tarball lives at <host>/<name>/-/<name>-<version>.tgz, with the
@@ -198,7 +198,7 @@ const installedAs = (path) => path.slice(path.lastIndexOf(NM) + NM.length);
  * with the one ahead of it when that is an `@scope`. Requiring a segment before
  * the delimiter at all is what stops a hostile https://host/-/trusted-1.0.0.tgz
  * from claiming a registered name. npm takes the filename off the RAW url and
- * requires the path's own last segment to equal it, so a URL carrying a query
+ * requires the path's own last segment to equal it, so a URL with a query
  * string or fragment -- which private registries emit -- yields no identity
  * rather than one read out of the path.
  */
@@ -233,7 +233,7 @@ function registryTarballIdentity(url) {
  * or directory, a git URL, a tarball URL it cannot parse, or any source an
  * override names -- so no name-keyed verdict applies to the entry. An override
  * is keyed both to the name the entry is installed under and to the name its
- * URL carries, since either can be the one the rewritten edge names.
+ * URL holds, since either can be the one the rewritten edge names.
  */
 function packageIdentity(path, entry, overriddenToSource = new Map()) {
   const resolved = typeof entry.resolved === "string" ? entry.resolved : null;
@@ -254,7 +254,7 @@ function packageIdentity(path, entry, overriddenToSource = new Map()) {
 
 /**
  * The lockfile entries npm's install-script gate considers: not the root or a
- * workspace (neither carries a node_modules/ path), not a workspace link (whose
+ * workspace (neither has a node_modules/ path), not a workspace link (whose
  * lifecycle its owner runs), and not a bundled dependency, whose install script
  * npm never runs and no policy entry can allow.
  */
@@ -339,11 +339,11 @@ describe("allowScripts install-script policy", () => {
   });
 
   it("names every package it considers, bar the vendored file: tarball", () => {
-    // The install directory carries an alias name npm refuses to match, and the
+    // The install directory has an alias name npm refuses to match, and the
     // dependency edge npm falls back to instead is not visible from a lockfile,
     // so a package this cannot name from its resolved URL is one whose verdict
     // it cannot decide. Only the vendored tarball is in that position, and it
-    // stays out of the policy by carrying no install script; anything else
+    // stays out of the policy by running no install script; anything else
     // landing there needs its source form modeled before it can be governed.
     const unnamed = installed
       .filter((pkg) => pkg.name === null)
@@ -405,7 +405,7 @@ describe("the identity npm matches a lockfile entry by", () => {
     ).toEqual({ name: "@scope/pkg", version: "1.0.0" });
   });
 
-  it("refuses a name to a URL carrying no package path before its /-/", () => {
+  it("refuses a name to a URL with no package path before its /-/", () => {
     expect(
       identityOf("node_modules/h3", {
         version: "2.0.1",
@@ -444,7 +444,7 @@ describe("the identity npm matches a lockfile entry by", () => {
 
 describe("the verdict npm reaches for a lockfile entry", () => {
   // `h3` installed twice, once under its own name and once as the alias
-  // `h3-v2`, which is the shape this repo's lockfile carries.
+  // `h3-v2`, which is the shape this repo's lockfile has.
   const aliasedH3 = {
     packages: {
       "node_modules/h3": {
@@ -612,7 +612,7 @@ describe("the verdict npm reaches under a root override", () => {
     }
   });
 
-  it("refuses the name a foreign URL carries under an overridden directory", () => {
+  it("refuses the name a foreign URL has under an overridden directory", () => {
     const source = "https://host.test/other/-/other-1.0.0.tgz";
     const packages = installedPackages(
       overriddenTree({

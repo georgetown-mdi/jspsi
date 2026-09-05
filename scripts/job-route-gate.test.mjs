@@ -27,7 +27,7 @@ import {
 // day it lands. There is no allowance list -- every handler gates.
 //
 // Per HANDLER, not per module: a module-level reading would pass a module that
-// gates GET and misses DELETE, and a module here carries up to three methods.
+// gates GET and misses DELETE, and a module here has up to three methods.
 //
 // Reach and limits, stated rather than implied.
 //
@@ -36,7 +36,7 @@ import {
 // object-literal method. Anything else -- a `handlers` value that is not an
 // object literal, a spread, a handler referenced by name or produced by a
 // wrapper -- is reported as a shape the check cannot read rather than passed
-// over, and so is a file in the routes tree carrying no `handlers` map at all.
+// over, and so is a file in the routes tree holding no `handlers` map at all.
 // A new idiom is a failure to answer, never a silent gap.
 //
 // What it decides about the call is SYNTACTIC. It counts a call to a name the
@@ -46,7 +46,7 @@ import {
 // as "the call appears in the body's first statement" -- the readable proxy for
 // "before any filesystem use or spawn", which is not decidable here. A handler
 // whose body is a single expression rather than a block has no first statement
-// to hold the call and reads as gating late.
+// to hold the call and is treated as gating late.
 //
 // Obtaining the outcome is not acting on it, so the outcome is read too -- for a
 // handler that gates in its first statement, one that does not being already
@@ -56,14 +56,14 @@ import {
 // leaves the handler on the refusing side -- a `return` or a `throw`, written
 // directly, at the end of a block, or on both sides of a nested `if`. Either
 // polarity is read (`=== "response"` and `!== "manager"` alike), which rests on
-// the outcome union carrying exactly two kinds; the rot guard below fails if it
+// the outcome union having exactly two kinds; the rot guard below fails if it
 // grows a third.
 //
 // The success-first guard clause is that shape with its refusing side left
 // implicit: the test's own branch takes the passing kind and exits, and the
-// refusal is whatever the handler falls through to. It reads as acting when BOTH
-// exit -- the branch, which is what makes the rest of the body the refusing path
-// alone, and that rest, read as an `else` block would be.
+// refusal is whatever the handler falls through to. It is treated as acting
+// when BOTH exit -- the branch, which is what makes the rest of the body the
+// refusing path alone, and that rest, treated as an `else` block would be.
 //
 // A handler is DECIDED to ignore the refusal when it discards the call's value,
 // when nothing follows the call, when the statement that follows does not test
@@ -88,12 +88,12 @@ const ROUTES_DIR = "apps/web/src/routes/api/jobs";
 const GATE_MODULE = "apps/web/src/jobs/routeSupport.ts";
 
 // The exported name the route modules import, and the tail every import
-// specifier of it must carry.
+// specifier of it must contain.
 const GATE = "gateJobRoute";
 const GATE_MODULE_TAIL = "routeSupport";
 
 // The gate's outcome type, the property discriminating its arms, and the kind
-// whose arm carries the refusal a handler has to return.
+// whose arm holds the refusal a handler has to return.
 const OUTCOME_TYPE = "GateOutcome";
 const DISCRIMINANT = "kind";
 const REFUSING_KIND = "response";

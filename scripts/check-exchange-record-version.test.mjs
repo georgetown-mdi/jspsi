@@ -32,7 +32,7 @@ import { PRE_PUBLICATION_RELEASE as PROTOCOL_CHECK_FLOOR } from "./check-protoco
 import { CHECKS } from "./run-checks.mjs";
 
 /**
- * The two obligations the exchange-record literal carries. The bump rule's whole
+ * The two obligations the exchange-record literal holds. The bump rule's whole
  * value is that it fires on a move and on nothing else; the reset rule's two
  * halves bind at opposite ends of one release marker, and the repository sits on
  * the first half. So the move and the armed reset states are driven through the
@@ -85,7 +85,7 @@ function publishedState(overrides = {}) {
 }
 
 /**
- * A tree carrying what the check reads: the release manifest, the record version
+ * A tree holding what the check reads: the release manifest, the record version
  * source, and the recovery sources, copied so the recovery rule reads the real
  * declarations. `omitRecovery` leaves one of them out, which is how the deleted
  * source is reached. This is how the states beyond this repository's own are
@@ -400,7 +400,7 @@ describe("the check as CI runs it", () => {
 
   it("passes a published release whose recorded discharges retire both rules", () => {
     // Both discharges driven through the real script, since each is a constant
-    // in the check rather than an input the fixture tree carries.
+    // in the check rather than an input the fixture tree holds.
     const moved = "psilink-exchange-record/v2";
     const scriptRoot = mkdtempSync(
       resolve(tmpdir(), "psilink-record-version-script-"),
@@ -523,9 +523,9 @@ describe("the check's registration", () => {
     );
   });
 
-  it("is carried by the release checklist step its failures name", () => {
+  it("depends on the release checklist step its failures name", () => {
     // The check reads the literal; the artifact-side obligations it cannot read
-    // are the checklist's, so a step that stopped carrying them -- or a heading
+    // are the checklist's, so a step that stopped stating them -- or a heading
     // reworded out from under the pointer -- would leave every failure message
     // naming a place that says nothing.
     const releases = readRoot("docs/RELEASES.md");

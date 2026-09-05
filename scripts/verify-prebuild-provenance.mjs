@@ -3,7 +3,7 @@
 // run by .github/actions/setup ahead of `npm ci` and by release.yaml's publish
 // job ahead of the shipped image build.
 //
-// The tarball carries native N-API .node prebuilds that are dlopen'd with full
+// The tarball contains native N-API .node prebuilds that are dlopen'd with full
 // process privilege into the PSI crypto pipeline, and it is built in another
 // repository (the fork's native-prebuilds.yml) and copied here by hand. The
 // committed `.sha256` sidecar cannot close that hop: it is written in the same
@@ -17,9 +17,9 @@
 //
 // ARMING. Enforcement arms per artifact, because attestation coverage is a
 // property of the run that packed a given tarball rather than of the fork: one
-// packed by a run predating the producing workflow's attest step carries
+// packed by a run predating the producing workflow's attest step holds
 // nothing to verify. The marker file beside the tarball
-// (`<tarball>.provenance.json`) carries the switch:
+// (`<tarball>.provenance.json`) holds the switch:
 //
 //   attestation_expected: false -> report, warn, and pass. The sidecar is then
 //     the whole control.
@@ -36,8 +36,8 @@
 // diff in `lib/` that a reviewer reads, rather than a silent absence.
 //
 // What this check does NOT establish, and the runbook
-// (docs/PREBUILD_REVENDOR.md) carries as the reviewer's own step: that the
-// attested build is honest. An attestation binds bytes to a workflow run in the
+// (docs/PREBUILD_REVENDOR.md) states as the reviewer's own step: that the
+// attested build is correct. An attestation binds bytes to a workflow run in the
 // producer repo; whether that run built what its source says is the fork's
 // problem, not this one.
 
@@ -74,8 +74,8 @@ export const VERIFIER_STDERR_LIMIT = 16 * 1024 * 1024;
 
 /**
  * The single vendored tarball's filename, or a problem describing why there is
- * no single one. Exactly one is the premise every call site's glob already
- * carries; two would make `sha256sum -c lib/*.tgz.sha256` ambiguous too.
+ * no single one. Exactly one is the assumption every call site's glob already
+ * holds; two would make `sha256sum -c lib/*.tgz.sha256` ambiguous too.
  */
 export function resolveTarballName(entries) {
   const found = entries.filter((name) => TARBALL.test(name));
@@ -125,7 +125,7 @@ export function markerProblems(marker) {
 
   // `source_ref` reaches the verifier's argv as free text, and the
   // failure-cause recognizer reads the verifier's stderr by substring, so a
-  // ref carrying a recognizer marker (`refs/heads/no route to host`) would
+  // ref containing a recognizer marker (`refs/heads/no route to host`) would
   // rename an identity mismatch as an outage on any failure path that echoes
   // the ref back. Whether `gh` echoes this field on any such path is
   // unmeasured from here: driven with sentinel values, 2.98.0's 401 and 404
@@ -200,7 +200,7 @@ export function verifyArgv(tarballPath, marker) {
 // reading its stderr, except the four Go transport strings noted inline, which
 // are the sibling errno and timeout renderings of the same `net/http` path the
 // measured `dial tcp` line comes from. The list is a best-effort recognizer,
-// not a partition: a shape it does not carry falls through to the wording
+// not a partition: a shape it does not include falls through to the wording
 // below, and every one of these branches fails the check either way.
 const NON_LOOKUP_FAILURES = [
   {
@@ -222,7 +222,7 @@ const NON_LOOKUP_FAILURES = [
       "failed to fetch bundle",
       "dial tcp",
       "no route to host",
-      // Go transport renderings the measured `dial tcp` line does not carry.
+      // Go transport renderings the measured `dial tcp` line does not include.
       "no such host",
       "i/o timeout",
       "TLS handshake timeout",
@@ -251,7 +251,7 @@ export function nonLookupFailure(stderr) {
  * absent, and a problem when it exists but cannot be read. An unreadable marker
  * -- a permission error, a directory in its place -- is reported as itself
  * rather than folded into the missing-marker report, which would name the wrong
- * cause; both still fail the check. `readFile` is the test seam.
+ * cause; both still fail the check. `readFile` is what a test replaces.
  */
 export function readMarkerSource(markerPath, readFile = readFileSync) {
   try {
@@ -269,15 +269,15 @@ export function readMarkerSource(markerPath, readFile = readFileSync) {
  * written back out so the operator still reads the verifier's own words.
  *
  * A `spawnSync` error is only a spawn failure when the process never ran, which
- * is an error carrying neither an exit status nor a termination signal.
+ * is an error that has neither an exit status nor a termination signal.
  * Reporting any other error as an absent `gh` would name the wrong cause and
  * discard what the run said. An error alongside a status or a signal describes
- * a run that DID happen and was cut short, so it is carried out as `runError`
+ * a run that DID happen and was cut short, so it is kept as `runError`
  * for the decision to refuse rather than dropped: an overrun of `maxBuffer`
  * comes back as `ENOBUFS`, under the `SIGTERM` `spawnSync` sends for it, or --
  * measured against a child that survives that signal and swallows the `EPIPE`
  * behind it -- under an exit status of the child's own, zero included.
- * `writeStderr` is the test seam.
+ * `writeStderr` is what a test replaces.
  */
 export function verifierOutcome(run, writeStderr) {
   const stderr = typeof run.stderr === "string" ? run.stderr : "";
@@ -415,7 +415,7 @@ export function checkProvenance({
   // A cause that is not the lookup's own answer is named as itself. The
   // no-attestation conclusion below is a claim about the bytes, and reporting
   // it for an unrunnable `gh`, a killed run, a run cut short, or a fenced host
-  // reads an outage as tampering.
+  // treats an outage as tampering.
   if (spawnError !== undefined) {
     return unverified(
       `${invocation} could not be run: ${spawnError}. The attestation lookup never happened, so this is an absent or unrunnable \`gh\` rather than anything about ${artifact}. Install \`gh\` and re-run, or read CI's own run of this check (docs/PREBUILD_REVENDOR.md).`,

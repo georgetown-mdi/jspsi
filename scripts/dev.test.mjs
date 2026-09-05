@@ -12,7 +12,7 @@ import {
   runDevLoop,
 } from "./dev.mjs";
 
-// Coverage of the root dev loop's two load-bearing properties, neither of which
+// Coverage of the root dev loop's two critical properties, neither of which
 // a passing dev session would report: core's dist is current BEFORE the dev
 // server starts (a server that races the watcher resolves whatever dist happened
 // to be on disk, which is the stale build the loop exists to prevent), and one

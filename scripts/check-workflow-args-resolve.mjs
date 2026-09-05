@@ -3,7 +3,7 @@
 //
 // The Workflow harness injects a script's arguments as `args`, either as the
 // object the caller passed or as JSON text of it. Every other delivery -- an
-// array, a bare scalar, null, nothing at all -- carries no named field, and a
+// array, a bare scalar, null, nothing at all -- has no named field, and a
 // script that reads one off it gets `undefined` rather than an error: the round
 // runs, the agents are spawned, and the caller's arguments are simply missing
 // from the prompts. That is a silent degradation, so a committed script resolves
@@ -105,7 +105,7 @@ export function looseArgsReads(code) {
   return reads;
 }
 
-/** How many canonical `resolveWorkflowArgs(args)` calls a block carries. */
+/** How many canonical `resolveWorkflowArgs(args)` calls a block holds. */
 export function canonicalResolveCount(code) {
   const tokens = tokenize(code);
   let count = 0;
@@ -137,7 +137,7 @@ export function resolveViolations(file, source) {
   return violations;
 }
 
-/** Count the canonical resolves a source carries, for the pattern-rot guard. */
+/** Count the canonical resolves a source holds, for the pattern-rot guard. */
 export function resolveCount(file, source) {
   return codeBlocks(file, source).reduce(
     (total, block) => total + canonicalResolveCount(block.code),

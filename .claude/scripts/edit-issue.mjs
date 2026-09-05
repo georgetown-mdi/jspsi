@@ -208,7 +208,7 @@ function printBodyDiff(label, oldText, newText) {
 
 /**
  * Fetch a project's node ID and its field list in one GraphQL call, returning
- * { projectId, fields } where each field carries { id, name, dataType,
+ * { projectId, fields } where each field has { id, name, dataType,
  * options? }. `dataType` (TEXT / NUMBER / DATE / SINGLE_SELECT / ...) is the
  * precise field kind; the old `gh project field-list` porcelain collapsed text,
  * number, and date all to one type, forcing a value-shape guess at write time.

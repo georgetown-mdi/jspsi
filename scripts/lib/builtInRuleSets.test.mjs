@@ -82,7 +82,7 @@ describe("the declarations it evaluates", () => {
     ]);
   });
 
-  it("sees through the type assertions a declaration may carry", () => {
+  it("sees through the type assertions a declaration may have", () => {
     const asserted = readRuleSets(
       source({ keys: '[{ name: "SSN" }] as const' }),
     );
@@ -124,7 +124,7 @@ describe("the declarations it evaluates", () => {
     ).toContain("plain `key: value` assignment");
   });
 
-  it("reports a declaration the source does not carry", () => {
+  it("reports a declaration the source does not contain", () => {
     const trimmed = source().replace(
       new RegExp(`^.*${KEY_SET_DECLARATIONS.version}.*$`, "m"),
       "",
@@ -157,7 +157,7 @@ function build() {
     expect(keySet.content.length).toBeGreaterThan(0);
   });
 
-  it("fails a tree that does not carry the source at all, naming the file", () => {
+  it("fails a tree that does not contain the source at all, naming the file", () => {
     const root = mkdtempSync(resolve(tmpdir(), "psilink-rule-set-source-"));
     try {
       const { fieldSet, keySet, unreadable } = readRuleSetsFrom(root);

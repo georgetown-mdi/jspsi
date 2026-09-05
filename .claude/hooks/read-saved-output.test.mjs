@@ -69,7 +69,7 @@ describe("read-saved-output hook", () => {
   });
 
   it("stays silent when output merely quotes the notice", () => {
-    // The misfire this hook exists to avoid: printing a file that carries the
+    // The misfire this hook exists to avoid: printing a file that contains the
     // notice (this test, the hook's own source, a transcript) must not send it
     // chasing a path built from the quoted line.
     const path = saved("unreachable\n");
@@ -82,7 +82,7 @@ describe("read-saved-output hook", () => {
     }
   });
 
-  it("stays silent on a response carrying no notice at all", () => {
+  it("stays silent on a response containing no notice at all", () => {
     expect(bash("ordinary output\n")).toEqual({ status: 0, context: null });
     expect(bash({ stdout: "", stderr: "boom" })).toEqual({
       status: 0,

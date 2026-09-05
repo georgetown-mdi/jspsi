@@ -138,7 +138,7 @@ describe("workflow agent model check", () => {
     expect(violations[0].problem).toContain("no literal `model:`");
   });
 
-  it("flags a hoisted options object, which carries no inline pin", () => {
+  it("flags a hoisted options object, which holds no inline pin", () => {
     const violations = modelViolations(
       "cmd.md",
       block("const options = { model: 'opus' }\nagent(prompt, options)"),

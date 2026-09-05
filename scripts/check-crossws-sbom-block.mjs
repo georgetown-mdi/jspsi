@@ -19,7 +19,7 @@
 // workaround have drifted out of step. It passes in both states the drift
 // bounds: today's, where the unflagged command still refuses and the flag is
 // justified, and the post-cleanup one, where the unflagged command succeeds
-// and the docs do not carry the flag. A passing message names only the state
+// and the docs do not include the flag. A passing message names only the state
 // it observed: reading an absent flag as "no longer prescribed" would claim a
 // history this check has no way to see, since it cannot tell that state from
 // one where the flag was never adopted.
@@ -38,13 +38,13 @@
 //     the unflagged command might fail (a different peer conflict, a timeout
 //     under SBOM_TIMEOUT_MS below). Both read as "still blocked", which keeps
 //     the check passing rather than manufacturing a false "cleared" verdict --
-//     the cost is that a *different* new conflict reads as this one still
+//     the cost is that a *different* new conflict is treated as this one still
 //     standing rather than as its own finding.
 //   - It reads docs/RELEASES.md's step 9 section for the literal
 //     `--legacy-peer-deps` token, not the command's full spelling, so a reword
 //     of the paragraphs around the command does not retrigger it. Any
 //     occurrence in that section counts, the flag's cost note included, so the
-//     flag reads as prescribed until the whole cleanup the failure message
+//     flag is treated as prescribed until the whole cleanup the failure message
 //     asks for -- flag and cost note together -- is done.
 //   - It evaluates the exact SBOM_ARGS below. A step 9 that changes its scoping
 //     workspaces or its `--omit`/`--sbom-format` flags needs this file's

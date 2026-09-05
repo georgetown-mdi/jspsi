@@ -21,7 +21,7 @@ const readRoot = (name) =>
 
 const STEP_10_HEADING = "### 10. Publish the GitHub Release";
 
-/** A minimal docs/RELEASES.md whose step 9 section either carries the flag or not. */
+/** A minimal docs/RELEASES.md whose step 9 section either has the flag or not. */
 function releasesDoc({
   flagged,
   otherSectionCarriesFlag = false,

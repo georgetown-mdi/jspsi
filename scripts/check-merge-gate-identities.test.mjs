@@ -87,7 +87,7 @@ describe("job check names", () => {
     ]);
   });
 
-  it("marks a name carrying an expression as templated", () => {
+  it("marks a name containing an expression as templated", () => {
     expect(
       jobNames(`jobs:
   probe:
@@ -186,11 +186,11 @@ describe("required contexts", () => {
     ]);
   });
 
-  it("reads no contexts from rules carrying no required-status-checks rule", () => {
+  it("reads no contexts from rules containing no required-status-checks rule", () => {
     expect(branchRequiredContexts("main", [{ type: "deletion" }])).toEqual([]);
   });
 
-  it("keys a context shared by both branches once, carrying both", () => {
+  it("keys a context shared by both branches once, including both", () => {
     expect(
       mergeContexts([
         ...branchRequiredContexts("main", rulesWithChecks(requiredCheck("A"))),
@@ -270,7 +270,7 @@ describe("rule 1: a required context names a job", () => {
     expect(violations[0]).toContain("The ruleset entry names no app");
   });
 
-  it("fails a branch whose rules carry no required status check at all", () => {
+  it("fails a branch whose rules hold no required status check at all", () => {
     const violations = contextViolations(
       mergeContexts(
         branchRequiredContexts("main", rulesWithChecks(requiredCheck("A"))),
@@ -405,7 +405,7 @@ jobs:
     });
   });
 
-  // A tree carrying every workflow the real constant names, all filter-free but
+  // A tree holding every workflow the real constant names, all filter-free but
   // for the one under test, run through the default `files` argument: what fails
   // is the constant's own reach rather than a list the test supplied.
   const gatingTreeWith = (file, source) =>

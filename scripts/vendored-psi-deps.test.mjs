@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 // package the shipped type declarations import, and node-gyp-build, which
 // psi_native_node.js requires to resolve a prebuild. Upstream additionally
 // miscategorises a gRPC / protoc codegen set as runtime dependencies; the fork
-// carries those as devDependencies, so they stay out of every psilink install.
+// holds those as devDependencies, so they stay out of every psilink install.
 // These assertions stand in for the "psilink loads no gRPC and no proto codegen
 // at runtime" claim -- a re-roll that regresses the fork's manifest fails here
 // rather than silently restoring the surface, which is what a comment or a doc
@@ -60,7 +60,7 @@ const installedNames = new Set(
 
 describe("vendored @openmined/psi.js dependency surface", () => {
   it("resolves to the committed local tarball, not a registry package", () => {
-    // The pinning premise in DEPENDENCY_PINS.md: a file: path resolves to
+    // The pinning assumption in DEPENDENCY_PINS.md: a file: path resolves to
     // exactly the committed bytes. The sha256 sidecar covers those bytes in the
     // tree; the install-time half is the recorded sha512 integrity, held
     // against the tarball by the assertion below rather than claimed here.

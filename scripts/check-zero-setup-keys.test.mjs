@@ -75,7 +75,7 @@ const sets = ({ fields = FIELDS, keys = KEYS } = {}) => ({
   keySet: { name: "hmis-keys", version: "1.0.0", content: keys },
 });
 
-/** A tree carrying only what the check reads: the two declared sets. */
+/** A tree holding only what the check reads: the two declared sets. */
 function fixtureTree({ fields = FIELDS, keys = KEYS, source } = {}) {
   const root = mkdtempSync(resolve(tmpdir(), "psilink-zero-setup-keys-"));
   temporaryRoots.push(root);

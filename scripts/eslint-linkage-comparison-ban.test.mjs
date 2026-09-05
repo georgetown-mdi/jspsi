@@ -21,9 +21,9 @@ import {
 //
 // The ban itself fails silently in the other direction: an import specifier or
 // import-name that stops matching keeps reporting zero problems, which reads the
-// same as clean source. It is also carried by two config objects that flat
+// same as clean source. It is also held by two config objects that flat
 // config replaces rather than merges -- the src block, and the block below it
-// that re-carries the src block's groups alongside this ban and exempts the
+// that repeats the src block's groups alongside this ban and exempts the
 // chokepoint -- so a third block growing its own no-restricted-imports options
 // would drop it with no other tell.
 //
@@ -32,7 +32,7 @@ import {
 // `eslint .` reaches those same blocks through apps/web/eslint.config.js, the
 // nearest config file for that subtree. One transform is applied: the type-aware
 // layer is stripped off (withoutTypeAwareLayer), so what this file reports rests
-// on the text it hands in and nothing else. The blocks carrying the ban are
+// on the text it hands in and nothing else. The blocks holding the ban are
 // transformed by nothing, so the import names, the `files` scoping, and the
 // chokepoint's `ignores` exemption are the real ones.
 
@@ -58,7 +58,7 @@ async function importHits(filePath, source) {
 }
 
 // The chokepoint, one of its src-side callers, and a test file. The test tree is
-// deliberately outside the ban: the suites that pin the prune's effect ask core's
+// outside the ban by design: the suites that pin the prune's effect ask core's
 // strict predicate and the wrapper about the same key and compare the answers.
 const CHOKEPOINT = resolve(repoRoot, "apps/web/src/psi/linkageComparison.ts");
 const WEB_SRC = resolve(repoRoot, "apps/web/src/psi/advancedInviteTerms.ts");
@@ -101,7 +101,7 @@ describe("the linkage-compare chokepoint ban", { timeout: 60_000 }, () => {
     }
   });
 
-  it("carries the ban to the src caller and spares the chokepoint", async () => {
+  it("extends the ban to the src caller and spares the chokepoint", async () => {
     for (const [filePath, expected] of [
       [WEB_SRC, BANNED_NAMES],
       [CHOKEPOINT, undefined],

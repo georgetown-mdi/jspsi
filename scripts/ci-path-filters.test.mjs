@@ -9,14 +9,14 @@ import { WORKFLOW_DIR, workflowDocument } from "./lib/workflows.mjs";
 // (eb_build_and_test.yaml) globs each guarded root -- apps/web/**,
 // packages/core/** -- while the deploy gate (eb_deploy.yaml) enumerates
 // individual subtrees, because a deploy must not rebuild+redeploy unchanged
-// runtime behavior on a test-only push. That asymmetry is deliberate, but it is
+// runtime behavior on a test-only push. That asymmetry is by design, but it is
 // also a trap: a NEW top-level directory under a guarded root (say
 // apps/web/middleware/) is built by the PR gate yet silently skipped by the
 // deploy enumeration, so the change never ships and nothing fails. This guard
 // turns that silent stale-deploy into a red test at the PR that introduces the
 // directory, forcing an explicit ship-or-exclude decision then and there.
 //
-// It catches exactly ONE drift mode and is deliberately narrow: a NEW top-level
+// It catches exactly ONE drift mode and is narrow by design: a NEW top-level
 // directory appearing under a guarded root without a matching deploy entry. It
 // does NOT verify the deploy filter's existing entries -- a named-file entry can
 // be deleted, a subtree glob narrowed (apps/web/src/** -> apps/web/src/sub/**),

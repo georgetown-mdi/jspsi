@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 // PostToolUse hook: after a `gh pr create` call, tell the session to WRITE a
 // ready-to-paste squash-and-merge commit message to a per-PR file under the main
-// checkout's scratch/, when the PR branch carries more than one commit over its
+// checkout's scratch/, when the PR branch has more than one commit over its
 // base.
 //
 // Why this exists: psilink merges pull requests with squash-and-merge, so GitHub
 // folds every commit on the branch into one commit whose default message is the PR
 // title plus a bullet list of commit subjects, not a coherent hand-written summary.
 // A maintainer squash-merging a multi-commit PR is better served by a ready-to-paste
-// subject and body that follow the repo's Commit Messages rules; this hook surfaces
+// subject and body that follow the repo's Commit Messages rules; this hook raises
 // that need right after the PR is opened rather than leaving it for the maintainer
 // to notice is missing.
 //
@@ -23,7 +23,7 @@
 // the main checkout with `--head <branch>` while that checkout sits on staging,
 // where an origin/staging..HEAD count is 0 -- which would silence this reminder
 // on exactly the multi-commit branches it exists for. So when the command
-// carries `--head`, the count is origin/staging..<that ref>: linked worktrees
+// contains `--head`, the count is origin/staging..<that ref>: linked worktrees
 // share one object database, so the branch resolves from whichever checkout the
 // command ran in, and no network call is added. A fork-style `owner:branch`
 // value counts what follows the colon. With no `--head`, or a value no ref
@@ -34,9 +34,9 @@
 // and the file key from the last PR URL, so a long branch's count lands in a short
 // branch's file. Past one create, the `--head` values and the PR numbers are read
 // as lists in command and output order and paired by position, one reminder per
-// pair carrying more than one commit, joined into a single message. Position is
+// pair whose branch has more than one commit, joined into a single message. Position is
 // the only thing that pairs them, so the pairing is trusted only when the two
-// lists are the same length: a create that failed, or output carrying part of what
+// lists are the same length: a create that failed, or output containing part of what
 // ran, leaves lists that cannot be aligned, and the hook emits nothing rather than
 // address a message wrongly -- the session's retry of the failed create fires the
 // hook again. Within a pair, a `--head` no ref resolves for is skipped rather than
@@ -55,20 +55,20 @@
 //     resolving `git rev-parse --git-common-dir` against the event's cwd and
 //     taking its parent. That output is relative in the main worktree and
 //     absolute from a linked one (git 2.39.5), which the resolve against cwd
-//     settles either way -- so a PR opened from a branch worktree still leaves
+//     determines either way -- so a PR opened from a branch worktree still leaves
 //     its message where the maintainer looks, in the checkout they merge from.
 // When neither the key nor the root can be determined, the reminder falls back to
 // asking for the message in the reply: a message in the transcript is worth more
 // than an instruction to write a path that was guessed.
 //
-// STATED LIMIT. What a PostToolUse payload carries for a Bash result is the
+// STATED LIMIT. What a PostToolUse payload holds for a Bash result is the
 // harness's business and is not asserted here: PR URLs are looked for in the
-// string-valued candidate fields in turn and taken from the first one carrying
+// string-valued candidate fields in turn and taken from the first one containing
 // any -- a payload repeating one result under two field names would otherwise
-// list every URL twice and break the pairing -- and a payload carrying none falls
-// back to the branch key rather than being wrong. The command is likewise read as
+// list every URL twice and break the pairing -- and a payload holding none falls
+// back to the branch key rather than being wrong. The command is likewise treated as
 // raw text rather than a parsed argv: a `--head` written inside another flag's
-// quoted value is read as if it named the branch, which lands on the
+// quoted value is treated as if it named the branch, which lands on the
 // unresolvable-ref path, and a literal `gh pr create` inside one (a PR body
 // quoting the command) counts as another create, routing a single create through
 // the pairing path -- where its reminder is unchanged while the lists still pair,
@@ -94,7 +94,7 @@ const CANDIDATE_FIELDS = ["output", "stdout", "stderr", "content"];
 const PR_URL = /https?:\/\/[^\s"']+?\/pull\/(\d+)\b/g;
 
 // `--head <branch>` or `--head=<branch>` as `gh pr create` takes it, with the
-// value optionally quoted the way a shell command line carries it.
+// value optionally quoted the way a shell command line holds it.
 const HEAD_FLAG = /--head(?:=|\s+)(?:"([^"]*)"|'([^']*)'|(\S+))/g;
 
 const GH_PR_CREATE = /gh pr create/g;
@@ -126,7 +126,7 @@ function candidates(toolResponse) {
   );
 }
 
-// Every PR number in the first candidate field carrying one, in output order.
+// Every PR number in the first candidate field containing one, in output order.
 function prNumbersFromResponse(toolResponse) {
   for (const candidate of candidates(toolResponse)) {
     const numbers = [...candidate.matchAll(PR_URL)].map((match) => match[1]);
@@ -176,8 +176,8 @@ function printReminder(count) {
   );
 }
 
-// The reminder for a command carrying a single `gh pr create`, or null when the
-// branch does not carry enough commits to need a squash message.
+// The reminder for a command containing a single `gh pr create`, or null when the
+// branch does not have enough commits to need a squash message.
 function singleCreateReminder(cwd, command, toolResponse) {
   const [headRef] = headRefsFromCommand(command);
   const count =
@@ -192,7 +192,7 @@ function singleCreateReminder(cwd, command, toolResponse) {
     : fileReminder(count, join(root, MESSAGE_SUBDIR, `${key}.txt`));
 }
 
-// One reminder per created pull request whose branch carries more than one
+// One reminder per created pull request whose branch has more than one
 // commit, or null when nothing qualifies or the heads and the PR numbers cannot
 // be paired by position.
 function multiCreateReminder(cwd, command, toolResponse) {

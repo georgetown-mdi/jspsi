@@ -25,7 +25,7 @@ const OWN = `${ROOT}/agent-${AGENT_ID}`;
 const SIBLING = `${ROOT}/agent-other`;
 
 // A tree a session was pointed at rather than given, and the id such a session
-// carries: the harness names a tree after an agent only when it gave that agent
+// holds: the harness names a tree after an agent only when it gave that agent
 // one, so a spawn briefed to work in an existing tree resolves to a tree that
 // was never created.
 const HANDED = `${ROOT}/agent-handed`;
@@ -43,7 +43,7 @@ afterAll(() => {
   for (const dir of fixtures) rmSync(dir, { recursive: true, force: true });
 });
 
-// A throwaway repo carrying a real linked worktree with uncommitted work in it,
+// A throwaway repo containing a real linked worktree with uncommitted work in it,
 // for the cases that let real git decide rather than modelling what it does.
 function makeRepoWithWorktree() {
   const dir = mkdtempSync(join(tmpdir(), "block-worktree-deletions-repo-"));
@@ -263,7 +263,7 @@ describe("block-worktree-deletions hook", () => {
   // header's stated limit has to go with it.
   it("records the command shapes it does not read", () => {
     expectAllowed([
-      // A command substitution keeps its brackets inside the stage carrying it,
+      // A command substitution keeps its brackets inside the stage that holds it,
       // so the deletion inside one is never the stage's command word.
       `echo $(rm -rf ${SIBLING})`,
       // A target that only exists at runtime stands nowhere on the line.
@@ -273,7 +273,7 @@ describe("block-worktree-deletions hook", () => {
 
   it("catches a quoted command word its deletion pre-filter would skip", () => {
     // The pre-filter strips quotes the same way the tokenizer does, so a quote
-    // buried in the command word no longer hides the deletion from the gate.
+    // buried in the command word cannot hide the deletion from the gate.
     expectBlocked([
       `r"m" -rf ${SIBLING}`,
       `m"v" ${SIBLING} /tmp/parked`,
@@ -397,7 +397,7 @@ describe("block-worktree-deletions hook", () => {
     expectAllowed([`rm ${HANDED}/probe.test.ts`, "rm probe.test.ts"], handed);
     expectBlocked([`rm -rf ${HANDED}`, `rm ${SIBLING}/probe.test.ts`], handed);
 
-    // A refusal has to carry the procedure that clears a stranded tree without a
+    // A refusal has to state the procedure that clears a stranded tree without a
     // deletion, or a session with one to retire has nothing to do next -- and it
     // has to say plainly that a tree another session is working in gets no
     // cleanup at all.
@@ -612,7 +612,7 @@ describe("block-worktree-deletions hook", () => {
   });
 
   // Which `git clean` spelling takes a worktree with it is git's behavior, not
-  // this hook's, so it is settled by running git against a real linked worktree
+  // this hook's, so it is determined by running git against a real linked worktree
   // rather than by modelling the force/-d rule here. The hook must refuse
   // exactly the spellings that destroy the tree: a failure means git's behavior
   // moved and the hook's reading of it has to move too.
@@ -764,7 +764,7 @@ describe("block-worktree-deletions hook", () => {
       },
       { spelling: "git -C SIBLING clean -d", from: "own", persisted: "false" },
       { spelling: "git -C SIBLING clean", from: "own", persisted: "false" },
-      // A `-c` on the command line settles the value either way round.
+      // A `-c` on the command line determines the value either way round.
       {
         spelling: "git -C SIBLING -c clean.requireForce=true clean -d",
         from: "own",
@@ -855,7 +855,7 @@ describe("block-worktree-deletions hook", () => {
     }
   });
 
-  // The config probe reads the environment assignments a command carries, and a
+  // The config probe reads the environment assignments a command contains, and a
   // spawn resolves its program from the child's PATH, so a collected PATH would
   // have this hook execute a git the inspected command line named. A logging shim
   // that answers every question with git's force-disabling value turns "the probe
@@ -883,7 +883,7 @@ describe("block-worktree-deletions hook", () => {
   // live-git differential above: `clean.requireForce=false` plus a single real -f
   // reaches git's nested-repo removal threshold on git <= 2.44 (where a disabled
   // requireForce feeds the same force counter a real -f does) and is skipped on
-  // git >= 2.45 (which stopped feeding it). That boundary was settled by driving
+  // git >= 2.45 (which stopped feeding it). That boundary was determined by driving
   // real git across it, not by reading git. Tying the expectation to live git's
   // effect therefore holds on one side of the boundary and fails on the other, so
   // this asserts the guard's own contract instead: it BLOCKS the shape either
@@ -911,7 +911,7 @@ describe("block-worktree-deletions hook", () => {
       projectDir: PROJECT,
     });
     // The filesystem root is the degenerate case of "above", and it has to name
-    // the root it would carry off rather than fall through on a doubled slash.
+    // the root it would delete rather than fall through on a doubled slash.
     const fromRoot = verdict("rm -rf /", { cwd: PROJECT, projectDir: PROJECT });
     expect(fromRoot.status).toBe(2);
     expect(fromRoot.stderr).toContain(join(PROJECT, ".claude", "worktrees"));
@@ -939,7 +939,7 @@ describe("block-worktree-deletions hook", () => {
   // The hook's header states the shapes it does not read. A stated limit is a
   // claim about runtime, so it is pinned here rather than left to prose that
   // cannot fail: each of these reaches a sibling worktree and this hook allows
-  // it. A failure means one of them is now caught and the header is stale.
+  // it. A failure means the hook catches one of these and the header is stale.
   it("allows the shapes its header states it does not read", () => {
     expectAllowed([
       `(cd ${ROOT} && rm -rf agent-other)`,
@@ -1026,7 +1026,7 @@ describe("block-worktree-deletions hook", () => {
     ]);
   });
 
-  it("allows a malformed or absent payload rather than wedging Bash", () => {
+  it("allows a malformed or absent payload rather than stalling Bash", () => {
     const { status } = spawnSync("node", [HOOK], {
       input: "not json",
       encoding: "utf8",

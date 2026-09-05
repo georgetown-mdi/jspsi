@@ -2,16 +2,16 @@
 // routeTree.gen.ts freshness check, run by static_checks.yaml on every PR.
 //
 // apps/web/src/routeTree.gen.ts is written by the TanStack Router codegen and
-// checked in deliberately: typecheck, lint, build, and the web test suites all
+// checked in by design: typecheck, lint, build, and the web test suites all
 // read it, so a fresh clone must have it before any generation step runs. The
 // price of checking it in is that every web-tooling invocation rewrites it, so a
-// copy that has drifted behind the pinned generator surfaces as an unrelated
+// copy that has drifted behind the pinned generator shows up as an unrelated
 // modification in a branch that touched no route -- noise in a diff, and a dirty
 // tree where a clean one is required.
 //
 // This check turns that drift into a build failure: it regenerates with the
 // generator the lockfile pins and compares byte for byte, so a refresh lands as
-// its own deliberate commit instead of riding along in someone else's.
+// its own commit instead of riding along in someone else's.
 //
 // Two properties the implementation is built around:
 //
@@ -27,7 +27,7 @@
 //      invocation, ~7s). A check that only diffed the file after that command
 //      would pass forever, detecting nothing, if a future TanStack or vitest
 //      release stopped generating on config load. So the file handed to the
-//      codegen carries a PROBE line, and finding that line still there
+//      codegen holds a PROBE line, and finding that line still there
 //      afterwards is a failure rather than a pass: the generator was measured
 //      to overwrite a probe-marked file whole, leaving none of it behind.
 //
@@ -53,7 +53,7 @@
 //   - It cannot separate a stale route tree from a broken web config: an
 //     invocation that fails for any other reason (an uncollectable test file, a
 //     missing @psilink/core build) fails this check too, reported as a codegen
-//     failure carrying the command's own output rather than as staleness.
+//     failure including the command's own output rather than as staleness.
 //   - It is not concurrency-safe against another writer. A process running the
 //     web tooling at the same time -- a live `npm run dev` -- races it for the
 //     file, and can leave either copy in place.

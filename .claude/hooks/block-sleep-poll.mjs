@@ -7,7 +7,7 @@
 // learns nothing it would not have been told -- a background run notifies on
 // exit, and a foreground command is waited on by the tool itself.
 //
-// What it matches is deliberately narrow, so a false positive costs a rephrase
+// What it matches is narrow, so a false positive costs a rephrase
 // rather than a capability: ONLY a command that is exactly `sleep <duration>`
 // with nothing else on the line, and only when that duration is at least five
 // seconds. A shorter sleep is a settle, not a poll. A sleep that is part of a

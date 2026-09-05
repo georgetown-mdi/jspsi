@@ -74,7 +74,7 @@ function makeRepo(commitsAheadOfBase, branch = null) {
   return dir;
 }
 
-// Another branch off the base carrying `commitsAheadOfBase` commits of its own,
+// Another branch off the base holding `commitsAheadOfBase` commits of its own,
 // leaving the checkout on the branch it was already on -- the shape a main
 // checkout is in when the by-ref flow opens a PR for a branch it is not on.
 function addBranch(dir, branch, commitsAheadOfBase) {
@@ -92,7 +92,7 @@ function addBranch(dir, branch, commitsAheadOfBase) {
 }
 
 // A linked worktree nested under .claude/worktrees/ the way the harness places
-// them, carrying the same commits over the base as the main checkout.
+// them, holding the same commits over the base as the main checkout.
 function addWorktree(main, branch) {
   const path = join(main, ".claude", "worktrees", `agent-${branch}`);
   mkdirSync(join(main, ".claude", "worktrees"), { recursive: true });
@@ -252,7 +252,7 @@ describe("remind-squash-message hook", () => {
     );
   });
 
-  it("counts the cwd HEAD when the command carries no --head", () => {
+  it("counts the cwd HEAD when the command has no --head", () => {
     const dir = track(makeRepo(0, "staging"));
     addBranch(dir, "branch-under-review", 3);
     expect(context(prCreateEvent(dir, ghOutput(46)))).toBeNull();

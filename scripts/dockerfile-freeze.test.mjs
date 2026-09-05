@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 //
 // Two images ship from this repository and both are held to the same
 // invariants: the default `Dockerfile` on node:26-alpine, and `Dockerfile.fips`
-// on Amazon Linux 2023 carrying a CMVP-validated OpenSSL FIPS provider. What
+// on Amazon Linux 2023 with a CMVP-validated OpenSSL FIPS provider. What
 // diverges is the OS package manager and the packages each fetches, which is
 // per-file data below rather than a loosened assertion; what the FIPS variant
 // adds on top of the shared set -- its certificate pins, its provider
@@ -28,7 +28,7 @@ const readRepoFile = (name) => readFileSync(resolve(repoRoot, name), "utf8");
 
 // Collapsed on the ASCII blanks a shell treats as separators, since indenting a
 // "\"-continued line changes the run of spaces between two tokens and nothing
-// else. Deliberately not /\s+/: that also eats U+00A0, which the shell does not
+// else. Not /\s+/ by design: that also eats U+00A0, which the shell does not
 // separate on.
 const normalize = (rest) => rest.trim().replace(/[ \t]+/g, " ");
 
@@ -135,7 +135,7 @@ function analyze(file) {
   const dockerfile = readRepoFile(file);
 
   // Drop comment lines, then fold "\"-continued lines into one logical
-  // instruction. That order is the load-bearing half: fold first and a comment
+  // instruction. That order is the critical half: fold first and a comment
   // line's own trailing backslash joins the instruction below it into the
   // comment, which drops that instruction -- an ownership change among them --
   // from every assertion in this file while the build still runs it.
@@ -197,7 +197,7 @@ function analyze(file) {
     stage.filter(({ inst }) => inst === "RUN").map(({ rest }) => rest);
 
   // Each RUN read as the several commands it runs, split on the operators that
-  // separate one from the next. The runtime stage's carry the WORKDIR their
+  // separate one from the next. The runtime stage's hold the WORKDIR their
   // instruction runs under. This reads the instruction text, so what it does NOT
   // reach is: ownership a RUN assigns through a shell variable holding the verb
   // or the path (`$SETUP /app`, `chown -R node:node "$DIR"`), ownership assigned
@@ -296,7 +296,7 @@ const EXPECTED_NPMRC_COPY = "COPY .npmrc package.json package-lock.json ./";
 // a multi-platform build can resolve: a platform-specific manifest digest names
 // one architecture and fails on the other. A builder's base is held as tightly
 // as a runtime stage's, because the npm that resolves the tree the runtime
-// stage ships is the one the builder's base carries -- a property of the digest
+// stage ships is the one the builder's base has -- a property of the digest
 // rather than of anything in this repository, which
 // docs/spec/DEPENDENCY_PINS.md records.
 const DEFAULT_BASE =
@@ -311,7 +311,7 @@ const FIPS_BASE =
 // so these installs are the only dependencies an image build fetches from a
 // distribution mirror -- which is the claim docs/spec/DEPENDENCY_PINS.md
 // records, and a claim prose cannot hold: a second package, or a wider spec on
-// one of these lines, ships unreviewed while the sentence still reads as the
+// one of these lines, ships unreviewed while the sentence still displays as the
 // reviewed set.
 //
 // `modeChangesOutside` is the other per-image literal: every mode change the
@@ -342,7 +342,7 @@ const IMAGES = [
       "RUN dnf -y --releasever=${AL2023_RELEASEVER} swap openssl-fips-provider-latest ${FIPS_PROVIDER_PACKAGE}-${FIPS_PROVIDER_VERSION} && dnf clean all",
     ],
     // Ten files against the default image's one: the Amazon Linux 2023 base and
-    // the samba-client closure carry account, mount and PAM helpers Alpine's
+    // the samba-client closure have account, mount and PAM helpers Alpine's
     // busybox userland does not.
     modeChangesOutside: [
       "chmod u-s,g-s /usr/bin/chage /usr/bin/gpasswd /usr/bin/mount " +
@@ -395,7 +395,7 @@ for (const { file, externalBases, osInstalls, image } of IMAGES) {
       ).toEqual([]);
     });
 
-    it("carries no # inside an instruction, so this parse and Docker's cannot disagree", () => {
+    it("has no # inside an instruction, so this parse and Docker's cannot disagree", () => {
       // Comment lines are gone before the fold in analyze(), so a "#" reaching
       // an instruction is either text Docker takes literally mid-line or a form
       // whose reading depends on where each parser thinks the instruction ended.
@@ -409,8 +409,8 @@ for (const { file, externalBases, osInstalls, image } of IMAGES) {
     });
 
     it("builds every stage from the reviewed base digest, or from a stage of its own", () => {
-      // A FROM naming a stage this file declared earlier carries that stage's
-      // base with it; every other one reaches a registry, and is held to the
+      // A FROM naming a stage this file declared earlier uses that stage's
+      // base; every other one reaches a registry, and is held to the
       // literal above. Comparing the whole list, in order, is what covers a
       // stage that drops its digest for the bare tag, one re-pinned onto
       // another digest, and a stage added or removed -- each of which changes
@@ -466,9 +466,9 @@ for (const { file, externalBases, osInstalls, image } of IMAGES) {
       // about which packages ship. Each of the three parts is what a measured
       // install turned on: `npm ci` empties node_modules only when it is
       // unscoped, and drops a package flagged `dev` while keeping one flagged
-      // `devOptional`, so a -w scoped `npm ci --omit=dev` with no wipe reads as
+      // `devOptional`, so a -w scoped `npm ci --omit=dev` with no wipe displays as
       // a production install while shipping most of the build tree.
-      // docs/spec/CONTAINER_IMAGES.md carries the measurement and what remains
+      // docs/spec/CONTAINER_IMAGES.md holds the measurement and what remains
       // unasserted here.
       const npmRuns = image.builderRuns.filter((run) => /\bnpm\b/.test(run));
       expect(npmRuns.length).toBeGreaterThan(0);
@@ -571,7 +571,7 @@ for (const { file, externalBases, osInstalls, image } of IMAGES) {
 //
 // Held over both published images. They differ in where the account comes from
 // -- the default image inherits it from node:26-alpine, the variant creates it,
-// Amazon Linux 2023 carrying none -- and in nothing this block reads.
+// Amazon Linux 2023 has none -- and in nothing this block reads.
 const RUNTIME_USER = "node";
 const EXPECTED_WRITABLE_SETUP =
   "RUN mkdir -p /work /run/psilink/sftp-credentials " +
@@ -582,7 +582,7 @@ const EXPECTED_WRITABLE_SETUP =
 // executes its own code without being able to rewrite it. The Dockerfile says so
 // in a comment, which cannot hold it -- a `--chown` on a COPY, or one path added
 // to the chown above, hands the code to the account the entrypoint runs as and
-// reads as ordinary housekeeping in a diff.
+// displays as ordinary housekeeping in a diff.
 const WRITABLE_TREES = ["/work", "/run/psilink"];
 const withinWritableTree = (path) =>
   WRITABLE_TREES.some((tree) => path === tree || path.startsWith(`${tree}/`));
@@ -599,7 +599,7 @@ const INSTALL_VERB = /\binstall\b/;
 // A package manager's `install` is that manager's own subcommand, a different
 // program's argument that reaches nothing, so the exemption below releases the
 // first non-flag token after the manager's name -- the subcommand position in
-// every shape the committed Dockerfiles use, though a global flag carrying a
+// every shape the committed Dockerfiles use, though a global flag holding a
 // separate value token that is literally `install` would take the release in
 // its place. That stays harmless: a manager-led command never executes
 // install(1), and an `install` token anywhere later is still refused. Two
@@ -611,7 +611,7 @@ const INSTALL_VERB = /\binstall\b/;
 // token anywhere else in the command is refused whatever leads the command, as
 // a proper ownership verb already is (`npm exec -- chown ...`).
 const PACKAGE_MANAGER_NAME = /^(?:apk|apt|apt-get|dnf|microdnf|yum|npm)$/;
-// The index of the released install token, or -1. A flag carrying its value as
+// The index of the released install token, or -1. A flag holding its value as
 // the next token rather than after an `=` pushes that value into the subcommand
 // position and takes the exemption with it; neither Dockerfile writes one, and
 // refusing that shape is this file's standing answer to an argv it cannot read.
@@ -807,9 +807,9 @@ for (const { file, modeChangesOutside, image } of IMAGES) {
       // arrives owned by the account it is created for, so an account command
       // hands over a path with no chown, chgrp or chmod anywhere in the stage.
       // The same two refusals stand over them -- reached other than as a
-      // command's leading word, and carrying a token the walk cannot read --
+      // command's leading word, and holding a token the walk cannot read --
       // and the builder creates no account at all, since its files cross into
-      // /app carrying whatever ownership that stage left on them.
+      // /app with whatever ownership that stage left on them.
       expect(
         image.runtimeShellCommands
           .filter(({ command }) => reachesAccountVerbOutsideTheParse(command))
@@ -833,7 +833,7 @@ for (const { file, modeChangesOutside, image } of IMAGES) {
       // /app` hands over the code the image runs. Held to the literal above
       // rather than to a reading of which paths are safe, and each home-making
       // verb must name its home, since an unnamed one is whatever
-      // /etc/login.defs carries -- a value this file cannot see.
+      // /etc/login.defs has -- a value this file cannot see.
       for (const { verb, homePaths } of image.accountCommands) {
         expect(homePaths).toHaveLength(
           HOME_MAKING_ACCOUNT_VERB.test(verb) ? 1 : 0,
@@ -851,7 +851,7 @@ for (const { file, modeChangesOutside, image } of IMAGES) {
     });
 
     it("assigns no ownership in the builder stage, whose files the runtime copies in", () => {
-      // `COPY --from=builder` carries the builder's files into /app, and what
+      // `COPY --from=builder` puts the builder's files into /app, and what
       // ownership they arrive with is Docker's rule rather than this file's to
       // model. The route is closed instead: the builder assigns no ownership at
       // all, so nothing crosses the stage boundary already handed to an account.
@@ -870,7 +870,7 @@ for (const { file, modeChangesOutside, image } of IMAGES) {
       // Every chown and chgrp in the stage, and every COPY that assigns
       // ownership as it lands. A path outside the two writable trees is code, or
       // a mount point, that the entrypoint's own process could then rewrite -- a
-      // group handed over no less than an owner, since the account carries its
+      // group handed over no less than an owner, since the account has its
       // group.
       const handedOverPaths = image.ownershipCommands
         .filter(({ command }) => /^(?:chown|chgrp) /.test(command))
@@ -913,7 +913,7 @@ for (const { file, modeChangesOutside, image } of IMAGES) {
   });
 }
 
-// The build step that carries the release version into the client bundle, and
+// The build step that puts the release version into the client bundle, and
 // with it into every `docker run` line the partner accept kit prints
 // (docs/spec/SERVER_JOB_API.md). Its two halves fail differently and both fail
 // quietly: a step that stops setting the variable ships a kit naming the
@@ -929,7 +929,7 @@ describe.each(IMAGES)(
 
     it("sets the version in exactly one builder step, which is the web build", () => {
       // Same instruction, because the value is this build's process
-      // environment and nothing else carries it across a RUN boundary: a
+      // environment and nothing else preserves it across a RUN boundary: a
       // version set in one step and a web build in another is a bundle with
       // no version in it.
       expect(versionRuns).toHaveLength(1);
@@ -1018,7 +1018,7 @@ describe("the root .npmrc the builder installs under", () => {
     expect(committed.equals(Buffer.from(EXPECTED_NPMRC, "utf8"))).toBe(true);
   });
 
-  it("carries no CR, so npm's line split and the one below cannot disagree", () => {
+  it("has no CR, so npm's line split and the one below cannot disagree", () => {
     // npm parses with the `ini` package, which breaks lines on /[\r\n]+/, so a
     // lone CR ends a line there while a split on "\n" alone reads
     // `# note<CR>//host/:_authToken=x` as one comment. Measured against npm
@@ -1045,13 +1045,13 @@ describe("the root .npmrc the builder installs under", () => {
     ]);
   });
 
-  it("carries no URL userinfo anywhere in it", () => {
+  it("has no URL userinfo anywhere in it", () => {
     // A credential rides in on a value rather than on a key name:
     // `registry=https://user:secret@host/`, including under an `@scope:registry`
     // key, is one npm turns into an Authorization: Basic header for that
     // registry. No policy above takes a URL, so this is what stands over a
     // URL-valued key that later joins them in the literal -- the one path a
-    // legitimate widening could carry a credential in on.
+    // legitimate widening could bring a credential in on.
     expect(EXPECTED_NPMRC).not.toMatch(/[a-z][a-z0-9+.-]*:\/\/[^/?#\s@]*@/i);
   });
 });
@@ -1143,12 +1143,12 @@ describe("Dockerfile.fips certificate pins", () => {
     expect(stripIndex).toBeGreaterThan(lastPackageIndex);
   });
 
-  it("points OPENSSL_CONF and OPENSSL_MODULES at what the image actually carries", () => {
+  it("points OPENSSL_CONF and OPENSSL_MODULES at what the image actually has", () => {
     expect(image.allRuntimeDests).toContain(image.runtimeEnv.OPENSSL_CONF);
     expect(image.runtimeEnv.OPENSSL_MODULES).toBe("/usr/lib64/ossl-modules");
   });
 
-  it("carries the pinned module version into the image as an ENV", () => {
+  it("puts the pinned module version into the image as an ENV", () => {
     // The entrypoint names the module from this value rather than reading one
     // back, which is sound only because the assertion above already compared it
     // against what the installed module reports. Both halves are needed: drop
@@ -1166,7 +1166,7 @@ describe("Dockerfile.fips certificate pins", () => {
 });
 
 // The pin that decides what the variant's Node runtime is made of. The build's
-// own checksum step compares the tarball against whatever hash the RUN carries,
+// own checksum step compares the tarball against whatever hash the RUN holds,
 // so it cannot notice a committed hash that has drifted from the value
 // docs/spec/DEPENDENCY_PINS.md records as resolved and reviewed. These literals
 // are what holds it.
@@ -1219,8 +1219,8 @@ describe("Dockerfile.fips Node runtime pins", () => {
     expect(normalize(nodeFetch.rest)).toMatch(/\| sha256sum -c -;/);
   });
 
-  it("carries those hashes as literals rather than as overridable ARGs", () => {
-    // `docker build --build-arg` moves an ARG, so a hash carried as one moves
+  it("holds those hashes as literals rather than as overridable ARGs", () => {
+    // `docker build --build-arg` moves an ARG, so a hash stored as one moves
     // with the artifact it is supposed to hold. NODE_VERSION stays an ARG,
     // which is why a Node bump edits these two literals in the same commit.
     const argDefaults = image.instructions
@@ -1305,7 +1305,7 @@ describe("the fips-only OpenSSL configuration the variant ships", () => {
 
   it("activates the FIPS and base providers and NOT the default provider", () => {
     // Leaving `default` activated is what turns the whole arrangement into a
-    // fallback: an algorithm the certified module does not carry then succeeds
+    // fallback: an algorithm the certified module does not have then succeeds
     // through an uncertified implementation instead of failing.
     const providers = sections[sections[init].providers];
     expect(Object.keys(providers).sort()).toEqual(["base", "fips"]);

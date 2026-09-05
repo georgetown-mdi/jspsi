@@ -18,9 +18,9 @@
 // Two fixture shapes decide whether a red result is about the image at all, and
 // both are set up here rather than left to the caller:
 //
-//   - The rendezvous directory the mount battery is pointed at. A fresh named
+//   - The rendezvous directory the mount checks are pointed at. A fresh named
 //     volume belongs to root, the default image runs as uid 1000, and the
-//     battery then fails its write with EACCES -- a verdict about the fixture.
+//     checks then fail their write with EACCES -- a verdict about the fixture.
 //     The bind mount below is world-writable, so the account the image runs as
 //     can write it whichever image is under test.
 //   - A TCP peer on port 445. `doctor probe` and cmd_psilink-probe.sh both stop
@@ -30,9 +30,9 @@
 //     it, and a fixture that does not come up is reported as a fixture failure
 //     rather than as a verdict about the image.
 //
-// What the run may claim is bounded by exit codes it treats as evidence. A
-// battery that refuses its input exits 64 having run no check, and so does an
-// image whose CLI carries no `doctor` command at all -- so 64 is never taken as
+// What the run may claim is bounded by exit codes it treats as evidence. The
+// doctor refusing its input exits 64 having run no check, and so does an
+// image whose CLI has no `doctor` command at all -- so 64 is never taken as
 // proof that anything ran. The evidence is a verdict: the machine-readable
 // document, whose version the shipped launchers refuse to read past.
 
@@ -49,7 +49,7 @@ import {
   SUPPORT_DIR,
 } from "./derive-image-dependencies.mjs";
 
-/** The container path the batteries and the volume helper are pointed at. */
+/** The container path the checks and the volume helper are pointed at. */
 const RENDEZVOUS = "/rz";
 
 /** The marker filename the shipped launchers use for the cross-check. */
@@ -94,7 +94,7 @@ export const CLI_RECIPES = {
 /**
  * What each helper script must show for its run to have proven the image.
  *
- * `reaches` are strings the run's output must carry, each chosen to sit after
+ * `reaches` are strings the run's output must contain, each chosen to sit after
  * the in-image tools that step needs: a script that reached them resolved them.
  * `refuses` are the arms a script takes when the image is missing something,
  * which must not appear.
@@ -197,12 +197,12 @@ export function readVerdict(stdout) {
 }
 
 /**
- * Whether an exit code is evidence a battery ran.
+ * Whether an exit code is evidence the checks ran.
  *
- * 0 and 78 are verdicts the battery reached; 69 is one it could not, which is
+ * 0 and 78 are verdicts the checks reached; 69 is one it could not, which is
  * what a missing in-image dependency produces and is therefore a failure here
- * rather than a pass. 64 is a refused input, which an image carrying no doctor
- * at all also answers with, so it proves nothing either way.
+ * rather than a pass. 64 is a refused input, which an image with no doctor
+ * at all also answers, so it proves nothing either way.
  */
 export function batteryRan(status) {
   return status === 0 || status === 78;
@@ -295,7 +295,7 @@ function exerciseDoctorProbe(context, argv) {
 function exerciseDoctorMount(context, argv) {
   const withJson = argv.includes("--json") ? argv : [...argv, "--json"];
   // Taken from the vector rather than fixed, so a call site that moves the
-  // battery to another path is mounted where it now looks.
+  // checks to another path is mounted where it now looks.
   const target = argv.find((token) => token.startsWith("/")) ?? RENDEZVOUS;
   context.plantMarker();
   const result = context.docker([
@@ -462,7 +462,7 @@ async function exerciseAll(image, derived) {
   const rendezvous = mkdtempSync(join(tmpdir(), "psilink-image-gate-"));
   chmodSync(rendezvous, 0o777);
   const token = randomBytes(16).toString("hex");
-  // Carried in this process's environment and named on the command line, the
+  // Held in this process's environment and named on the command line, the
   // shape every call site uses so a credential is not an argv value anything
   // reading the process table can see.
   const environment = {

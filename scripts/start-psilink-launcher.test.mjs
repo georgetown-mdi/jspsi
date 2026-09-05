@@ -111,7 +111,7 @@ function installEngine(workspace, name) {
 
 /**
  * A `uname` ahead of the real one, answering with `system`. The launcher reads
- * the host's kind to decide whether a bind mount carries ownership into the
+ * the host's kind to decide whether a bind mount keeps ownership inside the
  * container, so stubbing it is what lets both answers be driven from one host.
  */
 function stubUname(workspace, system) {
@@ -142,7 +142,7 @@ function stubId(workspace, uid, gid) {
   chmodSync(target, 0o755);
 }
 
-/** The account the launcher runs the container as on a host that carries
+/** The account the launcher runs the container as on a host that keeps
  * ownership through: the one running this suite. */
 const OPERATOR_IDENTITY = `${process.getuid()}:${process.getgid()}`;
 
@@ -162,7 +162,7 @@ function consoleArguments(workspace, folders, environment = {}) {
   return run.stdout.trim().split("\n");
 }
 
-/** Every `--volume` spec an argument vector carries, in order. */
+/** Every `--volume` spec an argument vector holds, in order. */
 function volumeSpecs(args) {
   return args.filter((value, index) => args[index - 1] === "--volume");
 }
@@ -296,7 +296,7 @@ const FATAL = {
 };
 
 // The two verdicts `psilink doctor mount` returns for a folder that can be read
-// and not written, and for one that cannot be read at all, as the real battery
+// and not written, and for one that cannot be read at all, as the real run
 // wrote them: the launcher's answer to the first is what separates the input
 // folder from the folders the console writes in.
 const READABLE_NOT_WRITABLE = {
@@ -436,7 +436,7 @@ describe("the shared folder's name passed to the console", () => {
     expect(args).toContain("JOB_RENDEZVOUS_NAME=county-exchange");
   });
 
-  it("keeps a folder name carrying a space in one argument", () => {
+  it("keeps a folder name containing a space in one argument", () => {
     const args = consoleArguments(makeWorkspace(), {
       PSILINK_DATA_ROOT: "/home/dana/Shared Drive/County Exchange/",
     });
@@ -465,7 +465,7 @@ describe("the shared folder's name passed to the console", () => {
 });
 
 describe("the account the container runs as", () => {
-  // A Linux bind mount carries its host directory's ownership into the
+  // A Linux bind mount keeps its host directory's ownership inside the
   // container, so an image running as its own fixed account can only write what
   // that account's number owns -- and an operator numbered from a directory
   // service is not it. The launcher runs the container as the operator instead,
@@ -511,7 +511,7 @@ describe("the account the container runs as", () => {
     }
   });
 
-  it("passes no identity where the mount carries no ownership through", () => {
+  it("passes no identity where the mount keeps no ownership through", () => {
     // A macOS engine runs the container in a virtual machine and presents the
     // mount to whichever account it runs as, so there is nothing to match and
     // the image's own account keeps its own scratch directory.
@@ -586,7 +586,7 @@ describe("the account the container runs as", () => {
   });
 
   it("runs the checks as the account the console will run as", () => {
-    // A battery run as some other account reports on that account: the check
+    // A run as some other account reports on that account: the check
     // and the console it gates have to be the same one.
     const workspace = makeWorkspace();
     stubUname(workspace, "Linux");
@@ -845,7 +845,7 @@ describe("the doctor loop", () => {
     stageVerdict(workspace, 1, 78, FIX_AND_RETRY);
     const launcher = stampedLauncher(workspace);
 
-    // Accept the first retry, decline the second: two batteries run, and the
+    // Accept the first retry, decline the second: the checks run twice, and the
     // console is never reached.
     const run = runLauncher(
       workspace,
@@ -899,7 +899,7 @@ describe("the doctor loop", () => {
     const launcher = stampedLauncher(workspace);
 
     // No input at all: a run without a TTY whose verdict stays fix_and_retry
-    // must stop after one battery, not spin the engine on a prompt nobody
+    // must stop after one doctor run, not spin the engine on a prompt nobody
     // will answer.
     const run = runLauncher(workspace, launcher, [
       "--data-root",
@@ -939,7 +939,7 @@ describe("the doctor loop", () => {
     expect(engineCalls(workspace)).not.toMatch(/serve/);
   });
 
-  it("runs the mount battery against every folder the console is given", () => {
+  it("runs the mount checks against every folder the console is given", () => {
     // A fault in any one of them is a reason not to start. Checking the shared
     // folder alone leaves the other two to fail as an EACCES after the browser
     // has opened.
@@ -981,7 +981,7 @@ describe("the doctor loop", () => {
     expect(engineCalls(workspace)).not.toMatch(/serve/);
   });
 
-  it("runs one battery when the same folder was given for everything", () => {
+  it("runs the checks once when the same folder was given for everything", () => {
     const workspace = makeWorkspace();
     installEngine(workspace, "docker");
     stageVerdict(workspace, 1, 78, FIX_AND_RETRY);
@@ -1013,7 +1013,7 @@ describe("what each folder has to answer", () => {
   // The console writes in the working and rendezvous folders and only reads the
   // input folder: it lists the CSVs there, and the exchange reads the selected
   // one in place. Mounting that folder read-only is a documented setup, so the
-  // battery's write verdict must not decide whether the console starts.
+  // checks' write verdict must not decide whether the console starts.
   const WRITE_ACTION = READABLE_NOT_WRITABLE.checks.find(
     (check) => check.id === "write_rename",
   ).action;
@@ -1063,8 +1063,8 @@ describe("what each folder has to answer", () => {
     // The refused write is not put to the operator as something to fix: it is
     // the folder they mounted read-only, doing what they asked of it.
     expect(run.stdout).not.toContain(WRITE_ACTION);
-    // The rendezvous folder is held to the whole battery, and this run stopped
-    // there rather than at the input folder.
+    // The rendezvous folder is held to the whole set of checks, and this run
+    // stopped there rather than at the input folder.
     expect(run.stdout).toContain(
       'ACTION:  ask for write permission on "the folder".',
     );
@@ -1097,10 +1097,10 @@ describe("what each folder has to answer", () => {
     expect(engineCalls(workspace)).not.toMatch(/serve/);
   });
 
-  it("stops on a battery that could not be run, read or no read", () => {
-    // A `fatal` verdict says the battery never finished, so what a check that
+  it("stops on checks that could not be run, read or no read", () => {
+    // A `fatal` verdict says the checks never finished, so what a check that
     // did run reported is not a verdict on the folder. The read is taken only
-    // out of a battery that ran to a verdict, whatever else it found.
+    // out of a run that reached a verdict, whatever else it found.
     const { workspace, folders } = withFolders(["input"]);
     stageVerdict(workspace, 1, 0, ALL_OK);
     stageVerdict(workspace, 2, 69, {

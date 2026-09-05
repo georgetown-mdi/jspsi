@@ -31,7 +31,7 @@
 //
 // What this check does not cover:
 //   - Any OTHER way a second upgrade listener could be attached to the shared
-//     server. It watches only the one knob -- `experimental.websocket` --
+//     server. It watches only the one setting -- `experimental.websocket` --
 //     that wires the crossws adapter through Nitro's own build.
 //   - Whether PeerJS's own listener still path-checks; that is
 //     apps/web/server/upgradeHardening.ts's and the PeerJS signaling route's
@@ -87,7 +87,7 @@ export async function checkNitroWebsocketUnset({
 // CLI entry: only runs when invoked directly, so the test can import the pure
 // functions without the process.exit. `--root` points the run at another
 // tree, which is how the test drives a fixture config this repository does
-// not carry.
+// not hold.
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
   const rootFlag = args.indexOf("--root");

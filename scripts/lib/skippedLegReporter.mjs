@@ -1,7 +1,7 @@
 // A skipped leg is coverage the run does not have. Vitest's default reporter
 // counts skips ("2 passed | 3 skipped") but names none of them, so a leg that
 // starts skipping -- a prerequisite that stopped being available, a condition
-// that inverted -- reads as green and nobody can tell which suite went quiet.
+// that inverted -- displays as green and nobody can tell which suite went quiet.
 // This reporter names every one at the end of a run: project, file, test, and
 // the reason where a runtime `ctx.skip(reason)` supplied one.
 //

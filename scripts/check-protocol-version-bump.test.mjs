@@ -80,7 +80,7 @@ function pinOf(sources) {
 }
 
 /**
- * A tree carrying only what the check reads: the release manifest, the
+ * A tree holding only what the check reads: the release manifest, the
  * PROTOCOL_VERSION source, the vectors directory, and the pin ledger. This is
  * how the armed states -- which this repository has not reached -- are driven
  * end to end through the real script.
@@ -183,7 +183,7 @@ describe("the PROTOCOL_VERSION the pin is held against", () => {
 describe("the digest standing in for the wire format", () => {
   it("does not move on formatting", () => {
     // The committed vectors are prettier-formatted and a prettier release can
-    // reflow them; that is not a wire-format delta and must not read as one.
+    // reflow them; that is not a wire-format delta and must not be treated as one.
     expect(wireFormatDigest('{"a":1,"b":[2,3]}')).toBe(
       wireFormatDigest('{\n  "a": 1,\n  "b": [2, 3]\n}\n'),
     );
@@ -223,7 +223,7 @@ describe("the vectors directory's classification", () => {
   });
 
   it("ignores the generators beside them", () => {
-    // check-vectors-generators.mjs classifies those; only *.json carries a pin.
+    // check-vectors-generators.mjs classifies those; only *.json has a pin.
     const { unclassified } = classifyVectorsDirectory([
       ...[...COVERED_VECTORS, ...UNCOVERED_VECTORS].map((e) => e.vectors),
       "generate-kex-vectors.mjs",
@@ -260,7 +260,7 @@ describe("the rule while it is inert", () => {
     ).toEqual([]);
   });
 
-  it("passes against this repository, which carries no release marker", () => {
+  it("passes against this repository, which has no release marker", () => {
     const { status, stdout } = runCheck();
     expect(status).toBe(0);
     expect(stdout).toContain(PRE_PUBLICATION_RELEASE);
@@ -305,7 +305,7 @@ describe("the rule once a release marker arms it", () => {
     expect(stdout).toContain("published release 0.2.0");
   });
 
-  it("fails a moved wire format carrying no bump, naming the spec paragraph", () => {
+  it("fails a moved wire format with no bump, naming the spec paragraph", () => {
     const sources = vectorsSources();
     const moved = vectorsSources({
       "psi-engine-wire-vectors.json": '{"pinned":"a ragged table"}',
@@ -357,7 +357,7 @@ describe("the rule once a release marker arms it", () => {
   });
 
   it("holds nothing against a file whose version marker is elsewhere", () => {
-    // The classification is load-bearing: a transform-dialect or receipt-format
+    // The classification is critical: a transform-dialect or receipt-format
     // change moves no pin here, because another marker versions it.
     const sources = vectorsSources();
     const moved = vectorsSources({
@@ -431,7 +431,7 @@ describe("the rule once a release marker arms it", () => {
   });
 
   it("fails a ledger key that is not a PROTOCOL_VERSION, naming the key", () => {
-    // A key `Number()` reads as NaN compares false against every version, so a
+    // A key `Number()` converts to NaN compares false against every version, so a
     // pin recorded under one is held to nothing while sitting in the ledger
     // looking recorded.
     const sources = vectorsSources();

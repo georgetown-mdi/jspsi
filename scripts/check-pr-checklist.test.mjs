@@ -18,7 +18,7 @@ import {
 const HEAD = "0123456789abcdef0123456789abcdef01234567";
 
 // A minimal resolved body in the template's shape: every required line present,
-// checked, carrying a resolution clause, and attesting the head it reviewed.
+// checked, holding a resolution clause, and attesting the head it reviewed.
 const passingBody = `## Summary
 
 Deliver the thing.
@@ -92,7 +92,7 @@ describe("PR checklist guard", () => {
     expect(v.some((m) => m.includes("n/a without a reason"))).toBe(true);
   });
 
-  it("passes an n/a that carries a reason", () => {
+  it("passes an n/a that has a reason", () => {
     const body = passingBody.replace(
       "-- updated docs/CLI.md",
       "-- n/a: internal refactor, no documented behavior changed",
@@ -204,7 +204,7 @@ describe("PR review attestation", () => {
     expect(v.some((m) => m.includes("names no sha"))).toBe(true);
   });
 
-  // Prose naming the head reads as an attestation to a human skimming the body,
+  // Prose naming the head is treated as an attestation to a human skimming the body,
   // so the rules must read the line that makes the claim and nothing else --
   // including when the prose sits in another line's label, not its clause.
   it("is not satisfied by another line naming the head", () => {

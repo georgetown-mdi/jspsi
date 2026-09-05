@@ -31,10 +31,10 @@ a command that exceeds the ceiling, or hand the work back to the caller.
 
 1. **Understand the input.** It is a finding, question, or note from a working
    session, plus whatever context the caller passed. Treat it as complete; do
-   not go spelunking through the codebase for more.
+   not search the codebase for more.
 2. **Load context.** Read `.claude/pm/ruleset.md` (always) and `CLAUDE.md`.
    Read `docs/EXCHANGE_REFERENCE.md`, source under `packages/core/src/`, `apps/cli/src/`,
-   or `apps/web/src/` only when the task's affected areas genuinely require it.
+   or `apps/web/src/` only when the task's affected areas require it.
    Keep reads targeted -- you are a consult, not an explorer.
 3. **Classify and check for duplicates** per the ruleset (board 9 vs 10; the
    `list-issues.mjs --all` whole-board skim).
@@ -53,11 +53,11 @@ cheaper sink on the ruleset's ladder holds it. Draft it with the ruleset
 template -- the light tier unless this is genuine capability work -- and **file
 it directly** (`gh project item-create`), then report: the board, the item URL, a
 one-line summary, and any unresolved points you logged. Unanswered questions do
-**not** block a capture -- a full-tier draft carries them in its **Open
-questions** section (an honest draft with open choices is fine) and a light-tier
+**not** block a capture -- a full-tier draft holds them in its **Open
+questions** section (an accurate draft with open choices is fine) and a light-tier
 draft states them in its summary sentence. You file at most one item per session:
 when the caller's prompt says a filing has already happened in this session, or
-the input carries several capturable items, draft the remainder in your report
+the input holds several capturable items, draft the remainder in your report
 and leave the writing to the owner's word. Also run the ruleset's epic/order
 step: set both fields autonomously when an existing epic clearly fits, and note
 the parenting in your report; when the fit is unclear, leave them unset and say
@@ -75,7 +75,7 @@ on the branch that raised it, a fix in the caller's own pass, or nothing -- and
 say why the board is the wrong home. Declining is a result, not a failure to do
 the job.
 
-**NEEDS INPUT** -- you genuinely cannot give useful feedback or a useful capture
+**NEEDS INPUT** -- you cannot give useful feedback or a useful capture
 without an answer only the human has (e.g. "is this a security-sensitive path?",
 "should this block the release, or is it exploratory?"). Return the specific
 questions (ruleset rules: highest-leverage first, one-line answers, options where
@@ -83,7 +83,7 @@ useful, at most three), plus a best-effort partial draft if it helps. Do not
 file a half-understood task. The main thread will put your questions to the user
 and re-spawn you with the answers.
 
-Work down the ladder: DECLINED or APPENDED whenever either genuinely holds the
+Work down the ladder: DECLINED or APPENDED whenever either holds the
 concern, FILED when neither does, and FILED over NEEDS INPUT whenever a useful
 capture is possible with open questions noted; reserve NEEDS INPUT for when the
 missing answer changes what you would even advise.

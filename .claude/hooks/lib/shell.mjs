@@ -1,10 +1,10 @@
 // Reading a Bash command line, and putting a read-only question to git.
 //
-// Three hooks split a command line into stages and tokenize it before deciding
-// anything, and five ran git to answer a question about a repository. Each
-// carried its own copy. The splitters and the tokenizer are the code most likely
-// to need a shared fix -- they are pragmatic and say so -- and a hole closed in
-// one copy stayed open in the others.
+// Three hooks split a command line into stages and tokenize it before
+// deciding anything, and five ran git to answer a question about a
+// repository. Each carried its own copy. The splitters and the tokenizer are
+// the code most likely to need a shared fix -- they are pragmatic and say so
+// -- and a hole closed in one copy stayed open in the others.
 //
 // None of this is a shell parser and none will become one. What it reads is a
 // plain command line: a subshell, a brace group, a command substitution, an
@@ -14,7 +14,7 @@
 
 import { execFileSync } from "node:child_process";
 
-// A lone `&` is deliberately not a separator: the same byte sits inside redirect
+// A lone `&` is not a separator, by design: the same byte sits inside redirect
 // words (`2>&1`, `&>`), where a split severs a command from operands that follow
 // the redirect, and a backgrounded `cd X &` runs in a subshell that never moves
 // the parent shell's directory. Both measured against real bash.
@@ -34,7 +34,7 @@ export function splitStages(pipeline) {
 
 /**
  * Every stage of every pipeline, for a hook that reads each stage on its own and
- * has no use for which pipeline carried it.
+ * has no use for which pipeline held it.
  */
 export function splitSegments(command) {
   return splitPipelines(command).flatMap(splitStages);
@@ -42,9 +42,9 @@ export function splitSegments(command) {
 
 /**
  * A segment's words, quoted spans kept whole and then stripped of every quote
- * character, so a quoted path or ref reads the same as a bare one. Stripping ALL
+ * character, so a quoted path or ref compares equal to a bare one. Stripping ALL
  * quotes rather than an outermost pair is what makes `HEAD:'staging'` normalize
- * to `HEAD:staging`; branch, remote and path names carry no quote of their own.
+ * to `HEAD:staging`; branch, remote and path names hold no quote of their own.
  * Not POSIX-complete.
  */
 export function tokenize(segment) {

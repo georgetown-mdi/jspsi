@@ -2,7 +2,7 @@
 // brace-expansion override redundancy check, run by static_checks.yaml on every
 // PR.
 //
-// The root package.json carries an override on `brace-expansion` so that every
+// The root package.json holds an override on `brace-expansion` so that every
 // requirer of it resolves to a line the advisory it answers has a patch for.
 // docs/spec/DEPENDENCY_PINS.md records why it is there and what it costs: a
 // dev-scoped `invalid` edge that refuses a dev-inclusive `npm sbom`, and a
@@ -32,7 +32,7 @@
 //     would report `invalid`.
 //   - It reads a narrow semver subset -- comparator sets over `^`, `~`, `=`,
 //     `<`, `<=`, `>`, `>=`, a bare version and the `x`/`*` wildcards, joined by
-//     `||`. Every other spelling, a hyphen range and anything carrying a
+//     `||`. Every other spelling, a hyphen range and anything holding a
 //     prerelease among them, is REFUSED by name rather than read, so an
 //     unmodeled form costs a red check naming the form to model here and never a
 //     verdict read off a range this could not evaluate. The subset it does read
@@ -42,10 +42,10 @@
 //   - It identifies an installed copy by the directory it sits in and an edge by
 //     the name it is declared under. npm's alias form
 //     (`some-key: "npm:brace-expansion@range"`) parts both from the package's own
-//     identity, which the lockfile then carries in the entry's `name` field
+//     identity, which the lockfile then holds in the entry's `name` field
 //     alone, so an alias tying `brace-expansion` to another name -- in either
 //     direction -- is REFUSED by name rather than read. An alias between two
-//     other packages, the shape the committed tree already carries, is left
+//     other packages, the shape the committed tree already holds, is left
 //     alone.
 //   - It reads the override's presence, not its spec: any `overrides` entry on
 //     the name stands, whatever form it takes.
@@ -140,7 +140,7 @@ export function parseComparator(operator, text) {
   // An inequality reads its partial as the span the partial names, so `>1.2` is
   // `>=1.3.0` and `<=1.2` is `<1.3.0`. Against a full version that span is the
   // version itself, and the release just past it is the next patch -- which
-  // holds only because the target compared against carries no prerelease.
+  // holds only because the target compared against has no prerelease.
   if (major === null) return null;
   const lower = [major, minor ?? 0, patch ?? 0];
   const past =
@@ -209,7 +209,7 @@ const aliasTarget = (spec) => {
  * Every record in which the committed lockfile ties `PACKAGE` to a name that is
  * not its own, in either direction: an entry whose `name` field disagrees with
  * the directory it installs under, and a dependency map's `npm:` alias spec
- * whose key disagrees with the package it names. An aliased install carries its
+ * whose key disagrees with the package it names. An aliased install holds its
  * true identity in that `name` field alone, so neither the directory nor the map
  * key can see it, and both are what the rest of this check reads by. An alias
  * between two packages that are neither of them `PACKAGE` is none of this

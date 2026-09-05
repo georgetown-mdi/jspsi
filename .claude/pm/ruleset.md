@@ -9,7 +9,7 @@ holds only the vehicle-independent rules. It is loaded by both PM front doors:
 - the **`/pm` persona** skill (`.claude/skills/pm/SKILL.md`) -- an interactive
   board-hygiene, epic-scoping, and task-drafting session.
 
-How clarifying questions get surfaced, and when a draft gets filed, differ
+How clarifying questions get raised, and when a draft gets filed, differ
 between the two front doors -- see each. Everything below is shared.
 
 ## Mission
@@ -94,15 +94,15 @@ Point rather than narrate: reference the mechanism's code or doc home ("see FILE
 
 When the input already contains an analysis -- options with trade-offs, a problem statement, a scope estimate -- carry that substance forward into the task. You may evaluate it: note risks or gaps in specific approaches, add context the submitter missed, critique assumptions. But do not select an implementation approach on the submitter's behalf when they have not selected one.
 
-Pay particular attention to statements that constrain the solution space: root cause conclusions, architectural invariants, and "any fix must ..." claims. These often appear as framing prose around an options table rather than in a named section, and they are easy to drop when compressing an analysis. Preserve them explicitly -- a contributor who misses a constraint may pursue an approach that cannot satisfy the requirement. Unresolved design decisions belong in **Open questions**, stated clearly so whoever picks up the task knows a decision is still needed. A task that reaches the board with open design choices is not incomplete; it is honest.
+Pay particular attention to statements that constrain the solution space: root cause conclusions, architectural invariants, and "any fix must ..." claims. These often appear as framing prose around an options table rather than in a named section, and they are easy to drop when compressing an analysis. Preserve them explicitly -- a contributor who misses a constraint may pursue an approach that cannot satisfy the requirement. Unresolved design decisions belong in **Open questions**, stated clearly so whoever picks up the task knows a decision is still needed. A task that reaches the board with open design choices is not incomplete; it is accurate about what is still undecided.
 
 A submitter recommending an approach in analysis ("the realistic fix is X", "X seems like the best path") is not the same as committing to one ("implement using X", "we've decided on X"). Treat the former as a candidate: reproduce the reasoning in Implementation notes, note it as the preferred candidate if the submitter says so, and put the final choice in Open questions. Only treat an approach as decided when the submitter's language is unambiguously directive.
 
-Leave this section out only if there genuinely is nothing non-obvious to say.
+Leave this section out only if there is nothing non-obvious to say.
 
 ## Open questions
 
-List any assumptions you made or questions still unresolved. Empty if everything is settled.
+List any assumptions you made or questions still unresolved. Empty if everything is decided.
 ```
 
 ## Style rules
@@ -129,7 +129,7 @@ Good questions: ask the highest-leverage one first; phrase each so it can be
 answered in one line; offer 2-3 plausible options where useful rather than
 leaving it open-ended; never ask what is already in the request or in
 `CLAUDE.md`. Ask at most three at once, and do not ask filler. *How* you
-surface these differs by front door -- the consult agent returns them as a
+raise these differs by front door -- the consult agent returns them as a
 NEEDS INPUT result; the `/pm` persona asks them directly in conversation.
 
 ## Project routing
@@ -161,7 +161,7 @@ Two GitHub Projects under the `georgetown-mdi` org; pick one per task:
 - A security issue in the **protocol** is a feature. A security issue in the **CI pipeline** is operations.
 - A bug fix to a release workflow is operations; a bug fix to the SFTP transport is a feature.
 - If the work spans both, file the feature task on board 9 and add a short "Operations follow-up" section. If the operations work is substantial, file two linked tasks -- one per board -- and reference each in the other's body.
-- If you genuinely cannot decide, this becomes a clarifying question. Do not silently guess.
+- If you cannot decide, this becomes a clarifying question. Do not silently guess.
 
 ## Checking for duplicates
 
@@ -196,7 +196,7 @@ the first. In order:
 - A review finding's default sink is a limits line in the governing `docs/spec/`
   file, written on the branch that raised it. Recommend that and file nothing.
 - A finding that belongs on the board but matches a standing sweep item (a
-  coverage sweep, an accounting settle-up) is APPENDED to that item -- name the
+  coverage sweep, an accounting reconciliation) is APPENDED to that item -- name the
   item and add the finding to its criteria rather than creating a sibling.
 - Declining to file is a legitimate outcome. Say what the concern is worth and
   where it should live instead.
@@ -244,12 +244,12 @@ filing without it.
 
 ## Epic and order
 
-Both boards carry `Epic` (free text) and `Order` (a number). When you file a
+Both boards have `Epic` (free text) and `Order` (a number). When you file a
 new task, slot it into an existing epic if one clearly fits. Do not invent a
 new epic.
 
 Discover the candidate epics from the same `list-issues.mjs` call you already run
-for the duplicate check -- its Epic column already carries them, so take the
+for the duplicate check -- its Epic column already contains them, so take the
 distinct non-empty values, no extra round-trip:
 
 ```sh
@@ -276,7 +276,7 @@ sets a clear fit autonomously and notes an unclear one in **Open questions**; th
 
 ## Epic terminal conditions
 
-Every epic carries a one-line terminal condition, written `Done is: ...`, naming
+Every epic has a one-line terminal condition, written `Done is: ...`, naming
 an observable state that ends it. An epic without one is a parking lot: it
 refills as fast as it drains, because nothing in it can be finished.
 

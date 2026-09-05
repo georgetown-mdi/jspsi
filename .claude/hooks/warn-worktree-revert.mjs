@@ -9,8 +9,9 @@
 // in the worktree while bare shell commands run in whatever checkout the cwd
 // landed in. A worktree and its main checkout hold byte-identical copies of every
 // unmodified tracked file, so `git status`, a build, and a test suite all look
-// green in the wrong tree; the mistake surfaces later, as work committed to the
-// wrong branch or a review round that reads a diff nobody wrote there.
+// green in the wrong tree; the mistake is not caught until later, as work
+// committed to the wrong branch or a review round that reads a diff nobody wrote
+// there.
 // block-primary-checkout-writes.mjs covers the file tools, which take an absolute
 // path and do not care about the cwd; this covers the bare-Bash exposure, at the
 // two events where the revert lands.

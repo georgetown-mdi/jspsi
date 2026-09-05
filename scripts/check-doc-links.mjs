@@ -95,7 +95,7 @@ export function findFailures(file, absPath, raw) {
   let match;
   while ((match = linkRe.exec(text)) !== null) {
     let target = match[1].trim();
-    // A link target may carry a title: [x](path "title"); drop the title.
+    // A link target may have a title: [x](path "title"); drop the title.
     const sp = target.indexOf(" ");
     if (sp !== -1) target = target.slice(0, sp);
     if (

@@ -12,21 +12,21 @@ import {
   withRestoreOnSignal,
 } from "./regenerationChecks.mjs";
 
-// The signal cases run in a child process, deliberately: a restore that
+// The signal cases run in a child process, by design: a restore that
 // re-raises kills the process it runs in, which inside a vitest worker would
 // take the rest of the suite with it. The child is the real thing -- a real
 // SIGINT or SIGTERM, this module's real handler -- and what it leaves behind is
 // a marker file and its own exit signal.
 const MODULE_URL = new URL("./regenerationChecks.mjs", import.meta.url).href;
 // A child that ignored its signal would run its two-second body out and exit on
-// its own, so the timeout is a backstop for a child that hangs instead. The case
+// its own, so the timeout is a safety check for a child that hangs instead. The case
 // timeout is the wider of the two, leaving the assertions to report a failure
 // rather than the runner reporting a timeout over them.
 const CHILD_TIMEOUT_MS = 10_000;
 const CASE_TIMEOUT_MS = 15_000;
 
 describe("firstDifference", () => {
-  it("locates the first changed line and carries both sides", () => {
+  it("locates the first changed line and includes both sides", () => {
     expect(firstDifference("a\nb\nc\n", "a\nB\nc\n")).toEqual({
       line: 2,
       committed: "b",

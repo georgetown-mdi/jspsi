@@ -2,11 +2,11 @@
 // PreToolUse hook: route a Workflow call whose inline script names Fable to a
 // user-approval prompt. It is the sibling of require-fable-approval.mjs, which
 // gates the Agent tool; a Workflow script reaches the same tier through its own
-// agent() options, where no top-level tool input carries the model.
+// agent() options, where no top-level tool input holds the model.
 //
 // Detection is textual and literal, over both halves of the call the model can
 // arrive in: the inline `script` and the serialized `args` it reads (a script can
-// pass `model: args.model` and carry the spelling in the args object of the same
+// pass `model: args.model` and hold the spelling in the args object of the same
 // event). A `model:` key, quoted or bare, assigned a Fable spelling, or a quoted
 // string that is itself a Fable spelling, asks.
 //
@@ -14,7 +14,7 @@
 // all of them fail OPEN: a model value computed at run time (`model: tier` with
 // the tier derived, `...options`) is invisible here; a `scriptPath` invocation
 // passes a file, not script text; and a resume of an earlier run replays a script
-// this hook never sees. The load-bearing half for committed scripts is the static
+// this hook never sees. The critical half for committed scripts is the static
 // check (`npm run check:workflow-agent-models`), which fails any agent() call in a
 // fenced js block under .claude/commands/, .claude/agents/, or .claude/skills/, or
 // in a checked-in Workflow script (.claude/scripts/*-workflow.mjs), that does not
@@ -23,7 +23,7 @@
 // script, which no committed-file check can reach.
 //
 // Every path but a positive match exits 0 and allows the call: an unreadable or
-// unparseable event, a tool other than Workflow, a call carrying neither script
+// unparseable event, a tool other than Workflow, a call holding neither script
 // nor args, a script and args with no Fable spelling in them, and any unexpected
 // throw (the outer catch). Fable's real gate for the Agent tool is
 // require-fable-approval.mjs; a false negative here costs an unprompted Workflow

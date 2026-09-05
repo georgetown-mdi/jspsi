@@ -7,7 +7,7 @@
 // of the keys included, because the order is cascade order and moving a key
 // changes which one claims a record more than one would match. The recorded
 // validation attaches to a name and a version together, so an edited set
-// carrying the old version leaves that note describing rules nobody ran, which
+// holding the old version leaves that note describing rules nobody ran, which
 // is the exact failure the naming exists to prevent. A future obligation written
 // as prose is the shape that rots: nothing fails when it is forgotten. This is
 // that obligation as a check.
@@ -24,19 +24,19 @@
 //
 //   B. THE PIN LEDGER, scripts/built-in-set-pins.json: the digest recorded for
 //      each version of each named set. Unlike the protocol-version pin, this
-//      rule binds now rather than from a first publication, so the ledger ships
-//      populated and every run holds the tree to it.
+//      rule binds from the outset rather than from a first publication, so the
+//      ledger ships populated and every run holds the tree to it.
 //
 // The ledger is keyed by set name and then by version, and is append-only: a
-// bump ADDS an entry, so an honest bump and an in-place rewrite of a recorded
+// bump ADDS an entry, so a legitimate bump and an in-place rewrite of a recorded
 // version's pin are different diffs. This check cannot tell a legitimate re-pin
 // from a rewrite that dodges the bump -- the same limit the pull-request
-// checklist's security-review sha carries -- so an edit to an already-recorded
+// checklist's security-review sha has -- so an edit to an already-recorded
 // entry is a reviewer's call, not this check's.
 //
 // What this check cannot see:
-//   - Whether the version decision taken was the RIGHT one. It fails moved
-//     content carrying no bump, and it fails a bump that records no pin; it
+//   - Whether the version decision taken was the RIGHT one. It fails content
+//     that has moved without a bump, and it fails a bump that records no pin; it
 //     cannot judge which semver component a change deserved, nor a bump that was
 //     not needed.
 //   - The difference between a content change and a cosmetic one below the
@@ -203,7 +203,7 @@ export function suggestedLedger(pins, sets, versions) {
 
 /**
  * Read the tree at `root` and report what the rule holds there, as `{sets, pins,
- * violations, blocked}`. `blocked` carries the reasons the check could not read
+ * violations, blocked}`. `blocked` holds the reasons the check could not read
  * an input at all, which fail rather than passing as agreement.
  */
 export function inspect(root) {
@@ -264,7 +264,7 @@ export function inspect(root) {
 
 /**
  * One line per set: the name and version a citation of the built-in rules names,
- * and the pin the tree carries for it. Reported on every passing run so what is
+ * and the pin the tree holds for it. Reported on every passing run so what is
  * pinned is read rather than inferred.
  */
 export function pinReport(sets) {
@@ -275,7 +275,7 @@ export function pinReport(sets) {
 
 // CLI entry: only runs when invoked directly, so the tests can import the pure
 // functions without the process.exit. `--root` points the run at another tree,
-// which is how the tests drive the edited sets this repository does not carry.
+// which is how the tests drive the edited sets this repository does not have.
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
   const rootFlag = args.indexOf("--root");

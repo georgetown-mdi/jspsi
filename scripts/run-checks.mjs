@@ -3,7 +3,7 @@
 // the checks are named on.
 //
 // static_checks.yaml's `repo-guards` job is where a repository-wide obligation
-// gets gated: it carries no path filter, and the merge-gating workflows beside
+// gets gated: it has no path filter, and the merge-gating workflows beside
 // it are each scoped to one concern (code scanning, dependency review, the
 // Alpine native build). So the set only grows. CHECKS below is that set, a line
 // per check, and the job is a single step invoking this runner -- which is also

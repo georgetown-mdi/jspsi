@@ -25,8 +25,8 @@ Run exactly:
 
 This prints only the item payload -- title, populated fields, and body -- in a
 single round-trip. Do NOT run `gh project item-list` or hand-write any gh/GraphQL:
-that pulls the entire board into context and is the inefficiency this command
-exists to avoid. If the item is reported not found, say so and stop.
+both pull the entire board into context. If the item is reported not found, say
+so and stop.
 
 The fetched body is context for you, not material for the repo. Never copy its
 prose, its item ids, or its register into code comments, docs, or commit
@@ -48,9 +48,8 @@ its local `staging` falls behind `origin/staging`. Sync it before branching:
 1. `git fetch origin` -- mandatory, not optional cleanup: the local refs are
    stale from the previous issue.
 2. Bring local `staging` up to `origin/staging` with `git checkout staging &&
-   git reset --hard origin/staging`. You never commit to `staging` -- it is only
-   a sync target -- so resetting it onto `origin/staging` is always safe and
-   leaves nothing to reconcile.
+   git reset --hard origin/staging`. You never commit to `staging`, so resetting
+   it onto `origin/staging` is safe.
 3. If the sync moved the lockfile, reinstall: `git diff --quiet ORIG_HEAD HEAD --
    package-lock.json || npm ci`. The reset in step 2 points `ORIG_HEAD` at the
    pre-sync commit, so `npm ci` runs only when `package-lock.json` actually
@@ -74,8 +73,8 @@ afterwards means the prior gate runs still stand.
 Before editing, read CONTRIBUTING.md and the files the issue's **Affected areas**
 and **Implementation notes** point to, then resolve the issue's **Open
 questions**. When recent merges touched the issue's surface, reconcile its
-premise against the merged code first: an obviated or reduced premise is a scope
-finding to raise, not a stale design to build. Explore with the Read and Grep tools, not shell `sed`/`cat`/`grep`:
+assumption against the merged code first: an obviated or reduced assumption is a
+scope finding to raise, not a stale design to build. Explore with the Read and Grep tools, not shell `sed`/`cat`/`grep`:
 they read and search without a permission prompt and keep large file dumps out of
 context. Settle a purely local open question yourself and note your choice.
 Routing a question the issue itself left open belongs to `CLAUDE.md`'s Agent
@@ -104,7 +103,7 @@ npm run lint`, and run the tests covering what you changed. Then sweep your own
 diff (`git diff`): delete every comment that restates the code, narrates the
 change, or cites a board id, and move any "this cannot happen" claim into a
 check. Report what you ran and the result; do not commit on red without saying
-so. When the issue carries an Open Questions section, the report also names
+so. When the issue has an Open Questions section, the report also names
 each question and the route it took -- settled as obvious, paneled, or asked.
 
 Commit to the new branch following CONTRIBUTING.md's commit conventions (no
@@ -158,7 +157,7 @@ steps above. When the instruction is to orchestrate:
 - **Delegate the writing.** Implementation goes to an `implementer` spawn with a
   self-contained brief; fix rounds are fresh `implementer` spawns. That includes
   /assess-review's own triage pass: you run the triage and make the calls, but
-  the edits go to one implementer per branch, a small fix carried as its exact
+  the edits go to one implementer per branch, a small fix included as its exact
   text in the brief. The orchestrating session edits nothing on any branch.
 - **Delegate the reading.** Exploration of the issue's surface goes to a spawn
   that returns a compact digest; your own context holds diff stats,
@@ -179,7 +178,7 @@ steps above. When the instruction is to orchestrate:
   trigger (assess-review, Step 2), batched into one message. The open PR ends
   the session: post-CI fixes, the merge, and board work belong to a fresh
   session started from the final report, which doubles as the continuation
-  note. Beyond the PR body it carries the rounds-ledger path and row count,
+  note. Beyond the PR body it includes the rounds-ledger path and row count,
   assess-review's left-unaddressed table, and the Security review line's basis
   -- the sha, the review kind, and for an n/a the enumeration that produced it
   -- so the next session can tell a re-scan from a re-review.

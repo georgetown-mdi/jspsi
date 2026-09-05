@@ -31,11 +31,11 @@ describe("readEvent", () => {
     expect(evaluate("event.readEvent()", JSON.stringify(bash))).toEqual(bash);
   });
 
-  it("reads unparseable input as no event", () => {
+  it("treats unparseable input as no event", () => {
     expect(evaluate("event.readEvent()", "not json")).toBeNull();
   });
 
-  it("reads empty input as no event", () => {
+  it("treats empty input as no event", () => {
     expect(evaluate("event.readEvent()", "")).toBeNull();
   });
 
@@ -112,7 +112,7 @@ describe("eventCwd", () => {
     ).toBe("/workspace");
   });
 
-  it("reads an empty or missing cwd as naming no directory", () => {
+  it("treats an empty or missing cwd as naming no directory", () => {
     for (const cwd of ["", undefined, null, 7]) {
       expect(
         evaluate(

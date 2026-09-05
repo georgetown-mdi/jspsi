@@ -37,7 +37,7 @@ import {
 // Reach and limits, stated rather than implied.
 //
 // It reads every test module of this checkout -- every file git lists whose name
-// carries a `.test.` suffix -- rather than a maintained list, so a new suite is
+// has a `.test.` suffix -- rather than a maintained list, so a new suite is
 // covered the day it lands. There is no allowance list. Git is what decides
 // which files those are, so an ignored tree stays out of the enumeration by the
 // same rule that keeps it out of a commit: build output, `node_modules`, and a
@@ -85,7 +85,7 @@ const TEST_MODULE = /\.test\.(m?tsx?|m?js)$/;
 // reports a pass nobody is told about.
 const RUN_ON = ["linux", "darwin"];
 
-// The names whose call carries a test body as a callback argument.
+// The names whose call has a test body as a callback argument.
 const RUNNERS = new Set(["test", "it", "describe", "suite", "bench"]);
 
 // Floors the enumeration has to clear. A move of the test trees, a rename of the
@@ -106,7 +106,7 @@ const WALK_TIMEOUT_MS = 120_000;
  * Git does the enumerating: `--cached --others --exclude-standard` is every file
  * the checkout tracks or would add, so what `.gitignore` excludes is excluded
  * here by that same rule rather than by a directory list kept in step with it by
- * hand. A checkout carrying sibling worktrees -- another branch's files, under an
+ * hand. A checkout holding sibling worktrees -- another branch's files, under an
  * ignored path -- therefore enumerates exactly what a lone checkout does.
  *
  * `-z` is what makes a non-ASCII path readable: under the default
@@ -145,7 +145,7 @@ function runnerOfCall(call) {
 }
 
 /**
- * Every test a module declares: a runner call carrying a function argument. The
+ * Every test a module declares: a runner call holding a function argument. The
  * enumeration the gate reading stands on, counted on its own so a reading that
  * stopped recognising one fails loudly.
  */

@@ -5,7 +5,7 @@ import { findFailures } from "./check-doc-links.mjs";
 
 // findFailures resolves relative targets against dirname(absPath), so a fixed
 // absPath inside this directory is enough -- the fixture doc never needs to
-// exist on disk, only the "missing" targets need to genuinely not exist here.
+// exist on disk, but the "missing" targets must not exist here.
 const here = dirname(fileURLToPath(import.meta.url));
 const file = "fixture.md";
 const absPath = resolve(here, file);
@@ -17,7 +17,7 @@ describe("check-doc-links inline code spans", () => {
     expect(findFailures(file, absPath, raw)).toEqual([]);
   });
 
-  it("still flags a genuinely dead link", () => {
+  it("still flags a dead link", () => {
     const raw = "[broken](missing.md)\n";
     const failures = findFailures(file, absPath, raw);
     expect(failures).toEqual([`${file}:1  dead path -> missing.md`]);

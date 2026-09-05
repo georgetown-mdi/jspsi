@@ -8,8 +8,7 @@ do not explore the codebase -- you run one Workflow per target ref, compute each
 round's trajectory, and write the artifacts.
 
 You stay where you are. Every step below works by ref and by absolute path: do
-not `cd` into a branch's worktree, and do not check anything out. That is what
-lets several branches be in review at once.
+not `cd` into a branch's worktree, and do not check anything out.
 
 ## Input
 
@@ -50,11 +49,10 @@ Hold each claim to the contract-language rules before running the round. A claim
 a measured bound, never totality: "no bypass among the following measured deliveries",
 with the remainder a stated limit. After a deliberate narrowing of a control, a
 no-regression claim covers what the kept checks are for, never the union of everything
-any prior head caught -- union coverage makes narrowing impossible. A claim that breaks
+any prior head caught. A claim that breaks
 either rule ("cannot be bypassed", "no way to", "genuinely binds", or a post-narrowing
 claim scoped to prior heads' union coverage) is a defective contract: stop and rewrite
-it first. A round run on a totality claim can only gate, because the reviewer's job is
-to find the counterexample the claim's own wording promises does not exist. A claim
+it first. A round run on a totality claim can only gate. A claim
 names WHICH fixed message, error class, or UI state results only when that message or
 state was measured to exist on `origin/staging` first; otherwise it states the property
 (refuses, does not throw, renders without crashing) and leaves the resulting surface to
@@ -64,7 +62,7 @@ contract of the same kind as a totality claim -- three of six refutations in the
 rewrite it.
 
 A plan-stage contract -- claims about a design rather than the code -- must include
-the premise claim, that the plan solves the right problem, among CLAIMS; commit the
+the assumption claim, that the plan solves the right problem, among CLAIMS; commit the
 design document on the branch first, so the diff the round reviews is non-empty.
 
 ## Step 1 -- Locate the targets and their trees (cheap)
@@ -80,10 +78,10 @@ For each entry of TARGETS (or, with none given, for the one branch
 
 1. BRANCH is the ref with any `refs/heads/` prefix stripped. Its artifact key is
    BRANCH with every character outside `A-Za-z0-9._-` replaced by `_` and any
-   leading dots dropped -- branch names carry no `/` by repo convention, so the
+   leading dots dropped -- branch names contain no `/` by repo convention, so the
    key is normally BRANCH itself.
 2. TREE is the `worktree` path of the record whose `branch` is that ref, or none
-   when no record carries it. A ref with no tree is reviewable by a lens round,
+   when no record holds it. A ref with no tree is reviewable by a lens round,
    which only reads; a role round that must RUN code against it has nowhere to
    run, so say so and stop rather than checking anything out.
 3. Run `git diff "origin/staging...<ref>" --stat`. If it reports no changes, say
@@ -94,7 +92,7 @@ with staging", i.e. PR semantics -- it ignores commits staging gained after the 
 forked. The remote-tracking ref is the base, not a local `staging`, which goes stale and
 silently widens the round with work that already merged. Every agent below uses the same
 ref and the same three-dot form. Only these `--stat` runs happen in the main thread, so
-no full diff ever enters this conversation's context.
+no full diff enters this conversation's context.
 
 Also read each target's rounds ledger (`PRIMARY/scratch/review-rounds/<key>.jsonl`)
 if it exists: its first row's `cap` is that branch's round budget (a first row
@@ -105,7 +103,7 @@ raises it.
 The ledger also sizes a role contract. From round 3 on -- the ledger already holds two
 rows of any kind -- CLAIMS covers only the DELTA: a claim whose subject the last fix
 touched, plus one claim per path that fix added. Re-running an unaffected claim the
-ledger already records as HOLDS is forbidden: it re-buys a verdict the branch owns.
+ledger already records as HOLDS is forbidden.
 A base sync -- the merge shape assess-review.md's Step 4 defines, a merge of
 origin/staging into the branch -- is not a fix: the branch owns no verdict at the
 merged head, so the delta rule does not apply. The contract is the branch's standing
@@ -114,8 +112,8 @@ in the ledger's rows), every claim re-run at the merge head; re-running its HOLD
 claims is required there rather than forbidden.
 Whatever the round, cap the list at `max(5, ceil(<changed lines>/60))` claims and never
 above 12, where `<changed lines>` is the insertions plus deletions in that target's
-`--stat` total above. A contract over that ceiling is trimmed to the claims that carry
-the round, not run long; say in your report which claims you dropped and why.
+`--stat` total above. A contract over that ceiling is trimmed to the claims most
+important to the round, not run long; say in your report which claims you dropped and why.
 
 ## Step 2 -- Run one review Workflow per target
 
@@ -134,7 +132,7 @@ The script is checked in and passed by path: do not paste its text into the call
 copy it out to edit it (it branches on the role in `args` itself, and both modes are
 pinned by `.claude/scripts/light-review-script.test.mjs`), and do not spawn the reviewers with the
 Agent tool instead -- plain agents cannot have their output format enforced, and the schema
-is the point (prompt-side "return only JSON" instructions have a long failure record here).
+is the point; a prompt-side "return only JSON" instruction does not hold here.
 
 Each target must be committed before you invoke it: the round reviews the ref, and
 `require-clean-tree-for-review.mjs` blocks the call when the tree holding any target
@@ -158,7 +156,7 @@ Common to both:
    1 (`mkdir -p` the directory; scratch/ is gitignored). That exact findings path is
    what assess-review looks for; it hard-stops without it. Read the ledger if it
    exists; this round's number is its line count + 1, counting rounds of every kind.
-   The first row written for a branch also carries `"cap"`: the Step 5 bucket's total
+   The first row written for a branch also contains `"cap"`: the Step 5 bucket's total
    round allowance for this diff (1 for the second bucket or the instruction-file
    floor, 3 for the full pipeline; a cap the owner raises is edited in place with a
    note).
@@ -167,7 +165,7 @@ Common to both:
    branch's next round until it ages out, so releasing it is part of booking the
    round, not cleanup you may skip. Delete it even when the round failed or you are
    abandoning its result.
-3. Every ledger row carries `"kind"`: the role name in role mode, `"light"` in lens mode.
+3. Every ledger row contains `"kind"`: the role name in role mode, `"light"` in lens mode.
    Trajectory comparisons -- REPEAT files, hotspots, whether the contested list grew --
    run against prior rounds of the SAME kind only. A role round's claims and a lens
    round's clusters are not comparable evidence. Kind scopes trajectory only:
@@ -175,24 +173,24 @@ Common to both:
 4. REPEATs and hotspots are computed on file paths. An entry whose `file` is empty names
    no file, so it is never a repeat and never a hotspot -- skip it rather than letting
    every fileless entry collide into one.
-5. Every row carries `"dispositions"`: one `{"item", "disposition"}` entry per thing this
+5. Every row contains `"dispositions"`: one `{"item", "disposition"}` entry per thing this
    round put on the table -- each confirmed cluster in lens mode, and each gating claim
    plus each out-of-claim finding in role mode -- where `item` is the cluster name, the
-   claim text, or the finding name. You write every one as `"open"`; you are the round,
-   not its triage. assess-review rewrites them in place to `fixed`, `contested`,
-   `narrowed`, `limit`, or `deferred` as it disposes of each, and a row still carrying
-   `open` after triage is a finding nobody decided.
+   claim text, or the finding name. You write every one as `"open"` and triage none of
+   them; assess-review rewrites them in place to `fixed`, `contested`, `narrowed`,
+   `limit`, or `deferred` as it disposes of each, and a row still holding `open` after
+   triage is a finding nobody decided.
 
 ### Lens mode -- the Workflow returned `{reviewerCount, simplerShapeVotes, clusters}`
 
-6. CONFIRMED = clusters with verification `confirmed`. A confirmed file that also carried
+6. CONFIRMED = clusters with verification `confirmed`. A confirmed file that also held
    a confirmed cluster in the PREVIOUS light round is a REPEAT; repeat files are the
    round's hotspots.
 7. CONTESTED = clusters with `flaggedBy` 1, severity critical or major, and verification
    not `refuted`.
 8. Append one JSON line to the ledger:
    `{"round": N, "kind": "light", "date": "<date -I>", "ref": "<the target ref>", "reviewerCount": <reviewerCount>, "clusters": [{"name", "file", "severity", "verification"}], "simplerShapeVotes": <count of simpler=true>, "dispositions": [{"item": <confirmed cluster name>, "disposition": "open"}]}`.
-   A branch's first row also carries `"cap": <the round budget>` (Common item 1).
+   A branch's first row also contains `"cap": <the round budget>` (Common item 1).
 9. Write the findings file: a header line (branch, target ref, round N, kind `light`,
    `reviewerCount` reviewers), then the clusters sorted by severity (critical first) then
    flaggedBy (descending) -- one row each with issue number, name, description, severity,
@@ -209,14 +207,14 @@ number you asked for.
 ### Role mode -- the Workflow returned `{claims, findings, gate, summary}`
 
 6. GATING = claims whose verdict is `REFUTED` or `COULD-NOT-VERIFY`. A gating claim's
-   file that also carried a gating claim in the PREVIOUS round of this same role is a
+   file that also held a gating claim in the PREVIOUS round of this same role is a
    REPEAT; repeat files are the round's hotspots.
 7. The gate is claim-scoped by design: `gate` reflects the contract's verdicts and
    nothing else. The out-of-claim `findings` never move it -- they are triage material
    for assess-review, which reads them off the artifact.
 8. Append one JSON line to the ledger:
    `{"round": N, "kind": "<role>", "date": "<date -I>", "ref": "<the target ref>", "gate": <gate>, "claims": [{"claim", "verdict", "file"}], "findings": [{"name", "file", "severity"}], "dispositions": [{"item": <gating claim or finding>, "disposition": "open"}]}`.
-   A branch's first row also carries `"cap": <the round budget>` (Common item 1).
+   A branch's first row also contains `"cap": <the round budget>` (Common item 1).
 9. Write the findings file: a header block naming the branch, the target ref, the role,
    the number of claims it was contracted to refute, and the gate outcome (`gate` true
    is GATED, false is CLEAR), then a verdict table -- one row per claim with the claim,
@@ -229,7 +227,7 @@ number you asked for.
 Each returned entry's `claim` is the contract's own text -- the Workflow paired the
 role's answer back to the claim as asked. Write it verbatim into the table and the
 ledger; a paraphrase makes the round untraceable to the contract it ran under. An entry
-also carrying `echoInexact` came back with a truncated or re-wrapped echo of its claim,
+also holding `echoInexact` came back with a truncated or re-wrapped echo of its claim,
 over which the Workflow restored the contract's text -- write that restored text like
 any other. An echo that instead extends the claim with added text is not restored: it
 verified a different, more specific assertion, so the Workflow leaves it unpaired and

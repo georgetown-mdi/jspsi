@@ -289,7 +289,7 @@ describe("the engagement probe the image ships", () => {
   });
 
   it("records the X25519 observation without gating on it", () => {
-    // Build-dependent -- the certified Amazon Linux module carries no X25519
+    // Build-dependent -- the certified Amazon Linux module has no X25519
     // and other FIPS builds do -- so it is recorded and never a failure.
     expect(summary.operations.x25519_derive_bits).toBeDefined();
     expect(summary.failures.some((f) => f.includes("X25519"))).toBe(false);
@@ -309,7 +309,7 @@ describe("the engagement probe the image ships", () => {
 // placeholder digest makes a case exit non-zero for that reason instead of the
 // one it names.
 //
-// Limit: this runs whatever coreutils the dev container carries, not Amazon
+// Limit: this runs whatever coreutils the dev container has, not Amazon
 // Linux 2023's coreutils-single, which is what the build will actually use.
 describe("the Node tarball checksum check", () => {
   function checkAgainstCommittedHash({ hash, tarball, bytes }) {

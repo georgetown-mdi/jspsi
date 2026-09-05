@@ -54,7 +54,7 @@ describe("parsing a TypeScript source", () => {
     while (outermost.parent) outermost = outermost.parent;
     expect(outermost).toBe(sourceFile);
     // getText() walks to the source file through those pointers, so it answers
-    // only for a tree that carries them.
+    // only for a tree that holds them.
     expect(call.getText()).toBe("f(1)");
   });
 });

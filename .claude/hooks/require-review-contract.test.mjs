@@ -63,7 +63,7 @@ describe("require-review-contract hook", () => {
     expect(stderr).toContain("/light-review --role");
   });
 
-  it("blocks a direct adversarial-verifier spawn even when the prompt carries claims", () => {
+  it("blocks a direct adversarial-verifier spawn even when the prompt includes claims", () => {
     const { status, stderr } = runHook({
       tool_name: "Agent",
       tool_input: {

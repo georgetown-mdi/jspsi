@@ -28,7 +28,7 @@ const USER_AGENT = "psilink-board-scripts";
 
 /**
  * Run gh with the given argv and return stdout as a string. Network calls go
- * through `graphql` (Node fetch) now, not gh -- gh (a Go binary) verifies TLS
+ * through `graphql` (Node fetch), not gh -- gh (a Go binary) verifies TLS
  * via the macOS `trustd` Mach service, which the command sandbox blocks, so its
  * network subcommands fail in-sandbox. gh is kept only for `gh auth token`,
  * which is network-free (it just reads stored credentials) and so works in-sandbox.
@@ -209,17 +209,17 @@ async function requestWithinTimeout(query, variables, token, timeoutMs) {
  * -- is retried up to GRAPHQL_MAX_ATTEMPTS times with a linear backoff, each
  * retry noted on stderr. When the attempts run out, or on a failure no retry can
  * help, the thrown error names the endpoint and how many attempts were made, so
- * a stall reads as a bounded, loud failure instead of a hang.
+ * a stall displays as a bounded, loud failure instead of a hang.
  *
- * Retry covers writes as well as reads, on the premise that every mutation these
+ * Retry covers writes as well as reads, on the assumption that every mutation these
  * scripts send is idempotent for the same value: `updateProjectV2ItemFieldValue`
  * and `updateProjectV2DraftIssue` both set a field to the value given rather
  * than appending to or incrementing it, so re-sending one after a stall the
  * server had in fact applied leaves the same state. A mutation that breaks that
- * premise -- one that creates, appends, or accumulates -- breaks this policy with
+ * assumption -- one that creates, appends, or accumulates -- breaks this policy with
  * it, and needs a caller-side path that does not retry.
  *
- * A response is returned whenever it carries `data` -- even an HTTP 200 that also
+ * A response is returned whenever it contains `data` -- even an HTTP 200 that also
  * has `errors`, which is how GraphQL reports a partial result (e.g. one NOT_FOUND
  * node in a batch). This preserves the "one bad ID does not sink the whole fetch"
  * behavior that `fetchItems` relies on. A response with no usable `data` (auth
@@ -334,12 +334,12 @@ export function toNumericId(arg, expectedProject) {
 
 /**
  * GraphQL selection for an item's project-field values. Covers the value types
- * the boards use -- text, number, and single-select -- each carrying its field
+ * the boards use -- text, number, and single-select -- each holding its field
  * name via the ProjectV2FieldCommon interface. Shared so fetchItems (read by
  * numeric ID) and the all-items listing in list-epic.mjs extract fields the same
  * way. Other value types (date, iteration, ...) are simply not selected here and
  * fall out of the resulting map; extend this and extractFields together if a new
- * type needs surfacing.
+ * type needs exposing.
  */
 const FIELD_VALUES_FRAGMENT =
   "fieldValues(first: 20) { nodes { __typename " +
@@ -452,7 +452,7 @@ export async function fetchItems(projectNumber, numericIds) {
  * DIFFERENT project (a numeric id whose item lives on another board reads back
  * that other board's item). Verifying the resolved node's own project closes that
  * cross-board read, which would otherwise return another board's item as if it
- * were this one. The mismatch result carries `resolvedProject` so a caller can
+ * were this one. The mismatch result includes `resolvedProject` so a caller can
  * point at the board the id actually belongs to. Exported for unit testing.
  */
 export function mapFetchedNode(node, id, projectNumber) {
@@ -502,7 +502,7 @@ async function runQueryViaFetch(query) {
  * Fetch every item of a project with its field values and node IDs, returning
  * [{ id, nodeId, title, fields }] where id is the numeric item ID, nodeId is the
  * `PVTI_` global node ID, and fields is the { name -> value } map (see
- * extractFields, which surfaces Status / Epic / Order among
+ * extractFields, which exposes Status / Epic / Order among
  * others). Pages through the items connection with a cursor until hasNextPage is
  * false, so no item is dropped however large the board grows -- the silent
  * truncation a single `gh project item-list --limit N` would cause is impossible

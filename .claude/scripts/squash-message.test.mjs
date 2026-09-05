@@ -34,7 +34,7 @@ describe("squash-message argument parsing", () => {
 });
 
 describe("squash-message prompt", () => {
-  it("carries the PR number and names CONTRIBUTING.md", () => {
+  it("includes the PR number and names CONTRIBUTING.md", () => {
     expect(prompt(928)).toBe(
       "Please use the commit history, the PR body, and @CONTRIBUTING.md to write a short squash-and-merge commit message for PR #928.",
     );

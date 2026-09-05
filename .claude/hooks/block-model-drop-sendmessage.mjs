@@ -20,7 +20,7 @@
 // Design: MARKER-GATED, no file I/O. There is no transcript read and nothing that
 // can fail open on I/O. The allow paths are: an event naming another tool, or one
 // stdin held nothing parseable for; a send to "main" (a background subagent
-// reporting up, with no pinned recipient to drop); or a message carrying the
+// reporting up, with no pinned recipient to drop); or a message containing the
 // literal [accept-model-drop] marker. Every other SendMessage -- resuming or
 // steering a spawned agent -- blocks, and so does a payload that parses to a JSON
 // value other than an object -- null, an array, a primitive -- which names no tool
@@ -72,7 +72,7 @@ function main() {
 try {
   main();
 } catch {
-  // Defensive fail-closed backstop: the two exit-0 cases (unparseable event,
+  // Defensive fail-closed safety check: the two exit-0 cases (unparseable event,
   // non-SendMessage tool) are decided before this can be reached, and JSON.parse
   // has its own inner catch, so any error arriving here is on a SendMessage event
   // that must block, not allow.

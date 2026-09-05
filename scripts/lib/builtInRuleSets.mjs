@@ -3,7 +3,7 @@
 // Two repository checks hold a property of those sets --
 // check-zero-setup-keys.mjs and check-built-in-set-versions.mjs -- and both need
 // the same thing: the field set and the key set as VALUES, not as text. Reading
-// them from the source rather than from the built package is deliberate. The
+// them from the source rather than from the built package is by design. The
 // arrays are module-private (`getDefaultLinkageTerms` is the only way out of
 // that module, and it filters), and a check that imported a built dist would
 // pass against a stale build -- the one failure mode a guard over source content
@@ -51,7 +51,7 @@ function describe(node) {
  * The value a literal initializer denotes: strings, numbers, booleans, arrays,
  * and object literals of those. Anything else raises {@link
  * UnreadableDeclaration} naming the syntax, so a declaration that stopped being
- * a literal fails the checks over it rather than reading as an empty one.
+ * a literal fails the checks over it rather than being treated as an empty one.
  */
 export function literalValue(node) {
   if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
@@ -183,7 +183,7 @@ export function readRuleSets(source) {
 
 /**
  * {@link readRuleSets} over the tree at `root`. A source file the tree does not
- * carry at all -- reachable through a caller's `--root` pointed at a tree
+ * hold at all -- reachable through a caller's `--root` pointed at a tree
  * missing it -- is unreadable the same way a bad declaration is, under
  * {@link RULE_SET_SOURCE} rather than a declaration name, so a caller's
  * `unreadable`-to-`blocked` mapping covers this failure with no separate catch
@@ -221,7 +221,7 @@ export function canonicalize(value) {
   return value;
 }
 
-/** The pin a set's content carries: sha256 over its canonicalized form. */
+/** The pin that identifies a set's content: sha256 over its canonicalized form. */
 export function contentDigest(content) {
   const canonical = JSON.stringify(canonicalize(content));
   return `sha256:${createHash("sha256").update(canonical).digest("hex")}`;

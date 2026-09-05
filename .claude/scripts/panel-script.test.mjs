@@ -44,7 +44,7 @@ const answer = (position) => ({
 });
 
 describe("panel command wiring", () => {
-  it("invokes the script this file tests, and carries no script of its own", () => {
+  it("invokes the script this file tests, and has no script of its own", () => {
     const command = readFileSync(resolve(root, COMMAND), "utf8");
     expect(command).toContain(SCRIPT);
     expect(jsBlocks(command)).toEqual([]);
