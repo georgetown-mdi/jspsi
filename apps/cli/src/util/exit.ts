@@ -16,8 +16,8 @@ import {
  * The process exit code for a failure in this implementation rather than in
  * anything the operator, the partner, or the transport supplied: `EX_SOFTWARE`
  * (70), the sysexits code for an internal software error. Held by core's
- * {@link InternalConsistencyError}, whose only raise site is the single-pass
- * send-time reply-cap safety check, and set nowhere else.
+ * {@link InternalConsistencyError}, which core raises where it finds one of
+ * its own invariants broken.
  *
  * Distinct from both neighbours: 64 would name the operator's input as what to
  * fix when the run already found their declared sizes within budget, and 69
