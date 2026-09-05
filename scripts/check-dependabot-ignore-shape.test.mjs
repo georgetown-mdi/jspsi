@@ -3,11 +3,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import {
-  fileReferences,
-  pinViolations,
-  treeReferences,
-} from "./check-action-pin-drift.mjs";
+import { pinViolations } from "./check-action-pin-drift.mjs";
 import {
   coversAction,
   githubActionsIgnoreEntries,
@@ -15,6 +11,7 @@ import {
   shapeViolations,
   suppressesWithinMajor,
 } from "./check-dependabot-ignore-shape.mjs";
+import { fileReferences, treeReferences } from "./lib/workflows.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");

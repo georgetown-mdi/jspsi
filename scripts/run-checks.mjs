@@ -149,14 +149,9 @@ export const CHECKS = [
       "A wire-format change from the first published release onward moves PROTOCOL_VERSION.",
   },
   {
-    script: "check:disclosure-recovery",
+    script: "check:exchange-record-version",
     description:
-      "EXCHANGE_RECORD_VERSION cannot move while the disclosure-accounting recovery path it defers to is absent.",
-  },
-  {
-    script: "check:exchange-record-reset",
-    description:
-      "EXCHANGE_RECORD_VERSION is not the reset value below the release marker apps/cli/package.json states, and is that value at and above it.",
+      "EXCHANGE_RECORD_VERSION stands where the disclosure-accounting recovery was driven against it, and is the reset value at and above the release marker apps/cli/package.json states, not below.",
   },
   {
     script: "check:stun-default-claims",

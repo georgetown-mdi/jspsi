@@ -2,8 +2,8 @@
 // published one, shared by the checks that read it: check-release-version.mjs
 // holds a pushed release tag to it, check-protocol-version-bump.mjs reads it as
 // the marker deciding whether the wire-format pin binds yet, and
-// check-exchange-record-reset.mjs as the marker the record-format reset is dated
-// by. One manifest path, one reader, and one publication floor, so no two of
+// check-exchange-record-version.mjs as the marker the record-format reset is
+// dated by. One manifest path, one reader, and one publication floor, so no two of
 // them can come to disagree about which file carries the release version, what
 // counts as carrying one, or when first publication happens.
 

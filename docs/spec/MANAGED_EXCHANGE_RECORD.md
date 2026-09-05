@@ -1115,7 +1115,8 @@ whole-read rejection above exists to prevent. The export hands over stored bytes
 and makes no claim about them; an extracted entry is an archival artifact, and a
 build that does not recognize its version will not re-check it.
 
-A bump is held to re-taking this decision by `npm run check:disclosure-recovery`,
+A bump is held to re-taking this decision by
+`npm run check:exchange-record-version`,
 which pins the record version literal and fails the move rather than letting it
 ship past the obligation.
 

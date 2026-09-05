@@ -65,10 +65,10 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { parse } from "yaml";
+import { WORKFLOW_DIR, workflowDocument } from "./lib/workflows.mjs";
 
 /** The workflow whose push filter decides when a deploy runs. */
-export const DEPLOY_WORKFLOW = ".github/workflows/eb_deploy.yaml";
+export const DEPLOY_WORKFLOW = `${WORKFLOW_DIR}/eb_deploy.yaml`;
 
 /** The build output the deployed artifact is packaged from. */
 export const BUILD_OUTPUT = "apps/web/.output";
@@ -133,13 +133,13 @@ const WILDCARD_SUFFIX = "/**";
 const GLOB_CHARACTERS = /[*?[\]{}!+@()|]/;
 
 /**
- * The `paths` list of the deploy workflow's push trigger, in file order.
+ * The `paths` list of the parsed deploy workflow's push trigger, in file order.
  * Throws when the trigger is not shaped the way this check reads it, so a
  * workflow restructured out from under the check fails rather than yielding an
  * empty filter that matches nothing and reports every source as uncovered.
  */
-export function readTriggerPaths(workflowSource) {
-  const paths = parse(workflowSource)?.on?.push?.paths;
+export function readTriggerPaths(workflow) {
+  const paths = workflow?.on?.push?.paths;
   if (!Array.isArray(paths) || paths.length === 0) {
     throw new Error(
       `${DEPLOY_WORKFLOW} declares no on.push.paths list. Either the deploy trigger stopped being path-filtered -- in which case every push deploys and this check is obsolete -- or the workflow was restructured; scripts/check-deploy-trigger-graph.mjs reads that list and has to be updated with it.`,
@@ -353,7 +353,7 @@ export function trackedFiles(repoRoot) {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const repoRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
   const filter = compileFilter(
-    readTriggerPaths(readFileSync(resolve(repoRoot, DEPLOY_WORKFLOW), "utf8")),
+    readTriggerPaths(workflowDocument(repoRoot, DEPLOY_WORKFLOW)),
   );
   const graph = collectGraph(repoRoot);
   const missingRoots = unreachedRoots(graph);

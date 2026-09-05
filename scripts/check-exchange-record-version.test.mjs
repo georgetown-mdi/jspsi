@@ -15,31 +15,42 @@ import { afterAll, describe, expect, it } from "vitest";
 import {
   CHECKLIST_HEADING,
   CHECKLIST_STEP,
+  CHECK_SOURCE,
   PRE_PUBLICATION_RELEASE,
+  RECORD_VERSION_PIN,
   RECORD_VERSION_SOURCE,
+  RECOVERY_ENTRY_POINTS,
   RELEASE_MANIFEST,
   RESET_RECORD_VERSION,
-  RESET_SOURCE,
   RESET_TAKEN_AT_RELEASE,
+  bumpViolations,
+  declaredRecordVersion,
+  missingRecoveryEntryPoints,
   resetViolations,
-} from "./check-exchange-record-reset.mjs";
+} from "./check-exchange-record-version.mjs";
 import { PRE_PUBLICATION_RELEASE as PROTOCOL_CHECK_FLOOR } from "./check-protocol-version-bump.mjs";
 import { CHECKS } from "./run-checks.mjs";
-import { declaredRecordVersion } from "./lib/exchangeRecordVersion.mjs";
 
 /**
- * The first-publication reset rule. Its two halves bind at opposite ends of one
- * release marker -- the literal must not be the reset value before it, and must
- * be at it -- and the repository sits on the first half, so the armed states are
- * driven through the real script against fixture trees.
+ * The two obligations the exchange-record literal carries. The bump rule's whole
+ * value is that it fires on a move and on nothing else; the reset rule's two
+ * halves bind at opposite ends of one release marker, and the repository sits on
+ * the first half. So the move and the armed reset states are driven through the
+ * real script against fixture trees, and the rules that read the tree as it
+ * stands read the real sources rather than strings that look like them.
  */
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
-const SCRIPT = resolve(here, "check-exchange-record-reset.mjs");
+const SCRIPT = resolve(here, "check-exchange-record-version.mjs");
 
 const readRoot = (relative) =>
   readFileSync(resolve(repoRoot, relative), "utf8");
+
+/** The real recovery sources, as the check reads them. */
+const realSources = Object.fromEntries(
+  Object.keys(RECOVERY_ENTRY_POINTS).map((file) => [file, readRoot(file)]),
+);
 
 const temporaryRoots = [];
 afterAll(() => {
@@ -53,7 +64,7 @@ const FIRST_PUBLISHED_RELEASE = "0.2.0";
 /** The kinds a set of violations reports, in the order reported. */
 const kindsOf = (violations) => violations.map(({ kind }) => kind);
 
-/** The state the check reads, with `overrides` applied. */
+/** The state the reset rule reads, with `overrides` applied. */
 function state(overrides = {}) {
   return {
     published: false,
@@ -74,16 +85,19 @@ function publishedState(overrides = {}) {
 }
 
 /**
- * A tree carrying only what the check reads: the release manifest and the record
- * version source. This is how the states beyond this repository's own are driven
- * end to end through the real script.
+ * A tree carrying what the check reads: the release manifest, the record version
+ * source, and the recovery sources, copied so the recovery rule reads the real
+ * declarations. `omitRecovery` leaves one of them out, which is how the deleted
+ * source is reached. This is how the states beyond this repository's own are
+ * driven end to end through the real script.
  */
 function fixtureTree({
   releaseVersion = PRE_PUBLICATION_RELEASE,
   declared = DEVELOPMENT_VERSION,
   recordSource,
+  omitRecovery = null,
 } = {}) {
-  const root = mkdtempSync(resolve(tmpdir(), "psilink-record-reset-"));
+  const root = mkdtempSync(resolve(tmpdir(), "psilink-record-version-"));
   temporaryRoots.push(root);
   const write = (relative, content) => {
     mkdirSync(resolve(root, dirname(relative)), { recursive: true });
@@ -94,6 +108,11 @@ function fixtureTree({
     RECORD_VERSION_SOURCE,
     recordSource ?? `export const EXCHANGE_RECORD_VERSION = "${declared}";\n`,
   );
+  for (const file of Object.keys(RECOVERY_ENTRY_POINTS)) {
+    if (file === omitRecovery) continue;
+    mkdirSync(resolve(root, dirname(file)), { recursive: true });
+    copyFileSync(resolve(repoRoot, file), resolve(root, file));
+  }
   return root;
 }
 
@@ -111,7 +130,96 @@ function runCheck(root, script = SCRIPT) {
   }
 }
 
-describe("the marker the reset is dated by", () => {
+describe("reading the declared record version", () => {
+  it("reads the literal out of the real source", () => {
+    expect(declaredRecordVersion(readRoot(RECORD_VERSION_SOURCE))).toBe(
+      RECORD_VERSION_PIN,
+    );
+  });
+
+  it("reads a moved literal as the moved value", () => {
+    expect(
+      declaredRecordVersion(
+        'export const EXCHANGE_RECORD_VERSION = "psilink-exchange-record/v7";',
+      ),
+    ).toBe("psilink-exchange-record/v7");
+  });
+
+  it("reads none from a declaration that is not a quoted literal", () => {
+    // A computed or re-exported constant is not a value this check can compare,
+    // and guessing one would make the rule silently inert.
+    for (const source of [
+      "export const EXCHANGE_RECORD_VERSION = RECORD_VERSIONS.current;",
+      "export const EXCHANGE_RECORD_VERSION = `psilink-exchange-record/v${n}`;",
+      "export { EXCHANGE_RECORD_VERSION } from './versions';",
+      "",
+    ]) {
+      expect(declaredRecordVersion(source)).toBeUndefined();
+    }
+  });
+});
+
+describe("rule 1 fires on a version move and on nothing else", () => {
+  it("passes against the tree as it stands", () => {
+    expect(bumpViolations(RECORD_VERSION_PIN, realSources)).toEqual([]);
+  });
+
+  it("fails a simulated move, naming the obligation rather than only the mismatch", () => {
+    const violations = bumpViolations(
+      "psilink-exchange-record/v7",
+      realSources,
+    );
+
+    expect(kindsOf(violations)).toEqual(["moved"]);
+    const [{ message }] = violations;
+    // Both versions, so which of the two is wrong is the maintainer's call.
+    expect(message).toContain(RECORD_VERSION_PIN);
+    expect(message).toContain("psilink-exchange-record/v7");
+    // The obligation itself: what a move does to a stored accounting, and what
+    // has to be re-taken before the new value is recorded.
+    expect(message).toContain("accounting of disclosures");
+    expect(message).toContain("RECORD_VERSION_PIN");
+    expect(message).toContain(
+      "apps/web/test/unit/disclosureAccounting.test.ts",
+    );
+  });
+});
+
+describe("the recovery path rule 1 points at", () => {
+  it("finds every entry point in the real sources", () => {
+    expect(missingRecoveryEntryPoints(realSources)).toEqual([]);
+  });
+
+  it("fails when an entry point is gone, so the rule cannot defer to nothing", () => {
+    // A tree that dropped the recovery would otherwise pass the pin check while
+    // deferring a bump decision to a path that no longer exists.
+    const [file] = Object.keys(RECOVERY_ENTRY_POINTS);
+    const [name] = RECOVERY_ENTRY_POINTS[file];
+    const gutted = {
+      ...realSources,
+      [file]: realSources[file].replace(
+        `export function ${name}`,
+        `function ${name}`,
+      ),
+    };
+
+    expect(missingRecoveryEntryPoints(gutted)).toEqual([{ file, name }]);
+    expect(bumpViolations(RECORD_VERSION_PIN, gutted)[0].message).toContain(
+      "nothing to defer to",
+    );
+  });
+
+  it("reports every missing entry point, not just the first", () => {
+    const empty = Object.fromEntries(
+      Object.keys(RECOVERY_ENTRY_POINTS).map((file) => [file, ""]),
+    );
+    const expected = Object.values(RECOVERY_ENTRY_POINTS).flat().length;
+
+    expect(missingRecoveryEntryPoints(empty)).toHaveLength(expected);
+  });
+});
+
+describe("the marker rule 2 is dated by", () => {
   it("is the same publication floor the wire-format pin arms on", () => {
     // One definition of "first publication" rather than two: the reset and the
     // protocol bump are dated by the same release, so a moved floor moves both.
@@ -173,9 +281,9 @@ describe("at the release that publishes the reset", () => {
   });
 });
 
-describe("the recorded discharge", () => {
+describe("the recorded reset discharge", () => {
   it("retires the rule, so a later forward bump is not held to the reset", () => {
-    // The reset is taken once. Without this the check would fail every ordinary
+    // The reset is taken once. Without this the rule would fail every ordinary
     // bump after publication, demanding a version that already shipped.
     for (const declared of [
       RESET_RECORD_VERSION,
@@ -224,31 +332,52 @@ describe("the recorded discharge", () => {
 });
 
 describe("the check as CI runs it", () => {
-  it("passes against the committed tree, naming the reset still to come", () => {
+  it("passes against the committed tree, reporting both obligations", () => {
     const { status, stdout } = runCheck();
 
     expect(status).toBe(0);
+    expect(stdout).toContain(RECORD_VERSION_PIN);
+    expect(stdout).toContain("recovery path");
     expect(stdout).toContain("development counter");
     expect(stdout).toContain(RESET_RECORD_VERSION);
   });
 
-  it("reads the committed literal as a value the reset has not reached", () => {
-    expect(declaredRecordVersion(readRoot(RECORD_VERSION_SOURCE))).not.toBe(
-      RESET_RECORD_VERSION,
-    );
+  it("passes against a fixture copy of that tree, so the fixture is faithful", () => {
+    const { status, stdout } = runCheck(fixtureTree());
+
+    expect(status).toBe(0);
+    expect(stdout).toContain(RECORD_VERSION_PIN);
   });
 
-  it("fails a published release that did not take the reset", () => {
+  it("reports both rules on one moved literal, in one run", () => {
     const { status, stderr } = runCheck(
-      fixtureTree({ releaseVersion: FIRST_PUBLISHED_RELEASE }),
+      fixtureTree({
+        releaseVersion: FIRST_PUBLISHED_RELEASE,
+        declared: "psilink-exchange-record/v7",
+      }),
     );
 
     expect(status).toBe(1);
-    expect(stderr).toContain("Exchange record reset check failed");
+    expect(stderr).toContain("Exchange record version check failed");
+    expect(stderr).toContain("moved from");
     expect(stderr).toContain(RESET_RECORD_VERSION);
   });
 
-  it("fails a reset taken before that release", () => {
+  it("reports a deleted recovery source rather than crashing on the read", () => {
+    // Deleting the file outright is the loudest form of the failure rule 1
+    // reports, so it must reach the message naming the entry point: an ENOENT
+    // out of the read still exits non-zero, with CI red and the diagnostic lost.
+    const [omitted] = Object.keys(RECOVERY_ENTRY_POINTS);
+    const { status, stderr } = runCheck(fixtureTree({ omitRecovery: omitted }));
+
+    expect(status).toBe(1);
+    expect(stderr).not.toContain("ENOENT");
+    expect(stderr).toContain("nothing to defer to");
+    for (const name of RECOVERY_ENTRY_POINTS[omitted])
+      expect(stderr).toContain(`${omitted}: "${name}"`);
+  });
+
+  it("fails a reset taken before the release that publishes it", () => {
     const { status, stderr } = runCheck(
       fixtureTree({ declared: RESET_RECORD_VERSION }),
     );
@@ -269,34 +398,45 @@ describe("the check as CI runs it", () => {
     expect(stderr).toContain("records no discharge");
   });
 
-  it("passes a published release whose recorded discharge retires the rule", () => {
-    // The retire driven through the real script, since the discharge is a
-    // constant in the check rather than an input the fixture tree carries.
-    const scriptRoot = mkdtempSync(resolve(tmpdir(), "psilink-reset-script-"));
+  it("passes a published release whose recorded discharges retire both rules", () => {
+    // Both discharges driven through the real script, since each is a constant
+    // in the check rather than an input the fixture tree carries.
+    const moved = "psilink-exchange-record/v2";
+    const scriptRoot = mkdtempSync(
+      resolve(tmpdir(), "psilink-record-version-script-"),
+    );
     temporaryRoots.push(scriptRoot);
     mkdirSync(resolve(scriptRoot, "scripts/lib"), { recursive: true });
-    for (const relative of [
-      "scripts/lib/exchangeRecordVersion.mjs",
+    for (const module of [
+      "scripts/lib/deferredObligation.mjs",
       "scripts/lib/releaseManifest.mjs",
     ]) {
-      copyFileSync(resolve(repoRoot, relative), resolve(scriptRoot, relative));
+      copyFileSync(resolve(repoRoot, module), resolve(scriptRoot, module));
     }
-    const declaration = "export const RESET_TAKEN_AT_RELEASE = undefined;";
-    const source = readRoot(RESET_SOURCE);
-    expect(source).toContain(declaration);
-    const staged = resolve(scriptRoot, RESET_SOURCE);
+    const source = readRoot(CHECK_SOURCE);
+    const edits = [
+      [
+        "export const RESET_TAKEN_AT_RELEASE = undefined;",
+        `export const RESET_TAKEN_AT_RELEASE = "${FIRST_PUBLISHED_RELEASE}";`,
+      ],
+      [
+        `export const RECORD_VERSION_PIN = "${RECORD_VERSION_PIN}";`,
+        `export const RECORD_VERSION_PIN = "${moved}";`,
+      ],
+    ];
+    const staged = resolve(scriptRoot, CHECK_SOURCE);
     writeFileSync(
       staged,
-      source.replace(
-        declaration,
-        `export const RESET_TAKEN_AT_RELEASE = "${FIRST_PUBLISHED_RELEASE}";`,
-      ),
+      edits.reduce((text, [from, to]) => {
+        expect(text).toContain(from);
+        return text.replace(from, to);
+      }, source),
     );
 
     const { status, stdout } = runCheck(
       fixtureTree({
         releaseVersion: FIRST_PUBLISHED_RELEASE,
-        declared: "psilink-exchange-record/v2",
+        declared: moved,
       }),
       staged,
     );
@@ -331,6 +471,27 @@ describe("the check as CI runs it", () => {
     expect(stderr).toContain("extraction pattern rotted");
   });
 
+  it("reports the missing recovery entry points beside a literal it cannot read", () => {
+    // The recovery rule reads the recovery sources and not the literal, so a
+    // tree that lost both gets both reports in one run: whoever fixes the
+    // extraction pattern would otherwise meet the second failure only on the
+    // next run.
+    const [omitted] = Object.keys(RECOVERY_ENTRY_POINTS);
+    const { status, stderr } = runCheck(
+      fixtureTree({
+        recordSource:
+          "export const EXCHANGE_RECORD_VERSION = RECORD_VERSIONS.current;\n",
+        omitRecovery: omitted,
+      }),
+    );
+
+    expect(status).toBe(1);
+    expect(stderr).toContain("extraction pattern rotted");
+    expect(stderr).toContain("nothing to defer to");
+    for (const name of RECOVERY_ENTRY_POINTS[omitted])
+      expect(stderr).toContain(`${omitted}: "${name}"`);
+  });
+
   it("refuses a --root it was handed no value for", () => {
     const { status } = (() => {
       try {
@@ -351,14 +512,14 @@ describe("the check as CI runs it", () => {
 describe("the check's registration", () => {
   it("is the command the workflow invokes", () => {
     expect(JSON.parse(readRoot("package.json")).scripts).toHaveProperty(
-      "check:exchange-record-reset",
-      `node ${RESET_SOURCE}`,
+      "check:exchange-record-version",
+      `node ${CHECK_SOURCE}`,
     );
   });
 
   it("is on the list the Static Checks gate runs", () => {
     expect(CHECKS.map((check) => check.script)).toContain(
-      "check:exchange-record-reset",
+      "check:exchange-record-version",
     );
   });
 
@@ -371,7 +532,7 @@ describe("the check's registration", () => {
 
     expect(releases).toContain(`#### ${CHECKLIST_HEADING}`);
     expect(releases).toContain(RESET_RECORD_VERSION);
-    expect(releases).toContain("npm run check:exchange-record-reset");
+    expect(releases).toContain("npm run check:exchange-record-version");
     expect(releases).toContain("RESET_TAKEN_AT_RELEASE");
     // The two artifact classes a downward move leaves misread, by name. The
     // web-store names are extracted from the constants the store actually

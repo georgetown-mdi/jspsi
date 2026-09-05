@@ -75,9 +75,14 @@
 
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  obligationRoot,
+  reportBlocked,
+  reportViolations,
+} from "./lib/deferredObligation.mjs";
 import {
   PRE_PUBLICATION_RELEASE,
   RELEASE_MANIFEST,
@@ -102,6 +107,9 @@ export const VECTORS_DIRECTORY = "packages/core/test/vectors";
 
 /** The recorded pin per published PROTOCOL_VERSION. */
 export const PINS_FILE = "scripts/protocol-version-pins.json";
+
+/** This file, named by the usage line its command line prints. */
+export const CHECK_SOURCE = "scripts/check-protocol-version-bump.mjs";
 
 /** The paragraph stating the rule, named by every failure this check reports. */
 export const SPEC_PARAGRAPH =
@@ -427,33 +435,16 @@ export function ledgerSuggestionVersion(pins, protocolVersion) {
     : protocolVersion + 1;
 }
 
+/** This check as its reports name it. */
+const LABEL = "Protocol version bump check";
+
 // CLI entry: only runs when invoked directly, so the tests can import the pure
-// functions without the process.exit. `--root` points the run at another tree,
-// which is how the tests drive the armed states this repository has not reached.
+// functions without the process.exit.
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const args = process.argv.slice(2);
-  const rootFlag = args.indexOf("--root");
-  const root =
-    rootFlag === -1
-      ? resolve(dirname(fileURLToPath(import.meta.url)), "..")
-      : resolve(args[rootFlag + 1] ?? "");
-  if (rootFlag !== -1 && args[rootFlag + 1] === undefined) {
-    console.error(
-      "usage: node scripts/check-protocol-version-bump.mjs [--root <tree>]",
-    );
-    process.exit(2);
-  }
+  const report = inspect(obligationRoot(process.argv.slice(2), CHECK_SOURCE));
+  if (reportBlocked(LABEL, report.blocked)) process.exit(1);
 
-  const report = inspect(root);
-  if (report.blocked.length > 0) {
-    console.error("Protocol version bump check could not run:\n");
-    for (const reason of report.blocked) console.error("  " + reason);
-    process.exit(1);
-  }
-
-  if (report.violations.length > 0) {
-    console.error("Protocol version bump check failed:\n");
-    for (const { message } of report.violations) console.error("  " + message);
+  if (reportViolations(LABEL, report.violations)) {
     if (
       report.violations.some(
         ({ kind }) => kind === "record" || kind === "moved",

@@ -144,12 +144,12 @@ The canonical release version is also what arms the wire-format pin. `npm run ch
 
 #### Reset the exchange-record format at first publication
 
-`EXCHANGE_RECORD_VERSION` is an internal development counter, cycled freely because no published artifact contains any of its literals. The first release above `0.1.0` ships it reset to `psilink-exchange-record/v1`, and `npm run check:exchange-record-reset` -- armed by the same marker -- fails from that release until the reset is taken. Take it as one piece:
+`EXCHANGE_RECORD_VERSION` is an internal development counter, cycled freely because no published artifact contains any of its literals. The first release above `0.1.0` ships it reset to `psilink-exchange-record/v1`, and `npm run check:exchange-record-version` -- armed by the same marker -- fails from that release until the reset is taken. Take it as one piece:
 
 1. Set `EXCHANGE_RECORD_VERSION` to `psilink-exchange-record/v1` in `packages/core/src/exchangeRecord.ts`.
 2. Regenerate the record vectors through their generator, `packages/core/test/vectors/generate-exchange-record-vectors.mjs`; `npm run check:vectors` holds every vectors file to its generator.
-3. Discharge the obligations `scripts/check-disclosure-recovery.mjs` names -- it fails on its own once the literal moves -- and re-record its `RECORD_VERSION_PIN`.
-4. Clear the development artifacts below, then record the reset: set `RESET_TAKEN_AT_RELEASE` to `X.Y.Z` in `scripts/check-exchange-record-reset.mjs`. That retires the rule, so an ordinary forward bump after this release is not held to `v1`.
+3. Discharge the recovery obligations `scripts/check-exchange-record-version.mjs` names -- they fail on their own once the literal moves -- and re-record its `RECORD_VERSION_PIN`.
+4. Clear the development artifacts below, then record the reset: set `RESET_TAKEN_AT_RELEASE` to `X.Y.Z` in the same file. That retires the rule, so an ordinary forward bump after this release is not held to `v1`.
 
 **Clearing development artifacts.** This reset moves the literal downward, and a leftover artifact the counter numbered on its way up is misread rather than refused. Two classes can hold one, and no released artifact is among them: `packages/core/src/exchangeRecord.ts` does not exist at `v0.1.0`, so nothing published contains a `psilink-exchange-record/vN` literal at all.
 

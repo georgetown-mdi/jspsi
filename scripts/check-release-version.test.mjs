@@ -4,13 +4,12 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import { parse } from "yaml";
-
 import {
   agreementViolations,
   manifestVersion,
   taggedVersion,
 } from "./check-release-version.mjs";
+import { WORKFLOW_DIR, workflowDocument } from "./lib/workflows.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
@@ -141,7 +140,10 @@ describe("the check as the release workflow runs it", () => {
 });
 
 describe("the release workflow's version check step", () => {
-  const releaseDocument = parse(readRoot(".github/workflows/release.yaml"));
+  const releaseDocument = workflowDocument(
+    repoRoot,
+    `${WORKFLOW_DIR}/release.yaml`,
+  );
   const publishJobs = Object.values(releaseDocument.jobs).filter((job) =>
     (job.steps ?? []).some((step) => (step.with ?? {}).push === true),
   );

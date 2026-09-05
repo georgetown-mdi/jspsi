@@ -27,6 +27,7 @@ import {
   tagFilters,
   unescapeRegexLiteral,
 } from "./check-release-signing.mjs";
+import { parseWorkflow } from "./lib/workflows.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
@@ -34,6 +35,10 @@ const SCRIPT = resolve(here, "check-release-signing.mjs");
 
 const readRoot = (relative) =>
   readFileSync(resolve(repoRoot, relative), "utf8");
+
+// The rule reads a parsed workflow; each case states the source it stands for.
+const tagFiltersIn = (source) =>
+  tagFilters(parseWorkflow("fixture.yaml", source));
 
 const RELEASE_WORKFLOW = ".github/workflows/release.yaml";
 const releaseWorkflowSource = readRoot(RELEASE_WORKFLOW);
@@ -279,12 +284,12 @@ describe("a tag filter as a regular expression", () => {
 
 describe("the tag trigger a workflow declares", () => {
   it("reads the committed release trigger", () => {
-    expect(tagFilters(releaseWorkflowSource)).toEqual([TAG_FILTER]);
+    expect(tagFiltersIn(releaseWorkflowSource)).toEqual([TAG_FILTER]);
   });
 
   it("reads a scalar filter and an absent trigger", () => {
-    expect(tagFilters("on:\n  push:\n    tags: v*\n")).toEqual(["v*"]);
-    expect(tagFilters("on:\n  pull_request:\n")).toEqual([]);
+    expect(tagFiltersIn("on:\n  push:\n    tags: v*\n")).toEqual(["v*"]);
+    expect(tagFiltersIn("on:\n  pull_request:\n")).toEqual([]);
   });
 });
 

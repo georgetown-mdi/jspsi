@@ -1,8 +1,6 @@
-import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -13,15 +11,16 @@ import {
   rootScripts,
   summarize,
 } from "./run-checks.mjs";
+import { WORKFLOW_DIR, workflowDocument } from "./lib/workflows.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const WORKFLOW = ".github/workflows/static_checks.yaml";
+const WORKFLOW = `${WORKFLOW_DIR}/static_checks.yaml`;
 const GUARD_JOB = "repo-guards";
 
 const scripts = rootScripts(ROOT);
 
 function guardJobSteps() {
-  const workflow = parse(readFileSync(resolve(ROOT, WORKFLOW), "utf8"));
+  const workflow = workflowDocument(ROOT, WORKFLOW);
   return workflow.jobs[GUARD_JOB].steps;
 }
 

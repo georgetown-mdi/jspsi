@@ -75,14 +75,15 @@
 //     workflow's self-verify step is what measures that, and this check is what
 //     keeps the step's two arguments the published ones.
 
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { parse } from "yaml";
-
-const WORKFLOW_DIR = ".github/workflows";
-const WORKFLOW_FILE = /\.ya?ml$/;
+import {
+  WORKFLOW_DIR,
+  parseWorkflow,
+  readWorkflows,
+} from "./lib/workflows.mjs";
 
 /** The document publishing the verification commands a partner runs. */
 export const RELEASES_DOC = "docs/RELEASES.md";
@@ -253,9 +254,9 @@ export function refPatternForTagFilter(filter) {
   return { pattern: filter.replace(/\./g, "\\.") };
 }
 
-/** The tag filters a workflow's `on.push.tags` trigger carries. */
-export function tagFilters(source) {
-  const tags = parse(source)?.on?.push?.tags;
+/** The tag filters a parsed workflow's `on.push.tags` trigger holds. */
+export function tagFilters(workflow) {
+  const tags = workflow?.on?.push?.tags;
   if (typeof tags === "string") return [tags];
   return Array.isArray(tags) ? tags : [];
 }
@@ -371,7 +372,7 @@ function verifyArgumentViolations({ step, where, file, published }) {
  * not publish, so a step is held only to carrying the argument at all.
  */
 export function publishSequenceViolations(source, file, published = {}) {
-  const jobs = parse(source)?.jobs;
+  const jobs = parseWorkflow(file, source)?.jobs;
   const violations = [];
   let pushed = 0;
 
@@ -554,7 +555,7 @@ export function couplingViolations({
     );
   }
 
-  const filters = tagFilters(workflowSource);
+  const filters = tagFilters(parseWorkflow(workflowPath, workflowSource));
   if (filters.length !== 1) {
     violations.push(
       `${workflowPath} triggers on ${filters.length} tag filters${filters.length === 0 ? "" : ` (${list(filters)})`}, and this check holds the published identity against exactly one. Either the workflow lost the tag trigger the signer identity is made of, or the identity now covers a set of filters that has to be compared by hand.`,
@@ -582,8 +583,8 @@ export function couplingViolations({
  * `{problem}` when the tree holds other than exactly one.
  */
 export function findSigningWorkflow(workflows) {
-  const signing = workflows.filter(({ source }) => {
-    const jobs = parse(source)?.jobs;
+  const signing = workflows.filter(({ path, source }) => {
+    const jobs = parseWorkflow(path, source)?.jobs;
     return Object.values(jobs ?? {}).some((job) =>
       (Array.isArray(job?.steps) ? job.steps : []).some(
         (step) => classifyStep(step).role === "sign",
@@ -597,16 +598,6 @@ export function findSigningWorkflow(workflows) {
         ? `no workflow under ${WORKFLOW_DIR} runs \`cosign sign\`, so nothing signs a release image, or the step shape this check reads has moved`
         : `${signing.length} workflows under ${WORKFLOW_DIR} run \`cosign sign\` (${list(signing.map(({ path }) => path))}), and this check holds the published identity against exactly one signer`,
   };
-}
-
-function readWorkflows(root) {
-  return readdirSync(resolve(root, WORKFLOW_DIR))
-    .filter((name) => WORKFLOW_FILE.test(name))
-    .sort()
-    .map((name) => ({
-      path: `${WORKFLOW_DIR}/${name}`,
-      source: readFileSync(resolve(root, WORKFLOW_DIR, name), "utf8"),
-    }));
 }
 
 /**
