@@ -1055,7 +1055,9 @@ jobs:
 
       # Step 2 of the recipe, in the doc's own order and at the doc's own rule
       # numbers: -I inserts at the position given, so the numbering is what
-      # keeps the DROP last rather than first.
+      # keeps the DROP last rather than first. The rule lines are held identical
+      # to the doc's by scripts/egress-recipe-parity.test.mjs, which the scripts
+      # suite runs on every pull request, this workflow's paths trigger or not.
       - name: Apply the documented DOCKER-USER allowlist
         run: |
           set -euo pipefail

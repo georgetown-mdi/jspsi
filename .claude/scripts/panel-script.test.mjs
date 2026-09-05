@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { jsBlocks } from "../../scripts/check-workflow-agent-models.mjs";
+import { jsBlocks } from "../../scripts/lib/markdownFences.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const COMMAND = ".claude/commands/panel.md";

@@ -6,7 +6,6 @@ import {
   agentCallCount,
   agentCalls,
   agentUses,
-  jsBlocks,
   modelViolations,
   pinnedModels,
   sourceFiles,
@@ -65,11 +64,6 @@ describe("workflow agent model check", () => {
     expect(violations).toHaveLength(1);
     expect(violations[0].line).toBe(2);
     expect(violations[0].problem).toContain("no literal `model:`");
-  });
-
-  it("reads only js fences, and reports their line numbers", () => {
-    const source = `intro\n${FENCE}sh\nnpm test\n${FENCE}\nmid\n${FENCE}js\nconst a = 1\n${FENCE}\n`;
-    expect(jsBlocks(source)).toEqual([{ code: "const a = 1", startLine: 7 }]);
   });
 
   it("reads the CommonMark fence forms a plain ```js pattern misses", () => {
