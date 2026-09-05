@@ -211,6 +211,14 @@ string, which is what RFC 8785 requires:
   refusal; a well-formed surrogate pair is unaffected and emits its raw UTF-8
   bytes, as the `astral-emoji` vector fixes.
 
+A linkage terms document MUST be well-formed UTF-16 throughout -- every string
+value, every array element, and every object key, the partner-named
+`transform.params` keys included -- and the terms schema
+(`packages/core/src/config/linkageTermsSchema.ts`) refuses one that is not on
+every parse path, so an exchange refuses such a document where the partner's
+terms are read rather than at the agreed-terms hash, which is computed after
+the exchange has disclosed.
+
 ### Absent versus null
 
 `null` is a value; an absent member is the absence of a key. They are distinct

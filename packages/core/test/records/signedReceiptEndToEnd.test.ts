@@ -1171,3 +1171,90 @@ describe("a run terminated after its disclosure keeps the record of it", () => {
     expect(exchangeRecordOwedButUnbuilt(initiatorFailure)).toBe(false);
   });
 });
+
+describe("partner terms holding a lone surrogate end the run before disclosure", () => {
+  // A lone surrogate is not a Unicode scalar value and has no UTF-8 encoding,
+  // so RFC 8785 requires the canonical encoder to terminate on a string holding
+  // one (docs/spec/CANONICAL_ENCODING.md). The whole terms document is
+  // canonically encoded to compute the agreed-terms hash both the receipt and
+  // the self-attested record commit to, and the hash is computed after the
+  // exchange has disclosed -- so the linkage-terms schema refuses such a
+  // document where the partner's terms are parsed, which is before
+  // compatibility is weighed and before either party's data moves.
+  const LONE_SURROGATE = "\ud800";
+
+  test("the honest party refuses at the terms parse, sending only terms and an abort", async () => {
+    const [rawHonest, rawHostile] = createMessagePipe();
+    const honestSide = recording(rawHonest);
+    const hostileSide = recording(rawHostile);
+
+    const honest = runExchange(
+      honestSide.conn,
+      "initiator",
+      prepared("Initiator Co", both, clientRows),
+      {
+        psiLibrary,
+        signingIdentity: identityA,
+        partnerFingerprint: fingerprintB,
+        sessionKey,
+      },
+    ).then(
+      () => {
+        throw new Error("expected the honest party to refuse");
+      },
+      (reason: unknown) => reason,
+    );
+    // The hostile party signs nothing: its own leg never reaches the swap, and
+    // the identity it authored would not be one its certificate authorizes.
+    const hostile = runExchange(
+      hostileSide.conn,
+      "responder",
+      prepared(`Responder Co${LONE_SURROGATE}`, both, serverRows),
+      { psiLibrary },
+    ).catch((reason: unknown) => reason);
+
+    const raised = await honest;
+    expect((raised as Error).message).toContain(
+      "partner linkage terms failed to parse",
+    );
+    // The refusal reports no receipt and owes no record: nothing was disclosed,
+    // so there is no disclosure for a record to attest and none is lost.
+    expect(exchangeRecordFromFailure(raised)).toBeUndefined();
+    expect(exchangeRecordOwedButUnbuilt(raised)).toBe(false);
+
+    // The timing, read off the wire: the terms frame and then the abort, and
+    // nothing else -- no linkage key, no payload row, no receipt frame. The
+    // hostile side sent its terms and got the abort back.
+    expect(honestSide.sent.map(frameKind)).toEqual(["terms", "abort"]);
+    expect(hostileSide.sent.map(frameKind)).toEqual(["terms"]);
+
+    await rawHonest.close();
+    await rawHostile.close();
+    await hostile;
+  });
+
+  test("the same pair produces a receipt and a record on well-formed terms", async () => {
+    // The control for the refusal above: with the responder's identity
+    // well-formed, the run reaches the swap and both parties hold the three
+    // things the refused run has none of.
+    const [resInit, resResp] = await runBoth(
+      {
+        signingIdentity: identityA,
+        partnerFingerprint: fingerprintB,
+        sessionKey,
+      },
+      {
+        signingIdentity: identityB,
+        partnerFingerprint: fingerprintA,
+        sessionKey,
+      },
+    );
+    expect(resInit.signedReceipt).toBeDefined();
+    expect(resResp.signedReceipt).toBeDefined();
+    expect(resInit.audit?.record.outcome).toBe("completed");
+    expect(resResp.audit?.record.outcome).toBe("completed");
+    expect(resInit.audit?.record.termsHash).toBe(
+      resResp.audit?.record.termsHash,
+    );
+  });
+});

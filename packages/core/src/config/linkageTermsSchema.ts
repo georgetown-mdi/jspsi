@@ -13,6 +13,7 @@ import {
   REGEX_STEP_PATTERN_PARAM,
 } from "./transformRegexDialect.js";
 import { exceedsOwnKeyCount } from "../utils/objectKeyCount.js";
+import { loneSurrogateIndex } from "../utils/wellFormedString.js";
 import {
   COUNT_ONLY_SHAPE_REFUSALS,
   countOnlyShapeViolation,
@@ -90,6 +91,16 @@ export const TEXT_CONTROL_CHAR_PATTERN = /[\u0000-\u001f\u007f-\u009f]/;
  */
 export const TEXT_CONTROL_CHAR_MESSAGE =
   "a linkage terms free-text value must not contain control characters";
+
+/**
+ * Shared refusal message for a terms string -- a member value, an array
+ * element, or an object KEY -- that is not well-formed UTF-16. A fixed literal
+ * naming no submitted value: the offending string is located by the issue
+ * `path`, which `describeDecodeError` escapes segment by segment, as the
+ * unsanitized parse-error path (protocolSetup) requires.
+ */
+export const LONE_SURROGATE_MESSAGE =
+  "a linkage terms text value must not contain an unpaired UTF-16 surrogate";
 
 /**
  * Upper bound on the COUNT of entries in the `linkageFields` and
@@ -215,6 +226,42 @@ const freeTextValue = (schema: z.ZodString) =>
   schema.refine((value) => !TEXT_CONTROL_CHAR_PATTERN.test(value), {
     message: TEXT_CONTROL_CHAR_MESSAGE,
   });
+
+/**
+ * The path within `value` of the first string -- a member value, an array
+ * element, or an object KEY -- holding an unpaired UTF-16 surrogate, or
+ * undefined when every string in it is well-formed
+ * ({@link loneSurrogateIndex}).
+ *
+ * A walk over the parsed document rather than a per-field check: it reaches
+ * every string-typed field the schema declares at once, the keys of a
+ * `transform.params` record, and the arbitrary JSON a param VALUE may hold --
+ * the last of which no per-field refine can be written for. Its depth is
+ * bounded by the camelize pre-pass every parse path runs (MAX_NESTING_DEPTH,
+ * utils/camelizeKeys.ts) and its width by the schema's own count bounds.
+ */
+function loneSurrogatePath(
+  value: unknown,
+  path: PropertyKey[],
+): PropertyKey[] | undefined {
+  if (typeof value === "string")
+    return loneSurrogateIndex(value) >= 0 ? path : undefined;
+  if (Array.isArray(value)) {
+    for (const [index, element] of value.entries()) {
+      const found = loneSurrogatePath(element, [...path, index]);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  }
+  if (value === null || typeof value !== "object") return undefined;
+  for (const [key, child] of Object.entries(value)) {
+    const childPath = [...path, key];
+    if (loneSurrogateIndex(key) >= 0) return childPath;
+    const found = loneSurrogatePath(child, childPath);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
 
 /**
  * A constraint `exclude` denylist: partner-controlled free-text values, each
@@ -1242,6 +1289,22 @@ export const LinkageTermsSchema: z.ZodType<LinkageTerms> =
     .refine((a) => countOnlyShapeViolation(a) !== "payload", {
       message: COUNT_ONLY_SHAPE_REFUSALS.payload,
       path: ["payload"],
+    })
+    // Refuse an ill-formed UTF-16 string anywhere in the document. The terms
+    // are canonically encoded WHOLE -- by validateCompatibility and by
+    // computeTermsHash, which runs after the exchange has disclosed -- and
+    // RFC 8785 requires an encoder to terminate on a lone surrogate, so a
+    // document admitted here ends the run with neither a receipt nor the
+    // record of that disclosure. Every parse path inherits it. Full
+    // reasoning: docs/spec/CANONICAL_ENCODING.md, "Strings".
+    .superRefine((terms, ctx) => {
+      const path = loneSurrogatePath(terms, []);
+      if (path !== undefined)
+        ctx.addIssue({
+          code: "custom",
+          message: LONE_SURROGATE_MESSAGE,
+          path,
+        });
     });
 
 // --- Parse -------------------------------------------------------------------

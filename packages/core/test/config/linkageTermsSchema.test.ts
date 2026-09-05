@@ -12,6 +12,7 @@ import {
   MAX_NAME_LENGTH,
   MAX_TEXT_LENGTH,
   TEXT_CONTROL_CHAR_MESSAGE,
+  LONE_SURROGATE_MESSAGE,
   MAX_LINKAGE_ENTRIES,
   MAX_PARAMS_ENTRIES,
   MAX_PAD_LEFT_LENGTH,
@@ -2098,6 +2099,284 @@ test("an over-count transform params record is rejected without the per-key came
   // Far below TOTAL: a camelize rewrite or per-key record parse would push this to
   // at least TOTAL.
   expect(inspected).toBeLessThan(MAX_PARAMS_ENTRIES * 10);
+});
+
+// --- Well-formed UTF-16 rule -------------------------------------------------
+// Every string in a terms document -- a member value, an array element, and a
+// `transform.params` object KEY -- must be well-formed UTF-16. The whole
+// document is canonically encoded (the cross-party comparison and the
+// agreed-terms hash), and RFC 8785 requires an encoder to terminate on a lone
+// surrogate, so a document admitted here would abort the run only after the
+// exchange had disclosed. The cases below pin the reach: every free-form
+// position refuses by this rule, and the sweep pins that no string position at
+// all admits one.
+
+const LONE_HIGH = "\ud800";
+const ASTRAL_PAIR = "\u{1f600}";
+
+// Every string-bearing structure the schema admits, so a case that plants a
+// lone surrogate at one position leaves every other holding a real value.
+const wideTerms = {
+  ...base,
+  identity: "Agency A",
+  linkageFields: [
+    {
+      name: "lastName",
+      type: "last_name",
+      constraints: {
+        allowedCharacters: "A-Z",
+        affixesAllowed: false,
+        exclude: ["UNKNOWN"],
+      },
+    },
+    { name: "ssn", type: "ssn" },
+  ],
+  linkageKeys: [
+    {
+      name: "SSN",
+      elements: [
+        {
+          field: "ssn",
+          name: "ssnElement",
+          transform: [
+            {
+              function: "trim",
+              params: { note: "keep", nested: { deep: ["value"] } },
+            },
+          ],
+        },
+      ],
+    },
+    {
+      name: "Name pair",
+      elements: [
+        { field: "lastName", name: "left" },
+        { field: "ssn", name: "right" },
+      ],
+      swap: ["left", "right"] as [string, string],
+    },
+  ],
+  linkageRuleSet: {
+    fieldSet: { name: "baseline-pii", version: "1.0.0" },
+    keySet: { name: "baseline-keys", version: "1.0.0" },
+  },
+  payload: {
+    send: [{ name: "enrollmentDate", description: "Date of enrollment" }],
+    receive: [{ name: "programId", description: "Program identifier" }],
+  },
+  legalAgreement: {
+    reference: "MOU-2025-0042",
+    purpose: "Audit of the State tutoring program",
+    expirationDate: "2030-12-31",
+  },
+};
+
+type PathStep = string | number;
+
+const childAt = (node: unknown, step: PathStep): unknown =>
+  Array.isArray(node)
+    ? node[step as number]
+    : (node as Record<string, unknown>)[step as string];
+
+const parentAt = (document: unknown, path: PathStep[]): unknown =>
+  path.slice(0, -1).reduce(childAt, document);
+
+/** A deep copy of `wideTerms` whose string VALUE at `path` gains a lone
+ *  surrogate. */
+const surrogateInValue = (path: PathStep[]): unknown => {
+  const document = structuredClone(wideTerms);
+  const parent = parentAt(document, path);
+  const leaf = path[path.length - 1];
+  const planted = `${String(childAt(parent, leaf))}${LONE_HIGH}`;
+  if (Array.isArray(parent)) parent[leaf as number] = planted;
+  else (parent as Record<string, unknown>)[leaf as string] = planted;
+  return document;
+};
+
+/** A deep copy of `wideTerms` whose object KEY at `path` gains a lone
+ *  surrogate, its value moved across with it. */
+const surrogateInKey = (path: PathStep[]): unknown => {
+  const document = structuredClone(wideTerms);
+  const record = parentAt(document, path) as Record<string, unknown>;
+  const key = path[path.length - 1] as string;
+  record[`${key}${LONE_HIGH}`] = record[key];
+  delete record[key];
+  return document;
+};
+
+/** Every path within `value` at which a string sits. */
+const stringValuePaths = (
+  value: unknown,
+  path: PathStep[] = [],
+): PathStep[][] => {
+  if (typeof value === "string") return [path];
+  if (Array.isArray(value))
+    return value.flatMap((element, index) =>
+      stringValuePaths(element, [...path, index]),
+    );
+  if (value === null || typeof value !== "object") return [];
+  return Object.entries(value).flatMap(([key, child]) =>
+    stringValuePaths(child, [...path, key]),
+  );
+};
+
+test("the wide fixture every lone-surrogate case mutates parses as authored", () => {
+  expect(() => parseLinkageTerms(wideTerms)).not.toThrow();
+});
+
+// The enumeration: every position a partner may write free-form text at. The
+// remaining string positions the schema declares -- `version`, `date`,
+// `algorithm`, `linkageStrategy`, a linkage field's `type`, an element's
+// `generateFuzzyComparisons`, each rule-set `version`, and the legal
+// agreement's `expirationDate` -- are fixed by a format or an enum, and the
+// sweep below covers them.
+test.each([
+  ["the party identity", ["identity"]],
+  ["a linkage field name", ["linkageFields", 0, "name"]],
+  [
+    "a name constraint character class",
+    ["linkageFields", 0, "constraints", "allowedCharacters"],
+  ],
+  [
+    "a constraint exclude value",
+    ["linkageFields", 0, "constraints", "exclude", 0],
+  ],
+  ["a linkage key name", ["linkageKeys", 0, "name"]],
+  ["a key element field reference", ["linkageKeys", 0, "elements", 0, "field"]],
+  ["a key element name", ["linkageKeys", 0, "elements", 0, "name"]],
+  [
+    "a transform function name",
+    ["linkageKeys", 0, "elements", 0, "transform", 0, "function"],
+  ],
+  [
+    "a transform param value",
+    ["linkageKeys", 0, "elements", 0, "transform", 0, "params", "note"],
+  ],
+  [
+    "a transform param value nested under an array",
+    [
+      "linkageKeys",
+      0,
+      "elements",
+      0,
+      "transform",
+      0,
+      "params",
+      "nested",
+      "deep",
+      0,
+    ],
+  ],
+  ["a swap target", ["linkageKeys", 1, "swap", 0]],
+  ["a cited field-set name", ["linkageRuleSet", "fieldSet", "name"]],
+  ["a cited key-set name", ["linkageRuleSet", "keySet", "name"]],
+  ["a sent payload column name", ["payload", "send", 0, "name"]],
+  ["a sent payload column description", ["payload", "send", 0, "description"]],
+  ["a received payload column name", ["payload", "receive", 0, "name"]],
+  [
+    "a received payload column description",
+    ["payload", "receive", 0, "description"],
+  ],
+  ["a legal agreement reference", ["legalAgreement", "reference"]],
+  ["a legal agreement purpose", ["legalAgreement", "purpose"]],
+])("rejects a lone surrogate in %s", (_label, path) => {
+  const result = safeParseLinkageTerms(surrogateInValue(path as PathStep[]));
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(
+    result.error.issues.map((issue) => ({
+      path: issue.path.join("."),
+      message: issue.message,
+    })),
+  ).toContainEqual({
+    path: (path as PathStep[]).join("."),
+    message: LONE_SURROGATE_MESSAGE,
+  });
+});
+
+test("rejects a lone surrogate in a transform params key", () => {
+  // The one object KEY a partner authors: `transform.params` is a record, so
+  // its key names are partner-chosen rather than fixed by the schema, and a
+  // key is serialized as a JSON string like any value.
+  const path = [
+    "linkageKeys",
+    0,
+    "elements",
+    0,
+    "transform",
+    0,
+    "params",
+    "note",
+  ];
+  const result = safeParseLinkageTerms(surrogateInKey(path));
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(
+    result.error.issues.map((issue) => ({
+      path: issue.path.join("."),
+      message: issue.message,
+    })),
+  ).toContainEqual({
+    path: `${path.slice(0, -1).join(".")}.note${LONE_HIGH}`,
+    message: LONE_SURROGATE_MESSAGE,
+  });
+});
+
+test("no string position in the document admits a lone surrogate", () => {
+  // The reach claim over the whole shape rather than over the enumerated
+  // fields: every string the wide fixture holds, planted one at a time. The
+  // format-fixed positions refuse by their own rule as well; what this pins is
+  // that not one of them lets the document through to the terms exchange.
+  const paths = stringValuePaths(wideTerms);
+  expect(paths.length).toBeGreaterThan(20);
+  const admitted = paths.filter(
+    (path) => safeParseLinkageTerms(surrogateInValue(path)).success,
+  );
+  expect(admitted.map((path) => path.join("."))).toEqual([]);
+});
+
+test("accepts a well-formed surrogate pair", () => {
+  // The rule is about ill-formed UTF-16, not about astral characters: a paired
+  // surrogate has a UTF-8 encoding and encodes to its raw bytes.
+  expect(() =>
+    parseLinkageTerms({
+      ...wideTerms,
+      identity: `Agency ${ASTRAL_PAIR} A`,
+      legalAgreement: {
+        ...wideTerms.legalAgreement,
+        purpose: `Audit ${ASTRAL_PAIR}`,
+      },
+    }),
+  ).not.toThrow();
+});
+
+test("the lone-surrogate refusal names the field by path, not the value", () => {
+  // As with the control-character refusal: the parse-error path is relayed
+  // unsanitized where the terms exchange reports it (protocolSetup), so the
+  // issue locates the offender by `path` and says nothing about the bytes.
+  const result = safeParseLinkageTerms({
+    ...wideTerms,
+    identity: `Agency A${LONE_HIGH}unrepeatable-label`,
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const rendered = JSON.stringify(result.error.issues);
+  expect(rendered).toContain(LONE_SURROGATE_MESSAGE);
+  expect(rendered).not.toContain("unrepeatable-label");
+});
+
+test("a lone surrogate is refused before validateCompatibility is reached", () => {
+  // The disclosure-relevant ordering. validateCompatibility canonically
+  // encodes only the fields it compares, so it returns no error for a lone
+  // surrogate in `identity`; the parse is what has to refuse, and it is the
+  // step every terms consumer runs first.
+  const local = parseLinkageTerms({
+    ...base,
+    output: { expectsOutput: true, shareWithPartner: true },
+  });
+  const hostile = { ...local, identity: `Agency${LONE_HIGH}A` };
+  expect(safeParseLinkageTerms(hostile).success).toBe(false);
+  expect(validateCompatibility(local, hostile).errors).toEqual([]);
 });
 
 // --- Nested-collection count bounds ------------------------------------------
