@@ -119,9 +119,13 @@ export interface Ssh2SftpClientInternals {
      * the ssh2 Client's EventEmitter surface; typed optional so an upgrade that
      * relocates them fails the connect-time seam check rather than the type.
      * See resolveTransportCloseSeams().
+     *
+     * The same pair also takes 'ready', which ssh2 emits when authentication has
+     * succeeded: it is what arms the dial's subsystem-open bound and what drops
+     * that arming when the dial settles first (see ./sftpSubsystemOpen).
      */
-    once?(event: "close", listener: () => void): void;
-    removeListener?(event: "close", listener: () => void): void;
+    once?(event: "close" | "ready", listener: () => void): void;
+    removeListener?(event: "close" | "ready", listener: () => void): void;
     /**
      * Node's own EventEmitter ceiling control, driven once at construction to
      * seat `SHARED_SSH2_CLIENT_MAX_EVENT_LISTENERS` (ssh2SftpAdapter.ts). Optional
@@ -180,14 +184,15 @@ export interface TerminalCloseSeam {
 }
 
 /**
- * The ssh2 seams a forced close of an ALREADY-ENDED transport drives: the
- * terminal close's socket destroy, plus the ssh2 Client's 'close' subscription,
- * which is what fires ssh2-sftp-client's global listener to clear the session.
- * Not `end()`: a transport that has ended needs no second end. Resolved and bound
- * together so a caller cannot reach one without having checked all of them. See
- * resolveEndedTransportCloseSeams.
+ * The ssh2 seams a FORCED close drives: the terminal close's socket destroy,
+ * plus the ssh2 Client's 'close' subscription, which is what reports that
+ * destroy landed -- and, on a transport whose session is still set, what fires
+ * ssh2-sftp-client's global listener to clear it. Not `end()`: neither a
+ * transport that has ended nor a dial being abandoned needs one. Resolved and
+ * bound together so a caller cannot reach one without having checked all of
+ * them. See resolveForcedCloseSeams.
  */
-export interface EndedTransportCloseSeams extends TerminalCloseSeam {
+export interface ForcedCloseSeams extends TerminalCloseSeam {
   once: (event: "close", listener: () => void) => void;
   removeListener: (event: "close", listener: () => void) => void;
 }
@@ -198,7 +203,7 @@ export interface EndedTransportCloseSeams extends TerminalCloseSeam {
  * close that may follow it. See
  * resolveTransportCloseSeams.
  */
-export interface TransportCloseSeams extends EndedTransportCloseSeams {
+export interface TransportCloseSeams extends ForcedCloseSeams {
   end: () => void;
 }
 
@@ -229,31 +234,45 @@ export function resolveTerminalCloseSeam(
 }
 
 /**
- * The seams a forced close of an already-ended transport drives past the
- * public API: the ssh2 Client's own once()/removeListener() for the 'close'
- * that clears the session, plus the terminal close's socket seam and Node's
- * writableEnded flag on that same socket. Both forced closes resolve them
- * where they use them: the connection-per-poll release through the wider set
- * below (verified at dial time), and the mid-exchange recovery on its own,
- * whose severity is a warning rather than a failed dial. Re-verify on any
- * ssh2 / ssh2-sftp-client upgrade per docs/spec/DEPENDENCY_PINS.md.
+ * The seams a forced close drives past the public API: the ssh2 Client's own
+ * once()/removeListener() for the 'close' the destroy drives, plus the terminal
+ * close's socket seam. Every caller resolves them where it uses them -- the
+ * abandoned dial's close, the mid-exchange recovery's, and the
+ * connection-per-poll release's through the wider set below (verified at dial
+ * time). Re-verify on any ssh2 / ssh2-sftp-client upgrade per
+ * docs/spec/DEPENDENCY_PINS.md.
  */
-export function resolveEndedTransportCloseSeams(
+export function resolveForcedCloseSeams(
   internals: Ssh2SftpClientInternals,
-): EndedTransportCloseSeams | UnavailableTransportCloseSeam {
+): ForcedCloseSeams | UnavailableTransportCloseSeam {
   const client = internals.client;
   if (typeof client?.once !== "function") return { missing: "client.once()" };
   if (typeof client.removeListener !== "function")
     return { missing: "client.removeListener()" };
   const terminal = resolveTerminalCloseSeam(internals);
   if ("missing" in terminal) return terminal;
-  if (typeof terminal.socket.writableEnded !== "boolean")
-    return { missing: "client._sock.writableEnded" };
   return {
     once: client.once.bind(client),
     removeListener: client.removeListener.bind(client),
     ...terminal,
   };
+}
+
+/**
+ * The above plus Node's writableEnded flag on the same socket, which the
+ * connection-per-poll release reads to tell WHO ended the transport. Required
+ * only where a close meets a transport that has already ended: a close that
+ * reads the flag nowhere resolves the narrower set above instead, so a bump
+ * that relocated the flag alone cannot disable a destroy that never read it.
+ */
+export function resolveEndedTransportCloseSeams(
+  internals: Ssh2SftpClientInternals,
+): ForcedCloseSeams | UnavailableTransportCloseSeam {
+  const seams = resolveForcedCloseSeams(internals);
+  if ("missing" in seams) return seams;
+  if (typeof seams.socket.writableEnded !== "boolean")
+    return { missing: "client._sock.writableEnded" };
+  return seams;
 }
 
 /**

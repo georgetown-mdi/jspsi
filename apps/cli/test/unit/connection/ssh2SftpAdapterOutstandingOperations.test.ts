@@ -640,14 +640,24 @@ describe("an operation outstanding across a session transition", () => {
       expect(adapter.midExchangeReconnectCount).toBe(1);
       const messages = warn.mock.calls.map((call) => call[0] as string);
       expect(unreadableLifecycleWarnings(warn)).toHaveLength(1);
-      expect(messages).toHaveLength(2);
-      expect(messages[1]).toContain("could not be re-opened");
-      // The lost reading costs latency and the refused re-dial costs the
-      // operation, so only the second claims an incompatible library.
+      expect(messages).toHaveLength(3);
+      // The same absent surface costs the dial its subsystem-open bound, which
+      // is reported where it is lost: at the connect, ahead of anything the
+      // recovery then reports.
+      expect(messages[0]).toContain(
+        "cannot put a deadline on the SFTP subsystem request",
+      );
+      expect(messages[2]).toContain("could not be re-opened");
+      // An unbounded phase and a lost reading each cost latency; only the
+      // refused re-dial costs the operation, so only it claims an incompatible
+      // library.
       expect(messages[0]).toContain(
         "does not fully support the installed SFTP library",
       );
       expect(messages[1]).toContain(
+        "does not fully support the installed SFTP library",
+      );
+      expect(messages[2]).toContain(
         "not compatible with the installed SFTP library",
       );
       for (const message of messages) {

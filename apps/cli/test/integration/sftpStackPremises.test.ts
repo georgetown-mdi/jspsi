@@ -49,6 +49,12 @@ const DISABLED_DESTROY_WAIT_MS = 1_000;
 // 0-2 ms for the fresh one answering the identical call.
 const STALE_WRAPPER_SILENCE_MS = 1_500;
 const FRESH_WRAPPER_ANSWER_CEILING_MS = 1_000;
+// The connect deadline a dial parked at the SFTP subsystem is given, and how
+// long it is then watched for a settlement that ssh2's own deadline does not
+// produce. The watch is several times the deadline, so a phase that deadline
+// did reach would have ended well inside it.
+const SUBSYSTEM_PHASE_READY_TIMEOUT_MS = 500;
+const SUBSYSTEM_PHASE_PARKED_MS = 2_500;
 // A NAME reply at the widths below crosses loopback in single-digit
 // milliseconds; the ceiling is orders above that. A reply the client refuses
 // settles just as fast, so the longer window is spent only where the assumption
@@ -68,7 +74,7 @@ const delay = (ms: number): Promise<void> =>
 // socket beneath the ssh2 Client that the abandoning teardown destroys.
 interface RawClientInternals {
   sftp?: SFTPWrapper;
-  client?: { _sock?: Socket };
+  client?: { _sock?: Socket; once(event: "ready", listener: () => void): void };
 }
 
 function internalsOf(client: Ssh2SftpClient): RawClientInternals {
@@ -134,6 +140,47 @@ async function waitFor(
     await delay(intervalMs);
   }
   throw new Error("waitFor: condition not met within timeout");
+}
+
+// Park a dial past authentication, against a server that accepts the session
+// channel and then never answers the `subsystem sftp` request. The waits are
+// the same two the mid-handshake park needs, and for the same reason: the
+// server's count is what says the dial has reached the phase.
+async function parkDialAtSubsystemOpen(
+  srv: InProcessSftpServer,
+  client: Ssh2SftpClient,
+): Promise<{
+  dial: TrackedDial;
+  socket: Socket;
+  readyAtMs: number;
+  requestedAtMs: number;
+}> {
+  const controls = srv.sessionControls;
+  const withheldBefore = controls.withheldSubsystemOpenCount();
+  controls.withholdSubsystemOpen = true;
+  const started = Date.now();
+  let readyAtMs = Infinity;
+  const internals = internalsOf(client);
+  // Subscribed before the dial, to the same event the adapter's bound arms on,
+  // so the ordering asserted below is read from the library rather than assumed
+  // of it. The Client exists from ssh2-sftp-client's constructor, which is the
+  // assumption that lets the adapter arm its bound before dialing at all.
+  expect(internals.client).toBeDefined();
+  internals.client?.once("ready", () => {
+    readyAtMs = Date.now() - started;
+  });
+  const dial = trackDial(
+    client.connect({
+      ...dialOptions(srv),
+      readyTimeout: SUBSYSTEM_PHASE_READY_TIMEOUT_MS,
+    }),
+  );
+  await waitFor(() => internals.client?._sock !== undefined);
+  await waitFor(() => controls.withheldSubsystemOpenCount() > withheldBefore);
+  const requestedAtMs = Date.now() - started;
+  const socket = internals.client?._sock as Socket;
+  expect(dial.outcome()).toBe("pending");
+  return { dial, socket, readyAtMs, requestedAtMs };
 }
 
 // Park a dial against a server that answers the SSH identification string and
@@ -448,6 +495,65 @@ inProcessOnly(
       }).toEqual({ destroyed: true, dial: "pending" });
     } finally {
       srv.sessionControls.stopStallingHandshakes();
+      await srv.stop();
+    }
+  },
+  TEST_TIMEOUT_MS,
+);
+
+inProcessOnly(
+  "ssh2's readyTimeout does not reach the SFTP subsystem-open phase",
+  async () => {
+    const srv = await startInProcessSftpServer();
+    const client = createRawSftpClient();
+    try {
+      const { dial, socket, readyAtMs, requestedAtMs } =
+        await parkDialAtSubsystemOpen(srv, client);
+
+      // Where the phase begins, and so where the adapter's own bound is armed:
+      // ssh2 reports the client ready, and only then does ssh2-sftp-client ask
+      // for the subsystem. A version that requested it earlier would arm the
+      // bound over a phase that had not started.
+      expect(readyAtMs).toBeLessThanOrEqual(requestedAtMs);
+
+      await delay(SUBSYSTEM_PHASE_PARKED_MS);
+
+      // The assumption the bound exists for: several times over the connect
+      // deadline this dial was given, with the request unanswered, nothing on
+      // the library's side has ended it. A version that grew a deadline of its
+      // own for this phase fails here, and the adapter's bound becomes
+      // redundant rather than wrong.
+      expect({
+        dial: dial.outcome(),
+        destroyed: socket.destroyed,
+        writable: socket.writable,
+        parkedForAtLeast: SUBSYSTEM_PHASE_PARKED_MS,
+        readyTimeout: SUBSYSTEM_PHASE_READY_TIMEOUT_MS,
+      }).toEqual({
+        dial: "pending",
+        destroyed: false,
+        // Which is why the bound's expiry destroys this socket: left as it is,
+        // it is the state every later dial on this client would defer behind.
+        writable: true,
+        parkedForAtLeast: SUBSYSTEM_PHASE_PARKED_MS,
+        readyTimeout: SUBSYSTEM_PHASE_READY_TIMEOUT_MS,
+      });
+
+      socket.destroy();
+      await Promise.race([dial.settlement, delay(DESTROY_SETTLE_CEILING_MS)]);
+
+      // The close the bound's expiry drives, at this phase rather than
+      // mid-handshake: it settles the dial it abandoned, so the adapter is left
+      // holding neither a live socket nor an unsettled promise. The race above
+      // is the ceiling -- it returns at DESTROY_SETTLE_CEILING_MS whether the
+      // dial settled or not -- so a still-pending outcome here is one that did
+      // not settle in time.
+      expect({ outcome: dial.outcome(), destroyed: socket.destroyed }).toEqual({
+        outcome: "rejected",
+        destroyed: true,
+      });
+    } finally {
+      srv.sessionControls.withholdSubsystemOpen = false;
       await srv.stop();
     }
   },
