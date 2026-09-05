@@ -26,62 +26,38 @@ import type { CanonicalValue } from "../utils/canonical.js";
 import type { CommittedPayload } from "./exchangeRecord.js";
 import type { SigningCertificate, SigningIdentity } from "./signingIdentity.js";
 
-// Certificate-backed signed exchange receipts (the sign/exchange step). At the
-// conclusion of a successful exchange both parties sign one shared receipt
-// content, each over signer-bound bytes, and swap signatures over the live
-// channel, producing one dual-signed record holding both parties' signatures
-// and certificates. Each side verifies the partner's certificate fingerprint
-// against the pinned value before verifying the signature; a mismatch or bad
-// signature terminates the exchange fail-closed with a `security`
-// ConnectionError.
+// Certificate-backed signed exchange receipts (the sign/exchange step): both
+// parties sign one shared receipt content over signer-bound bytes and swap
+// signatures over the live channel, producing one dual-signed record. The
+// step, its trust model, and what the content admits are in
+// docs/spec/PROTOCOL.md ("The signed-receipt step"); the byte layout every
+// derivation here must reproduce is docs/spec/EXCHANGE_RECORD.md ("Signed
+// receipt").
 //
-// The receipt content covers only mutually-verifiable facts -- values both
-// parties derive byte-identically: the agreed-terms hash, a session-keyed MAC
-// of the data that flowed in each direction, and the per-exchange
-// session-derived binder. One-party-only facts (recordsExposed, the
-// retention pointer, the salted record commitments, the association-table
-// pairing) stay out, since they are not byte-identical, or not held by both
-// parties. Each party signs bytes that bind its own certificate fingerprint
-// and handshake role alongside the shared content, so the two
-// {certificate, signature} blocks are not interchangeable: a holder cannot
-// swap them to re-attribute a direction to the wrong party.
-//
-// Trust anchor and byte layout: docs/spec/PROTOCOL.md ("the signed-receipt
-// step") and docs/spec/EXCHANGE_RECORD.md ("Signed receipt"). This module
-// reuses the certificate/pinning primitives (signingIdentity.ts), the
-// canonical encoding (utils/canonical.ts), and the committed-payload shape
-// (exchangeRecord.ts) rather than introducing a second signing or
-// serialization surface.
+// This module reuses the certificate/pinning primitives
+// (signingIdentity.ts), the canonical encoding (utils/canonical.ts), and the
+// committed-payload shape (exchangeRecord.ts) rather than introducing a
+// second signing or serialization surface.
 
 // --- Versions and domains ----------------------------------------------------
 
 /** Single recognized format version for a dual-signed record; a reader rejects
- * any other value rather than migrating it. It moves with the certificate format
- * the record embeds, so a record written under a different signature scheme is
- * refused by this discriminant as well as by the embedded certificate's own. */
+ * any other value rather than migrating it. It moves with the certificate
+ * format the record embeds (docs/spec/EXCHANGE_RECORD.md, "Dual-signed record
+ * file"). */
 export const SIGNED_RECEIPT_VERSION = "psilink-signed-receipt/v2";
 
-// Domain-separation label folded into the signed receipt-content bytes, kept
-// distinct from every other label derived from the canonical encoder (the
-// agreed-terms hash, the record commitments, and the certificate
-// signature/fingerprint domains in signingIdentity.ts), so a receipt-content
-// signature can never be replayed as a certificate self-signature or vice
-// versa. Its version tracks the shape of the bytes it covers -- the shared
-// content plus the signer's fingerprint and role -- not the signature
-// algorithm; the embedded certificate's own version separates a v1
-// certificate from a v2 one inside those bytes.
+// The domain label folded into the signed receipt-content bytes. Its version
+// tracks the shape of those bytes, not the signature algorithm; the embedded
+// certificate's own version separates a v1 certificate from a v2 one inside
+// them. See docs/spec/EXCHANGE_RECORD.md ("Receipt signature").
 const RECEIPT_CONTENT_DOMAIN = "psilink-signed-receipt-content/v2";
 
-// HKDF info label for the per-direction payload MAC key, derived from the
-// session key. The direction suffix (`initiator-to-responder` /
-// `responder-to-initiator`) separates the two directions; the whole label is
-// prefix-free against every other session-key label (`psilink-aead-v1:{...}`,
-// `psilink-abort-token-v1:{...}`, `psilink-shared-secret-rotation-v1`,
-// `psilink-signed-receipt-binder-v1:{...}`). Keying the directional MAC off
-// the session key -- not a bare hash -- is what stops a third-party receipt
-// holder, who has neither the session key nor the flowing data, from
-// recomputing a directional MAC or brute-forcing a low-entropy payload from
-// it.
+// The two HKDF info labels the session-derived receipt values are taken
+// under -- this one and RECEIPT_BINDER_LABEL below -- sit in the disjoint
+// space docs/spec/PROTOCOL.md ("The domain-separation label space")
+// enumerates. Each takes a suffix from a fixed, non-empty set, which is what
+// keeps it prefix-free; neither is given a variable or optional one.
 const RECEIPT_PAYLOAD_MAC_LABEL = "psilink-signed-receipt-payload-v1";
 
 // The two directions the payload MAC keys are derived for. Fixed by the handshake
@@ -91,37 +67,25 @@ const RECEIPT_PAYLOAD_MAC_DIRECTIONS = {
   responderToInitiator: "responder-to-initiator",
 } as const;
 
-// HKDF info label for the per-exchange replay binder, distinct from and prefix-
-// free against every other session-key label (`psilink-aead-v1:{...}`,
-// `psilink-abort-token-v1:{...}`, `psilink-shared-secret-rotation-v1`,
-// `psilink-signed-receipt-payload-v1:{...}`). The role suffix separates the
-// initiator's and responder's binder inputs -- see deriveReceiptBinder.
 const RECEIPT_BINDER_LABEL = "psilink-signed-receipt-binder-v1";
 
-// Length of a directional payload MAC key and the HMAC-SHA-256 output, matching
-// the 32-byte session-derived tokens HKDF produces from the same session key.
 const RECEIPT_PAYLOAD_MAC_BYTES = 32;
 
-// Length of the per-exchange binder, matching the 32-byte session-derived tokens
-// (deriveAbortToken, deriveAeadKey) HKDF produces from the same session key.
 const RECEIPT_BINDER_BYTES = 32;
 
 // --- Per-exchange replay binder ----------------------------------------------
 
 /**
- * Derive the per-exchange replay binder: a 32-byte tag derived one-way from
- * the session key via HKDF, with role separation from the other session-key
- * labels. Both parties call this with the SAME `role` argument (the
- * initiator's), so both derive the one shared binder with no extra messages
- * and neither party unilaterally controls it -- the role suffix is for HKDF
- * domain separation, not to give the two parties different binders, exactly
- * as the abort-token derivation binds a token to its writer's role. It is
- * base64url-encoded and folded into the signed receipt content, so a
- * receipt from one exchange cannot be presented as evidence of another: a
- * different exchange has a different session key, hence a different
- * binder, and the signature no longer verifies. Passing an unrecognized
- * role throws rather than silently deriving a binder the two parties may
- * not agree on, mirroring {@link deriveAbortToken}.
+ * Derive the per-exchange replay binder folded into the signed receipt
+ * content; its derivation and what it pairs are in docs/spec/PROTOCOL.md
+ * ("Replay binder").
+ *
+ * Both parties must call this with the SAME `role` argument, the initiator's:
+ * the role suffix is HKDF domain separation, not a per-party value, so
+ * passing the local role instead would give the two parties different binders
+ * and fail the swap. Passing an unrecognized role throws rather than silently
+ * deriving one the two parties may not agree on, mirroring
+ * {@link deriveAbortToken}.
  */
 export async function deriveReceiptBinder(
   sessionKey: Uint8Array<ArrayBuffer>,
@@ -191,17 +155,12 @@ async function deriveDirectionalPayloadMacKey(
 }
 
 /**
- * Compute the directional payload MAC: an unpadded base64url HMAC-SHA-256
- * over the canonical encoding (RFC 8785) of the committed payload, under a
- * session-derived per-direction key. Both parties reproduce it identically
- * from the same flowing data and the shared session key, so a sender's MAC
- * of what it sent equals the receiver's MAC of what it received; a third
- * party without the session key cannot -- unlike a bare hash, this stops a
- * receipt holder from brute-forcing a low-entropy payload. The committed
- * payload is the record format's own shape (column names + row values, the
- * transport `hasData` discriminant dropped, the no-data case an empty
- * value), reproducing across implementations under the fixed canonical
- * rules.
+ * Compute the directional payload MAC over the committed payload's canonical
+ * encoding, under a session-derived per-direction key. Its construction and
+ * what keying it off the session key buys: docs/spec/EXCHANGE_RECORD.md
+ * ("Receipt content"). The payload passed in must already be the record
+ * format's committed-payload shape, not the transport's, or the two parties
+ * MAC different bytes for the same logical data.
  */
 async function macCommittedPayload(
   macKey: Uint8Array<ArrayBuffer>,
@@ -267,17 +226,11 @@ export async function buildReceiptContent(
 }
 
 /**
- * Build the canonical bytes one party signs for a receipt: the
- * domain-separated canonical encoding (RFC 8785) of
- * `{domain, content, signer: {fingerprint, role}}`, where `signer` binds the
- * SIGNER's own certificate fingerprint and handshake role into the
- * signature. Because each party signs bytes that name itself, the two
- * signature blocks in a dual-signed record are not interchangeable: a
- * holder cannot swap them to re-attribute a direction's payload to the
- * wrong party. Both parties and any independent implementation derive
- * byte-identical input for a given signer, so the signature verifies across
- * implementations. Field order is irrelevant -- the canonical encoder sorts
- * keys.
+ * Build the canonical bytes one party signs for a receipt, laid out in
+ * docs/spec/EXCHANGE_RECORD.md ("Receipt signature"). The `signer` member
+ * binds the SIGNER's own fingerprint and role, which is what makes the two
+ * signature blocks in a dual-signed record non-interchangeable. Field order
+ * is irrelevant here -- the canonical encoder sorts keys.
  */
 function receiptSignatureBytes(
   content: ReceiptContent,

@@ -47,21 +47,13 @@ export interface AuthResult {
 
 /**
  * The fixed set of AEAD direction-context labels {@link deriveAeadKey}
- * accepts. The application-layer AEAD channel derives one AES-256-GCM key
- * per direction; both endpoints must pass the same label for a direction to
- * derive the same key.
+ * accepts, one per direction of the application-layer AEAD channel. Why the
+ * key is per direction and why the label set is closed:
+ * docs/spec/CHANNEL_SECURITY.md ("Application-layer AEAD").
  *
- * One key per direction, not per channel, because both directions number
- * their messages from zero and build the AEAD nonce from that sequence: a
- * shared key would reuse a key-nonce pair, which is catastrophic for
- * AES-GCM.
- *
- * Add a label only as a reviewed change, appended here -- an unlisted label
- * could be variable, non-ASCII, or non-NFC, so the two parties would derive
- * different keys and AEAD would fail with an opaque auth-tag/decrypt error.
- *
- * Frozen so a plain-JS caller cannot widen the set by pushing a label onto
- * the readonly compile-time type; the runtime guard below checks this set.
+ * Add a label only as a reviewed change, appended here. Frozen so a plain-JS
+ * caller cannot widen the set by pushing onto the readonly compile-time type;
+ * the runtime guard below checks this set.
  */
 export const AEAD_CONTEXTS = Object.freeze([
   "initiator-to-responder",
@@ -88,9 +80,7 @@ export type AeadContext = (typeof AEAD_CONTEXTS)[number];
  *                    that binds the derived key to one direction of the
  *                    encrypted stream.  The {@link AeadContext} type rejects a
  *                    free-form label at compile time; the runtime check below
- *                    catches an untyped (plain-JS or `as`-cast) caller, failing
- *                    fast rather than silently deriving a key the two parties
- *                    may not agree on.
+ *                    catches an untyped (plain-JS or `as`-cast) caller.
  * @throws {Error} if `context` is not one of {@link AEAD_CONTEXTS}.
  */
 export async function deriveAeadKey(
@@ -107,11 +97,10 @@ export async function deriveAeadKey(
 }
 
 /**
- * The two abort-token roles, frozen for the same reason as {@link AEAD_CONTEXTS}:
- * the readonly compile-time type also holds at runtime, so a plain-JS caller
- * cannot widen the set the runtime guard below checks. One token is derived per
- * role; the writer's own role names the token it writes, the peer's role names
- * the token it verifies. Structurally identical to {@link HandshakeRole}.
+ * The two abort-token roles, frozen for the same reason as
+ * {@link AEAD_CONTEXTS}. One token is derived per role; the writer's own role
+ * names the token it writes, the peer's role names the token it verifies.
+ * Structurally identical to {@link HandshakeRole}.
  */
 export const ABORT_TOKEN_ROLES = Object.freeze([
   "initiator",
@@ -123,21 +112,11 @@ type AbortTokenRole = (typeof ABORT_TOKEN_ROLES)[number];
 
 /**
  * Derive a 32-byte per-direction abort token from the session key using HKDF.
- *
  * The token authenticates the cross-party abort marker
- * (`<writerId>-abort.json`): only a party holding the fresh ephemeral session
- * key can produce it, so the untrusted directory admin cannot forge an
- * accepted marker, and a captured marker never validates in another session.
- * The per-direction `role` binds the token to its writer's role, so a marker
- * captured and renamed to the other party's name does not validate.
- *
- * Domain separation: HKDF `info` is not length-prefixed, so each label
- * derived from the session key must be exact-string-distinct and prefix-free
- * against every other one. The only other session-key labels are
- * `psilink-aead-v1:{...}` and `psilink-shared-secret-rotation-v1`;
- * `psilink-abort-token-v1:{initiator,responder}` diverges from both at
- * `abort` vs `aead`/`shared`, and the frozen role set plus the `:` separator
- * guarantee a non-empty role suffix, so no label is a prefix of another.
+ * (`<writerId>-abort.json`); what it protects, the role binding, and this
+ * label's place in the domain-separation label space are in
+ * docs/spec/CHANNEL_SECURITY.md ("Authenticated abort marker") and
+ * docs/spec/PROTOCOL.md ("The domain-separation label space").
  *
  * Mirrors {@link deriveAeadKey}: a frozen role tuple plus a runtime allowlist
  * check catches an untyped (plain-JS or `as`-cast) caller.
@@ -170,23 +149,17 @@ function isExpired(expires: string, now: number): boolean {
 
 /**
  * Assert the locally-knowable pre-handshake preconditions on a shared secret:
- * present and well-formed (a base64url 32-byte value matching
- * {@link SHARED_SECRET_REGEX}), and not already expired if `expires` is set.
- * Both conditions are determinable from local state alone, so a caller can
- * run this before opening any connection.
- *
- * {@link runProtocol} (the CLI) does exactly that, so an expired or malformed
- * secret fails before any rendezvous I/O; {@link authenticateConnection} also
- * runs it, as the authoritative boundary for a library consumer that bypasses
- * that orchestration.
+ * present and well-formed (matching {@link SHARED_SECRET_REGEX}), and not
+ * already expired. Both are determinable from local state alone, so a caller
+ * can run this before opening any connection -- {@link runProtocol} (the CLI)
+ * does, and {@link authenticateConnection} also runs it for a library
+ * consumer that bypasses that orchestration. This is the pre-handshake check
+ * of docs/spec/PROTOCOL.md ("Enforcement sites"), which enumerates all four
+ * and states what each covers.
  *
  * Both throws are tagged `psilinkRecoveryHintEmitted: true`, since their
  * messages already include specific recovery instructions; a higher-level
  * catch checks the tag and suppresses its own generic advisory.
- *
- * Does NOT cover a secret that expires during the key-exchange round-trip:
- * that is only knowable after the handshake completes, and is enforced by a
- * separate post-handshake check inside {@link authenticateConnection}.
  *
  * Narrows `authentication.sharedSecret` to a non-optional `string` on
  * success.
@@ -238,18 +211,14 @@ export function assertSharedSecretReadyForHandshake(
  * responsible for ensuring the secret is present.
  *
  * Expiry is checked before the handshake begins and again after it
- * completes; if `authentication.expires` is in the past at either point,
- * this function throws. The post-handshake check covers a secret that
- * expires during the round-trip, bounded by the 30 s per-message handshake
- * timeout: about 30 s worst case for the initiator's one receive, about 60 s
- * for the responder's two.
+ * completes (docs/spec/PROTOCOL.md, "Enforcement sites").
  *
  * This function's own validation errors (secret format, pre- and
  * post-handshake expiry) are tagged `psilinkRecoveryHintEmitted: true`,
  * since their messages already include recovery instructions; higher-level
  * code should check the tag and suppress its own generic advisory when it
  * is set. A key-exchange failure from `runKex` is not tagged: its message
- * is intentionally generic.
+ * is generic by design.
  *
  * @param conn            An open, ready-to-use connection.
  * @param authentication  The authentication block from the connection
@@ -261,10 +230,9 @@ export function assertSharedSecretReadyForHandshake(
  *                        application-encryption layer over the connection.
  *                        It is bound into the handshake transcript and OR'd
  *                        with the peer's request; the result is returned as
- *                        {@link AuthResult.applyEncryption}. File-sync
- *                        transports pass `true` (the server admin can snoop);
- *                        a transport already end-to-end confidential against
- *                        any in-path party passes `false`.
+ *                        {@link AuthResult.applyEncryption}. Which channel
+ *                        asks for what: docs/spec/CHANNEL_SECURITY.md
+ *                        ("Which channels request it").
  *
  * @throws {Error} if `authentication.sharedSecret` is absent or not a
  *                 base64url-encoded 32-byte value.
@@ -298,7 +266,7 @@ export async function authenticateConnection(
   );
 
   // Post-handshake expiry check: catches a secret that expires during the
-  // key-exchange round-trip (see the JSDoc above for the timing budget).
+  // key-exchange round-trip (docs/spec/PROTOCOL.md, "Enforcement sites").
   if (expires !== undefined && isExpired(expires, Date.now())) {
     throw Object.assign(
       new Error(

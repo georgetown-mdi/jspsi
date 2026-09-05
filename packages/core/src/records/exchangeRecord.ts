@@ -27,40 +27,25 @@ import type { CanonicalValue } from "../utils/canonical.js";
 import type { LinkageTerms } from "../config/linkageTermsSchema.js";
 import type { Algorithm, AssociationTable } from "../types.js";
 
-// The exchange record: a self-attested, unsigned disclosure-log entry each party
-// writes once the exchange has disclosed, whatever the run's outcome
-// (docs/spec/EXCHANGE_RECORD.md, When a record is owed). It stands alone as a
-// disclosure-log entry: the governing agreement, the algorithm, the categories
-// of data exchanged, both self-asserted identities, the timestamp, this party's
-// exposed record count, the result size when both parties are entitled to it,
-// and an optional retention pointer -- enough for a HIPAA or FERPA accounting
-// without re-matching the linkage-terms config. It holds governance metadata
-// only, never a payload, linkage-field, or matched-identifier value; the
-// exchanged data is bound by commitments, not embedded.
+// The exchange record: a self-attested, unsigned disclosure-log entry each
+// party writes once the exchange has disclosed. Its fields, when one is owed,
+// and the commitment scheme below are specified in
+// docs/spec/EXCHANGE_RECORD.md, and every commitment and hash here is taken
+// over the encoding docs/spec/CANONICAL_ENCODING.md fixes.
 //
-// It is not a signed or non-repudiable receipt and not evidence against the
-// partner: no private key, no extra protocol round. Signing is the deferred
-// Signed Exchange Receipts work, which reuses this module's commitment scheme
-// and on-disk format. Commitments, not a bare hash, bind the data: a
-// low-entropy result (e.g. an identifier association table) hashed alone would
-// be brute-forceable from the record; a per-commitment salt prevents that. See
-// docs/spec/EXCHANGE_RECORD.md and docs/spec/CANONICAL_ENCODING.md.
+// The one constraint the format itself enforces: the record holds governance
+// metadata only, never a payload, linkage-field, or matched-identifier value.
+// The exchanged data is bound by commitments rather than embedded.
 
 // --- Versions ----------------------------------------------------------------
 
 /**
  * The one recognized format version for an {@link ExchangeRecord}. A reader
- * (the verification item) rejects an unrecognized version rather than
- * migrating it. It moves whenever a field's ABSENCE changes meaning, since a
- * reader could not otherwise tell an old record's silence from the new one:
- * {@link ExchangeRecord.receiptBinder} (absent now means no signed receipt),
- * {@link ExchangeRecordGovernance.linkageRuleSet} and
- * {@link ExchangeRecordGovernance.linkageRuleSetVerdict} (absent now means no
- * citation, or no verdict on one), {@link ExchangeRecord.localIdentity} and
- * {@link ExchangeRecord.partnerIdentity} (absent now means the party
- * supplied no name), and {@link ExchangeRecord.outcome} (now present on
- * every record, so its absence would misread as an earlier record that
- * always meant "completed").
+ * rejects an unrecognized version rather than migrating it. It moves with the
+ * field set, so adding or removing an omittable field bumps it: what a
+ * reader would otherwise misread an old record's silence as, and which
+ * fields have moved it, are in docs/spec/EXCHANGE_RECORD.md ("Record
+ * fields").
  */
 export const EXCHANGE_RECORD_VERSION = "psilink-exchange-record/v6";
 
@@ -83,20 +68,12 @@ export const SALT_BYTES = 32;
 export type CommitmentName =
   "associationTable" | "localPayloadSent" | "partnerPayloadReceived";
 
-// Domain-separation labels, one per commitment kind, folded into the committed
-// message (not the salt) so the three kinds stay cryptographically distinct
-// under an identical (salt, data) pair. Keep them distinct -- collapsing the
-// sent/received payload labels would let a commitment of one kind verify as
-// another.
-//
-// A sender's localPayloadSent commitment and the receiver's
-// partnerPayloadReceived commitment for the same logical payload are never
-// equal as strings (different label, different salt): verification re-supplies
-// each party's committed data and recomputes the canonical bytes (see
-// CommittedPayload) rather than comparing commitment strings. Recomputing the
-// OTHER party's commitment also needs that party's salt, so it is not
-// derivable from one's own record alone; VerificationKeys holds only salts,
-// never a data snapshot.
+// The per-kind domain labels folded into the committed message, not the salt,
+// so the three kinds stay distinct under an identical (salt, data) pair.
+// Collapsing any two -- the sent and received payload labels above all --
+// would let a commitment of one kind verify as another; the consequences that
+// separation has for cross-party verification are in
+// docs/spec/EXCHANGE_RECORD.md ("Commitment scheme").
 const COMMITMENT_DOMAINS: Record<CommitmentName, string> = {
   associationTable: "psilink-commit-association-table/v1",
   localPayloadSent: "psilink-commit-payload-sent/v1",
@@ -115,16 +92,11 @@ const AGREED_TERMS_DOMAIN = "psilink-agreed-terms/v1";
 // verifyRecordCommitments. Keep them exported.
 
 /**
- * Compute the commitment to `data` of the given kind under `salt`.
+ * Compute the commitment to `data` of the given kind under `salt`, in the
+ * construction docs/spec/EXCHANGE_RECORD.md ("Commitment scheme") specifies.
  *
- * Construction: `HMAC-SHA-256(key = salt, message = canonical({domain, data}))`.
- * HMAC keyed by a secret >= 128-bit salt gives computational hiding: its output
- * reveals nothing about `data` without the salt, so a low-entropy `data` cannot
- * be brute-forced from the commitment alone. Binding follows from SHA-256's
- * collision resistance. The message is the canonical encoding (RFC 8785) of
- * `{domain, data}`, so the input bytes are reproducible across implementations
- * and the salt/data boundary is unambiguous. `data` must be in the canonical
- * value domain; binary data must already be base64url-encoded to a string.
+ * `data` must be in the canonical value domain; binary data must already be
+ * base64url-encoded to a string.
  */
 export async function computeCommitment(
   name: CommitmentName,
@@ -760,22 +732,12 @@ const VerificationKeysSchema: z.ZodType<VerificationKeys> = z.object({
  * this on-disk, version-frozen format.
  *
  * It binds the column names and the values, NOT any party's internal row
- * indices. The received payload's rows contain the PARTNER's row indices on the
- * wire (see `PartnerPayload`), which the holder does not retain in a
- * reproducible form -- the human result file records the received values, not
- * the partner's row numbers -- so committing them would leave a holder unable
- * to reopen its own commitment from its retained input and result. The payload
- * commitment therefore binds only what the holder keeps (the columns and the
- * values); WHICH records matched is bound separately by the association-table
- * commitment (an index pair), which the result file does retain. See
- * docs/spec/EXCHANGE_RECORD.md, "No data snapshot in the keys".
- *
- * Both the payload a party sent and the payload it received are mapped into
- * this one shape before committing (see `toCommittedPayload` in
- * payloadExchange), so for the same logical payload a sender and receiver
- * commit over byte-identical data. The transport-only `hasData` discriminant
- * is not part of it; a no-data payload is the empty-arrays value
- * `{ columns: [], rows: [] }`.
+ * indices, and the payload a party sent and the payload it received are both
+ * mapped into this one shape before committing (`toCommittedPayload` in
+ * payloadExchange), so the two parties commit over byte-identical data for
+ * one logical payload. Why the row indices are excluded, and what binds which
+ * records matched instead: docs/spec/EXCHANGE_RECORD.md ("Commitment
+ * scheme").
  *
  * Declared as a `type` (not an `interface`) so it has an implicit index
  * signature and is assignable to {@link CanonicalValue} without a cast.
