@@ -1,11 +1,11 @@
 // Workflow script for /panel, invoked as
-// Workflow({scriptPath: 'scripts/panel-workflow.mjs', args: {...}}).
+// Workflow({scriptPath: '.claude/scripts/panel-workflow.mjs', args: {...}}).
 //
 // It is a Workflow script BODY, not a module: the harness injects `args`,
 // `agent`, and `parallel`, and takes the top-level `return` as the run's result.
 // No ES module parser accepts a top-level return, which is why eslint.config.mjs
-// excludes this file; scripts/panel-script.test.mjs compiles it as a function
-// body and drives it.
+// excludes this file; .claude/scripts/panel-script.test.mjs compiles it as a
+// function body and drives it.
 
 export const meta = {
   name: "panel",

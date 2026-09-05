@@ -52,7 +52,7 @@
 set -euo pipefail
 shopt -s dotglob nullglob
 
-SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DRIFT_CHECK="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/check-node-modules-drift.mjs"
 WORKTREE="$(git rev-parse --show-toplevel)"
 PRIMARY="$(cd "$(dirname "$(git rev-parse --git-common-dir)")" && pwd)"
 BASE_REF="${PSILINK_WORKTREE_BASE_REF:-origin/staging}"
@@ -192,7 +192,7 @@ done
 
 echo "worktree-init: node_modules provisioned; checking it against package-lock.json ..."
 check_status=0
-node "$SCRIPTS/check-node-modules-drift.mjs" "$WORKTREE" --shared-from "$PRIMARY" || check_status=$?
+node "$DRIFT_CHECK" "$WORKTREE" --shared-from "$PRIMARY" || check_status=$?
 if [ "$check_status" -eq 2 ]; then
   echo "worktree-init: the check could not verify the mirrored deps against package-lock.json, so nothing vouches for a build and test run on them." >&2
   install_from_lockfile

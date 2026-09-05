@@ -2,11 +2,11 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { jsBlocks } from "./check-workflow-agent-models.mjs";
+import { jsBlocks } from "../../scripts/check-workflow-agent-models.mjs";
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const COMMAND = ".claude/commands/panel.md";
-const SCRIPT = "scripts/panel-workflow.mjs";
+const SCRIPT = ".claude/scripts/panel-workflow.mjs";
 
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 

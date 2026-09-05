@@ -157,7 +157,7 @@ runs:
     # the file: tarball separately, which a version-keyed diff cannot see.
     - name: Verify the restored dependency tree against the lockfile
       if: steps.install-cache.outputs.cache-hit == 'true'
-      run: node .claude/scripts/check-node-modules-drift.mjs
+      run: node scripts/check-node-modules-drift.mjs
       shell: bash
     # An entry under an exact key is immutable, so a tree archived from a partial
     # install would be restored by every later run carrying that key, which would

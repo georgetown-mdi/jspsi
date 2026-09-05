@@ -17,10 +17,10 @@
 // this hook never sees. The load-bearing half for committed scripts is the static
 // check (`npm run check:workflow-agent-models`), which fails any agent() call in a
 // fenced js block under .claude/commands/, .claude/agents/, or .claude/skills/, or
-// in a checked-in Workflow script (scripts/*-workflow.mjs), that does not pin a
-// literal non-Fable tier -- within its own stated limits, a computed model value
-// and a call reached through an alias. This hook covers the ad-hoc inline script,
-// which no committed-file check can reach.
+// in a checked-in Workflow script (.claude/scripts/*-workflow.mjs), that does not
+// pin a literal non-Fable tier -- within its own stated limits, a computed model
+// value and a call reached through an alias. This hook covers the ad-hoc inline
+// script, which no committed-file check can reach.
 //
 // Every path but a positive match exits 0 and allows the call: an unreadable or
 // unparseable event, a tool other than Workflow, a call carrying neither script

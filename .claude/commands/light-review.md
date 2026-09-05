@@ -121,8 +121,8 @@ the round, not run long; say in your report which claims you dropped and why.
 
 Invoke the Workflow tool ONCE PER SURVIVING TARGET, all of them in a single
 message so they run concurrently. Each call sets `scriptPath` to the ABSOLUTE
-path `<PRIMARY>/scripts/light-review-workflow.mjs`, with PRIMARY from Step 1 --
-the bare relative `scripts/light-review-workflow.mjs` fails the call with
+path `<PRIMARY>/.claude/scripts/light-review-workflow.mjs`, with PRIMARY from Step 1 --
+the bare relative `.claude/scripts/light-review-workflow.mjs` fails the call with
 "script file not found" -- and `args` to
 `{"targetRef": "<ref>", "worktreePath": <TREE, or null when no tree holds the ref>, "docs": [<the DOCS list, possibly empty>], "role": <the role name or null>, "claims": [<CLAIMS, or an empty list in lens mode>]}`.
 
@@ -132,7 +132,7 @@ invoke Workflow at all, so the calls are yours to make from this thread.
 
 The script is checked in and passed by path: do not paste its text into the call, do not
 copy it out to edit it (it branches on the role in `args` itself, and both modes are
-pinned by `scripts/light-review-script.test.mjs`), and do not spawn the reviewers with the
+pinned by `.claude/scripts/light-review-script.test.mjs`), and do not spawn the reviewers with the
 Agent tool instead -- plain agents cannot have their output format enforced, and the schema
 is the point (prompt-side "return only JSON" instructions have a long failure record here).
 

@@ -171,7 +171,7 @@ describe("parseArgs", () => {
   it("treats an empty command line as a usage request", () => {
     const parsed = parseArgs([]);
     expect(parsed.ok).toBe(false);
-    expect(parsed.message).toMatch(/^Usage: node measure-pr-checks\.mjs/);
+    expect(parsed.message).toMatch(/^Usage: npm run measure:pr-checks --/);
   });
 
   it("defaults the sample size and the base branch", () => {

@@ -157,7 +157,7 @@ export default tseslint.config(
       // agent() model pins are checked by `npm run check:workflow-agent-models`
       // and their handling of `args` by `npm run check:workflow-args-resolve`,
       // and both are executed as function bodies by their colocated tests.
-      "scripts/*-workflow.mjs",
+      ".claude/scripts/*-workflow.mjs",
     ],
   },
   {
