@@ -5282,16 +5282,16 @@ test("a successful run under --event-stream reports stage timing and counters", 
   expect(metrics.reconnects).toBe(0);
 }, 20_000);
 
-test("summarizes the reconnect count at normal verbosity when the session was re-established", async () => {
-  // Without --event-stream the reconnect count reaches the operator nowhere, so a
-  // server that repeatedly dropped and was re-dialed would be invisible on a
-  // normal run. runProtocol logs a one-line teardown summary at info instead.
-  // Force a non-zero count on the (real) file-drop client via its reconnectCount
+test("summarizes the dialing retries at normal verbosity, apart from any re-establishment", async () => {
+  // Without --event-stream the reconnect counts reach the operator nowhere, so a
+  // server that had to be dialed repeatedly would be invisible on a normal run.
+  // runProtocol logs a one-line teardown summary at info instead. Force a
+  // non-zero count on the (real) file-drop client via its connectRetryCount
   // getter; midExchangeReconnectCount stays 0 (a file-drop channel holds no
-  // session), so this is the connect-retries-only case: the summary reports just
-  // the total and omits the mid-exchange session-re-dial clause entirely.
-  const reconnectSpy = vi
-    .spyOn(LocalFSClient.prototype, "reconnectCount", "get")
+  // session), so this is the retries-only case: the summary reports the retries
+  // and claims no re-establishment, which a retried dial is not.
+  const connectRetrySpy = vi
+    .spyOn(LocalFSClient.prototype, "connectRetryCount", "get")
     .mockReturnValue(3);
   try {
     await Promise.all([
@@ -5319,34 +5319,36 @@ test("summarizes the reconnect count at normal verbosity when the session was re
       }),
     ]);
   } finally {
-    reconnectSpy.mockRestore();
+    connectRetrySpy.mockRestore();
   }
 
   expect(
     mockState.infos.some(
       (line) =>
-        line.includes("re-established 3 times") &&
+        line.includes("connecting was retried 3 times") &&
         line.includes("during this exchange"),
     ),
   ).toBe(true);
-  // No session was lost mid-exchange, so the "of which ... mid-exchange" clause
-  // -- and its session terminology, which does not apply to a file-drop channel
-  // -- must not appear.
+  // No session was lost mid-exchange, so neither the re-establishment line nor
+  // its session terminology -- which does not apply to a file-drop channel --
+  // may appear.
+  expect(mockState.infos.some((line) => line.includes("re-established"))).toBe(
+    false,
+  );
   expect(mockState.infos.some((line) => line.includes("mid-exchange"))).toBe(
     false,
   );
-  expect(mockState.infos.some((line) => line.includes("of which"))).toBe(false);
 }, 20_000);
 
-test("summary reports the mid-exchange sub-count apart from the total", async () => {
-  // A single merged reconnect number cannot tell benign startup retries from
-  // chronic mid-exchange session drops. The summary reports the mid-exchange
-  // sub-count distinctly so the operator sees the signal that matters. Force a
-  // total of 4 with 3 of them sessions lost mid-exchange on the (real) file-drop
-  // client via its metric getters.
-  const reconnectSpy = vi
-    .spyOn(LocalFSClient.prototype, "reconnectCount", "get")
-    .mockReturnValue(4);
+test("summary reports the sessions lost apart from the dialing retries", async () => {
+  // A single merged reconnect number cannot tell benign dialing retries from
+  // chronic mid-exchange session drops -- and a dial that never established
+  // anything is no re-establishment at all. The summary states each on its own
+  // line so the operator sees which one happened. Force 3 sessions lost and 1
+  // dialing retry on the (real) file-drop client via its metric getters.
+  const connectRetrySpy = vi
+    .spyOn(LocalFSClient.prototype, "connectRetryCount", "get")
+    .mockReturnValue(1);
   const midExchangeSpy = vi
     .spyOn(LocalFSClient.prototype, "midExchangeReconnectCount", "get")
     .mockReturnValue(3);
@@ -5376,15 +5378,18 @@ test("summary reports the mid-exchange sub-count apart from the total", async ()
       }),
     ]);
   } finally {
-    reconnectSpy.mockRestore();
+    connectRetrySpy.mockRestore();
     midExchangeSpy.mockRestore();
   }
 
   expect(
-    mockState.infos.some(
-      (line) =>
-        line.includes("re-established 4 times") &&
-        line.includes("of which 3 were sessions lost mid-exchange"),
+    mockState.infos.some((line) =>
+      line.includes("the connection was lost and re-established 3 times"),
+    ),
+  ).toBe(true);
+  expect(
+    mockState.infos.some((line) =>
+      line.includes("connecting was retried 1 time during this exchange"),
     ),
   ).toBe(true);
 }, 20_000);

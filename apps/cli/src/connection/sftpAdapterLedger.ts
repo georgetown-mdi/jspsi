@@ -250,6 +250,11 @@ export class SftpAdapterLedger {
     return this.losses.partner;
   }
 
+  /** The subset of {@link reconnectCount} that were dialing retries. */
+  get connectRetryCount(): number {
+    return this.connectRetries;
+  }
+
   /** Re-issues of a data operation past its first attempt, over the run. */
   get transportRetryCount(): number {
     return this.transportRetries;

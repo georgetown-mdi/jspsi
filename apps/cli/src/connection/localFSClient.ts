@@ -113,6 +113,14 @@ export class LocalFSClient implements FileTransportClient {
   }
 
   /**
+   * The whole of {@link reconnectCount} here: every attempt this client counts
+   * is a `connect()` re-attempt, since it opens no session to lose.
+   */
+  get connectRetryCount(): number {
+    return this.reconnectAttempts;
+  }
+
+  /**
    * The session and retry counters the SFTP adapter reports, each fixed at 0
    * here: the filedrop transport opens no connection or session, so there is
    * nothing to drop, retry, or release mid-exchange. These are required, not
