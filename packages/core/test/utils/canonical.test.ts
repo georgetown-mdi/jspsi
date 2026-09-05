@@ -56,6 +56,29 @@ describe("canonical-vectors.json", () => {
     );
   });
 
+  // The file's own shape rule, which no encoder run checks:
+  // docs/spec/CANONICAL_ENCODING.md states that a `refuses` vector has none of
+  // `canonical`, `bytesHex`, or `sha256Hex` and that every other vector has all
+  // three. A byte string left behind on a vector that became a refusal would
+  // otherwise sit in the file unread, stating bytes no implementation may emit.
+  test("each vector states the encoded fields its refuses flag admits", () => {
+    const encodedFields = ["canonical", "bytesHex", "sha256Hex"] as const;
+    const statedPerVector = Object.fromEntries(
+      vectors.map((vector) => [
+        vector.name,
+        encodedFields.filter((field) => field in vector),
+      ]),
+    );
+    expect(statedPerVector).toEqual(
+      Object.fromEntries(
+        vectors.map((vector) => [
+          vector.name,
+          vector.refuses ? [] : [...encodedFields],
+        ]),
+      ),
+    );
+  });
+
   test.each(vectors)("$name: $description", (vector) => {
     if (vector.refuses) {
       expect(() => canonicalString(vector.value)).toThrow(
