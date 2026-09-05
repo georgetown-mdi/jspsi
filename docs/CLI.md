@@ -511,12 +511,13 @@ connection:
 
 #### When a WebRTC exchange does not connect
 
-A rendezvous that ends without a data channel names what ICE found, so the two failures that look alike from the outside can be told apart:
+A rendezvous that ends without a data channel names what ICE found, so the failures that look alike from the outside can be told apart:
 
-- **No relay candidate was gathered.** Nothing on this host could reach the TURN server -- the network blocked it, the credentials were wrong, or the relay presented a certificate this host does not trust. Fix the relay, or arrange a direct path; waiting longer changes nothing.
+- **No relay candidate was gathered, and no `turn` entry is configured.** A relay that is not configured cannot be gathered, so this is what a direct-only connection reports when no direct path was found. Arrange a direct path between the two parties -- the same network, or a VPN -- or [configure a relay](#turn).
+- **No relay candidate was gathered from a configured `turn` entry.** Nothing on this host could reach the relay -- the network blocked it, the credentials were wrong, or the relay presented a certificate this host does not trust. Fix the relay, or arrange a direct path; waiting longer changes nothing.
 - **A relay candidate was gathered and no candidate pair succeeded.** Both sides had addresses to try and none of the pairs worked. This is a path problem between the two parties, so the partner's side is where to look next.
 
-The failure states which of the two it is, alongside how many remote candidates the partner sent and how many pairs were tried. A completed exchange reports the candidate pair it settled on at `--log-level debug`, which is what tells you whether a run that worked went direct or through the relay.
+The failure states whether a relay candidate was gathered, how many remote candidates the partner sent, and how many pairs were tried. A report of no relay candidate is the first case or the second according to your own `turn` configuration, which the failure does not read. A completed exchange reports the candidate pair it settled on at `--log-level debug`, which is what tells you whether a run that worked went direct or through the relay.
 
 **A failure against the signaling server names a certificate problem when that is what it was.** A `wss://` socket that cannot be opened is checked once more against the same endpoint, and a certificate that does not verify on this host is reported as such rather than as a generic connection failure. On a network that intercepts TLS, the remedy is to trust that network's certificate authority -- add it to the host's trust store, or name a file holding it in `NODE_EXTRA_CA_CERTS`.
 

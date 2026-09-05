@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "vitest";
 import logLibrary from "loglevel";
 
 import {
+  ConnectionError,
   deriveRendezvousPeerId,
   generateSharedSecret,
   sanitizeErrorForDisplay,
@@ -11,6 +12,7 @@ import {
 
 import { snapshotDiagnosticSinkAndLevel } from "../../loggingTestSupport";
 import { BROKER_MESSAGE } from "../../../src/connection/webrtc/brokerClient";
+import { ICE_STATS_TIMEOUT_MS } from "../../../src/connection/webrtc/iceDiagnostics";
 import {
   MAX_CONNECTION_ID_LENGTH,
   MAX_PENDING_REMOTE_CANDIDATES,
@@ -123,6 +125,12 @@ class ScriptedPeer {
   readonly sctp = { sctp: { outboundQueue: [], sentQueue: [] } };
   /** ICE statistics `getStats()` answers with; a test scripts what it holds. */
   stats = new Map<string, unknown>();
+  /**
+   * How `getStats()` answers at all: a peer connection already torn down
+   * throws, and a collection that overruns {@link ICE_STATS_TIMEOUT_MS} never
+   * settles. Both leave a failure with no candidate report to attach.
+   */
+  statsAnswer: "resolves" | "throws" | "never-settles" = "resolves";
   /** Fired during setLocalDescription, as werift does. */
   candidatesDuringSetLocal: Array<Record<string, unknown>> = [];
 
@@ -167,6 +175,10 @@ class ScriptedPeer {
   }
 
   getStats(): Promise<Map<string, unknown>> {
+    if (this.statsAnswer === "throws")
+      throw new Error("the peer connection is closed");
+    if (this.statsAnswer === "never-settles")
+      return new Promise<Map<string, unknown>>(() => {});
     return Promise.resolve(this.stats);
   }
 
@@ -970,3 +982,89 @@ test("the channel-open ceiling reports the same diagnosis", async () => {
     "local candidates gathered: 1 (host); no relay candidate gathered",
   );
 });
+
+/**
+ * Drive one of the two diagnosed failures against a peer whose statistics
+ * cannot be read, timing the failure itself: the diagnosis is bounded, so what
+ * a report that never arrives may cost is the description, not the outcome.
+ */
+async function failureWithUnreadableStats(options: {
+  statsAnswer: ScriptedPeer["statsAnswer"];
+  path: "connection-failed" | "channel-open-ceiling";
+}): Promise<{ error: ConnectionError; elapsedMs: number }> {
+  const { socket, peer, session, inviterId } = await startRendezvous({
+    role: "acceptor",
+    channelOpenTimeoutMs: 100,
+    rendezvousTimeoutMs: 30_000,
+  });
+  peer.statsAnswer = options.statsAnswer;
+  const startedAt = Date.now();
+  if (options.path === "connection-failed") peer.failConnection();
+  else
+    socket.deliver({
+      type: BROKER_MESSAGE.answer,
+      src: inviterId,
+      payload: { sdp: { type: "answer", sdp: "v=0\r\nanswer\r\n" } },
+    });
+  const error = await session.then(
+    () => new Error("the rendezvous was expected to fail"),
+    (err: unknown) => err,
+  );
+  return { error: error as ConnectionError, elapsedMs: Date.now() - startedAt };
+}
+
+/** What every failure reporting no candidate report at all has in common. */
+function expectUndiagnosedFailure(
+  error: ConnectionError,
+  summary: string,
+): void {
+  expect(error).toBeInstanceOf(ConnectionError);
+  expect(error.kind).toBe("transport");
+  expect(error.message).toContain(summary);
+  expect(error.cause).toBeUndefined();
+  expect(sanitizeErrorForDisplay(error)).not.toContain("candidates gathered");
+}
+
+test("a failed connection whose statistics throw reports the failure alone", async () => {
+  const { error, elapsedMs } = await failureWithUnreadableStats({
+    statsAnswer: "throws",
+    path: "connection-failed",
+  });
+  expectUndiagnosedFailure(
+    error,
+    "no network path between the two parties could be established",
+  );
+  // A peer that answers at once is not waited on: the ceiling below is what
+  // bounds one that does not.
+  expect(elapsedMs).toBeLessThan(ICE_STATS_TIMEOUT_MS);
+});
+
+test("a failed connection whose statistics never arrive fails on the ICE ceiling", async () => {
+  const { error, elapsedMs } = await failureWithUnreadableStats({
+    statsAnswer: "never-settles",
+    path: "connection-failed",
+  });
+  expectUndiagnosedFailure(
+    error,
+    "no network path between the two parties could be established",
+  );
+  expect(elapsedMs).toBeGreaterThanOrEqual(ICE_STATS_TIMEOUT_MS);
+}, 15_000);
+
+test("a channel-open ceiling whose statistics throw reports the failure alone", async () => {
+  const { error, elapsedMs } = await failureWithUnreadableStats({
+    statsAnswer: "throws",
+    path: "channel-open-ceiling",
+  });
+  expectUndiagnosedFailure(error, "did not open within 100ms");
+  expect(elapsedMs).toBeLessThan(ICE_STATS_TIMEOUT_MS);
+});
+
+test("a channel-open ceiling whose statistics never arrive still reports", async () => {
+  const { error, elapsedMs } = await failureWithUnreadableStats({
+    statsAnswer: "never-settles",
+    path: "channel-open-ceiling",
+  });
+  expectUndiagnosedFailure(error, "did not open within 100ms");
+  expect(elapsedMs).toBeGreaterThanOrEqual(ICE_STATS_TIMEOUT_MS);
+}, 15_000);

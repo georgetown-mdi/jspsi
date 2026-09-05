@@ -18,9 +18,9 @@ import type { RTCPeerConnection } from "werift";
  * Every candidate type on the remote side is a token the exchange partner
  * chose: werift takes it verbatim from the candidate line it was sent and
  * validates nothing about it. It is bounded and escaped where it reaches the
- * operator -- a labelled cause link on the failure path, `sanitizeForDisplay`
- * at the log call site on the success path -- never composed into a first-party
- * summary.
+ * operator -- a labelled cause link on the failure path,
+ * `redactAndSanitizeForDisplay` at the log call site on the success path --
+ * never composed into a first-party summary.
  */
 
 /** Candidate type an entry with no readable one is counted under. */
@@ -58,14 +58,19 @@ export interface CandidateTally {
   types: ReadonlyArray<string>;
   /** Distinct types beyond the ones listed. */
   unlistedTypes: number;
-  /** Whether a relay candidate is among them. */
-  hasRelay: boolean;
 }
 
 /** What one peer connection's ICE stats say about the path it looked for. */
 export interface IceCandidateReport {
   local: CandidateTally;
   remote: CandidateTally;
+  /**
+   * Whether a relay candidate is among this side's. Only this side's is
+   * answered: it is the one an operator can act on, and it is read off every
+   * gathered type rather than the capped list in the tally. What the partner
+   * sent is already in {@link remote}'s types.
+   */
+  localRelayGathered: boolean;
   /** Candidate pairs the report holds. */
   pairCount: number;
   /** How many of them reached the succeeded state. */
@@ -93,7 +98,6 @@ function tallyOf(types: ReadonlyArray<string>): CandidateTally {
     count: types.length,
     types: distinct.slice(0, MAX_REPORTED_CANDIDATE_TYPES),
     unlistedTypes: Math.max(0, distinct.length - MAX_REPORTED_CANDIDATE_TYPES),
-    hasRelay: distinct.includes(RELAY_CANDIDATE_TYPE),
   };
 }
 
@@ -147,6 +151,7 @@ export function readIceCandidateReport(
   return {
     local: tallyOf(localTypes),
     remote: tallyOf(remoteTypes),
+    localRelayGathered: localTypes.includes(RELAY_CANDIDATE_TYPE),
     pairCount: pairs.length,
     succeededPairCount: pairs.filter(
       (pair) => stringField(pair, "state") === "succeeded",
@@ -198,7 +203,7 @@ export function describeSelectedCandidatePair(
 export function iceFailureDetails(
   report: IceCandidateReport,
 ): [string, ...string[]] {
-  const relay = report.local.hasRelay
+  const relay = report.localRelayGathered
     ? "relay candidate gathered"
     : "no relay candidate gathered";
   const pairs =
