@@ -108,7 +108,7 @@ interface ConstraintViolation {
  *     check only warns rather than blocking, the consequence is a suppressed
  *     advisory badge, never a data-filtering or match-correctness effect.
  *
- * Every sub-case is pinned by tests in standardization.test.ts. For a
+ * Every sub-case is pinned by tests in valueConstraints.test.ts. For a
  * legitimate class the per-code-point test is exactly `^[allowed]*$` (every
  * character must be in the class). The empty string trivially conforms.
  */

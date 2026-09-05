@@ -203,8 +203,9 @@ One assumption the live suite cannot hold, and where it lives instead: werift
 inlines its ICE candidates in the SDP, so two peers connect on loopback even
 when every trickled candidate is discarded. The candidate-queue rule the
 transport exists to honour is therefore invisible end to end and would fail only
-in the field. It is pinned in `apps/cli/test/unit/webrtcNegotiation.test.ts`,
-which drives the negotiation against a scripted broker and peer connection and
+in the field. It is pinned in
+`apps/cli/test/unit/connection/webrtcNegotiation.test.ts`, which drives the
+negotiation against a scripted broker and peer connection and
 asserts the ORDER of what goes on the wire.
 
 #### The one-command acceptance leg
@@ -510,19 +511,17 @@ route every project by directory alone and define no suffix glob at all.
 `*.integration.test.ts` / `*.browser.test.ts` suffix as an alternate match
 alongside its `test/unit/**`, `test/integration/**`, `test/browser/**` globs,
 but a file already under one of those directories matches by directory
-regardless of the suffix -- `apps/web/test/unit/` has the suffix on 26 of
-its 160 files and omits it on the other 134, and both route identically. Name
-a file for its module or scenario, not for its project.
+regardless of the suffix, and roughly a sixth of the files under
+`apps/web/test/unit/` carry it while the rest do not. Name a file for its
+module or scenario, not for its project.
 
 ### Grouping
 
 Group related tests with vitest's own `describe`, never with a title prefix
-written into a string. `packages/core/test/fileSyncConnection.test.ts` contains
-240 test titles that open `"synchronize(): ..."` where a `describe` block was
-meant: a title is a `describe` spelled as a string, so it does not nest, does
-not collapse in a reporter, and does not survive a rename. A `describe` title
-does not repeat the file's own name -- the path already says which module is
-under test.
+written into a string: a title is a `describe` spelled as a string, so it does
+not nest, does not collapse in a reporter, and does not survive a rename. A
+`describe` title does not repeat the file's own name -- the path already says
+which module is under test.
 
 ### Size, and when a file splits
 
@@ -530,12 +529,13 @@ A file crossing roughly 1,500 lines is due for a look, not a stop. Nothing
 checks the number, so it is a prompt to open the file and ask whether it still
 tracks one module, not a gate.
 
-The harder rule: a test file splits when its source module splits.
-`apps/cli/test/unit/ssh2SftpAdapter.test.ts` (11,006 lines) covers several
-modules' subjects, and `packages/core/test/fileSyncConnection.test.ts` (10,442
-lines) is in the same state -- both are cases where the source was split and
-the test file was not, so it asserts behavior that lives in several modules.
-Left unsplit, a module's tests become unfindable without grep.
+The harder rule: a test file splits when its source module splits. Left
+unsplit, it asserts behavior that lives in several modules and a module's
+tests become unfindable without grep. Both of this repository's cases have
+been split along that line: the SFTP adapter's suite is now one file per
+subject beside `ssh2SftpAdapter.ts`, sharing one fixture module, and the
+file-sync connection's rendezvous and retain-mode cases sit with the modules
+they exercise.
 
 ### Where helpers live
 
@@ -631,14 +631,15 @@ browser half unmeasured.
 `webrtc-interop-vectors.json` -- the CLI-to-web rendezvous, invitation, and
 handshake-role contract -- splits both ways:
 
-- `packages/core/test/webrtcInterop.test.ts` for what core alone owns.
-- `apps/cli/test/unit/webrtcInterop.test.ts` and
-  `apps/cli/test/unit/webrtcDispatch.test.ts` for the CLI's own constructions.
-- `apps/web/test/unit/webrtcInterop.test.ts` for the web app's, with each of the
-  three flows that read the side-to-role table driven through its own entry
-  point as well: the two one-shot flows in
-  `apps/web/test/unit/webrtcInteropHooks.test.ts` and the managed re-run in
-  `apps/web/test/unit/managedRunDriver.test.ts`. A correct table read on the
+- `packages/core/test/config/webrtcInterop.test.ts` for what core alone owns.
+- `apps/cli/test/unit/connection/webrtcInterop.test.ts` and
+  `apps/cli/test/unit/connection/webrtcDispatch.test.ts` for the CLI's own
+  constructions.
+- `apps/web/test/unit/psi/webrtcInterop.test.ts` for the web app's, with each
+  of the three flows that read the side-to-role table driven through its own
+  entry point as well: the two one-shot flows in
+  `apps/web/test/unit/psi/webrtcInteropHooks.test.ts` and the managed re-run in
+  `apps/web/test/unit/psi/managedRunDriver.test.ts`. A correct table read on the
   wrong key is the same failure on the wire, and one no web-to-web test can see,
   since a swapped key moves both ends together.
 - `apps/web/test/browser/webrtcInterop.test.ts` for the peer-id derivation and

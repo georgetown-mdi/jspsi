@@ -25,7 +25,7 @@ import styles from "@styles/app.module.css";
 // The ledger and demotion-notice expectations derive their form from this
 // function, so they pin that those sinks have the same form step 2's chips do,
 // not what that form is; the literal FSI/PDI expectations live in
-// apps/web/test/unit/columnNameDisplay.test.ts.
+// apps/web/test/unit/components/columnNameDisplay.test.ts.
 import { isolatedColumnName } from "@components/ColumnName";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";

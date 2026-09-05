@@ -177,7 +177,7 @@ software depends on.
 That the directory-operand form works at all -- that `/bin/chmod -h -N` accepts
 a directory as its operand, and that clearing the ACL there drops both the
 `file_inherit` and `directory_inherit` flags -- was driven against the real tool
-on 2026-09-01: `npx vitest run apps/cli/test/unit/extendedAclCoverage.test.ts`
+on 2026-09-01: `npx vitest run apps/cli/test/unit/doctor/extendedAclCoverage.test.ts`
 on a macOS host, 10 passed and 1 skipped, the skip being the Linux-only "no
 strip is attempted on the host's real platform" leg. Both facts come from the
 "nothing under an inheriting TMPDIR has an ACE" leg, which pins the

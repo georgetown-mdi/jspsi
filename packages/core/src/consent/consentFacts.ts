@@ -426,7 +426,7 @@ export const CONSENT_FACTS = {
   // PSI frames over the bare transport, with no application-layer encryption
   // to promise. It renders no consent fact at all, which is what keeps the
   // sentence accurate -- pinned by a test rather than by this comment
-  // (apps/cli/test/unit/zeroSetup.test.ts), so wiring consent facts into that
+  // (apps/cli/test/unit/commands/zeroSetup.test.ts), so wiring consent facts into that
   // path fails until the claim is re-examined.
   retainedFiles: {
     basis: "enforced",
@@ -801,7 +801,7 @@ export const DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT =
  * The non-receipt half this statement holds is the DISPLAY half:
  * {@link runExchange} gates the association table it returns on this
  * party's own output entitlement, so a sole-receiver acceptance is handed
- * none (pinned in packages/core/test/linkageCardinality.test.ts). The
+ * none (pinned in packages/core/test/config/linkageCardinality.test.ts). The
  * statement therefore says what this client presents and stops there. What
  * the wire does NOT withhold is a fact of its own, held by the
  * `duplicateGroupingDisplayLimit` entry of {@link CONSENT_FACTS} and

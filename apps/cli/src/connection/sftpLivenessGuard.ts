@@ -52,10 +52,10 @@ export const SFTP_STALL_DEADLINE_MS = 60_000;
  * would let an unbounded value crowd out the budget the first-party framing
  * needs.
  *
- * apps/cli/test/unit/transportRefusalBudget.test.ts asserts the ordinary-size fit
- * for the enumerated CLI call sites; the adapter's other stall shapes (delete,
- * rename, exclusive create, existence check) are covered by that suite's
- * class-level flood half and are measured, not pinned.
+ * apps/cli/test/unit/connection/transportRefusalBudget.test.ts asserts the
+ * ordinary-size fit for the enumerated CLI call sites; the adapter's other
+ * stall shapes (delete, rename, exclusive create, existence check) are covered
+ * by that suite's class-level flood half and are measured, not pinned.
  */
 export function transportOperationStalledError(
   operation: string,

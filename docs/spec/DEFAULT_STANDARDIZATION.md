@@ -30,7 +30,7 @@ pipeline.
 
 The step sequences, the worked examples, the alias table, and the date-format
 inference parameters below are checked against the shipped registries by
-`packages/core/test/defaultStandardizationDoc.test.ts`: an edit to either side
+`packages/core/test/config/defaultStandardizationDoc.test.ts`: an edit to either side
 that is not mirrored in the other fails the unit suite.
 
 ## Cross-party invariant

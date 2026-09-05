@@ -222,7 +222,7 @@ export const VERIFIERS = [
   {
     script: "verify-native-wire-vectors.mjs",
     reason:
-      "replays psi-engine-wire-vectors.json through the vendored NATIVE addon selected for the runtime, proving native/WASM interop rather than the file's provenance (which generate-psi-engine-wire-vectors.mjs above supplies). Run against the musl build by native_alpine.yaml; packages/core/test/psiEngineWireVectorsNative.test.ts reimplements the same comparison in-process rather than running this script.",
+      "replays psi-engine-wire-vectors.json through the vendored NATIVE addon selected for the runtime, proving native/WASM interop rather than the file's provenance (which generate-psi-engine-wire-vectors.mjs above supplies). Run against the musl build by native_alpine.yaml; packages/core/test/psi/psiEngineWireVectorsNative.test.ts reimplements the same comparison in-process rather than running this script.",
   },
 ];
 
@@ -231,7 +231,7 @@ export const UNGENERATED_VECTORS = [
   {
     vectors: "canonical-vectors.json",
     reason:
-      "a hand-authored RFC 8785 conformance corpus transcribed from docs/spec/CANONICAL_ENCODING.md. Generating it from this repo's canonicalizer would make it a self-test; replayed by packages/core/test/canonical.test.ts and apps/web/test/browser/canonical.test.ts.",
+      "a hand-authored RFC 8785 conformance corpus transcribed from docs/spec/CANONICAL_ENCODING.md. Generating it from this repo's canonicalizer would make it a self-test; replayed by packages/core/test/utils/canonical.test.ts and apps/web/test/browser/canonical.test.ts.",
   },
   {
     vectors: "psi-prebuild-manifest.json",

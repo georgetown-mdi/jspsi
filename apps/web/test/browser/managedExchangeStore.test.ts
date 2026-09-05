@@ -58,7 +58,7 @@ import type {
 // The IndexedDB half of the managed-exchange store, exercised against real
 // Chromium (real IndexedDB, structured clone, and the File System Access handle
 // type). The pure record schema and composition are unit-tested without a
-// database in test/unit/managedExchangeRecord.test.ts; this suite proves the CRUD
+// database in test/unit/psi/managedExchangeRecord.test.ts; this suite proves the CRUD
 // round-trips, the reader-rejects-unknown rule on a store read, and that a
 // one-step delete leaves nothing behind.
 

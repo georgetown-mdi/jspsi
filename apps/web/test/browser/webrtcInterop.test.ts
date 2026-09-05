@@ -20,7 +20,7 @@ import type {
 } from "@psilink/core";
 
 /**
- * The browser companion to apps/web/test/unit/webrtcInterop.test.ts: it runs
+ * The browser companion to apps/web/test/unit/psi/webrtcInterop.test.ts: it runs
  * the same checked-in CLI-to-web interop vectors through the browser build
  * of @psilink/core and the app's accept path in real Chromium, since the
  * rendezvous peer id and invitation checksum are computed on crypto.subtle,

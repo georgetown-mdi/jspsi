@@ -25,7 +25,7 @@ import type { LinkageTerms } from "@psilink/core";
 // screen shows, in which tier, for which entitlements. The whole tier is reached
 // from the algorithm alone, so every rendering here is driven from a psi-c terms
 // document with nothing forced. The CLI accept prompt's half of the same pairs is
-// in apps/cli/test/unit/accept.test.ts.
+// in apps/cli/test/unit/commands/accept.test.ts.
 
 const app = createAppMount();
 

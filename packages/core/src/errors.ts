@@ -262,7 +262,7 @@ export class LinkageTermsUnsatisfiableError extends UsageError {
  * acceptor's standardization is derived from its adopted terms via
  * `getDefaultStandardization`, whose outputs are exactly those terms'
  * field names, so it is consistent with them by construction and does not
- * reach this throw (pinned in standardization.test.ts). Adopted,
+ * reach this throw (pinned in linkageSatisfiability.test.ts). Adopted,
  * partner-origin field names therefore never appear here -- every message
  * this type holds is the authoring party's own local content. See
  * {@link OperatorConfigError} for why the web keys its actionable

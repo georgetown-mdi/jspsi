@@ -12,7 +12,7 @@ import { defaultSpawnCSVParseWorker } from "@psi/workers/csvParseWorkerClient";
 
 // The off-main-thread CSV parse, exercised against the REAL Vite-native worker in a
 // real browser (dev). The controller's dispatch plumbing is pinned in Node with a
-// fake worker (test/unit/csvParseController.test.ts); these confirm the actual worker
+// fake worker (test/unit/psi/csvParseController.test.ts); these confirm the actual worker
 // module -- constructed via `new Worker(new URL(...))`, running core's loadCSVFile --
 // parses correctly and exposes core's guards, in a real Worker. The production-BUNDLE
 // case is a separate build-gated integration test, since Vitest's browser mode

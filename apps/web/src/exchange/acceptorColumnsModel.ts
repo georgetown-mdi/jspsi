@@ -552,14 +552,15 @@ interface AcceptorPayloadDeclarationConflict {
  * the `payload.send` core enforces (`deriveAcceptedLinkageTerms`).
  *
  * The EMPTY declaration is gated only when the inviting party expects output
- * (`output.expectsOutput`, core's `shareWithPartner` on the mirrored side): when it
- * does not, the run transmits nothing whatever the operator marks, so there is
- * nothing to conflict with. A NON-EMPTY declaration is always gated, since it is an
- * accuracy control over a dictionary that is exchanged and written into the
- * exchange record regardless of output direction; `LinkageTermsSchema` refuses a
- * non-empty `payload.receive` alongside `expectsOutput: false`
- * (packages/core/test/linkageTerms.test.ts), so that combination never reaches
- * this step.
+ * (`output.expectsOutput`, core's `shareWithPartner` on the mirrored side):
+ * when it does not, the run transmits nothing whatever the operator marks, so
+ * there is nothing to conflict with. A NON-EMPTY declaration is always gated,
+ * since it is an accuracy control over a dictionary that is exchanged and
+ * written into the exchange record regardless of output direction;
+ * `LinkageTermsSchema` refuses a non-empty `payload.receive` alongside
+ * `expectsOutput: false`
+ * (packages/core/test/config/linkageTermsSchema.test.ts), so that combination
+ * never reaches this step.
  */
 export function acceptorPayloadDeclarationConflict(
   invitationTerms: LinkageTerms,

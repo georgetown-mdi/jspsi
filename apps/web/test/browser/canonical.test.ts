@@ -5,7 +5,7 @@ import { describe, expect, test } from "vitest";
 
 import { canonicalBytes, canonicalString } from "@psilink/core";
 
-// The companion to packages/core/test/canonical.test.ts: it runs the SAME
+// The companion to packages/core/test/utils/canonical.test.ts: it runs the SAME
 // checked-in vectors through the browser build of @psilink/core in real
 // Chromium. The Node suite proves Node matches the vectors and this suite
 // proves the browser matches the same vectors, so the two platforms produce

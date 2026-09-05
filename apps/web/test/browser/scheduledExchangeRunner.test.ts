@@ -20,7 +20,7 @@ import type { ManagedScheduleRuntimeOptions } from "@psi/managed/managedSchedule
 // This suite mounts in a real Chromium tab, the runtime the runner must not
 // fire in. The runner it starts is injected -- this file tests the gate and
 // the mount's lifetime, not the tick, which is
-// test/unit/managedScheduleRunner.test.ts.
+// test/unit/psi/managedScheduleRunner.test.ts.
 
 const app = createAppMount();
 

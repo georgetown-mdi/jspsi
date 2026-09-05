@@ -11,13 +11,14 @@ import { ConnectionError } from "@psilink/core";
  *
  * Every shape here was measured against the installed `peerjs` 1.5.5 and
  * `peerjs-js-binarypack` 2.1.0 rather than read off their sources, and both are
- * exact-pinned for that reason (docs/spec/DEPENDENCY_PINS.md). What was measured:
- * the chunk envelope's four keys and their order, the 16,300-byte chunking
- * threshold, the close sentinel's exact object, the truthy-`__peerData` receive
- * dispatch, and the fact that `pack` encodes a `Uint8Array`, an `ArrayBuffer` and
- * a Node `Buffer` to identical bytes. The round-trip tests in
- * test/unit/peerjsWire.test.ts pin those bytes as fixtures, so a bump that moves
- * the encoding fails there rather than at a partner's browser.
+ * exact-pinned for that reason (docs/spec/DEPENDENCY_PINS.md). What was
+ * measured: the chunk envelope's four keys and their order, the 16,300-byte
+ * chunking threshold, the close sentinel's exact object, the
+ * truthy-`__peerData` receive dispatch, and the fact that `pack` encodes a
+ * `Uint8Array`, an `ArrayBuffer` and a Node `Buffer` to identical bytes. The
+ * round-trip tests in test/unit/connection/peerjsWire.test.ts pin those bytes
+ * as fixtures, so a bump that moves the encoding fails there rather than at a
+ * partner's browser.
  *
  * This module is the framing only. The bounds that make the receive path safe
  * against a hostile peer live beside it in `inboundBounds.ts`, which is the only

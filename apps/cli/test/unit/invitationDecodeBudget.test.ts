@@ -38,7 +38,7 @@ const nonLocatorInvitation = (): Promise<string> =>
     },
   });
 
-// The CLI-side counterpart to packages/core/test/invitation.test.ts's
+// The CLI-side counterpart to packages/core/test/config/invitation.test.ts's
 // locator-guidance test: it drives the real decode wrapper and reads the
 // guidance from core's own describeDecodeError, rather than restating it.
 test("the locator rejection's guidance survives the CLI's own decode composition", async () => {

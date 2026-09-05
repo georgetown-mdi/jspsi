@@ -26,7 +26,7 @@ import { MatchingSharingSection } from "@exchange/MatchingSharingSection";
 // The expectations derive their form from this function, so they pin that the
 // section's string sink has the same form its chips do, not what that form
 // is; the literal FSI/PDI expectations live in
-// apps/web/test/unit/columnNameDisplay.test.ts.
+// apps/web/test/unit/components/columnNameDisplay.test.ts.
 import { isolatedColumnName } from "@components/ColumnName";
 
 import { createAppMount } from "./renderApp";

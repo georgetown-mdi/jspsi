@@ -14,7 +14,7 @@ import type { PsiEngine } from "@psilink/core";
 // The browser PSI crypto offload, exercised against the REAL Vite-native worker
 // running the REAL WASM engine in a real browser. The host-side
 // dispatch plumbing (reply routing, fault handling, dispose ordering) is pinned in
-// Node with a fake worker (test/unit/psiCryptoController.test.ts); this closes the gap
+// Node with a fake worker (test/unit/psi/psiCryptoController.test.ts); this closes the gap
 // end to end -- that the actual worker module, constructed via `new Worker(new
 // URL(...))` and loading `@openmined/psi.js/psi_wasm_worker`, runs the masking
 // correctly (byte-identical intersection) AND tears down cleanly on every terminal

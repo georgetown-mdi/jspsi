@@ -1,0 +1,809 @@
+import { afterEach, expect, test } from "vitest";
+
+import { deriveRendezvousPeerId, generateSharedSecret } from "@psilink/core";
+
+import { BROKER_MESSAGE } from "../../../src/connection/webrtc/brokerClient";
+import {
+  MAX_CONNECTION_ID_LENGTH,
+  MAX_PENDING_REMOTE_CANDIDATES,
+  openWebRtcPeerSession,
+} from "../../../src/connection/webrtc/weriftPeer";
+
+import type { WebRtcPeerSession } from "../../../src/connection/webrtc/weriftPeer";
+import type { RTCPeerConnection } from "werift";
+
+/**
+ * The negotiation state machine against a scripted broker and a scripted peer
+ * connection: which signaling frame goes out, in what order, and in response
+ * to what. werift inlines its ICE candidates in the SDP, so a peer whose
+ * trickled candidates are all dropped still connects on loopback -- the
+ * candidate-queue rule is invisible to an end-to-end test and only fails in
+ * the field. The live path is test/integration/webrtc/transport.test.ts.
+ */
+
+const CANDIDATE_A = {
+  candidate: "candidate:1 1 udp 2130706431 10.0.0.1 5000 typ host",
+  sdpMid: "0",
+  sdpMLineIndex: 0,
+};
+const CANDIDATE_B = {
+  candidate: "candidate:2 1 udp 2130706430 10.0.0.2 5001 typ host",
+  sdpMid: "0",
+  sdpMLineIndex: 0,
+};
+
+/**
+ * werift hands the negotiation an `RTCIceCandidate` instance whose `toJSON`
+ * produces the browser-shaped payload; the transport converts through that
+ * method, so a scripted candidate has to include it too.
+ */
+function asIceCandidate(fields: Record<string, unknown>): unknown {
+  return { ...fields, toJSON: () => fields };
+}
+
+/** A broker socket that records what the client sent and replays what a test says. */
+class ScriptedSocket {
+  static readonly OPEN = 1;
+  readyState = 0;
+  readonly sent: Array<Record<string, unknown>> = [];
+  /** How many times the client closed this socket; the registered id's release. */
+  closeCalls = 0;
+  private readonly listeners = new Map<string, Set<(event: unknown) => void>>();
+
+  addEventListener(type: string, handler: (event: unknown) => void): void {
+    const set = this.listeners.get(type) ?? new Set();
+    set.add(handler);
+    this.listeners.set(type, set);
+  }
+
+  removeEventListener(type: string, handler: (event: unknown) => void): void {
+    this.listeners.get(type)?.delete(handler);
+  }
+
+  send(data: string): void {
+    this.sent.push(JSON.parse(data) as Record<string, unknown>);
+  }
+
+  close(): void {
+    this.closeCalls += 1;
+    this.readyState = 3;
+  }
+
+  register(): void {
+    this.readyState = ScriptedSocket.OPEN;
+    this.emit("open", {});
+    this.deliver({ type: BROKER_MESSAGE.open });
+  }
+
+  deliver(message: Record<string, unknown>): void {
+    this.emit("message", { data: JSON.stringify(message) });
+  }
+
+  /** The frames of one type the client sent, in order. */
+  ofType(type: string): Array<Record<string, unknown>> {
+    return this.sent.filter((frame) => frame.type === type);
+  }
+
+  /** Index of the first frame of `type`, or -1. */
+  firstIndexOf(type: string): number {
+    return this.sent.findIndex((frame) => frame.type === type);
+  }
+
+  /** Has the client attached its listeners yet? */
+  wired(): boolean {
+    return (this.listeners.get("message")?.size ?? 0) > 0;
+  }
+
+  private emit(type: string, event: unknown): void {
+    for (const handler of [...(this.listeners.get(type) ?? [])]) handler(event);
+  }
+}
+
+/** A peer connection stand-in: no ICE, no DTLS, candidates fired on command. */
+class ScriptedPeer {
+  onicecandidate: ((event: { candidate?: unknown }) => void) | undefined;
+  onconnectionstatechange: (() => void) | undefined;
+  ondatachannel: ((event: { channel: unknown }) => void) | undefined;
+  connectionState = "connected";
+  localDescription: { type: string; sdp: string } | undefined;
+  readonly remoteDescriptions: Array<{ type: string; sdp: string }> = [];
+  readonly remoteCandidates: Array<unknown> = [];
+  readonly channels: Array<FakeChannel> = [];
+  /** How many times the session closed this connection. */
+  closeCalls = 0;
+  // The SCTP queues the session's drain assumption asserts on.
+  readonly sctp = { sctp: { outboundQueue: [], sentQueue: [] } };
+  /** Fired during setLocalDescription, as werift does. */
+  candidatesDuringSetLocal: Array<Record<string, unknown>> = [];
+
+  createDataChannel(label: string): FakeChannel {
+    const channel = new FakeChannel(label);
+    this.channels.push(channel);
+    return channel;
+  }
+
+  createOffer(): Promise<{ type: string; sdp: string }> {
+    return Promise.resolve({ type: "offer", sdp: "v=0\r\noffer\r\n" });
+  }
+
+  createAnswer(): Promise<{ type: string; sdp: string }> {
+    return Promise.resolve({ type: "answer", sdp: "v=0\r\nanswer\r\n" });
+  }
+
+  setLocalDescription(description: {
+    type: string;
+    sdp: string;
+  }): Promise<void> {
+    this.localDescription = description;
+    // werift begins firing candidates here, before the description can have
+    // reached the broker: the whole reason the transport queues them.
+    for (const candidate of this.candidatesDuringSetLocal) {
+      this.onicecandidate?.({ candidate: asIceCandidate(candidate) });
+    }
+    return Promise.resolve();
+  }
+
+  setRemoteDescription(description: {
+    type: string;
+    sdp: string;
+  }): Promise<void> {
+    this.remoteDescriptions.push(description);
+    return Promise.resolve();
+  }
+
+  addIceCandidate(candidate: unknown): Promise<void> {
+    this.remoteCandidates.push(candidate);
+    return Promise.resolve();
+  }
+
+  close(): Promise<void> {
+    this.closeCalls += 1;
+    this.connectionState = "closed";
+    return Promise.resolve();
+  }
+}
+
+class FakeChannel {
+  readyState = "connecting";
+  bufferedAmount = 0;
+  onopen: (() => void) | undefined;
+  onclose: (() => void) | undefined;
+  onmessage: ((event: { data: unknown }) => void) | undefined;
+  onerror: ((event: { error: unknown }) => void) | undefined;
+
+  constructor(readonly label: string) {}
+
+  open(): void {
+    this.readyState = "open";
+    this.onopen?.();
+  }
+
+  send(): void {}
+  close(): void {}
+}
+
+const sessions: Array<WebRtcPeerSession> = [];
+
+afterEach(async () => {
+  for (const session of sessions.splice(0)) await session.close();
+});
+
+/** Start a rendezvous with scripted transports; resolve once both are wired. */
+async function startRendezvous(options: {
+  role: "inviter" | "acceptor";
+  candidatesDuringSetLocal?: Array<Record<string, unknown>>;
+  offerRetryIntervalMs?: number;
+  rendezvousTimeoutMs?: number;
+  channelOpenTimeoutMs?: number;
+  signal?: AbortSignal;
+  /**
+   * Whether the broker confirms the registration with `OPEN`. A test of the
+   * window before registration completes says no and leaves it unconfirmed.
+   */
+  confirmRegistration?: boolean;
+}): Promise<{
+  socket: ScriptedSocket;
+  peer: ScriptedPeer;
+  session: Promise<WebRtcPeerSession>;
+  inviterId: string;
+  acceptorId: string;
+}> {
+  const sharedSecret = generateSharedSecret();
+  const [inviterId, acceptorId] = await Promise.all([
+    deriveRendezvousPeerId(sharedSecret, "inviter"),
+    deriveRendezvousPeerId(sharedSecret, "acceptor"),
+  ]);
+  const socket = new ScriptedSocket();
+  const peer = new ScriptedPeer();
+  peer.candidatesDuringSetLocal = options.candidatesDuringSetLocal ?? [];
+  const session = openWebRtcPeerSession({
+    location: {
+      host: "127.0.0.1",
+      port: 9000,
+      path: "/api",
+      key: "peerjs",
+      secure: false,
+    },
+    role: options.role,
+    sharedSecret,
+    iceServers: [{ urls: "stun:127.0.0.1:3478" }],
+    offerRetryIntervalMs: options.offerRetryIntervalMs ?? 60_000,
+    rendezvousTimeoutMs: options.rendezvousTimeoutMs ?? 10_000,
+    channelOpenTimeoutMs: options.channelOpenTimeoutMs ?? 10_000,
+    signal: options.signal,
+    peerConnectionFactory: () => peer as unknown as RTCPeerConnection,
+    socketFactory: () => socket as unknown as WebSocket,
+  });
+  session.then(
+    (value) => sessions.push(value),
+    () => {
+      // A test that expects the rendezvous to fail owns the rejection.
+    },
+  );
+  // The rendezvous derives both ids before it opens the socket, so wait for the
+  // client to attach its listeners rather than guessing how long that takes.
+  for (let attempt = 0; attempt < 200 && !socket.wired(); attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  if (options.confirmRegistration !== false) socket.register();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  return { socket, peer, session, inviterId, acceptorId };
+}
+
+/**
+ * Whether a rendezvous has settled yet. A rendezvous still waiting is the
+ * assertion in the tests below, so the answer has to come back rather than
+ * block on a promise that is not meant to settle at all.
+ */
+async function settlementOf(
+  session: Promise<WebRtcPeerSession>,
+): Promise<"waiting" | "resolved" | "rejected"> {
+  return await Promise.race([
+    session.then(
+      () => "resolved" as const,
+      () => "rejected" as const,
+    ),
+    new Promise<"waiting">((resolve) =>
+      setTimeout(() => resolve("waiting"), 20),
+    ),
+  ]);
+}
+
+// --- the dialer's offer -----------------------------------------------------
+
+test("the acceptor's OFFER contains the payload a browser PeerJS peer parses", async () => {
+  const { socket, peer, session, inviterId } = await startRendezvous({
+    role: "acceptor",
+  });
+  const [offer] = socket.ofType(BROKER_MESSAGE.offer);
+  expect(offer.dst).toBe(inviterId);
+  const payload = offer.payload as Record<string, unknown>;
+  expect(payload.sdp).toEqual({ type: "offer", sdp: "v=0\r\noffer\r\n" });
+  expect(payload.type).toBe("data");
+  // The receiving PeerJS peer selects its DataConnection subclass from this
+  // field, so a mismatch is a protocol break rather than a preference.
+  expect(payload.serialization).toBe("binary");
+  expect(payload.reliable).toBe(true);
+  expect(payload.label).toBe(payload.connectionId);
+  expect(String(payload.connectionId)).toMatch(/^dc_/);
+  // The dialer creates the channel, and its label matches the connection id.
+  expect(peer.channels).toHaveLength(1);
+  expect(peer.channels[0].label).toBe(payload.connectionId);
+  peer.channels[0].open();
+  await session;
+});
+
+// --- the candidate queue ----------------------------------------------------
+
+test("no candidate is sent before the local description reaches the broker", async () => {
+  const { socket, peer, session } = await startRendezvous({
+    role: "acceptor",
+    candidatesDuringSetLocal: [CANDIDATE_A, CANDIDATE_B],
+  });
+  const offerAt = socket.firstIndexOf(BROKER_MESSAGE.offer);
+  const candidateAt = socket.firstIndexOf(BROKER_MESSAGE.candidate);
+  expect(offerAt).toBeGreaterThanOrEqual(0);
+  expect(candidateAt).toBeGreaterThan(offerAt);
+  // Both queued candidates are flushed once the offer is out; none is dropped.
+  expect(
+    socket
+      .ofType(BROKER_MESSAGE.candidate)
+      .map((frame) => (frame.payload as { candidate: unknown }).candidate),
+  ).toEqual([CANDIDATE_A, CANDIDATE_B]);
+  peer.channels[0].open();
+  await session;
+});
+
+test("a candidate gathered after the description is sent goes out at once", async () => {
+  const { socket, peer, session } = await startRendezvous({ role: "acceptor" });
+  expect(socket.ofType(BROKER_MESSAGE.candidate)).toHaveLength(0);
+  peer.onicecandidate?.({ candidate: asIceCandidate(CANDIDATE_A) });
+  expect(
+    socket
+      .ofType(BROKER_MESSAGE.candidate)
+      .map((frame) => (frame.payload as { candidate: unknown }).candidate),
+  ).toEqual([CANDIDATE_A]);
+  peer.channels[0].open();
+  await session;
+});
+
+test("an end-of-candidates event sends nothing", async () => {
+  const { socket, peer, session } = await startRendezvous({ role: "acceptor" });
+  peer.onicecandidate?.({ candidate: undefined });
+  expect(socket.ofType(BROKER_MESSAGE.candidate)).toHaveLength(0);
+  peer.channels[0].open();
+  await session;
+});
+
+// --- the retry the broker's silence forces ----------------------------------
+
+test("the offer is re-sent while the partner has not answered", async () => {
+  // The broker neither queues a message for an unregistered peer nor reports
+  // that it dropped one, so a repeat is the dialer's only route.
+  const { socket, peer, session } = await startRendezvous({
+    role: "acceptor",
+    candidatesDuringSetLocal: [CANDIDATE_A],
+    offerRetryIntervalMs: 20,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  expect(socket.ofType(BROKER_MESSAGE.offer).length).toBeGreaterThan(1);
+  // Each repeat includes the candidates again: the ones already sent were
+  // dropped along with the offer they belonged to.
+  expect(socket.ofType(BROKER_MESSAGE.candidate).length).toBeGreaterThan(1);
+  // Same connection id throughout, which a peer that already has the
+  // connection ignores rather than renegotiating.
+  const ids = new Set(
+    socket
+      .ofType(BROKER_MESSAGE.offer)
+      .map((frame) => (frame.payload as { connectionId: string }).connectionId),
+  );
+  expect(ids.size).toBe(1);
+  peer.channels[0].open();
+  await session;
+});
+
+test("the retry stops once the answer lands", async () => {
+  const { socket, peer, session, inviterId } = await startRendezvous({
+    role: "acceptor",
+    offerRetryIntervalMs: 20,
+  });
+  socket.deliver({
+    type: BROKER_MESSAGE.answer,
+    src: inviterId,
+    payload: { sdp: { type: "answer", sdp: "v=0\r\nanswer\r\n" } },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  const afterAnswer = socket.ofType(BROKER_MESSAGE.offer).length;
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  expect(socket.ofType(BROKER_MESSAGE.offer)).toHaveLength(afterAnswer);
+  expect(peer.remoteDescriptions).toEqual([
+    { type: "answer", sdp: "v=0\r\nanswer\r\n" },
+  ]);
+  peer.channels[0].open();
+  await session;
+});
+
+// --- which ceiling governs which wait ---------------------------------------
+
+/**
+ * The two ceilings measure different things, and only unequal values tell
+ * them apart: the rendezvous budget covers a partner who has not arrived (ten
+ * minutes), the channel-open ceiling a partner present and negotiating whose
+ * channel never comes up (thirty seconds). The dialer creates its channel
+ * before it has offered, so confusing the two cuts a ten-minute rendezvous to
+ * thirty seconds and blames a network path for an operator who started late.
+ */
+
+test("the dialer's channel-open ceiling does not run before it is answered", async () => {
+  const { socket, peer, session, inviterId } = await startRendezvous({
+    role: "acceptor",
+    channelOpenTimeoutMs: 100,
+    rendezvousTimeoutMs: 30_000,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  expect(await settlementOf(session)).toBe("waiting");
+
+  socket.deliver({
+    type: BROKER_MESSAGE.answer,
+    src: inviterId,
+    payload: { sdp: { type: "answer", sdp: "v=0\r\nanswer\r\n" } },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  peer.channels[0].open();
+  await expect(session).resolves.toBeDefined();
+});
+
+test("an unanswered dialer fails on the rendezvous budget, and says so", async () => {
+  const { session } = await startRendezvous({
+    role: "acceptor",
+    channelOpenTimeoutMs: 100,
+    rendezvousTimeoutMs: 150,
+  });
+  await expect(session).rejects.toThrow(/did not answer within 150ms/);
+});
+
+test("a channel that never opens after the answer fails at the open ceiling", async () => {
+  const { socket, session, inviterId } = await startRendezvous({
+    role: "acceptor",
+    channelOpenTimeoutMs: 100,
+    rendezvousTimeoutMs: 30_000,
+  });
+  socket.deliver({
+    type: BROKER_MESSAGE.answer,
+    src: inviterId,
+    payload: { sdp: { type: "answer", sdp: "v=0\r\nanswer\r\n" } },
+  });
+  await expect(session).rejects.toThrow(/did not open within 100ms/);
+});
+
+// --- the listener's answer --------------------------------------------------
+
+test("the inviter answers an offer and adopts its connection id", async () => {
+  const { socket, peer, session, acceptorId } = await startRendezvous({
+    role: "inviter",
+  });
+  expect(socket.ofType(BROKER_MESSAGE.offer)).toHaveLength(0);
+  socket.deliver({
+    type: BROKER_MESSAGE.offer,
+    src: acceptorId,
+    payload: {
+      sdp: { type: "offer", sdp: "v=0\r\noffer\r\n" },
+      type: "data",
+      connectionId: "dc_fromtheirside",
+      serialization: "binary",
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const [answer] = socket.ofType(BROKER_MESSAGE.answer);
+  expect(answer.dst).toBe(acceptorId);
+  const payload = answer.payload as Record<string, unknown>;
+  expect(payload.sdp).toEqual({ type: "answer", sdp: "v=0\r\nanswer\r\n" });
+  // The answer contains no label/reliable/serialization -- the offer settled all
+  // three -- and reuses the id the dialer chose.
+  expect(payload.connectionId).toBe("dc_fromtheirside");
+  expect(payload).not.toHaveProperty("serialization");
+  // The listener takes the channel the remote created rather than making one.
+  expect(peer.channels).toHaveLength(0);
+  const channel = new FakeChannel("dc_fromtheirside");
+  peer.ondatachannel?.({ channel });
+  channel.open();
+  await session;
+});
+
+test("an over-long connection id in an offer is neither adopted nor echoed", async () => {
+  const { socket, peer, session, acceptorId } = await startRendezvous({
+    role: "inviter",
+  });
+  // Larger than the bound but still inside the broker's 256 KiB frame, so it
+  // reaches onOffer; adopting it would push every outbound answer/candidate past
+  // the broker's inbound limit.
+  const oversized = `dc_${"x".repeat(MAX_CONNECTION_ID_LENGTH * 4)}`;
+  socket.deliver({
+    type: BROKER_MESSAGE.offer,
+    src: acceptorId,
+    payload: {
+      sdp: { type: "offer", sdp: "v=0\r\noffer\r\n" },
+      type: "data",
+      connectionId: oversized,
+      serialization: "binary",
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const [answer] = socket.ofType(BROKER_MESSAGE.answer);
+  const echoed = (answer.payload as { connectionId: string }).connectionId;
+  // The over-long id is refused; this side keeps its own short generated id.
+  expect(echoed).not.toBe(oversized);
+  expect(echoed.length).toBeLessThanOrEqual(MAX_CONNECTION_ID_LENGTH);
+  expect(echoed).toMatch(/^dc_/);
+  // And the rendezvous still completes on the channel the remote created.
+  const channel = new FakeChannel("dc_ok");
+  peer.ondatachannel?.({ channel });
+  channel.open();
+  await session;
+});
+
+test("a repeated offer is re-answered rather than renegotiated", async () => {
+  const { socket, peer, session, acceptorId } = await startRendezvous({
+    role: "inviter",
+  });
+  const offer = {
+    type: BROKER_MESSAGE.offer,
+    src: acceptorId,
+    payload: {
+      sdp: { type: "offer", sdp: "v=0\r\noffer\r\n" },
+      type: "data",
+      connectionId: "dc_repeat",
+    },
+  };
+  socket.deliver(offer);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  socket.deliver(offer);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  expect(socket.ofType(BROKER_MESSAGE.answer).length).toBeGreaterThan(1);
+  // One remote description: the repeat did not rebuild the connection already
+  // forming.
+  expect(peer.remoteDescriptions).toHaveLength(1);
+  const channel = new FakeChannel("dc_repeat");
+  peer.ondatachannel?.({ channel });
+  channel.open();
+  await session;
+});
+
+// --- what the negotiation refuses to act on ---------------------------------
+
+test("a signaling frame from any id but the derived partner is ignored", async () => {
+  const { socket, peer, session } = await startRendezvous({ role: "inviter" });
+  socket.deliver({
+    type: BROKER_MESSAGE.offer,
+    src: "ffff9999ffff9999ffff9999ffff9999",
+    payload: {
+      sdp: { type: "offer", sdp: "v=0\r\nintruder\r\n" },
+      connectionId: "dc_intruder",
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  expect(socket.ofType(BROKER_MESSAGE.answer)).toHaveLength(0);
+  expect(peer.remoteDescriptions).toHaveLength(0);
+  const channel = new FakeChannel("dc_ok");
+  peer.ondatachannel?.({ channel });
+  channel.open();
+  await session;
+});
+
+test("a signaling frame containing no src is dropped", async () => {
+  // The honest broker stamps src on every relayed frame, so a src-less frame is
+  // not peer traffic; the one party that can plant one is a hostile signaling
+  // server, and it must not be able to apply an offer.
+  const { socket, peer, session } = await startRendezvous({ role: "inviter" });
+  socket.deliver({
+    type: BROKER_MESSAGE.offer,
+    payload: {
+      sdp: { type: "offer", sdp: "v=0\r\nnosrc\r\n" },
+      connectionId: "dc_nosrc",
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  expect(socket.ofType(BROKER_MESSAGE.answer)).toHaveLength(0);
+  expect(peer.remoteDescriptions).toHaveLength(0);
+  const channel = new FakeChannel("dc_ok");
+  peer.ondatachannel?.({ channel });
+  channel.open();
+  await session;
+});
+
+test("a remote candidate is held until a remote description can apply it", async () => {
+  const { socket, peer, session, inviterId } = await startRendezvous({
+    role: "acceptor",
+  });
+  socket.deliver({
+    type: BROKER_MESSAGE.candidate,
+    src: inviterId,
+    payload: { candidate: CANDIDATE_A },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  expect(peer.remoteCandidates).toHaveLength(0);
+
+  socket.deliver({
+    type: BROKER_MESSAGE.answer,
+    src: inviterId,
+    payload: { sdp: { type: "answer", sdp: "v=0\r\nanswer\r\n" } },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  expect(peer.remoteCandidates).toEqual([CANDIDATE_A]);
+  peer.channels[0].open();
+  await session;
+});
+
+test("a flood of remote candidates before the description is capped, and a late description still applies the ones held", async () => {
+  const { socket, peer, session, inviterId } = await startRendezvous({
+    role: "acceptor",
+  });
+  // A partner (or hostile broker) that never answers could stream candidates for
+  // the whole rendezvous budget; the queue that holds them is capped.
+  for (let i = 0; i < MAX_PENDING_REMOTE_CANDIDATES + 25; i += 1) {
+    socket.deliver({
+      type: BROKER_MESSAGE.candidate,
+      src: inviterId,
+      payload: { candidate: CANDIDATE_A },
+    });
+  }
+  // None is applied while the description has not arrived.
+  expect(peer.remoteCandidates).toHaveLength(0);
+
+  socket.deliver({
+    type: BROKER_MESSAGE.answer,
+    src: inviterId,
+    payload: { sdp: { type: "answer", sdp: "v=0\r\nanswer\r\n" } },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  // Exactly the cap was retained; the surplus was dropped, not queued -- and the
+  // late description still completed the rendezvous.
+  expect(peer.remoteCandidates).toHaveLength(MAX_PENDING_REMOTE_CANDIDATES);
+  peer.channels[0].open();
+  await session;
+});
+
+test("two answers delivered in one tick set the remote description once", async () => {
+  const { socket, peer, session, inviterId } = await startRendezvous({
+    role: "acceptor",
+  });
+  const answer = {
+    type: BROKER_MESSAGE.answer,
+    src: inviterId,
+    payload: { sdp: { type: "answer", sdp: "v=0\r\nanswer\r\n" } },
+  };
+  // Same tick, before the first setRemoteDescription resolves: the synchronous
+  // latch must stop the second from re-applying and failing the rendezvous.
+  socket.deliver(answer);
+  socket.deliver(answer);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  expect(peer.remoteDescriptions).toHaveLength(1);
+  peer.channels[0].open();
+  await session;
+});
+
+test("the partner leaving the broker fails the rendezvous", async () => {
+  const { socket, session, inviterId } = await startRendezvous({
+    role: "acceptor",
+  });
+  socket.deliver({ type: BROKER_MESSAGE.leave, src: inviterId, payload: {} });
+  await expect(session).rejects.toThrow(/left the signaling server/);
+});
+
+// --- broker traffic after the session is established ------------------------
+
+test("broker signaling after the channel opens is ignored", async () => {
+  const { socket, peer, session, acceptorId } = await startRendezvous({
+    role: "inviter",
+  });
+  const offer = {
+    type: BROKER_MESSAGE.offer,
+    src: acceptorId,
+    payload: {
+      sdp: { type: "offer", sdp: "v=0\r\noffer\r\n" },
+      type: "data",
+      connectionId: "dc_open",
+    },
+  };
+  socket.deliver(offer);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const channel = new FakeChannel("dc_open");
+  peer.ondatachannel?.({ channel });
+  channel.open();
+  await session;
+
+  const answersBefore = socket.ofType(BROKER_MESSAGE.answer).length;
+  // Post-open, a repeated offer is not reflected as a fresh full-SDP answer
+  // through the broker, and a late candidate is not fed to the peer.
+  socket.deliver(offer);
+  socket.deliver({
+    type: BROKER_MESSAGE.candidate,
+    src: acceptorId,
+    payload: { candidate: CANDIDATE_A },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  expect(socket.ofType(BROKER_MESSAGE.answer)).toHaveLength(answersBefore);
+  expect(peer.remoteCandidates).toHaveLength(0);
+});
+
+// --- what an abort leaves behind --------------------------------------------
+
+/**
+ * The rendezvous can wait up to ten minutes, so `runProtocol` hands it the
+ * interrupt signal for a quick Ctrl-C. Ending it early closes the broker
+ * socket (releasing the derived id) and the peer connection, asserted against
+ * the real session where that wiring lives. A webrtc open is two phases --
+ * registering, then waiting for the partner -- each with its own cancellation
+ * wording; the three tests below cover the three windows an abort can land in.
+ */
+
+test("an abort after registration names the rendezvous and tears both down", async () => {
+  const controller = new AbortController();
+  const { socket, peer, session } = await startRendezvous({
+    role: "acceptor",
+    signal: controller.signal,
+  });
+  // Registered and negotiating: the dialer's offer is already on the wire.
+  expect(socket.ofType(BROKER_MESSAGE.offer).length).toBeGreaterThan(0);
+  expect(socket.closeCalls).toBe(0);
+  expect(peer.closeCalls).toBe(0);
+
+  controller.abort();
+  // The registration released the signal when the broker confirmed it, so what
+  // reaches the operator names the phase they actually interrupted -- the wait
+  // for the partner, not a connection to the signaling server that succeeded
+  // minutes ago.
+  await expect(session).rejects.toThrow(/the WebRTC rendezvous was cancelled/);
+  // Exactly once each: an abandoned rendezvous leaves no registered id on the
+  // broker and no half-open peer connection behind.
+  expect(socket.closeCalls).toBe(1);
+  expect(peer.closeCalls).toBe(1);
+});
+
+test("an abort inside the dialer's offer does not wait out the rendezvous", async () => {
+  // The window between the two phases' listeners: the registration has released
+  // the signal, and the negotiation cannot install its own until the acceptor's
+  // offer resolves -- werift gathers as it describes, so that offer spans timer
+  // turns. An abort landing here reaches no listener at all, and only the
+  // negotiation's re-check keeps the run from sitting out its whole rendezvous
+  // budget after the operator has already interrupted it.
+  const controller = new AbortController();
+  const { socket, peer, session } = await startRendezvous({
+    role: "acceptor",
+    signal: controller.signal,
+    confirmRegistration: false,
+    // Short enough that a missed abort fails as a timeout here rather than
+    // spending the suite's own ceiling on it.
+    rendezvousTimeoutMs: 500,
+  });
+  peer.createOffer = async () => {
+    controller.abort();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    return { type: "offer", sdp: "v=0\r\noffer\r\n" };
+  };
+  socket.register();
+
+  await expect(session).rejects.toThrow(/the WebRTC rendezvous was cancelled/);
+  expect(socket.closeCalls).toBe(1);
+  expect(peer.closeCalls).toBe(1);
+});
+
+test("a broker failure inside the acceptor's offer rejects rather than going unhandled", async () => {
+  // The acceptor awaits its own offer before it awaits the rendezvous, so a
+  // failure latched in that window rejects a promise nothing is waiting on
+  // yet. Unhandled, that terminates the process at exit 1 instead of failing
+  // the exchange the ordinary way. A terminal broker ERROR delivered while
+  // createOffer is in flight is one of several failures that reach fail()
+  // there.
+  const unhandled: unknown[] = [];
+  const record = (reason: unknown): void => {
+    unhandled.push(reason);
+  };
+  process.on("unhandledRejection", record);
+  try {
+    const { socket, peer, session } = await startRendezvous({
+      role: "acceptor",
+      confirmRegistration: false,
+    });
+    peer.createOffer = async () => {
+      socket.deliver({ type: BROKER_MESSAGE.error, payload: "server sank" });
+      // The real offer does I/O (werift gathers as it describes), so the window
+      // it holds open spans timer turns rather than resolving in the microtask
+      // the failure landed in -- which is what leaves the rejection unhandled
+      // long enough to be reported.
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return { type: "offer", sdp: "v=0\r\noffer\r\n" };
+    };
+    socket.register();
+
+    await expect(session).rejects.toThrow(/signaling server reported an error/);
+    // The teardown the classified path owes, which an unhandled rejection skips.
+    expect(peer.closeCalls).toBe(1);
+    // A turn for the rejection to be reported if it was never handled.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(unhandled).toEqual([]);
+  } finally {
+    process.off("unhandledRejection", record);
+  }
+});
+
+test("an abort before registration tears down the same, having sent nothing", async () => {
+  // The earliest window: the socket exists but the broker has not confirmed it,
+  // so the abort is the registration's, and its wording is what the operator
+  // gets. The peer connection is already built by this point, and is what would
+  // be left running if only the registration unwound itself.
+  const controller = new AbortController();
+  const { socket, peer, session } = await startRendezvous({
+    role: "acceptor",
+    signal: controller.signal,
+    confirmRegistration: false,
+  });
+
+  controller.abort();
+  await expect(session).rejects.toThrow(
+    /connecting to the signaling server was cancelled/,
+  );
+  expect(socket.sent).toHaveLength(0);
+  expect(socket.closeCalls).toBe(1);
+  expect(peer.closeCalls).toBe(1);
+});

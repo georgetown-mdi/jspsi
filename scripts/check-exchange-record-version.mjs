@@ -60,7 +60,7 @@
 //
 // What this check cannot see:
 //   - Whether the recovery still WORKS. It reads declarations, not behaviour. The
-//     behaviour is held by apps/web/test/unit/disclosureAccounting.test.ts (the
+//     behaviour is held by apps/web/test/unit/psi/disclosureAccounting.test.ts (the
 //     envelope-parses/entries-reject split, driven against the real parsers),
 //     apps/web/test/browser/managedExchangeStore.test.ts (the read's
 //     classification and the reset against real IndexedDB), and
@@ -202,7 +202,7 @@ export function bumpViolations(declared, sources) {
         "A move invalidates every accounting of disclosures already at rest in a browser: the accounting's read refuses the whole value, and so does the append inside it, so a scheduled exchange goes on disclosing and files nothing. The recovery offered for that state is the stored-form export and the accounting-scoped reset, and its export arm exists only while a move leaves the accounting ENVELOPE readable with the stored entries returned verbatim.",
         "",
         "That assumption has been driven against the pinned version and no other. Before recording the new one:",
-        "  - re-drive the split against the moved format (apps/web/test/unit/disclosureAccounting.test.ts), so the export arm is known to still have entries to hand over;",
+        "  - re-drive the split against the moved format (apps/web/test/unit/psi/disclosureAccounting.test.ts), so the export arm is known to still have entries to hand over;",
         "  - re-check that both arms are reachable from the unreadable state, in order (apps/web/test/browser/managedExchangeDetail.test.ts);",
         "  - state what the bump does to a stored accounting in docs/spec/MANAGED_EXCHANGE_RECORD.md and docs/MANAGED_EXCHANGE.md if the answer changed;",
         `  - then set RECORD_VERSION_PIN in ${CHECK_SOURCE} to "${declared}".`,

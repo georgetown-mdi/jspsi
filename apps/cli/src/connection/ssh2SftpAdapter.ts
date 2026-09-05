@@ -1688,15 +1688,16 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // reconnect/idempotency analysis.
     this.attachFatalErrorListener(sftp);
     // The session is established: arm the keepalive heartbeat so a long idle
-    // stretch (a PSI round on the computing side) does not let the server's idle
-    // timeout drop it. start() resets the idle clock, so a reconnect re-arms
-    // cleanly; it is torn down by end() and by the fatal-'error' guard. Skipped in
-    // ephemeral-session mode, where NO session is heartbeated: the two spans that
-    // DO cross an idle stretch there -- the rendezvous that precedes the loop, and
-    // a boundary the release keeps for an outstanding operation -- are accepted
-    // un-heartbeated and cross it instead through the mode's uncapped recovery
-    // re-dial (the uncapped-recovery unit case in test/unit/ssh2SftpAdapter.test.ts,
-    // driven end to end in test/integration/ephemeralSessionExchange.test.ts).
+    // stretch (a PSI round on the computing side) does not let the server's
+    // idle timeout drop it. start() resets the idle clock, so a reconnect re-
+    // arms cleanly; it is torn down by end() and by the fatal-'error' guard.
+    // Skipped in ephemeral-session mode, where NO session is heartbeated: the
+    // two spans that DO cross an idle stretch there -- the rendezvous that
+    // precedes the loop, and a boundary the release keeps for an outstanding
+    // operation -- are accepted un-heartbeated and cross it instead through the
+    // mode's uncapped recovery re-dial (the uncapped-recovery unit case in
+    // test/unit/connection/ssh2SftpAdapter.test.ts, driven end to end in
+    // test/integration/ephemeralSessionExchange.test.ts).
     if (!this.ephemeralSessions) this.heartbeat.start();
     // Discharge the idle-boundary release (see the `sessionBoundary` field): LAST
     // and on success only, so a dial that threw above leaves the release standing

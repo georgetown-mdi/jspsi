@@ -53,7 +53,7 @@ const countingCauseCycle = (): {
 // call site's own message on `.message`, and a stable fragment of the step
 // on its own cause link, plus the exit-64 classification (instanceof
 // UsageError) neither may disturb -- the link's own budget is measured in
-// test/transportRefusalBudget.test.ts.
+// test/connection/transportRefusalBudget.test.ts.
 describe("terminal transport/directory error taxonomy", () => {
   test("FrameSizeExceededError tags the recovery hint and puts a next step on its own link", () => {
     const err = new FrameSizeExceededError("inbound frame exceeds the cap");

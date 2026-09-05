@@ -25,7 +25,7 @@ import {
  * ceiling, not a quota, and each fragment fitted here is a value rather than a
  * composition, so the clip only ever bites a fragment that is itself the
  * anomaly. That each caller's fragments fit inside it at ordinary size is
- * asserted by apps/cli/test/unit/transportRefusalBudget.test.ts.
+ * asserted by apps/cli/test/unit/connection/transportRefusalBudget.test.ts.
  */
 const CAUSE_LINK_VALUE_BUDGET = DEFAULT_MAX_DISPLAY_LENGTH;
 

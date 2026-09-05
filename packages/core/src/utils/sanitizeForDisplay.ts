@@ -260,7 +260,7 @@ const CONTROL_CHARACTER = new RegExp(`^${CONTROL_CHARACTERS.source}$`, "u");
  * the operator is shown rather than to a width the treatment then changes.
  * Its order against redaction does not matter -- neither treatment can
  * make or unmake the other's match, held by a check rather than by this
- * sentence (`packages/core/test/sanitizeForDisplay.test.ts`). For DISPLAY
+ * sentence (`packages/core/test/utils/sanitizeForDisplay.test.ts`). For DISPLAY
  * only, like every treatment beside it: a comparison, a hash, or a stored
  * value takes the raw string.
  */

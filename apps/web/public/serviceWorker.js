@@ -490,7 +490,7 @@ async function trimCache(cache, max) {
  * the one that would carry no security headers unless they are written here. The
  * four below are the literal mirror of `securityResponseHeaders` in
  * `apps/web/src/utils/securityHeaders.ts` (a worker with no build step cannot
- * import it); `apps/web/test/unit/serviceWorker.test.ts` holds this response
+ * import it); `apps/web/test/unit/utils/serviceWorker.test.ts` holds this response
  * against that module, so the mirror cannot drift. */
 function uncachedOfflineResponse() {
   return new Response(UNCACHED_OFFLINE_DOCUMENT, {

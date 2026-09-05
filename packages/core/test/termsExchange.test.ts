@@ -845,7 +845,7 @@ test("an incompatibility rejects both parties with a message identifying the cau
 
 test("responder neutralizes partner bytes in a linkage-terms parse error", async () => {
   // End-to-end guard for the source sanitization: the per-call-site pin lives
-  // in linkageTerms.test.ts; this proves protocolSetup ROUTES the relayed parse
+  // in linkageTermsSchema.test.ts; this proves protocolSetup ROUTES the parse
   // error through it. A partner whose terms fail to parse with a bidi override
   // and an ANSI escape in the issue PATH must have those bytes neutralized in
   // the rejection the responder relays, never exposed raw: reverting to a raw

@@ -179,7 +179,7 @@ const RECORDED_SITES: readonly ConfigErrorSite[] = [
       "shape: callers gate the assertion on an authored standardization, and an " +
       "acceptor's is reconstructed from its adopted terms by " +
       "getDefaultStandardization and so cannot contradict them (pinned in " +
-      "packages/core/test/standardization.test.ts). A caller that fed a " +
+      "packages/core/test/linkageSatisfiability.test.ts). A caller that fed a " +
       "partner-supplied standardization here would defeat it.",
   },
   {
