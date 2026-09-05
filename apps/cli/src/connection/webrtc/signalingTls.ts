@@ -35,11 +35,34 @@ export const SIGNALING_TLS_PROBE_TIMEOUT_MS = 5_000;
 /**
  * Answers what the certificate check said about a signaling endpoint: the
  * verification failure's code, or `undefined` when the certificate was not the
- * problem.
+ * problem. `signal` releases the handshake, answering `undefined` at once.
  */
 export type SignalingCertificateProbe = (
   location: BrokerLocation,
+  signal?: AbortSignal,
 ) => Promise<string | undefined>;
+
+/**
+ * The host to hand `tls.connect`: the URL parser's, with an IPv6 literal's
+ * brackets removed.
+ *
+ * The brackets are URL syntax rather than part of the address, and `tls.connect`
+ * resolves what it is given as written -- measured against a self-signed
+ * listener on `::1`, "[::1]" reports `ENOTFOUND` with no certificate check
+ * having run, "::1" reports `DEPTH_ZERO_SELF_SIGNED_CERT`. Parsing rather than
+ * reading `host` is what makes this the same authority the signaling socket
+ * dialed, IDNA normalization included.
+ */
+function dialedHost(location: BrokerLocation): string | undefined {
+  let parsed: URL;
+  try {
+    parsed = new URL(`wss://${location.host}`);
+  } catch {
+    return undefined;
+  }
+  const { hostname } = parsed;
+  return hostname.startsWith("[") ? hostname.slice(1, -1) : hostname;
+}
 
 /** Read `authorizationError`, which Node sets as a code string or an Error. */
 function verificationFailureCode(socket: TLSSocket): string | undefined {
@@ -58,14 +81,16 @@ function verificationFailureCode(socket: TLSSocket): string | undefined {
  *
  * Never rejects: every outcome that is not a verification failure -- the
  * handshake succeeding, the connection failing before TLS, the ceiling
- * expiring -- is `undefined`, because the caller already has a failure to
- * report and this only adds to it.
+ * expiring, `signal` aborting, a `host` that does not parse -- is `undefined`,
+ * because the caller already has a failure to report and this only adds to it.
  */
 export const probeSignalingCertificate: SignalingCertificateProbe = (
   location,
+  signal,
 ) =>
   new Promise<string | undefined>((resolve) => {
-    if (!location.secure) {
+    const host = dialedHost(location);
+    if (!location.secure || host === undefined || signal?.aborted === true) {
       resolve(undefined);
       return;
     }
@@ -73,21 +98,30 @@ export const probeSignalingCertificate: SignalingCertificateProbe = (
     // omits it for an IP literal, where SNI is not defined.
     let socket: TLSSocket;
     try {
-      socket = connect({ host: location.host, port: location.port });
+      socket = connect({ host, port: location.port });
     } catch {
       resolve(undefined);
       return;
     }
-    const timer = setTimeout(() => {
-      socket.destroy();
-      resolve(undefined);
-    }, SIGNALING_TLS_PROBE_TIMEOUT_MS);
+    // The socket is left referenced although the ceiling above is not: both
+    // unreferenced, a run whose last live handle is this handshake exits before
+    // the failure it explains is reported (measured: the answer never arrives).
+    // An interrupt releases it by destroying it below instead.
+    const timer = setTimeout(
+      () => settle(undefined),
+      SIGNALING_TLS_PROBE_TIMEOUT_MS,
+    );
     timer.unref();
-    const settle = (code: string | undefined): void => {
+    function settle(code: string | undefined): void {
       clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
       socket.destroy();
       resolve(code);
-    };
+    }
+    function onAbort(): void {
+      settle(undefined);
+    }
+    signal?.addEventListener("abort", onAbort);
     socket.on("secureConnect", () => settle(undefined));
     socket.on("error", () => settle(verificationFailureCode(socket)));
   });

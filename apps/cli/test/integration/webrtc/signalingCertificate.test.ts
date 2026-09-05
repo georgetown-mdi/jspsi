@@ -1,11 +1,15 @@
 import net from "node:net";
+import os from "node:os";
 import tls from "node:tls";
 
 import { afterAll, beforeAll, expect, test } from "vitest";
 
 import { loopbackTlsCert } from "@psilink/testkit/loopbackTlsCert";
 
-import { probeSignalingCertificate } from "../../../src/connection/webrtc/signalingTls";
+import {
+  SIGNALING_TLS_PROBE_TIMEOUT_MS,
+  probeSignalingCertificate,
+} from "../../../src/connection/webrtc/signalingTls";
 
 import type { BrokerLocation } from "../../../src/connection/webrtc/brokerClient";
 import type { Server as TlsServer } from "node:tls";
@@ -25,11 +29,36 @@ import type { Server as TcpServer } from "node:net";
  */
 
 let tlsServer: TlsServer | undefined;
+let ipv6TlsServer: TlsServer | undefined;
 let plainServer: TcpServer | undefined;
 
-/** A location pointing at `port` on loopback, with TLS expected. */
-function location(port: number): BrokerLocation {
-  return { host: "127.0.0.1", port, path: "/", key: "peerjs", secure: true };
+/**
+ * Whether this machine has an IPv6 loopback address to bind. A container
+ * without one cannot drive the bracketed-literal case at all, and the reporter
+ * names what the run skipped.
+ */
+const ipv6Loopback = Object.values(os.networkInterfaces())
+  .flatMap((addresses) => addresses ?? [])
+  .some((address) => address.internal && address.address === "::1");
+
+/** A location pointing at `port` on `host`, with TLS expected. */
+function location(port: number, host = "127.0.0.1"): BrokerLocation {
+  return { host, port, path: "/", key: "peerjs", secure: true };
+}
+
+/**
+ * The live TLS socket handles this process holds against `port`, read off
+ * Node's own handle list: a probe that has answered must leave none, or the
+ * handshake it abandoned holds the process until its ceiling expires.
+ */
+function tlsHandlesTo(port: number): Array<tls.TLSSocket> {
+  const handles = (
+    process as unknown as { _getActiveHandles: () => Array<unknown> }
+  )._getActiveHandles();
+  return handles.filter(
+    (handle): handle is tls.TLSSocket =>
+      handle instanceof tls.TLSSocket && handle.remotePort === port,
+  );
 }
 
 beforeAll(async () => {
@@ -46,10 +75,20 @@ beforeAll(async () => {
   await new Promise<void>((resolve) =>
     plainServer?.listen(0, "127.0.0.1", resolve),
   );
+  if (!ipv6Loopback) return;
+  ipv6TlsServer = tls.createServer(
+    { key: loopbackTlsCert.key, cert: loopbackTlsCert.cert },
+    (socket) => socket.on("error", () => {}),
+  );
+  ipv6TlsServer.on("error", () => {});
+  await new Promise<void>((resolve) =>
+    ipv6TlsServer?.listen(0, "::1", resolve),
+  );
 });
 
 afterAll(() => {
   tlsServer?.close();
+  ipv6TlsServer?.close();
   plainServer?.close();
 });
 
@@ -91,4 +130,37 @@ test("a plaintext listener that never answers is bounded, not a verdict", async 
   await expect(
     probeSignalingCertificate(location(boundPort(plainServer))),
   ).resolves.toBeUndefined();
+}, 20_000);
+
+test.skipIf(loopbackTlsCert === null || !ipv6Loopback)(
+  "an IPv6 broker is dialed as an address rather than looked up as a name",
+  async () => {
+    // A configured IPv6 host is bracketed, which is the URL syntax for the
+    // literal and not part of the address: handed to tls.connect as written it
+    // is resolved as a name and reports ENOTFOUND, so an IPv6 broker's operator
+    // would be told the generic failure however its certificate verified.
+    const problem = await probeSignalingCertificate(
+      location(boundPort(ipv6TlsServer), "[::1]"),
+    );
+    expect(problem).toBeDefined();
+    expect(problem).toMatch(/CERT|SIGN/);
+  },
+);
+
+test("an aborted probe releases the handshake it holds", async () => {
+  // The plaintext listener accepts and answers nothing, so this handshake would
+  // run to the probe's ceiling. An interrupt waits out none of this transport's
+  // budgets (docs/spec/WEBRTC_TRANSPORT.md, Budgets), and what it leaves behind
+  // is measured rather than reasoned about: a socket still open is a handle
+  // that holds the process after the run was told to stop.
+  const port = boundPort(plainServer);
+  const controller = new AbortController();
+  const startedAt = Date.now();
+  const answered = probeSignalingCertificate(location(port), controller.signal);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  controller.abort();
+  await expect(answered).resolves.toBeUndefined();
+  expect(Date.now() - startedAt).toBeLessThan(SIGNALING_TLS_PROBE_TIMEOUT_MS);
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  expect(tlsHandlesTo(port)).toHaveLength(0);
 }, 20_000);
