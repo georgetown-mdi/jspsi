@@ -13,6 +13,10 @@ import { inProcessOnly } from "../sftpBackendGate";
 // succeeded. Driven through the adapter against a server that authenticates the
 // dial and then answers that request with nothing.
 //
+// What such a dial leaves behind is held here too: the cases at the end chain a
+// dial straight onto the failure ahead of it, where the ssh2 Client's 'close'
+// for the transport the bound destroyed can still be owed.
+//
 // Only the in-process backend can withhold a subsystem reply -- a real sshd
 // either serves the subsystem or refuses it -- so these run there with a server
 // of their own.
@@ -46,6 +50,33 @@ function dialOptions(srv: InProcessSftpServer): Record<string, unknown> {
     ...serverAuth(usera),
     readyTimeout: CONNECT_BUDGET_MS,
   };
+}
+
+// One attempt and no retry: what the chained cases below measure is the fate of
+// the dial issued into the window the failure ahead of it left behind, which the
+// retry loop would otherwise absorb a second later on a socket of its own.
+function oneAttempt(srv: InProcessSftpServer): Record<string, unknown> {
+  return { ...dialOptions(srv), maxReconnectAttempts: 0 };
+}
+
+// Dial `count` times over the one client, each dial issued from the settlement
+// handler of the one ahead of it so no tick passes between them, and report
+// what each dial settled with (`undefined` where it connected). Back-to-back is
+// the point: the window a dial the bound ended leaves behind is the ssh2
+// Client's 'close' for the transport it destroyed.
+function chainedDials(
+  adapter: SSH2SFTPClientAdapter,
+  options: Record<string, unknown>,
+  count: number,
+  settled: unknown[] = [],
+): Promise<unknown[]> {
+  if (settled.length === count) return Promise.resolve(settled);
+  const next = (outcome: unknown): Promise<unknown[]> =>
+    chainedDials(adapter, options, count, [...settled, outcome]);
+  return adapter.connect(options).then(
+    () => next(undefined),
+    (error: unknown) => next(error),
+  );
 }
 
 inProcessOnly(
@@ -191,6 +222,84 @@ inProcessOnly(
       expect(logs.map((entry) => entry.message).join("\n")).toContain(
         "did not open the SFTP subsystem",
       );
+    } finally {
+      srv.sessionControls.withholdSubsystemOpen = false;
+      await adapter.end().catch(() => {});
+      await srv.stop();
+    }
+  },
+  TEST_TIMEOUT_MS,
+);
+
+inProcessOnly(
+  "a re-dial chained onto a bounded failure reaches the server and is " +
+    "bounded again",
+  async () => {
+    const srv = await startInProcessSftpServer();
+    const adapter = new SSH2SFTPClientAdapter();
+    try {
+      srv.sessionControls.withholdSubsystemOpen = true;
+      const withheldBefore = srv.sessionControls.withheldSubsystemOpenCount();
+      const started = Date.now();
+      const [, chained] = await chainedDials(adapter, oneAttempt(srv), 2);
+      const elapsedMs = Date.now() - started;
+
+      // The re-dial got its own budget at the server rather than being failed
+      // over the transport the dial before it abandoned: ssh2-sftp-client's
+      // connect-time listeners fail a dial issued while the ssh2 Client's
+      // 'close' for that transport is still owed, and the handshake that dial
+      // started runs on unowned at the server
+      // (docs/spec/DEPENDENCY_PINS.md).
+      expect(chained).toBeInstanceOf(TimeoutError);
+      expect((chained as Error).message).toContain(
+        "did not open the SFTP subsystem",
+      );
+      expect({
+        withinCeiling: elapsedMs < 2 * BOUNDED_DIAL_CEILING_MS,
+        subsystemRequests:
+          srv.sessionControls.withheldSubsystemOpenCount() - withheldBefore,
+      }).toEqual({ withinCeiling: true, subsystemRequests: 2 });
+
+      // And the connection is left dialable: the same client reaches a server
+      // that answers the request again.
+      srv.sessionControls.withholdSubsystemOpen = false;
+      await adapter.connect(oneAttempt(srv));
+      await expect(adapter.exists(srv.handle.remoteRoot)).resolves.toBe(true);
+    } finally {
+      srv.sessionControls.withholdSubsystemOpen = false;
+      await adapter.end().catch(() => {});
+      await srv.stop();
+    }
+  },
+  TEST_TIMEOUT_MS,
+);
+
+inProcessOnly(
+  "four back-to-back bounded failures leave the connection able to dial again",
+  async () => {
+    const srv = await startInProcessSftpServer();
+    const adapter = new SSH2SFTPClientAdapter();
+    try {
+      srv.sessionControls.withholdSubsystemOpen = true;
+      const withheldBefore = srv.sessionControls.withheldSubsystemOpenCount();
+      const rejections = await chainedDials(adapter, oneAttempt(srv), 4);
+
+      // Every one of them is its own bounded failure at the server: a dial
+      // failed over the window the dial before it left behind would report a
+      // different failure and never reach the request.
+      expect({
+        bounded: rejections.filter(
+          (error) =>
+            error instanceof TimeoutError &&
+            error.message.includes("did not open the SFTP subsystem"),
+        ).length,
+        subsystemRequests:
+          srv.sessionControls.withheldSubsystemOpenCount() - withheldBefore,
+      }).toEqual({ bounded: 4, subsystemRequests: 4 });
+
+      srv.sessionControls.withholdSubsystemOpen = false;
+      await adapter.connect(oneAttempt(srv));
+      await expect(adapter.exists(srv.handle.remoteRoot)).resolves.toBe(true);
     } finally {
       srv.sessionControls.withholdSubsystemOpen = false;
       await adapter.end().catch(() => {});
