@@ -176,7 +176,9 @@ function stripCommentMarkers(line) {
  *
  * The comments come from the parse walked node by node: TypeScript attaches
  * every comment as leading or trailing trivia of some token, and the end-of-file
- * token carries the ones past the last statement.
+ * token carries the ones past the last statement. A line's text is cut from the
+ * comment ranges themselves rather than read off the raw line, so code sharing a
+ * line with a comment is not scanned as comment text.
  */
 export function commentBlocks(fileName, text) {
   const source = parseSource(fileName, text);
@@ -194,22 +196,30 @@ export function commentBlocks(fileName, text) {
     ts.getLeadingCommentRanges(text, source.endOfFileToken.getFullStart()),
   );
 
-  const lines = text.split("\n");
-  const commented = new Set();
-  for (const range of ranges.values()) {
-    const first = source.getLineAndCharacterOfPosition(range.pos).line;
-    const last = source.getLineAndCharacterOfPosition(range.end).line;
-    for (let line = first; line <= last; line += 1) commented.add(line);
+  const commentText = new Map();
+  for (const range of [...ranges.values()].sort(
+    (first, second) => first.pos - second.pos,
+  )) {
+    const start = source.getLineAndCharacterOfPosition(range.pos).line;
+    text
+      .slice(range.pos, range.end)
+      .split("\n")
+      .forEach((slice, offset) => {
+        const held = commentText.get(start + offset) ?? "";
+        const stripped = stripCommentMarkers(slice);
+        const separator = held.length > 0 && stripped.length > 0 ? " " : "";
+        commentText.set(start + offset, `${held}${separator}${stripped}`);
+      });
   }
 
   const blocks = [];
   let open = null;
-  for (const line of [...commented].sort((a, b) => a - b)) {
+  for (const line of [...commentText.keys()].sort((a, b) => a - b)) {
     if (open === null || line !== open.lines.at(-1) + 1) {
       open = { lines: [], text: "", spans: [] };
       blocks.push(open);
     }
-    const stripped = stripCommentMarkers(lines[line]);
+    const stripped = commentText.get(line);
     if (open.text.length > 0) open.text += " ";
     open.spans.push({
       end: open.text.length + stripped.length,
@@ -234,6 +244,15 @@ function excerptAt(block, offset) {
 }
 
 /**
+ * The override as it is written in a comment: the marker at a word boundary, so
+ * a longer word ending in it is a different word, with its reason as the second
+ * group.
+ */
+const OVERRIDE_PATTERN = new RegExp(
+  `(^|[^\\w-])${OVERRIDE_MARKER}(?!\\w)(\\s*--\\s*\\S)?`,
+);
+
+/**
  * Every history-narration tell in one source, as `{ line, tell, excerpt }`. A
  * block carrying OVERRIDE_MARKER reports nothing; a block carrying it with no
  * reason after `--` reports that instead, so the override cannot be pasted in
@@ -242,10 +261,10 @@ function excerptAt(block, offset) {
 export function narrationInSource(fileName, text) {
   const found = [];
   for (const block of commentBlocks(fileName, text)) {
-    const marker = block.text.indexOf(OVERRIDE_MARKER);
-    if (marker !== -1) {
-      if (/^\s*--\s*\S/.test(block.text.slice(marker + OVERRIDE_MARKER.length)))
-        continue;
+    const override = OVERRIDE_PATTERN.exec(block.text);
+    if (override) {
+      if (override[2]) continue;
+      const marker = override.index + override[1].length;
       found.push({
         line: lineOfOffset(block, marker),
         tell: `${OVERRIDE_MARKER} carries no reason after \`--\``,
@@ -369,7 +388,9 @@ export function changedLines(root, base) {
 export function scanRange(root, changed) {
   const violations = [];
   let files = 0;
-  for (const [file, lines] of [...changed].sort()) {
+  for (const [file, lines] of [...changed].sort(([first], [second]) =>
+    first < second ? -1 : first > second ? 1 : 0,
+  )) {
     const path = resolve(root, file);
     if (!isScannedFile(file) || !existsSync(path)) continue;
     files += 1;

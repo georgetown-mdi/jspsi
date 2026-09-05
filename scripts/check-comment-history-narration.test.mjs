@@ -189,6 +189,20 @@ describe("what counts as a comment", () => {
     ).toEqual(["a reference to the change itself"]);
   });
 
+  it("leaves the code beside a trailing comment alone", () => {
+    expect(
+      tells(
+        'const message = "This addon is no longer needed for this plan"; // shown in the billing panel\n',
+      ),
+    ).toEqual([]);
+  });
+
+  it("leaves the code beside a leading block comment alone", () => {
+    expect(
+      tells('/* flag */ const label = "the old implementation was retired";\n'),
+    ).toEqual([]);
+  });
+
   it("joins adjacent comment lines and breaks at a blank line", () => {
     const blocks = commentBlocks(
       FIXTURE,
@@ -212,6 +226,14 @@ describe("the override", () => {
       `// One. ${OVERRIDE_MARKER} -- why\n\n// The old implementation rethrew.\n`,
     );
     expect(found).toEqual(["an earlier version of the code named as such"]);
+  });
+
+  it("reads a longer word ending in the marker as a different word", () => {
+    for (const lookAlike of [`dis${OVERRIDE_MARKER}`, `re${OVERRIDE_MARKER}`]) {
+      expect(
+        tells(`// The old implementation rethrew. ${lookAlike} -- why\n`),
+      ).toEqual(["an earlier version of the code named as such"]);
+    }
   });
 
   it("reports the marker written with no reason", () => {
