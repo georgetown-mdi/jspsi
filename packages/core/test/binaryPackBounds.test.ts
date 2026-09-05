@@ -386,13 +386,12 @@ describe("scanFrameStructure: the per-value cost model", () => {
 });
 
 describe("scanFrameStructure: the map-key rule", () => {
-  // A map key that is not a string on the wire is refused rather than costed: the
-  // property name `map[key] = value` coerces it to grows with the descendants
-  // `unpack` zero-fills past the end of the buffer, not with the bytes the frame
-  // spends declaring them, so no charge taken during the walk can bound it. The
-  // real packer emits a map only for a plain JS object, whose keys are strings, so
-  // no legitimate frame is refused here -- the differential suite holds that
-  // assumption to the real packer.
+  // A map key that is not a string on the wire is refused rather than
+  // costed: the property name `map[key] = value` coerces it to grows with
+  // the descendants `unpack` zero-fills past the end of the buffer, not with
+  // the bytes the frame spends declaring them, so no charge taken during the
+  // walk can bound it. The real packer never emits such a key; the
+  // differential suite holds that assumption.
   const refuses = (frame: Uint8Array): boolean =>
     scanRefuses(frame, Number.MAX_SAFE_INTEGER, 256, 1 << 20);
 
@@ -446,7 +445,7 @@ describe("scanFrameStructure: the map-key rule", () => {
 
 /** Encode a value with the real BinaryPack packer and return the wire bytes. The
  * packer resolves synchronously for everything but a `Blob`, which nothing here
- * packs; the await keeps the declared type honest. */
+ * packs; the await keeps the declared type accurate. */
 async function packFrame(value: Packable): Promise<Uint8Array> {
   return new Uint8Array(await pack(value));
 }

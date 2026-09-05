@@ -190,16 +190,14 @@ test("a legitimately large original-index frame parses", () => {
 });
 
 // --- PSI decode element-count guard: frame-bytes vs element-count amplification -
-// A malicious partner can pack a PSI setup / request / response with many
-// minimal (~2-byte) repeated encrypted-element entries -- within the frame
-// byte cap, yet declaring up to ~frameBytes/2 elements; deserializeBinary
-// allocates one heap object per declared entry, so such a frame would
-// exhaust memory inside deserializeBinary itself. The participant instead
-// SCANS the protobuf wire format and rejects an over-declared frame BEFORE
-// deserializeBinary runs (connection/psiElementScan.ts), with a ceiling of
-// min(authenticated keyCount * recordCount, MAX_PSI_DECODE_ELEMENTS).
-// These tests craft an over-declared frame and assert the pre-scan's own
-// abort message, with the bound tightened to stand in for a real count.
+// A malicious partner can pack minimal (~2-byte) repeated encrypted-element entries
+// within the frame byte cap while declaring far more elements than legitimate;
+// deserializeBinary allocates one heap object per declared entry, exhausting memory.
+// The participant scans the wire format and rejects an over-declared frame before
+// deserializing (connection/psiElementScan.ts), with a ceiling of min(authenticated
+// keyCount * recordCount, MAX_PSI_DECODE_ELEMENTS). These tests craft such a frame
+// and assert the pre-scan's abort message, with the bound tightened to stand in for
+// a real count.
 
 // A tiny encrypted-element list whose declared count far exceeds any bound the
 // tests set, in a frame of only a few dozen bytes.
@@ -384,13 +382,11 @@ test("count-only countIntersection (joiner) rejects an over-declared response fr
 });
 
 // --- Non-Raw server setup: the element-count guard cannot be bypassed ----------
-// This protocol only ever sends a Raw server setup. A setup whose data-structure
-// oneof is anything other than Raw -- or is left unset -- has `getRaw()` undefined,
-// so its declared element count would be a benign 0 that slips past the bound,
-// then hands a non-Raw structure to the reveal-intersection path, which aborts
-// with a cryptic library error. The participant instead rejects a non-Raw setup
-// with a clean protocol abort, so the guard is fail-closed on an unexpected
-// structure regardless of the bound.
+// This protocol only ever sends a Raw server setup. A non-Raw or unset
+// data-structure oneof has `getRaw()` undefined, so its declared element count is a
+// benign 0 that slips past the bound, then reaches the reveal-intersection path as a
+// cryptic library error. The participant instead rejects a non-Raw setup with a
+// clean protocol abort, fail-closed regardless of the bound.
 
 // A well-formed server setup with no data structure set: its `getRaw()` is
 // undefined, the generic non-Raw case the guard rejects.

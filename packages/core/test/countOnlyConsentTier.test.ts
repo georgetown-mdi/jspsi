@@ -48,7 +48,7 @@ const SPEC_ASSIGNED_BASIS: Partial<Record<ConsentFactId, ConsentFactBasis>> = {
 };
 
 describe("the count-only consent tier", () => {
-  test("carries the basis the protocol assigns each half of the claim", () => {
+  test("holds the basis the protocol assigns each half of the claim", () => {
     for (const [id, basis] of Object.entries(SPEC_ASSIGNED_BASIS)) {
       const fact: ConsentFact = CONSENT_FACTS[id as ConsentFactId];
       expect(fact, `${id} is not a classified consent fact`).toBeDefined();
@@ -68,7 +68,7 @@ describe("the count-only consent tier", () => {
     expect(COUNT_ONLY_DISCLOSURE_STATEMENT.length).toBeGreaterThan(0);
   });
 
-  test("carries no proposed-but-not-applied caveat, since the exchange conducts the run", () => {
+  test("has no proposed-but-not-applied caveat, since the exchange conducts the run", () => {
     // The count-only tier is reached from the algorithm alone: what a surface
     // renders for a psi-c invitation is the tier, never a caveat qualifying it away.
     // A caveat keyed to the algorithm would be the drift this pins -- it would state

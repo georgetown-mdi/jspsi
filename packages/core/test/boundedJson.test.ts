@@ -69,7 +69,7 @@ test("invalid UTF-8 bytes throw (fatal decode), not a bound error", () => {
   expect(thrown).not.toBeInstanceOf(JsonStructureBoundError);
 });
 
-test("the structural-bound error carries no input bytes", () => {
+test("the structural-bound error contains no input bytes", () => {
   // Fixed text only -- the rejection must never echo attacker-controlled bytes.
   const err = new JsonStructureBoundError();
   expect(err.message).toBe(

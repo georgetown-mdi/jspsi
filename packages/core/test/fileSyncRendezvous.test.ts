@@ -1218,7 +1218,7 @@ describe("FileSyncRendezvous entry scan and sweep contract", () => {
     expect(files.has(`${DIR}/${helloName("zzz")}`)).toBe(false);
   });
 
-  test("a delete rejection during sweep surfaces as a transport error, not a UsageError", async () => {
+  test("a delete rejection during sweep shows as a transport error, not a UsageError", async () => {
     const files = new Map<string, Buffer>();
     files.set(`${DIR}/x-y${LOCK_SUFFIX}`, Buffer.alloc(0));
     const p = makeParty(
@@ -1311,7 +1311,7 @@ describe("FileSyncRendezvous entry-guard refusals at the display boundary", () =
     };
   }
 
-  test("the unexpected-protocol-file refusal still carries the recovery step once rendered", async () => {
+  test("the unexpected-protocol-file refusal still holds the recovery step once rendered", async () => {
     const files = new Map<string, Buffer>();
     // Retain-mode message acks: the longest protocol filename shape there is,
     // and twelve of them, so the raw enumeration alone is several times the
@@ -1601,7 +1601,7 @@ describe("FileSyncRendezvous entry-guard refusals at the display boundary", () =
     ["a non-ASCII code point", "你好"],
     ["a control byte", "\x1b[31mred"],
     ["an astral code point", "\u{1f600}"],
-  ])("a filename carrying %s is escaped once, not twice", async (_, stem) => {
+  ])("a filename containing %s is escaped once, not twice", async (_, stem) => {
     const files = new Map<string, Buffer>();
     const hostile = `${stem}-lock.json`;
     files.set(`${REAL_DIR}/${hostile}`, Buffer.alloc(0));

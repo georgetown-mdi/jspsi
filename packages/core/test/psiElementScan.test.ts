@@ -33,12 +33,10 @@ function rawSetupBytes(count: number, byteLen = 0): Uint8Array {
 }
 
 // --- Equivalence: the scan count matches what deserializeBinary materializes ----
-// This is a critical safety property. The scan runs before deserialize to
-// bound the amplifying allocation, so it must never under-count the elements
-// the library would produce. Pin it across message kinds, element counts,
-// element byte sizes, and the optional revealIntersection field -- and
-// re-verify on a library upgrade: this test is the executable check for that
-// structural assumption.
+// The scan runs before deserialize to bound the amplifying allocation, so it
+// must never under-count the elements the library would produce. Pin it
+// across message kinds, element counts, element byte sizes, and the optional
+// revealIntersection field, and re-verify on a library upgrade.
 
 const cases: Array<{
   kind: PsiMessageKind;

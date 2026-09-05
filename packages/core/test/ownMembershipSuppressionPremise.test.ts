@@ -6,12 +6,11 @@ import type { Output } from "../src/config/linkageTerms.js";
 import type { PsiRole } from "../src/types.js";
 
 // Both acceptance surfaces withhold `partnerLearnsOwnMembership` from a
-// psi-c invitation on a fact of role resolution, not a copy judgment: on a
-// one-sided exchange the non-entitled party is always the sender, and a
-// count-only sender computes nothing and gets no count-report frame
-// (docs/spec/PROTOCOL.md, PSI-C), so it has no membership to disclose. This
-// test pins that role-resolution assumption directly, since the render
-// tests that assert the suppression cannot see a regression in it.
+// psi-c invitation based on role resolution: on a one-sided exchange the
+// non-entitled party is always the sender, and a count-only sender computes
+// nothing and gets no count-report frame (docs/spec/PROTOCOL.md, PSI-C), so
+// it has no membership to disclose. This test pins that assumption directly,
+// since the render tests asserting the suppression cannot see it regress.
 
 /** The entitled side of a one-sided pair: the only party the run delivers to. */
 const ENTITLED: Output = { expectsOutput: true, shareWithPartner: false };
@@ -43,7 +42,7 @@ function rolesFromBothSides(
   };
 }
 
-describe("the role premise the consent surfaces' psi-c own-membership suppression rests on", () => {
+describe("the role assumption the consent surfaces' psi-c own-membership suppression rests on", () => {
   // Each shape gives the non-entitled party the smaller dataset, which is what the
   // work-minimizing branch makes the RECEIVER: an assignment that stopped taking
   // the one-sided branch would fail here rather than coincide with it.

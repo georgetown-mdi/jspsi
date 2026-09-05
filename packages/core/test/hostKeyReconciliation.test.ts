@@ -186,7 +186,7 @@ test("two different rejected key types do not collapse into a same-type warning"
   expect(msg).toMatch(/multiple host keys/);
 });
 
-test("one rejected key type observed by both parties reads as a same-type divergence", () => {
+test("one rejected key type observed by both parties is treated as a same-type divergence", () => {
   // The other half of the same property: the SAME rejected type on both sides
   // still compares equal, so the narrower wording is not lost to the bound.
   const keyType = observedKeyType("\x00same");

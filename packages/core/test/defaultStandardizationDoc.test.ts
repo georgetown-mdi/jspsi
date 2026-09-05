@@ -20,10 +20,9 @@ import type { SemanticType } from "../src/types";
 // docs/spec/DEFAULT_STANDARDIZATION.md mirrors registries that live only in
 // code: the per-type step arrays, the inference alias table, and the
 // date-format inference parameters. This suite reads the published document
-// and drives the shipped functions against it, so a pipeline edit that skips
-// the document, or a document edit that invents a step, fails here. It
-// parses the document rather than keeping a second copy of the pipelines,
-// which would be a third place to drift.
+// and drives the shipped functions against it, so an edit to either side
+// that drifts from the other fails here, rather than keeping a second copy
+// of the pipelines as a third place to drift.
 const DOC_RELATIVE_PATH = "docs/spec/DEFAULT_STANDARDIZATION.md";
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
 const docLines = readFileSync(`${repoRoot}${DOC_RELATIVE_PATH}`, "utf8").split(

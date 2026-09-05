@@ -190,7 +190,7 @@ describe("values outside the canonical domain are rejected", () => {
     );
   });
 
-  test("an array carrying a toJSON method is rejected, not coerced", () => {
+  test("an array with a toJSON method is rejected, not coerced", () => {
     // canonicalize would serialize toJSON()'s return instead of the elements.
     const arr: unknown[] = [1, 2, 3];
     (arr as { toJSON?: unknown }).toJSON = () => "hijacked";
@@ -240,7 +240,7 @@ describe("values outside the canonical domain are rejected", () => {
 // --- boundary guard: every rejection is a CanonicalEncodingError --------------
 
 describe("the boundary guard keeps the single-error-type contract", () => {
-  test("a throwing enumerable getter surfaces as a CanonicalEncodingError, not the raw error", () => {
+  test("a throwing enumerable getter shows as a CanonicalEncodingError, not the raw error", () => {
     // Only a non-schema-parsed object can have a throwing getter here: the
     // traversal in assertCanonical (and canonicalize) reads the getter,
     // which throws. The boundary try/catch in canonicalString converts the
@@ -287,7 +287,7 @@ describe("the boundary guard keeps the single-error-type contract", () => {
     expect(() => canonicalString(value)).toThrow(CanonicalEncodingError);
   });
 
-  test("a circular reference surfaces as a CanonicalEncodingError, not a raw stack overflow", () => {
+  test("a circular reference shows as a CanonicalEncodingError, not a raw stack overflow", () => {
     // assertCanonical recurses into the cycle until the stack overflows;
     // the boundary guard converts that RangeError to a
     // CanonicalEncodingError. Only non-schema-parsed data can form a

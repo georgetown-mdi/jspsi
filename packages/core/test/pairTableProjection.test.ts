@@ -441,7 +441,7 @@ test("hands the resolved shape to the front end before the first round", async (
   expect(resultA.associationTable).toStrictEqual([[0], [0]]);
 });
 
-test("a one-sided run names its own side of the cardinality at the seam", async () => {
+test("a one-sided run names its own side of the cardinality at the boundary", async () => {
   const [, captureA, , captureB] = await runBoth(
     preparedFor("A", paddedRows("Henry", "Anna", 4), true),
     preparedFor("B", paddedRows("Henry", "Bruno", 6), false),
@@ -462,7 +462,7 @@ test("a one-sided run names its own side of the cardinality at the seam", async 
   ).toBeUndefined();
 });
 
-test("a non-receiving party's own seam says so, on the cascade", async () => {
+test("a non-receiving party's own boundary says so, on the cascade", async () => {
   // The "one" party is the helper here: it contributes its records, receives no
   // table of its own, and its notice must not promise it a result file. The
   // cascade withholds no half from anyone, so the "many" party's notice keeps the

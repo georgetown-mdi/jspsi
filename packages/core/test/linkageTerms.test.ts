@@ -345,7 +345,7 @@ test("a parse error does not echo a partner-supplied received value", () => {
   }
 });
 
-test("a relayed parse error keeps an honest schema path readable", () => {
+test("a relayed parse error keeps an ordinary schema path readable", () => {
   // Acceptance counterpart to the sanitization pin above: the source escaping
   // must not over-escape an ordinary schema-fixed path. `sanitizeForDisplay`
   // leaves printable ASCII intact, so the `.` separators and numeric array
@@ -1289,7 +1289,7 @@ test("the refusal locates the offending step and param by issue path, echoing no
   expect(issue?.message).not.toContain("xxxx");
 });
 
-test("the refusal's path carries the param name escaped, not raw", () => {
+test("the refusal's path holds the param name escaped, not raw", () => {
   // The path locates the offender, so it holds a partner-controlled param NAME
   // -- and for a name UNDER the key-length bound, which the `invalid_key` route
   // never flags, this refusal is the first issue to place it there. The relay the
@@ -1343,7 +1343,7 @@ test("parseLinkageTerms throws on an over-bound param (the initiator/joiner path
   ).toThrow(ZodError);
 });
 
-test("a replacement carrying substitution sequences parses at the bound", () => {
+test("a replacement holding substitution sequences parses at the bound", () => {
   // The schema's half of the magnitude control: this bound reads a param's
   // LENGTH, so a replacement whose every character pair is a `$'` substitution
   // sequence -- which re-inserts the operator's own cell at each match position
@@ -1764,7 +1764,7 @@ test("date mismatch produces a warning, not an error", () => {
   expect(warnings[0]).toMatch(/date mismatch/);
 });
 
-test("every value a warning can carry is already escape-stable", () => {
+test("every value a warning can hold is already escape-stable", () => {
   // The CLI escapes a warning again at its log line and its event stream, so a
   // warning makes two passes on that route (recorded as a limit in
   // CHANNEL_SECURITY.md). That second pass is unobservable only while every
@@ -2213,7 +2213,7 @@ test("an explicit empty receive: [] is strict and aborts a partner that sends co
   // takes the present-field branch of the gate and a partner that discloses any
   // column fails the check. This agrees with the received-payload runtime
   // enforcement (an empty committed set is strict) and the web consent
-  // display's "(none)" commitment; reading [] as lazy here would admit an
+  // display's "(none)" commitment; treating [] as lazy here would admit an
   // exchange that enforcement later aborts.
   const local = { ...termsA, payload: { receive: [] } };
   const partner = {
@@ -2474,11 +2474,11 @@ test("both parties deduplicating is compatible when both expect output", () => {
 // enough that no real configuration hits them (asserted by the boundary-accept
 // cases) but still refuse a token padded to exhaust the recipient.
 
-test("accepts terms carrying no identity, and round-trips the absence", () => {
+test("accepts terms holding no identity, and round-trips the absence", () => {
   // `identity` is optional: a party that supplied no name sends terms with the
   // key absent, and nothing downstream substitutes one. Parsing must leave the
   // field absent rather than materializing an empty string or a default, since
-  // every surface reads that absence as "this party named itself none".
+  // every surface treats that absence as "this party named itself none".
   const { identity: _unnamed, ...withoutIdentity } = base;
   const parsed = parseLinkageTerms(withoutIdentity);
   expect(parsed.identity).toBeUndefined();
@@ -2588,7 +2588,7 @@ const freeTextTerms = (overrides: {
   },
 });
 
-test("rejects an identity carrying a NUL", () => {
+test("rejects an identity holding a NUL", () => {
   expect(() =>
     parseLinkageTerms(freeTextTerms({ identity: `Agency${NUL} A` })),
   ).toThrow(ZodError);
@@ -2601,7 +2601,7 @@ test.each([
   ["a tab", "\t"],
   ["a line feed", "\n"],
   ["a carriage return", "\r"],
-])("rejects an identity carrying %s", (_label, control) => {
+])("rejects an identity holding %s", (_label, control) => {
   // Tab, LF, and CR take no exception here, unlike a note authored in a
   // multi-line field: an identity is a single-line label bound into the
   // exchange record, so whitespace controls are as unmeant as an ESC is.
@@ -2610,25 +2610,25 @@ test.each([
   ).toThrow(ZodError);
 });
 
-test("rejects a legal agreement purpose carrying a control character", () => {
+test("rejects a legal agreement purpose holding a control character", () => {
   expect(() =>
     parseLinkageTerms(freeTextTerms({ purpose: `Audit${NUL} of the program` })),
   ).toThrow(ZodError);
 });
 
-test("rejects a payload column description carrying a control character", () => {
+test("rejects a payload column description holding a control character", () => {
   expect(() =>
     parseLinkageTerms(freeTextTerms({ description: `Date${ESC}[2J` })),
   ).toThrow(ZodError);
 });
 
-test("rejects a constraint exclude value carrying a control character", () => {
+test("rejects a constraint exclude value holding a control character", () => {
   expect(() =>
     parseLinkageTerms(freeTextTerms({ exclude: `123456789${NUL}` })),
   ).toThrow(ZodError);
 });
 
-test("accepts free text carrying non-ASCII letters", () => {
+test("accepts free text holding non-ASCII letters", () => {
   // The refused ranges stop below U+00A0, so a party writing its name, its
   // purpose, or its denylist in its own script is admissible -- as is the
   // no-break space at that first admitted code point, placed in the identity
@@ -3688,7 +3688,7 @@ describe("linkageRuleSet", () => {
     expect(validateCompatibility(partner, local).errors).toHaveLength(1);
   });
 
-  test("delimits a partner set name that carries the clause's own connective", () => {
+  test("delimits a partner set name that holds the clause's own connective", () => {
     // The name is free text the partner chooses, so an undelimited one could pass
     // itself off as the whole clause: "keys 1.0.0 over pii" as a name would be
     // treated as a rule set the partner does not cite. The quotes keep each

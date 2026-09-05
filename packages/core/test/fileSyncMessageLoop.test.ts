@@ -562,8 +562,9 @@ describe("FileSyncMessageLoop counter commit points", () => {
 
     // What the counter's position does NOT license is reusing the slot: the peer
     // may already have consumed a message under that seq and delivered it, so a
-    // second message written under it would be read as a second message rather
-    // than as the retry it is. The refusal is at send() entry, before any write.
+    // second message written under it would be treated as a second message
+    // rather than as the retry it is. The refusal is at send() entry, before
+    // any write.
     const refused = await f.loop.send({ a: 2 }).then(
       () => undefined,
       (e: unknown) => e,
@@ -955,7 +956,7 @@ describe("FileSyncMessageLoop poller lifecycle", () => {
 });
 
 describe("FileSyncMessageLoop inboundFrameCap", () => {
-  test("clamps to the static backstop and only ever tightens", () => {
+  test("clamps to the static cap and only ever tightens", () => {
     const f = makeLoop();
     f.loop.setInboundFrameCap(MAX_FRAME_SIZE_BYTES * 2);
     expect(internals(f.loop).inboundFrameCap).toBe(MAX_FRAME_SIZE_BYTES);

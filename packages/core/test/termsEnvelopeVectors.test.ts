@@ -171,7 +171,7 @@ describe("terms-exchange envelope vectors", () => {
   );
 
   test.each(vectors.abortFrames.map((frame) => [frame.name, frame]))(
-    "%s: the abort slot carries the pinned field set",
+    "%s: the abort slot holds the pinned field set",
     async (_name, frame) => {
       const sent: Array<unknown> = [];
       const conn: MessageConnection = {
@@ -201,7 +201,7 @@ describe("terms-exchange envelope vectors", () => {
 
   test("every field a slot admits rides some pinned frame on that slot", () => {
     // Every admitted field must appear on some pinned frame: a schema field
-    // added with no covering frame fails here until a scenario carries it,
+    // added with no covering frame fails here until a scenario includes it,
     // which also moves the bump guard's digest.
     for (const [slot, admitted] of Object.entries(vectors.envelopeFields)) {
       const emitted = new Set(

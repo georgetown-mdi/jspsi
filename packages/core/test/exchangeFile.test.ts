@@ -83,7 +83,7 @@ test("mintExchangeFile: an sftp config re-parses (camelize + schema) equal to th
   expect(reparsed).toEqual(expected);
 });
 
-test("mintExchangeFile: the serialized YAML is snake_case and carries the placeholder username", () => {
+test("mintExchangeFile: the serialized YAML is snake_case and has the placeholder username", () => {
   const yaml = mintExchangeFile({
     connection: { channel: "sftp", host: "sftp.example.org" },
     linkageTerms: baseTerms,
@@ -100,7 +100,7 @@ test("mintExchangeFile: the serialized YAML is snake_case and carries the placeh
 
 // --- Filedrop minting --------------------------------------------------------
 
-test("mintExchangeFile: a filedrop config carries the shared directory and no server block", () => {
+test("mintExchangeFile: a filedrop config has the shared directory and no server block", () => {
   const yaml = mintExchangeFile({
     connection: { channel: "filedrop", path: "/mnt/share/drop" },
     linkageTerms: baseTerms,
@@ -114,7 +114,7 @@ test("mintExchangeFile: a filedrop config carries the shared directory and no se
 
 // --- Split-directory pair minting --------------------------------------------
 
-test("mintExchangeFile: an sftp split pair is carried verbatim under server", () => {
+test("mintExchangeFile: an sftp split pair is held verbatim under server", () => {
   const yaml = mintExchangeFile({
     connection: {
       channel: "sftp",
@@ -134,7 +134,7 @@ test("mintExchangeFile: an sftp split pair is carried verbatim under server", ()
   expect(reparsed.connection.server.username).toBe(PLACEHOLDER_SSH_USERNAME);
 });
 
-test("mintExchangeFile: a filedrop split pair is carried at the top level", () => {
+test("mintExchangeFile: a filedrop split pair is held at the top level", () => {
   const yaml = mintExchangeFile({
     connection: {
       channel: "filedrop",
@@ -407,13 +407,10 @@ test("connectionFromLocator: every credential-bearing webrtc key is rejected in 
 // --- Mint surface stays file-sync-only ---------------------------------------
 
 test("mintExchangeFile: a webrtc locator is not an admissible mint input (compile-time guard)", () => {
-  // The downloadable-file mint path is file-sync-only: a webrtc exchange is
-  // coordinated live, not from a minted file. This is enforced structurally --
-  // ExchangeFileInput.connection is the file-sync-only ExchangeFileConnection,
-  // which does not include WebRTCExchangeLocator -- and this @ts-expect-error is
-  // that guard as a check: if webrtc ever became assignable to the mint input,
-  // the suppression would go unused and typecheck would fail here, flagging the
-  // silent widening the union addition must not cause.
+  // The mint path is file-sync-only: ExchangeFileInput.connection excludes
+  // WebRTCExchangeLocator, so this @ts-expect-error is that guard as a check --
+  // if webrtc ever became assignable, the suppression would go unused and
+  // typecheck would fail here.
   const input = {
     // @ts-expect-error webrtc is outside the mint's locator input by design
     connection: { channel: "webrtc", host: "peer.example.org" },

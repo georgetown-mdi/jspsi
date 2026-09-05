@@ -91,12 +91,11 @@ describe("native <-> WASM cross-backend parity", () => {
 });
 
 // The exchanges above use small inputs, so the native addon runs its EC
-// loops single-threaded: parallel_ec.cpp only shards at
-// kMinInputsForThreads (1024) inputs and up, and nothing else pins the
-// threaded path against WASM. This exercises it: a > 1024-element flow
-// through each backend, asserting byte- and association-identical
-// output. Unique inputs give every sort a total order, so the messages
-// compare exactly.
+// loops single-threaded: parallel_ec.cpp only shards at kMinInputsForThreads
+// (1024) inputs and up, and nothing else pins the threaded path against
+// WASM. This exercises it with a > 1024-element flow through each backend,
+// asserting byte- and association-identical output, since unique inputs give
+// every sort a total order.
 describe("native <-> WASM parity above the threading threshold", () => {
   const toHex = (bytes: Uint8Array): string =>
     Buffer.from(bytes).toString("hex");
@@ -147,13 +146,12 @@ describe("native <-> WASM parity above the threading threshold", () => {
     }
   }
 
-  // Two 1101-element flows, one per backend, are the most arithmetic any test in
-  // this package does off the stress tier: 2.2s alone on an idle container, and
-  // 4.1s measured inside the full unit suite on four cores -- 82% of vitest's 5s
-  // default, which is why CI has seen it lose. Sized at roughly seven times that
-  // worst measurement, the bound stays a safety check for an EC loop that
-  // never returns rather than an assertion about how fast the addon
-  // shards its work.
+  // Two 1101-element flows, one per backend, are the most arithmetic any test in this
+  // package does off the stress tier: 2.2s alone on an idle container, and 4.1s measured
+  // inside the full unit suite on four cores -- 82% of vitest's 5s default, which is why
+  // CI has seen it lose. Sized at roughly seven times that worst measurement, the bound
+  // stays a safety check for an EC loop that never returns rather than an assertion
+  // about how fast the addon shards its work.
   test(
     "threaded native EC loops reproduce the WASM output",
     { timeout: 30_000 },

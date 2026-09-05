@@ -27,14 +27,12 @@ const TOKEN_PEER = new Uint8Array(32).fill(0x22);
 
 const TEST_DIR = "/test";
 
-// In-memory FileTransportClient instrumented for the teardown-sequencing
-// tests: records an op log so a test can assert ordering (e.g. the abort
-// marker's rename completed BEFORE the transport was ended); models a real
-// transport where end() destroys the channel, so a put/rename still in
-// flight after it rejects -- making the sequencing test a genuine falsifier,
-// since an early end() would reject the marker write and redden the test;
-// and optionally delays writes (to give a missing decision-await a real
-// window to race ahead) or hangs them forever (to exercise the write budget).
+// In-memory FileTransportClient for the teardown-sequencing tests: records an
+// op log so a test can assert ordering (e.g. the marker rename completed
+// before the transport was ended). Models a real transport where end()
+// destroys the channel, so a put/rename still in flight after it rejects,
+// making the ordering assertion a genuine falsifier. Optionally delays writes
+// (to race a missing await) or hangs them forever (for the write-budget tests).
 function makeAbortTestClient(opts?: {
   writeDelayMs?: number;
   hangWrite?: boolean;
@@ -382,7 +380,7 @@ test("a hung marker write is abandoned within the short budget without hanging t
 
 // --- read side: detect and verify a peer abort marker ------------------------
 
-test("a valid peer abort marker surfaces a terminal PeerAbortError, never delivered as a message", async () => {
+test("a valid peer abort marker raises a terminal PeerAbortError, never delivered as a message", async () => {
   const { client, files } = makeAbortTestClient();
   const conn = await makeArmedConn(client, { peerId: PEER_ID });
   plantPeerMarker(files, TOKEN_PEER);
@@ -516,7 +514,7 @@ test("a foreign <other>-abort.json is not exempted and still hits the unexpected
 
 // --- message suppression hook ------------------------------------------------
 
-test("PeerAbortError carries the recovery-hint tag so the CLI suppresses the generic advisory", () => {
+test("PeerAbortError has the recovery-hint tag so the CLI suppresses the generic advisory", () => {
   // runProtocol's isHintTagged walker reads this property to skip the generic
   // "retry without re-inviting" advisory, leaving only the definitive message.
   expect(

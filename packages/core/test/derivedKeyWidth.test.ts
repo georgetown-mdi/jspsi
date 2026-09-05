@@ -179,14 +179,11 @@ const WIDTH_SHAPING_STEPS: ReadonlyArray<[string, TransformStep, number]> = [
 ];
 
 describe("the width an element's transforms bound its value to", () => {
-  test.each(WIDTH_SHAPING_STEPS)(
-    "%s settles a width",
-    (_label, step, width) => {
-      expect(elementValueWidthBound([step])).toBe(width);
-    },
-  );
+  test.each(WIDTH_SHAPING_STEPS)("%s fixes a width", (_label, step, width) => {
+    expect(elementValueWidthBound([step])).toBe(width);
+  });
 
-  test("every other function core knows settles none", () => {
+  test("every other function core knows fixes none", () => {
     // Held to the registry rather than to a list beside it, so a function added
     // to core falls back to the global cap until it is classified here -- the
     // safe direction, since a width derived too small refuses an honest row.
@@ -199,7 +196,7 @@ describe("the width an element's transforms bound its value to", () => {
     }
   });
 
-  test("a pad fills up to its length and settles no width on its own", () => {
+  test("a pad fills up to its length and fixes no width on its own", () => {
     expect(
       elementValueWidthBound([{ function: "pad_left", params: { length: 9 } }]),
     ).toBeUndefined();
@@ -220,7 +217,7 @@ describe("the width an element's transforms bound its value to", () => {
     ).toBe(9);
   });
 
-  test("the last step to settle a width governs", () => {
+  test("the last step to fix a width governs", () => {
     expect(
       elementValueWidthBound([
         { function: "pad_left", params: { length: 40 } },
@@ -252,13 +249,12 @@ describe("the width an element's transforms bound its value to", () => {
     ).toBe(10);
   });
 
-  test("a width that settles at zero is floored at one", () => {
+  test("a derived width of zero is floored at one", () => {
     // A value always yields at least itself, so the narrowest honest bound is
     // one character. `parse_date` with an empty output layout is the one shape
-    // whose params fix the width at zero -- the rendered date is as wide as the
-    // format -- and a zero would declare a key narrower than the single
-    // candidate the row builder emits for it. The terms schema refuses the
-    // shape (linkageTerms.test.ts), so this floor is what holds for a chain
+    // whose params fix the width at zero, declaring a key narrower than the
+    // single candidate the row builder emits for it. The terms schema already
+    // refuses the shape (linkageTerms.test.ts); this floor covers a chain
     // reaching the derivation another way.
     expect(
       elementValueWidthBound([
@@ -297,7 +293,7 @@ describe("the width an element's transforms bound its value to", () => {
     expect(declaredEffectiveKeyCount(terms)).toBe(terms.linkageKeys.length);
   });
 
-  test("a substring whose bounds do not settle a width derives none", () => {
+  test("a substring whose bounds do not fix a width derives none", () => {
     // A negative length measures its end from the end of the VALUE, so the
     // window it opens grows with the value; a degenerate bound reads nothing at
     // all, which the row build drops.
@@ -402,7 +398,7 @@ describe("the width a key declares", () => {
     );
   });
 
-  test("an unbounded transpositions element declares more than one key may carry", () => {
+  test("an unbounded transpositions element declares more than one key may hold", () => {
     // The stated limit of the all-pairs enumeration: the pair count of the
     // 128-character expansion limit is far above MAX_KEY_CANDIDATE_WIDTH, so an
     // element whose transforms bound no width is refused where the width is
@@ -566,7 +562,7 @@ describe("the width a key declares", () => {
     );
   });
 
-  test("the same ceiling refuses the row build at the width seam", () => {
+  test("the same ceiling refuses the row build at the width boundary", () => {
     // The check that refuses a fuzzy-widened row is the one that refuses an
     // over-ceiling key: both read the width the terms declare, so an operator
     // meets one message rather than a drop at one bound and a refusal at another.
@@ -594,7 +590,7 @@ describe("the width a key declares", () => {
 describe("both parties derive the same width with no round-trip", () => {
   const FUZZY_TERMS = termsWithFuzzyKey("transpositions");
 
-  test("neither terms frame carries a width, and each side derives the other's", async () => {
+  test("neither terms frame holds a width, and each side derives the other's", async () => {
     const [connA, connB] = createMessagePipe();
     const { conn: recordingA, sent: initiatorSent } =
       recordingConnection(connA);
@@ -657,7 +653,7 @@ describe("both parties derive the same width with no round-trip", () => {
     },
   );
 
-  test("a frame carrying a width on top of the terms proceeds without reading it", async () => {
+  test("a frame holding a width on top of the terms proceeds without reading it", async () => {
     const [connA, connB] = createMessagePipe();
     const responder = exchangeTerms(connB, "responder", FUZZY_TERMS, 200);
     await connA.send({

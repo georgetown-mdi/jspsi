@@ -30,7 +30,7 @@ import { readMessage } from "./utils/compatibilityMessageReader";
 
 // --- Reading a composed diagnostic back --------------------------------------
 
-test("the reader recovers exactly what the seam delimited", () => {
+test("the reader recovers exactly what the boundary delimited", () => {
   // The assertions below are only as good as this reader, so pin it against the
   // constructor it reads: quoting is injective, and the reader inverts it.
   for (const value of [
@@ -81,14 +81,13 @@ describe("quoteTermsValue", () => {
   });
 
   test("no value renders as a control character the composition placed", () => {
-    // The delimiting above bounds what a value can do in PRINTABLE bytes. This
+    // The delimiting above bounds what a value can do in PRINTABLE bytes; this
     // is the same bound one level up, where a composition's own structure is a
-    // control character -- a block that separates its lines with `\n` and is
-    // escaped whole where it is shown. The escape renders that line break and a
-    // value's own alike, so the delimiting boundary replaces the value's;
-    // every control character is covered rather than the line break alone,
-    // since which ones a composition builds structure from is not this
-    // module's to know.
+    // control character -- a block separates its lines with `\n`, escaped
+    // whole where shown. The escape treats that line break and a value's own
+    // alike, so the delimiting boundary must cover every control character,
+    // not just the line break, since it cannot know which ones a composition
+    // uses to build structure.
     for (let codePoint = 0; codePoint <= 0x9f; codePoint += 1) {
       const character = String.fromCodePoint(codePoint);
       if (!/\p{Cc}/u.test(character)) continue;
@@ -153,7 +152,7 @@ describe("bareTermsValue", () => {
     }
   });
 
-  test("the bare shape carries nothing a clause boundary is made of", () => {
+  test("the bare shape contains nothing a clause boundary is made of", () => {
     // Half of what licenses rendering a value bare at all: the payload list is
     // built from `,`, `[`, and `]`, and a run is closed by the delimiter, so a
     // shape admitting none of those cannot reach for the structure around it.
@@ -188,7 +187,7 @@ describe("bareTermsValue", () => {
       );
   });
 
-  test("a value carrying no digit is not bare-shaped", () => {
+  test("a value with no digit is not bare-shaped", () => {
     // The other half. Excluding the space makes a bare value exactly one
     // whitespace-delimited token, which on its own does NOT keep it out of a
     // connective position: the TEMPLATE supplies the spaces around a bare slot,
@@ -529,8 +528,8 @@ const TREATED_ESC = controlCharacterMarker(0x1b);
  *
  * The compile-time half of the sweep is separate and stronger -- the brand on
  * validateCompatibility's accumulators, exercised above -- so this table does not
- * carry the burden of being exhaustive on its own; it is what shows the delimiting
- * actually holds on each message an operator can be shown.
+ * have to be exhaustive on its own; it shows the delimiting actually holds on
+ * each message an operator can be shown.
  */
 interface SweptDiagnostic {
   readonly id: string;
@@ -1107,7 +1106,7 @@ test("every adversarial shape is swept across all but one diagnostic", () => {
       ).toBeGreaterThanOrEqual(SWEPT.length - 1);
 });
 
-test("a hostile value does reach the seam's bare branch", () => {
+test("a hostile value does reach the boundary's bare branch", () => {
   // Otherwise the shapes above would say nothing about the branch the digit
   // requirement governs: every slot could quote every one of them and the sweep
   // would still pass. A value is rendered bare where the message holds it
@@ -1222,7 +1221,7 @@ describe.each(SWEPT)("$id", (diagnostic) => {
 
 // --- Diagnostics that name no value ------------------------------------------
 
-test("the value-free diagnostics carry no delimiter at all", () => {
+test("the value-free diagnostics contain no delimiter at all", () => {
   // The rest of the class: fixed first-party copy, which the brand covers the
   // same way but which has no value to delimit. Pinned so a later edit that
   // interpolates a terms value into one of them has to come through the
@@ -1257,7 +1256,7 @@ test("the value-free diagnostics carry no delimiter at all", () => {
     expect(message).not.toContain(TERMS_VALUE_DELIMITER);
 });
 
-test("each output-mismatch branch reads as a whole sentence", () => {
+test("each output-mismatch branch displays as a whole sentence", () => {
   // The four readings are spelled out rather than assembled from interpolated
   // phrases, which is what keeps a first-party fragment out of the brand's way.
   const outputErrors = (

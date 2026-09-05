@@ -713,7 +713,7 @@ test("receive after a failure rejects with the latched error without reaching th
   await enc.close();
 });
 
-test("a receive parked when the wrapper latches surfaces the inner failure as transport", async () => {
+test("a receive parked when the wrapper latches reports the inner failure as transport", async () => {
   const { inner, receives } = parkingInner();
   const enc = await EncryptedMessageConnection.create(
     inner,

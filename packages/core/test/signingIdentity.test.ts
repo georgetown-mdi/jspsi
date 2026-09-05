@@ -425,7 +425,7 @@ describe("format-version enforcement", () => {
     await expect(parseSigningIdentity(V1_IDENTITY_FILE)).rejects.toThrow();
   });
 
-  test("a current-format body carrying the previous version is still rejected", async () => {
+  test("a current-format body holding the previous version is still rejected", async () => {
     // The version is the discriminant on its own: a document that is otherwise a
     // well-formed current certificate does not become acceptable by shape.
     const cert = clone((await freshIdentity()).certificate) as unknown as {

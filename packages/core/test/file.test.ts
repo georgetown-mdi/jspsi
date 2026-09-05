@@ -200,7 +200,7 @@ const ceilingTripScenarios: Array<{
 }> = [
   {
     // One logical line with no terminator anywhere: PapaParse can never yield a
-    // row or settle the header, so the read would buffer the whole span. The
+    // row or determine the header, so the read would buffer the whole span. The
     // guard destroys the stream with an operator-readable error once the run
     // since the last terminator crosses the limit. Delivered in small chunks, as
     // fs.createReadStream / stdin would deliver a large file.
@@ -219,7 +219,7 @@ const ceilingTripScenarios: Array<{
   {
     // A header of very many columns with its terminator beyond the ceiling: the
     // run grows from the first byte with no terminator to reset it, so it crosses
-    // the limit before the header settles -- the giant-header shape.
+    // the limit before the header is determined -- the giant-header shape.
     label: "a header over the byte ceiling fails fast",
     makeStream: (ceiling) => {
       const cols = Array.from({ length: 400 }, (_v, i) => `col_${i}`);
@@ -234,7 +234,7 @@ const ceilingTripScenarios: Array<{
     // arrive in a SINGLE data event (a lone push, or any source with a read
     // buffer larger than the span). The guard scans within that one chunk --
     // resetting the run at the header's newline, then accumulating the field past
-    // the ceiling -- so a chunk carrying both a terminator and an over-ceiling
+    // the ceiling -- so a chunk holding both a terminator and an over-ceiling
     // tail still trips. streamOf pushes the entire content as one event.
     label: "a giant field arriving in one data event fails fast",
     makeStream: (ceiling) =>
@@ -297,7 +297,7 @@ test("loadCSVColumnSample: the default ceiling is well above a realistic header"
 
 test("loadCSVColumnSample: a header split across stream chunks is read whole", async () => {
   // A header longer than one stream read arrives split across chunks, so the
-  // first chunk carries no fields yet. The loader must wait for the complete
+  // first chunk has no fields yet. The loader must wait for the complete
   // header rather than committing to the first chunk's empty field list -- else
   // it returns an empty header and init's inference silently diverges from the
   // full read. The header here (~8000 columns) far exceeds the 16 KiB piece size.
@@ -321,7 +321,7 @@ test("loadCSVColumnSample: a header split across stream chunks is read whole", a
 });
 
 test("loadCSVFile: destroys the source stream once the ceiling aborts the read", async () => {
-  // On a ceiling trip the guard destroys the source itself (surfacing the error
+  // On a ceiling trip the guard destroys the source itself (raising the error
   // through PapaParse), and the error path releases it again; either way the stream
   // is destroyed rather than leaked until GC. The spy fires on the guard's destroy.
   const ceiling = 512;
@@ -436,7 +436,7 @@ test("loadCSVFile: a fault in a later chunk still refuses the read", async () =>
 
 test("streamCSVRows: the faulting chunk's rows never reach the consumer", async () => {
   // A streaming consumer accumulates as it goes, so the gate must refuse BEFORE
-  // handing over the chunk that carries the fault; the rows it would have added are
+  // handing over the chunk that holds the fault; the rows it would have added are
   // exactly the altered ones.
   const csv = "name,dob\nAlice,1990-01-02\nBob,1985-12-31,surplus\n";
   const seen: Array<CSVRow> = [];
@@ -643,7 +643,7 @@ test("guardStreamLineByteCeiling: an over-ceiling run terminated later in the sa
 });
 
 test("guardStreamLineByteCeiling: an over-ceiling run accumulated across chunks trips before a later terminator", () => {
-  // The same inner overflow, but the run is carried across `data` events: the bytes
+  // The same inner overflow, but the run continues across `data` events: the bytes
   // that cross the ceiling arrive in a later chunk, ahead of that chunk's terminator.
   const g = fakeGuardSource();
   guardStreamLineByteCeiling(g.source, 10);

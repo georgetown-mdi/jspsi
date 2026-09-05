@@ -175,7 +175,7 @@ describe("reconstructCommittedData round-trips through the real build path", () 
       ourIdColumn: "pid",
     });
     // The reader's own verdict first, so an escaping fault localizes to the hop
-    // rather than surfacing only as an opaque commitment mismatch.
+    // rather than showing only as an opaque commitment mismatch.
     expect(result.headers).toEqual(["pid", "row_id", "note", "blank"]);
     expect(result.rows).toEqual([
       [COMMA_VALUE, "1", `${QUOTE_VALUE} / ${NEWLINE_VALUE}`, ""],
@@ -523,8 +523,8 @@ describe("reconstructCommittedData round-trips a deduplicating cardinality", () 
 // that kept the FIRST copy unconditionally would put every later copy's value
 // cells outside every commitment in the record: nothing would reproduce them, so
 // nothing would contradict an edit to them. Each case below edits one value cell
-// of an otherwise honest artifact set, through the same build/write/parse path
-// the honest round trips take, and requires the verdict to move off "verified".
+// of an otherwise correct artifact set, through the same build/write/parse path
+// a correct round trip takes, and requires the verdict to move off "verified".
 describe("an edited copy of a repeated result row fails its commitment", () => {
   // The result's value columns start after our record id and the partner row
   // index, so with one disclosed partner column the received value is cell 2.
@@ -565,8 +565,8 @@ describe("an edited copy of a repeated result row fails its commitment", () => {
     ourIdColumn: "pid",
   };
 
-  test("copies carrying the same values still collapse to the one committed row", async () => {
-    // The control for the cases below: agreeing copies are the honest shape, so
+  test("copies holding the same values still collapse to the one committed row", async () => {
+    // The control for the cases below: agreeing copies are the correct shape, so
     // they collapse silently and every commitment opens.
     const { report, warnings, data } = await roundTrip(manySideFan);
     expect(warnings).toEqual([]);
@@ -625,7 +625,7 @@ describe("an edited copy of a repeated result row fails its commitment", () => {
     expect(report.commitments.partnerPayloadReceived).toBe("mismatch");
   });
 
-  test("a moved pairing column surfaces the divergence on the table instead", async () => {
+  test("a moved pairing column shows the divergence on the table instead", async () => {
     // The case the warning's attribution has to stay conditional for. Pointing
     // the third result row at the partner row the first two already hold makes
     // its value cell a disagreeing copy -- but the collapse then reproduces the
@@ -656,7 +656,7 @@ describe("an edited copy of a repeated result row fails its commitment", () => {
 
 // No commitment covers the recorded result size, so verification recounts it
 // from the pairing the record does commit to. Each case below alters that one
-// cleartext field of an otherwise honest artifact set -- the commitments stay
+// cleartext field of an otherwise correct artifact set -- the commitments stay
 // untouched, so a "verified" verdict would mean the pair count is whatever the
 // holder typed.
 describe("a tampered result size fails against the re-supplied pairing", () => {
@@ -712,7 +712,7 @@ describe("a tampered result size fails against the re-supplied pairing", () => {
     ourIdColumn: "pid",
   };
 
-  test("one-to-one: an inflated figure fails across the record file, and the honest one verifies", async () => {
+  test("one-to-one: an inflated figure fails across the record file, and the correct one verifies", async () => {
     const honest = await withRecordedSize(oneToOne, 2, true);
     expect(honest.resultSize).toBe("verified");
     expect(honest.outcome).toBe("verified");
@@ -789,7 +789,7 @@ describe("reconstructCommittedData round-trips a live PSI exchange", () => {
     linkageKeys: [{ name: "firstName", elements: [{ field: "firstName" }] }],
   };
   // Different row orders on the two sides, by design, so the partner send order
-  // and our association order genuinely diverge (exercising the sort).
+  // and our association order diverge (exercising the sort).
   const serverRows: CSVRow[] = [
     { first_name: "Elizabeth", note: "s-e" },
     { first_name: "Alice", note: "s-a" },

@@ -372,9 +372,9 @@ test("the record attests the count-only run truthfully", async () => {
   expect(resp.recordsExposed).toBe(responderRows.length);
 });
 
-test("one-sided: the receiver holds a count its own record does not carry", async () => {
+test("one-sided: the receiver holds a count its own record does not contain", async () => {
   // The result-size gate is the terms agreement, not what a party happens to learn:
-  // the conservative rule psi applies is carried over unchanged rather than relaxed
+  // the conservative rule psi applies stays unchanged rather than relaxed
   // because psi-c's whole result happens to be one integer.
   const { initiator, responder } = await runBoth(receives, helps);
 
@@ -558,7 +558,7 @@ test("an unimplemented algorithm is refused whichever party's terms name it", ()
   }
 });
 
-test("an out-of-shape count-only pair is refused whichever party's terms carry it", () => {
+test("an out-of-shape count-only pair is refused whichever party's terms hold it", () => {
   // The shape rules over the agreed pair, in both orientations: a pair holding
   // an out-of-shape document is refused here rather than run over the first of
   // its two keys, whether the document is this party's own or the partner's.

@@ -388,7 +388,7 @@ test("acceptance derives every strategy-and-deduplicate pair this build runs", (
 // one-to-one, where each record stands in exactly one pair. An out-of-order
 // local half or a repeated pair is refused under every cardinality.
 
-test("a strictly ascending local half is what the consuming seam accepts", () => {
+test("a strictly ascending local half is what the consuming boundary accepts", () => {
   expect(() =>
     assertMatchedPairsWellFormed([[], []], "one-to-one"),
   ).not.toThrow();
@@ -406,7 +406,7 @@ test("a strictly ascending local half is what the consuming seam accepts", () =>
   ).not.toThrow();
 });
 
-test("a repeated local row is refused under one-to-one at the consuming seam", () => {
+test("a repeated local row is refused under one-to-one at the consuming boundary", () => {
   // One-to-one pairs each matched record of ours exactly once, so the payload rows
   // and the result rows stand one per matched record. A repeat is the
   // deduplicating shape and does not belong under this label.
@@ -421,7 +421,7 @@ test("a repeated local row is refused under one-to-one at the consuming seam", (
   ).toThrow(/repeats a local row index/);
 });
 
-test("a deduplicating table's repeated local row is admitted at the consuming seam", () => {
+test("a deduplicating table's repeated local row is admitted at the consuming boundary", () => {
   // The "one" side of a deduplicating exchange: the partner's rows 0 and 1 both
   // link to this party's row 0.
   expect(() =>
@@ -445,7 +445,7 @@ test("a deduplicating table's repeated local row is admitted at the consuming se
   ).not.toThrow();
 });
 
-test("the mirror table's repeated partner row is admitted at the consuming seam", () => {
+test("the mirror table's repeated partner row is admitted at the consuming boundary", () => {
   // The "many" side: this party's rows 0 and 1 both link to the partner's row 4.
   // Its local half is strictly ascending, so one-to-one admits it too -- the
   // multiplicity this label holds sits on the partner half.
@@ -462,7 +462,7 @@ test("the mirror table's repeated partner row is admitted at the consuming seam"
   }
 });
 
-test("a descending local half is refused at the consuming seam", () => {
+test("a descending local half is refused at the consuming boundary", () => {
   for (const cardinality of ["one-to-one", "one-to-many"] as const) {
     expect(() =>
       assertMatchedPairsWellFormed(
@@ -476,7 +476,7 @@ test("a descending local half is refused at the consuming seam", () => {
   }
 });
 
-test("a repeated pair is refused at the consuming seam", () => {
+test("a repeated pair is refused at the consuming boundary", () => {
   // One link written twice: the result file would hold the row twice and the
   // attested size would count it twice. Checked under the cardinality that admits
   // the repeated local row at all, so the pair check is what refuses these.
@@ -512,7 +512,7 @@ test("a repeated pair is refused at the consuming seam", () => {
   ).not.toThrow();
 });
 
-test("halves of different lengths are refused at the consuming seam", () => {
+test("halves of different lengths are refused at the consuming boundary", () => {
   expect(() =>
     assertMatchedPairsWellFormed([[0, 1], [0]], "one-to-one"),
   ).toThrow(/different lengths/);

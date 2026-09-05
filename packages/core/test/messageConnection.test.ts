@@ -201,7 +201,7 @@ test("send is rejected while a half-close is pending, without writing", async ()
   expect(await conn.receive()).toBe("final");
 });
 
-test("a close racing the final drain still surfaces the transport error", async () => {
+test("a close racing the final drain still shows the transport error", async () => {
   const { conn, controls } = makeQueued();
   controls.deliver("final");
   controls.finish(new ConnectionError("peer closed", "transport"));
@@ -248,7 +248,7 @@ test("fromEventConnection: relays messages over an event-based Connection", asyn
   expect(await connA.receive()).toEqual({ from: "B" });
 });
 
-test("fromEventConnection: surfaces an error buffered before the bridge attached", async () => {
+test("fromEventConnection: reports an error buffered before the bridge attached", async () => {
   const [, eventB] = makeEventConnections();
   // Error emitted with no listener registered is buffered by the transport.
   eventB.emit("error", new Error("early failure"));
@@ -341,7 +341,7 @@ test("fromEventConnection: a throwing inactivityHint still fails the connection"
   expect(err.message).not.toContain("hint blew up");
 });
 
-test("fromEventConnection: the silence error carries no clause when no hint is supplied", async () => {
+test("fromEventConnection: the silence error holds no clause when no hint is supplied", async () => {
   const [, eventB] = makeEventConnections();
   // No hint: the bare diagnostic, unchanged. This pins that a transport which
   // supplies none (e.g. WebRTC) is not given file-sync guidance.
@@ -450,7 +450,7 @@ test("send: an orphaned hand-off with no parked receive fails terminally, not si
   await expect(conn.send("y")).rejects.toBeInstanceOf(ConnectionError);
 });
 
-test("send: a transport rejection surfaces its own cause, not the liveness backstop", async () => {
+test("send: a transport rejection shows its own cause, not the liveness fallback", async () => {
   const { conn, send } = makeQueued({ inactivityTimeoutMs: 10_000 });
   // The guard holds the loop open so a lower, faster per-operation deadline (or a
   // socket error) rejects the hand-off first with its transport-specific cause,
@@ -598,7 +598,7 @@ test("receiveParsed: a malformed message throws a protocol ConnectionError", asy
   expect(err.cause).toBeInstanceOf(z.ZodError);
 });
 
-test("receiveParsed: a transport drop surfaces as transport, not protocol", async () => {
+test("receiveParsed: a transport drop shows as transport, not protocol", async () => {
   const [a, b] = createMessagePipe();
   const schema = z.object({ n: z.number() });
   const parked = receiveParsed(b, schema);

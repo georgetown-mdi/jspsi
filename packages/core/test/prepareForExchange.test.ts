@@ -554,7 +554,7 @@ describe("prepareForExchange: a fan-out transform runs under single-pass", () =>
     expect(prepared.dataset.declaresFanOut).toBe(false);
   });
 
-  test("runExchange carries fan-out terms to the terms exchange", async () => {
+  test("runExchange passes fan-out terms to the terms exchange", async () => {
     // The run boundary's half: the terms reach the connection rather than the
     // refusal, so the failure is the unusable connection's.
     const failIfUsed = (): never => {
@@ -928,7 +928,7 @@ describe("prepareForExchange: certificate mode with no local identity is refused
 describe("assertCertificateModeNamesLocalParty", () => {
   const { identity: _named, ...unnamedTerms } = terms;
 
-  test("refuses certificate mode over terms carrying no identity", () => {
+  test("refuses certificate mode over terms holding no identity", () => {
     expect(() =>
       assertCertificateModeNamesLocalParty(
         { mode: "certificate" },
@@ -961,7 +961,7 @@ describe("assertCertificateModeNamesLocalParty", () => {
   test("reads the value the receipt step reads, not the identity argument", () => {
     // runExchange destructures `linkageTerms` off the PreparedExchange and
     // refuses the signature swap when its identity is absent, so the gate is held
-    // to that same resolved value: a spec carrying its own terms keeps their
+    // to that same resolved value: a spec holding its own terms keeps their
     // identity whatever the identity argument says. A gate reading the argument
     // instead would pass a run the swap then refuses after the payloads crossed.
     const prepared = prepareForExchange(
@@ -1272,7 +1272,7 @@ const refusalCases: Array<{
   },
 ];
 
-describe("prepareForExchange: the class every refusal carries", () => {
+describe("prepareForExchange: the class every refusal holds", () => {
   for (const refusal of refusalCases) {
     test(`${refusal.what} is refused as ${refusal.errorClass.name}`, () => {
       let thrown: unknown;
@@ -1303,7 +1303,7 @@ describe("prepareForExchange: the class every refusal carries", () => {
 
   test("a linkage key whose declared window opens at no length is refused", () => {
     // Not a row in the table above, because the refusal has to be measured
-    // against the same terms carrying a window that DOES open: the terms are
+    // against the same terms holding a window that DOES open: the terms are
     // identical but for the bounds, so what stops the run is the window rather
     // than the fixture around it.
     const keyedOnWindow = (params: Record<string, unknown>): LinkageTerms => ({
@@ -1330,7 +1330,7 @@ describe("prepareForExchange: the class every refusal carries", () => {
       );
 
     expect(() => prepareWith({ start: 1, length: 3 })).not.toThrow();
-    // A bound left unfilled: admitted by the terms schema, and read as no window
+    // A bound left unfilled: admitted by the terms schema, and treated as no window
     // at any value length, so the key produces nothing for either party.
     expect(() => prepareWith({ length: 3 })).toThrow(
       LinkageTermsUnsatisfiableError,

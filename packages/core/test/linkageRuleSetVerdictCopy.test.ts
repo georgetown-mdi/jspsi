@@ -33,7 +33,7 @@ describe("distinctLinkageRuleSetVerdicts", () => {
     expect(distinctLinkageRuleSetVerdicts()).toStrictEqual([]);
   });
 
-  test("carries every member of the union rather than dropping an unranked one", () => {
+  test("includes every member of the union rather than dropping an unranked one", () => {
     // A surface renders no marker and no caveat for a verdict this drops, so the
     // ordering must be total over the union: the ranking is a Record over it,
     // which is what fails a new member at compile time, and this is the runtime
@@ -98,7 +98,7 @@ describe("RECORDED_LINKAGE_RULE_SET_CAVEAT", () => {
   test("points a record's reader at the verdict instead of denying or restating one", () => {
     // A record's citation is always paired with the writing party's verdict, so
     // the one sentence that serves all three verdicts must neither claim nothing
-    // was checked nor read as verification -- and must not put the verdict's own
+    // was checked nor count as verification -- and must not put the verdict's own
     // vocabulary on a surface that does not hold the value.
     expect(RECORDED_LINKAGE_RULE_SET_CAVEAT).toContain("exchange record");
     expect(RECORDED_LINKAGE_RULE_SET_CAVEAT).toContain("matching basis");

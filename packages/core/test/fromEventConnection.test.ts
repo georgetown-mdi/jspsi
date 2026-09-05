@@ -167,7 +167,7 @@ test("fromEventConnection over FileSyncConnection: send() writes the outbound me
   expect(written).toHaveLength(1);
 });
 
-test("fromEventConnection over FileSyncConnection: a poll-loop error surfaces as a sticky transport ConnectionError", async () => {
+test("fromEventConnection over FileSyncConnection: a poll-loop error shows as a sticky transport ConnectionError", async () => {
   const peerId = "peer-test";
   // list() always reports a matching file (size matches declared) but get()
   // always throws ENOENT: after MAX_CONSECUTIVE_ENOENT cycles the poller emits
@@ -205,7 +205,7 @@ test("fromEventConnection over FileSyncConnection: a poll-loop error surfaces as
   await expect(mc.send("x")).rejects.toBeInstanceOf(ConnectionError);
 });
 
-test("fromEventConnection over FileSyncConnection: an error buffered before the bridge attaches is surfaced", async () => {
+test("fromEventConnection over FileSyncConnection: an error buffered before the bridge attaches is reported", async () => {
   const { client } = makeMockClient();
   const conn = makeConnectedConn(client);
   // Error emitted with no listener attached is buffered by the transport's

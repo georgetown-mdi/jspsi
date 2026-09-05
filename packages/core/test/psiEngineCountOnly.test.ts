@@ -21,11 +21,10 @@ import { loadNativeAddonOrSkip } from "./utils/nativeAddon";
 
 // The count-only (psi-c) construction at the PsiEngine boundary: a round
 // resolving to the intersection cardinality and nothing that names a match.
-// Tested properties are the normative rows of docs/spec/PROTOCOL.md, PSI-C.
-// These tests exercise the boundary directly; countOnlyRun.test.ts drives
-// the exchange built on it. A library refusal is asserted generically,
-// since WASM reports it as an opaque marshalling error where the native
-// addon names it (docs/notes/psi-c-count-only.md) -- except the mode
+// Tested properties are the normative rows of docs/spec/PROTOCOL.md, PSI-C;
+// countOnlyRun.test.ts drives the exchange built on it. A library refusal is
+// asserted generically since WASM reports an opaque marshalling error where
+// the native addon names it (docs/notes/psi-c-count-only.md), except the mode
 // mismatch, which the engine names itself off the request.
 
 const wasm = await PSI();
@@ -244,7 +243,7 @@ describe.each([
     revealingReceiver.dispose();
   });
 
-  test("the response does not carry the request's element order", async () => {
+  test("the response does not contain the request's element order", async () => {
     const countOnlySender = sender("count-only");
     const countOnlyReceiver = receiver("count-only");
 
@@ -272,10 +271,10 @@ describe.each([
   // TypeScript cannot reach a caller of the published package, who can pass a
   // string outside PsiEngineMode; both worker boundaries read their init back
   // through an unchecked cast, so a spawn site that omits the mode delivers
-  // undefined. The casts stand in for both. Every mode decision derives from
-  // a single boolean, so a value naming no mode must land wholly on the
-  // nondisclosing side, not clear the reveal flag while leaving the
-  // contribution filter or sorting permutation set for `psi`.
+  // undefined, which the casts stand in for. Every mode decision derives from a
+  // single boolean, so a value naming no mode must land wholly on the
+  // nondisclosing side, not clear the reveal flag while leaving the contribution
+  // filter or sorting permutation set for `psi`.
   const unrecognizedModes: ReadonlyArray<PsiEngineMode> = [
     "reveal-everything" as PsiEngineMode,
     undefined as unknown as PsiEngineMode,
@@ -379,14 +378,13 @@ describe.each([
   });
 });
 
-// The normative singleton rule -- a party contributes the values occurring
-// exactly once in its own dataset, in first-appearance order -- has two
-// implementations: the engine's count-only contribution filter, and the
-// cascade's removeDuplicatesAndUndefineds that link.ts runs on the live
-// `psi` path. This pins their agreement on the vector set below: which
-// values survive, and in what order. It does not pin the cascade's extra
-// job -- undefined means "no value for this key" there, where the engine
-// sees only a dense list of strings.
+// The normative singleton rule -- a party contributes the values occurring exactly
+// once in its own dataset, in first-appearance order -- has two implementations: the
+// engine's count-only contribution filter, and the cascade's
+// removeDuplicatesAndUndefineds that link.ts runs on the live `psi` path. This pins
+// their agreement on the vector set below (which values survive, and in what order),
+// not the cascade's extra job: undefined means "no value for this key" there, where
+// the engine sees only a dense list of strings.
 test("the count-only contribution filter and the cascade agree on the singleton rule", () => {
   const vectors: Array<Array<string>> = [
     [],
@@ -426,16 +424,11 @@ test("the count-only contribution filter and the cascade agree on the singleton 
 });
 
 test("a duplicated response does not inflate the reported cardinality", async () => {
-  // The sender's cheapest inflation attempt on a count-only run's one figure:
-  // repeat the response's encrypted elements. psilink's frame guard does not
-  // close this -- the response element bound (psiElementBounds,
-  // connection/frameSize.ts) is `keyCount * recordCount`, which upper-bounds
-  // a party's DISTINCT values, so a dataset with any repeated or empty key
-  // leaves room for more elements than the receiver contributed. What
-  // refuses the inflation is the vendored library's own cardinality
-  // operation, driven here with every element repeated five times: the
-  // count is unchanged. A library bump that changed this fails here instead
-  // of silently inflating the reported count.
+  // The response element bound (psiElementBounds, connection/frameSize.ts)
+  // upper-bounds a party's DISTINCT values (keyCount * recordCount), so it leaves room
+  // for more elements when a dataset has a repeated or empty key. What refuses the
+  // inflation is the vendored library's own cardinality operation, exercised here with
+  // every element repeated five times: the count stays unchanged.
   const countOnlySender = inProcess(wasm, "starter", "sender", "count-only");
   const countOnlyReceiver = inProcess(wasm, "joiner", "receiver", "count-only");
 

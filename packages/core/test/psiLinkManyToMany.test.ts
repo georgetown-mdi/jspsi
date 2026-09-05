@@ -45,7 +45,7 @@ function makeParticipant(role: "starter" | "joiner"): PSIParticipant {
 
 // Interpose on one party's INBOUND frames, leaving both parties' own behavior
 // untouched, so a deviation stands in for a partner that computes the protocol
-// honestly right up to the frame under test. Mirrors psiLinkManyToOne.test.ts.
+// correctly right up to the frame under test. Mirrors psiLinkManyToOne.test.ts.
 type Deviation = (frame: unknown) => unknown;
 
 function deviatingInbound(
@@ -447,7 +447,7 @@ test("a value m and n records hold writes m x n result rows and attests m x n", 
   );
   expect(headers).toStrictEqual(["pid", "row_id", "dose"]);
   // One row per pair: each of this party's two records against each of the
-  // partner's three, carrying that partner record's own payload row.
+  // partner's three, holding that partner record's own payload row.
   expect(rows).toStrictEqual([
     ["S0", "0", "1mg"],
     ["S0", "1", "2mg"],
@@ -696,7 +696,7 @@ for (const party of ["starter", "joiner"] as const) {
     );
   });
 
-  test(`a returned list carrying other than the accumulated entry count is refused${under}`, async () => {
+  test(`a returned list containing other than the accumulated entry count is refused${under}`, async () => {
     // The count is the sum of the per-record run lengths this party accumulated
     // over the partner's own list, so a returned list of any other length is
     // refused before its entries are read.
@@ -709,7 +709,7 @@ for (const party of ["starter", "joiner"] as const) {
   test(`the expected count follows the partner's own list, not the returned one${under}`, async () => {
     // What pins the returned list's length is a quantity this party computed from a
     // frame it had already checked: repeating an entry of the PARTNER's list adds
-    // that record's whole group to the tally, so the honest returned list that
+    // that record's whole group to the tally, so the correct returned list that
     // follows is then too short. Nothing about the deviating party's own data
     // changes, and the repeat stays inside the partner's counted rows.
     await expectProtocolRefusal(

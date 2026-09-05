@@ -242,7 +242,7 @@ describe("the round-value participation question a deduplicating sender does not
     expect(answeredNo).toBeGreaterThan(0);
   });
 
-  test("the corpus carries the shapes that question was built for", () => {
+  test("the corpus holds the shapes that question was built for", () => {
     // Counted over what the sweep actually reached rather than over the fixtures,
     // so a round whose shape never reaches the sweep counts for nothing.
     let withRecurringValue = 0;

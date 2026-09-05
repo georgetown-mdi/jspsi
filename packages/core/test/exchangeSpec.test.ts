@@ -51,7 +51,7 @@ test("metadata and standardization are optional", () => {
   expect(result.success).toBe(true);
 });
 
-test("expectedPayloadColumns: the local lock-in field round-trips, including the empty set", () => {
+test("expectedPayloadColumns: the local commitment field round-trips, including the empty set", () => {
   // The offline-accept commitment: a top-level, per-party field (camelCase
   // parsed, snake_case on disk). A non-empty list and the empty set are both
   // valid -- the empty set is the strict "receive nothing" commitment -- while
@@ -69,7 +69,7 @@ test("expectedPayloadColumns: the local lock-in field round-trips, including the
   expect(parseExchangeSpec(minimalSpec).expectedPayloadColumns).toBeUndefined();
 });
 
-test("expectedPartnerDeduplicate: the terms-side lock-in round-trips both booleans", () => {
+test("expectedPartnerDeduplicate: the terms-side commitment round-trips both booleans", () => {
   // The acceptance's terms-side binding: a top-level, per-party field (camelCase
   // parsed, snake_case on disk). `false` is a real declaration -- the one a
   // hostile inviter would widen away from by presenting `true` -- so it must

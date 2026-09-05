@@ -37,7 +37,7 @@ describe("a party identity as display text", () => {
     expect(displayPartyIdentity(`Acme${ESC}org`)).not.toContain(ESC);
   });
 
-  test("an absent name reads as an absence, in one wording", () => {
+  test("an absent name displays as an absence, in one wording", () => {
     expect(displayPartyIdentity(undefined)).toBe(UNNAMED_PARTY_LABEL);
     expect(redactAndDisplayPartyIdentity(undefined)).toBe(UNNAMED_PARTY_LABEL);
     // Parenthesized and lower-case so it states an absence rather than filling

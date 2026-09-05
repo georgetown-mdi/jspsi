@@ -193,13 +193,11 @@ describe("replacement-string $-sequences", () => {
 
 // --- Unicode-property and case-folding semantics -----------------------------
 // PROTOCOL.md admits \p{...} property classes and inline (?i) into the
-// dialect. re2js bakes its Unicode property and case-folding tables into
-// the published build, so an upgrade carrying a newer Unicode database
-// could silently shift which code points match -- a SILENT key divergence,
-// since both parties hash the same partner pattern into their keys. These
-// pin the critical behavior so a drift fails CI instead, which is why
-// re2js can stay on a caret range for security and bug fixes without
-// pinning the exact version. Verified against re2js 2.8.3.
+// dialect. re2js bakes its Unicode tables into the published build, and
+// both parties hash the same partner pattern into their keys, so an
+// update that changes those tables could silently shift which code
+// points match. These pin that behavior so a change fails CI instead.
+// Verified against re2js 2.8.3.
 //
 // The standardization pipeline NFC-normalizes input before the engine sees
 // it, canonicalizing some of these code points (e.g. KELVIN SIGN U+212A ->

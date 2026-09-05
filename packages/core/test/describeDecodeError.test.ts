@@ -41,7 +41,7 @@ describe("describeDecodeError", () => {
     ).toBe("connectionEndpoint.host: Invalid");
   });
 
-  test("escapes a path component carrying control/deceptive-Unicode bytes", () => {
+  test("escapes a path component holding control/deceptive-Unicode bytes", () => {
     // A Zod path can name a partner-controlled object KEY in the general case
     // (the invitation is crafted by the inviting party), not only a fixed
     // schema field, so a key holding a raw ESC (ANSI) or a bidi override must

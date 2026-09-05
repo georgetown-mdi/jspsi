@@ -3,7 +3,7 @@ import { describe, expect, test, vi } from "vitest";
 import { TimeoutError, withTimeout, retryPromise } from "../src/utils/promise";
 
 describe("TimeoutError", () => {
-  test("is an Error subclass carrying the message and a stable name", () => {
+  test("is an Error subclass holding the message and a stable name", () => {
     const err = new TimeoutError("boom");
     expect(err).toBeInstanceOf(Error);
     expect(err).toBeInstanceOf(TimeoutError);
@@ -32,7 +32,7 @@ describe("withTimeout", () => {
     ).rejects.toBe(original);
   });
 
-  test("rejects with a TimeoutError carrying the message when the deadline fires first", async () => {
+  test("rejects with a TimeoutError holding the message when the deadline fires first", async () => {
     vi.useFakeTimers();
     try {
       // Never settles, so only the deadline can resolve the race.

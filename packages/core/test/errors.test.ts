@@ -85,7 +85,7 @@ describe("terminal transport/directory error taxonomy", () => {
   });
 });
 
-describe("errors deliberately left without a recovery hint", () => {
+describe("errors left without a recovery hint", () => {
   test("BilateralModeMismatchError stays untagged and leaves its message intact", () => {
     // A terminal UsageError that holds its fix in the call-site message ("both
     // parties must use the same setting"), so the constructor appends nothing.
@@ -105,7 +105,7 @@ describe("errors deliberately left without a recovery hint", () => {
     expect(err.message).toBe(message);
   });
 
-  test("ConnectionClosedError carries no hint and is not a UsageError", () => {
+  test("ConnectionClosedError has no hint and is not a UsageError", () => {
     // Judged stepless by the audit: an internal teardown signal that almost
     // never reaches the exit code, so the generic advisory has nothing to
     // contradict and it stays a plain Error (CLI exit 69, not 64).
@@ -258,7 +258,7 @@ describe("isPeerWaitTimeout cause-chain walk", () => {
 });
 
 describe("PeerAbortError exemplar (unchanged)", () => {
-  test("still carries the hint and its pinned partner-contact message", () => {
+  test("still has the hint and its pinned partner-contact message", () => {
     // The audit's exemplar: its message is pinned by design and must not be
     // reworded. This guards against an accidental edit to the bar the rest rose
     // to meet.

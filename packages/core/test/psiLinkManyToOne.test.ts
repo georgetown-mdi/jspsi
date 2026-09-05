@@ -611,7 +611,7 @@ for (const manySide of ["starter", "joiner"] as const) {
     );
   });
 
-  test(`a returned list carrying other than the computed entry count is refused${under}`, async () => {
+  test(`a returned list containing other than the computed entry count is refused${under}`, async () => {
     // The many side's own list comes back one entry per record it matched...
     await expectProtocolRefusal(
       manySide,
@@ -645,7 +645,7 @@ for (const manySide of ["starter", "joiner"] as const) {
 
   test(`a returned list splitting one of the many side's groups is refused${under}`, async () => {
     // The mirror deviation: the two entries that named ONE position come back
-    // carrying different partner rows, so the partner splits a group this side's
+    // holding different partner rows, so the partner splits a group this side's
     // own data formed. Every entry stays in range and the count is untouched.
     await expectProtocolRefusal(
       manySide,
@@ -874,7 +874,7 @@ test("single-pass reproduces the expansion ordering across interleaved groups", 
   ]);
 });
 
-test("single-pass carries the survivor-relative rule into a group", async () => {
+test("single-pass extends the survivor-relative rule into a group", async () => {
   // Candidacy, not the whole dataset, decides what is ambiguous, and the two
   // rules meet here. The joiner's "Z" sits on rows 0 and 1, so the whole dataset
   // makes it ambiguous; row 0 matches on key 0 and leaves, which leaves "Z"

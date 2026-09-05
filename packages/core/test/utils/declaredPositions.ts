@@ -65,13 +65,10 @@ export interface DeclaredPositions {
 /**
  * Every property path {@link DeclaredPositionsRequest.rootInterface} and the
  * structs nested under it declare, read from those declarations with the
- * compiler API at test time, with array and tuple indices collapsed to `[]`
- * -- so a path reads `linkageKeys[].elements[].transforms[].effect`.
- *
+ * compiler API at test time, with array and tuple indices collapsed to `[]`.
  * Derived rather than listed by its callers, so what each of them checks
- * must fail on a field added to core rather than silently missing it.
- * Throwing rather than returning less is the same commitment: a walk that
- * quietly stops short shrinks what its caller demands while staying green.
+ * must fail on a field added to core; throwing rather than returning less
+ * keeps a walk that stops short from silently shrinking that coverage.
  */
 export function declaredPositions({
   sourcePathFromCoreRoot,
