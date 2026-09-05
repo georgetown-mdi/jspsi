@@ -106,14 +106,38 @@ const seatWarningSinkBan = {
 // src/psi, and one import of a screen from there pulls the whole product tree in
 // behind it. A module two layers need belongs in src/psi when it is React-free
 // and in src/components when it is not.
-const productDirectoryBans = ["console", "exchange", "recurring"].map(
-  (dir) => ({
-    group: [`@${dir}/*`, `**/../${dir}`, `**/../${dir}/**`],
-    message:
-      `src/psi and src/components sit below the product directories; neither may import from src/${dir}. ` +
-      "Move what both layers need into src/psi (React-free) or src/components (React), and import it from there.",
-  }),
-);
+const productDirectories = ["console", "exchange", "recurring"];
+
+const productDirectoryBanMessage = (target) =>
+  `src/psi and src/components sit below the product directories; neither may import from ${target}. ` +
+  "Move what both layers need into src/psi (React-free) or src/components (React), and import it from there.";
+
+// The `../` groups need a climb immediately before the directory; the src-rooted
+// groups beside them close the climb that goes one level further and comes back
+// down through src (`../../../src/exchange/Lobby` is the same module).
+const productDirectoryBans = productDirectories.map((dir) => ({
+  group: [
+    `@${dir}/*`,
+    `**/../${dir}`,
+    `**/../${dir}/**`,
+    `**/src/${dir}`,
+    `**/src/${dir}/**`,
+  ],
+  message: productDirectoryBanMessage(`src/${dir}`),
+}));
+
+// no-restricted-imports reads static import and export declarations only, so
+// `await import("@exchange/Lobby")` reaches a product directory past the groups
+// above -- and the app already loads modules that way (ScheduledExchangeRunner,
+// csvParseController). This matches the same spellings on a dynamic import's
+// literal source: the alias, and a relative climb (through a `src/` segment or
+// not) landing on one of the three directories.
+const productDirectoryDynamicImportBan = {
+  selector: `ImportExpression[source.value=/^(@(${productDirectories.join("|")})\\/|(\\.\\.\\/)+(src\\/)?(${productDirectories.join("|")})(\\/|$))/]`,
+  message: productDirectoryBanMessage(
+    "src/console, src/exchange or src/recurring",
+  ),
+};
 
 const rawRowsConsumers = [
   "src/exchange/AcceptorScreen.tsx",
@@ -306,6 +330,15 @@ export default [
     files: ["src/psi/**/*.{ts,tsx}", "src/components/**/*.{ts,tsx}"],
     ignores: ["src/psi/linkageComparison.ts"],
     rules: {
+      // The dynamic-import half of the ban, re-carrying the three selectors the
+      // src/ block sets for these files.
+      "no-restricted-syntax": [
+        "error",
+        sensitiveYamlParseBan,
+        rawRowsAccessBan,
+        seatWarningSinkBan,
+        productDirectoryDynamicImportBan,
+      ],
       "no-restricted-imports": [
         "error",
         {
@@ -316,11 +349,36 @@ export default [
     },
   },
   {
+    // The rawRows consumers that sit below the products take the dynamic-import
+    // ban while keeping their rawRows exemption: the block above re-carries
+    // rawRowsAccessBan, and would otherwise replace their options and restore it.
+    // Their import ban comes from that block, which this one leaves alone.
+    files: rawRowsConsumers.filter(
+      (file) =>
+        file.startsWith("src/psi/") || file.startsWith("src/components/"),
+    ),
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        sensitiveYamlParseBan,
+        seatWarningSinkBan,
+        productDirectoryDynamicImportBan,
+      ],
+    },
+  },
+  {
     // The linkage-compare chokepoint takes the direction ban like the rest of
     // src/psi, without the ban on calling core's predicates -- it is the module
     // that calls them.
     files: ["src/psi/linkageComparison.ts"],
     rules: {
+      "no-restricted-syntax": [
+        "error",
+        sensitiveYamlParseBan,
+        rawRowsAccessBan,
+        seatWarningSinkBan,
+        productDirectoryDynamicImportBan,
+      ],
       "no-restricted-imports": [
         "error",
         {

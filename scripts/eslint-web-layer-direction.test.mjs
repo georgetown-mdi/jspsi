@@ -35,7 +35,10 @@ const eslint = new ESLint({
   baseConfig: withoutTypeAwareLayer(repoConfig),
 });
 
-/** no-restricted-imports messages reported for `source` linted as `filePath`. */
+// The ban is two rules: no-restricted-imports for the static declarations, and
+// one no-restricted-syntax selector for the dynamic import() the import rule
+// does not read. A case is refused when either reports.
+/** Direction-ban messages reported for `source` linted as `filePath`. */
 async function directionHits(filePath, source) {
   const [result] = await eslint.lintText(source, { filePath });
   const fatal = result.messages.filter((message) => message.fatal);
@@ -43,7 +46,9 @@ async function directionHits(filePath, source) {
     throw new Error(`${filePath}: ${fatal.map((m) => m.message).join("; ")}`);
   }
   return result.messages.filter(
-    (message) => message.ruleId === "no-restricted-imports",
+    (message) =>
+      message.ruleId === "no-restricted-imports" ||
+      message.ruleId === "no-restricted-syntax",
   );
 }
 
@@ -81,14 +86,19 @@ const BELOW = [
 
 // Both spellings a file below the products could reach one by: the alias every
 // import in the app uses, and the relative climb the alias stands in for.
-const REFUSED_SPECIFIERS = [
+const ALIAS_SPECIFIERS = [
   "@console/mountListing",
   "@exchange/Lobby",
   "@recurring/SavedExchanges",
+];
+
+const CLIMB_SPECIFIERS = [
   "../console/mountListing",
   "../exchange/Lobby",
   "../recurring/SavedExchanges",
 ];
+
+const REFUSED_SPECIFIERS = [...ALIAS_SPECIFIERS, ...CLIMB_SPECIFIERS];
 
 // The same relative climb, one directory deeper, as written from a nested src/psi
 // subdirectory.
@@ -96,6 +106,21 @@ const NESTED_REFUSED_SPECIFIERS = [
   "../../console/mountListing",
   "../../exchange/Lobby",
   "../../recurring/SavedExchanges",
+];
+
+// A third spelling of the same reach: climbing PAST src/ and back down through
+// it, which puts no ".." immediately before the product directory. It is refused
+// only while the src-rooted groups are in the ban.
+const PAST_SRC_SPECIFIERS = [
+  "../../src/console/mountListing",
+  "../../src/exchange/Lobby",
+  "../../src/recurring/SavedExchanges",
+];
+
+const NESTED_PAST_SRC_SPECIFIERS = [
+  "../../../src/console/mountListing",
+  "../../../src/exchange/Lobby",
+  "../../../src/recurring/SavedExchanges",
 ];
 
 // What the layers below must keep accepting: each other, the shared helpers, and
@@ -163,6 +188,12 @@ describe("the web app's layer-direction ban", { timeout: 60_000 }, () => {
           "**/../exchange/**",
           "**/../recurring",
           "**/../recurring/**",
+          "**/src/console",
+          "**/src/console/**",
+          "**/src/exchange",
+          "**/src/exchange/**",
+          "**/src/recurring",
+          "**/src/recurring/**",
         ]),
       );
     }
@@ -214,10 +245,68 @@ describe("the web app's layer-direction ban", { timeout: 60_000 }, () => {
     });
   }
 
+  for (const [layer, filePath] of BELOW) {
+    for (const specifier of PAST_SRC_SPECIFIERS) {
+      it(`refuses the climb past src to '${specifier}' from ${layer}`, async () => {
+        expect(
+          await directionHits(filePath, `import "${specifier}";\n`),
+        ).not.toHaveLength(0);
+      });
+    }
+  }
+
+  for (const specifier of NESTED_PAST_SRC_SPECIFIERS) {
+    it(`refuses the climb past src to '${specifier}' from a nested src/psi subdirectory`, async () => {
+      expect(
+        await directionHits(PSI_NESTED, `import "${specifier}";\n`),
+      ).not.toHaveLength(0);
+    });
+  }
+
+  // A dynamic import reaches the same modules and no import declaration reports
+  // it, so every spelling is planted again in that form -- including from a
+  // nested src/psi subdirectory, where the app already loads a module this way.
+  for (const [layer, filePath] of BELOW) {
+    for (const specifier of [...REFUSED_SPECIFIERS, ...PAST_SRC_SPECIFIERS]) {
+      it(`refuses a dynamic import of '${specifier}' from ${layer}`, async () => {
+        expect(
+          await directionHits(
+            filePath,
+            `export const load = () => import("${specifier}");\n`,
+          ),
+        ).not.toHaveLength(0);
+      });
+    }
+  }
+
+  for (const specifier of [
+    ...ALIAS_SPECIFIERS,
+    ...NESTED_REFUSED_SPECIFIERS,
+    ...NESTED_PAST_SRC_SPECIFIERS,
+  ]) {
+    it(`refuses a dynamic import of '${specifier}' from a nested src/psi subdirectory`, async () => {
+      expect(
+        await directionHits(
+          PSI_NESTED,
+          `export const load = () => import("${specifier}");\n`,
+        ),
+      ).not.toHaveLength(0);
+    });
+  }
+
   for (const [layer, filePath, specifier] of ACCEPTED) {
     it(`accepts '${specifier}' from ${layer}`, async () => {
       expect(
         await directionHits(filePath, `import "${specifier}";\n`),
+      ).toHaveLength(0);
+    });
+
+    it(`accepts a dynamic import of '${specifier}' from ${layer}`, async () => {
+      expect(
+        await directionHits(
+          filePath,
+          `export const load = () => import("${specifier}");\n`,
+        ),
       ).toHaveLength(0);
     });
   }
