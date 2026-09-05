@@ -11,19 +11,19 @@ import type {
   Standardization,
   StandardizationStep,
   StandardizationTransformation,
-} from "./config/standardization.js";
+} from "./config/standardizationSchema.js";
 import type {
   GenerateFuzzyComparisons,
   LinkageKey,
   LinkageKeyElement,
   LinkageTerms,
   TransformStep,
-} from "./config/linkageTerms.js";
+} from "./config/linkageTermsSchema.js";
 import {
   MAX_DATE_FORMAT_LENGTH,
   MAX_TRANSFORM_PATTERN_LENGTH,
   referencedLinkageFieldNames,
-} from "./config/linkageTerms.js";
+} from "./config/linkageTermsSchema.js";
 import {
   swapPairFuzzyComparisonsDiffer,
   swapPairTransformsDiffer,
@@ -867,7 +867,7 @@ export interface StandardizationFunctionDescriptor {
    * the factory falls back to. These schemas describe well-formed editor output
    * (a value, or an omitted default); they are NOT the partner-supplied wire
    * params, which stay `z.unknown()`, count-bounded and string-length-bounded
-   * in `config/linkageTerms.ts`. The drift test pins each schema against its
+   * in `config/linkageTermsSchema.ts`. The drift test pins each schema against its
    * factory so a descriptor cannot disagree with the function it describes.
    *
    * Typed `ZodObject<ZodRawShape>` rather than a per-function shape because the
@@ -1886,7 +1886,7 @@ function compiledElementSteps(
  * The partner authors the element transforms and this party runs them over its
  * own rows, so the SIZE of what a row derives is partner-influenced while the
  * data is local. The wire schema bounds what the partner may WRITE (a param's
- * content length, config/linkageTerms.ts) but not what a row DERIVES from it: a
+ * content length, config/linkageTermsSchema.ts) but not what a row DERIVES from it: a
  * `replace_regex` replacement is a substitution template whose match-context
  * sequences re-insert the operator's own cell at every match position, and steps
  * compose, each fed the previous one's output. This ceiling is the bound on the
@@ -2058,7 +2058,7 @@ function applyElementTransform(
 // are different ones; `pair` is what lets a refusal name whichever of the two it
 // is about. Only the receiver swaps, so the pair's two transforms have to agree
 // for the round to compare like with like whichever party role resolution makes
-// receiver; the terms schema binds them (config/linkageTerms.ts), which is what
+// receiver; the terms schema binds them (config/linkageTermsSchema.ts), which is what
 // lets the transform stay with the position here.
 //
 // This list is the SWAPPED order alone. The receiver assembles the authored
@@ -2509,7 +2509,7 @@ function planFuzzyExpansions(
 // The receiver assembles the authored order by exchanging the swap pair's two
 // assembled candidate lists, which is the authored order exactly when the pair's
 // two positions declare the same transform and the same expansion -- the shape
-// the terms schema requires (config/linkageTerms.ts). Reading it off the terms
+// the terms schema requires (config/linkageTermsSchema.ts). Reading it off the terms
 // again here rather than trusting that rule keeps the assumption a check: a key
 // assembled outside the schema is refused instead of matching on a set neither
 // order realizes. The key path locates the offender, as the width refusals do,

@@ -5,7 +5,7 @@
 // invitation looks like.
 
 import type { InvitationToken } from "../config/invitation.js";
-import type { LinkageTerms } from "../config/linkageTerms.js";
+import type { LinkageTerms } from "../config/linkageTermsSchema.js";
 
 /**
  * @internal
@@ -51,7 +51,7 @@ export const PRINTABLE_ASCII = /^[\x20-\x7e]*$/;
  * `version`, `date`, `expirationDate`, and the two rule-set `version` strings
  * are format-constrained (semver, `z.iso.date`). `identity` and the constraint
  * `exclude` value are free text held to the control-character rule
- * (`TEXT_CONTROL_CHAR_PATTERN`, config/linkageTerms.ts), which refuses the ESC
+ * (`TEXT_CONTROL_CHAR_PATTERN`, config/linkageTermsSchema.ts), which refuses the ESC
  * and BEL they hold here; the bidi override in `purpose` and in the payload
  * `description` is not a control character, so those two stay within what a
  * decoded token can hold -- a real parse of this fixture's own values accepts

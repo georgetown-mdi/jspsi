@@ -1,6 +1,6 @@
 import { expect, test, describe, vi } from "vitest";
 
-import { getDefaultStandardization } from "../src/defaults/standardization";
+import { getDefaultStandardization } from "../src/defaults/builtInStandardization";
 import {
   inferDateFormat,
   columnValues,
@@ -14,7 +14,7 @@ import {
 } from "../src/utils/linearRegex";
 import { REGEX_STEP_PATTERN_PARAM } from "../src/config/transformRegexDialect";
 import type { ColumnMetadata } from "../src/config/metadata";
-import type { LinkageTerms } from "../src/config/linkageTerms";
+import type { LinkageTerms } from "../src/config/linkageTermsSchema";
 
 // --- Fixtures ----------------------------------------------------------------
 

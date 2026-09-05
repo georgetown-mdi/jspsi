@@ -1,17 +1,17 @@
-import { referencedLinkageFieldNames } from "../config/linkageTerms";
+import { referencedLinkageFieldNames } from "../config/linkageTermsSchema";
 import type {
   LinkageRuleSetReference,
   LinkageSetIdentity,
   LinkageTerms,
   LinkageField,
   LinkageKey,
-} from "../config/linkageTerms";
+} from "../config/linkageTermsSchema";
 import type { Metadata } from "../config/metadata";
 import { canonicalString } from "../utils/canonical";
 import type {
   Standardization,
   StandardizationTransformation,
-} from "../config/standardization";
+} from "../config/standardizationSchema";
 import type { SemanticType } from "../types";
 
 /**

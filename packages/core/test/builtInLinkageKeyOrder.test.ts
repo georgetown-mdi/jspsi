@@ -1,8 +1,11 @@
 import { describe, expect, test } from "vitest";
 
-import { DEFAULT_LINKAGE_RULE_SET } from "../src/defaults/linkageTerms";
+import { DEFAULT_LINKAGE_RULE_SET } from "../src/defaults/builtInLinkageTerms";
 
-import type { LinkageField, LinkageKey } from "../src/config/linkageTerms";
+import type {
+  LinkageField,
+  LinkageKey,
+} from "../src/config/linkageTermsSchema";
 
 const { linkageFields, linkageKeys } = DEFAULT_LINKAGE_RULE_SET;
 

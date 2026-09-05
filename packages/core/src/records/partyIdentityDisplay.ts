@@ -1,5 +1,5 @@
 // The one place a missing party identity becomes text. `linkage_terms.identity`
-// is optional (config/linkageTerms.ts); a party that gives no name gets this
+// is optional (config/linkageTermsSchema.ts); a party that gives no name gets this
 // marker, never `undefined`, an empty cell, or a stand-in such as the account
 // psilink runs as. Every sink that shows a party identity routes through here
 // and displays the same marker, so it is treated as an absence, not a name.

@@ -8,7 +8,7 @@ import {
 import {
   MAX_TEXT_LENGTH,
   MAX_TRANSFORM_PARAM_LENGTH,
-} from "../src/config/linkageTerms";
+} from "../src/config/linkageTermsSchema";
 
 // Minimal valid components used as a base.
 const minimalLinkageTerms = {

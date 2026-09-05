@@ -7,7 +7,7 @@ import {
   linkageRuleSetVerdictNote,
 } from "../src/consent/consentFacts";
 
-import type { LinkageRuleSetCitationVerdict } from "../src/defaults/linkageTerms";
+import type { LinkageRuleSetCitationVerdict } from "../src/defaults/builtInLinkageTerms";
 
 /**
  * The shared copy every surface renders beside a rule-set citation: which caveats

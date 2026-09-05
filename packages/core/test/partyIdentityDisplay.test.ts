@@ -8,7 +8,7 @@ import {
 import { summarizeInvitation } from "../src/consent/invitationSummary";
 import { ESC, hostileTerms, RLO } from "../src/consent/displayEscapingFixtures";
 
-import type { LinkageTerms } from "../src/config/linkageTerms";
+import type { LinkageTerms } from "../src/config/linkageTermsSchema";
 
 /**
  * `linkage_terms.identity` is optional, so every surface that shows a

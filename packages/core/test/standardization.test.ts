@@ -63,25 +63,25 @@ import {
   DEFAULT_LINKAGE_RULE_SET,
   getDefaultLinkageTerms,
   linkageTermsFromRuleSet,
-} from "../src/defaults/linkageTerms";
-import { getDefaultStandardization } from "../src/defaults/standardization";
+} from "../src/defaults/builtInLinkageTerms";
+import { getDefaultStandardization } from "../src/defaults/builtInStandardization";
 import {
   MAX_KEY_ELEMENTS,
   MAX_TRANSFORM_PARAM_LENGTH,
   safeParseLinkageTerms,
-} from "../src/config/linkageTerms";
+} from "../src/config/linkageTermsSchema";
 import type {
   LinkageField,
   LinkageKey,
   LinkageKeyElement,
   LinkageTerms,
   TransformStep,
-} from "../src/config/linkageTerms";
+} from "../src/config/linkageTermsSchema";
 import type { ColumnMetadata, Metadata } from "../src/config/metadata";
 import {
   StandardizationSchema,
   type Standardization,
-} from "../src/config/standardization";
+} from "../src/config/standardizationSchema";
 import { withUnlistedFanOutFunctions } from "./utils/unlistedFanOut";
 import {
   isListedFanOutFunction,

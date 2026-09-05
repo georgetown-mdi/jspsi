@@ -18,8 +18,8 @@ import { redactAndDisplayPartyIdentity } from "../records/partyIdentityDisplay.j
 
 import { endpointRequiresRetainedFiles } from "../config/invitation.js";
 import type { InvitationToken } from "../config/invitation.js";
-import { checkLinkageRuleSetCitation } from "../defaults/linkageTerms.js";
-import type { LinkageRuleSetCitationVerdict } from "../defaults/linkageTerms.js";
+import { checkLinkageRuleSetCitation } from "../defaults/builtInLinkageTerms.js";
+import type { LinkageRuleSetCitationVerdict } from "../defaults/builtInLinkageTerms.js";
 import { deduplicateIsImplementedForStrategy } from "../linkageTermsPolicy.js";
 import type {
   LinkageField,
@@ -27,7 +27,7 @@ import type {
   LinkageKeyElement,
   LinkageStrategy,
   TransformStep,
-} from "../config/linkageTerms.js";
+} from "../config/linkageTermsSchema.js";
 import type { Algorithm } from "../types.js";
 import type { Displayable } from "../utils/sanitizeForDisplay.js";
 

@@ -1,7 +1,7 @@
 // The two-party half of linkage terms: what an ACCEPTOR runs after adopting an
 // inviter's terms, and whether the two parties' terms agree closely enough to
 // run at all. Neither is configuration parsing -- both read terms already
-// parsed by the schema in config/linkageTerms.ts -- and both are driven by the
+// parsed by the schema in config/linkageTermsSchema.ts -- and both are driven by the
 // exchange rather than by a document load.
 
 import { UsageError } from "./errors.js";
@@ -24,14 +24,14 @@ import {
   MAX_TEXT_LENGTH,
   TEXT_CONTROL_CHAR_MESSAGE,
   TEXT_CONTROL_CHAR_PATTERN,
-} from "./config/linkageTerms.js";
+} from "./config/linkageTermsSchema.js";
 import type {
   LinkageField,
   LinkageRuleSetReference,
   LinkageTerms,
   Payload,
   PayloadColumn,
-} from "./config/linkageTerms.js";
+} from "./config/linkageTermsSchema.js";
 
 /**
  * Derive the {@link LinkageTerms} an ACCEPTOR runs from the inviter's terms

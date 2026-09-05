@@ -10,8 +10,8 @@ import { deriveAcceptedLinkageTerms } from "../src/linkageTermsNegotiation";
 import {
   parseLinkageTerms,
   safeParseLinkageTerms,
-} from "../src/config/linkageTerms";
-import type { LinkageTerms } from "../src/config/linkageTerms";
+} from "../src/config/linkageTermsSchema";
+import type { LinkageTerms } from "../src/config/linkageTermsSchema";
 import {
   assertCountOnlyTransmitsNoColumn,
   countOnlyTransmitsColumn,

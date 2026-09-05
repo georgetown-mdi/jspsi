@@ -6,7 +6,7 @@ import {
 } from "../src/payloadExchange";
 import { prepareForExchange, runExchange } from "../src/exchange";
 import { overlongDisclosedColumnPositions } from "../src/config/metadata";
-import { MAX_NAME_LENGTH } from "../src/config/linkageTerms";
+import { MAX_NAME_LENGTH } from "../src/config/linkageTermsSchema";
 import { UsageError } from "../src/errors";
 import {
   createMessagePipe,
@@ -17,7 +17,7 @@ import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
 import type { MessageConnection } from "../src/connection/messageConnection";
 import type { Metadata } from "../src/config/metadata";
-import type { LinkageTerms, Output } from "../src/config/linkageTerms";
+import type { LinkageTerms, Output } from "../src/config/linkageTermsSchema";
 
 // The name of a transmitted column is held, not merely used: it rides the
 // payload frame to the partner and is written into this party's exchange record,

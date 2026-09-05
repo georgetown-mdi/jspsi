@@ -22,13 +22,13 @@ import {
   MAX_SINGLE_PASS_CELLS,
   singlePassReplyByteCap,
 } from "../src/connection/frameSize";
-import { MAX_LINKAGE_ENTRIES } from "../src/config/linkageTerms";
+import { MAX_LINKAGE_ENTRIES } from "../src/config/linkageTermsSchema";
 import {
   createMessagePipe,
   ConnectionError,
 } from "../src/connection/messageConnection";
 import { UsageError } from "../src/errors";
-import type { LinkageTerms } from "../src/config/linkageTerms";
+import type { LinkageTerms } from "../src/config/linkageTermsSchema";
 import type { AssociationTable } from "../src/types";
 import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
 

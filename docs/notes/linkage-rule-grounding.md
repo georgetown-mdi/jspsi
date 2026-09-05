@@ -48,7 +48,7 @@ Three of the sources have limits that several claims below depend on:
 The built-in rules are two artifacts: the `baseline-pii` field set (five
 standardized PII elements) and the `hmis-keys` key set (fourteen key combinations
 over them, applied in the order the set lists). Both are declared in
-`packages/core/src/defaults/linkageTerms.ts`; what they cover and how they are
+`packages/core/src/defaults/builtInLinkageTerms.ts`; what they cover and how they are
 versioned is [default-linkage-rule-set.md](default-linkage-rule-set.md), and this
 note does not restate either.
 

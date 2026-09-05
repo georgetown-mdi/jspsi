@@ -28,7 +28,7 @@ export const MAX_IDENTITY_LENGTH = 1024;
  * U+00A0, so a label written in the operator's own script stays admissible.
  *
  * Core's terms-document rule (`TEXT_CONTROL_CHAR_PATTERN`,
- * packages/core/src/config/linkageTerms.ts) draws the same ranges over the four
+ * packages/core/src/config/linkageTermsSchema.ts) draws the same ranges over the four
  * free-text fields of a linkage-terms document, the party `identity` among
  * them, which a label accepted here becomes; the two patterns are held equal
  * by test/unit/identityLabelParity.test.ts. This contract is stricter: it also

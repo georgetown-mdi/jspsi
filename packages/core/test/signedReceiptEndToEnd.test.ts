@@ -28,7 +28,7 @@ import {
 } from "../src/records/signingIdentity";
 import { COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH } from "../src/utils/sanitizeForDisplay";
 
-import type { Output } from "../src/config/linkageTerms";
+import type { Output } from "../src/config/linkageTermsSchema";
 import type { MessageConnection } from "../src/connection/messageConnection";
 import type { ExchangeRecord } from "../src/records/exchangeRecord";
 import type { ExchangeResult } from "../src/exchange";

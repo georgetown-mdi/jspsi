@@ -6,9 +6,9 @@ import {
   MAX_NAME_LENGTH,
   MAX_PAYLOAD_ENTRIES,
   MAX_TEXT_LENGTH,
-} from "./linkageTerms.js";
+} from "./linkageTermsSchema.js";
 import { AuthenticationSchema, ConnectionConfigSchema } from "./connection.js";
-import { StandardizationSchema } from "./standardization.js";
+import { StandardizationSchema } from "./standardizationSchema.js";
 import { MetadataSchema } from "./metadata.js";
 import { OutboundPayloadConsentSchema } from "./outboundPayloadConsent.js";
 import { SigningConfigSchema } from "./signing.js";

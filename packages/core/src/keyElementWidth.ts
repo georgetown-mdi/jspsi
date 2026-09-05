@@ -11,7 +11,7 @@
  * would drift silently.
  */
 
-import type { TransformStep } from "./config/linkageTerms.js";
+import type { TransformStep } from "./config/linkageTermsSchema.js";
 
 /**
  * The characters a `phonetic` step emits for one value under `soundex`: an
@@ -131,8 +131,8 @@ function parseDateWidthBound(
  * passed on: a zero declares a key narrower than the single candidate the row
  * builder emits for it, which trips that same check and drives the effective
  * key count below the plain key count. The terms schema refuses that shape
- * where a document is read (`linkageTerms.ts`), so this floor is what holds
- * for a chain reaching the derivation another way.
+ * where a document is read (`config/linkageTermsSchema.ts`), so this floor
+ * is what holds for a chain reaching the derivation another way.
  */
 export function elementValueWidthBound(
   steps: readonly TransformStep[] | undefined,

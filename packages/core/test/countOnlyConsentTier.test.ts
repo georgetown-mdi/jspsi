@@ -6,7 +6,7 @@ import {
   COUNT_ONLY_DISCLOSURE_STATEMENT,
   PROPOSED_NOT_APPLIED_NOTES,
 } from "../src/consent/consentFacts.js";
-import { parseLinkageTerms } from "../src/config/linkageTerms.js";
+import { parseLinkageTerms } from "../src/config/linkageTermsSchema.js";
 import {
   COUNT_ONLY_PROBE_TERMS,
   consentRepresentationProbes,

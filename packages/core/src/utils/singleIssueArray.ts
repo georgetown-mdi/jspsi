@@ -14,7 +14,7 @@ import * as z from "zod";
  *   nested `rows`): Zod overflows its own call stack spreading that issue array
  *   up through the frames -- `Maximum call stack size exceeded`, at ~130k
  *   elements (the same mechanism the `transform.params` bound forestalls in
- *   config/linkageTerms.ts).
+ *   config/linkageTermsSchema.ts).
  * - A single/root flat array (the residual the call-stack analysis missed): no
  *   frame to overflow, but at ~3.5M issues Zod throws `Invalid string length`
  *   building its error string (`JSON.stringify` of the issues exceeds V8's max

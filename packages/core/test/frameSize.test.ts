@@ -6,7 +6,7 @@ import {
   MAX_RECORD_COUNT,
   psiElementBounds,
 } from "../src/connection/frameSize";
-import { MAX_LINKAGE_ENTRIES } from "../src/config/linkageTerms";
+import { MAX_LINKAGE_ENTRIES } from "../src/config/linkageTermsSchema";
 import {
   MAX_EFFECTIVE_KEY_COUNT,
   MAX_KEY_CANDIDATE_WIDTH,

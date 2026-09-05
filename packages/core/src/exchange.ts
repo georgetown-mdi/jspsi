@@ -9,8 +9,8 @@ import {
   assertCountOnlyTermsShape,
   assertDeduplicateImplemented,
 } from "./linkageTermsPolicy.js";
-import { getDefaultLinkageTerms } from "./defaults/linkageTerms.js";
-import { getDefaultStandardization } from "./defaults/standardization.js";
+import { getDefaultLinkageTerms } from "./defaults/builtInLinkageTerms.js";
+import { getDefaultStandardization } from "./defaults/builtInStandardization.js";
 import {
   buildStandardizedDataset,
   declaredEffectiveKeyCount,
@@ -77,7 +77,7 @@ import {
 } from "./records/signedReceipt.js";
 import { OperatorConfigError, UsageError, causeChainSome } from "./errors.js";
 import type { Metadata } from "./config/metadata.js";
-import type { LinkageTerms } from "./config/linkageTerms.js";
+import type { LinkageTerms } from "./config/linkageTermsSchema.js";
 import type { StandardizedDataset } from "./standardization.js";
 import type {
   HandshakeRole,

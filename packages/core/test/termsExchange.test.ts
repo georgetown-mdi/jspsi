@@ -8,8 +8,8 @@ import {
   PROTOCOL_VERSION_MISMATCH_MESSAGE,
   TERMS_ENVELOPE_FIELDS,
 } from "../src/protocolSetup";
-import { MAX_NAME_LENGTH } from "../src/config/linkageTerms";
-import type { LinkageTerms, Output } from "../src/config/linkageTerms";
+import { MAX_NAME_LENGTH } from "../src/config/linkageTermsSchema";
+import type { LinkageTerms, Output } from "../src/config/linkageTermsSchema";
 import type { PresentedHostKey } from "../src/connection/fileSyncConnection";
 import type { PsiRole } from "../src/types";
 

@@ -8,7 +8,7 @@ import { keyTypeFromBlob } from "../src/utils/sshHostKey";
 import { prepareForExchange, runExchange } from "../src/exchange";
 import { createMessagePipe } from "../src/connection/messageConnection";
 import type { PresentedHostKey } from "../src/connection/fileSyncConnection";
-import type { Output } from "../src/config/linkageTerms";
+import type { Output } from "../src/config/linkageTermsSchema";
 
 // Cross-party reconciliation of the SFTP host-key fingerprint. Each party
 // advertises the host key it observed in the authenticated post-handshake

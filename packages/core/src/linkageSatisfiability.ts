@@ -14,13 +14,13 @@ import {
   StandardizationTermsError,
   UsageError,
 } from "./errors.js";
-import type { Standardization } from "./config/standardization.js";
+import type { Standardization } from "./config/standardizationSchema.js";
 import type {
   LinkageField,
   LinkageKey,
   LinkageTerms,
   TransformStep,
-} from "./config/linkageTerms.js";
+} from "./config/linkageTermsSchema.js";
 import { inferMetadata } from "./config/metadata.js";
 import type { ColumnMetadata } from "./config/metadata.js";
 import { DEFAULT_DATE_OUTPUT_FORMAT } from "./keyElementWidth.js";

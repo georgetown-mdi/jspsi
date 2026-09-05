@@ -20,7 +20,7 @@ import type {
   GenerateFuzzyComparisons,
   LinkageKey,
   LinkageTerms,
-} from "../src/config/linkageTerms";
+} from "../src/config/linkageTermsSchema";
 
 const FUZZY_KINDS: readonly GenerateFuzzyComparisons[] = [
   "transpositions",

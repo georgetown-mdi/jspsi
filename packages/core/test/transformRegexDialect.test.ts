@@ -5,7 +5,7 @@ import {
   linkageTermsHaveNonConformantTransformRegex,
 } from "../src/config/transformRegexDialect";
 import { STANDARDIZATION_FUNCTION_DESCRIPTORS } from "../src/standardization";
-import type { LinkageTerms } from "../src/config/linkageTerms";
+import type { LinkageTerms } from "../src/config/linkageTermsSchema";
 
 // A terms shape holding a single element transform, enough for the gate walk.
 const termsWith = (

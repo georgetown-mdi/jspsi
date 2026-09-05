@@ -6,7 +6,7 @@ import {
   ConnectionError,
   receiveParsed,
 } from "../connection/messageConnection.js";
-import { MAX_TEXT_LENGTH } from "../config/linkageTerms.js";
+import { MAX_TEXT_LENGTH } from "../config/linkageTermsSchema.js";
 import {
   SIGNING_CERTIFICATE_VERSION,
   computeCertificateFingerprint,

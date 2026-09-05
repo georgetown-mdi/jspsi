@@ -4,7 +4,7 @@ import {
   buildStandardizedDataset,
   StandardizedKeyIterable,
 } from "../src/standardization";
-import type { LinkageTerms } from "../src/config/linkageTerms";
+import type { LinkageTerms } from "../src/config/linkageTermsSchema";
 import type { ColumnMetadata } from "../src/config/metadata";
 
 // --- Shared fixtures ---------------------------------------------------------

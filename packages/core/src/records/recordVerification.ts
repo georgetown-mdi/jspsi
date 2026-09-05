@@ -9,7 +9,7 @@ import type {
   VerificationKeys,
 } from "./exchangeRecord.js";
 import type { CanonicalValue } from "../utils/canonical.js";
-import type { LinkageTerms } from "../config/linkageTerms.js";
+import type { LinkageTerms } from "../config/linkageTermsSchema.js";
 import type { CSVRow } from "../file.js";
 import type { AssociationTable } from "../types.js";
 

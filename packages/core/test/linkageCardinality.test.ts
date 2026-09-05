@@ -26,7 +26,7 @@ import {
   deriveAcceptedLinkageTerms,
   validateCompatibility,
 } from "../src/linkageTermsNegotiation";
-import { parseLinkageTerms } from "../src/config/linkageTerms";
+import { parseLinkageTerms } from "../src/config/linkageTermsSchema";
 import { entityClusters } from "../src/psi/entityClosure";
 import { inferMetadata } from "../src/config/metadata";
 import { mintExchangeFile } from "../src/config/exchangeFile";
@@ -36,7 +36,10 @@ import { UsageError } from "../src/errors";
 
 import type { PreparedExchange, ExchangeResult } from "../src/exchange";
 import type { MessageConnection } from "../src/connection/messageConnection";
-import type { LinkageStrategy, LinkageTerms } from "../src/config/linkageTerms";
+import type {
+  LinkageStrategy,
+  LinkageTerms,
+} from "../src/config/linkageTermsSchema";
 import type { CSVRow } from "../src/file";
 
 // The cardinality runExchange passes to the linkage strategies comes from the

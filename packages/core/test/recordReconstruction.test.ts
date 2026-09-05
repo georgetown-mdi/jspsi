@@ -27,7 +27,7 @@ import {
 } from "../src/records/recordVerification";
 import { createMessagePipe } from "../src/connection/messageConnection";
 
-import type { LinkageTerms, Output } from "../src/config/linkageTerms";
+import type { LinkageTerms, Output } from "../src/config/linkageTermsSchema";
 import type { Metadata } from "../src/config/metadata";
 import type { PartnerPayload } from "../src/payloadExchange";
 import type { RetainedResult } from "../src/records/recordVerification";

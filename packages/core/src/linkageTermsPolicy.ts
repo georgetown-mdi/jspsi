@@ -1,5 +1,5 @@
 // The runtime rules a set of agreed linkage terms is held to, as opposed to the
-// shape a terms document must parse into (config/linkageTerms.ts): which
+// shape a terms document must parse into (config/linkageTermsSchema.ts): which
 // linkage strategies implement `deduplicate` and many-to-many matching, what a
 // count-only (`psi-c`) document may not carry, and which swap-paired key
 // elements a single transform would read differently on the two parties.
@@ -15,7 +15,7 @@ import type {
   LinkageKeyElement,
   LinkageStrategy,
   LinkageTerms,
-} from "./config/linkageTerms.js";
+} from "./config/linkageTermsSchema.js";
 
 /**
  * Which of the count-only shape rules a `psi-c` terms document breaks. The

@@ -47,9 +47,9 @@ import type {
   LinkageTerms,
   Output,
   TransformStep,
-} from "../src/config/linkageTerms";
+} from "../src/config/linkageTermsSchema";
 import type { Metadata } from "../src/config/metadata";
-import type { Standardization } from "../src/config/standardization";
+import type { Standardization } from "../src/config/standardizationSchema";
 import type { CSVRow } from "../src/file";
 import type { PsiRole } from "../src/types";
 

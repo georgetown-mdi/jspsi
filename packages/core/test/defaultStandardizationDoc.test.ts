@@ -5,16 +5,19 @@ import { describe, expect, test } from "vitest";
 import { parse as parseYaml } from "yaml";
 
 import { ALIAS_TYPE_META_MAP } from "../src/config/metadata";
-import { safeParseLinkageTerms } from "../src/config/linkageTerms";
-import { getDefaultStandardization } from "../src/defaults/standardization";
+import { safeParseLinkageTerms } from "../src/config/linkageTermsSchema";
+import { getDefaultStandardization } from "../src/defaults/builtInStandardization";
 import { runPipeline } from "../src/standardization";
 import { SEMANTIC_TYPES } from "../src/types";
 import { snakeizeKeys } from "../src/utils/camelizeKeys";
 import { CANDIDATE_DATE_FORMATS, INFER_DATE_SCAN_CAP } from "../src/utils/date";
 
 import type { ColumnMetadata } from "../src/config/metadata";
-import type { LinkageField, LinkageTerms } from "../src/config/linkageTerms";
-import type { StandardizationStep } from "../src/config/standardization";
+import type {
+  LinkageField,
+  LinkageTerms,
+} from "../src/config/linkageTermsSchema";
+import type { StandardizationStep } from "../src/config/standardizationSchema";
 import type { SemanticType } from "../src/types";
 
 // docs/spec/DEFAULT_STANDARDIZATION.md mirrors registries that live only in

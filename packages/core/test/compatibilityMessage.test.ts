@@ -15,7 +15,7 @@ import {
   ruleSetCitation,
 } from "../src/config/compatibilityMessage";
 import { validateCompatibility } from "../src/linkageTermsNegotiation";
-import type { LinkageTerms } from "../src/config/linkageTerms";
+import type { LinkageTerms } from "../src/config/linkageTermsSchema";
 import {
   redactAndSanitizeForDisplay,
   sanitizeErrorForDisplay,

@@ -26,7 +26,7 @@
 //
 // Rationale and the decisions taken: docs/notes/shared-consent-summary.md.
 
-import type { LinkageRuleSetCitationVerdict } from "../defaults/linkageTerms.js";
+import type { LinkageRuleSetCitationVerdict } from "../defaults/builtInLinkageTerms.js";
 
 /**
  * Whether the exchange holds a consent fact itself, or the fact is the inviting

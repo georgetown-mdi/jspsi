@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { getDefaultLinkageTerms } from "../src/defaults/linkageTerms.js";
+import { getDefaultLinkageTerms } from "../src/defaults/builtInLinkageTerms.js";
 import {
   summarizeInvitation,
   TRANSFORM_FUNCTION_GLOSSARY,
@@ -15,7 +15,7 @@ import type { ConnectionEndpoint } from "../src/config/invitation.js";
 import type {
   LinkageStrategy,
   TransformStep,
-} from "../src/config/linkageTerms.js";
+} from "../src/config/linkageTermsSchema.js";
 
 // A linkable column set (ssn + names + dob give satisfiable keys) that ALSO
 // includes columns the inferred metadata discloses: `notes` infers as an

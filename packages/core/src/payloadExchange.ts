@@ -7,8 +7,8 @@ import {
   disclosedColumnNames,
   overlongDisclosedColumnPositions,
 } from "./config/metadata.js";
-import type { Output, Payload } from "./config/linkageTerms.js";
-import { MAX_NAME_LENGTH } from "./config/linkageTerms.js";
+import type { Output, Payload } from "./config/linkageTermsSchema.js";
+import { MAX_NAME_LENGTH } from "./config/linkageTermsSchema.js";
 import type { CompatibilityMessageFragment } from "./config/compatibilityMessage.js";
 import {
   compatibilityMessage,

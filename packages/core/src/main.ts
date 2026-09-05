@@ -181,11 +181,11 @@ export type { CompatibilityMessageFragment } from "./config/compatibilityMessage
 export { reconcileHostKeyFingerprints } from "./hostKeyReconciliation";
 export { describeDecodeError } from "./utils/describeDecodeError";
 
-export { StandardizationSchema } from "./config/standardization";
+export { StandardizationSchema } from "./config/standardizationSchema";
 export type {
   Standardization,
   StandardizationStep,
-} from "./config/standardization";
+} from "./config/standardizationSchema";
 export {
   CONNECTION_PER_POLL_SHORT_INTERVAL_WARN_MS,
   ConnectionConfigSchema,
@@ -222,12 +222,12 @@ export {
   isOptInLinkageKey,
   linkageRuleSetReferenceFor,
   optInLinkageKeys,
-} from "./defaults/linkageTerms";
+} from "./defaults/builtInLinkageTerms";
 export type {
   BuiltInLinkageRuleSet,
   LinkageRuleSetCitationVerdict,
-} from "./defaults/linkageTerms";
-export { getDefaultStandardization } from "./defaults/standardization";
+} from "./defaults/builtInLinkageTerms";
+export { getDefaultStandardization } from "./defaults/builtInStandardization";
 export {
   ExchangeSpecSchema,
   parseExchangeSpec,
@@ -251,7 +251,7 @@ export {
   TEXT_CONTROL_CHAR_PATTERN,
   referencedLinkageFieldNames,
   safeParseLinkageTerms,
-} from "./config/linkageTerms";
+} from "./config/linkageTermsSchema";
 export {
   deriveAcceptedLinkageTerms,
   validateCompatibility,
@@ -268,7 +268,7 @@ export type {
   Output,
   Payload,
   TransformStep,
-} from "./config/linkageTerms";
+} from "./config/linkageTermsSchema";
 export {
   INVITATION_LIFETIME_SECONDS,
   MAX_ENDPOINT_HOST_LENGTH,

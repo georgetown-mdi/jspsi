@@ -7,7 +7,7 @@ import {
 } from "../src/consent/linkageTermConsentCoverage.js";
 import { declaredPositions } from "./utils/declaredPositions.js";
 
-import type { LinkageTerms } from "../src/config/linkageTerms.js";
+import type { LinkageTerms } from "../src/config/linkageTermsSchema.js";
 import type { ConsentRelevantTerm } from "../src/consent/linkageTermConsentCoverage.js";
 
 /**
@@ -24,7 +24,7 @@ import type { ConsentRelevantTerm } from "../src/consent/linkageTermConsentCover
  */
 function declaredTermPositions(): Set<string> {
   return declaredPositions({
-    sourcePathFromCoreRoot: "src/config/linkageTerms.ts",
+    sourcePathFromCoreRoot: "src/config/linkageTermsSchema.ts",
     rootInterface: "LinkageTerms",
     recordValuePositions: ["linkageKeys[].elements[].transform[].params"],
   }).all;

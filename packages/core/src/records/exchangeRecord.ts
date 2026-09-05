@@ -19,12 +19,12 @@ import {
   MAX_NAME_LENGTH,
   MAX_PAYLOAD_ENTRIES,
   MAX_TEXT_LENGTH,
-} from "../config/linkageTerms.js";
-import { checkLinkageRuleSetCitation } from "../defaults/linkageTerms.js";
+} from "../config/linkageTermsSchema.js";
+import { checkLinkageRuleSetCitation } from "../defaults/builtInLinkageTerms.js";
 import { boundedArray } from "../utils/boundedArray.js";
 
 import type { CanonicalValue } from "../utils/canonical.js";
-import type { LinkageTerms } from "../config/linkageTerms.js";
+import type { LinkageTerms } from "../config/linkageTermsSchema.js";
 import type { Algorithm, AssociationTable } from "../types.js";
 
 // The exchange record: a self-attested, unsigned disclosure-log entry each party

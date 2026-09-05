@@ -1,4 +1,4 @@
-import type { LinkageTerms } from "./linkageTerms.js";
+import type { LinkageTerms } from "./linkageTermsSchema.js";
 import {
   coerceToPatternString,
   patternConformsToDialect,

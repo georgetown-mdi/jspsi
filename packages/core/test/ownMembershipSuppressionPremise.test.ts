@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import { resolveRole } from "../src/protocolSetup.js";
 
-import type { Output } from "../src/config/linkageTerms.js";
+import type { Output } from "../src/config/linkageTermsSchema.js";
 import type { PsiRole } from "../src/types.js";
 
 // Both acceptance surfaces withhold `partnerLearnsOwnMembership` from a

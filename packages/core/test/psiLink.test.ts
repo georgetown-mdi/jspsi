@@ -19,7 +19,7 @@ import {
   FAN_OUT_CANDIDATES_PER_ELEMENT,
   MAX_KEY_CANDIDATE_WIDTH,
 } from "../src/fanOutFunctions";
-import { MAX_LINKAGE_ENTRIES } from "../src/config/linkageTerms";
+import { MAX_LINKAGE_ENTRIES } from "../src/config/linkageTermsSchema";
 import {
   MAX_FRAME_SIZE_BYTES,
   MAX_SINGLE_PASS_CELLS,

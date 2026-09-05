@@ -16,7 +16,10 @@ import {
 import { FAN_OUT_CANDIDATES_PER_ELEMENT } from "../src/fanOutFunctions";
 import { UsageError } from "../src/errors";
 import { getLogger } from "../src/utils/logger";
-import type { LinkageKey, TransformStep } from "../src/config/linkageTerms";
+import type {
+  LinkageKey,
+  TransformStep,
+} from "../src/config/linkageTermsSchema";
 import { withUnlistedFanOutFunctions } from "./utils/unlistedFanOut";
 
 // A `transpositions` element declares one candidate per PAIR of its value's

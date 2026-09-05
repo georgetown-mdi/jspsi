@@ -19,7 +19,7 @@ import { RE2JS } from "re2js";
  * across exchanges in a long-lived process; it does not guard a per-row
  * recompile, which the key-building path already avoids on its own. On
  * overflow the oldest entry is evicted. The count bounds in
- * config/linkageTerms.ts keep a single terms set well under this, so a
+ * config/linkageTermsSchema.ts keep a single terms set well under this, so a
  * legitimate exchange never evicts mid-build.
  */
 const COMPILE_CACHE_MAX = 1024;

@@ -10,7 +10,7 @@ import {
 
 import type { MessageConnection } from "../src/connection/messageConnection";
 import type { PreparedExchange } from "../src/exchange";
-import type { Output } from "../src/config/linkageTerms";
+import type { Output } from "../src/config/linkageTermsSchema";
 
 // A payload row must supply exactly one value per named column, or the
 // record's readable governance list and its committed values fall out of

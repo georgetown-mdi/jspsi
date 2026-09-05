@@ -9,7 +9,7 @@ import {
 import {
   MAX_DATE_FORMAT_LENGTH,
   MAX_TRANSFORM_PATTERN_LENGTH,
-} from "../src/config/linkageTerms";
+} from "../src/config/linkageTermsSchema";
 
 // --- Descriptor / registry parity --------------------------------------------
 

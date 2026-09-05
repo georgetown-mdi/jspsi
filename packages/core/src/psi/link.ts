@@ -330,7 +330,7 @@ function multiplicitySides(cardinality: LinkageCardinality): MultiplicitySides {
 // same reason as above.
 //
 // The both-sided verdict is read from the strategy table the agreed-terms
-// refusal reads (config/linkageTerms.ts) rather than restated here, so a
+// refusal reads (config/linkageTermsSchema.ts) rather than restated here, so a
 // strategy entry that starts pairing the cardinality stops being refused at
 // both points at once.
 function singlePassResolves(cardinality: LinkageCardinality): boolean {

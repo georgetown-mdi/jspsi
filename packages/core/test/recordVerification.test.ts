@@ -18,7 +18,7 @@ import type {
   CommittedPayload,
   ExchangeRecordInputs,
 } from "../src/records/exchangeRecord";
-import type { LinkageTerms } from "../src/config/linkageTerms";
+import type { LinkageTerms } from "../src/config/linkageTermsSchema";
 import type { Metadata } from "../src/config/metadata";
 import type { PartnerPayload } from "../src/payloadExchange";
 import type {

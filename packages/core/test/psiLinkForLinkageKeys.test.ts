@@ -7,7 +7,7 @@ import {
 } from "../src/standardization";
 import { PSIParticipant } from "../src/psi/participant";
 import { linkViaPSI } from "../src/psi/link";
-import type { LinkageTerms } from "../src/config/linkageTerms";
+import type { LinkageTerms } from "../src/config/linkageTermsSchema";
 import type { ColumnMetadata } from "../src/config/metadata";
 
 import { createMessagePipe } from "../src/connection/messageConnection";

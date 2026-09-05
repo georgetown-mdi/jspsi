@@ -3,9 +3,9 @@ import { resolveFieldColumns } from "../standardization.js";
 import type {
   Standardization,
   StandardizationStep,
-} from "../config/standardization.js";
+} from "../config/standardizationSchema.js";
 import type { ColumnMetadata } from "../config/metadata.js";
-import type { LinkageTerms } from "../config/linkageTerms.js";
+import type { LinkageTerms } from "../config/linkageTermsSchema.js";
 
 // --- Step arrays -------------------------------------------------------------
 

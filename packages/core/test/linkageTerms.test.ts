@@ -22,9 +22,9 @@ import {
   MAX_TRANSFORM_STEPS,
   MAX_KEY_ELEMENTS,
   MAX_PAYLOAD_ENTRIES,
-} from "../src/config/linkageTerms";
-import type { LinkageKey } from "../src/config/linkageTerms";
-import type { LinkageTerms } from "../src/config/linkageTerms";
+} from "../src/config/linkageTermsSchema";
+import type { LinkageKey } from "../src/config/linkageTermsSchema";
+import type { LinkageTerms } from "../src/config/linkageTermsSchema";
 import {
   assertPresentedDeduplicateMatchesInvitation,
   InvitationTermDivergenceError,

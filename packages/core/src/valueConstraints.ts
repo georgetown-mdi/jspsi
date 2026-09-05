@@ -6,7 +6,7 @@
 //
 // Advisory throughout, matching the LinkageField constraint contract ("the
 // application warns if violated but does not enforce them",
-// config/linkageTerms.ts): nothing here throws or rejects a value; each
+// config/linkageTermsSchema.ts): nothing here throws or rejects a value; each
 // surface decides how to present the result (a web badge, a CLI warning line).
 //
 // Coverage is authoritative: every constraint with a CLEAN value-level test is
@@ -28,8 +28,11 @@
 
 import { compileLinearRegex } from "./utils/linearRegex.js";
 import type { CompiledLinearRegex } from "./utils/linearRegex.js";
-import { referencedLinkageFieldNames } from "./config/linkageTerms.js";
-import type { LinkageField, LinkageTerms } from "./config/linkageTerms.js";
+import { referencedLinkageFieldNames } from "./config/linkageTermsSchema.js";
+import type {
+  LinkageField,
+  LinkageTerms,
+} from "./config/linkageTermsSchema.js";
 import { isCalendarDateValid } from "./utils/calendarDate.js";
 import type { StandardizedDataset } from "./standardization.js";
 

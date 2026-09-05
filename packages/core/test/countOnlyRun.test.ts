@@ -24,7 +24,7 @@ import {
 import type { MessageConnection } from "../src/connection/messageConnection";
 import type { ExchangeResult, PreparedExchange } from "../src/exchange";
 import type { Algorithm } from "../src/types";
-import type { LinkageTerms, Output } from "../src/config/linkageTerms";
+import type { LinkageTerms, Output } from "../src/config/linkageTermsSchema";
 
 const psiLibrary = await PSI();
 

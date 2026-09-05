@@ -16,7 +16,7 @@ import {
   ExchangeSpecSchema,
 } from "../src/config/exchangeSpec";
 import { camelizeKeys } from "../src/utils/camelizeKeys";
-import type { LinkageTerms } from "../src/config/linkageTerms";
+import type { LinkageTerms } from "../src/config/linkageTermsSchema";
 import type { FileSyncOptions } from "../src/config/connection";
 
 // A minimal, valid set of linkage terms shared across cases -- the mint layer

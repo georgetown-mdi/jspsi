@@ -24,7 +24,8 @@ import { resolve } from "node:path";
 import ts from "typescript";
 
 /** The source the built-in field set and key set are declared in. */
-export const RULE_SET_SOURCE = "packages/core/src/defaults/linkageTerms.ts";
+export const RULE_SET_SOURCE =
+  "packages/core/src/defaults/builtInLinkageTerms.ts";
 
 /** The declarations naming, versioning, and holding the field set. */
 export const FIELD_SET_DECLARATIONS = {
