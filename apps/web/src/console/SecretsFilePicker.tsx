@@ -13,14 +13,14 @@ import {
 
 import { sanitizeForDisplay } from "@psilink/core";
 
-import { fetchSecretsEntries } from "@psi/sftpAuthoringClient";
+import { fetchSecretsEntries } from "@psi/jobClient/sftpAuthoringClient";
 
 import styles from "@styles/app.module.css";
 
 import { MountLoading, MountStateNotice, RefreshButton } from "./mountListing";
 import { breadcrumbTrail, enterSubdir, fileSubPath } from "./mountNavigation";
 
-import type { SecretsEntriesResult } from "@psi/sftpAuthoringClient";
+import type { SecretsEntriesResult } from "@psi/jobClient/sftpAuthoringClient";
 
 /** The mount-root breadcrumb label. */
 const ROOT_LABEL = "secrets";

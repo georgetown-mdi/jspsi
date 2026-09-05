@@ -64,7 +64,7 @@ import {
   validZeroSetupIntent,
 } from "../utils/jobFixtures";
 
-import type { JobRendezvousConfig } from "@psi/workInputClient";
+import type { JobRendezvousConfig } from "@psi/jobClient/workInputClient";
 import type { JobSigningPaths } from "@jobs/intent";
 import type { LinkageTerms } from "@psilink/core";
 import type { ReceiptsDraft } from "@psi/receiptsModel";

@@ -14,7 +14,7 @@ import {
 } from "@mantine/core";
 import { IconAlertTriangle, IconInfoCircle } from "@tabler/icons-react";
 
-import { resolveSigningFingerprint } from "@psi/signingIdentityClient";
+import { resolveSigningFingerprint } from "@psi/jobClient/signingIdentityClient";
 
 import {
   CERTIFICATE_EXPORT_NOTICE,
@@ -31,8 +31,8 @@ import styles from "@styles/app.module.css";
 import { DisclosureSection } from "../components/DisclosureSection";
 
 import type { ReceiptsDraft, ReceiptsSigningMode } from "@psi/receiptsModel";
-import type { JobRendezvousConfig } from "@psi/workInputClient";
-import type { SigningFingerprintOutcome } from "@psi/signingIdentityClient";
+import type { JobRendezvousConfig } from "@psi/jobClient/workInputClient";
+import type { SigningFingerprintOutcome } from "@psi/jobClient/signingIdentityClient";
 
 /** The three modes the configuration format has, in the order the reference lists
  * them. The middle one is offered disabled: core refuses it before an exchange

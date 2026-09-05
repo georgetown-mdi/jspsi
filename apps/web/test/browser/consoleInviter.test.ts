@@ -55,7 +55,7 @@ vi.mock("@utils/clientConfig", () => ({
 
 // Nothing here drives the browser transport (it is disabled on the console), so
 // the rendezvous functions are never called.
-vi.mock("@psi/rendezvous", async () =>
+vi.mock("@psi/transport/rendezvous", async () =>
   (await import("./moduleMocks")).rendezvousMock(),
 );
 

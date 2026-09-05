@@ -12,10 +12,11 @@ import {
   referencedLinkageFieldNames,
 } from "@psilink/core";
 
-import { encodeKeyForComparison, isOptInDraftKey } from "./linkageComparison";
+import { encodeKeyForComparison, isOptInDraftKey } from "../linkageComparison";
+import { normalizeForEditor } from "../metadataEditing";
+
 import { buildAdvancedTerms } from "./advancedInviteTerms";
 import { directionForOutput } from "./advancedInviteTypes";
-import { normalizeForEditor } from "./metadataEditing";
 
 import type {
   CSVRow,

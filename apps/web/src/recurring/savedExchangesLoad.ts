@@ -17,8 +17,8 @@
 
 import { savedExchangeRows } from "./savedExchangesModel";
 
-import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
-import type { ManagedLocalState } from "@psi/managedLocalState";
+import type { ManagedExchangeRecord } from "@psi/managed/managedExchangeRecord";
+import type { ManagedLocalState } from "@psi/managed/managedLocalState";
 import type { SavedExchangeRow } from "./savedExchangesModel";
 
 /** The outcome of loading the home list. `"unavailable"` means the store could not

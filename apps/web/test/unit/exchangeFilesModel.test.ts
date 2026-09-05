@@ -10,7 +10,7 @@ import {
   exchangeFilesProblems,
 } from "@console/exchangeFilesModel";
 import { composeConfigDocument, zeroSetupOptionsArgv } from "@jobs/intent";
-import { PEER_ID_SHAPE_MESSAGE } from "@psi/peerIdLabel";
+import { PEER_ID_SHAPE_MESSAGE } from "@psi/transport/peerIdLabel";
 
 import { validIntent } from "../utils/jobFixtures";
 

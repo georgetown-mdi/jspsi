@@ -49,7 +49,7 @@ import {
 import {
   DEFAULT_PEER_WAIT_TIMEOUT_MS,
   PartnerNoShowError,
-} from "./waitForConnection";
+} from "../transport/waitForConnection";
 import {
   ManagedExchangeCustodyUnreadableError,
   ManagedExchangeSpentError,

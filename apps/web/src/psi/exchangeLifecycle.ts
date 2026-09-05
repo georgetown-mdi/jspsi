@@ -8,13 +8,13 @@ import {
 } from "@psilink/core";
 
 import { authenticateExchange } from "./authenticateExchange";
-import { createBrowserPsiEngineFactory } from "./psiCryptoController";
-import { defaultSpawnPsiCryptoWorker } from "./psiCryptoWorkerClient";
-import { openPeerMessageConnection } from "./peerMessageConnection";
+import { createBrowserPsiEngineFactory } from "./workers/psiCryptoController";
+import { defaultSpawnPsiCryptoWorker } from "./workers/psiCryptoWorkerClient";
+import { openPeerMessageConnection } from "./transport/peerMessageConnection";
 
 import type { DataConnection } from "peerjs";
 import type Peer from "peerjs";
-import type { PeerCloseOutcome } from "./waitForPeerClose";
+import type { PeerCloseOutcome } from "./transport/waitForPeerClose";
 
 import type {
   ExchangeResult,

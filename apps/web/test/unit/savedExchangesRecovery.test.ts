@@ -6,7 +6,7 @@ import {
   recoveryRows,
 } from "@recurring/savedExchangesRecovery";
 
-import type { ManagedExchangeDiagnosticEntry } from "@psi/managedExchangeStore";
+import type { ManagedExchangeDiagnosticEntry } from "@psi/managed/managedExchangeStore";
 
 // The read-failed recovery listing's display derivation, tested in Node: a
 // readable entry shows its label, side, and last-run date; an unreadable

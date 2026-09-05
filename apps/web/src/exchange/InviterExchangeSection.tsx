@@ -34,7 +34,7 @@ import { useJobExchangeRecordOffer } from "./useJobExchangeRecordOffer";
 
 import type { ExchangeRun } from "./exchangeRun";
 import type { GeneratedInvitation } from "@psi/invitation";
-import type { JobRunStatus } from "@psi/serverJobExchangeDriver";
+import type { JobRunStatus } from "@psi/jobClient/serverJobExchangeDriver";
 import type { RunFailure } from "./useInviterExchange";
 import type { RunOutputs } from "@psi/runOutputs";
 

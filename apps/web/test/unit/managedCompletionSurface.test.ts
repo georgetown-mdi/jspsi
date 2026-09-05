@@ -1,8 +1,8 @@
 import { describe, expect, test, vi } from "vitest";
 
-import { managedRerunCompletion } from "@psi/managedCompletionSurface";
+import { managedRerunCompletion } from "@psi/managed/managedCompletionSurface";
 
-import type { ManagedBackupExportHook } from "@psi/managedCompletionSurface";
+import type { ManagedBackupExportHook } from "@psi/managed/managedCompletionSurface";
 
 // The completion surface's backup-refresh hook, tested in Node. A successful re-run
 // just rotated the secret, so the previous backup is stale; the surface offers

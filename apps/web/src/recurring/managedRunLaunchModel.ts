@@ -13,18 +13,18 @@
 import {
   ManagedExchangeExpiredError,
   benignRerunOutcome,
-} from "@psi/managedRun";
+} from "@psi/managed/managedRun";
 import {
   deriveManagedFailureTier,
   importedSinceLastSuccess,
-} from "@psi/managedFailureTiers";
-import { canReinviteFromRecord } from "@psi/managedReinvite";
+} from "@psi/managed/managedFailureTiers";
+import { canReinviteFromRecord } from "@psi/managed/managedReinvite";
 
 import { dateTimeLabel } from "@psi/inviterModel";
 
-import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
-import type { ManagedFailureTier } from "@psi/managedFailureTiers";
-import type { ManagedLocalState } from "@psi/managedLocalState";
+import type { ManagedExchangeRecord } from "@psi/managed/managedExchangeRecord";
+import type { ManagedFailureTier } from "@psi/managed/managedFailureTiers";
+import type { ManagedLocalState } from "@psi/managed/managedLocalState";
 
 /** The recovery affordance a surface state offers: drives what the host renders
  * below the alert, and through {@link managedRunRetryable} whether the

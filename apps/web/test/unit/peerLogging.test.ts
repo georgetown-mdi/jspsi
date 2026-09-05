@@ -5,7 +5,7 @@ import {
   createRedactingLogFunction,
   redactErrorIds,
   resolvePeerDebugLevel,
-} from "../../src/psi/peerLogging.js";
+} from "../../src/psi/transport/peerLogging.js";
 
 // A 32-hex-char string in the shape deriveRendezvousPeerId produces.
 const SAMPLE_ID = "0123456789abcdef0123456789abcdef";

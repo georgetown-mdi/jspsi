@@ -46,7 +46,7 @@ import {
 
 import type { CSVRow, LinkageTerms, Metadata } from "@psilink/core";
 import type { AcceptorColumnsState } from "@exchange/acceptorColumnsModel";
-import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
+import type { FieldValueCoverage } from "@psi/workers/nonEmptyAggregate";
 
 // Two single-element keys, one per name field, so a CSV can satisfy both, one, or
 // neither -- the three verdict outcomes. Adopted verbatim from the invitation; the

@@ -3,10 +3,10 @@ import { describe, expect, test } from "vitest";
 import {
   directionForOutput,
   outputForDirection,
-} from "../../src/psi/advancedInviteTypes.js";
+} from "../../src/psi/authoring/advancedInviteTypes.js";
 
 import type { Output } from "@psilink/core";
-import type { OutputDirection } from "../../src/psi/advancedInviteTypes.js";
+import type { OutputDirection } from "../../src/psi/authoring/advancedInviteTypes.js";
 
 /** Every direction the editor can hold, as a total record so a fourth one cannot
  * be added without this suite naming it. */

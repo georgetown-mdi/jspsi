@@ -24,13 +24,13 @@ import { EXCHANGE_RECORD_OUTCOMES } from "@psilink/core";
 import {
   MAX_JOB_STATUS_RESPONSE_BYTES,
   readBoundedJson,
-} from "@psi/jobApiBody";
+} from "@psi/jobClient/jobApiBody";
 import { delayUntilAborted } from "@psi/delayUntilAborted";
 
-import { recordFileStamp } from "./runOutputs";
+import { recordFileStamp } from "../runOutputs";
 
 import type { ExchangeRecordOutcome } from "@psilink/core";
-import type { RecordDownloads } from "./exchangeLifecycle";
+import type { RecordDownloads } from "../exchangeLifecycle";
 import type { RecordUnavailableReason } from "@jobs/jobManager";
 
 /** The console endpoint the shareable record downloads from. The browser never

@@ -17,7 +17,7 @@
  * `Content-Security-Policy` header: a browser enforces the intersection of
  * multiple CSP headers, which can silently tighten and break the page. The app
  * runs a same-origin module Web Worker (the off-main-thread CSV parse,
- * `apps/web/src/psi/csvParse.worker.ts`); the current CSP sets no
+ * `apps/web/src/psi/workers/csvParse.worker.ts`); the current CSP sets no
  * `default-src`/`script-src`/`child-src`/`worker-src`, so it does not restrict
  * workers and needs no change to permit it. If a worker-restricting directive is
  * ever added here, it must include `worker-src 'self'` -- the worker is a bundled

@@ -1,4 +1,4 @@
-import type { JobRunStatus } from "@psi/serverJobExchangeDriver";
+import type { JobRunStatus } from "@psi/jobClient/serverJobExchangeDriver";
 import type { ReattachedRunState } from "./RunSurface";
 
 /**

@@ -6,7 +6,7 @@ import {
   fetchRecurringHandoff,
   shellJoinCommand,
   windowsJoinCommand,
-} from "@psi/recurringHandoff";
+} from "@psi/managed/recurringHandoff";
 
 import { CopyableCode } from "@components/CopyableCode";
 import styles from "@styles/app.module.css";

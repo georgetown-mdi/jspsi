@@ -17,9 +17,9 @@ import {
 
 import { emptyColumnPositions } from "./columnNames";
 import { linkageRefusalFor } from "./linkageRefusal";
-import { loadCSVFileOffMainThread } from "./csvParseController";
+import { loadCSVFileOffMainThread } from "./workers/csvParseController";
 import { payloadSendForMetadata } from "./metadataEditing";
-import { standardizationForTerms } from "./advancedInviteTerms";
+import { standardizationForTerms } from "./authoring/advancedInviteTerms";
 
 import type {
   CSVRow,

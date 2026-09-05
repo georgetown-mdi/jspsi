@@ -30,12 +30,19 @@ the list is registered in `vite.config.ts` (`srcAliases`) and `nitro.config.ts`
 | `src/exchange/`  | `@exchange`   | The one-off exchange: the invite, accept, direct and verify screens and their models |
 | `src/recurring/` | `@recurring`  | The recurring-exchange manager: the saved list, the managed run surface, schedules   |
 | `src/console/`   | `@console`    | What only the console build renders: the mount file pickers, SFTP authoring, the server-job settings cards |
-| `src/psi/`       | `@psi`        | The protocol and run models. React-free                                             |
+| `src/psi/`       | `@psi`        | The protocol and run models, React-free, with a subdirectory per feature below      |
 | `src/components/`| `@components` | React pieces more than one product renders                                          |
 | `src/jobs/`      | `@jobs`       | The console server's job machinery, behind the API routes                           |
 | `src/utils/`     | `@utils`      | Configuration and generic helpers                                                    |
 | `src/styles/`    | `@styles`     | The design tokens and the stylesheet the screens share                              |
 | `src/routes/`    |               | Route entries, which compose the products                                            |
+
+`src/psi/` keeps the exchange itself at its top level and gives each feature
+beside it a subdirectory: `managed/` (the recurring-exchange records, store,
+schedule and runs), `jobClient/` (the browser's client of the console server's
+job API), `transport/` (WebRTC rendezvous, the peer connection and its waits),
+`authoring/` (invitation authoring) and `workers/` (the CSV, coverage and PSI
+workers with their controllers).
 
 The direction runs one way: `src/psi` and `src/components` sit below the three
 product directories and must not import from them, which is what keeps the

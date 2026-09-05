@@ -5,7 +5,7 @@ import log from "loglevel";
 import { isConsoleBuild as consoleBuild } from "@utils/clientConfig";
 import { isInstalledRuntime as installedRuntime } from "@utils/installedRuntime";
 
-import type { ManagedScheduleRuntimeOptions } from "@psi/managedScheduleRuntime";
+import type { ManagedScheduleRuntimeOptions } from "@psi/managed/managedScheduleRuntime";
 
 /** The call sites the mount reads its environment through, so a test can drive
  * the gate and the runtime it guards without an installed app. */
@@ -50,7 +50,7 @@ export const RUNNER_LOAD_FAILURE_NOTICE =
 export function startInstalledRuntimeRunner(
   options: ManagedScheduleRuntimeOptions,
   load: ManagedScheduleRuntimeLoader = () =>
-    import("@psi/managedScheduleRuntime"),
+    import("@psi/managed/managedScheduleRuntime"),
 ): void {
   load()
     .then(({ startManagedScheduleRuntime }) => {

@@ -4,7 +4,7 @@ import {
   PEER_ID_PATTERN,
   PEER_ID_SHAPE_MESSAGE,
   isAdmissiblePeerId,
-} from "@psi/peerIdLabel";
+} from "@psi/transport/peerIdLabel";
 
 /**
  * The party-name bound and the refusal that reports it, held together: the

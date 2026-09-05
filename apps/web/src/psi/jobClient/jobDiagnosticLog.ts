@@ -17,7 +17,7 @@
 import {
   MAX_JOB_STATUS_RESPONSE_BYTES,
   readBoundedJson,
-} from "@psi/jobApiBody";
+} from "@psi/jobClient/jobApiBody";
 import { delayUntilAborted } from "@psi/delayUntilAborted";
 
 /** The console endpoint the log downloads from. The browser never composes the

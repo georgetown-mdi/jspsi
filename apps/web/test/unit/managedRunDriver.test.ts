@@ -9,7 +9,7 @@ import { describeResolvedRunShape, runExchange } from "@psilink/core";
 import {
   DISCLOSURE_NOT_FILED_WARNING,
   runManagedExchangeInBrowser,
-} from "../../src/psi/managedRunDriver.js";
+} from "../../src/psi/managed/managedRunDriver.js";
 import {
   FINAL_FRAME_UNCONFIRMED_LINK_LOST_WARNING,
   FINAL_FRAME_UNCONFIRMED_WAIT_EXPIRED_WARNING,
@@ -17,15 +17,15 @@ import {
 import {
   PartnerNoShowError,
   waitForIncomingConnection,
-} from "../../src/psi/waitForConnection.js";
+} from "../../src/psi/transport/waitForConnection.js";
 import { appendDisclosureRecordToStore } from "../../src/psi/disclosureAccountingStore.js";
 import { authenticateExchange } from "../../src/psi/authenticateExchange.js";
-import { beginManagedRendezvous } from "../../src/psi/managedRendezvous.js";
+import { beginManagedRendezvous } from "../../src/psi/managed/managedRendezvous.js";
 import { disclosureRecord } from "../utils/disclosureFixtures.js";
-import { openPeerMessageConnection } from "../../src/psi/peerMessageConnection.js";
+import { openPeerMessageConnection } from "../../src/psi/transport/peerMessageConnection.js";
 
-import type { ManagedExchangeRecord } from "../../src/psi/managedExchangeRecord.js";
-import type { ManagedInputSource } from "../../src/psi/managedInputHandle.js";
+import type { ManagedExchangeRecord } from "../../src/psi/managed/managedExchangeRecord.js";
+import type { ManagedInputSource } from "../../src/psi/managed/managedInputHandle.js";
 
 import type { DataConnection } from "peerjs";
 import type Peer from "peerjs";
@@ -42,7 +42,7 @@ import type {
   RunExchangeOptions,
 } from "@psilink/core";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
-import type { PeerCloseOutcome } from "../../src/psi/waitForPeerClose.js";
+import type { PeerCloseOutcome } from "../../src/psi/transport/waitForPeerClose.js";
 import type { RunOutputs } from "@psi/runOutputs";
 
 /**
@@ -62,7 +62,7 @@ const OUTPUTS: RunOutputs = vi.hoisted(() => ({
   resultsUrl: "blob:results",
 }));
 
-vi.mock("../../src/psi/managedRun.js", () => ({
+vi.mock("../../src/psi/managed/managedRun.js", () => ({
   runManagedRerun: vi.fn(
     async (
       _record: unknown,
@@ -79,19 +79,22 @@ vi.mock("../../src/psi/managedRun.js", () => ({
     },
   ),
 }));
-vi.mock("../../src/psi/managedRendezvous.js", () => ({
+vi.mock("../../src/psi/managed/managedRendezvous.js", () => ({
   beginManagedRendezvous: vi.fn(),
 }));
-vi.mock("../../src/psi/peerMessageConnection.js", () => ({
+vi.mock("../../src/psi/transport/peerMessageConnection.js", () => ({
   openPeerMessageConnection: vi.fn(),
 }));
 // Only the inbound wait is faked; PartnerNoShowError stays the real class, because
 // the classification downstream of this wiring is an instanceof check on it.
-vi.mock("../../src/psi/waitForConnection.js", async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  waitForIncomingConnection: vi.fn(),
-}));
-vi.mock("../../src/psi/managedInputHandle.js", () => ({
+vi.mock(
+  "../../src/psi/transport/waitForConnection.js",
+  async (importOriginal) => ({
+    ...(await importOriginal<Record<string, unknown>>()),
+    waitForIncomingConnection: vi.fn(),
+  }),
+);
+vi.mock("../../src/psi/managed/managedInputHandle.js", () => ({
   acquireValidatedManagedInput: vi.fn(() =>
     Promise.resolve({ rows: [], columns: [] }),
   ),
@@ -99,7 +102,7 @@ vi.mock("../../src/psi/managedInputHandle.js", () => ({
 vi.mock("../../src/psi/disclosureAccountingStore.js", () => ({
   appendDisclosureRecordToStore: vi.fn(() => Promise.resolve()),
 }));
-vi.mock("../../src/psi/managedPreparedExchange.js", () => ({
+vi.mock("../../src/psi/managed/managedPreparedExchange.js", () => ({
   prepareManagedRerunExchange: vi.fn(() => ({})),
 }));
 vi.mock("../../src/psi/authenticateExchange.js", () => ({

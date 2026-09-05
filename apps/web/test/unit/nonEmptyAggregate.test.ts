@@ -9,15 +9,15 @@ import {
   createFieldCoverageAccumulator,
   isSilentEmpty,
   shouldComputeOffThread,
-} from "../../src/psi/nonEmptyAggregate.js";
+} from "../../src/psi/workers/nonEmptyAggregate.js";
 
-import { NonEmptyRateController } from "../../src/psi/nonEmptyAggregateController.js";
+import { NonEmptyRateController } from "../../src/psi/workers/nonEmptyAggregateController.js";
 
 import type {
   AggregateRequest,
   AggregateResponse,
   AggregateWorker,
-} from "../../src/psi/nonEmptyAggregateController.js";
+} from "../../src/psi/workers/nonEmptyAggregateController.js";
 
 import type { CSVRow, Standardization } from "@psilink/core";
 

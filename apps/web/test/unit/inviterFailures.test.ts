@@ -6,11 +6,11 @@ import {
   prepareForExchange,
 } from "@psilink/core";
 
-import { JobApiRequestError } from "@psi/serverJobExchangeDriver";
+import { JobApiRequestError } from "@psi/jobClient/serverJobExchangeDriver";
 import { failureFor } from "@exchange/useInviterExchange";
 
 import type { CSVRow, LinkageTerms, Metadata } from "@psilink/core";
-import type { JobInputSource } from "@psi/serverJobExchangeDriver";
+import type { JobInputSource } from "@psi/jobClient/serverJobExchangeDriver";
 
 const WORK_FILE: JobInputSource = {
   kind: "workFile",

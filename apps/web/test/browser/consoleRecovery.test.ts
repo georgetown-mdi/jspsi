@@ -30,7 +30,7 @@ vi.mock("@utils/clientConfig", () => ({
 }));
 
 // The console disables the browser transport; nothing here drives it.
-vi.mock("@psi/rendezvous", async () =>
+vi.mock("@psi/transport/rendezvous", async () =>
   (await import("./moduleMocks")).rendezvousMock(),
 );
 

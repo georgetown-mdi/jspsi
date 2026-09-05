@@ -108,7 +108,7 @@ vi.mock("@tanstack/react-router", async () =>
 
 // The rendezvous dial and listen run only inside a run lifecycle these initial
 // mounts never start.
-vi.mock("@psi/rendezvous", async () =>
+vi.mock("@psi/transport/rendezvous", async () =>
   (await import("./moduleMocks")).rendezvousMock(),
 );
 

@@ -28,17 +28,17 @@
 import {
   MAX_SCHEDULE_INTERVAL_DAYS,
   MAX_SCHEDULE_WINDOW_SECONDS,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 import {
   MAX_TIME_VALUE,
   managedScheduleWindow,
   managedScheduleWindowStateAt,
   nextManagedScheduleWindowAfter,
-} from "@psi/managedSchedule";
+} from "@psi/managed/managedSchedule";
 
 import { dateTimeLabel, lifetimeNoun } from "@psi/inviterModel";
 
-import type { ManagedExchangeSchedule } from "@psi/managedExchangeRecord";
+import type { ManagedExchangeSchedule } from "@psi/managed/managedExchangeRecord";
 
 /**
  * The consecutive-miss count at which a surface escalates from naming the last

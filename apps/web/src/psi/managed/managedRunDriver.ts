@@ -34,33 +34,36 @@ import {
   runExchange,
 } from "@psilink/core";
 
-import { buildRunOutputs } from "./runOutputs";
+import { buildRunOutputs } from "../runOutputs";
 
-import { CLOSE_OUTCOME_WARNINGS } from "./exchangeLifecycle";
-import { HANDSHAKE_ROLE_FOR_SIDE } from "./handshakeRole";
-import { acquireValidatedManagedInput } from "./managedInputHandle";
-import { appendDisclosureRecordToStore } from "./disclosureAccountingStore";
-import { authenticateExchange } from "./authenticateExchange";
-import { beginManagedRendezvous } from "./managedRendezvous";
-import { createBrowserPsiEngineFactory } from "./psiCryptoController";
-import { defaultSpawnPsiCryptoWorker } from "./psiCryptoWorkerClient";
-import { openPeerMessageConnection } from "./peerMessageConnection";
+import { CLOSE_OUTCOME_WARNINGS } from "../exchangeLifecycle";
+import { HANDSHAKE_ROLE_FOR_SIDE } from "../handshakeRole";
+import { appendDisclosureRecordToStore } from "../disclosureAccountingStore";
+import { authenticateExchange } from "../authenticateExchange";
+import { createBrowserPsiEngineFactory } from "../workers/psiCryptoController";
+import { defaultSpawnPsiCryptoWorker } from "../workers/psiCryptoWorkerClient";
+import { openPeerMessageConnection } from "../transport/peerMessageConnection";
+import { waitForIncomingConnection } from "../transport/waitForConnection";
+
 import { prepareManagedRerunExchange } from "./managedPreparedExchange";
 import { runManagedRerun } from "./managedRun";
-import { waitForIncomingConnection } from "./waitForConnection";
+
+import { beginManagedRendezvous } from "./managedRendezvous";
+
+import { acquireValidatedManagedInput } from "./managedInputHandle";
 
 import type { BuiltExchangeRecord, MessageConnection } from "@psilink/core";
 import type { DataConnection } from "peerjs";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 import type Peer from "peerjs";
 
-import type { ObjectUrls, RunOutputs } from "./runOutputs";
+import type { ObjectUrls, RunOutputs } from "../runOutputs";
 
 import type { ManagedExchangeRecord } from "./managedExchangeRecord";
 import type { ManagedExchangeRunResult } from "./managedExchangeRun";
 import type { ManagedInputSource } from "./managedInputHandle";
 import type { ManagedRerunOptions } from "./managedRun";
-import type { PeerCloseOutcome } from "./waitForPeerClose";
+import type { PeerCloseOutcome } from "../transport/waitForPeerClose";
 
 /** What the input phase yields to the handshake: the prepared exchange bound to
  * this run's freshly-read rows, before any connection. */

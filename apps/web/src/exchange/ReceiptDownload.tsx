@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 
-import { askJobReceiptOffer } from "@psi/jobReceipt";
+import { askJobReceiptOffer } from "@psi/jobClient/jobReceipt";
 
 import styles from "@styles/app.module.css";
 
 import { DownloadRow } from "./RunSurface";
 
-import type { JobReceiptOffer } from "@psi/jobReceipt";
+import type { JobReceiptOffer } from "@psi/jobClient/jobReceipt";
 
 /**
  * The lead the seat shows when a run that asked for a signed receipt has none on

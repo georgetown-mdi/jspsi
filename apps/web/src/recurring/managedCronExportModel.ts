@@ -18,12 +18,12 @@
 
 import { sanitizeErrorForDisplay } from "@psilink/core";
 
-import { composeManagedCronExport } from "@psi/managedCronExport";
+import { composeManagedCronExport } from "@psi/managed/managedCronExport";
 
 import { cronScheduleLine, taskSchedulerLine } from "./scheduleTemplates";
 
-import type { ManagedCronExport } from "@psi/managedCronExport";
-import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
+import type { ManagedCronExport } from "@psi/managed/managedCronExport";
+import type { ManagedExchangeRecord } from "@psi/managed/managedExchangeRecord";
 
 /**
  * The STUN server the exported invocation falls back to, disclosed on the panel
@@ -33,7 +33,7 @@ import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
  * apps/cli/src/connection/webrtc/weriftPeer.ts);
  * `npm run check:stun-default-claims` holds this copy to that one, since an app
  * may not import from another app. Not the web app's own ICE list
- * (`@psi/rendezvous`), which is a different list for exchanges this browser runs
+ * (`@psi/transport/rendezvous`), which is a different list for exchanges this browser runs
  * itself.
  */
 export const CLI_BUILT_IN_STUN_URI = "stun:stun.l.google.com:19302";

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { managedExchangeRunLockHeld } from "@psi/managedExchangeLock";
+import { managedExchangeRunLockHeld } from "@psi/managed/managedExchangeLock";
 
 /** How often the mounted surface re-reads the record's run lock. Web Locks raises no
  * change event, so the only reading available is a poll; this is short enough that a

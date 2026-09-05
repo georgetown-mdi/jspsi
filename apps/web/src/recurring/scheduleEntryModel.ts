@@ -23,16 +23,16 @@
 import {
   MAX_SCHEDULE_INTERVAL_DAYS,
   MAX_SCHEDULE_WINDOW_SECONDS,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 import {
   firstUnclosedManagedScheduleWindow,
   localCadenceFromAnchor,
   resolveLocalCadenceAnchor,
-} from "@psi/managedSchedule";
+} from "@psi/managed/managedSchedule";
 
 import { dateTimeLabel } from "@psi/inviterModel";
 
-import type { ManagedExchangeSchedule } from "@psi/managedExchangeRecord";
+import type { ManagedExchangeSchedule } from "@psi/managed/managedExchangeRecord";
 
 /** The unit the width field is entered in. */
 const SECONDS_PER_HOUR = 3600;

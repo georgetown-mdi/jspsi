@@ -18,23 +18,23 @@ import {
   ensureHandleReadPermission,
   fileSystemAccessSupported,
   storedInputHandleUsable,
-} from "@psi/managedInputHandle";
+} from "@psi/managed/managedInputHandle";
 import {
   clearManagedExchanges,
   createManagedExchange,
   getManagedExchange,
   persistManagedExchangeInputHandle,
-} from "@psi/managedExchangeStore";
-import { ManagedInputError } from "@psi/managedInputGuard";
-import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
-import { runManagedExchange } from "@psi/managedExchangeRun";
+} from "@psi/managed/managedExchangeStore";
+import { ManagedInputError } from "@psi/managed/managedInputGuard";
+import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
+import { runManagedExchange } from "@psi/managed/managedExchangeRun";
 
 import type { ExchangeSpec, WebRTCExchangeLocator } from "@psilink/core";
 import type {
   HandleReadPermissionQuery,
   HandleReadPermissionState,
-} from "@psi/managedInputHandle";
-import type { NewManagedExchange } from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedInputHandle";
+import type { NewManagedExchange } from "@psi/managed/managedExchangeRecord";
 
 // The platform half of the input-file handle lifecycle, exercised against real
 // Chromium: reading a File through a FileSystemFileHandle at run start, the

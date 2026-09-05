@@ -17,6 +17,12 @@ import {
 } from "@psilink/core";
 
 import {
+  isStepValid,
+  pipelineHasInertCoalesce,
+} from "../standardizationAuthoring";
+import { SEMANTIC_TYPE_LABELS } from "../metadataEditing";
+
+import {
   buildAdvancedTerms,
   importedCitationDropCause,
 } from "./advancedInviteTerms";
@@ -25,11 +31,6 @@ import {
   draftFromTerms,
   keyIsSupplyable,
 } from "./advancedInviteDraft";
-import {
-  isStepValid,
-  pipelineHasInertCoalesce,
-} from "./standardizationAuthoring";
-import { SEMANTIC_TYPE_LABELS } from "./metadataEditing";
 import { outputForDirection } from "./advancedInviteTypes";
 
 import type {

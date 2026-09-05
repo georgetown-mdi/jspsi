@@ -1,6 +1,6 @@
 import { StandardizedField } from "@psilink/core";
 
-import { isStepValid } from "./standardizationAuthoring";
+import { isStepValid } from "../standardizationAuthoring";
 
 import type { CSVRow, Standardization } from "@psilink/core";
 

@@ -19,7 +19,7 @@ import {
   setDraftMetadata,
   setDraftMetadataKeepingKeys,
   validateAdvancedInvite,
-} from "./advancedInvite";
+} from "./authoring/advancedInvite";
 
 import {
   SEMANTIC_TYPE_LABELS,
@@ -28,7 +28,7 @@ import {
   setColumnType,
 } from "./metadataEditing";
 
-import { isSilentEmpty } from "./nonEmptyAggregate";
+import { isSilentEmpty } from "./workers/nonEmptyAggregate";
 
 import { OFFLINE_EXCHANGE_REASON } from "./offlineExchangeGate";
 import { selectExchangeDriver } from "./exchangeDriverSelection";
@@ -40,7 +40,7 @@ import type {
   AdvancedValidation,
   DraftLegalAgreement,
   OutputDirection,
-} from "./advancedInvite";
+} from "./authoring/advancedInvite";
 import type {
   CSVRow,
   LinkageField,
@@ -53,7 +53,7 @@ import type {
 import type { DeploymentProfile } from "@utils/clientConfig";
 import type { DisclosureChoice } from "./metadataEditing";
 import type { ExchangeDriverSelection } from "./exchangeDriverSelection";
-import type { FieldValueCoverage } from "./nonEmptyAggregate";
+import type { FieldValueCoverage } from "./workers/nonEmptyAggregate";
 import type { RunOutputs } from "./runOutputs";
 
 /**

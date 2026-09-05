@@ -4,7 +4,7 @@ import { default as EventEmitter } from "eventemitter3";
 
 import { ConnectionError } from "@psilink/core";
 
-import { openPeerMessageConnection } from "../../src/psi/peerMessageConnection.js";
+import { openPeerMessageConnection } from "../../src/psi/transport/peerMessageConnection.js";
 
 import type { DataConnection } from "peerjs";
 

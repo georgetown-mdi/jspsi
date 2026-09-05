@@ -20,14 +20,14 @@ import {
 import {
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 import {
   clearManagedExchanges,
   createManagedExchange,
   getManagedExchange,
   persistManagedExchangeScheduleAdvance,
   updateManagedExchangeLocalFields,
-} from "@psi/managedExchangeStore";
+} from "@psi/managed/managedExchangeStore";
 import { ManagedExchangeDetail } from "@recurring/ManagedExchangeDetail";
 import { disclosureEntries } from "@recurring/disclosureAccountingModel";
 
@@ -44,7 +44,7 @@ import type {
   ManagedExchangeSchedule,
   ManagedExchangeSide,
   NewManagedExchange,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 import type { WebRTCExchangeLocator } from "@psilink/core";
 
 // The managed exchange detail sections, rendered: the read-only configuration with

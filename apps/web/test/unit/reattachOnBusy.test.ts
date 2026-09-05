@@ -3,15 +3,15 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   JobApiRequestError,
   RelayedTerminalError,
-} from "@psi/serverJobExchangeDriver";
+} from "@psi/jobClient/serverJobExchangeDriver";
 import { isExchangeBusyError, reattachOnBusy } from "@exchange/reattachOnBusy";
 import { failureFor } from "@exchange/useInviterExchange";
-import { writeAttachment } from "@psi/consoleJobAttachment";
+import { writeAttachment } from "@psi/jobClient/consoleJobAttachment";
 
 import type {
   JobApiClient,
   JobStatusProbe,
-} from "@psi/serverJobExchangeDriver";
+} from "@psi/jobClient/serverJobExchangeDriver";
 import type { ExchangeDriverEvents } from "@psi/exchangeDriver";
 import type { ExchangeErrorCategory } from "@psi/exchangeLifecycle";
 import type { RelayEvent } from "@jobs/cliDriver";

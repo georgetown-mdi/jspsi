@@ -538,7 +538,7 @@ describe("the check's registration", () => {
     // web-store names are extracted from the constants the store actually
     // opens, so a rename there fails here instead of leaving the guidance
     // naming a database that no longer exists.
-    const store = readRoot("apps/web/src/psi/managedExchangeStore.ts");
+    const store = readRoot("apps/web/src/psi/managed/managedExchangeStore.ts");
     const dbName = store.match(/MANAGED_EXCHANGE_DB_NAME = "([^"]+)"/)?.[1];
     const storeName = store.match(
       /MANAGED_EXCHANGE_DISCLOSURE_STORE_NAME = "([^"]+)"/,

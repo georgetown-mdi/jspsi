@@ -1,6 +1,6 @@
 import type { AcceptKitEndpoint } from "@exchange/acceptKit";
 import type { FileDropEndpoint } from "@psilink/core";
-import type { JobRendezvousConfig } from "@psi/workInputClient";
+import type { JobRendezvousConfig } from "@psi/jobClient/workInputClient";
 
 /**
  * The pure model behind the console's filedrop rendezvous: what an invitation minted

@@ -18,7 +18,7 @@ import {
 } from "@jobs/handoff";
 import { generateJobId, writeJobFile } from "@jobs/workdir";
 import { JobInputNotFoundError } from "@jobs/workInputs";
-import { createServerJobExchangeDriver } from "@psi/serverJobExchangeDriver";
+import { createServerJobExchangeDriver } from "@psi/jobClient/serverJobExchangeDriver";
 import { failureFor } from "@exchange/useInviterExchange";
 
 import {
@@ -43,7 +43,7 @@ import type {
   JobInputFileReference,
 } from "@jobs/intent";
 import type { ExchangeErrorCategory } from "@psi/exchangeLifecycle";
-import type { JobApiClient } from "@psi/serverJobExchangeDriver";
+import type { JobApiClient } from "@psi/jobClient/serverJobExchangeDriver";
 
 vi.mock("@jobs/workdir", { spy: true });
 

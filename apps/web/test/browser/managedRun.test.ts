@@ -12,15 +12,15 @@ import {
   clearManagedExchanges,
   createManagedExchange,
   getManagedExchange,
-} from "@psi/managedExchangeStore";
-import { ManagedExchangeExpiredError } from "@psi/managedExpiry";
-import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
-import { runManagedRerun } from "@psi/managedRun";
+} from "@psi/managed/managedExchangeStore";
+import { ManagedExchangeExpiredError } from "@psi/managed/managedExpiry";
+import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
+import { runManagedRerun } from "@psi/managed/managedRun";
 
 import type {
   ManagedExchangeRecord,
   NewManagedExchange,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 import type { WebRTCExchangeLocator } from "@psilink/core";
 
 // The re-run orchestration launched from a STORED record, against real Chromium

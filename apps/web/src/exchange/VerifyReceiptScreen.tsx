@@ -22,7 +22,7 @@ import {
 import { DisclosureSection } from "@components/DisclosureSection";
 import { MAX_CSV_FILE_BYTES } from "@components/csvIntake";
 import { importLinkageTerms } from "@psi/linkageTermsIO";
-import { loadCSVFileOffMainThread } from "@psi/csvParseController";
+import { loadCSVFileOffMainThread } from "@psi/workers/csvParseController";
 
 import styles from "@styles/app.module.css";
 

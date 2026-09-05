@@ -1,11 +1,17 @@
 import {
   JobApiRequestError,
   createServerJobReattachDriver,
-} from "@psi/serverJobExchangeDriver";
-import { readAttachment, writeAttachment } from "@psi/consoleJobAttachment";
+} from "@psi/jobClient/serverJobExchangeDriver";
+import {
+  readAttachment,
+  writeAttachment,
+} from "@psi/jobClient/consoleJobAttachment";
 
-import type { JobApiClient, JobRunStatus } from "@psi/serverJobExchangeDriver";
-import type { ConsoleJobSeat } from "@psi/consoleJobAttachment";
+import type {
+  JobApiClient,
+  JobRunStatus,
+} from "@psi/jobClient/serverJobExchangeDriver";
+import type { ConsoleJobSeat } from "@psi/jobClient/consoleJobAttachment";
 import type { ExchangeDriverEvents } from "@psi/exchangeDriver";
 import type { RunOutputs } from "@psi/runOutputs";
 

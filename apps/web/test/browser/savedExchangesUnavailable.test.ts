@@ -25,7 +25,7 @@ vi.mock("@tanstack/react-router", async () =>
 
 // Fail the store open -- the real failed-open the degrade classifies on. The rest of
 // the store module is left intact (the list never reaches its reads).
-vi.mock("@psi/managedExchangeStore", async (importOriginal) => {
+vi.mock("@psi/managed/managedExchangeStore", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return {
     ...actual,

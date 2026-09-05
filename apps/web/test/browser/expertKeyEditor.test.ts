@@ -8,7 +8,7 @@ import { createElement } from "react";
 
 import { authoredLinkageFields } from "@psilink/core";
 
-import { seedAdvancedInvite } from "@psi/advancedInvite";
+import { seedAdvancedInvite } from "@psi/authoring/advancedInvite";
 
 import { ExpertKeyEditor } from "@components/ExpertKeyEditor";
 

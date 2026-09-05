@@ -49,7 +49,7 @@ vi.mock("@utils/clientConfig", () => ({
 }));
 
 // The unsupported gate and the server-job accept never dial.
-vi.mock("@psi/rendezvous", async () =>
+vi.mock("@psi/transport/rendezvous", async () =>
   (await import("./moduleMocks")).rendezvousMock(),
 );
 

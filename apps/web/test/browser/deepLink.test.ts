@@ -29,7 +29,7 @@ vi.mock("@tanstack/react-router", async () =>
 // AcceptorScreen transitively imports the rendezvous and lifecycle modules, and
 // this test never launches an exchange (it stops at the decoded review screen),
 // so both are stubbed.
-vi.mock("@psi/rendezvous", async () =>
+vi.mock("@psi/transport/rendezvous", async () =>
   (await import("./moduleMocks")).rendezvousMock(),
 );
 vi.mock("@psi/exchangeLifecycle", () => ({

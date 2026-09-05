@@ -25,12 +25,12 @@ import {
   requestPersistentStorage,
   spendManagedExchangeIfCurrent,
   updateManagedExchangeLocalFields,
-} from "@psi/managedExchangeStore";
+} from "@psi/managed/managedExchangeStore";
 import {
   MAX_LABEL_LENGTH,
   MAX_SCHEDULE_INTERVAL_DAYS,
   composeManagedExchangeFile,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 import {
   appendDisclosureRecordToStore,
   readDisclosureAccounting,
@@ -39,7 +39,7 @@ import {
 import {
   getManagedLocalState,
   markManagedExchangeBackedUp,
-} from "@psi/managedLocalState";
+} from "@psi/managed/managedLocalState";
 import { DISCLOSURE_ACCOUNTING_VERSION } from "@psi/disclosureAccounting";
 import { buildManagedDeposit } from "@exchange/manageOfferModel";
 
@@ -53,7 +53,7 @@ import type {
   ManagedExchangeRecord,
   ManagedExchangeSchedule,
   NewManagedExchange,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 
 // The IndexedDB half of the managed-exchange store, exercised against real
 // Chromium (real IndexedDB, structured clone, and the File System Access handle

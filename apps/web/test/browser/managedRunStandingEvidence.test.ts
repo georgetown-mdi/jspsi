@@ -14,14 +14,14 @@ import {
   createManagedExchange,
   getManagedExchange,
   recordManagedExchangeLastRun,
-} from "@psi/managedExchangeStore";
+} from "@psi/managed/managedExchangeStore";
 import { ManagedRunSurface } from "@recurring/ManagedRunSurface";
-import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
-import { storageFailureRun } from "@psi/managedRunRotate";
+import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
+import { storageFailureRun } from "@psi/managed/managedRunRotate";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 
-import type { NewManagedExchange } from "@psi/managedExchangeRecord";
+import type { NewManagedExchange } from "@psi/managed/managedExchangeRecord";
 
 // A no-show must still show a standing persist failure and its re-invite recovery,
 // not the benign "not a fault on this device" reading: a one-sided persist failure
@@ -41,7 +41,7 @@ vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
 );
 
-vi.mock("@psi/rendezvous", async () =>
+vi.mock("@psi/transport/rendezvous", async () =>
   (await import("./moduleMocks")).rendezvousMock(),
 );
 
@@ -51,10 +51,11 @@ vi.mock("@psi/rendezvous", async () =>
 // and the error are what a `PartnerNoShowError` out of `runManagedRerun` produces,
 // and what its `RotationPersistError` produces for the run that rotates but cannot
 // save.
-vi.mock("@psi/managedRunDriver", async () => {
-  const { PartnerNoShowError } = await import("@psi/waitForConnection");
-  const rotate = await import("@psi/managedRunRotate");
-  const store = await import("@psi/managedExchangeStore");
+vi.mock("@psi/managed/managedRunDriver", async () => {
+  const { PartnerNoShowError } =
+    await import("@psi/transport/waitForConnection");
+  const rotate = await import("@psi/managed/managedRunRotate");
+  const store = await import("@psi/managed/managedExchangeStore");
   return {
     runManagedExchangeInBrowser: async (config: { record: { id: string } }) => {
       driver.runs += 1;

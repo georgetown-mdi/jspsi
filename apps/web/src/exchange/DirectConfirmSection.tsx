@@ -44,7 +44,7 @@ import {
 } from "./directExchangeModel";
 
 import type { LinkageStrategy } from "@psilink/core";
-import type { ProfiledJobInput } from "@psi/workInputClient";
+import type { ProfiledJobInput } from "@psi/jobClient/workInputClient";
 
 /**
  * The direct-exchange confirm screen: the committed file's identity and shape, the

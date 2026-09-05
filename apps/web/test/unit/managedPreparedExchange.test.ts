@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
 import { getDefaultLinkageTerms, inferMetadata } from "@psilink/core";
 
-import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
-import { prepareManagedRerunExchange } from "@psi/managedPreparedExchange";
+import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
+import { prepareManagedRerunExchange } from "@psi/managed/managedPreparedExchange";
 
 import type { CSVRow } from "@psilink/core";
 

@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 
-import { NonEmptyRateController } from "@psi/nonEmptyAggregateController";
-import { defaultSpawnAggregateWorker } from "@psi/nonEmptyAggregateWorkerClient";
-import { postJobInputCoverage } from "@psi/workInputClient";
+import { NonEmptyRateController } from "@psi/workers/nonEmptyAggregateController";
+import { defaultSpawnAggregateWorker } from "@psi/workers/nonEmptyAggregateWorkerClient";
+import { postJobInputCoverage } from "@psi/jobClient/workInputClient";
 
-import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
-import type { WorkInputReference } from "@psi/workInputClient";
+import type { FieldValueCoverage } from "@psi/workers/nonEmptyAggregate";
+import type { WorkInputReference } from "@psi/jobClient/workInputClient";
 
 import type { CSVRow, Standardization } from "@psilink/core";
 

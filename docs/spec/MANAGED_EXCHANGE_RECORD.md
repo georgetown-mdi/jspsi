@@ -149,7 +149,7 @@ enforcement.
 The record's local `side` field (`"inviter"` \| `"acceptor"`) dispatches a
 re-run to the right rendezvous flow: the web selects its role by **which
 function runs** -- `listenAsInviter` or `dialAsAcceptor`
-(`apps/web/src/psi/rendezvous.ts`), each hardcoding its peer-id derivation
+(`apps/web/src/psi/transport/rendezvous.ts`), each hardcoding its peer-id derivation
 label and its handshake role (the inviter is the `"responder"`, the acceptor
 the `"initiator"`). The document's `connection.role` field is not
 used for this: no web path reads it, and the record does not change that -- the
@@ -236,7 +236,7 @@ from that earlier reconstructed anchor and can land a bound sooner than a run
 rotation would have -- strictly the conservative direction, and recoverable by
 re-invite if it lands an already-lapsed bound (the standing recovery for a lapsed
 `expires`). The implementation of this derivation is
-`apps/web/src/psi/managedTokenAgeEdit.ts`.
+`apps/web/src/psi/managed/managedTokenAgeEdit.ts`.
 
 ### The schedule object
 
@@ -294,7 +294,7 @@ framing is in
 
 Entry is implemented in `apps/web/src/recurring/scheduleEntryModel.ts` (the
 validation, the resolution, and the cross-field condition) over the arithmetic in
-`apps/web/src/psi/managedSchedule.ts`; the form itself is the local-fields editor
+`apps/web/src/psi/managed/managedSchedule.ts`; the form itself is the local-fields editor
 in `apps/web/src/recurring/ManagedExchangeDetail.tsx`, which writes the schedule
 through the store's one local-fields edit alongside the label and the max-age
 policy.
@@ -565,9 +565,9 @@ exactly as one this runtime slept through:
   input at all.
 - One whose runtime stopped while the window was still open.
 
-The rules above are implemented in `apps/web/src/psi/managedScheduleRunner.ts`;
+The rules above are implemented in `apps/web/src/psi/managed/managedScheduleRunner.ts`;
 the browser host that wakes them, and the installed-runtime gate that decides
-whether it runs at all, are `apps/web/src/psi/managedScheduleRuntime.ts` and
+whether it runs at all, are `apps/web/src/psi/managed/managedScheduleRuntime.ts` and
 `apps/web/src/components/ScheduledExchangeRunner.tsx`.
 
 ### Clock skew and the window width

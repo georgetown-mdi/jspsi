@@ -12,7 +12,7 @@ import {
 
 import { normalizeBinary } from "@psilink/testkit/webrtcInboundFrames";
 
-import { boundChunkReassembly } from "../../src/psi/boundedReassembly.js";
+import { boundChunkReassembly } from "../../src/psi/transport/boundedReassembly.js";
 
 import type { Packable, Unpackable } from "peerjs-js-binarypack";
 import type { ConnectionError } from "@psilink/core";

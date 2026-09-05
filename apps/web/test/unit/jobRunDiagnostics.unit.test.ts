@@ -11,7 +11,7 @@ import { JOB_FILE_NAMES, jobCreateIntentSchema } from "@jobs/intent";
 import {
   LOG_AVAILABILITY_UNANSWERED_LIMIT,
   watchJobDiagnosticLog,
-} from "@psi/jobDiagnosticLog";
+} from "@psi/jobClient/jobDiagnosticLog";
 import {
   RUN_DIAGNOSTICS_DEFAULT,
   SWEEP_CONFIRMATION_NOTICE,
@@ -22,7 +22,7 @@ import {
   runDiagnosticsProblems,
   runDiagnosticsWithControl,
 } from "@psi/runDiagnosticsModel";
-import { RelayedTerminalError } from "@psi/serverJobExchangeDriver";
+import { RelayedTerminalError } from "@psi/jobClient/serverJobExchangeDriver";
 import { failureFor } from "@exchange/useInviterExchange";
 import { resolveWorkdirFile } from "@jobs/workdir";
 

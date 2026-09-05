@@ -29,7 +29,7 @@ import {
   buildAdvancedTerms,
   importedCitationDropNotice,
   isOptInDraftKey,
-} from "@psi/advancedInvite";
+} from "@psi/authoring/advancedInvite";
 
 import { ExpertKeyEditor } from "@components/ExpertKeyEditor";
 import { TermsImportExport } from "@components/TermsImportExport";
@@ -46,7 +46,7 @@ import { CITATION_DROP_TITLE, CitationDropNotice } from "./CitationDropNotice";
 
 import type { AcquiredCsv, InviterEditor, KeyVerdict } from "@psi/inviterModel";
 import type { Algorithm, LinkageStrategy, LinkageTerms } from "@psilink/core";
-import type { AdvancedInviteDraft } from "@psi/advancedInvite";
+import type { AdvancedInviteDraft } from "@psi/authoring/advancedInvite";
 
 /** The guided-list badge copy and CSS class for each per-key verdict
  * ({@link KeyVerdict}). A dead key displays amber ("won't match") rather than red:

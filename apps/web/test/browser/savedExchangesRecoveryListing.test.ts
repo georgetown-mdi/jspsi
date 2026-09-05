@@ -16,17 +16,17 @@ import {
   createManagedExchange,
   listManagedExchanges,
   openManagedExchangeDatabase,
-} from "@psi/managedExchangeStore";
+} from "@psi/managed/managedExchangeStore";
 import {
   listManagedLocalState,
   markManagedExchangeBackedUp,
-} from "@psi/managedLocalState";
+} from "@psi/managed/managedLocalState";
 import { SavedExchanges } from "@recurring/SavedExchanges";
-import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
+import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
 
 import { createAppMount } from "./renderApp";
 
-import type { NewManagedExchange } from "@psi/managedExchangeRecord";
+import type { NewManagedExchange } from "@psi/managed/managedExchangeRecord";
 
 // The read-failed recovery listing, against real Chromium (real IndexedDB).
 // Unlike savedExchangesFailed.test.ts, which mocks the strict read, this file

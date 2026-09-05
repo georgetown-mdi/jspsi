@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import { DISPLAY_TRUNCATION_MARKER } from "@psilink/core";
 
-import { probeSftpHostKey } from "@psi/sftpAuthoringClient";
+import { probeSftpHostKey } from "@psi/jobClient/sftpAuthoringClient";
 
 // The console is trusted and its probe body is still re-validated field by
 // field on the way in, so that a malformed one degrades to an accurate state

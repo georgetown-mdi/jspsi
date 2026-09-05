@@ -38,7 +38,7 @@ const srcAliases = {
   "@": path.resolve(import.meta.dirname, "src"),
 };
 
-// The WASM PSI worker engine. It is imported only by src/psi/psiCrypto.worker.ts, a
+// The WASM PSI worker engine. It is imported only by src/psi/workers/psiCrypto.worker.ts, a
 // `new Worker(new URL(...))` entry Vite's dependency scanner does not traverse, so it
 // is not discovered at startup. Without pre-bundling it in `optimizeDeps.include`, the
 // worker's first spawn triggers a dependency re-optimize and a full page reload

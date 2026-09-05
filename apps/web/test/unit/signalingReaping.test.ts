@@ -12,7 +12,7 @@ import { CheckBrokenConnections } from "@psilink/peerjs-broker/services/checkBro
 import { Client } from "@psilink/peerjs-broker/models/client";
 import { MAX_SIGNALING_PAYLOAD_BYTES } from "@psilink/peerjs-broker/services/webSocketServer/index";
 import { MessageType } from "@psilink/peerjs-broker/enums";
-import { PEER_PING_INTERVAL_MS } from "@psi/rendezvous";
+import { PEER_PING_INTERVAL_MS } from "@psi/transport/rendezvous";
 import defaultConfig from "@psilink/peerjs-broker/config/index";
 import { deriveRendezvousPeerId } from "@psilink/core";
 import { serializeFrame } from "@psilink/peerjs-broker/models/messageQueue";

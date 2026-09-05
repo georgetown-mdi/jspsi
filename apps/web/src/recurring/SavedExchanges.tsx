@@ -13,16 +13,16 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import {
   ManagedImportHandedOffError,
   importManagedExchange,
-} from "@psi/managedExchangeImport";
+} from "@psi/managed/managedExchangeImport";
 import {
   deleteManagedExchange,
   listManagedExchanges,
   listManagedExchangesDiagnostic,
   openManagedExchangeDatabase,
   requestPersistentStorage,
-} from "@psi/managedExchangeStore";
-import { MAX_ARTIFACT_IMPORT_BYTES } from "@psi/managedExchangeArtifact";
-import { listManagedLocalState } from "@psi/managedLocalState";
+} from "@psi/managed/managedExchangeStore";
+import { MAX_ARTIFACT_IMPORT_BYTES } from "@psi/managed/managedExchangeArtifact";
+import { listManagedLocalState } from "@psi/managed/managedLocalState";
 
 import { Lobby } from "@exchange/Lobby";
 
@@ -36,7 +36,7 @@ import {
 import { loadSavedExchanges } from "./savedExchangesLoad";
 import { recoveryRows } from "./savedExchangesRecovery";
 
-import type { ManagedSpentHandoff } from "@psi/managedLocalState";
+import type { ManagedSpentHandoff } from "@psi/managed/managedLocalState";
 import type { RecoveryRow } from "./savedExchangesRecovery";
 import type { SavedExchangeRow } from "./savedExchangesModel";
 import type { SavedExchangesLoad } from "./savedExchangesLoad";

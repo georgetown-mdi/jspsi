@@ -28,7 +28,7 @@ import { reattachedRunState } from "./reattachedRunState";
 import { useJobExchangeRecordOffer } from "./useJobExchangeRecordOffer";
 
 import type { ExchangeRun } from "./exchangeRun";
-import type { JobRunStatus } from "@psi/serverJobExchangeDriver";
+import type { JobRunStatus } from "@psi/jobClient/serverJobExchangeDriver";
 import type { RunFailure } from "./useInviterExchange";
 import type { RunOutputs } from "@psi/runOutputs";
 

@@ -16,7 +16,10 @@ import { IconAlertCircle } from "@tabler/icons-react";
 
 import { sanitizeForDisplay } from "@psilink/core";
 
-import { fetchJobInputProfile, fetchJobInputs } from "@psi/workInputClient";
+import {
+  fetchJobInputProfile,
+  fetchJobInputs,
+} from "@psi/jobClient/workInputClient";
 
 import { byteSizeLabel, dateTimeLabel } from "@psi/inviterModel";
 
@@ -30,7 +33,7 @@ import type {
   JobInputsResult,
   ProfiledJobInput,
   WorkInputReference,
-} from "@psi/workInputClient";
+} from "@psi/jobClient/workInputClient";
 
 /** The picker's per-reason copy for a profile that could not be read: a title and a
  * body, so each distinct failure names what to fix instead of one generic "removed or

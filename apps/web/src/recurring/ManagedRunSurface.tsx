@@ -11,30 +11,30 @@ import {
   COMPROMISE_RESPONSE_TITLE,
   composeManagedFailureConfirmation,
   routeConfirmationReply,
-} from "@psi/managedFailureConfirmation";
+} from "@psi/managed/managedFailureConfirmation";
 import {
   ManagedHandoffRefusedError,
   dispatchManagedMigration,
   exportManagedBackup,
-} from "@psi/managedExchangeExport";
+} from "@psi/managed/managedExchangeExport";
 import {
   getManagedExchange,
   readRecordAndMarkBackedUp,
   spendManagedExchangeIfCurrent,
   updateManagedExchangeLocalFields,
-} from "@psi/managedExchangeStore";
+} from "@psi/managed/managedExchangeStore";
 import {
   readDisclosureAccounting,
   resetDisclosureAccounting,
 } from "@psi/disclosureAccountingStore";
-import { MANAGED_EXCHANGE_ARTIFACT_MIME } from "@psi/managedExchangeArtifact";
-import { canReinviteFromRecord } from "@psi/managedReinvite";
-import { deriveManagedBackupState } from "@psi/managedBackupState";
-import { getManagedLocalState } from "@psi/managedLocalState";
-import { managedRerunCompletion } from "@psi/managedCompletionSurface";
-import { reinviteManagedExchange } from "@psi/managedReinviteDriver";
-import { runManagedExchangeInBrowser } from "@psi/managedRunDriver";
-import { storedInputHandleUsable } from "@psi/managedInputHandle";
+import { MANAGED_EXCHANGE_ARTIFACT_MIME } from "@psi/managed/managedExchangeArtifact";
+import { canReinviteFromRecord } from "@psi/managed/managedReinvite";
+import { deriveManagedBackupState } from "@psi/managed/managedBackupState";
+import { getManagedLocalState } from "@psi/managed/managedLocalState";
+import { managedRerunCompletion } from "@psi/managed/managedCompletionSurface";
+import { reinviteManagedExchange } from "@psi/managed/managedReinviteDriver";
+import { runManagedExchangeInBrowser } from "@psi/managed/managedRunDriver";
+import { storedInputHandleUsable } from "@psi/managed/managedInputHandle";
 import { whenDiagnostic } from "@utils/diagnostics";
 
 import { dateLabel, dateTimeLabel } from "@psi/inviterModel";
@@ -76,17 +76,17 @@ import type { Ref } from "react";
 import type {
   ManagedExchangeLocalEdits,
   ManagedExchangeRecord,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 import type {
   ManagedHandoffRefusal,
   ManagedMigrationDispatch,
-} from "@psi/managedExchangeExport";
+} from "@psi/managed/managedExchangeExport";
 import type { DisclosureAccountingRead } from "@psi/disclosureAccountingStore";
-import type { ManagedBackupMarker } from "@psi/managedBackupState";
-import type { ManagedInputSource } from "@psi/managedInputHandle";
-import type { ManagedReinvite } from "@psi/managedReinvite";
+import type { ManagedBackupMarker } from "@psi/managed/managedBackupState";
+import type { ManagedInputSource } from "@psi/managed/managedInputHandle";
+import type { ManagedReinvite } from "@psi/managed/managedReinvite";
 import type { ManagedRunFailureAlert } from "./managedRunLaunchModel";
-import type { ManagedSpentState } from "@psi/managedLocalState";
+import type { ManagedSpentState } from "@psi/managed/managedLocalState";
 import type { RunOutputs } from "@psi/runOutputs";
 
 /**

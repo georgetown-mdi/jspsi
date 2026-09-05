@@ -6,8 +6,8 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import {
   listManagedExchanges,
   openManagedExchangeDatabase,
-} from "@psi/managedExchangeStore";
-import { listManagedLocalState } from "@psi/managedLocalState";
+} from "@psi/managed/managedExchangeStore";
+import { listManagedLocalState } from "@psi/managed/managedLocalState";
 import { tokenFromInput } from "@psi/invitation";
 
 import { isConsoleBuild } from "@utils/clientConfig";

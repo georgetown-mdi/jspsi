@@ -15,7 +15,7 @@ import { isInstalledRuntime } from "@utils/installedRuntime";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 
-import type { ManagedScheduleRuntimeOptions } from "@psi/managedScheduleRuntime";
+import type { ManagedScheduleRuntimeOptions } from "@psi/managed/managedScheduleRuntime";
 
 // This suite mounts in a real Chromium tab, the runtime the runner must not
 // fire in. The runner it starts is injected -- this file tests the gate and

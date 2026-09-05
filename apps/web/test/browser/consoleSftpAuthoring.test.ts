@@ -29,7 +29,7 @@ vi.mock("@utils/clientConfig", () => ({
   psilinkVersion: () => undefined,
 }));
 
-vi.mock("@psi/rendezvous", async () =>
+vi.mock("@psi/transport/rendezvous", async () =>
   (await import("./moduleMocks")).rendezvousMock(),
 );
 

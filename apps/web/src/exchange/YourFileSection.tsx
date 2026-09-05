@@ -19,7 +19,7 @@ import { APPLIANCE_FILE_ASSURANCE, FILE_ASSURANCE_LINE } from "./fileAssurance";
 import type {
   ProfiledJobInput,
   WorkInputReference,
-} from "@psi/workInputClient";
+} from "@psi/jobClient/workInputClient";
 import type { AcquiredCsv } from "@psi/inviterModel";
 import type { AlertContent } from "@components/csvIntake";
 import type { FileRejection } from "@mantine/dropzone";

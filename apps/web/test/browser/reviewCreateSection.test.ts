@@ -8,7 +8,10 @@ import { createElement } from "react";
 
 import { editorFromCsv, editorWithAuthoredDraft } from "@psi/inviterModel";
 
-import { buildAdvancedTerms, draftFromTerms } from "@psi/advancedInvite";
+import {
+  buildAdvancedTerms,
+  draftFromTerms,
+} from "@psi/authoring/advancedInvite";
 
 import { CONNECTION_TUNING_DEFAULT } from "@console/connectionTuningModel";
 import { EXCHANGE_FILES_DEFAULT } from "@console/exchangeFilesModel";
@@ -19,7 +22,7 @@ import { ReviewCreateSection } from "@exchange/ReviewCreateSection";
 import { createAppMount } from "./renderApp";
 
 import type { AcquiredCsv, InviterEditor } from "@psi/inviterModel";
-import type { AdvancedInviteDraft } from "@psi/advancedInvite";
+import type { AdvancedInviteDraft } from "@psi/authoring/advancedInvite";
 
 const CITATION_DROP_NOTICE_NAME =
   "The imported rule-set citation will not be included";

@@ -17,7 +17,7 @@ import { ReceiptsCard } from "@console/ReceiptsCard";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 
-import type { JobRendezvousConfig } from "@psi/workInputClient";
+import type { JobRendezvousConfig } from "@psi/jobClient/workInputClient";
 import type { ReactElement } from "react";
 import type { ReceiptsDraft } from "@psi/receiptsModel";
 

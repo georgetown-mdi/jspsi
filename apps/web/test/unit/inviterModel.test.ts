@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import { authoredLinkageFields } from "@psilink/core";
 
-import { buildAdvancedTerms } from "@psi/advancedInvite";
+import { buildAdvancedTerms } from "@psi/authoring/advancedInvite";
 
 import {
   answersRows,
@@ -62,7 +62,7 @@ import type {
   InviterCreateGates,
   Transport,
 } from "@psi/inviterModel";
-import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
+import type { FieldValueCoverage } from "@psi/workers/nonEmptyAggregate";
 
 // A right-to-left override, written as an escape so the source holds no raw
 // control byte (which would reorder the line it sits on).

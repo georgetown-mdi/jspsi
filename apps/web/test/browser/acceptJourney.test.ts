@@ -48,7 +48,7 @@ vi.mock("@tanstack/react-router", async () =>
 
 // The rendezvous dial runs only inside the real lifecycle's acquire closure,
 // which the lifecycle stub below replaces wholesale, so it is never invoked.
-vi.mock("@psi/rendezvous", async () =>
+vi.mock("@psi/transport/rendezvous", async () =>
   (await import("./moduleMocks")).rendezvousMock(),
 );
 

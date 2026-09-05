@@ -16,7 +16,7 @@ import {
 } from "@psilink/core";
 
 import { PREVIEW_SAMPLE_SIZE } from "@psi/columnSamples";
-import { createFieldCoverageAccumulator } from "@psi/nonEmptyAggregate";
+import { createFieldCoverageAccumulator } from "@psi/workers/nonEmptyAggregate";
 
 import { MAX_INPUT_NAME_LENGTH, isAdmissibleInputName } from "./workInputName";
 import {
@@ -25,7 +25,7 @@ import {
 } from "./intent";
 import { JOB_DATA_ROOT_ENV } from "./gate";
 
-import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
+import type { FieldValueCoverage } from "@psi/workers/nonEmptyAggregate";
 import type { Standardization } from "@psilink/core";
 
 /**

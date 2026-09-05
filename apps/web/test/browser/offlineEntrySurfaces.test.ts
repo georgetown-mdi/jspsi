@@ -26,7 +26,7 @@ import { restoreConnectivity, setConnectivity } from "./connectivity";
 import { createAppMount } from "./renderApp";
 
 import type { LinkageTerms } from "@psilink/core";
-import type { ProfiledJobInput } from "@psi/workInputClient";
+import type { ProfiledJobInput } from "@psi/jobClient/workInputClient";
 
 // The block sits on the control that begins a live run -- the inviter's create,
 // the acceptor's launch, the console's direct run -- each held with the same
@@ -45,7 +45,7 @@ vi.mock("@tanstack/react-router", async () =>
 
 // The inviter screen transitively imports the rendezvous module, whose top-level
 // config load reads `process`; nothing here opens a transport.
-vi.mock("@psi/rendezvous", async () =>
+vi.mock("@psi/transport/rendezvous", async () =>
   (await import("./moduleMocks")).rendezvousMock(),
 );
 

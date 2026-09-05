@@ -8,11 +8,11 @@ import { triggerBlobDownload } from "@components/blobDownload";
 import {
   ManagedHandoffRefusedError,
   dispatchManagedCronExport,
-} from "@psi/managedExchangeExport";
+} from "@psi/managed/managedExchangeExport";
 import {
   getManagedExchange,
   spendManagedExchangeIfCurrent,
-} from "@psi/managedExchangeStore";
+} from "@psi/managed/managedExchangeStore";
 
 import { CopyableCode } from "@components/CopyableCode";
 import styles from "@styles/app.module.css";
@@ -33,8 +33,8 @@ import {
 import type {
   ManagedCronExportDispatch,
   ManagedHandoffRefusal,
-} from "@psi/managedExchangeExport";
-import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeExport";
+import type { ManagedExchangeRecord } from "@psi/managed/managedExchangeRecord";
 
 /** The key file's custody rules, cited rather than restated here. */
 const KEY_FILE_SECURITY_DOC_URL =

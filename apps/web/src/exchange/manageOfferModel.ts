@@ -30,8 +30,8 @@ import {
 import {
   MAX_LABEL_LENGTH,
   composeManagedExchangeFile,
-} from "@psi/managedExchangeRecord";
-import { rotationWriteBack } from "@psi/managedRunRotate";
+} from "@psi/managed/managedExchangeRecord";
+import { rotationWriteBack } from "@psi/managed/managedRunRotate";
 
 import type {
   ExchangeSpec,
@@ -43,7 +43,7 @@ import type {
 import type {
   ManagedExchangeSide,
   NewManagedExchange,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 
 /**
  * Build the credential-free {@link WebRTCExchangeLocator} the managed record's

@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 
-import { askJobExchangeRecordOffer } from "@psi/jobExchangeRecord";
+import { askJobExchangeRecordOffer } from "@psi/jobClient/jobExchangeRecord";
 
-import type { JobExchangeRecordOffer } from "@psi/jobExchangeRecord";
+import type { JobExchangeRecordOffer } from "@psi/jobClient/jobExchangeRecord";
 
 /**
  * Where a seat's record ask stands: the answer once the console gave one, or

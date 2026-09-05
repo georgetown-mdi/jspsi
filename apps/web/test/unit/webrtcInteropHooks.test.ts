@@ -2,12 +2,15 @@ import { readFileSync } from "node:fs";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { dialAsAcceptor, listenAsInviter } from "../../src/psi/rendezvous.js";
+import {
+  dialAsAcceptor,
+  listenAsInviter,
+} from "../../src/psi/transport/rendezvous.js";
 import { authenticateExchange } from "../../src/psi/authenticateExchange.js";
-import { openPeerMessageConnection } from "../../src/psi/peerMessageConnection.js";
+import { openPeerMessageConnection } from "../../src/psi/transport/peerMessageConnection.js";
 import { useAcceptorExchange } from "../../src/exchange/useAcceptorExchange.js";
 import { useInviterExchange } from "../../src/exchange/useInviterExchange.js";
-import { waitForIncomingConnection } from "../../src/psi/waitForConnection.js";
+import { waitForIncomingConnection } from "../../src/psi/transport/waitForConnection.js";
 
 import type * as PsilinkCore from "@psilink/core";
 import type {
@@ -172,15 +175,18 @@ vi.mock("@psilink/core", async (importOriginal) => {
 vi.mock("../../src/exchange/acceptorExchange.js", () => ({
   prepareAcceptorExchange: vi.fn(() => ({})),
 }));
-vi.mock("../../src/psi/rendezvous.js", () => ({
+vi.mock("../../src/psi/transport/rendezvous.js", () => ({
   listenAsInviter: vi.fn(),
   dialAsAcceptor: vi.fn(),
 }));
-vi.mock("../../src/psi/waitForConnection.js", async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  waitForIncomingConnection: vi.fn(),
-}));
-vi.mock("../../src/psi/peerMessageConnection.js", () => ({
+vi.mock(
+  "../../src/psi/transport/waitForConnection.js",
+  async (importOriginal) => ({
+    ...(await importOriginal<Record<string, unknown>>()),
+    waitForIncomingConnection: vi.fn(),
+  }),
+);
+vi.mock("../../src/psi/transport/peerMessageConnection.js", () => ({
   openPeerMessageConnection: vi.fn(),
 }));
 vi.mock("../../src/psi/authenticateExchange.js", () => ({

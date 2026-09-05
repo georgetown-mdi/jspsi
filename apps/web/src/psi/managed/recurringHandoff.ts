@@ -1,7 +1,7 @@
 import {
   MAX_JOB_HANDOFF_RESPONSE_BYTES,
   readBoundedJson,
-} from "@psi/jobApiBody";
+} from "@psi/jobClient/jobApiBody";
 
 import type { JobHandoff, JobHandoffTemplate } from "@jobs/handoff";
 

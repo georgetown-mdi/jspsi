@@ -24,6 +24,9 @@ import {
   OutboundDisclosureRefusalError,
 } from "@psilink/core";
 
+import { PartnerNoShowError } from "../transport/waitForConnection";
+import { hasRecoveryHint } from "../authenticateExchange";
+
 import {
   ManagedExchangeCustodyUnreadableError,
   ManagedExchangeSpentError,
@@ -39,8 +42,6 @@ import {
 } from "./managedInputGuard";
 import { RotationPersistError, failedRun, missedRun } from "./managedRunRotate";
 import { ManagedExchangeLockUnavailableError } from "./managedExchangeLock";
-import { PartnerNoShowError } from "./waitForConnection";
-import { hasRecoveryHint } from "./authenticateExchange";
 import { recordManagedExchangeLastRun } from "./managedExchangeStore";
 
 import type {

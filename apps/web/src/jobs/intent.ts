@@ -29,7 +29,10 @@ import {
   MAX_IDENTITY_LENGTH,
 } from "@psi/identityLabel";
 
-import { PEER_ID_SHAPE_MESSAGE, isAdmissiblePeerId } from "@psi/peerIdLabel";
+import {
+  PEER_ID_SHAPE_MESSAGE,
+  isAdmissiblePeerId,
+} from "@psi/transport/peerIdLabel";
 
 import { NOTE_CONTROL_CHAR_PATTERN } from "@psi/retentionNoteShape";
 

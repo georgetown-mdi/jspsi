@@ -15,8 +15,9 @@
 
 import { encodeInvitation, generateSharedSecret } from "@psilink/core";
 
+import { invitationLocation } from "../invitationLocation";
+
 import { composeManagedReinvite } from "./managedReinvite";
-import { invitationLocation } from "./invitationLocation";
 import { persistManagedExchangeReinvite } from "./managedExchangeStore";
 
 import type { ManagedExchangeRecord } from "./managedExchangeRecord";

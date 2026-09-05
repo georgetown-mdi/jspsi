@@ -12,21 +12,21 @@ import "@mantine/core/styles.css";
 import {
   clearManagedExchanges,
   createManagedExchange,
-} from "@psi/managedExchangeStore";
+} from "@psi/managed/managedExchangeStore";
 import {
   readDisclosureAccounting,
   resetDisclosureAccounting,
 } from "@psi/disclosureAccountingStore";
 import { DISCLOSURE_ACCOUNTING_VERSION } from "@psi/disclosureAccounting";
 import { ManagedRunSurface } from "@recurring/ManagedRunSurface";
-import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
+import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
 
 import { disclosureRecord } from "../utils/disclosureFixtures";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 
 import type { DisclosureAccountingRead } from "@psi/disclosureAccountingStore";
-import type { NewManagedExchange } from "@psi/managedExchangeRecord";
+import type { NewManagedExchange } from "@psi/managed/managedExchangeRecord";
 
 // How the run surface drives the accounting read it owns: what the section shows
 // while a read is in flight, and what it shows when one never lands. The read's
@@ -39,7 +39,7 @@ vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
 );
 
-vi.mock("@psi/rendezvous", async () =>
+vi.mock("@psi/transport/rendezvous", async () =>
   (await import("./moduleMocks")).rendezvousMock(),
 );
 

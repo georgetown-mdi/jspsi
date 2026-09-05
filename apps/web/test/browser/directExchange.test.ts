@@ -45,7 +45,7 @@ vi.mock("@utils/clientConfig", () => ({
 
 // The direct flow drives no browser transport, so the rendezvous functions are
 // never called.
-vi.mock("@psi/rendezvous", async () =>
+vi.mock("@psi/transport/rendezvous", async () =>
   (await import("./moduleMocks")).rendezvousMock(),
 );
 

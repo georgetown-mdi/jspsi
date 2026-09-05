@@ -13,7 +13,7 @@ import {
   buildAdvancedTerms,
   importedCitationDropNotice,
   inertCoalesceNotice,
-} from "@psi/advancedInvite";
+} from "@psi/authoring/advancedInvite";
 
 import { isConsoleBuild } from "@utils/clientConfig";
 import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
@@ -61,8 +61,8 @@ import type {
 } from "@psi/inviterModel";
 import type { ConnectionTuningDraft } from "@console/connectionTuningModel";
 import type { ExchangeFilesDraft } from "@console/exchangeFilesModel";
-import type { JobRendezvousConfig } from "@psi/workInputClient";
-import type { OutputDirection } from "@psi/advancedInvite";
+import type { JobRendezvousConfig } from "@psi/jobClient/workInputClient";
+import type { OutputDirection } from "@psi/authoring/advancedInvite";
 import type { ReceiptsDraft } from "@psi/receiptsModel";
 import type { RunDiagnosticsDraft } from "@psi/runDiagnosticsModel";
 import type { SftpConnectionProjection } from "@jobs/jobManager";

@@ -3,9 +3,9 @@ import { describe, expect, test, vi } from "vitest";
 import {
   DEFAULT_PEER_CLOSE_TIMEOUT_MS,
   waitForPeerClose,
-} from "../../src/psi/waitForPeerClose.js";
+} from "../../src/psi/transport/waitForPeerClose.js";
 
-import type { PeerCloseOutcome } from "../../src/psi/waitForPeerClose.js";
+import type { PeerCloseOutcome } from "../../src/psi/transport/waitForPeerClose.js";
 
 import type { DataConnection } from "peerjs";
 

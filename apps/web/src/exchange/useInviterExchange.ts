@@ -19,14 +19,17 @@ import {
   RelayedTerminalError,
   createFetchJobApiClient,
   createServerJobExchangeDriver,
-} from "@psi/serverJobExchangeDriver";
-import { discardServerJob, writeAttachment } from "@psi/consoleJobAttachment";
+} from "@psi/jobClient/serverJobExchangeDriver";
+import {
+  discardServerJob,
+  writeAttachment,
+} from "@psi/jobClient/consoleJobAttachment";
 import { HANDSHAKE_ROLE_FOR_SIDE } from "@psi/handshakeRole";
 import { createBrowserExchangeDriver } from "@psi/exchangeDriver";
 import { hasRecoveryHint } from "@psi/authenticateExchange";
-import { inviterExchangeDataSpec } from "@psi/advancedInvite";
-import { listenAsInviter } from "@psi/rendezvous";
-import { waitForIncomingConnection } from "@psi/waitForConnection";
+import { inviterExchangeDataSpec } from "@psi/authoring/advancedInvite";
+import { listenAsInviter } from "@psi/transport/rendezvous";
+import { waitForIncomingConnection } from "@psi/transport/waitForConnection";
 
 import { isConsoleBuild } from "@utils/clientConfig";
 import { whenDiagnostic } from "@utils/diagnostics";
@@ -62,7 +65,7 @@ import type {
   JobRunStatus,
   ServerJobExchangeDriverConfig,
   ServerJobExchangeTransport,
-} from "@psi/serverJobExchangeDriver";
+} from "@psi/jobClient/serverJobExchangeDriver";
 import type { GeneratedInvitation } from "@psi/invitation";
 import type { JobExchangeOptions } from "@jobs/intent";
 import type { ReceiptsIntentFields } from "@psi/receiptsModel";

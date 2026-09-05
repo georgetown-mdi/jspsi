@@ -26,7 +26,7 @@ import {
   useJobInputDir,
 } from "@jobs/workInputs";
 import { PREVIEW_SAMPLE_SIZE, sampleInputValues } from "@psi/columnSamples";
-import { computeFieldCoverage } from "@psi/nonEmptyAggregate";
+import { computeFieldCoverage } from "@psi/workers/nonEmptyAggregate";
 
 import type { Standardization } from "@psilink/core";
 

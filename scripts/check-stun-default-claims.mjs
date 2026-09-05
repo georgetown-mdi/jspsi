@@ -26,7 +26,7 @@
 //     re-run on every werift bump per docs/spec/DEPENDENCY_PINS.md. A check
 //     reading the library's source to predict its default would be a second
 //     implementation of it, which this repository does not accept.
-//   - The web app's OWN ICE list (apps/web/src/psi/rendezvous.ts, described in
+//   - The web app's OWN ICE list (apps/web/src/psi/transport/rendezvous.ts, described in
 //     PRIVACY.md). It is a different list, for exchanges a browser runs itself,
 //     and it happens to include the same Google server. Tying it here would fuse
 //     two independent decisions -- what the hosted app configures, and what the

@@ -21,7 +21,10 @@ import { sanitizeForDisplay } from "@psilink/core";
 
 import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
 
-import { probeSftpHostKey, putSftpConnection } from "@psi/sftpAuthoringClient";
+import {
+  probeSftpHostKey,
+  putSftpConnection,
+} from "@psi/jobClient/sftpAuthoringClient";
 import { isBareSftpHost } from "@psi/sftpHost";
 
 import styles from "@styles/app.module.css";
@@ -37,7 +40,7 @@ import type {
   ProbePeerAnswer,
   ProbePeerAnswerShape,
   ProbeSftpHostKeyResult,
-} from "@psi/sftpAuthoringClient";
+} from "@psi/jobClient/sftpAuthoringClient";
 import type {
   SftpConnectionFormValues,
   SftpEndpointLocator,

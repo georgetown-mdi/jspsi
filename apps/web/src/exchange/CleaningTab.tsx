@@ -4,7 +4,7 @@ import { Alert, VisuallyHidden } from "@mantine/core";
 import { IconAlertCircle } from "@tabler/icons-react";
 
 import { SEMANTIC_TYPE_LABELS } from "@psi/metadataEditing";
-import { isSilentEmpty } from "@psi/nonEmptyAggregate";
+import { isSilentEmpty } from "@psi/workers/nonEmptyAggregate";
 
 import {
   COVERAGE_UNAVAILABLE_MESSAGE,
@@ -18,7 +18,7 @@ import styles from "@styles/app.module.css";
 
 import type { LinkageField, StandardizationStep } from "@psilink/core";
 import type { ColumnSamples } from "@psi/columnSamples";
-import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
+import type { FieldValueCoverage } from "@psi/workers/nonEmptyAggregate";
 import type { InviterEditor } from "@psi/inviterModel";
 
 /**

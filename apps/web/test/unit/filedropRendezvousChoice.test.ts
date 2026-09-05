@@ -10,7 +10,7 @@ import {
 } from "@console/filedropRendezvousChoice";
 
 import type { InvitationToken } from "@psilink/core";
-import type { JobRendezvousConfig } from "@psi/workInputClient";
+import type { JobRendezvousConfig } from "@psi/jobClient/workInputClient";
 
 /** A schema-valid token to hang a minted endpoint off, so the endpoint is checked
  * by the same encode a real mint runs rather than by a restated rule. */

@@ -9,12 +9,12 @@ import {
   clearAttachment,
   discardServerJob,
   readAttachment,
-} from "@psi/consoleJobAttachment";
+} from "@psi/jobClient/consoleJobAttachment";
 import {
   createFetchJobApiClient,
   createServerJobReattachDriver,
   fetchSlotOccupancy,
-} from "@psi/serverJobExchangeDriver";
+} from "@psi/jobClient/serverJobExchangeDriver";
 
 import { appendSanitizedRunWarning } from "@psi/runWarnings";
 
@@ -45,9 +45,9 @@ import { StatusPanel } from "./StatusPanel";
 import { reattachedRunState } from "./reattachedRunState";
 import { useJobExchangeRecordOffer } from "./useJobExchangeRecordOffer";
 
-import type { ConsoleJobSeat } from "@psi/consoleJobAttachment";
+import type { ConsoleJobSeat } from "@psi/jobClient/consoleJobAttachment";
 import type { ExchangeRun } from "./exchangeRun";
-import type { JobRunStatus } from "@psi/serverJobExchangeDriver";
+import type { JobRunStatus } from "@psi/jobClient/serverJobExchangeDriver";
 import type { ReattachedRunState } from "./RunSurface";
 import type { RunFailure } from "./useInviterExchange";
 import type { RunOutputs } from "@psi/runOutputs";

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { deriveEditedExpiry } from "@psi/managedTokenAgeEdit";
+import { deriveEditedExpiry } from "@psi/managed/managedTokenAgeEdit";
 
 // The conservative edit-time re-derivation of `expires` when the operator edits the
 // max-token-age policy in place. The security invariant: an edit never pushes

@@ -3,7 +3,10 @@ import {
   withRetainModeImplications,
 } from "@psilink/core";
 
-import { PEER_ID_SHAPE_MESSAGE, isAdmissiblePeerId } from "@psi/peerIdLabel";
+import {
+  PEER_ID_SHAPE_MESSAGE,
+  isAdmissiblePeerId,
+} from "@psi/transport/peerIdLabel";
 
 import type { JobExchangeOptions } from "@jobs/intent";
 

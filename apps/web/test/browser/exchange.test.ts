@@ -76,7 +76,7 @@ const csvLoadHarness = vi.hoisted(() => ({
   lastSignal: undefined as AbortSignal | undefined,
   resolve: undefined as ((value: unknown) => void) | undefined,
 }));
-vi.mock("@psi/csvParseController", async (importOriginal) => {
+vi.mock("@psi/workers/csvParseController", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return {
     ...actual,
@@ -103,7 +103,7 @@ vi.mock("@psi/csvParseController", async (importOriginal) => {
 
 // The rendezvous listen runs only inside the run lifecycle's acquire closure,
 // which the lifecycle stub below never invokes.
-vi.mock("@psi/rendezvous", async () =>
+vi.mock("@psi/transport/rendezvous", async () =>
   (await import("./moduleMocks")).rendezvousMock(),
 );
 

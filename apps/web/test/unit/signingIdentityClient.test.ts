@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { resolveSigningFingerprint } from "@psi/signingIdentityClient";
+import { resolveSigningFingerprint } from "@psi/jobClient/signingIdentityClient";
 
 // The console is trusted and its fingerprint body is still re-validated field
 // by field on the way in. The stakes are what the card does with it: the

@@ -12,12 +12,12 @@ import {
 } from "@psilink/core";
 
 import { emptyColumnPositions, unnameableColumnsAlert } from "@psi/columnNames";
-import { capturedInputHandle } from "@psi/managedInputHandle";
+import { capturedInputHandle } from "@psi/managed/managedInputHandle";
 import { columnSamplesFromRows } from "@psi/columnSamples";
-import { createManagedExchange } from "@psi/managedExchangeStore";
-import { deleteSftpConnection } from "@psi/sftpAuthoringClient";
-import { fetchJobRendezvous } from "@psi/workInputClient";
-import { loadCSVFileOffMainThread } from "@psi/csvParseController";
+import { createManagedExchange } from "@psi/managed/managedExchangeStore";
+import { deleteSftpConnection } from "@psi/jobClient/sftpAuthoringClient";
+import { fetchJobRendezvous } from "@psi/jobClient/workInputClient";
+import { loadCSVFileOffMainThread } from "@psi/workers/csvParseController";
 import { prepareAcceptedInvitation } from "@psi/acceptInvitation";
 
 import { deploymentProfile, isConsoleBuild } from "@utils/clientConfig";
@@ -134,7 +134,7 @@ import type {
 import type {
   JobRendezvousConfig,
   ProfiledJobInput,
-} from "@psi/workInputClient";
+} from "@psi/jobClient/workInputClient";
 import type { AcceptorLaunchSource } from "./useAcceptorExchange";
 import type { AcceptorStep } from "./acceptorModel";
 import type { AlertContent } from "@components/csvIntake";
@@ -150,7 +150,7 @@ import type { ManageOfferStatus } from "./ManageExchangeOffer";
 import type { RailStep } from "@psi/inviterModel";
 import type { ReceiptsDraft } from "@psi/receiptsModel";
 import type { RunDiagnosticsDraft } from "@psi/runDiagnosticsModel";
-import type { SftpConnectionInfo } from "@psi/serverJobExchangeDriver";
+import type { SftpConnectionInfo } from "@psi/jobClient/serverJobExchangeDriver";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
 import type { SftpEndpointLocator } from "@console/sftpConnectionForm";
 

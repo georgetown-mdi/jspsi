@@ -11,22 +11,22 @@ import {
   nextConsecutiveMisses,
   nextManagedScheduleWindowAfter,
   resolveLocalCadenceAnchor,
-} from "@psi/managedSchedule";
+} from "@psi/managed/managedSchedule";
 import {
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
   scheduleSchema,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 import {
   encodeManagedExchangeArtifact,
   reconstructRecordFromArtifact,
-} from "@psi/managedExchangeArtifact";
+} from "@psi/managed/managedExchangeArtifact";
 import { withTimeZone } from "../utils/hostTimeZone";
 
 import type {
   ManagedExchangeRecord,
   ManagedExchangeSchedule,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 
 // The schedule arithmetic in Node, with every clock injected. The recurrence is
 // UTC-millisecond arithmetic against the record's stored-UTC anchor, so the suite

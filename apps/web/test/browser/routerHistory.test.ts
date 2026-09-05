@@ -27,7 +27,7 @@ import { createAppMount } from "./renderApp";
 import type { RouterHistory } from "@tanstack/react-router";
 
 // Nothing in this suite mints an invitation, so no rendezvous listen ever fires.
-vi.mock("@psi/rendezvous", async () =>
+vi.mock("@psi/transport/rendezvous", async () =>
   (await import("./moduleMocks")).rendezvousMock(),
 );
 vi.mock("@psi/exchangeLifecycle", () => ({

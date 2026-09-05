@@ -25,12 +25,12 @@ import {
   updateElementAt,
   updateKeyAt,
   validateAdvancedInvite,
-} from "../../src/psi/advancedInvite.js";
+} from "../../src/psi/authoring/advancedInvite.js";
 import { generateInvitation } from "../../src/psi/invitation.js";
 
 import type { CSVRow, LinkageKeyElement, LinkageTerms } from "@psilink/core";
 
-import type { AdvancedInviteDraft } from "../../src/psi/advancedInvite.js";
+import type { AdvancedInviteDraft } from "../../src/psi/authoring/advancedInvite.js";
 import type { InvitationLocation } from "../../src/psi/invitation.js";
 
 const ALL_COLUMNS = ["ssn", "ssn4", "first_name", "last_name", "dob"];

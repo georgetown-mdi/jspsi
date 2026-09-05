@@ -11,19 +11,19 @@ import {
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
   keyFileFieldsSchema,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 import {
   encodeManagedExchangeArtifact,
   importManagedExchangeArtifact,
   parseManagedExchangeArtifact,
   reconstructRecordFromArtifact,
   serializeManagedExchangeArtifact,
-} from "@psi/managedExchangeArtifact";
+} from "@psi/managed/managedExchangeArtifact";
 
 import type {
   ManagedExchangeSchedule,
   NewManagedExchange,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 import type { WebRTCExchangeLocator } from "@psilink/core";
 
 // The export/import artifact, tested in Node without a store: the round-trip

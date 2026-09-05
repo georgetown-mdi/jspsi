@@ -6,7 +6,10 @@ import { page, userEvent } from "vitest/browser";
 
 import { createElement } from "react";
 
-import { buildAdvancedTerms, seedAdvancedInvite } from "@psi/advancedInvite";
+import {
+  buildAdvancedTerms,
+  seedAdvancedInvite,
+} from "@psi/authoring/advancedInvite";
 import { exportLinkageTerms } from "@psi/linkageTermsIO";
 
 import { TermsImportExport } from "@components/TermsImportExport";

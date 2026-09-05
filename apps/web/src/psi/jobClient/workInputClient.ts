@@ -11,7 +11,7 @@ import type {
   JobInputProfile,
   JobInputProfileErrorCode,
 } from "@jobs/workInputs";
-import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
+import type { FieldValueCoverage } from "@psi/workers/nonEmptyAggregate";
 import type { Standardization } from "@psilink/core";
 
 /**

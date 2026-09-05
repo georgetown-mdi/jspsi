@@ -7,18 +7,18 @@ import { describeResolvedRunShape } from "@psilink/core";
 import {
   DISCLOSURE_NOT_FILED_WARNING,
   runManagedExchangeInBrowser,
-} from "../../src/psi/managedRunDriver.js";
+} from "../../src/psi/managed/managedRunDriver.js";
 import {
   browserScheduleTickSeams,
   droppableUnattendedNotice,
   startManagedScheduleRuntime,
-} from "../../src/psi/managedScheduleRuntime.js";
+} from "../../src/psi/managed/managedScheduleRuntime.js";
 import { CLOSE_OUTCOME_WARNINGS } from "../../src/psi/exchangeLifecycle.js";
-import { listReadableManagedExchanges } from "../../src/psi/managedExchangeStore.js";
+import { listReadableManagedExchanges } from "../../src/psi/managed/managedExchangeStore.js";
 
-import type { ManagedExchangeRecord } from "../../src/psi/managedExchangeRecord.js";
-import type { ManagedRunDriverConfig } from "../../src/psi/managedRunDriver.js";
-import type { ManagedScheduleTickSeams } from "../../src/psi/managedScheduleRunner.js";
+import type { ManagedExchangeRecord } from "../../src/psi/managed/managedExchangeRecord.js";
+import type { ManagedRunDriverConfig } from "../../src/psi/managed/managedRunDriver.js";
+import type { ManagedScheduleTickSeams } from "../../src/psi/managed/managedScheduleRunner.js";
 
 /**
  * The browser half of the unattended runner: what it hands the run driver, what
@@ -32,10 +32,13 @@ import type { ManagedScheduleTickSeams } from "../../src/psi/managedScheduleRunn
 // The real module is kept for its notice constant (the sink's whole decision is
 // which notice it was handed, so asserting against a copy of the text would
 // assert nothing), with only the run replaced.
-vi.mock("../../src/psi/managedRunDriver.js", async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  runManagedExchangeInBrowser: vi.fn(),
-}));
+vi.mock(
+  "../../src/psi/managed/managedRunDriver.js",
+  async (importOriginal) => ({
+    ...(await importOriginal<Record<string, unknown>>()),
+    runManagedExchangeInBrowser: vi.fn(),
+  }),
+);
 // The WASM engine the real driver module pulls in; never loaded for a run that
 // is mocked.
 vi.mock("@openmined/psi.js/psi_wasm_web", () => ({

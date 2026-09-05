@@ -27,7 +27,7 @@
  * says so instead.
  */
 
-import type { ManagedSpentHandoff } from "@psi/managedLocalState";
+import type { ManagedSpentHandoff } from "@psi/managed/managedLocalState";
 
 /** Which hand-off a refusal is being shown at, which decides the way out it names.
  * `"command-line"` is the export panel on the detail surface, whose download button

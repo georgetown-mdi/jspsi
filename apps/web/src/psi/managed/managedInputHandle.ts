@@ -24,15 +24,16 @@
  * a real picker grant.
  */
 
+import { loadCSVFileOffMainThread } from "../workers/csvParseController";
+
 import {
   ManagedInputError,
   assessManagedInputColumns,
 } from "./managedInputGuard";
-import { loadCSVFileOffMainThread } from "./csvParseController";
 
 import type { ExchangeSpec } from "@psilink/core";
 
-import type { CSVParseRows } from "./csvParseController";
+import type { CSVParseRows } from "../workers/csvParseController";
 
 /**
  * Whether the File System Access API's file handles exist in this runtime, so a

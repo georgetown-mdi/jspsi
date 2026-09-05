@@ -14,12 +14,12 @@ import {
   clearManagedExchanges,
   createManagedExchange,
   spendManagedExchangeIfCurrent,
-} from "@psi/managedExchangeStore";
+} from "@psi/managed/managedExchangeStore";
 import {
   encodeManagedExchangeArtifact,
   serializeManagedExchangeArtifact,
-} from "@psi/managedExchangeArtifact";
-import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeArtifact";
+import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
 
 import { createAppMount } from "./renderApp";
 
@@ -36,7 +36,7 @@ vi.mock("@tanstack/react-router", async () =>
 
 // The store opens, but the record read rejects: the post-open read failure the load
 // classifies as `failed`. The rest of the store module is left intact.
-vi.mock("@psi/managedExchangeStore", async (importOriginal) => {
+vi.mock("@psi/managed/managedExchangeStore", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return {
     ...actual,

@@ -9,17 +9,17 @@ import {
   MAX_JOB_STATUS_RESPONSE_BYTES,
   MAX_SFTP_CONNECTION_RESPONSE_BYTES,
   readBoundedJson,
-} from "@psi/jobApiBody";
-import { jobRecordDownloads } from "@psi/jobExchangeRecord";
+} from "@psi/jobClient/jobApiBody";
+import { jobRecordDownloads } from "@psi/jobClient/jobExchangeRecord";
 import { whenDiagnostic } from "@utils/diagnostics";
 
-import { ERROR_MESSAGE_CHAIN_FIELD } from "./relayErrorChain";
+import { ERROR_MESSAGE_CHAIN_FIELD } from "../relayErrorChain";
 
-import type { ExchangeDriver, ExchangeDriverEvents } from "./exchangeDriver";
+import type { ExchangeDriver, ExchangeDriverEvents } from "../exchangeDriver";
 import type {
   ExchangeErrorCategory,
   StageDefinition,
-} from "./exchangeLifecycle";
+} from "../exchangeLifecycle";
 import type {
   JobCreateIntent,
   JobExchangeIntent,
@@ -30,9 +30,9 @@ import type {
 } from "@jobs/intent";
 import type { LinkageTerms, Metadata, Standardization } from "@psilink/core";
 import type { RelayEvent, RelayEventType } from "@jobs/cliDriver";
-import type { ReceiptsIntentFields } from "./receiptsModel";
-import type { RunDiagnosticsIntentFields } from "./runDiagnosticsModel";
-import type { RunOutputs } from "./runOutputs";
+import type { ReceiptsIntentFields } from "../receiptsModel";
+import type { RunDiagnosticsIntentFields } from "../runDiagnosticsModel";
+import type { RunOutputs } from "../runOutputs";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
 
 const log = getLogger("serverJobExchangeDriver");

@@ -10,7 +10,7 @@ import {
   createServerJobZeroSetupDriver,
   fetchSftpConnection,
   fetchSlotOccupancy,
-} from "@psi/serverJobExchangeDriver";
+} from "@psi/jobClient/serverJobExchangeDriver";
 import { buildRunOutputs } from "@psi/runOutputs";
 
 import { VALID_SHARED_SECRET, validLinkageTerms } from "../utils/jobFixtures";
@@ -26,7 +26,7 @@ import type {
   RecordAvailability,
   ServerJobExchangeDriverConfig,
   ServerJobZeroSetupDriverConfig,
-} from "@psi/serverJobExchangeDriver";
+} from "@psi/jobClient/serverJobExchangeDriver";
 import type { ObjectUrls, RunOutputs } from "@psi/runOutputs";
 import type { RelayEvent } from "@jobs/cliDriver";
 

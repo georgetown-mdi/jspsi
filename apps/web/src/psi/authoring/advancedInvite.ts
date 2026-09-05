@@ -78,4 +78,4 @@ export {
   isDraftDrawnFromLinkageRuleSet,
   isOptInDraftKey,
   linkageRuleSetReferenceForDraft,
-} from "./linkageComparison";
+} from "../linkageComparison";

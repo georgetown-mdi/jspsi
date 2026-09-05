@@ -21,7 +21,7 @@ import {
 } from "@exchange/acceptorColumnsModel";
 import { authenticateExchange } from "@psi/authenticateExchange";
 import { generateInvitation } from "@psi/invitation";
-import { inviterExchangeDataSpec } from "@psi/advancedInviteTerms";
+import { inviterExchangeDataSpec } from "@psi/authoring/advancedInviteTerms";
 import { prepareAcceptorExchange } from "@exchange/acceptorExchange";
 
 import { HarnessFileDropClient } from "./fileDropTransport";

@@ -2,7 +2,7 @@ import { getLogger, parseBoundedJson } from "@psilink/core";
 
 import { whenDiagnostic } from "@utils/diagnostics";
 
-import type { JobApiClient } from "@psi/serverJobExchangeDriver";
+import type { JobApiClient } from "@psi/jobClient/serverJobExchangeDriver";
 
 /**
  * The console's strand-recovery persistence: a single localStorage record naming

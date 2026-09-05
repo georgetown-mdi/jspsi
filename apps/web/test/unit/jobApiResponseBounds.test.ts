@@ -5,29 +5,29 @@ import {
   createFetchJobApiClient,
   fetchSftpConnection,
   fetchSlotOccupancy,
-} from "@psi/serverJobExchangeDriver";
+} from "@psi/jobClient/serverJobExchangeDriver";
 import {
   MAX_JOB_HANDOFF_RESPONSE_BYTES,
   MAX_JOB_LISTING_RESPONSE_BYTES,
   MAX_JOB_STATUS_RESPONSE_BYTES,
   MAX_SFTP_CONNECTION_RESPONSE_BYTES,
-} from "@psi/jobApiBody";
+} from "@psi/jobClient/jobApiBody";
 import {
   fetchJobInputProfile,
   fetchJobInputs,
   fetchJobRendezvous,
   postJobInputCoverage,
-} from "@psi/workInputClient";
+} from "@psi/jobClient/workInputClient";
 import {
   fetchSecretsEntries,
   probeSftpHostKey,
   putSftpConnection,
-} from "@psi/sftpAuthoringClient";
-import { fetchJobExchangeRecordOffer } from "@psi/jobExchangeRecord";
-import { fetchJobLogState } from "@psi/jobDiagnosticLog";
-import { fetchJobReceiptOffer } from "@psi/jobReceipt";
-import { fetchRecurringHandoff } from "@psi/recurringHandoff";
-import { resolveSigningFingerprint } from "@psi/signingIdentityClient";
+} from "@psi/jobClient/sftpAuthoringClient";
+import { fetchJobExchangeRecordOffer } from "@psi/jobClient/jobExchangeRecord";
+import { fetchJobLogState } from "@psi/jobClient/jobDiagnosticLog";
+import { fetchJobReceiptOffer } from "@psi/jobClient/jobReceipt";
+import { fetchRecurringHandoff } from "@psi/managed/recurringHandoff";
+import { resolveSigningFingerprint } from "@psi/jobClient/signingIdentityClient";
 
 // Every job-API client reads the console's answer under a byte cap. Each case
 // below hands the client a body that is VALID JSON and valid for that client's

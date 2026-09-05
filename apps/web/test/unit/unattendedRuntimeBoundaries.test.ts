@@ -10,9 +10,9 @@ import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
 import {
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
-} from "@psi/managedExchangeRecord";
-import { startManagedScheduleRuntime } from "@psi/managedScheduleRuntime";
-import { tickManagedSchedules } from "@psi/managedScheduleRunner";
+} from "@psi/managed/managedExchangeRecord";
+import { startManagedScheduleRuntime } from "@psi/managed/managedScheduleRuntime";
+import { tickManagedSchedules } from "@psi/managed/managedScheduleRunner";
 
 import {
   createServiceWorkerHarness,
@@ -21,9 +21,9 @@ import {
 
 import type { ShellContainer, ShellWorker } from "@utils/appShellUpdate";
 
-import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
-import type { ManagedLocalState } from "@psi/managedLocalStateShape";
-import type { ManagedScheduleTickSeams } from "@psi/managedScheduleRunner";
+import type { ManagedExchangeRecord } from "@psi/managed/managedExchangeRecord";
+import type { ManagedLocalState } from "@psi/managed/managedLocalStateShape";
+import type { ManagedScheduleTickSeams } from "@psi/managed/managedScheduleRunner";
 
 /**
  * The two runtime boundaries the unattended runner rests on, as checks rather

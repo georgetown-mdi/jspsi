@@ -27,7 +27,7 @@ import { directServerBlockedReason } from "./directExchangeModel";
 import type { ConnectionTuningDraft } from "@console/connectionTuningModel";
 import type { DirectTransport } from "./directExchangeModel";
 import type { ExchangeFilesDraft } from "@console/exchangeFilesModel";
-import type { JobRendezvousConfig } from "@psi/workInputClient";
+import type { JobRendezvousConfig } from "@psi/jobClient/workInputClient";
 import type { RunDiagnosticsDraft } from "@psi/runDiagnosticsModel";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
 

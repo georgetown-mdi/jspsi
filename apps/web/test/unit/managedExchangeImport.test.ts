@@ -4,19 +4,19 @@ import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
 import {
   ManagedImportHandedOffError,
   importManagedExchange,
-} from "@psi/managedExchangeImport";
+} from "@psi/managed/managedExchangeImport";
 import {
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 import {
   encodeManagedExchangeArtifact,
   serializeManagedExchangeArtifact,
-} from "@psi/managedExchangeArtifact";
+} from "@psi/managed/managedExchangeArtifact";
 
-import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
-import type { ManagedImportDeps } from "@psi/managedExchangeImport";
-import type { ManagedReviveOutcome } from "@psi/managedExchangeStore";
+import type { ManagedExchangeRecord } from "@psi/managed/managedExchangeRecord";
+import type { ManagedImportDeps } from "@psi/managed/managedExchangeImport";
+import type { ManagedReviveOutcome } from "@psi/managed/managedExchangeStore";
 
 // The import take-over, tested in Node with injected dependencies: a valid
 // artifact installs one owner and marks it imported-and-backed-up; a

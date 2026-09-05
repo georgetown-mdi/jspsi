@@ -28,9 +28,9 @@
  * per-run peer-id derivation are unit-testable without a real broker.
  */
 
-import { dialAsAcceptor, listenAsInviter } from "./rendezvous";
-import { invitationLocation } from "./invitationLocation";
-import { webrtcEndpointFromLocation } from "./invitation";
+import { dialAsAcceptor, listenAsInviter } from "../transport/rendezvous";
+import { invitationLocation } from "../invitationLocation";
+import { webrtcEndpointFromLocation } from "../invitation";
 
 import type { DataConnection } from "peerjs";
 import type { ExchangeSpec } from "@psilink/core";

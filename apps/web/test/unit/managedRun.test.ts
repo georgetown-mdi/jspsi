@@ -11,29 +11,29 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   MANAGED_EXCHANGE_SCHEMA_VERSION,
   composeManagedExchangeFile,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 import {
   ManagedExchangeCustodyUnreadableError,
   ManagedExchangeSpentError,
-} from "@psi/managedExchangeRun";
+} from "@psi/managed/managedExchangeRun";
 import {
   ManagedExchangeExpiredError,
   benignRerunOutcome,
   remapLapsedRunFailure,
   rerunFailureLastRun,
   runManagedRerun,
-} from "@psi/managedRun";
+} from "@psi/managed/managedRun";
 import {
   ManagedInputError,
   managedInputFailureKind,
-} from "@psi/managedInputGuard";
-import { ManagedExchangeLockUnavailableError } from "@psi/managedExchangeLock";
-import { PartnerNoShowError } from "@psi/waitForConnection";
-import { RotationPersistError } from "@psi/managedRunRotate";
-import { parseManagedLocalState } from "@psi/managedLocalStateShape";
-import { recordManagedExchangeLastRun } from "@psi/managedExchangeStore";
+} from "@psi/managed/managedInputGuard";
+import { ManagedExchangeLockUnavailableError } from "@psi/managed/managedExchangeLock";
+import { PartnerNoShowError } from "@psi/transport/waitForConnection";
+import { RotationPersistError } from "@psi/managed/managedRunRotate";
+import { parseManagedLocalState } from "@psi/managed/managedLocalStateShape";
+import { recordManagedExchangeLastRun } from "@psi/managed/managedExchangeStore";
 
-import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
+import type { ManagedExchangeRecord } from "@psi/managed/managedExchangeRecord";
 
 // The pure orchestration of a re-run, tested in Node for the parts that do NOT
 // touch the platform (the pre-connection expiry short-circuit, which never reaches
@@ -42,7 +42,7 @@ import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
 // claim -- the phase boundary reported to the caller's failure classification --
 // needs the run driven end to end here, against stubbed Web Locks and store writes.
 
-vi.mock("@psi/managedExchangeStore", async (importOriginal) => ({
+vi.mock("@psi/managed/managedExchangeStore", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   persistManagedExchangeRotation: vi.fn(() => Promise.resolve()),
   recordManagedExchangeLastRun: vi.fn(() => Promise.resolve()),
@@ -60,7 +60,7 @@ const handedOff = vi.hoisted(
     unreadable: unknown;
   } => ({ state: undefined, unreadable: undefined }),
 );
-vi.mock("@psi/managedLocalState", async (importOriginal) => ({
+vi.mock("@psi/managed/managedLocalState", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   getManagedLocalState: () =>
     handedOff.unreadable === undefined

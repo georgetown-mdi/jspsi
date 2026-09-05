@@ -32,7 +32,7 @@ import { parseExchangeRecord } from "@psilink/core";
 import {
   MANAGED_EXCHANGE_DISCLOSURE_STORE_NAME,
   openManagedExchangeDatabase,
-} from "./managedExchangeStore";
+} from "./managed/managedExchangeStore";
 import {
   appendDisclosureRecord,
   parseDisclosureAccounting,

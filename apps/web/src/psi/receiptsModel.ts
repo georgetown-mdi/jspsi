@@ -2,7 +2,7 @@ import { FINGERPRINT_REGEX, MAX_TEXT_LENGTH } from "@psilink/core";
 
 import { NOTE_CONTROL_CHAR_PATTERN } from "./retentionNoteShape";
 
-import type { JobRendezvousConfig } from "./workInputClient";
+import type { JobRendezvousConfig } from "./jobClient/workInputClient";
 import type { JobSigningChoice } from "@jobs/intent";
 
 /**

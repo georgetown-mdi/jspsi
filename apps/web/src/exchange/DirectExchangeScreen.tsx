@@ -5,9 +5,9 @@ import { IconAlertCircle } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 
 import { emptyColumnPositions, unnameableColumnsAlert } from "@psi/columnNames";
-import { deleteSftpConnection } from "@psi/sftpAuthoringClient";
-import { fetchJobRendezvous } from "@psi/workInputClient";
-import { fetchSftpConnection } from "@psi/serverJobExchangeDriver";
+import { deleteSftpConnection } from "@psi/jobClient/sftpAuthoringClient";
+import { fetchJobRendezvous } from "@psi/jobClient/workInputClient";
+import { fetchSftpConnection } from "@psi/jobClient/serverJobExchangeDriver";
 
 import { isConsoleBuild } from "@utils/clientConfig";
 
@@ -51,11 +51,11 @@ import type { DirectStep, DirectTransport } from "./directExchangeModel";
 import type {
   JobInputSource,
   SftpConnectionInfo,
-} from "@psi/serverJobExchangeDriver";
+} from "@psi/jobClient/serverJobExchangeDriver";
 import type {
   JobRendezvousConfig,
   ProfiledJobInput,
-} from "@psi/workInputClient";
+} from "@psi/jobClient/workInputClient";
 import type { AlertContent } from "@components/csvIntake";
 import type { ConnectionTuningDraft } from "@console/connectionTuningModel";
 import type { ExchangeFilesDraft } from "@console/exchangeFilesModel";

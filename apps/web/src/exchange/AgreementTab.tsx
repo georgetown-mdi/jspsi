@@ -9,7 +9,7 @@ import styles from "@styles/app.module.css";
 import type {
   AdvancedValidation,
   DraftLegalAgreement,
-} from "@psi/advancedInvite";
+} from "@psi/authoring/advancedInvite";
 import type { InviterEditor } from "@psi/inviterModel";
 
 const EMPTY_AGREEMENT: DraftLegalAgreement = {

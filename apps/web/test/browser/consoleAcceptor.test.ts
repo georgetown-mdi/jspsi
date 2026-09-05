@@ -60,7 +60,7 @@ vi.mock("@utils/clientConfig", () => ({
 }));
 
 // The unsupported gate never dials.
-vi.mock("@psi/rendezvous", async () =>
+vi.mock("@psi/transport/rendezvous", async () =>
   (await import("./moduleMocks")).rendezvousMock(),
 );
 

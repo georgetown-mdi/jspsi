@@ -10,9 +10,10 @@ import {
 import {
   isDraftDrawnFromLinkageRuleSet,
   linkageRuleSetReferenceForDraft,
-} from "./linkageComparison";
+} from "../linkageComparison";
+import { payloadSendForMetadata } from "../metadataEditing";
+
 import { outputForDirection } from "./advancedInviteTypes";
-import { payloadSendForMetadata } from "./metadataEditing";
 
 import type {
   BuiltInLinkageRuleSet,

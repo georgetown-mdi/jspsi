@@ -43,7 +43,7 @@ const linkageComparisonChokepointBan = {
     "linkageRuleSetReferenceFor",
   ],
   message:
-    "Ask rule-set membership about a draft through src/psi/linkageComparison.ts (encodeKeyForComparison / isOptInDraftKey / isDraftDrawnFromLinkageRuleSet / linkageRuleSetReferenceForDraft, re-exported from @psi/advancedInvite), not core's strict predicates: those compare by canonical byte equality, which reads an explicitly-`undefined` optional property -- what a draft rebuild spreads in -- as a difference and silently drops the key's opt-in badge and the terms' rule-set citation.",
+    "Ask rule-set membership about a draft through src/psi/linkageComparison.ts (encodeKeyForComparison / isOptInDraftKey / isDraftDrawnFromLinkageRuleSet / linkageRuleSetReferenceForDraft, re-exported from @psi/authoring/advancedInvite), not core's strict predicates: those compare by canonical byte equality, which reads an explicitly-`undefined` optional property -- what a draft rebuild spreads in -- as a difference and silently drops the key's opt-in badge and the terms' rule-set citation.",
 };
 
 // Confine reads of an acquired CSV's `rawRows` to the enumerated file-intake, draft,
@@ -120,8 +120,8 @@ const rawRowsConsumers = [
   "src/exchange/InviterScreen.tsx",
   "src/exchange/useInviterExchange.ts",
   "src/psi/inviterModel.ts",
-  "src/psi/nonEmptyAggregate.worker.ts",
-  "src/psi/nonEmptyAggregateController.ts",
+  "src/psi/workers/nonEmptyAggregate.worker.ts",
+  "src/psi/workers/nonEmptyAggregateController.ts",
   "src/psi/runOutputs.ts",
 ];
 
@@ -216,7 +216,7 @@ export default [
     // inside the method. It does not reach a `response.text()` or
     // `response.arrayBuffer()` read, each of which buffers the whole body before
     // any parse; what a client takes instead of either is the bounded read in
-    // src/psi/jobApiBody.ts, and docs/spec/SERVER_JOB_API.md (Size caps) states
+    // src/psi/jobClient/jobApiBody.ts, and docs/spec/SERVER_JOB_API.md (Size caps) states
     // that limit. It is a property ban with no object name, because the receiver
     // of a `.json()` is a variable a selector cannot resolve -- so it also
     // matches `Response.json()` the response builder, which this app does not
@@ -241,7 +241,7 @@ export default [
         {
           property: "json",
           message:
-            "Read a fetched body through the bounded read in src/psi/jobApiBody.ts (readBoundedJson / readJsonOrNull, under the cap the endpoint's answer needs); Response.json() buffers whatever the server sends and hands it to a raw JSON.parse. A read that genuinely needs neither: eslint-disable-next-line with a one-line justification.",
+            "Read a fetched body through the bounded read in src/psi/jobClient/jobApiBody.ts (readBoundedJson / readJsonOrNull, under the cap the endpoint's answer needs); Response.json() buffers whatever the server sends and hands it to a raw JSON.parse. A read that genuinely needs neither: eslint-disable-next-line with a one-line justification.",
         },
       ],
     },

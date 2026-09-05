@@ -12,13 +12,13 @@ import "@mantine/core/styles.css";
 import {
   clearManagedExchanges,
   createManagedExchange,
-} from "@psi/managedExchangeStore";
+} from "@psi/managed/managedExchangeStore";
 import { ManagedRunSurface } from "@recurring/ManagedRunSurface";
-import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
+import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 
-import type { NewManagedExchange } from "@psi/managedExchangeRecord";
+import type { NewManagedExchange } from "@psi/managed/managedExchangeRecord";
 
 // The classification depends on a flag the real component sets in the callback it
 // hands the driver, so only a rendered test -- not a model test -- catches a
@@ -38,7 +38,7 @@ vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
 );
 
-vi.mock("@psi/rendezvous", async () =>
+vi.mock("@psi/transport/rendezvous", async () =>
   (await import("./moduleMocks")).rendezvousMock(),
 );
 
@@ -47,8 +47,9 @@ vi.mock("@psi/rendezvous", async () =>
 // test asks for the post-boundary case. Nothing dials a partner, and nothing
 // stamps the record: what the surface renders comes from the live error and this
 // flag alone.
-vi.mock("@psi/managedRunDriver", async () => {
-  const { PartnerNoShowError } = await import("@psi/waitForConnection");
+vi.mock("@psi/managed/managedRunDriver", async () => {
+  const { PartnerNoShowError } =
+    await import("@psi/transport/waitForConnection");
   return {
     runManagedExchangeInBrowser: (config: {
       options?: { onDataExchangeStart?: () => void };

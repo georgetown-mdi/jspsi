@@ -12,26 +12,26 @@ import {
   dispatchManagedMigration,
   exportManagedBackup,
   managedBackupFileName,
-} from "@psi/managedExchangeExport";
+} from "@psi/managed/managedExchangeExport";
 import {
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 import {
   importManagedExchangeArtifact,
   parseManagedExchangeArtifact,
-} from "@psi/managedExchangeArtifact";
+} from "@psi/managed/managedExchangeArtifact";
 
 import type {
   ManagedCronExportDeps,
   ManagedExportDeps,
   ManagedMigrationDeps,
-} from "@psi/managedExchangeExport";
+} from "@psi/managed/managedExchangeExport";
 import type {
   ManagedSpendOutcome,
   ManagedSpentHandoff,
-} from "@psi/managedLocalState";
-import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedLocalState";
+import type { ManagedExchangeRecord } from "@psi/managed/managedExchangeRecord";
 
 // The three export intents, tested in Node with injected dependencies. Every
 // export reads the record fresh rather than trusting a caller's copy. The

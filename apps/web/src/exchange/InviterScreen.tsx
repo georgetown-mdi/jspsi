@@ -19,14 +19,14 @@ import {
   overlongColumnsAlert,
   unnameableColumnsAlert,
 } from "@psi/columnNames";
-import { capturedInputHandle } from "@psi/managedInputHandle";
+import { capturedInputHandle } from "@psi/managed/managedInputHandle";
 import { columnSamplesFromRows } from "@psi/columnSamples";
-import { createManagedExchange } from "@psi/managedExchangeStore";
-import { deleteSftpConnection } from "@psi/sftpAuthoringClient";
-import { fetchJobRendezvous } from "@psi/workInputClient";
-import { fetchSftpConnection } from "@psi/serverJobExchangeDriver";
+import { createManagedExchange } from "@psi/managed/managedExchangeStore";
+import { deleteSftpConnection } from "@psi/jobClient/sftpAuthoringClient";
+import { fetchJobRendezvous } from "@psi/jobClient/workInputClient";
+import { fetchSftpConnection } from "@psi/jobClient/serverJobExchangeDriver";
 import { invitationLocation } from "@psi/invitationLocation";
-import { loadCSVFileOffMainThread } from "@psi/csvParseController";
+import { loadCSVFileOffMainThread } from "@psi/workers/csvParseController";
 
 import { isConsoleBuild, psilinkVersion } from "@utils/clientConfig";
 import { whenDiagnostic } from "@utils/diagnostics";
@@ -153,11 +153,11 @@ import type {
 import type {
   JobInputSource,
   SftpConnectionInfo,
-} from "@psi/serverJobExchangeDriver";
+} from "@psi/jobClient/serverJobExchangeDriver";
 import type {
   JobRendezvousConfig,
   ProfiledJobInput,
-} from "@psi/workInputClient";
+} from "@psi/jobClient/workInputClient";
 import type { AlertContent } from "@components/csvIntake";
 import type { CoverageInput } from "@components/useNonEmptyRates";
 

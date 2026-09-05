@@ -6,7 +6,7 @@ import {
   createPsiCryptoWorkerHandle,
   decodePsiWorkerInit,
   encodePsiWorkerInit,
-} from "../../src/psi/psiCryptoController.js";
+} from "../../src/psi/workers/psiCryptoController.js";
 
 import type {
   PsiEngine,
@@ -19,7 +19,7 @@ import type {
 import type {
   PsiCryptoWorker,
   SpawnPsiCryptoWorker,
-} from "../../src/psi/psiCryptoController.js";
+} from "../../src/psi/workers/psiCryptoController.js";
 
 // createPsiCryptoWorkerHandle is the single definition of the browser host-side
 // worker wiring; production reaches it via createBrowserPsiEngineFactory and these

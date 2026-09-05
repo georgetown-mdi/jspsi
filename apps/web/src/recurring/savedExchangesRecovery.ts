@@ -17,7 +17,7 @@ import { dateLabel } from "@psi/inviterModel";
 
 import { SIDE_LABEL } from "./savedExchangesModel";
 
-import type { ManagedExchangeDiagnosticEntry } from "@psi/managedExchangeStore";
+import type { ManagedExchangeDiagnosticEntry } from "@psi/managed/managedExchangeStore";
 
 /** The label a row shows for an unreadable entry: nothing about it could be
  * parsed, so it displays as an unreadable record rather than an empty or guessed

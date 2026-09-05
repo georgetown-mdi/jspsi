@@ -60,7 +60,10 @@ const CHOKEPOINT = resolve(repoRoot, "apps/web/src/psi/linkageComparison.ts");
 const PRODUCT = resolve(repoRoot, "apps/web/src/exchange/Lobby.tsx");
 
 // Reserved for the first-parse check, linted by nothing else here.
-const PSI_FIRST_PARSE = resolve(repoRoot, "apps/web/src/psi/peerIdLabel.ts");
+const PSI_FIRST_PARSE = resolve(
+  repoRoot,
+  "apps/web/src/psi/transport/peerIdLabel.ts",
+);
 
 const BELOW = [
   ["src/psi", PSI],
@@ -86,7 +89,7 @@ const ACCEPTED = [
   ["src/psi", PSI, "@utils/clientConfig"],
   ["src/psi", PSI, "@components/ColumnName"],
   ["src/psi", PSI, "./runOutputs"],
-  ["src/components", COMPONENTS, "@psi/advancedInvite"],
+  ["src/components", COMPONENTS, "@psi/authoring/advancedInvite"],
   ["src/exchange", PRODUCT, "@console/mountListing"],
   ["src/exchange", PRODUCT, "@recurring/SavedExchanges"],
 ];

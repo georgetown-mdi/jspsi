@@ -57,7 +57,7 @@ function peerOpened(peer: Peer): Promise<void> {
  * Google STUN) -- which is why the browser project also disables Chromium's
  * mDNS host-candidate obfuscation (vite.config.ts), since a `.local` name
  * cannot otherwise resolve. Production configures real STUN for cross-network
- * peers (src/psi/rendezvous.ts).
+ * peers (src/psi/transport/rendezvous.ts).
  */
 export async function connectRendezvousPair(
   sharedSecret: string,

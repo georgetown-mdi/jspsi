@@ -10,11 +10,11 @@ import {
   ATTEMPT_RATE_GAP_MS,
   MAX_WINDOW_ATTEMPTS,
   tickManagedSchedules,
-} from "@psi/managedScheduleRunner";
+} from "@psi/managed/managedScheduleRunner";
 import {
   ManagedExchangeCustodyUnreadableError,
   ManagedExchangeSpentError,
-} from "@psi/managedExchangeRun";
+} from "@psi/managed/managedExchangeRun";
 import {
   applyManagedExchangeLastRun,
   applyManagedExchangeLocalEdits,
@@ -22,28 +22,28 @@ import {
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
   parseManagedExchangeRecord,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 import {
   encodeManagedExchangeArtifact,
   reconstructRecordFromArtifact,
-} from "@psi/managedExchangeArtifact";
-import { ManagedExchangeExpiredError } from "@psi/managedExpiry";
-import { ManagedExchangeLockUnavailableError } from "@psi/managedExchangeLock";
-import { ManagedInputError } from "@psi/managedInputGuard";
-import { PartnerNoShowError } from "@psi/waitForConnection";
-import { RotationPersistError } from "@psi/managedRunRotate";
-import { managedScheduleWindow } from "@psi/managedSchedule";
+} from "@psi/managed/managedExchangeArtifact";
+import { ManagedExchangeExpiredError } from "@psi/managed/managedExpiry";
+import { ManagedExchangeLockUnavailableError } from "@psi/managed/managedExchangeLock";
+import { ManagedInputError } from "@psi/managed/managedInputGuard";
+import { PartnerNoShowError } from "@psi/transport/waitForConnection";
+import { RotationPersistError } from "@psi/managed/managedRunRotate";
+import { managedScheduleWindow } from "@psi/managed/managedSchedule";
 
 import type {
   ManagedExchangeRecord,
   ManagedExchangeSchedule,
   ManagedExchangeScheduleAdvance,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 import type {
   ManagedScheduleAttempt,
   ManagedScheduleTickSeams,
-} from "@psi/managedScheduleRunner";
-import type { ManagedLocalState } from "@psi/managedLocalStateShape";
+} from "@psi/managed/managedScheduleRunner";
+import type { ManagedLocalState } from "@psi/managed/managedLocalStateShape";
 
 // The unattended runner's tick in Node, with the clock, the store, the delay
 // and the run all injected. The fake clock advances only where real time would

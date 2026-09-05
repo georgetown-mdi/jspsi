@@ -4,8 +4,11 @@ import {
   MAX_SCHEDULE_INTERVAL_DAYS,
   MAX_SCHEDULE_WINDOW_SECONDS,
   scheduleSchema,
-} from "@psi/managedExchangeRecord";
-import { MAX_TIME_VALUE, nextConsecutiveMisses } from "@psi/managedSchedule";
+} from "@psi/managed/managedExchangeRecord";
+import {
+  MAX_TIME_VALUE,
+  nextConsecutiveMisses,
+} from "@psi/managed/managedSchedule";
 import {
   REPEATED_MISS_ESCALATION,
   repeatedMissCoordination,
@@ -16,15 +19,15 @@ import {
 } from "@recurring/scheduleSurfacingModel";
 import { withTimeZone } from "../utils/hostTimeZone";
 
-import type { ManagedExchangeSchedule } from "@psi/managedExchangeRecord";
+import type { ManagedExchangeSchedule } from "@psi/managed/managedExchangeRecord";
 import type { ScheduleDueness } from "@recurring/scheduleSurfacingModel";
 
 // The schedule's display derivation in Node, with the clock injected: where
 // the recurrence stands at an instant, the cadence in words, and the
 // coordination state a run of missed windows earns. Every window instant
-// comes from the schedule arithmetic in @psi/managedSchedule, read off the
-// lattice rather than the record's planned `nextWindow`, with the agreed
-// instant held across a daylight-saving transition.
+// comes from the schedule arithmetic in @psi/managed/managedSchedule, read
+// off the lattice rather than the record's planned `nextWindow`, with the
+// agreed instant held across a daylight-saving transition.
 
 /** Anchor 2026-01-06T14:00Z, weekly, a three-hour window: window n opens
  * `2026-01-06 + 7n` at 14:00Z and closes at 17:00Z. */

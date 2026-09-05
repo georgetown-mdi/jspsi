@@ -12,16 +12,16 @@ import "@mantine/core/styles.css";
 import {
   clearManagedExchanges,
   createManagedExchange,
-} from "@psi/managedExchangeStore";
+} from "@psi/managed/managedExchangeStore";
 import { AppShellStatus } from "@components/AppShellStatus";
 import { ManagedRunSurface } from "@recurring/ManagedRunSurface";
 import { SavedExchanges } from "@recurring/SavedExchanges";
-import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
+import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
 
 import { restoreConnectivity, setConnectivity } from "./connectivity";
 import { createAppMount } from "./renderApp";
 
-import type { NewManagedExchange } from "@psi/managedExchangeRecord";
+import type { NewManagedExchange } from "@psi/managed/managedExchangeRecord";
 
 // What the app does with no network, against real Chromium: the shell's accurate
 // statement that it is offline, the recurring-exchange list rendering from the
@@ -37,7 +37,7 @@ vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
 );
 
-vi.mock("@psi/rendezvous", async () =>
+vi.mock("@psi/transport/rendezvous", async () =>
   (await import("./moduleMocks")).rendezvousMock(),
 );
 

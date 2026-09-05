@@ -14,10 +14,10 @@ import {
   clearManagedExchanges,
   createManagedExchange,
   spendManagedExchangeIfCurrent,
-} from "@psi/managedExchangeStore";
+} from "@psi/managed/managedExchangeStore";
 import { Lobby } from "@exchange/Lobby";
-import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
-import { markManagedExchangeBackedUp } from "@psi/managedLocalState";
+import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
+import { markManagedExchangeBackedUp } from "@psi/managed/managedLocalState";
 import styles from "@styles/app.module.css";
 
 import { createAppMount } from "./renderApp";
@@ -25,13 +25,13 @@ import { createAppMount } from "./renderApp";
 import type {
   ManagedExchangeSchedule,
   NewManagedExchange,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 
 // The component's delete goes through this module. It is mocked so the delete-failure
 // test can make a single delete reject while every other case uses the real
 // transaction; `deleteOverride`, when set, replaces the real delete for one test.
 let deleteOverride: ((id: string) => Promise<void>) | undefined;
-vi.mock("@psi/managedExchangeStore", async (importOriginal) => {
+vi.mock("@psi/managed/managedExchangeStore", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   const realDelete = actual.deleteManagedExchange as (
     id: string,

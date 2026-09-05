@@ -8,7 +8,10 @@ import { createElement } from "react";
 
 import { editorFromCsv, editorWithAuthoredDraft } from "@psi/inviterModel";
 
-import { buildAdvancedTerms, draftFromTerms } from "@psi/advancedInvite";
+import {
+  buildAdvancedTerms,
+  draftFromTerms,
+} from "@psi/authoring/advancedInvite";
 
 import { KeysTab } from "@exchange/KeysTab";
 import { consoleAcquiredCsv } from "@console/consoleAcquiredCsv";

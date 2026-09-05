@@ -3,8 +3,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createFetchJobApiClient,
   createServerJobZeroSetupDriver,
-} from "@psi/serverJobExchangeDriver";
-import { discardServerJob, writeAttachment } from "@psi/consoleJobAttachment";
+} from "@psi/jobClient/serverJobExchangeDriver";
+import {
+  discardServerJob,
+  writeAttachment,
+} from "@psi/jobClient/consoleJobAttachment";
 
 import { whenDiagnostic } from "@utils/diagnostics";
 
@@ -27,7 +30,7 @@ import type {
 import type {
   JobInputSource,
   JobRunStatus,
-} from "@psi/serverJobExchangeDriver";
+} from "@psi/jobClient/serverJobExchangeDriver";
 import type { DirectTransport } from "./directExchangeModel";
 import type { ExchangeDriverEvents } from "@psi/exchangeDriver";
 import type { ExchangeErrorCategory } from "@psi/exchangeLifecycle";

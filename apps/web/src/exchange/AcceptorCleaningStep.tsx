@@ -4,7 +4,7 @@ import { Alert, VisuallyHidden } from "@mantine/core";
 import { IconAlertCircle, IconAlertTriangle } from "@tabler/icons-react";
 
 import { SEMANTIC_TYPE_LABELS } from "@psi/metadataEditing";
-import { isSilentEmpty } from "@psi/nonEmptyAggregate";
+import { isSilentEmpty } from "@psi/workers/nonEmptyAggregate";
 
 import {
   COVERAGE_UNAVAILABLE_MESSAGE,
@@ -22,7 +22,7 @@ import type {
   StandardizationStep,
 } from "@psilink/core";
 import type { ColumnSamples } from "@psi/columnSamples";
-import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
+import type { FieldValueCoverage } from "@psi/workers/nonEmptyAggregate";
 
 /**
  * The acceptor's Cleaning tab: per-field pipelines with previews and whole-file

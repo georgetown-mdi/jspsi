@@ -38,7 +38,7 @@ import type {
   ManagedExchangeLastRun,
   ManagedExchangeRecord,
   ManagedExchangeSide,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 import type { RepeatedMissCoordination } from "./scheduleSurfacingModel";
 
 /** The operator-facing name for each side of the partnership. */

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   createFetchJobApiClient,
   createServerJobReattachDriver,
-} from "@psi/serverJobExchangeDriver";
+} from "@psi/jobClient/serverJobExchangeDriver";
 import { JobManager } from "@jobs/jobManager";
 import { appendSanitizedRunWarning } from "@psi/runWarnings";
 

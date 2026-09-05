@@ -17,30 +17,30 @@ import {
   MANAGED_EXCHANGE_SCHEMA_VERSION,
   applyManagedExchangeLastRun,
   composeManagedExchangeFile,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 import {
   ManagedExchangeCustodyUnreadableError,
   ManagedExchangeSpentError,
-} from "@psi/managedExchangeRun";
+} from "@psi/managed/managedExchangeRun";
 import {
   RotationPersistError,
   missedRun,
   storageFailureRun,
-} from "@psi/managedRunRotate";
-import { ManagedExchangeExpiredError } from "@psi/managedExpiry";
-import { ManagedExchangeLockUnavailableError } from "@psi/managedExchangeLock";
-import { ManagedInputError } from "@psi/managedInputGuard";
-import { PartnerNoShowError } from "@psi/waitForConnection";
+} from "@psi/managed/managedRunRotate";
+import { ManagedExchangeExpiredError } from "@psi/managed/managedExpiry";
+import { ManagedExchangeLockUnavailableError } from "@psi/managed/managedExchangeLock";
+import { ManagedInputError } from "@psi/managed/managedInputGuard";
+import { PartnerNoShowError } from "@psi/transport/waitForConnection";
 
 import type {
   ManagedExchangeLastRun,
   ManagedExchangeRecord,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 import type {
   ManagedRunFailure,
   ManagedRunFailureAlert,
 } from "@recurring/managedRunLaunchModel";
-import type { ManagedLocalState } from "@psi/managedLocalState";
+import type { ManagedLocalState } from "@psi/managed/managedLocalState";
 
 // The launch surface's failure classification, tested in Node: the pre-connection
 // benign states come from the error; a failed-closed handshake and every other

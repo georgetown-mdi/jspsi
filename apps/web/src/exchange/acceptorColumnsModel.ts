@@ -19,9 +19,9 @@ import {
   isStepValid,
 } from "@psi/standardizationAuthoring";
 
-import { defaultStandardizationForRows } from "@psi/advancedInvite";
+import { defaultStandardizationForRows } from "@psi/authoring/advancedInvite";
 
-import { isSilentEmpty } from "@psi/nonEmptyAggregate";
+import { isSilentEmpty } from "@psi/workers/nonEmptyAggregate";
 
 import { OFFLINE_EXCHANGE_REASON } from "@psi/offlineExchangeGate";
 
@@ -36,7 +36,7 @@ import type {
 
 import type { AcceptorDataEdits } from "@psi/acceptInvitation";
 import type { FieldStepOverride } from "@psi/standardizationAuthoring";
-import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
+import type { FieldValueCoverage } from "@psi/workers/nonEmptyAggregate";
 
 /**
  * The pure, React-free model behind the acceptor console's "Confirm your columns"

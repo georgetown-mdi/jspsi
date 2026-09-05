@@ -12,9 +12,9 @@
  * summary, so the operator can recognize a partnership and launch a re-run.
  */
 
-import { deriveManagedBackupState } from "@psi/managedBackupState";
-import { deriveManagedFailureTier } from "@psi/managedFailureTiers";
-import { managedExchangeLapsed } from "@psi/managedExpiry";
+import { deriveManagedBackupState } from "@psi/managed/managedBackupState";
+import { deriveManagedFailureTier } from "@psi/managed/managedFailureTiers";
+import { managedExchangeLapsed } from "@psi/managed/managedExpiry";
 
 import { dateLabel, dateTimeLabel } from "@psi/inviterModel";
 import {
@@ -27,12 +27,12 @@ import type {
   ManagedExchangeRecord,
   ManagedExchangeSchedule,
   ManagedExchangeSide,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 import type {
   ManagedLocalState,
   ManagedSpentHandoff,
-} from "@psi/managedLocalState";
-import type { ManagedFailureTier } from "@psi/managedFailureTiers";
+} from "@psi/managed/managedLocalState";
+import type { ManagedFailureTier } from "@psi/managed/managedFailureTiers";
 
 /** This party's side, as the run list names it: the operator recognizes "you
  * invite" / "you accept" more readily than the wire roles. Shared with the

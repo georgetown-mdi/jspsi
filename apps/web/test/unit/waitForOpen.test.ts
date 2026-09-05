@@ -2,7 +2,7 @@ import { describe, expect, test, vi } from "vitest";
 
 import { default as EventEmitter } from "eventemitter3";
 
-import { waitForConnectionOpen } from "../../src/psi/waitForOpen.js";
+import { waitForConnectionOpen } from "../../src/psi/transport/waitForOpen.js";
 
 import type { DataConnection } from "peerjs";
 

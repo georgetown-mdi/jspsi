@@ -36,18 +36,18 @@ import {
   setDraftMetadata,
   setDraftMetadataKeepingKeys,
   validateAdvancedInvite,
-} from "../../src/psi/advancedInvite.js";
+} from "../../src/psi/authoring/advancedInvite.js";
 import {
   setColumnType,
   setColumnTypeForMatching,
 } from "../../src/psi/metadataEditing.js";
 import { generateInvitation } from "../../src/psi/invitation.js";
-import { prepareManagedRerunExchange } from "../../src/psi/managedPreparedExchange.js";
+import { prepareManagedRerunExchange } from "../../src/psi/managed/managedPreparedExchange.js";
 
 import type {
   AdvancedInviteDraft,
   AdvancedInviteSeed,
-} from "../../src/psi/advancedInvite.js";
+} from "../../src/psi/authoring/advancedInvite.js";
 
 import type { CSVRow, LinkageKey, LinkageTerms, Metadata } from "@psilink/core";
 

@@ -16,8 +16,8 @@ import {
 import {
   MAX_SCHEDULE_WINDOW_SECONDS,
   scheduleSchema,
-} from "@psi/managedExchangeRecord";
-import { catchUpManagedSchedule } from "@psi/managedSchedule";
+} from "@psi/managed/managedExchangeRecord";
+import { catchUpManagedSchedule } from "@psi/managed/managedSchedule";
 import { withTimeZone } from "../utils/hostTimeZone";
 
 import type { ScheduleEntryFields } from "@recurring/scheduleEntryModel";

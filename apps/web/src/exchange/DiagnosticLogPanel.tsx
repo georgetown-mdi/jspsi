@@ -4,7 +4,7 @@ import {
   jobDiagnosticLogFileName,
   jobDiagnosticLogUrl,
   watchJobDiagnosticLog,
-} from "@psi/jobDiagnosticLog";
+} from "@psi/jobClient/jobDiagnosticLog";
 
 import styles from "@styles/app.module.css";
 

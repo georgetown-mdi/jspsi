@@ -13,7 +13,7 @@ import { Link } from "@tanstack/react-router";
 
 import { DisclosureSection } from "@components/DisclosureSection";
 import { isInstalledRuntime } from "@utils/installedRuntime";
-import { storedInputHandleUsable } from "@psi/managedInputHandle";
+import { storedInputHandleUsable } from "@psi/managed/managedInputHandle";
 import { triggerBlobDownload } from "@components/blobDownload";
 
 import { dateLabel } from "@psi/inviterModel";
@@ -64,7 +64,7 @@ import type {
   ManagedExchangeLocalEdits,
   ManagedExchangeRecord,
   ManagedExchangeSchedule,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 import type { ConfigRow } from "./managedDetailModel";
 import type { DisclosureAccountingRead } from "@psi/disclosureAccountingStore";
 import type { DisclosureFact } from "./disclosureAccountingModel";

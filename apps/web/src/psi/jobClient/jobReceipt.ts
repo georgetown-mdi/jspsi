@@ -25,10 +25,10 @@
 import {
   MAX_JOB_STATUS_RESPONSE_BYTES,
   readBoundedJson,
-} from "@psi/jobApiBody";
+} from "@psi/jobClient/jobApiBody";
 import { delayUntilAborted } from "@psi/delayUntilAborted";
 
-import { recordFileStamp } from "./runOutputs";
+import { recordFileStamp } from "../runOutputs";
 
 /** The console endpoint the receipt downloads from. The browser never composes
  * the file's path: the console resolves it inside the job's own workdir. */

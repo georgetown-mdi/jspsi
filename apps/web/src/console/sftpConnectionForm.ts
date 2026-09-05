@@ -6,7 +6,7 @@ import {
 
 import { isBareSftpHost } from "@psi/sftpHost";
 
-import type { AuthoredSftpConnectionRequest } from "@psi/sftpAuthoringClient";
+import type { AuthoredSftpConnectionRequest } from "@psi/jobClient/sftpAuthoringClient";
 
 /**
  * The pure model behind the console's SFTP connection authoring form: the field

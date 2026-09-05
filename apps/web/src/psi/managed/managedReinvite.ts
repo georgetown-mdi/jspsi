@@ -52,10 +52,10 @@ import {
   MAX_INVITATION_LIFETIME_SECONDS,
 } from "@psilink/core";
 
-import { deepLinkFor, webrtcEndpointFromLocation } from "./invitation";
+import { deepLinkFor, webrtcEndpointFromLocation } from "../invitation";
 import { rotationWriteBack } from "./managedRunRotate";
 
-import type { InvitationLocation } from "./invitation";
+import type { InvitationLocation } from "../invitation";
 import type { InvitationToken } from "@psilink/core";
 import type { ManagedExchangeRecord } from "./managedExchangeRecord";
 import type { RotationWriteBack } from "./managedRunRotate";

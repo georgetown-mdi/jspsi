@@ -11,7 +11,7 @@ import {
 import { IconCircleCheck } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 
-import { probeManagedStoreOpen } from "@psi/managedExchangeStore";
+import { probeManagedStoreOpen } from "@psi/managed/managedExchangeStore";
 
 import styles from "@styles/app.module.css";
 
