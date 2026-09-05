@@ -81,8 +81,10 @@ export const CLI_WEBRTC_DIR = "apps/cli/src/connection/webrtc";
 /** `CLI_WEBRTC_DIR`'s files, repository-relative, held to the real listing. */
 export const CLI_FILES = [
   "apps/cli/src/connection/webrtc/brokerClient.ts",
+  "apps/cli/src/connection/webrtc/iceDiagnostics.ts",
   "apps/cli/src/connection/webrtc/inboundBounds.ts",
   "apps/cli/src/connection/webrtc/peerjsWire.ts",
+  "apps/cli/src/connection/webrtc/signalingTls.ts",
   "apps/cli/src/connection/webrtc/webrtcMessageConnection.ts",
   "apps/cli/src/connection/webrtc/weriftPeer.ts",
 ];

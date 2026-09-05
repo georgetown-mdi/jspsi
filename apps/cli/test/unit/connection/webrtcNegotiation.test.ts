@@ -1,8 +1,18 @@
 import { afterEach, expect, test } from "vitest";
+import logLibrary from "loglevel";
 
-import { deriveRendezvousPeerId, generateSharedSecret } from "@psilink/core";
+import {
+  ConnectionError,
+  deriveRendezvousPeerId,
+  generateSharedSecret,
+  sanitizeErrorForDisplay,
+  setDiagnosticSink,
+  setLogLevel,
+} from "@psilink/core";
 
+import { snapshotDiagnosticSinkAndLevel } from "../../loggingTestSupport";
 import { BROKER_MESSAGE } from "../../../src/connection/webrtc/brokerClient";
+import { ICE_STATS_TIMEOUT_MS } from "../../../src/connection/webrtc/iceDiagnostics";
 import {
   MAX_CONNECTION_ID_LENGTH,
   MAX_PENDING_REMOTE_CANDIDATES,
@@ -113,6 +123,16 @@ class ScriptedPeer {
   closeCalls = 0;
   // The SCTP queues the session's drain assumption asserts on.
   readonly sctp = { sctp: { outboundQueue: [], sentQueue: [] } };
+  /** ICE statistics `getStats()` answers with; a test scripts what it holds. */
+  stats = new Map<string, unknown>();
+  /**
+   * How `getStats()` answers at all: a peer connection already torn down
+   * throws, and a collection that overruns {@link ICE_STATS_TIMEOUT_MS} never
+   * settles. Both leave a failure with no candidate report to attach.
+   */
+  statsAnswer: "resolves" | "throws" | "never-settles" = "resolves";
+  /** How many times the session collected them. */
+  statsCalls = 0;
   /** Fired during setLocalDescription, as werift does. */
   candidatesDuringSetLocal: Array<Record<string, unknown>> = [];
 
@@ -156,10 +176,25 @@ class ScriptedPeer {
     return Promise.resolve();
   }
 
+  getStats(): Promise<Map<string, unknown>> {
+    this.statsCalls += 1;
+    if (this.statsAnswer === "throws")
+      throw new Error("the peer connection is closed");
+    if (this.statsAnswer === "never-settles")
+      return new Promise<Map<string, unknown>>(() => {});
+    return Promise.resolve(this.stats);
+  }
+
   close(): Promise<void> {
     this.closeCalls += 1;
     this.connectionState = "closed";
     return Promise.resolve();
+  }
+
+  /** Report the state werift reports when no candidate pair ever worked. */
+  failConnection(): void {
+    this.connectionState = "failed";
+    this.onconnectionstatechange?.();
   }
 }
 
@@ -183,6 +218,8 @@ class FakeChannel {
 }
 
 const sessions: Array<WebRtcPeerSession> = [];
+
+snapshotDiagnosticSinkAndLevel();
 
 afterEach(async () => {
   for (const session of sessions.splice(0)) await session.close();
@@ -807,3 +844,254 @@ test("an abort before registration tears down the same, having sent nothing", as
   expect(socket.closeCalls).toBe(1);
   expect(peer.closeCalls).toBe(1);
 });
+
+// --- what a run reports about the path it found -----------------------------
+
+/** A stats report in the map shape werift's `getStats()` resolves to. */
+function iceStats(
+  entries: Array<Record<string, unknown>>,
+): Map<string, unknown> {
+  return new Map(entries.map((entry) => [String(entry.id), entry]));
+}
+
+/** Statistics naming one nominated pair, the shape a live channel reports. */
+function connectedStats(remoteType: string): Map<string, unknown> {
+  return iceStats([
+    { type: "local-candidate", id: "L1", candidateType: "host" },
+    { type: "remote-candidate", id: "R1", candidateType: remoteType },
+    {
+      type: "candidate-pair",
+      id: "P1",
+      localCandidateId: "L1",
+      remoteCandidateId: "R1",
+      state: "succeeded",
+      nominated: true,
+    },
+  ]);
+}
+
+/** Collect every diagnostic line the run emits, with debug lines admitted. */
+function captureDiagnostics(): Array<string> {
+  const lines: Array<string> = [];
+  setDiagnosticSink((_method, _prefix, args) => {
+    lines.push(args.map((arg) => String(arg)).join(" "));
+  });
+  setLogLevel(logLibrary.levels.DEBUG);
+  return lines;
+}
+
+/** The rendezvous failure, rendered as the operator is shown it. */
+async function renderedFailure(
+  session: Promise<WebRtcPeerSession>,
+): Promise<string> {
+  return sanitizeErrorForDisplay(
+    await session.then(
+      () => new Error("the rendezvous was expected to fail"),
+      (err: unknown) => err,
+    ),
+  );
+}
+
+test("the open channel reports the candidate pair it runs over", async () => {
+  const lines = captureDiagnostics();
+  const { peer, session } = await startRendezvous({ role: "acceptor" });
+  peer.stats = connectedStats("relay");
+  peer.channels[0].open();
+  await session;
+  expect(lines.join("\n")).toContain(
+    "the data channel opened over candidate pair local host, remote relay",
+  );
+});
+
+test("a run at a level that prints no debug line collects no statistics", async () => {
+  // The pair line is the whole of what the collection is for, and collecting is
+  // bounded rather than instant, so a run that would print nothing must not
+  // spend the open channel's time on a peer whose getStats stalls.
+  setLogLevel(logLibrary.levels.INFO);
+  const { peer, session } = await startRendezvous({ role: "acceptor" });
+  peer.statsAnswer = "never-settles";
+  peer.stats = connectedStats("relay");
+  const startedAt = Date.now();
+  peer.channels[0].open();
+  await session;
+  expect(peer.statsCalls).toBe(0);
+  expect(Date.now() - startedAt).toBeLessThan(ICE_STATS_TIMEOUT_MS);
+});
+
+test("a debug run collects them once", async () => {
+  captureDiagnostics();
+  const { peer, session } = await startRendezvous({ role: "acceptor" });
+  peer.stats = connectedStats("relay");
+  peer.channels[0].open();
+  await session;
+  expect(peer.statsCalls).toBe(1);
+});
+
+test("a run whose statistics name no pair says so rather than nothing", async () => {
+  const lines = captureDiagnostics();
+  const { peer, session } = await startRendezvous({ role: "acceptor" });
+  peer.channels[0].open();
+  await session;
+  expect(lines.join("\n")).toContain("ICE reported no selected candidate pair");
+});
+
+test("a partner's candidate type cannot drive the operator's terminal", async () => {
+  const lines = captureDiagnostics();
+  const { peer, session } = await startRendezvous({ role: "acceptor" });
+  peer.stats = connectedStats("relay\u001b[31m\nFAKE: exchange complete");
+  peer.channels[0].open();
+  await session;
+  const reported = lines.find((line) => line.includes("candidate pair"));
+  expect(reported).toContain(
+    "remote relay\\x1b[31m\\x0aFAKE: exchange complete",
+  );
+  expect(reported).not.toContain("\u001b");
+  expect(reported).not.toContain("\n");
+});
+
+test("an ICE failure names what was gathered, received and tried", async () => {
+  const { peer, session } = await startRendezvous({ role: "acceptor" });
+  peer.stats = iceStats([
+    { type: "local-candidate", id: "L1", candidateType: "host" },
+    { type: "local-candidate", id: "L2", candidateType: "srflx" },
+  ]);
+  peer.failConnection();
+  const rendered = await renderedFailure(session);
+  expect(rendered).toContain(
+    "no network path between the two parties could be established",
+  );
+  expect(rendered).toContain(
+    "local candidates gathered: no relay candidate gathered; 2 (host, srflx)",
+  );
+  expect(rendered).toContain("remote candidates received: none");
+  expect(rendered).toContain("candidate pairs: none formed");
+});
+
+test("a relay gathered that still found no path is reported apart", async () => {
+  const { peer, session } = await startRendezvous({ role: "acceptor" });
+  peer.stats = iceStats([
+    { type: "local-candidate", id: "L1", candidateType: "relay" },
+    { type: "remote-candidate", id: "R1", candidateType: "host" },
+    {
+      type: "candidate-pair",
+      id: "P1",
+      localCandidateId: "L1",
+      remoteCandidateId: "R1",
+      state: "failed",
+    },
+  ]);
+  peer.failConnection();
+  const rendered = await renderedFailure(session);
+  expect(rendered).toContain(
+    "local candidates gathered: relay candidate gathered; 1 (relay)",
+  );
+  expect(rendered).toContain("remote candidates received: 1 (host)");
+  expect(rendered).toContain("candidate pairs: 1 tried, none succeeded");
+});
+
+test("the channel-open ceiling reports the same diagnosis", async () => {
+  const { socket, peer, session, inviterId } = await startRendezvous({
+    role: "acceptor",
+    channelOpenTimeoutMs: 100,
+    rendezvousTimeoutMs: 30_000,
+  });
+  peer.stats = iceStats([
+    { type: "local-candidate", id: "L1", candidateType: "host" },
+  ]);
+  socket.deliver({
+    type: BROKER_MESSAGE.answer,
+    src: inviterId,
+    payload: { sdp: { type: "answer", sdp: "v=0\r\nanswer\r\n" } },
+  });
+  const rendered = await renderedFailure(session);
+  expect(rendered).toContain("did not open within 100ms");
+  expect(rendered).toContain(
+    "local candidates gathered: no relay candidate gathered; 1 (host)",
+  );
+});
+
+/**
+ * Drive one of the two diagnosed failures against a peer whose statistics
+ * cannot be read, timing the failure itself: the diagnosis is bounded, so what
+ * a report that never arrives may cost is the description, not the outcome.
+ */
+async function failureWithUnreadableStats(options: {
+  statsAnswer: ScriptedPeer["statsAnswer"];
+  path: "connection-failed" | "channel-open-ceiling";
+}): Promise<{ error: ConnectionError; elapsedMs: number }> {
+  const { socket, peer, session, inviterId } = await startRendezvous({
+    role: "acceptor",
+    channelOpenTimeoutMs: 100,
+    rendezvousTimeoutMs: 30_000,
+  });
+  peer.statsAnswer = options.statsAnswer;
+  const startedAt = Date.now();
+  if (options.path === "connection-failed") peer.failConnection();
+  else
+    socket.deliver({
+      type: BROKER_MESSAGE.answer,
+      src: inviterId,
+      payload: { sdp: { type: "answer", sdp: "v=0\r\nanswer\r\n" } },
+    });
+  const error = await session.then(
+    () => new Error("the rendezvous was expected to fail"),
+    (err: unknown) => err,
+  );
+  return { error: error as ConnectionError, elapsedMs: Date.now() - startedAt };
+}
+
+/** What every failure reporting no candidate report at all has in common. */
+function expectUndiagnosedFailure(
+  error: ConnectionError,
+  summary: string,
+): void {
+  expect(error).toBeInstanceOf(ConnectionError);
+  expect(error.kind).toBe("transport");
+  expect(error.message).toContain(summary);
+  expect(error.cause).toBeUndefined();
+  expect(sanitizeErrorForDisplay(error)).not.toContain("candidates gathered");
+}
+
+test("a failed connection whose statistics throw reports the failure alone", async () => {
+  const { error, elapsedMs } = await failureWithUnreadableStats({
+    statsAnswer: "throws",
+    path: "connection-failed",
+  });
+  expectUndiagnosedFailure(
+    error,
+    "no network path between the two parties could be established",
+  );
+  // A peer that answers at once is not waited on: the ceiling below is what
+  // bounds one that does not.
+  expect(elapsedMs).toBeLessThan(ICE_STATS_TIMEOUT_MS);
+});
+
+test("a failed connection whose statistics never arrive fails on the ICE ceiling", async () => {
+  const { error, elapsedMs } = await failureWithUnreadableStats({
+    statsAnswer: "never-settles",
+    path: "connection-failed",
+  });
+  expectUndiagnosedFailure(
+    error,
+    "no network path between the two parties could be established",
+  );
+  expect(elapsedMs).toBeGreaterThanOrEqual(ICE_STATS_TIMEOUT_MS);
+}, 15_000);
+
+test("a channel-open ceiling whose statistics throw reports the failure alone", async () => {
+  const { error, elapsedMs } = await failureWithUnreadableStats({
+    statsAnswer: "throws",
+    path: "channel-open-ceiling",
+  });
+  expectUndiagnosedFailure(error, "did not open within 100ms");
+  expect(elapsedMs).toBeLessThan(ICE_STATS_TIMEOUT_MS);
+});
+
+test("a channel-open ceiling whose statistics never arrive still reports", async () => {
+  const { error, elapsedMs } = await failureWithUnreadableStats({
+    statsAnswer: "never-settles",
+    path: "channel-open-ceiling",
+  });
+  expectUndiagnosedFailure(error, "did not open within 100ms");
+  expect(elapsedMs).toBeGreaterThanOrEqual(ICE_STATS_TIMEOUT_MS);
+}, 15_000);

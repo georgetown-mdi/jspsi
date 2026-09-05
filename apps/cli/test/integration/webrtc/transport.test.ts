@@ -3,11 +3,15 @@ import { createSocket } from "node:dgram";
 import dns from "node:dns";
 
 import { RTCPeerConnection } from "werift";
-import { afterAll, afterEach, beforeAll, expect, test } from "vitest";
+import { afterAll, afterEach, beforeAll, expect, test, vi } from "vitest";
 
 import { ConnectionError, generateSharedSecret } from "@psilink/core";
 
 import { openWebRtcMessageConnection } from "../../../src/connection/webrtc/webrtcMessageConnection";
+import {
+  describeSelectedCandidatePair,
+  readIceStats,
+} from "../../../src/connection/webrtc/iceDiagnostics";
 import {
   WERIFT_BUILT_IN_STUN_URI,
   openWebRtcPeerSession,
@@ -16,6 +20,7 @@ import { PEERJS_CHUNK_MTU } from "../../../src/connection/webrtc/peerjsWire";
 import { startBrokerProcess } from "../../signaling/brokerProcess";
 
 import type { BrokerLocation } from "../../../src/connection/webrtc/brokerClient";
+import type { RTCIceServer } from "werift";
 import type { BrokerProcess } from "../../signaling/brokerProcess";
 import type { MessageConnection } from "@psilink/core";
 
@@ -342,6 +347,135 @@ test("the built-in default is the endpoint the warning and the export panel name
   for (const request of requests) {
     expect(request.readUInt16BE(0)).toBe(0x0001);
     expect(request.readUInt32BE(4)).toBe(0x2112a442);
+  }
+}, 60_000);
+
+/**
+ * The candidate types ICE defines. The diagnostics read werift's own entries by
+ * field name, so a selected type outside this set is a field that moved rather
+ * than an unusual network path.
+ */
+const ICE_CANDIDATE_TYPES = ["host", "srflx", "prflx", "relay"];
+
+test("the ICE report reads the statistics real werift produces", async () => {
+  // The reader itself is exercised against hand-written reports in
+  // test/unit/connection/webrtcIceDiagnostics.test.ts. What only a live pair
+  // holds is that the entries werift emits still carry the field names it keys
+  // on -- `candidateType`, `localCandidateId`, `remoteCandidateId`, `state`,
+  // `nominated` -- so a bump that renames one reddens here rather than reaching
+  // an operator as a report that quietly names nothing.
+  const common = partyOptions(generateSharedSecret());
+  const peers: Array<RTCPeerConnection> = [];
+  const capturePeer = (configuration: {
+    iceServers?: Array<RTCIceServer>;
+  }): RTCPeerConnection => {
+    const peer = new RTCPeerConnection(configuration);
+    peers.push(peer);
+    return peer;
+  };
+  const [inviter, acceptor] = await Promise.all([
+    openWebRtcMessageConnection({
+      ...common,
+      role: "inviter",
+      peerConnectionFactory: capturePeer,
+    }),
+    openWebRtcMessageConnection({
+      ...common,
+      role: "acceptor",
+      peerConnectionFactory: capturePeer,
+    }),
+  ]);
+  openConnections.push(inviter, acceptor);
+  // One frame each way first, so the pair the report names is one that carried
+  // the exchange rather than one that had only been probed.
+  await acceptor.send({ step: "hello" });
+  expect(await inviter.receive()).toEqual({ step: "hello" });
+
+  expect(peers).toHaveLength(2);
+  for (const peer of peers) {
+    const report = await readIceStats(peer);
+    if (report === undefined)
+      throw new Error("the open channel reported no ICE statistics");
+    expect(report.local.count).toBeGreaterThan(0);
+    expect(report.remote.count).toBeGreaterThan(0);
+    expect(report.succeededPairCount).toBeGreaterThan(0);
+    expect(ICE_CANDIDATE_TYPES).toContain(report.selected?.localType);
+    expect(ICE_CANDIDATE_TYPES).toContain(report.selected?.remoteType);
+    expect(describeSelectedCandidatePair(report)).toMatch(
+      /^local [a-z]+, remote [a-z]+$/,
+    );
+  }
+}, 120_000);
+
+/** A peer's own description, or a failure naming the peer that had none. */
+function sdpOf(peer: RTCPeerConnection): string {
+  const sdp = peer.localDescription?.sdp;
+  if (sdp === undefined || sdp === "")
+    throw new Error("the peer connection produced no local description");
+  return sdp;
+}
+
+/**
+ * A candidate type outside ICE's vocabulary, in the shape a hostile partner
+ * would send one. The token is the partner's own text, so what werift does with
+ * it is what decides whether a report can hold partner-chosen bytes at all.
+ */
+const UNRECOGNIZED_CANDIDATE_TYPE = "FAKE\u001b[31m";
+
+test("a candidate type werift does not recognize reaches no report", async () => {
+  // iceDiagnostics.ts states this as the reason its bounding and escaping are
+  // defense against a version bump rather than the control keeping a partner's
+  // text off the terminal, and only the library can hold it: the line is
+  // accepted without throwing and then appears in no getStats entry.
+  const dialer = new RTCPeerConnection({ iceServers: HOST_ONLY_ICE });
+  const answerer = new RTCPeerConnection({ iceServers: HOST_ONLY_ICE });
+  try {
+    dialer.createDataChannel("probe");
+    await dialer.setLocalDescription(await dialer.createOffer());
+    const offer = sdpOf(dialer);
+    await answerer.setRemoteDescription({ type: "offer", sdp: offer });
+    await answerer.setLocalDescription(await answerer.createAnswer());
+    // werift inlines its gathered candidates in the SDP, so stripping them
+    // leaves the two handed over below as the only remote candidates this side
+    // ever sees.
+    const trickled = sdpOf(answerer)
+      .split("\r\n")
+      .filter(
+        (line) =>
+          !line.startsWith("a=candidate:") &&
+          !line.startsWith("a=end-of-candidates"),
+      )
+      .join("\r\n");
+    await dialer.setRemoteDescription({ type: "answer", sdp: trickled });
+    const mid = /a=mid:(\S+)/.exec(trickled)?.[1];
+    // Neither call is guarded: a throw here is the measurement failing rather
+    // than a candidate to absorb.
+    await dialer.addIceCandidate({
+      candidate:
+        "candidate:1 1 udp 2130706430 127.0.0.8 5001 typ host generation 0",
+      sdpMid: mid,
+      sdpMLineIndex: 0,
+    });
+    await dialer.addIceCandidate({
+      candidate:
+        `candidate:2 1 udp 2130706431 127.0.0.9 5000 typ ` +
+        `${UNRECOGNIZED_CANDIDATE_TYPE} generation 0`,
+      sdpMid: mid,
+      sdpMLineIndex: 0,
+    });
+    // The well-formed one landing is what makes the other's absence a
+    // measurement rather than a race: both were handed over together.
+    const report = await vi.waitFor(
+      async () => {
+        const stats = await readIceStats(dialer);
+        expect(stats?.remote.types).toContain("host");
+        return stats;
+      },
+      { timeout: 10_000 },
+    );
+    expect(report?.remote.types.join(" ")).not.toContain("FAKE");
+  } finally {
+    await Promise.all([dialer.close(), answerer.close()]);
   }
 }, 60_000);
 
