@@ -14,13 +14,13 @@ import {
   createManagedExchange,
   getManagedExchange,
   spendManagedExchangeIfCurrent,
-} from "@psi/managedExchangeStore";
-import { ManagedRunSurface } from "@bench/ManagedRunSurface";
-import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeStore";
+import { ManagedRunSurface } from "@recurring/ManagedRunSurface";
+import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
 
 import { createAppMount } from "./renderApp";
 
-import type { NewManagedExchange } from "@psi/managedExchangeRecord";
+import type { NewManagedExchange } from "@psi/managed/managedExchangeRecord";
 
 // The run surface's hand-off confirm, rendered against real Chromium (the record
 // and its sibling stores are the real IndexedDB ones). What is pinned here is the
@@ -33,7 +33,7 @@ vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
 );
 
-vi.mock("@psi/rendezvous", async () =>
+vi.mock("@psi/transport/rendezvous", async () =>
   (await import("./moduleMocks")).rendezvousMock(),
 );
 
@@ -43,7 +43,7 @@ vi.mock("@psi/rendezvous", async () =>
 // spent entry to name the hand-off from.
 const recordRead = vi.hoisted(() => ({ rejects: false }));
 
-vi.mock("@psi/managedExchangeStore", async (importOriginal) => {
+vi.mock("@psi/managed/managedExchangeStore", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   const readRecord = actual.getManagedExchange as typeof getManagedExchange;
   return {
@@ -59,7 +59,7 @@ vi.mock("@psi/managedExchangeStore", async (importOriginal) => {
 // reached without a real artifact download in the runner. The export itself, and
 // the spend it defers until the operator confirms, are covered against the real
 // store in managedExchangeBackup.test.ts.
-vi.mock("@psi/managedExchangeExport", async (importOriginal) => {
+vi.mock("@psi/managed/managedExchangeExport", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return {
     ...actual,

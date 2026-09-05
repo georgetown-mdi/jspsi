@@ -14,34 +14,34 @@ import {
   readRecordAndMarkBackedUp,
   recordManagedExchangeLastRun,
   spendManagedExchangeIfCurrent,
-} from "@psi/managedExchangeStore";
+} from "@psi/managed/managedExchangeStore";
 import {
   dispatchManagedMigration,
   exportManagedBackup,
-} from "@psi/managedExchangeExport";
+} from "@psi/managed/managedExchangeExport";
 import {
   encodeManagedExchangeArtifact,
   importManagedExchangeArtifact,
   serializeManagedExchangeArtifact,
-} from "@psi/managedExchangeArtifact";
+} from "@psi/managed/managedExchangeArtifact";
 import {
   getManagedLocalState,
   listManagedLocalState,
   markManagedExchangeBackedUp,
   markManagedExchangeImported,
-} from "@psi/managedLocalState";
-import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
-import { deriveManagedFailureTier } from "@psi/managedFailureTiers";
-import { failedRun } from "@psi/managedRunRotate";
-import { importManagedExchange } from "@psi/managedExchangeImport";
-import { managedRunFailureFromRecord } from "@bench/managedRunLaunchModel";
-import { savedExchangeRows } from "@bench/savedExchangesModel";
-import { withManagedExchangeLock } from "@psi/managedExchangeLock";
+} from "@psi/managed/managedLocalState";
+import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
+import { deriveManagedFailureTier } from "@psi/managed/managedFailureTiers";
+import { failedRun } from "@psi/managed/managedRunRotate";
+import { importManagedExchange } from "@psi/managed/managedExchangeImport";
+import { managedRunFailureFromRecord } from "@recurring/managedRunLaunchModel";
+import { savedExchangeRows } from "@recurring/savedExchangesModel";
+import { withManagedExchangeLock } from "@psi/managed/managedExchangeLock";
 
 import type {
   ManagedExchangeSchedule,
   NewManagedExchange,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 import type { WebRTCExchangeLocator } from "@psilink/core";
 
 // The store-backed export/import and local sibling state, exercised against real

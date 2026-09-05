@@ -5,13 +5,13 @@ import {
   discardServerJob,
   readAttachment,
   writeAttachment,
-} from "@psi/consoleJobAttachment";
+} from "@psi/jobClient/consoleJobAttachment";
 
 import type {
   JobApiClient,
   JobStatusProbe,
-} from "@psi/serverJobExchangeDriver";
-import type { ConsoleJobAttachment } from "@psi/consoleJobAttachment";
+} from "@psi/jobClient/serverJobExchangeDriver";
+import type { ConsoleJobAttachment } from "@psi/jobClient/consoleJobAttachment";
 
 const KEY = "psilink-console-last-job";
 

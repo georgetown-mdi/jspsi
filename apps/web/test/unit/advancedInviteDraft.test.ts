@@ -6,13 +6,13 @@ import {
   addKey,
   buildAdvancedTerms,
   inviterExchangeDataSpec,
-} from "../../src/psi/advancedInvite.js";
+} from "../../src/psi/authoring/advancedInvite.js";
 import {
   draftWithFieldAdded,
   seedAdvancedInvite,
   setDraftMetadata,
   setDraftMetadataKeepingKeys,
-} from "../../src/psi/advancedInviteDraft.js";
+} from "../../src/psi/authoring/advancedInviteDraft.js";
 
 import type { CSVRow, Metadata } from "@psilink/core";
 

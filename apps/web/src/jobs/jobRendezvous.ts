@@ -20,7 +20,7 @@ import { isPathWithin } from "./pathContainment";
  * With {@link JOB_RENDEZVOUS_OUTBOUND_DIR_ENV} also set, this names the INBOUND
  * (peer-written) leg of a split rendezvous, not a directory both parties write.
  */
-export const JOB_RENDEZVOUS_DIR_ENV = "JOB_RENDEZVOUS_DIR";
+const JOB_RENDEZVOUS_DIR_ENV = "JOB_RENDEZVOUS_DIR";
 
 /**
  * Names the OUTBOUND (self-written) rendezvous directory of a split filedrop
@@ -34,7 +34,7 @@ export const JOB_RENDEZVOUS_DIR_ENV = "JOB_RENDEZVOUS_DIR";
  * fallback is refused rather than synced (see {@link rendezvousSplitFaults}).
  * Server-side configuration, never a browser-sent path.
  */
-export const JOB_RENDEZVOUS_OUTBOUND_DIR_ENV = "JOB_RENDEZVOUS_OUTBOUND_DIR";
+const JOB_RENDEZVOUS_OUTBOUND_DIR_ENV = "JOB_RENDEZVOUS_OUTBOUND_DIR";
 
 /**
  * Names the SHARED FOLDER the rendezvous mount stands for, for when a launcher
@@ -46,7 +46,7 @@ export const JOB_RENDEZVOUS_OUTBOUND_DIR_ENV = "JOB_RENDEZVOUS_OUTBOUND_DIR";
  * Server-side configuration; reaches the partner in the invitation's locator and
  * accept kit.
  */
-export const JOB_RENDEZVOUS_NAME_ENV = "JOB_RENDEZVOUS_NAME";
+const JOB_RENDEZVOUS_NAME_ENV = "JOB_RENDEZVOUS_NAME";
 
 /**
  * Names the SHARED FOLDER the OUTBOUND mount of a split rendezvous stands for, the
@@ -59,7 +59,7 @@ export const JOB_RENDEZVOUS_NAME_ENV = "JOB_RENDEZVOUS_NAME";
  * Server-side configuration; reaches the partner in the invitation's locator and
  * accept kit.
  */
-export const JOB_RENDEZVOUS_OUTBOUND_NAME_ENV = "JOB_RENDEZVOUS_OUTBOUND_NAME";
+const JOB_RENDEZVOUS_OUTBOUND_NAME_ENV = "JOB_RENDEZVOUS_OUTBOUND_NAME";
 
 declare global {
   var jobRendezvousProvisioning: JobRendezvousProvisioning | undefined;
@@ -74,7 +74,7 @@ declare global {
  * own terms and naming the variable to fix. When set, no filedrop exchange is
  * offered or created.
  */
-export interface JobRendezvousProvisioning {
+interface JobRendezvousProvisioning {
   /** The inbound (peer-written) leg, or the single shared mount when no outbound leg
    * is provisioned. Undefined when no rendezvous mount resolves at all. */
   dir?: string;
@@ -391,7 +391,7 @@ function splitPairProblem(
 /** What a split-provisioned console's two mounts are faulted for: the refusal
  * that stops every filedrop exchange, and the warning that the containment half of
  * it was decided without a leg's real path. Either or both may be absent. */
-export interface RendezvousSplitFaults {
+interface RendezvousSplitFaults {
   problem?: string;
   unresolvedLegWarning?: string;
 }

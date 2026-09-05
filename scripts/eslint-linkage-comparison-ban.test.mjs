@@ -61,7 +61,10 @@ async function importHits(filePath, source) {
 // outside the ban by design: the suites that pin the prune's effect ask core's
 // strict predicate and the wrapper about the same key and compare the answers.
 const CHOKEPOINT = resolve(repoRoot, "apps/web/src/psi/linkageComparison.ts");
-const WEB_SRC = resolve(repoRoot, "apps/web/src/psi/advancedInviteTerms.ts");
+const WEB_SRC = resolve(
+  repoRoot,
+  "apps/web/src/psi/authoring/advancedInviteTerms.ts",
+);
 const WEB_TEST = resolve(
   repoRoot,
   "apps/web/test/unit/guidedOptInKeys.test.ts",
@@ -186,7 +189,7 @@ describe("the linkage-compare chokepoint ban", { timeout: 60_000 }, () => {
     expect(
       await importHits(
         WEB_SRC,
-        'import { isOptInDraftKey } from "@psi/advancedInvite";\n',
+        'import { isOptInDraftKey } from "@psi/authoring/advancedInvite";\n',
       ),
     ).toHaveLength(0);
   });

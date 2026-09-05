@@ -12,18 +12,18 @@ import {
 import {
   CRON_EXPORT_CONFIG_MIME,
   CRON_EXPORT_KEY_MIME,
-} from "@psi/managedCronExport";
+} from "@psi/managed/managedCronExport";
 import {
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
-} from "@psi/managedExchangeRecord";
-import { managedCronExportPanelState } from "@bench/managedCronExportModel";
+} from "@psi/managed/managedExchangeRecord";
+import { managedCronExportPanelState } from "@recurring/managedCronExportModel";
 
 import type { ExchangeLocator, WebRTCExchangeLocator } from "@psilink/core";
 import type {
   ManagedExchangeRecord,
   NewManagedExchange,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 
 // The pure model behind the command-line export panel, tested in Node without a
 // store or a download: what the panel renders for an exportable record, the two

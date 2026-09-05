@@ -1,6 +1,6 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 
-import { SavedExchanges } from "@bench/SavedExchanges";
+import { SavedExchanges } from "@recurring/SavedExchanges";
 import { isConsoleBuild } from "@utils/clientConfig";
 import { seo } from "@utils/seo";
 

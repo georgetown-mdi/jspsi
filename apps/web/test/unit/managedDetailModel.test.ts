@@ -8,19 +8,19 @@ import {
   linkageTermsRows,
   runHistoryEntries,
   scheduleView,
-} from "@bench/managedDetailModel";
+} from "@recurring/managedDetailModel";
 import {
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
-} from "@psi/managedExchangeRecord";
-import { managedExchangeLapsed } from "@psi/managedExpiry";
+} from "@psi/managed/managedExchangeRecord";
+import { managedExchangeLapsed } from "@psi/managed/managedExpiry";
 
 import type {
   ManagedExchangeLastRun,
   ManagedExchangeSchedule,
   ManagedExchangeSide,
   NewManagedExchange,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 import type { WebRTCExchangeLocator } from "@psilink/core";
 
 // The pure derivation behind the managed exchange detail view, tested in Node: the

@@ -57,7 +57,7 @@ export const PERSISTENCE_LOSS_EXIT_CODE = 73;
  *   already happened. What was lost is named by the `warning` events the CLI
  *   emitted before its terminal event, which the relay already holds.
  */
-export type JobOutcome =
+type JobOutcome =
   "succeeded" | "failed" | "cancelled" | "completedWithPersistenceLoss";
 
 /** The reconciled terminal state of a CLI run. */
@@ -133,7 +133,7 @@ export function resolveCliBinaryPath(
  * without limit; the tail is sanitized before it is exposed and is never
  * streamed to the client raw.
  */
-export const STDERR_TAIL_CAP = 8192;
+const STDERR_TAIL_CAP = 8192;
 
 /**
  * The maximum length buffered on the fd-3 line reader, in UTF-16 code units,

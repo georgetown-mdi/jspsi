@@ -5,7 +5,7 @@ import {
   fetchJobInputs,
   fetchJobRendezvous,
   postJobInputCoverage,
-} from "@psi/workInputClient";
+} from "@psi/jobClient/workInputClient";
 import { consoleCoverageProvider } from "@components/useNonEmptyRates";
 
 import type { Standardization } from "@psilink/core";

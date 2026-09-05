@@ -10,24 +10,24 @@ import { describe, expect, test } from "vitest";
 import {
   MANAGED_EXCHANGE_SCHEMA_VERSION,
   composeManagedExchangeFile,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 import {
   assessManagedInputColumns,
   managedInputFailureKind,
-} from "@psi/managedInputGuard";
+} from "@psi/managed/managedInputGuard";
 import {
   deriveManagedFailureTier,
   importedSinceLastSuccess,
-} from "@psi/managedFailureTiers";
-import { prepareManagedRerunExchange } from "@psi/managedPreparedExchange";
-import { rerunFailureLastRun } from "@psi/managedRun";
+} from "@psi/managed/managedFailureTiers";
+import { prepareManagedRerunExchange } from "@psi/managed/managedPreparedExchange";
+import { rerunFailureLastRun } from "@psi/managed/managedRun";
 
 import type {
   ManagedExchangeLastRun,
   ManagedExchangeRecord,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 import type { CSVRow } from "@psilink/core";
-import type { ManagedLocalState } from "@psi/managedLocalState";
+import type { ManagedLocalState } from "@psi/managed/managedLocalState";
 
 // The desync-versus-attack tier derivation, tested in Node: each recorded benign state
 // resolves to its own tier from the record's OWN structured bookkeeping, and only a

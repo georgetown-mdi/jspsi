@@ -10,15 +10,15 @@ import { describe, expect, test } from "vitest";
 import {
   MANAGED_EXCHANGE_SCHEMA_VERSION,
   composeManagedExchangeFile,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 import {
   canReinviteFromRecord,
   composeManagedReinvite,
-} from "@psi/managedReinvite";
+} from "@psi/managed/managedReinvite";
 
 import type { InvitationLocation } from "@psi/invitation";
 import type { InvitationToken } from "@psilink/core";
-import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
+import type { ManagedExchangeRecord } from "@psi/managed/managedExchangeRecord";
 
 // Fast re-invite from a stored record, tested in Node: the fresh invitation is
 // composed from the record's OWN document (terms + committed send set), mints only a

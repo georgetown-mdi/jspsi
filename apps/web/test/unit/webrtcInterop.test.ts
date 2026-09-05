@@ -6,7 +6,10 @@ import { default as EventEmitter } from "eventemitter3";
 
 import { ConnectionError } from "@psilink/core";
 
-import { dialAsAcceptor, listenAsInviter } from "../../src/psi/rendezvous.js";
+import {
+  dialAsAcceptor,
+  listenAsInviter,
+} from "../../src/psi/transport/rendezvous.js";
 import { HANDSHAKE_ROLE_FOR_SIDE } from "../../src/psi/handshakeRole.js";
 import { authenticateExchange } from "../../src/psi/authenticateExchange.js";
 import { prepareAcceptedInvitation } from "../../src/psi/acceptInvitation.js";

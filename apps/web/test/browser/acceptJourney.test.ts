@@ -17,8 +17,8 @@ import {
   generateSharedSecret,
 } from "@psilink/core";
 
-import { WAITING_STAGE_ID, stagesFor } from "@bench/exchangeRun";
-import { AcceptorBench } from "@bench/AcceptorBench";
+import { WAITING_STAGE_ID, stagesFor } from "@exchange/exchangeRun";
+import { AcceptorScreen } from "@exchange/AcceptorScreen";
 
 import { createAppMount } from "./renderApp";
 
@@ -31,16 +31,16 @@ import type {
 // Mounts the acceptor route tree and drives it end to end through the UI a
 // user touches (file select, consent action, Start), checking the handoff
 // between the acquire phase, the consent gate, the columns step, and the
-// run/completion screen. Per-screen behavior lives in benchAccept.test.ts;
+// run/completion screen. Per-screen behavior lives in accept.test.ts;
 // PSI mechanics live in invitedPSI.test.ts. This file checks only that the
 // screens hand off correctly for a full UI journey to Done with a
 // downloadable result.
 
-// Entry point: AcceptorBench, mounted directly. That is exactly the component
+// Entry point: AcceptorScreen, mounted directly. That is exactly the component
 // the /accept route renders (routes/accept.tsx), matching the suite's mount
 // idiom (direct createRoot, the router boundary mocked).
 
-// AcceptorBench's recovery links and lobby touch the router boundary; the
+// AcceptorScreen's recovery links and lobby touch the router boundary; the
 // journey never navigates.
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
@@ -48,7 +48,7 @@ vi.mock("@tanstack/react-router", async () =>
 
 // The rendezvous dial runs only inside the real lifecycle's acquire closure,
 // which the lifecycle stub below replaces wholesale, so it is never invoked.
-vi.mock("@psi/rendezvous", async () =>
+vi.mock("@psi/transport/rendezvous", async () =>
   (await import("./moduleMocks")).rendezvousMock(),
 );
 
@@ -66,7 +66,7 @@ function preparedWith(keyCount: number): PreparedExchange {
   } as unknown as PreparedExchange;
 }
 
-// The lifecycle stub for this journey: unlike benchAccept.test.ts, which records
+// The lifecycle stub for this journey: unlike accept.test.ts, which records
 // the call and fires the callbacks by hand afterward, this stub settles the run
 // itself. On invocation it captures the owner's AbortController (the run's
 // `signal`), emits the real stage tree, walks the pre-run stages, then delivers
@@ -150,7 +150,7 @@ afterEach(() => {
 
 test("acceptor journey reaches Done with a downloadable result driven only through the UI", async () => {
   window.location.hash = await encodeRunToken();
-  app.render(createElement(AcceptorBench));
+  app.render(createElement(AcceptorScreen));
 
   // Review the terms -> Continue. The decode-to-terms handoff is the acquire
   // phase's own state reaching the first rendered screen.

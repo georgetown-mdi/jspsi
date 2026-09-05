@@ -26,16 +26,19 @@ logLibrary.setDefaultLevel(config.LOG_LEVEL);
 // catch-all; `@psi` here stands in for that catch-all, which the unit project
 // needs because its `src/psi` sources pull in `@utils/*`.
 const srcAliases = {
-  "@bench": path.resolve(import.meta.dirname, "src/bench"),
   "@components": path.resolve(import.meta.dirname, "src/components"),
+  "@console": path.resolve(import.meta.dirname, "src/console"),
+  "@exchange": path.resolve(import.meta.dirname, "src/exchange"),
   "@jobs": path.resolve(import.meta.dirname, "src/jobs"),
+  "@recurring": path.resolve(import.meta.dirname, "src/recurring"),
+  "@styles": path.resolve(import.meta.dirname, "src/styles"),
   "@utils": path.resolve(import.meta.dirname, "src/utils"),
   "@psi": path.resolve(import.meta.dirname, "src/psi"),
   "@theme": path.resolve(import.meta.dirname, "src/theme"),
   "@": path.resolve(import.meta.dirname, "src"),
 };
 
-// The WASM PSI worker engine. It is imported only by src/psi/psiCrypto.worker.ts, a
+// The WASM PSI worker engine. It is imported only by src/psi/workers/psiCrypto.worker.ts, a
 // `new Worker(new URL(...))` entry Vite's dependency scanner does not traverse, so it
 // is not discovered at startup. Without pre-bundling it in `optimizeDeps.include`, the
 // worker's first spawn triggers a dependency re-optimize and a full page reload
@@ -273,7 +276,7 @@ export default defineConfig((_configEnv) => {
               headless: true,
               enabled: true,
               // Vitest's default viewport is phone-sized (414x896), below the
-              // bench's narrow cut-over (NARROW_BENCH_MAX_WIDTH), which would
+              // app's narrow cut-over (NARROW_VIEWPORT_MAX_WIDTH), which would
               // silently flip every suite into the narrow layout. Pin the
               // project to a wide desktop viewport so the wide layout is the
               // deterministic default; a narrow-layout test opts in with

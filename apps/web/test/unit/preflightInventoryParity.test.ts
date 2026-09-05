@@ -11,24 +11,24 @@ import {
   CONNECTION_PER_POLL_SHORT_INTERVAL_ADVISORY,
   FILEDROP_CONNECTION_TUNING,
   LOW_POLL_INTERVAL_ADVISORY,
-} from "@bench/connectionTuningModel";
+} from "@console/connectionTuningModel";
 import {
   EMPTY_SFTP_FORM,
   KEYBOARD_INTERACTIVE_REQUIRES_PASSWORD,
   PASSPHRASE_REQUIRES_PRIVATE_KEY,
   SPLIT_DIRECTORY_RETAIN_REQUIREMENT,
   sftpFormError,
-} from "@bench/sftpConnectionForm";
+} from "@console/sftpConnectionForm";
 import {
   acceptorDisclosedColumns,
   acceptorPayloadDeclarationConflict,
-} from "@bench/acceptorColumnsModel";
+} from "@exchange/acceptorColumnsModel";
 import { StandardizationPreview } from "@components/StandardizationPreview";
 import { linkageRefusalFor } from "@psi/linkageRefusal";
-import { probePeerAnswerCopy } from "@bench/SftpAuthoringForm";
+import { probePeerAnswerCopy } from "@console/SftpAuthoringForm";
 
 import type { PreflightId } from "@psilink/testkit/preflightInventory";
-import type { SftpConnectionFormValues } from "@bench/sftpConnectionForm";
+import type { SftpConnectionFormValues } from "@console/sftpConnectionForm";
 
 // This is the console half of the preflight parity inventory
 // (`@psilink/testkit/preflightInventory`); the CLI half is
@@ -46,7 +46,7 @@ type ConsoleSurface = readonly [module: string, symbol: unknown] | null;
 const CONSOLE_SURFACES: Record<PreflightId, ConsoleSurface> = {
   linkageSatisfiability: ["@psi/linkageRefusal", linkageRefusalFor],
   unacceptedPayloadColumns: [
-    "@bench/acceptorColumnsModel",
+    "@exchange/acceptorColumnsModel",
     acceptorPayloadDeclarationConflict,
   ],
   valueConstraints: [
@@ -54,35 +54,35 @@ const CONSOLE_SURFACES: Record<PreflightId, ConsoleSurface> = {
     StandardizationPreview,
   ],
   passphraseRequiresPrivateKey: [
-    "@bench/sftpConnectionForm",
+    "@console/sftpConnectionForm",
     PASSPHRASE_REQUIRES_PRIVATE_KEY,
   ],
   keyboardInteractiveRequiresPassword: [
-    "@bench/sftpConnectionForm",
+    "@console/sftpConnectionForm",
     KEYBOARD_INTERACTIVE_REQUIRES_PASSWORD,
   ],
   lowPollingFrequency: [
-    "@bench/connectionTuningModel",
+    "@console/connectionTuningModel",
     LOW_POLL_INTERVAL_ADVISORY,
   ],
   connectionPerPollShortInterval: [
-    "@bench/connectionTuningModel",
+    "@console/connectionTuningModel",
     CONNECTION_PER_POLL_SHORT_INTERVAL_ADVISORY,
   ],
   unsupportedChannelFlags: [
-    "@bench/connectionTuningModel",
+    "@console/connectionTuningModel",
     FILEDROP_CONNECTION_TUNING,
   ],
   ignoredOfflineOverrides: null,
   keyFilePath: null,
-  hostKeyTrust: ["@bench/SftpAuthoringForm", probePeerAnswerCopy],
+  hostKeyTrust: ["@console/SftpAuthoringForm", probePeerAnswerCopy],
   identityDivergence: null,
   outboundPayloadConsent: [
-    "@bench/acceptorColumnsModel",
+    "@exchange/acceptorColumnsModel",
     acceptorDisclosedColumns,
   ],
   splitDirectoryRequiresRetain: [
-    "@bench/sftpConnectionForm",
+    "@console/sftpConnectionForm",
     SPLIT_DIRECTORY_RETAIN_REQUIREMENT,
   ],
   jobAdmission: null,

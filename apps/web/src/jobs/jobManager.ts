@@ -1,14 +1,18 @@
 import path from "node:path";
 
 import {
-  JOB_FILE_NAMES,
-  composeConfigDocument,
-  composeKeyFileDocument,
-  composeSftpConfigDocument,
   zeroSetupFiledropArgv,
   zeroSetupOptionsArgv,
   zeroSetupSftpArgv,
-} from "./intent";
+} from "./intentArgv";
+
+import {
+  composeConfigDocument,
+  composeKeyFileDocument,
+  composeSftpConfigDocument,
+} from "./intentConfig";
+import { JOB_FILE_NAMES } from "./intentSchemas";
+
 import { JobInputNotFoundError, jobInputFilePath } from "./workInputs";
 import {
   createWorkdir,
@@ -49,7 +53,7 @@ import type {
   JobExchangeIntent,
   JobInputFileReference,
   JobSigningPaths,
-} from "./intent";
+} from "./intentSchemas";
 import type { ExchangeRecordOutcome } from "@psilink/core";
 import type { JobHandoff } from "./handoff";
 import type { JobSftpServerEntry } from "./sftpServer";
@@ -153,7 +157,7 @@ export interface BufferedEvent {
 }
 
 /** The lifecycle status of a job. */
-export type JobStatus = "running" | "succeeded" | "failed" | "cancelled";
+type JobStatus = "running" | "succeeded" | "failed" | "cancelled";
 
 /**
  * Why the exchange-record pair is withheld for a job, distinguished because a
@@ -172,7 +176,7 @@ export type RecordUnavailableReason =
  * in-memory {@link JobRecord}. There is at most one exchange, held in memory only;
  * a restart forgets it, so there is no restored view.
  */
-export interface JobView {
+interface JobView {
   id: string;
   status: JobStatus;
   /** The reconciled terminal state, once the child has exited. */
@@ -275,18 +279,18 @@ type ExchangeSlot =
  * dropping events silently, so a supervisor never observes a truncated
  * history.
  */
-export const EVENT_BUFFER_CAP = 10000;
+const EVENT_BUFFER_CAP = 10000;
 
 /** The grace before SIGINT escalates to SIGTERM during cancellation. */
-export const CANCEL_SIGTERM_GRACE_MS = 5000;
+const CANCEL_SIGTERM_GRACE_MS = 5000;
 /** The grace before SIGTERM escalates to SIGKILL during cancellation. */
-export const CANCEL_SIGKILL_GRACE_MS = 5000;
+const CANCEL_SIGKILL_GRACE_MS = 5000;
 
 /**
  * Options for {@link JobManager}, so tests can inject a stub binary path and
  * shortened timers without touching the environment.
  */
-export interface JobManagerOptions {
+interface JobManagerOptions {
   dataRoot: string;
   binaryPath?: string;
   eventBufferCap?: number;

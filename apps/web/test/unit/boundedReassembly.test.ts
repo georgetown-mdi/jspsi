@@ -5,7 +5,7 @@ import { ConnectionError, WEBRTC_VALUE_WEIGHTS } from "@psilink/core";
 import {
   boundChunkReassembly,
   checkDeliveredFrameBound,
-} from "../../src/psi/boundedReassembly.js";
+} from "../../src/psi/transport/boundedReassembly.js";
 
 import type { DataConnection } from "peerjs";
 

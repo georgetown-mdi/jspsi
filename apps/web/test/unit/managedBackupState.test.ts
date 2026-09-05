@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
 
-import { deriveManagedBackupState } from "@psi/managedBackupState";
+import { deriveManagedBackupState } from "@psi/managed/managedBackupState";
 
-import type { ManagedBackupMarker } from "@psi/managedBackupState";
+import type { ManagedBackupMarker } from "@psi/managed/managedBackupState";
 
 // The one derived backup state, now marker-present/absent: a present marker is
 // backed-up, no marker is backup-needed. Currency is maintained structurally by how the

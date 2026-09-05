@@ -4,17 +4,17 @@ import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
 import {
   MANAGED_EXCHANGE_SCHEMA_VERSION,
   composeManagedExchangeFile,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 import {
   savedExchangeRow,
   savedExchangeRows,
-} from "@bench/savedExchangesModel";
+} from "@recurring/savedExchangesModel";
 
 import type {
   ManagedExchangeRecord,
   ManagedExchangeSchedule,
-} from "@psi/managedExchangeRecord";
-import type { ManagedLocalState } from "@psi/managedLocalState";
+} from "@psi/managed/managedExchangeRecord";
+import type { ManagedLocalState } from "@psi/managed/managedLocalState";
 
 // The saved-exchanges run list's display derivation, tested in Node: the side
 // label, the one-line status from `lastRun` and `expires`, the derived backup

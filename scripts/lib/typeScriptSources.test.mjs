@@ -16,7 +16,7 @@ import {
 // walk needs, the descendants a walk reaches -- and that a repository-relative
 // path names the file this checkout ships.
 
-/** A seat in the bench's idiom: two calls, both written inside JSX. */
+/** A seat in the app's idiom: two calls, both written inside JSX. */
 const SEAT = `export function Seat({ error }: SeatProps) {
   const alert = <Alert message={describe(error)}>{retry(error)}</Alert>;
   return <section>{alert}</section>;

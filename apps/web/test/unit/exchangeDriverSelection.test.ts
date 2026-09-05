@@ -3,11 +3,11 @@ import { describe, expect, test } from "vitest";
 import {
   selectExchangeDriver,
   sftpConnectionAvailability,
-} from "@bench/exchangeDriverSelection";
+} from "@psi/exchangeDriverSelection";
 
 import type { DeploymentProfile } from "@utils/clientConfig";
-import type { ExchangeDriverSelection } from "@bench/exchangeDriverSelection";
-import type { Transport } from "@bench/inviterModel";
+import type { ExchangeDriverSelection } from "@psi/exchangeDriverSelection";
+import type { Transport } from "@psi/transportChooser";
 
 const PROFILES: ReadonlyArray<DeploymentProfile> = ["hosted", "console"];
 const CHANNELS: ReadonlyArray<Transport> = ["browser", "sftp", "filedrop"];

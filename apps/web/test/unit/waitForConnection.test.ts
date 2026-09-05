@@ -5,7 +5,7 @@ import { default as EventEmitter } from "eventemitter3";
 import {
   PartnerNoShowError,
   waitForIncomingConnection,
-} from "../../src/psi/waitForConnection.js";
+} from "../../src/psi/transport/waitForConnection.js";
 
 import type { DataConnection } from "peerjs";
 import type Peer from "peerjs";

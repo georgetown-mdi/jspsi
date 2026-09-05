@@ -17,7 +17,7 @@ import {
   EXCHANGE_FILES_DEFAULT,
   ZERO_SETUP_EXCHANGE_FILES,
   exchangeFilesOptions,
-} from "@bench/exchangeFilesModel";
+} from "@console/exchangeFilesModel";
 import {
   CONNECTION_PER_POLL_SHORT_INTERVAL_ADVISORY,
   CONNECTION_TUNING_DEFAULT,
@@ -30,12 +30,13 @@ import {
   connectionTuningSummary,
   defaultPlaceholder,
   withConnectionTuning,
-} from "@bench/connectionTuningModel";
+} from "@console/connectionTuningModel";
+import { zeroSetupOptionsArgv } from "@jobs/intentArgv";
+
 import {
   composeConfigDocument,
   composeSftpConfigDocument,
-  zeroSetupOptionsArgv,
-} from "@jobs/intent";
+} from "@jobs/intentConfig";
 
 import {
   testSftpServerEntry,
@@ -43,8 +44,8 @@ import {
   validSftpIntent,
 } from "../utils/jobFixtures";
 
-import type { ConnectionTuningDraft } from "@bench/connectionTuningModel";
-import type { ExchangeFilesDraft } from "@bench/exchangeFilesModel";
+import type { ConnectionTuningDraft } from "@console/connectionTuningModel";
+import type { ExchangeFilesDraft } from "@console/exchangeFilesModel";
 
 const draft = (
   overrides: Partial<ConnectionTuningDraft> = {},

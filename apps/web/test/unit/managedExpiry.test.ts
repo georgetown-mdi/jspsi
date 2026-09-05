@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   ManagedExchangeExpiredError,
   managedExchangeLapsed,
-} from "@psi/managedExpiry";
+} from "@psi/managed/managedExpiry";
 
 // The pure lapsed-`expires` check, tested in Node: it is applied before any
 // connection, so a lapsed bound is its own benign state, never the desync/attack

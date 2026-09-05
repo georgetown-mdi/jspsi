@@ -12,7 +12,7 @@ import { sortAssociationTable } from "@psilink/core/testing";
 import PSI from "@openmined/psi.js/psi_wasm_web";
 
 import { authenticateExchange } from "../../src/psi/authenticateExchange.js";
-import { openPeerMessageConnection } from "../../src/psi/peerMessageConnection.js";
+import { openPeerMessageConnection } from "../../src/psi/transport/peerMessageConnection.js";
 
 import {
   canReachServer,

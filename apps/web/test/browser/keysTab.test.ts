@@ -6,16 +6,19 @@ import { page } from "vitest/browser";
 
 import { createElement } from "react";
 
-import { editorFromCsv, editorWithAuthoredDraft } from "@bench/inviterModel";
+import { editorFromCsv, editorWithAuthoredDraft } from "@psi/inviterEditor";
 
-import { buildAdvancedTerms, draftFromTerms } from "@psi/advancedInvite";
+import {
+  buildAdvancedTerms,
+  draftFromTerms,
+} from "@psi/authoring/advancedInvite";
 
-import { KeysTab } from "@bench/KeysTab";
-import { consoleAcquiredCsv } from "@bench/consoleAcquiredCsv";
+import { KeysTab } from "@exchange/KeysTab";
+import { consoleAcquiredCsv } from "@console/consoleAcquiredCsv";
 
 import { createAppMount } from "./renderApp";
 
-import type { AcquiredCsv } from "@bench/inviterModel";
+import type { AcquiredCsv } from "@psi/inviterEditor";
 
 // A minimal file with a date_of_birth column, so the seeded default keys
 // include one built from it (the element the dead-key transform below targets).
@@ -38,7 +41,7 @@ const csv: AcquiredCsv = {
 // Author a self-defeating parse_date onto the date_of_birth element of the
 // first key: input_format "MM/DD" has no year, so every record's element
 // resolves empty and the whole key runs to a silent empty result -- the same
-// dead-key construction the model-level tests in benchInviterModel.test.ts use.
+// dead-key construction the model-level tests in inviterModel.test.ts use.
 function withDeadDobKey(editor: ReturnType<typeof editorFromCsv>) {
   const keys = editor.draft.keys.map((entry, index) => {
     if (index !== 0) return entry;
@@ -248,7 +251,7 @@ describe("KeysTab: expert import/export over a rows-withheld console shape", () 
     // The console acquires a server-side profile, not the rows, so its `rawRows` is
     // a getter that throws in dev/test. KeysTab must feed the import/export the
     // rows-withheld seed ([]), not the getter -- so expert mode renders rather than
-    // crashing the console.
+    // crashing the screen.
     const consoleCsv = consoleAcquiredCsv({
       fileName: "clients.csv",
       sizeBytes: 4096,

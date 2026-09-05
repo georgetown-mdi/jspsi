@@ -10,17 +10,17 @@ import {
   getManagedExchange,
   persistManagedExchangeReinvite,
   recordManagedExchangeLastRun,
-} from "@psi/managedExchangeStore";
+} from "@psi/managed/managedExchangeStore";
 import {
   getManagedLocalState,
   markManagedExchangeImported,
-} from "@psi/managedLocalState";
-import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
-import { failedRun } from "@psi/managedRunRotate";
-import { managedRunFailureFromRecord } from "@bench/managedRunLaunchModel";
-import { reinviteManagedExchange } from "@psi/managedReinviteDriver";
+} from "@psi/managed/managedLocalState";
+import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
+import { failedRun } from "@psi/managed/managedRunRotate";
+import { managedRunFailureFromRecord } from "@recurring/managedRunLaunchModel";
+import { reinviteManagedExchange } from "@psi/managed/managedReinviteDriver";
 
-import type { NewManagedExchange } from "@psi/managedExchangeRecord";
+import type { NewManagedExchange } from "@psi/managed/managedExchangeRecord";
 import type { WebRTCExchangeLocator } from "@psilink/core";
 
 // The fast re-invite recovery, driven against the real store: a re-invite rotates the

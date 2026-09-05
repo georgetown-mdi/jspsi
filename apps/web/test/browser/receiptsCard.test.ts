@@ -12,14 +12,14 @@ import "@mantine/core/styles.css";
 import {
   IDENTITY_LABEL_REQUIRED_REASON,
   RECEIPTS_DEFAULT,
-} from "@bench/receiptsModel";
-import { ReceiptsCard } from "@bench/ReceiptsCard";
+} from "@psi/receiptsModel";
+import { ReceiptsCard } from "@console/ReceiptsCard";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 
-import type { JobRendezvousConfig } from "@psi/workInputClient";
+import type { JobRendezvousConfig } from "@psi/jobClient/workInputClient";
 import type { ReactElement } from "react";
-import type { ReceiptsDraft } from "@bench/receiptsModel";
+import type { ReceiptsDraft } from "@psi/receiptsModel";
 
 // The console's receipts card against a stubbed signing endpoint. What
 // `receiptsModel` decides is pinned by the unit suite; what this one covers is the
@@ -115,7 +115,7 @@ function stubSigningApi(options: StubOptions = {}): { bodies: Array<string> } {
   return { bodies };
 }
 
-/** The draft the harness last held, so a test can assert on the value a bench
+/** The draft the harness last held, so a test can assert on the value a screen
  * would include in the run intent as well as on what is rendered. */
 let latestDraft: ReceiptsDraft = RECEIPTS_DEFAULT;
 
@@ -130,8 +130,8 @@ const SINGLE_MOUNT_RENDEZVOUS: JobRendezvousConfig = {
 };
 
 /**
- * The card wired the way both benches wire it -- `AcceptorBench` directly and
- * `InviterBench` through `ReviewCreateSection` -- with a bare `useState` setter as
+ * The card wired the way both screens wire it -- `AcceptorScreen` directly and
+ * `InviterScreen` through `ReviewCreateSection` -- with a bare `useState` setter as
  * `onChange`. That is the contract the concurrent-edit tests turn on: the setter
  * REPLACES the whole draft, so whatever the card passes is the whole of what
  * survives.

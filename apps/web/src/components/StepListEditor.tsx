@@ -64,7 +64,7 @@ export interface EditableStep {
  * on `soundex`); a param with no default is left unset for the operator to fill. A
  * step with no seeded params omits the `params` key entirely, matching the shape
  * core's own default pipelines use. */
-export function newStep(functionName: string): EditableStep {
+function newStep(functionName: string): EditableStep {
   const descriptor = descriptorFor(functionName);
   const params: Record<string, unknown> = {};
   if (descriptor !== undefined)

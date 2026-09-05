@@ -8,13 +8,13 @@ import {
 } from "@psilink/core";
 
 import { authenticateExchange } from "./authenticateExchange";
-import { createBrowserPsiEngineFactory } from "./psiCryptoController";
-import { defaultSpawnPsiCryptoWorker } from "./psiCryptoWorkerClient";
-import { openPeerMessageConnection } from "./peerMessageConnection";
+import { createBrowserPsiEngineFactory } from "./workers/psiCryptoController";
+import { defaultSpawnPsiCryptoWorker } from "./workers/psiCryptoWorkerClient";
+import { openPeerMessageConnection } from "./transport/peerMessageConnection";
 
 import type { DataConnection } from "peerjs";
 import type Peer from "peerjs";
-import type { PeerCloseOutcome } from "./waitForPeerClose";
+import type { PeerCloseOutcome } from "./transport/waitForPeerClose";
 
 import type {
   ExchangeResult,
@@ -31,7 +31,7 @@ const log = getLogger("exchangeLifecycle");
  * waited for the peer up to the ceiling without the peer's take signal
  * arriving: this side's exchange finished, but the partner's may not have.
  * Composed raw and escaped once at the display boundary
- * (`apps/web/src/bench/runWarnings.ts`). Names no duration -- the operator
+ * (`apps/web/src/psi/runWarnings.ts`). Names no duration -- the operator
  * does not set or see the ceiling -- and directs the operator to confirm with
  * the partner, since only the partner's result is in doubt.
  */
@@ -156,7 +156,7 @@ export interface AcquiredExchange {
 /** The `signal` and stage-reporting hooks an {@link Acquire} uses while it
  * loads/prepares and draws in the peer. Every hook no-ops once `signal`
  * aborts. */
-export interface AcquireContext {
+interface AcquireContext {
   signal: AbortSignal;
   /** Activate a stage (e.g. "waiting for peer" immediately before a wait). */
   onStage: (stageId: string) => void;
@@ -256,7 +256,7 @@ export type GenerateOutput<TOutputs extends ExchangeOutputs = ExchangeOutputs> =
   (result: ExchangeResult, prepared: PreparedExchange) => TOutputs;
 
 /** Options for {@link runExchangeLifecycle}. */
-export interface RunExchangeLifecycleOptions<
+interface RunExchangeLifecycleOptions<
   TOutputs extends ExchangeOutputs = ExchangeOutputs,
 > {
   acquire: Acquire;

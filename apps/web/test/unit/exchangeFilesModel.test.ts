@@ -8,13 +8,16 @@ import {
   ZERO_SETUP_EXCHANGE_FILES,
   exchangeFilesOptions,
   exchangeFilesProblems,
-} from "@bench/exchangeFilesModel";
-import { composeConfigDocument, zeroSetupOptionsArgv } from "@jobs/intent";
-import { PEER_ID_SHAPE_MESSAGE } from "@psi/peerIdLabel";
+} from "@console/exchangeFilesModel";
+import { zeroSetupOptionsArgv } from "@jobs/intentArgv";
+
+import { composeConfigDocument } from "@jobs/intentConfig";
+
+import { PEER_ID_SHAPE_MESSAGE } from "@jobs/intentSchemas";
 
 import { validIntent } from "../utils/jobFixtures";
 
-import type { ExchangeFilesDraft } from "@bench/exchangeFilesModel";
+import type { ExchangeFilesDraft } from "@console/exchangeFilesModel";
 
 const draft = (
   overrides: Partial<ExchangeFilesDraft> = {},

@@ -15,12 +15,12 @@ import { exportLinkageTerms, importLinkageTerms } from "@psi/linkageTermsIO";
 import {
   gatedActiveSettingMessage,
   importedConstraintDivergenceMessage,
-} from "@psi/advancedInvite";
+} from "@psi/authoring/advancedInvite";
 
 import { triggerBlobDownload } from "./blobDownload";
 
 import type { CSVRow, LinkageTerms } from "@psilink/core";
-import type { AdvancedInviteSeed } from "@psi/advancedInvite";
+import type { AdvancedInviteSeed } from "@psi/authoring/advancedInvite";
 
 const IMPORT_SUCCESS = "Imported. Review the loaded terms before generating.";
 

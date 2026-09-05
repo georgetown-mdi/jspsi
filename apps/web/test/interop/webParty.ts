@@ -18,11 +18,11 @@ import {
   acceptorColumnsEditorState,
   acceptorInitialColumnsState,
   acceptorLaunchPayload,
-} from "@bench/acceptorColumnsModel";
+} from "@exchange/acceptorColumnsModel";
 import { authenticateExchange } from "@psi/authenticateExchange";
 import { generateInvitation } from "@psi/invitation";
-import { inviterExchangeDataSpec } from "@psi/advancedInviteTerms";
-import { prepareAcceptorExchange } from "@bench/acceptorExchange";
+import { inviterExchangeDataSpec } from "@psi/authoring/advancedInviteTerms";
+import { prepareAcceptorExchange } from "@exchange/acceptorExchange";
 
 import { HarnessFileDropClient } from "./fileDropTransport";
 
@@ -61,7 +61,7 @@ export interface WebInvitation extends WebPartySetup {
  * The web app's acceptor seat: adopt a partner's invitation and assemble this
  * party's half of the exchange from it.
  *
- * Every step is the app's own (apps/web/src/bench): the confirm-columns editor's
+ * Every step is the app's own (apps/web/src/exchange): the confirm-columns editor's
  * seed over this file's header, the recommended per-type cleaning it derives, the
  * launch payload it hands off, and `prepareAcceptorExchange`'s terms adoption
  * with its disclosed-payload and partner-deduplicate commitments. What the harness

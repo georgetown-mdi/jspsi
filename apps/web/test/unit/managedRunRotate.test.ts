@@ -8,9 +8,9 @@ import {
   runRotationCriticalSection,
   storageFailureRun,
   succeededRun,
-} from "@psi/managedRunRotate";
+} from "@psi/managed/managedRunRotate";
 
-import type { ManagedRotationCriticalSection } from "@psi/managedRunRotate";
+import type { ManagedRotationCriticalSection } from "@psi/managed/managedRunRotate";
 
 // The pure ordering and decision half of the run+rotate critical section, tested
 // in Node without a database or a real Web Lock: the persist-before-data-exchange

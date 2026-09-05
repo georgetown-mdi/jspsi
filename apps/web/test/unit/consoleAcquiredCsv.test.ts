@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { consoleAcquiredCsv } from "../../src/bench/consoleAcquiredCsv.js";
+import { consoleAcquiredCsv } from "../../src/console/consoleAcquiredCsv.js";
 
 describe("consoleAcquiredCsv", () => {
   const profile = {

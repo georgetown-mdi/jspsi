@@ -4,8 +4,11 @@ import { default as EventEmitter } from "eventemitter3";
 
 import { deriveRendezvousPeerId, generateSharedSecret } from "@psilink/core";
 
-import { dialAsAcceptor, listenAsInviter } from "../../src/psi/rendezvous.js";
-import { PartnerNoShowError } from "../../src/psi/waitForConnection.js";
+import {
+  dialAsAcceptor,
+  listenAsInviter,
+} from "../../src/psi/transport/rendezvous.js";
+import { PartnerNoShowError } from "../../src/psi/transport/waitForConnection.js";
 
 import type { DataConnection, PeerOptions } from "peerjs";
 import type Peer from "peerjs";

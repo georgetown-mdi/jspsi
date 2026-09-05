@@ -6,9 +6,9 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   createFetchJobApiClient,
   createServerJobReattachDriver,
-} from "@psi/serverJobExchangeDriver";
+} from "@psi/jobClient/serverJobExchangeDriver";
 import { JobManager } from "@jobs/jobManager";
-import { appendSanitizedRunWarning } from "@bench/runWarnings";
+import { appendSanitizedRunWarning } from "@psi/runWarnings";
 
 import { Route as EventsRoute } from "../../src/routes/api/jobs/$jobId/events";
 

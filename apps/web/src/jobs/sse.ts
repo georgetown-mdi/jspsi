@@ -55,7 +55,7 @@ export const SSE_KEEPALIVE_FRAME = ": keepalive\n\n";
  * this stays well under that floor rather than raising a timeout the
  * deployment owns and psilink does not.
  */
-export const SSE_KEEPALIVE_INTERVAL_MS = 15000;
+const SSE_KEEPALIVE_INTERVAL_MS = 15000;
 
 /**
  * The job-manager surface {@link createJobEventStream} reaches, narrowed to the
@@ -70,7 +70,7 @@ export interface JobEventSubscriber {
 }
 
 /** What {@link createJobEventStream} needs to stream one job's events. */
-export interface JobEventStreamOptions {
+interface JobEventStreamOptions {
   manager: JobEventSubscriber;
   record: JobRecord;
   /** The resume offset from {@link resumeOffsetFrom}: only events with a strictly

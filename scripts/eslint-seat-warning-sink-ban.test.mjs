@@ -62,7 +62,7 @@ async function banHits(filePath, source) {
 // hold the ban -- a path outside apps/web/src matches none of them and reports
 // zero however the text is written. Only the path is borrowed: every case below
 // lints the text it hands in, which the canary proves.
-const SEAT_FILE = resolve(repoRoot, "apps/web/src/bench/runWarnings.ts");
+const SEAT_FILE = resolve(repoRoot, "apps/web/src/psi/runWarnings.ts");
 
 // A real seat that also sits in the rawRows allowlist block, whose separate
 // `no-restricted-syntax` options REPLACE (not merge with) the broad src block's.
@@ -70,7 +70,7 @@ const SEAT_FILE = resolve(repoRoot, "apps/web/src/bench/runWarnings.ts");
 // silently uncovered.
 const RAW_ROWS_SEAT_FILE = resolve(
   repoRoot,
-  "apps/web/src/bench/useInviterExchange.ts",
+  "apps/web/src/exchange/useInviterExchange.ts",
 );
 
 // Loading the flat config and the typescript-eslint parser for the first time is
@@ -84,7 +84,7 @@ const LINTER_WARM_UP_TIMEOUT_MS = 30_000;
 // linted by nothing else here.
 const SEAT_FILE_FIRST_PARSE = resolve(
   repoRoot,
-  "apps/web/src/bench/runOutputs.ts",
+  "apps/web/src/psi/runOutputs.ts",
 );
 
 // Every seat the app actually offers the driver, linted as it stands on disk. The
@@ -94,10 +94,10 @@ const SEAT_FILE_FIRST_PARSE = resolve(
 // that stops offering the slot, fails here rather than leaving a short list
 // reporting zero.
 const APP_SEAT_FILES = [
-  "apps/web/src/bench/useDirectExchange.ts",
-  "apps/web/src/bench/useAcceptorExchange.ts",
-  "apps/web/src/bench/useInviterExchange.ts",
-  "apps/web/src/bench/RecoveredExchangePanel.tsx",
+  "apps/web/src/exchange/useDirectExchange.ts",
+  "apps/web/src/exchange/useAcceptorExchange.ts",
+  "apps/web/src/exchange/useInviterExchange.ts",
+  "apps/web/src/exchange/RecoveredExchangePanel.tsx",
 ].map((seat) => resolve(repoRoot, seat));
 
 // Linting those from disk is a second real pass over the app's sources, so it

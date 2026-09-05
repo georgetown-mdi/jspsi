@@ -8,7 +8,7 @@ import {
   loadCSVFileOffMainThread,
   replyBatchRows,
   shouldParseOffThread,
-} from "../../src/psi/csvParseController.js";
+} from "../../src/psi/workers/csvParseController.js";
 
 import type {
   CSVParseRequest,
@@ -16,7 +16,7 @@ import type {
   CSVParseResult,
   CSVParseRows,
   CSVParseWorker,
-} from "../../src/psi/csvParseController.js";
+} from "../../src/psi/workers/csvParseController.js";
 
 // The header meta a well-formed reply holds -- what core's loadCSVFile puts in
 // meta.fields. Shared by the result fixtures and the streamed done message.

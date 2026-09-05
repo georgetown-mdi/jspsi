@@ -11,18 +11,18 @@ import {
   SFTP_CONNECTION_TUNING,
   connectionTuningOptions,
   connectionTuningProblems,
-} from "@bench/connectionTuningModel";
+} from "@console/connectionTuningModel";
 import {
   EXCHANGE_FILES_DEFAULT,
   ZERO_SETUP_EXCHANGE_FILES,
   exchangeFilesOptions,
-} from "@bench/exchangeFilesModel";
+} from "@console/exchangeFilesModel";
 import { resolveCliBinaryPath, spawnZeroSetupJob } from "@jobs/cliDriver";
 import {
   zeroSetupFiledropArgv,
   zeroSetupOptionsArgv,
   zeroSetupSftpArgv,
-} from "@jobs/intent";
+} from "@jobs/intentArgv";
 
 import {
   awaitJobTerminalState,

@@ -9,13 +9,13 @@ import {
   FINAL_FRAME_UNCONFIRMED_LINK_LOST_WARNING,
   FINAL_FRAME_UNCONFIRMED_WAIT_EXPIRED_WARNING,
 } from "../../src/psi/exchangeLifecycle.js";
-import { openPeerMessageConnection } from "../../src/psi/peerMessageConnection.js";
+import { openPeerMessageConnection } from "../../src/psi/transport/peerMessageConnection.js";
 
 import { canReachServer } from "../utils/pspiFixtures.js";
 import { connectRendezvousPair } from "../utils/rendezvousPair.js";
 
 import type { MessageConnection } from "@psilink/core";
-import type { PeerCloseOutcome } from "../../src/psi/waitForPeerClose.js";
+import type { PeerCloseOutcome } from "../../src/psi/transport/waitForPeerClose.js";
 import type { RendezvousPair } from "../utils/rendezvousPair.js";
 
 /**

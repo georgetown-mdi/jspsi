@@ -1,0 +1,209 @@
+import { useEffect, useRef, useState } from "react";
+
+import { Button, NativeSelect, VisuallyHidden } from "@mantine/core";
+
+import {
+  DISCLOSURE_LABELS,
+  SEMANTIC_TYPE_LABELS,
+  disclosureChoicesForType,
+  disclosureOf,
+  hasMultipleIdentifiers,
+} from "@psi/metadataEditing";
+
+import { ColumnName, isolatedColumnName } from "@components/ColumnName";
+import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
+
+import { disclosedColumnNames } from "@psilink/core";
+
+import styles from "@styles/app.module.css";
+
+import type { Metadata, SemanticType } from "@psilink/core";
+import type { DisclosureChoice } from "@psi/metadataEditing";
+
+const SEMANTIC_TYPES = Object.keys(SEMANTIC_TYPE_LABELS) as Array<SemanticType>;
+
+/**
+ * Step 2 of the inviter spine -- the one mandatory review: what each column is
+ * and what it is used for, which together decide exactly what the partner can
+ * ever see. Presentational over the host's metadata; edits go up through the
+ * two callbacks and the single-identifier rule's demotions come back down as
+ * `announcement`.
+ *
+ * The grid's row headers and its two control labels, the chip list, the summary
+ * its live region speaks, and the demotion `announcement` its caller composes all
+ * pass the operator's own CSV headers through {@link ColumnName} /
+ * {@link isolatedColumnName} -- the same treatment the ledger's send row and the
+ * acceptor's confirm-columns grid use -- so a header cannot read one way where its
+ * disclosure is set and another in the chips, the sentence, the notice, or the
+ * rail. That module documents what the isolation does and does not cover: a sink
+ * here that puts literal copy in one text block with the names -- the notice's
+ * separators and its trailing sentence, the summary the live region speaks -- is
+ * where the residual lands, and the notice is driven in
+ * test/browser/inviterSharing.test.ts.
+ */
+export function MatchingSharingSection({
+  metadata,
+  onColumnType,
+  onColumnDisclosure,
+  announcement,
+  onContinue,
+}: {
+  metadata: Metadata;
+  onColumnType: (columnName: string, type: SemanticType) => void;
+  onColumnDisclosure: (columnName: string, choice: DisclosureChoice) => void;
+  /** The demotion notice from the last edit, announced politely and rendered
+   * under the table; empty when the last edit displaced nothing. */
+  announcement: string;
+  onContinue: () => void;
+}) {
+  const sent = disclosedColumnNames(metadata);
+
+  // The visible send set lives in the ledger and the extra-data block, which
+  // cannot speak for the selects; this debounced region voices the new set as
+  // it changes, computed from the same predicate the run transmits on. The
+  // timer clears on every change and on unmount, so an edit burst announces
+  // once.
+  const summary =
+    sent.length === 0
+      ? "No columns will be sent to your partner."
+      : `Columns sent to your partner: ${sent.map(isolatedColumnName).join(", ")}.`;
+  const [summaryAnnouncement, setSummaryAnnouncement] = useState("");
+  const summaryRef = useRef(summary);
+  summaryRef.current = summary;
+  useEffect(() => {
+    const handle = setTimeout(
+      () => setSummaryAnnouncement(summaryRef.current),
+      600,
+    );
+    return () => clearTimeout(handle);
+  }, [summary]);
+
+  // The two-identifier conflict's visible surfaces are the standing hint and the
+  // work column's Problems entry; this deferred region is its audible half, voiced
+  // even when a seed mounts already in conflict.
+  const conflictAnnouncement = useDeferredAnnouncement(
+    hasMultipleIdentifiers(metadata)
+      ? "Problem: choose a single record identifier."
+      : "",
+  );
+  return (
+    <>
+      <p className={styles.eyebrow}>Step 2 of 3</p>
+      <h1 tabIndex={-1}>Matching &amp; sharing</h1>
+      <p>Confirm what each column is and what it is used for.</p>
+      <div className={styles.tableScroll}>
+        <table className={styles.dataTable}>
+          <caption className={styles.visuallyHidden}>
+            Your columns: type and use
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Column</th>
+              <th scope="col">Type</th>
+              <th scope="col">How it is used</th>
+            </tr>
+          </thead>
+          <tbody>
+            {metadata.map((column) => (
+              <tr key={column.name}>
+                <th
+                  scope="row"
+                  className={`${styles.mono} ${styles.rowHeader}`}
+                >
+                  <ColumnName name={column.name} />
+                </th>
+                <td>
+                  <NativeSelect
+                    aria-label={`Type for ${isolatedColumnName(column.name)}`}
+                    value={column.type}
+                    data={SEMANTIC_TYPES.map((type) => ({
+                      value: type,
+                      label: SEMANTIC_TYPE_LABELS[type],
+                    }))}
+                    onChange={(event) =>
+                      onColumnType(
+                        column.name,
+                        event.currentTarget.value as SemanticType,
+                      )
+                    }
+                  />
+                </td>
+                <td>
+                  <NativeSelect
+                    aria-label={`How ${isolatedColumnName(column.name)} is used`}
+                    value={disclosureOf(column)}
+                    data={disclosureChoicesForType(column.type).map(
+                      (choice) => ({
+                        value: choice,
+                        label: DISCLOSURE_LABELS[choice],
+                      }),
+                    )}
+                    onChange={(event) =>
+                      onColumnDisclosure(
+                        column.name,
+                        event.currentTarget.value as DisclosureChoice,
+                      )
+                    }
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className={`${styles.small} ${styles.sub}`}>
+        Only one column can be the record identifier. Choose a single column
+        that you can use to import the data back into your system.
+      </p>
+      {/* Always mounted so assistive tech observes content changes; kept
+          separate from the hint above so clearing a notice never re-announces
+          the hint. */}
+      <p
+        className={`${styles.small} ${styles.sub}`}
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        {announcement}
+      </p>
+      <VisuallyHidden role="status" aria-live="polite" aria-atomic="true">
+        {summaryAnnouncement}
+      </VisuallyHidden>
+      <VisuallyHidden role="status" aria-live="polite" aria-atomic="true">
+        {conflictAnnouncement}
+      </VisuallyHidden>
+      {sent.length > 0 ? (
+        <>
+          <p>
+            For each row in your file that matches, you will send your partner
+            these elements:
+          </p>
+          <ul className={styles.columnChips}>
+            {sent.map((column) => (
+              <li key={column} className={styles.mono}>
+                <ColumnName name={column} />
+              </li>
+            ))}
+          </ul>
+          <p className={`${styles.small} ${styles.sub}`}>
+            You can change these with the &quot;How it is used&quot; selects
+            above. Your partner never receives the values in your non-matching
+            rows.
+          </p>
+        </>
+      ) : (
+        <div className={styles.stateInset}>
+          <p className={styles.stateLabel}>
+            No columns marked &quot;sent to your partner&quot;
+          </p>
+          <p className={styles.small} style={{ margin: 0 }}>
+            No values will be sent to your partner. Your file&apos;s columns are
+            used only to find matches.
+          </p>
+        </div>
+      )}
+      <div className={styles.workFoot}>
+        <Button onClick={onContinue}>Continue to review &amp; create</Button>
+      </div>
+    </>
+  );
+}

@@ -6,12 +6,12 @@ import { afterEach, describe, expect, test } from "vitest";
 import {
   DIAGNOSTIC_LOG_UNANSWERED_LEAD,
   DIAGNOSTIC_LOG_UNANSWERED_NOTICE,
-} from "@bench/DiagnosticLogPanel";
-import { JOB_FILE_NAMES, jobCreateIntentSchema } from "@jobs/intent";
+} from "@exchange/DiagnosticLogPanel";
+import { JOB_FILE_NAMES, jobCreateIntentSchema } from "@jobs/intentSchemas";
 import {
   LOG_AVAILABILITY_UNANSWERED_LIMIT,
   watchJobDiagnosticLog,
-} from "@psi/jobDiagnosticLog";
+} from "@psi/jobClient/jobDiagnosticLog";
 import {
   RUN_DIAGNOSTICS_DEFAULT,
   SWEEP_CONFIRMATION_NOTICE,
@@ -21,9 +21,9 @@ import {
   runDiagnosticsIntentFields,
   runDiagnosticsProblems,
   runDiagnosticsWithControl,
-} from "@bench/runDiagnosticsModel";
-import { RelayedTerminalError } from "@psi/serverJobExchangeDriver";
-import { failureFor } from "@bench/useInviterExchange";
+} from "@psi/runDiagnosticsModel";
+import { RelayedTerminalError } from "@psi/jobClient/serverJobExchangeDriver";
+import { failureFor } from "@exchange/useInviterExchange";
 import { resolveWorkdirFile } from "@jobs/workdir";
 
 import {
@@ -556,8 +556,8 @@ describe("the escalation is stated before the run, not composed from its failure
 //
 // These pins exercise failureFor, the one composition point all three seats
 // share, and say nothing about what a seat does with the result afterward --
-// that half is covered by scripts/bench-failure-passthrough.test.mjs, which
-// walks the bench tree and fails any call site that does something with the
+// that half is covered by scripts/run-failure-passthrough.test.mjs, which
+// walks the exchange tree and fails any call site that does something with the
 // result besides handing it to setFailure.
 describe("relayed terminal text never retitles a failure", () => {
   /** The CLI's own refusal wording, planted inside a filename an untrusted party

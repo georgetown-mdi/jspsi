@@ -13,7 +13,7 @@ import {
 } from "@jobs/routeSupport";
 import { jobEmptyResponse, jobJsonResponse } from "@jobs/gate";
 import { JobInputNotFoundError } from "@jobs/workInputs";
-import { jobCreateIntentSchema } from "@jobs/intent";
+import { jobCreateIntentSchema } from "@jobs/intentSchemas";
 
 /**
  * `POST /api/jobs` -- create and start an exchange job from a typed intent.

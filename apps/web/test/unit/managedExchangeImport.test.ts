@@ -4,19 +4,19 @@ import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
 import {
   ManagedImportHandedOffError,
   importManagedExchange,
-} from "@psi/managedExchangeImport";
+} from "@psi/managed/managedExchangeImport";
 import {
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 import {
   encodeManagedExchangeArtifact,
   serializeManagedExchangeArtifact,
-} from "@psi/managedExchangeArtifact";
+} from "@psi/managed/managedExchangeArtifact";
 
-import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
-import type { ManagedImportDeps } from "@psi/managedExchangeImport";
-import type { ManagedReviveOutcome } from "@psi/managedExchangeStore";
+import type { ManagedExchangeRecord } from "@psi/managed/managedExchangeRecord";
+import type { ManagedImportDeps } from "@psi/managed/managedExchangeImport";
+import type { ManagedReviveOutcome } from "@psi/managed/managedExchangeStore";
 
 // The import take-over, tested in Node with injected dependencies: a valid
 // artifact installs one owner and marks it imported-and-backed-up; a
@@ -159,7 +159,7 @@ describe("importManagedExchange", () => {
   });
 
   test("has a backed-up schedule but still no handle, so no import can run unattended", async () => {
-    // The converse of the deposit path (test/unit/benchManageOfferModel.test.ts,
+    // The converse of the deposit path (test/unit/manageOfferModel.test.ts,
     // which writes a handle and no schedule): an import can have a schedule and
     // reconstructs no handle, so neither path on its own assembles the pair the
     // unattended runner fires on. The source record here HELD a handle, so what

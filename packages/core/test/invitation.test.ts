@@ -560,7 +560,7 @@ test("decodeInvitation refuses an over-bound raw input with the length message",
 // decodeInvitation catches the JSON.parse and base64url-decode failures and
 // rethrows a FIXED string rather than the underlying message, since that
 // message can quote partner-controlled bytes. describeDecodeError relays it
-// verbatim to the web accept page's alert (apps/web AcceptorBench), which
+// verbatim to the web accept page's alert (apps/web AcceptorScreen), which
 // renders it with no further escaping. These tests pin the swallow so a
 // future refactor cannot relay the original message and reopen it.
 

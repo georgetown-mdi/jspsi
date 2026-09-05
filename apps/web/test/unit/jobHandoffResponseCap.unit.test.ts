@@ -8,10 +8,10 @@ import {
   MAX_METADATA_DESCRIPTION_LENGTH,
   MAX_STANDARDIZATION_STEPS,
   MAX_STANDARDIZATION_TRANSFORMATIONS,
-} from "@jobs/intent";
-import { MAX_JOB_HANDOFF_RESPONSE_BYTES } from "@psi/jobApiBody";
+} from "@jobs/intentSchemas";
+import { MAX_JOB_HANDOFF_RESPONSE_BYTES } from "@psi/jobClient/jobApiBody";
 import { buildJobHandoff } from "@jobs/handoff";
-import { fetchRecurringHandoff } from "@psi/recurringHandoff";
+import { fetchRecurringHandoff } from "@psi/managed/recurringHandoff";
 import { jobJsonResponse } from "@jobs/gate";
 
 import { testSftpServerEntry, validSftpIntent } from "../utils/jobFixtures";

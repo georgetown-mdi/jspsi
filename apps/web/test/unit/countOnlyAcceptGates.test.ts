@@ -6,7 +6,7 @@ import {
   acceptorInitialColumnsState,
   acceptorLaunchBlockedReason,
   acceptorVerdict,
-} from "@bench/acceptorColumnsModel";
+} from "@exchange/acceptorColumnsModel";
 import { importLinkageTerms } from "@psi/linkageTermsIO";
 
 import type { CSVRow, LinkageTerms } from "@psilink/core";

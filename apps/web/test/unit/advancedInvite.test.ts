@@ -38,7 +38,7 @@ import {
   setDraftMetadataKeepingKeys,
   standardizationForTerms,
   validateAdvancedInvite,
-} from "../../src/psi/advancedInvite.js";
+} from "../../src/psi/authoring/advancedInvite.js";
 import {
   disclosedColumnNames,
   setColumnDisclosure,
@@ -49,7 +49,7 @@ import type {
   AdvancedInviteDraft,
   AdvancedInviteSeed,
   OutputDirection,
-} from "../../src/psi/advancedInvite.js";
+} from "../../src/psi/authoring/advancedInvite.js";
 
 import type { LinkageTerms, Metadata } from "@psilink/core";
 

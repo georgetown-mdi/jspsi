@@ -14,7 +14,7 @@
  * path, and the schema's own reason text. Structural, so a zod issue from any of
  * the job bodies satisfies it.
  */
-export interface JobSchemaIssue {
+interface JobSchemaIssue {
   code: string;
   path: ReadonlyArray<PropertyKey>;
   message: string;

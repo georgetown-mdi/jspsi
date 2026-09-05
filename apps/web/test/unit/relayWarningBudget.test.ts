@@ -14,8 +14,8 @@ import {
 import {
   createFetchJobApiClient,
   createServerJobReattachDriver,
-} from "@psi/serverJobExchangeDriver";
-import { appendSanitizedRunWarning } from "@bench/runWarnings";
+} from "@psi/jobClient/serverJobExchangeDriver";
+import { appendSanitizedRunWarning } from "@psi/runWarnings";
 import { renderSseFrame } from "@jobs/sse";
 import { spawnExchangeJob } from "@jobs/cliDriver";
 

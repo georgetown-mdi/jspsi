@@ -5,10 +5,10 @@ import {
   askJobExchangeRecordOffer,
   fetchJobExchangeRecordOffer,
   jobRecordDownloads,
-} from "@psi/jobExchangeRecord";
-import { untakenRecordConfirm } from "@bench/BenchRunSurface";
+} from "@psi/jobClient/jobExchangeRecord";
+import { untakenRecordConfirm } from "@exchange/RunSurface";
 
-import type { JobExchangeRecordOffer } from "@psi/jobExchangeRecord";
+import type { JobExchangeRecordOffer } from "@psi/jobClient/jobExchangeRecord";
 
 const CREATED_AT = "2026-07-08T14:32:00.000Z";
 const RECORD_STAMP = "2026-07-08T14-32-00-000Z";

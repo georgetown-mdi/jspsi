@@ -6,15 +6,15 @@ import { page } from "vitest/browser";
 
 import { createElement } from "react";
 
-import { declaredFieldsFor, editorFromCsv } from "@bench/inviterModel";
+import { declaredFieldsFor, editorFromCsv } from "@psi/inviterEditor";
 import { columnSamplesFromRows } from "@psi/columnSamples";
 
-import { AcceptorCleaningStep } from "@bench/AcceptorCleaningStep";
-import { CleaningTab } from "@bench/CleaningTab";
+import { AcceptorCleaningStep } from "@exchange/AcceptorCleaningStep";
+import { CleaningTab } from "@exchange/CleaningTab";
 
 import { createAppMount } from "./renderApp";
 
-import type { AcquiredCsv } from "@bench/inviterModel";
+import type { AcquiredCsv } from "@psi/inviterEditor";
 
 // A minimal file whose seeded terms hold a few cleaning fields, so both surfaces
 // mount their standardization workbench alongside the banner under test.

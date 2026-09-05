@@ -22,7 +22,7 @@ import {
   parseManagedExchangeRecord,
   partitionReadableManagedExchanges,
   safeParseManagedExchangeRecord,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 import { withTimeZone } from "../utils/hostTimeZone";
 
 import type {
@@ -30,7 +30,7 @@ import type {
   ManagedExchangeRecord,
   ManagedExchangeSchedule,
   NewManagedExchange,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 import type { WebRTCExchangeLocator } from "@psilink/core";
 
 const linkageTerms = getDefaultLinkageTerms("County Health Dept");

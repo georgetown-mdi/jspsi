@@ -19,14 +19,14 @@ import {
   seedAdvancedInvite,
   setDraftMetadata,
   setDraftMetadataKeepingKeys,
-} from "../../src/psi/advancedInviteDraft.js";
+} from "../../src/psi/authoring/advancedInviteDraft.js";
 import {
   buildAdvancedTerms,
   gradeAuthoredKeys,
-} from "../../src/psi/advancedInviteTerms.js";
+} from "../../src/psi/authoring/advancedInviteTerms.js";
 import { setColumnType } from "../../src/psi/metadataEditing.js";
 
-import type { AdvancedInviteDraft } from "../../src/psi/advancedInviteTypes.js";
+import type { AdvancedInviteDraft } from "../../src/psi/authoring/advancedInviteTypes.js";
 
 const ALL_COLUMNS = ["ssn", "ssn4", "first_name", "last_name", "dob"];
 

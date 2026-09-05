@@ -16,14 +16,14 @@ import {
   draftFromTerms,
   draftWithFieldAdded,
   seedAdvancedInvite,
-} from "../../src/psi/advancedInviteDraft.js";
+} from "../../src/psi/authoring/advancedInviteDraft.js";
 import {
   gatedActiveSettingMessage,
   inertCoalesceNotice,
   validateAdvancedInvite,
-} from "../../src/psi/advancedInviteValidation.js";
+} from "../../src/psi/authoring/advancedInviteValidation.js";
 import { SEMANTIC_TYPE_LABELS } from "../../src/psi/metadataEditing.js";
-import { buildAdvancedTerms } from "../../src/psi/advancedInviteTerms.js";
+import { buildAdvancedTerms } from "../../src/psi/authoring/advancedInviteTerms.js";
 import { isStepValid } from "../../src/psi/standardizationAuthoring.js";
 
 import type {
@@ -32,7 +32,7 @@ import type {
   TransformStep,
 } from "@psilink/core";
 
-import type { AdvancedInviteDraft } from "../../src/psi/advancedInviteTypes.js";
+import type { AdvancedInviteDraft } from "../../src/psi/authoring/advancedInviteTypes.js";
 
 const ALL_COLUMNS = ["ssn", "ssn4", "first_name", "last_name", "dob"];
 

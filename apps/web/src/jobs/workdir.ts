@@ -141,7 +141,7 @@ export function resultFileExists(outputPath: string): boolean {
 /** The two fields the status path reads off a record file: the timestamp the
  * download filenames are stamped from, and what the record says became of the run
  * that wrote it. */
-export interface JobRecordSummary {
+interface JobRecordSummary {
   createdAt: string;
   outcome: ExchangeRecordOutcome;
 }

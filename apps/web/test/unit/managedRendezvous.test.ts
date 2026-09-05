@@ -11,8 +11,8 @@ import {
 import {
   assertManagedRerunDispatchable,
   beginManagedRendezvous,
-} from "@psi/managedRendezvous";
-import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedRendezvous";
+import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
 
 import type {
   ExchangeSpec,
@@ -22,7 +22,7 @@ import type {
 import type { DataConnection } from "peerjs";
 import type Peer from "peerjs";
 
-import type { ManagedRendezvousFlows } from "@psi/managedRendezvous";
+import type { ManagedRendezvousFlows } from "@psi/managed/managedRendezvous";
 
 // The side-dispatched rendezvous, tested in Node with the rendezvous flows faked:
 // the record's local `side` selects listenAsInviter vs dialAsAcceptor, the
@@ -250,7 +250,7 @@ describe("per-run peer id derives fresh from the current secret", () => {
     // The real listenAsInviter with an injected peer factory: capture the id it
     // registers, which must be the derivation over THIS secret (never a stored id).
     let constructedId: string | undefined;
-    const { listenAsInviter } = await import("@psi/rendezvous");
+    const { listenAsInviter } = await import("@psi/transport/rendezvous");
     const flows: ManagedRendezvousFlows = {
       listenAsInviter: (s, options) =>
         listenAsInviter(s, {

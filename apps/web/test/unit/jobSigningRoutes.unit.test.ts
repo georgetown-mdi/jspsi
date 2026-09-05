@@ -3,9 +3,12 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { MAX_IDENTITY_LENGTH } from "@psi/identityLabel";
+import {
+  JOB_FILE_NAMES,
+  MAX_IDENTITY_LENGTH,
+  jobZeroSetupIntentSchema,
+} from "@jobs/intentSchemas";
 
-import { JOB_FILE_NAMES, jobZeroSetupIntentSchema } from "@jobs/intent";
 import { JobManager, SigningFingerprintBusyError } from "@jobs/jobManager";
 import {
   SIGNING_CERTIFICATE_FILE_NAME,
@@ -24,7 +27,7 @@ import {
   validZeroSetupIntent,
 } from "../utils/jobFixtures";
 
-import type { JobCreateIntent } from "@jobs/intent";
+import type { JobCreateIntent } from "@jobs/intentSchemas";
 
 // The HTTP boundary of the console's signing surface: what the fingerprint route
 // maps each condition to, what the receipt route will and will not serve, and

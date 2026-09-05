@@ -10,8 +10,8 @@ import {
   createServerJobZeroSetupDriver,
   fetchSftpConnection,
   fetchSlotOccupancy,
-} from "@psi/serverJobExchangeDriver";
-import { buildRunOutputs } from "@bench/runOutputs";
+} from "@psi/jobClient/serverJobExchangeDriver";
+import { buildRunOutputs } from "@psi/runOutputs";
 
 import { VALID_SHARED_SECRET, validLinkageTerms } from "../utils/jobFixtures";
 
@@ -26,8 +26,8 @@ import type {
   RecordAvailability,
   ServerJobExchangeDriverConfig,
   ServerJobZeroSetupDriverConfig,
-} from "@psi/serverJobExchangeDriver";
-import type { ObjectUrls, RunOutputs } from "@bench/runOutputs";
+} from "@psi/jobClient/serverJobExchangeDriver";
+import type { ObjectUrls, RunOutputs } from "@psi/runOutputs";
 import type { RelayEvent } from "@jobs/cliDriver";
 
 /** The inline CSV content the reused config holds; the driver maps an `inline`

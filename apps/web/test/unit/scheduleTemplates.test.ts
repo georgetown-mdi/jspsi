@@ -1,6 +1,9 @@
 import { expect, test } from "vitest";
 
-import { cronScheduleLine, taskSchedulerLine } from "@bench/scheduleTemplates";
+import {
+  cronScheduleLine,
+  taskSchedulerLine,
+} from "@recurring/scheduleTemplates";
 
 // The two schedule snippets both hand-off surfaces show. An operator copies
 // these verbatim into cron or schtasks, so what is checked here is the text they

@@ -10,7 +10,7 @@ import {
   useRouter,
 } from "@tanstack/react-router";
 
-import { BenchPage } from "@bench/BenchPage";
+import { AppPage } from "@components/AppPage";
 import { whenDiagnostic } from "@utils/diagnostics";
 
 import { useOnlineStatus } from "./useOnlineStatus";
@@ -35,7 +35,7 @@ export function DefaultCatchBoundary({ error }: ErrorComponentProps) {
   // Rendered outside any route layout, so it supplies its own <main> landmark
   // and padding.
   return (
-    <BenchPage>
+    <AppPage>
       <Stack component="main" gap="sm" p="xl">
         {/* The sanitized error alone ("Failed to fetch") does not say the browser
             is offline, the likeliest cause here, so name that state and its
@@ -71,6 +71,6 @@ export function DefaultCatchBoundary({ error }: ErrorComponentProps) {
           )}
         </Group>
       </Stack>
-    </BenchPage>
+    </AppPage>
   );
 }

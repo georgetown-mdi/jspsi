@@ -18,10 +18,10 @@ import {
   EMPTY_CHAIN_LINK,
   createFetchJobApiClient,
   createServerJobReattachDriver,
-} from "@psi/serverJobExchangeDriver";
+} from "@psi/jobClient/serverJobExchangeDriver";
 import { spawnExchangeJob, validateAndSanitizeEvent } from "@jobs/cliDriver";
 import { ERROR_MESSAGE_CHAIN_FIELD } from "@psi/relayErrorChain";
-import { failureFor } from "@bench/useInviterExchange";
+import { failureFor } from "@exchange/useInviterExchange";
 import { renderSseFrame } from "@jobs/sse";
 
 import {

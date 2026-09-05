@@ -92,24 +92,24 @@ const WEB_TSCONFIG = "apps/web/tsconfig.json";
 
 /** The three sources the issue names; `webFilesDrift` holds WEB_FILES to these plus their one-hop first-party imports. */
 export const WEB_ENTRY_POINTS = [
-  "apps/web/src/psi/rendezvous.ts",
-  "apps/web/src/psi/managedRendezvous.ts",
-  "apps/web/src/psi/peerMessageConnection.ts",
+  "apps/web/src/psi/transport/rendezvous.ts",
+  "apps/web/src/psi/managed/managedRendezvous.ts",
+  "apps/web/src/psi/transport/peerMessageConnection.ts",
 ];
 
 /** WEB_ENTRY_POINTS plus their one-hop first-party imports, held to that derivation by webFilesDrift below. */
 export const WEB_FILES = [
-  "apps/web/src/psi/rendezvous.ts",
-  "apps/web/src/psi/managedRendezvous.ts",
-  "apps/web/src/psi/peerMessageConnection.ts",
-  "apps/web/src/psi/waitForConnection.ts",
-  "apps/web/src/psi/peerLogging.ts",
+  "apps/web/src/psi/transport/rendezvous.ts",
+  "apps/web/src/psi/managed/managedRendezvous.ts",
+  "apps/web/src/psi/transport/peerMessageConnection.ts",
+  "apps/web/src/psi/transport/waitForConnection.ts",
+  "apps/web/src/psi/transport/peerLogging.ts",
   "apps/web/src/psi/invitationLocation.ts",
   "apps/web/src/psi/invitation.ts",
-  "apps/web/src/psi/managedExchangeRecord.ts",
-  "apps/web/src/psi/boundedReassembly.ts",
-  "apps/web/src/psi/waitForOpen.ts",
-  "apps/web/src/psi/waitForPeerClose.ts",
+  "apps/web/src/psi/managed/managedExchangeRecord.ts",
+  "apps/web/src/psi/transport/boundedReassembly.ts",
+  "apps/web/src/psi/transport/waitForOpen.ts",
+  "apps/web/src/psi/transport/waitForPeerClose.ts",
   "apps/web/src/utils/diagnostics.ts",
   "apps/web/src/utils/clientConfig.ts",
 ];

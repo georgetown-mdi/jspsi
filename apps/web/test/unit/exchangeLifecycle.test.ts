@@ -21,7 +21,7 @@ import {
   runExchangeLifecycle,
 } from "../../src/psi/exchangeLifecycle.js";
 import { authenticateExchange } from "../../src/psi/authenticateExchange.js";
-import { openPeerMessageConnection } from "../../src/psi/peerMessageConnection.js";
+import { openPeerMessageConnection } from "../../src/psi/transport/peerMessageConnection.js";
 
 import type {
   Acquire,
@@ -47,7 +47,7 @@ import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 // (teardown, abort, error classification, first-frame disconnect, the handshake
 // gating runExchange) is observable without a real peer, WASM library, or
 // crypto round-trip.
-vi.mock("../../src/psi/peerMessageConnection.js", () => ({
+vi.mock("../../src/psi/transport/peerMessageConnection.js", () => ({
   openPeerMessageConnection: vi.fn(),
 }));
 vi.mock("../../src/psi/authenticateExchange.js", () => ({

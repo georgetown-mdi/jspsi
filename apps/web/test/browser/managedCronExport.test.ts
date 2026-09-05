@@ -19,21 +19,21 @@ import {
   createManagedExchange,
   getManagedExchange,
   spendManagedExchangeIfCurrent,
-} from "@psi/managedExchangeStore";
+} from "@psi/managed/managedExchangeStore";
 import {
   getManagedLocalState,
   markManagedExchangeBackedUp,
-} from "@psi/managedLocalState";
-import { CLI_BUILT_IN_STUN_URI } from "@bench/managedCronExportModel";
-import { ManagedRunSurface } from "@bench/ManagedRunSurface";
-import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
-import { dispatchManagedCronExport } from "@psi/managedExchangeExport";
+} from "@psi/managed/managedLocalState";
+import { CLI_BUILT_IN_STUN_URI } from "@recurring/managedCronExportModel";
+import { ManagedRunSurface } from "@recurring/ManagedRunSurface";
+import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
+import { dispatchManagedCronExport } from "@psi/managed/managedExchangeExport";
 
 import { captureDownloads } from "./captureDownloads";
 import { createAppMount } from "./renderApp";
 
 import type { CapturedDownload } from "./captureDownloads";
-import type { NewManagedExchange } from "@psi/managedExchangeRecord";
+import type { NewManagedExchange } from "@psi/managed/managedExchangeRecord";
 
 // The command-line export panel on the run surface, against real Chromium: real
 // IndexedDB stores, a real export, nothing stubbed. Pinned here: the hand-off
@@ -46,7 +46,7 @@ vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
 );
 
-vi.mock("@psi/rendezvous", async () =>
+vi.mock("@psi/transport/rendezvous", async () =>
   (await import("./moduleMocks")).rendezvousMock(),
 );
 

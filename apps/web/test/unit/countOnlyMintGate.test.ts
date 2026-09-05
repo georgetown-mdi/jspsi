@@ -1,11 +1,11 @@
 import { describe, expect, test } from "vitest";
 
-import { buildAdvancedTerms } from "@psi/advancedInviteTerms";
-import { seedAdvancedInvite } from "@psi/advancedInviteDraft";
+import { buildAdvancedTerms } from "@psi/authoring/advancedInviteTerms";
+import { seedAdvancedInvite } from "@psi/authoring/advancedInviteDraft";
 import { setColumnDisclosure } from "@psi/metadataEditing";
-import { validateAdvancedInvite } from "@psi/advancedInviteValidation";
+import { validateAdvancedInvite } from "@psi/authoring/advancedInviteValidation";
 
-import type { AdvancedInviteDraft } from "@psi/advancedInviteTypes";
+import type { AdvancedInviteDraft } from "@psi/authoring/advancedInviteTypes";
 
 // The count-only shape gate at the web AUTHORING boundary. Each of the five rules
 // is reached through `buildAdvancedTerms`, which clamps only the settings whose

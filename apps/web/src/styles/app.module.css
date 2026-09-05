@@ -1,0 +1,1250 @@
+/* Layout and identity classes for the linkage console, translated from the
+   approved mockup (design/web-redesign/proposal-c.html) onto the --app-*
+   tokens (tokens.css). Interactive controls stay Mantine; these classes hold
+   only what Mantine cannot: the top bar and work/ledger grid, and the
+   mockup's type discipline (mono = real data or protocol state, sans =
+   guidance). */
+
+.page {
+  min-height: 100dvh;
+  background: var(--app-surface);
+  color: var(--app-ink);
+  font-size: 16.5px;
+  line-height: 1.5;
+  /* The top bar's fixed height: sets .topBar's real rendered height AND the
+     sticky offset of anything that must clear the stuck bar (.gridUnderBar
+     .ledger), so the two cannot drift apart. */
+  --app-topbar-height: 56px;
+}
+
+.page h1 {
+  font-size: 1.6rem;
+  font-weight: 650;
+  line-height: 1.25;
+  margin: 0 0 0.6rem 0;
+}
+
+.page h1:focus {
+  outline: none;
+}
+
+.page h1:focus-visible {
+  outline: 3px solid var(--app-accent);
+  outline-offset: 4px;
+}
+
+.page h2 {
+  font-size: 1.18rem;
+  font-weight: 650;
+  margin: 2rem 0 0.6rem 0;
+}
+
+.page h3 {
+  font-size: 1rem;
+  font-weight: 650;
+  margin: 1.4rem 0 0.4rem 0;
+}
+
+.page p {
+  margin: 0.5rem 0;
+  max-width: 68ch;
+}
+
+/* Reading-measure cap is for standing prose (lobby copy, the how-it-works
+   blurb) only: lifted inside .work so work-column paragraphs -- guidance
+   next to a form surface that must track the surface's own width -- fill
+   the container instead. The descendant selector out-specifies .page p;
+   a bare .work p would tie and depend on source order. */
+.page .work p {
+  max-width: none;
+}
+
+/* Excludes a Mantine Button rendered as an anchor (component={Link}): a filled
+   Button's label color is --button-color (routed to the per-scheme contrast
+   color by the theme, see theme.ts FILLED_PRIMARY_CONTRAST), and this rule's
+   higher specificity would otherwise overwrite it with --app-accent, close
+   enough to the filled background to make the label unreadable. An
+   outline/light Button still wants accent-colored text, so the exclusion is
+   scoped to the Button root only. mantine-Button-root is one of Mantine's
+   unhashed global class names, so it must be wrapped in :global() here --
+   CSS Modules would otherwise hash the name inside :not() and the exclusion
+   would silently never match. */
+.page a:not(:global(.mantine-Button-root)) {
+  color: var(--app-accent);
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.mono {
+  font-family: Consolas, "Lucida Console", ui-monospace, monospace;
+  font-size: 0.92em;
+  font-variant-numeric: tabular-nums;
+}
+
+.eyebrow {
+  font-size: 12px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--app-secondary);
+  margin: 0 0 0.35rem 0;
+}
+
+.sub {
+  color: var(--app-secondary);
+}
+
+.small {
+  font-size: 14px;
+}
+
+/* ---------- work + ledger grid ---------- */
+
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 28px;
+  max-width: 1260px;
+  margin: 0 auto;
+  padding: 30px 32px 40px 32px;
+  align-items: start;
+}
+
+.gridLedger {
+  grid-template-columns: minmax(0, 1fr) 296px;
+}
+
+.gridPlain {
+  max-width: 860px;
+}
+
+.work {
+  background: var(--app-column);
+  border: 1px solid var(--app-rule);
+  border-radius: 10px;
+  box-shadow: var(--app-shadow);
+  padding: 30px 36px 34px 36px;
+  min-width: 0;
+}
+
+/* ---------- top bar ---------- */
+
+.topBar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  height: var(--app-topbar-height);
+  background: var(--app-column);
+  border-bottom: 1px solid var(--app-rule);
+  padding: 0 32px;
+}
+
+.wordmark {
+  font-family: Consolas, "Lucida Console", ui-monospace, monospace;
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.04em;
+  margin-bottom: 18px;
+}
+
+.topBar .wordmark {
+  font-family: inherit;
+  font-weight: 650;
+  font-size: 14.5px;
+  letter-spacing: normal;
+  margin: 0;
+  flex: none;
+}
+
+.topBarNav {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.topBarStepper {
+  min-width: max-content;
+}
+
+/* Label weight/color track the step state alongside Mantine's indicators
+   (accent ring = current, filled check = done, muted number = pending), so
+   the three states read at a glance at the bar's slim height. */
+.topBarStepper button[data-progress] .topBarStepLabel {
+  font-weight: 650;
+  color: var(--app-ink);
+}
+
+.topBarStepper
+  button:not([data-progress]):not([data-completed])
+  .topBarStepLabel {
+  color: var(--app-secondary);
+}
+
+/* Scoped under .topBar so the left-auto margin outweighs the .page p margin
+   rule (higher specificity), keeping the note pinned to the bar's right edge
+   rather than being treated as a sixth step. */
+.topBar .topBarNote {
+  margin: 0 0 0 auto;
+  font-size: 12px;
+  color: var(--app-faint);
+  white-space: nowrap;
+  flex: none;
+}
+
+.stepLink {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.problems {
+  margin-bottom: 20px;
+  border: 2px solid var(--app-danger);
+  background: var(--app-danger-bg);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.problems h2 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 0 0 6px 0;
+  color: var(--app-danger);
+}
+
+.problems ul {
+  margin: 0;
+  padding: 0 0 0 1.1em;
+  font-size: 13.5px;
+}
+
+.val {
+  font-family: Consolas, "Lucida Console", ui-monospace, monospace;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--app-faint);
+  white-space: nowrap;
+}
+
+.valEdited {
+  color: var(--app-accent);
+  font-weight: 600;
+}
+
+.valAttention {
+  color: var(--app-warn);
+  font-weight: 600;
+}
+
+/* ---------- ledger ---------- */
+
+.ledger {
+  position: sticky;
+  top: 20px;
+  background: var(--app-column);
+  border: 1px solid var(--app-rule);
+  border-radius: 10px;
+  padding: 18px 20px 16px 20px;
+}
+
+/* Under a top bar both elements stick in the same scroll container, so the
+   ledger's offset must clear the bar's height or the opaque bar covers its
+   top edge. Scoped to grids that actually sit under a bar; a bar-less screen
+   keeps the plain 20px offset above. */
+.gridUnderBar .ledger {
+  top: calc(var(--app-topbar-height) + 20px);
+}
+
+.ledger h2 {
+  margin: 0 0 4px 0;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--app-secondary);
+}
+
+.ledger dl {
+  margin: 8px 0 0 0;
+}
+
+.ledgerRow {
+  border-top: 1px solid var(--app-rule);
+  padding: 9px 0 8px 0;
+}
+
+.ledgerRow dt {
+  font-size: 11.5px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--app-secondary);
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.ledgerRow dd {
+  margin: 3px 0 0 0;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+  font-family: Consolas, "Lucida Console", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.dash {
+  color: var(--app-faint);
+}
+
+.ledgerRef {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: var(--app-accent);
+  white-space: nowrap;
+}
+
+.ledgerTerm {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* The heading's info-icon control: bare glyph, no button chrome. Inherits the
+   dt's secondary color so the icon meets the same contrast bar as the heading
+   text it explains. */
+.ledgerInfo {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  margin: 0;
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: help;
+}
+
+.ledgerInfo:focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: 2px;
+  border-radius: 50%;
+}
+
+.ledgerCustomize {
+  border-top: 1px solid var(--app-rule);
+  padding: 9px 0 4px 0;
+}
+
+.ledgerGroupLabel {
+  font-size: 11.5px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--app-secondary);
+  margin: 0 0 2px 0;
+}
+
+.ledgerCustomize ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.customizeRow {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 0;
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 14px;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.customizeRow > span:first-child {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.customizeRow:disabled {
+  cursor: default;
+  color: var(--app-secondary);
+}
+
+.customizeRow:disabled > span:first-child {
+  text-decoration: none;
+}
+
+.customizeCurrent {
+  color: var(--app-accent);
+  font-weight: 650;
+}
+
+.trust {
+  margin: 14px 0 0 0;
+  padding-top: 12px;
+  border-top: 2px solid var(--app-rule);
+  font-size: 13px;
+  color: var(--app-secondary);
+}
+
+/* ---------- work-column furniture ---------- */
+
+.workFoot {
+  margin-top: 2rem;
+  padding-top: 1.2rem;
+  border-top: 1px solid var(--app-rule);
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.statusLine {
+  font-weight: 600;
+  margin: 0;
+  color: var(--app-secondary);
+  font-size: 14px;
+}
+
+.statusLineOk {
+  color: var(--app-ok);
+}
+
+/* The caution treatment, for a state that asks the operator to look into
+   something rather than reporting a failure; --app-danger is reserved for the
+   latter. */
+.statusLineWarn {
+  color: var(--app-warn);
+}
+
+.dropzone {
+  border: 2px dashed var(--app-field-border);
+  border-radius: 8px;
+  background: var(--app-field-bg);
+  padding: 22px 24px;
+  text-align: center;
+  cursor: pointer;
+}
+
+.dropzone p {
+  margin: 2px auto;
+}
+
+.dropzoneMax {
+  color: var(--app-secondary);
+  font-size: 14px;
+}
+
+.fileCard {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--app-code-bg);
+  border: 1px solid var(--app-rule);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 12px 0;
+}
+
+.fileCard svg {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  color: var(--app-accent);
+}
+
+.fileName {
+  font-weight: 650;
+}
+
+.fileMeta {
+  color: var(--app-secondary);
+  font-size: 14px;
+}
+
+.callout {
+  background: var(--app-accent-bg);
+  border: 1px solid var(--app-accent);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 1.1rem 0;
+}
+
+.callout p {
+  margin: 3px 0;
+}
+
+.calloutLead {
+  font-weight: 650;
+}
+
+/* The input of the read-only field holding the peer's own first bytes, below the
+   probe's failure alert and outside it: monospace and neutral ink rather than
+   the alert's voice, so a fragment somebody else chose displays as theirs on screen
+   as well as in the accessibility tree. Grows to its content rather than
+   scrolling (the field autosizes): the whole capped excerpt is what the operator
+   judges. */
+.peerBytes {
+  display: block;
+  background: var(--app-code-bg);
+  color: var(--app-ink);
+  resize: none;
+  overflow-wrap: anywhere;
+}
+
+.stateInset {
+  border: 1px dashed var(--app-faint);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 1.4rem 0;
+}
+
+.stateLabel {
+  font-size: 11.5px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--app-faint);
+  margin: 0 0 8px 0;
+}
+
+.tableScroll {
+  overflow-x: auto;
+}
+
+.dataTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.dataTable th {
+  font-size: 12px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--app-secondary);
+  text-align: left;
+  padding: 6px 12px 6px 0;
+  border-bottom: 2px solid var(--app-rule);
+}
+
+.dataTable td {
+  padding: 9px 12px 9px 0;
+  border-bottom: 1px solid var(--app-rule-soft);
+  vertical-align: middle;
+}
+
+.statusLineDanger {
+  color: var(--app-danger);
+}
+
+.backlink {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 14px;
+  color: var(--app-accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  margin-bottom: 0.8rem;
+}
+
+.guidedKeys {
+  list-style: none;
+  margin: 0.8rem 0;
+  padding: 0;
+}
+
+.guidedKeys li {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--app-rule-soft);
+}
+
+.keyBadge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  padding: 1px 8px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.keyBadgeSatisfiable {
+  color: var(--app-ok);
+  border: 1px solid var(--app-ok);
+}
+
+.keyBadgeUnsatisfiable {
+  color: var(--app-danger);
+  border: 1px solid var(--app-danger);
+}
+
+.keyBadgeDead {
+  color: var(--app-warn);
+  border: 1px solid var(--app-warn);
+}
+
+/* An offered key the built-in set does not declare. Neutral rather than a
+   severity color: it marks provenance, not a problem, and it sits beside a
+   verdict badge that does hold severity. */
+.keyBadgeOptIn {
+  color: var(--app-secondary);
+  border: 1px solid var(--app-rule);
+}
+
+.movers {
+  display: inline-flex;
+  gap: 6px;
+  flex: none;
+}
+
+.radioCard {
+  border: 2px solid var(--app-rule);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 10px 0;
+}
+
+.radioCardSelected {
+  border-color: var(--app-accent);
+  background: var(--app-accent-bg);
+}
+
+.tagRoadmap {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--app-warn);
+  border: 1px solid var(--app-warn);
+  border-radius: 999px;
+  padding: 1px 8px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.answers th[scope="row"] {
+  font-size: 15px;
+  font-weight: 650;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--app-ink);
+  border-bottom: 1px solid var(--app-rule-soft);
+  padding: 10px 16px 10px 0;
+  width: 34%;
+  vertical-align: top;
+}
+
+.answersChange {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.setAbove {
+  color: var(--app-faint);
+  font-size: 13px;
+}
+
+.fieldset {
+  border: 0;
+  padding: 0;
+  margin: 1.2rem 0;
+}
+
+.fieldset legend {
+  font-weight: 650;
+  padding: 0;
+  margin-bottom: 4px;
+}
+
+.rowHeader {
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--app-ink);
+  font-weight: 600;
+}
+
+.columnChips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0.6rem 0;
+  padding: 0;
+  list-style: none;
+}
+
+.columnChips li {
+  background: var(--app-code-bg);
+  border: 1px solid var(--app-rule);
+  border-radius: 999px;
+  padding: 3px 12px;
+  font-weight: 600;
+}
+
+/* ---------- post-create: share, run, completion ---------- */
+
+.sealedTag {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--app-accent);
+  border: 1px solid var(--app-accent);
+  border-radius: 999px;
+  padding: 1px 8px;
+  margin-bottom: 6px;
+}
+
+.demoNotice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--app-secondary);
+  margin-bottom: 8px;
+}
+
+.demoClear {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--app-accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.copyRow {
+  margin: 1.1rem 0;
+}
+
+.copyBox {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.copyLabel {
+  font-weight: 650;
+  display: block;
+}
+
+.copyHint {
+  display: block;
+  color: var(--app-secondary);
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.codeBlock {
+  flex: 1;
+  background: var(--app-code-bg);
+  border: 1px solid var(--app-rule);
+  border-radius: 6px;
+  padding: 10px 12px;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.copyPreview {
+  white-space: nowrap;
+  overflow-x: auto;
+}
+
+/* The recurring hand-off's preformatted config/command block: shown whole (not
+   the elided secret preview) with horizontal scroll for long lines, and a copy
+   button aligned to its top-right. */
+.handoffCodeRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0.5rem 0 1rem 0;
+}
+
+.handoffCode {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  background: var(--app-code-bg);
+  border: 1px solid var(--app-rule);
+  border-radius: 6px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.handoffSteps {
+  margin: 0.5rem 0;
+  padding-left: 1.5rem;
+}
+
+.handoffSteps > li {
+  margin: 0.75rem 0;
+}
+
+.handoffStepLabel {
+  font-weight: 650;
+  margin: 0 0 0.25rem 0;
+}
+
+.handoffHeading {
+  font-size: 1em;
+  font-weight: 650;
+  margin: 1rem 0 0.25rem 0;
+}
+
+.copyStatus {
+  min-height: 1.2em;
+  font-size: 13px;
+  color: var(--app-secondary);
+  margin: 4px 0;
+}
+
+.revealArea {
+  display: block;
+  width: 100%;
+  height: 110px;
+  overflow-y: auto;
+  resize: none;
+  background: var(--app-code-bg);
+  border: 1px solid var(--app-rule);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-top: 4px;
+  color: inherit;
+}
+
+/* A forwardable prose message shown in full: wrapped, readable multi-line text
+   (not the one-line nowrap secret preview), sized to its content by rows. */
+.forwardableMessage {
+  display: block;
+  width: 100%;
+  overflow-y: auto;
+  resize: vertical;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--app-code-bg);
+  border: 1px solid var(--app-rule);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-top: 6px;
+  color: inherit;
+  font: inherit;
+  line-height: 1.5;
+}
+
+.copyBtn {
+  flex: none;
+  align-self: center;
+}
+
+.statusPanel {
+  border: 1px solid var(--app-rule);
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin: 1.2rem 0;
+}
+
+.statusPanelDone {
+  border: none;
+  padding: 0;
+}
+
+.statusPanel h2 {
+  margin: 0 0 8px 0;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--app-secondary);
+}
+
+.stageLabel {
+  text-align: center;
+  font-weight: 650;
+  font-size: 1.05rem;
+  margin: 6px 0 12px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.spinner {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 3px solid var(--app-rule);
+  border-top-color: var(--app-accent);
+  animation: spin 0.9s linear infinite;
+  flex: none;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.progress {
+  height: 14px;
+  border: 1px solid var(--app-rule);
+  border-radius: 7px;
+  overflow: hidden;
+  background: var(--app-code-bg);
+}
+
+.progressBar {
+  height: 100%;
+  background: repeating-linear-gradient(
+    45deg,
+    var(--app-accent) 0 10px,
+    var(--app-stripe) 10px 20px
+  );
+  background-size: 28.28px 28.28px;
+  animation: slide 1.1s linear infinite;
+}
+
+.progressHalted .progressBar,
+.progressDone .progressBar {
+  animation: none;
+  background: var(--app-accent);
+}
+
+@keyframes slide {
+  to {
+    background-position: 28.28px 0;
+  }
+}
+
+.stageHistory {
+  list-style: none;
+  margin: 0.8rem 0 0 0;
+  padding: 0;
+  font-size: 14.5px;
+}
+
+.stageHistory li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0;
+  color: var(--app-secondary);
+}
+
+.stageHistory li.historyNow {
+  color: var(--app-ink);
+  font-weight: 650;
+}
+
+.tick {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--app-ok) var(--app-check) center / 10px no-repeat;
+}
+
+.historyNow .tick {
+  background: var(--app-accent);
+}
+
+.donePanel {
+  border: 1px solid var(--app-rule);
+  border-left: 6px solid var(--app-accent);
+  border-radius: 8px;
+  padding: 20px 24px;
+  margin: 1.2rem 0;
+}
+
+.bigCount {
+  font-size: 1.5rem;
+  font-weight: 650;
+  margin: 0;
+}
+
+.dlRow {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--app-rule-soft);
+  flex-wrap: wrap;
+}
+
+.dlLabel {
+  flex: 1 1 220px;
+  font-weight: 600;
+}
+
+/* A configuration row's value list: one entry per line, so a name holding a
+   list separator cannot be treated as two entries. Unbulleted and unindented,
+   so it sits in the row exactly where a single value would. */
+.dlValueList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1 1 220px;
+}
+
+/* A configuration row's caveat: a full-width basis so the wrapping row breaks
+   before it and the qualification sits under the value it qualifies, rather than
+   competing with it for the value column's width. */
+.dlNote {
+  flex: 1 1 100%;
+}
+
+.keepPrivate {
+  color: var(--app-danger);
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 12.5px;
+  letter-spacing: 0.05em;
+}
+
+.linkLike {
+  background: none;
+  border: none;
+  padding: 0;
+  font-weight: 600;
+  color: var(--app-accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+    border-top-color: var(--app-rule);
+    border-left-color: var(--app-accent);
+  }
+
+  .progressBar {
+    animation: none;
+    background: var(--app-accent);
+  }
+}
+
+/* ---------- lobby ---------- */
+
+.lobby {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 40px 32px 40px 32px;
+}
+
+/* Used by the /saved surfaces (the recurring list and the storage-unavailable
+   degrade), which still render the wordmark inside .lobby; the landing page
+   dropped its own wordmark but these keep the tighter gap. */
+.lobby .wordmark {
+  margin-bottom: 8px;
+}
+
+.tagline {
+  font-size: 1.08rem;
+  max-width: 62ch;
+}
+
+.lobbyActions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 24px;
+  margin: 1.4rem 0 1rem 0;
+}
+
+/* Below-cards copy should read at the cards' width, not the standing
+   68ch prose measure (.page p): the general-sibling combinator only
+   reaches markup after .lobbyActions inside .lobby, so the tagline and
+   file-assurance line above the cards keep their narrower measure, and
+   no other .page using .sub/.small/.howItWorks is affected. */
+.lobby .lobbyActions ~ p,
+.lobby .lobbyActions ~ .howItWorks p {
+  max-width: none;
+}
+
+.actionCard {
+  display: flex;
+  flex-direction: column;
+  background: var(--app-column);
+  border: 2px solid var(--app-rule);
+  border-radius: 10px;
+  padding: 22px 24px 24px 24px;
+}
+
+/* The cards stretch to equal height in the grid; pushing each card's action
+   paragraph (its last child) to the bottom lines the two buttons up on one
+   baseline regardless of how much copy or field sits above them. */
+.actionCard > p:last-child {
+  margin-top: auto;
+  margin-bottom: 0;
+}
+
+.actionCard h3 {
+  margin: 0 0 6px 0;
+  font-size: 1.1rem;
+}
+
+.howItWorks {
+  border-top: 1px solid var(--app-rule);
+  margin-top: 2rem;
+  padding-top: 1.2rem;
+  color: var(--app-secondary);
+  font-size: 15px;
+}
+
+/* ---------- saved exchanges ---------- */
+
+.savedList {
+  list-style: none;
+  margin: 1.4rem 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.savedRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: var(--app-column);
+  border: 2px solid var(--app-rule);
+  border-radius: 10px;
+  padding: 14px 18px;
+}
+
+.savedRowMain {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.savedRowLabel {
+  font-weight: 600;
+}
+
+.savedRowActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* ---------- responsive ---------- */
+
+@media (max-width: 1080px) {
+  .gridLedger {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ledger {
+    position: static;
+  }
+
+  .lobbyActions {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .topBar {
+    padding: 0 16px;
+    gap: 12px;
+  }
+
+  .topBarNote {
+    display: none;
+  }
+}
+
+/* ---------- narrow-viewport information architecture ----------
+   Kept in sync with NARROW_VIEWPORT_MAX_WIDTH (narrowViewport.ts): the JS
+   useMediaQuery that switches the DOM presentation and these styles read the
+   same width, so they cannot disagree about the cut-over. The step strip, the
+   share bar, and the Customize disclosure are conditionally rendered above
+   this width, so their classes never apply to the wide layout. */
+@media (max-width: 600px) {
+  .topBarNav {
+    flex: 1;
+    overflow-x: visible;
+  }
+
+  .stepStrip {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin: 0;
+    background: var(--app-column);
+    border: 1px solid var(--app-rule);
+    border-radius: 2px;
+    padding: 8px 12px;
+    font-size: 13.5px;
+    font-weight: 650;
+  }
+
+  .narrowLedger {
+    min-width: 0;
+  }
+
+  .shareBar,
+  .customizeDisclosure {
+    border: 1px solid var(--app-rule);
+    background: var(--app-column);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin: 12px 0;
+  }
+
+  .shareBarBody {
+    padding-top: 8px;
+    font-size: 13.5px;
+  }
+
+  .shareBarBody .trust {
+    margin-top: 10px;
+  }
+
+  .customizeGroupNote {
+    font-size: 12px;
+    color: var(--app-faint);
+    margin: 8px 0 4px 0;
+  }
+}

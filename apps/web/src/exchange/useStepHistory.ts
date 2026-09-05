@@ -1,0 +1,88 @@
+import { useCallback, useEffect, useRef } from "react";
+
+import {
+  stepFromPopState,
+  stepHistoryState,
+  stepHistoryStateForPush,
+} from "./stepHistory";
+
+/**
+ * Wire a console's internal step state to the browser History stack so Back and
+ * Forward walk the steps in place instead of leaving the route. It does not own
+ * the step -- the component keeps its `useState` -- but it pushes a marked
+ * history entry on each forward move and, on a `popstate`, hands the caller the
+ * step the target entry holds so the component can restore it without
+ * remounting or losing the loaded file.
+ *
+ * A restore may be clamped: the step the entry names can require backing state
+ * the console no longer holds (its work column would render blank), so
+ * `onRestore` returns the step it actually settled on. When that differs from
+ * the entry's step, the hook rewrites the current entry's marker to the settled
+ * step with `replaceState` -- so a later Back does not land on the same dead
+ * entry again -- keeping the router's index and key, since Back already moved
+ * the cursor and only the console marker is stale.
+ *
+ * On mount the hook marks the current history entry as the console's FIRST step
+ * (via `replaceState`, so it adds no entry). That baseline is what makes Back
+ * from a later step land on the first step in place, while Back from the first
+ * step falls through to the genuinely pre-console entry and leaves the route as
+ * ordinary navigation.
+ *
+ * @param initialStep - the step the console mounts on, seeded into the current
+ *   history entry so Back can restore it.
+ * @param onRestore - applies a step arriving from Back/Forward; must set the
+ *   step state WITHOUT pushing a new entry (the browser already moved the
+ *   cursor), and must validate the step against its own union, ignoring a
+ *   foreign one (a stale entry from before a deploy renamed a step). Returns the
+ *   step it settled on so the hook can rewrite a clamped entry; return the
+ *   passed step (or nothing) when it was applied unchanged. The hook keeps a
+ *   live ref to it, so an inline closure is fine.
+ */
+export function useStepHistory(
+  initialStep: string,
+  onRestore: (step: string) => string | void,
+): {
+  pushStep: (step: string) => void;
+} {
+  const restoreRef = useRef(onRestore);
+  restoreRef.current = onRestore;
+  const initialStepRef = useRef(initialStep);
+
+  // Mark the current entry as the console's first step. replaceState keeps the
+  // router history's index and entry key untouched (replace semantics), so the
+  // console occupies exactly one entry until it pushes a step; a StrictMode
+  // double-mount replays this idempotently on the same entry.
+  useEffect(() => {
+    window.history.replaceState(
+      stepHistoryState(initialStepRef.current, window.history.state),
+      "",
+    );
+  }, []);
+
+  const pushStep = useCallback((step: string) => {
+    window.history.pushState(
+      stepHistoryStateForPush(step, window.history.state),
+      "",
+    );
+  }, []);
+
+  useEffect(() => {
+    function handlePopState(event: PopStateEvent) {
+      const step = stepFromPopState(event.state);
+      // Not a console entry: Back/Forward left the console (the pre-first-step
+      // entry or an unrelated route). Let the browser navigate normally --
+      // nothing to restore, and the component unmounts as it always did.
+      if (step === undefined) return;
+      const settled = restoreRef.current(step);
+      if (settled !== undefined && settled !== step)
+        window.history.replaceState(
+          stepHistoryState(settled, window.history.state),
+          "",
+        );
+    }
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  return { pushStep };
+}

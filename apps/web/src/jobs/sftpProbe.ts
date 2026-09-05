@@ -55,7 +55,7 @@ export const PROBE_PEER_READ_BUDGET_MS = 2_000;
  */
 export const PROBE_SIGTERM_MS = 15_000;
 /** The grace before the watchdog escalates SIGTERM to SIGKILL. */
-export const PROBE_SIGKILL_GRACE_MS = 5_000;
+const PROBE_SIGKILL_GRACE_MS = 5_000;
 
 // The two `key_type` bounds below mirror core's `MAX_KEY_TYPE_BYTES` (64) and
 // `isAcceptedKeyTypeByte` (`[A-Za-z0-9._@-]`) (docs/spec/CHANNEL_SECURITY.md,
@@ -89,7 +89,7 @@ const PEER_ANSWER_SHAPES = new Set(["http", "tls-alert", "unrecognized"]);
 export const PROBE_EXCERPT_MAX_DISPLAY_LENGTH = 512;
 
 /** What the peer's first bytes were, for a shape the CLI recognizes. */
-export type SftpPeerAnswerShape = "http" | "tls-alert" | "unrecognized";
+type SftpPeerAnswerShape = "http" | "tls-alert" | "unrecognized";
 
 /**
  * Why a dial reached the port and still read no host key, as the CLI's own
@@ -103,7 +103,7 @@ export type SftpPeerAnswerShape = "http" | "tls-alert" | "unrecognized";
  * Absent on an `unreachable` the child could not diagnose -- a refused
  * connection, an unresolvable name, a peer that stalled.
  */
-export type SftpProbeDiagnosis =
+type SftpProbeDiagnosis =
   | { kind: "nonSsh"; shape: SftpPeerAnswerShape; excerpt: string }
   | { kind: "closedUnanswered" };
 

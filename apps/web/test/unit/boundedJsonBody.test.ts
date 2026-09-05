@@ -5,7 +5,7 @@ import {
   MAX_JOB_STATUS_RESPONSE_BYTES,
   readBoundedJson,
   readJsonOrNull,
-} from "@psi/jobApiBody";
+} from "@psi/jobClient/jobApiBody";
 import { readBoundedJsonBody } from "@utils/boundedJsonBody";
 
 // The web app's one byte-capped JSON body read, in both directions: the request

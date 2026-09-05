@@ -9,13 +9,13 @@ import "@mantine/core/styles.css";
 
 import { joinErrorCauseChain } from "@psilink/core";
 
-import { FailureMessage } from "@bench/BenchRunSurface";
-import { RelayedTerminalError } from "@psi/serverJobExchangeDriver";
-import { failureFor } from "@bench/useInviterExchange";
+import { FailureMessage } from "@exchange/RunSurface";
+import { RelayedTerminalError } from "@psi/jobClient/serverJobExchangeDriver";
+import { failureFor } from "@exchange/useInviterExchange";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 
-vi.mock("@psi/rendezvous", async () =>
+vi.mock("@psi/transport/rendezvous", async () =>
   (await import("./moduleMocks")).rendezvousMock(),
 );
 

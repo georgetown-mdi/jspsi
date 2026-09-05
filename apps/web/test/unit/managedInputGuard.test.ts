@@ -10,7 +10,7 @@ import {
   ManagedInputError,
   assessManagedInputColumns,
   managedInputFailureKind,
-} from "@psi/managedInputGuard";
+} from "@psi/managed/managedInputGuard";
 
 import type { ExchangeSpec, WebRTCExchangeLocator } from "@psilink/core";
 

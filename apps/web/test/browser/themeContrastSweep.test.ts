@@ -12,10 +12,11 @@ import "@mantine/core/styles.css";
 
 import { encodeInvitation, generateSharedSecret } from "@psilink/core";
 
-import { AcceptorBench } from "@bench/AcceptorBench";
-import { BenchLobby } from "@bench/BenchLobby";
-import { InviterBench } from "@bench/InviterBench";
-import { VerifyReceiptBench } from "@bench/VerifyReceiptBench";
+import { AcceptorScreen } from "@exchange/AcceptorScreen";
+import { Lobby } from "@exchange/Lobby";
+
+import { InviterScreen } from "@exchange/InviterScreen";
+import { VerifyReceiptScreen } from "@exchange/VerifyReceiptScreen";
 
 import { createAppMount } from "./renderApp";
 
@@ -37,11 +38,11 @@ import type { ReactNode } from "react";
 // second colour engine as a dev dependency).
 //
 // Swept routes (extend this set when a top-level screen is added):
-//   /         console lobby     -> BenchLobby
-//   /exchange inviter console   -> InviterBench (initial "Your file" step)
-//   /accept   acceptor console  -> AcceptorBench (review step, a valid token in
-//                                  the hash -- the route's real initial state)
-//   /verify   verify receipt    -> VerifyReceiptBench (initial mount)
+//   /         lobby     -> Lobby
+//   /exchange inviter screen   -> InviterScreen (initial "Your file" step)
+//   /accept   acceptor screen  -> AcceptorScreen (review step, a valid token in
+//                                the hash -- the route's real initial state)
+//   /verify   verify receipt  -> VerifyReceiptScreen (initial mount)
 // Each renders through renderApp (the app's real MantineProvider + resolver
 // config) in BOTH forceColorScheme: "light" and "dark", so a surface AA-clean in
 // one scheme but not the other is still caught.
@@ -107,7 +108,7 @@ vi.mock("@tanstack/react-router", async () =>
 
 // The rendezvous dial and listen run only inside a run lifecycle these initial
 // mounts never start.
-vi.mock("@psi/rendezvous", async () =>
+vi.mock("@psi/transport/rendezvous", async () =>
   (await import("./moduleMocks")).rendezvousMock(),
 );
 
@@ -340,21 +341,21 @@ async function mountAndSweep(
 }
 
 const ROUTES: Array<{ route: string; node: () => Promise<ReactNode> }> = [
-  { route: "/", node: () => Promise.resolve(createElement(BenchLobby)) },
+  { route: "/", node: () => Promise.resolve(createElement(Lobby)) },
   {
     route: "/exchange",
-    node: () => Promise.resolve(createElement(InviterBench)),
+    node: () => Promise.resolve(createElement(InviterScreen)),
   },
   {
     route: "/accept",
     node: async () => {
       window.location.hash = await encodeAcceptToken();
-      return createElement(AcceptorBench);
+      return createElement(AcceptorScreen);
     },
   },
   {
     route: "/verify",
-    node: () => Promise.resolve(createElement(VerifyReceiptBench)),
+    node: () => Promise.resolve(createElement(VerifyReceiptScreen)),
   },
 ];
 

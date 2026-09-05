@@ -360,72 +360,6 @@ function MatchKeyDetails({ summary }: { summary: InvitationKeySummary }) {
 }
 
 /**
- * Wraps the terms panel's lower reference tiers (what you receive, how records are
- * matched, the legal agreement, and "Other details") in one default-collapsed
- * disclosure when {@link condensed}; otherwise renders them inline unchanged.
- * Never set on the acceptor's pre-consent "review" screen, the one place informed
- * consent is captured, so no tier is ever hidden from that decision.
- *
- * The always-mounted wrapper, with aria-controls and the self-describing
- * describedby summary, mirrors the "Other details" idiom, so a folded tier stays out
- * of the accessibility tree and tab order while collapsed yet remains reachable.
- */
-function CondensableDetails({
-  condensed,
-  children,
-}: {
-  condensed: boolean;
-  children: ReactNode;
-}) {
-  const [open, setOpen] = useState(false);
-  // Stable ids across SSR/hydration for the toggle -> panel and toggle -> summary
-  // associations, matching every other disclosure on this screen.
-  const panelId = useId();
-  const summaryId = useId();
-  const reduceMotion = useReducedMotion();
-  // Non-condensed: a transparent passthrough (a Fragment adds no DOM node), so the
-  // acceptor's full render is byte-identical to the un-wrapped tree.
-  if (!condensed) return <>{children}</>;
-  return (
-    <Stack gap={2}>
-      <UnstyledButton
-        onClick={() => setOpen((isOpen) => !isOpen)}
-        aria-expanded={open}
-        aria-controls={panelId}
-        aria-describedby={summaryId}
-      >
-        <Group gap={4}>
-          <IconChevronRight
-            size={16}
-            aria-hidden
-            style={{
-              transform: open ? "rotate(90deg)" : "rotate(0deg)",
-              transition: reduceMotion ? undefined : "transform 150ms ease",
-            }}
-          />
-          <Text size="sm" fw={500}>
-            See the full terms
-          </Text>
-        </Group>
-      </UnstyledButton>
-      {/* Self-describing, like "Other details": always truthful across configs -- the
-          matching keys are always present, and "the other terms" covers the
-          receive/legal/dedup/payload sections whichever render. Perspective-neutral
-          ("terms", not "proposed terms") so it reads correctly on the acceptor's
-          post-consent "accepted" surfaces, where the terms are agreed, not proposed. */}
-      <Text id={summaryId} size="xs" c="dimmed">
-        Contains how records are matched and the other terms.
-      </Text>
-      <div id={panelId}>
-        <Collapse expanded={open}>
-          <Stack gap="sm">{children}</Stack>
-        </Collapse>
-      </div>
-    </Stack>
-  );
-}
-
-/**
  * Renders the inviter's linkage terms decoded from an invitation for review,
  * organized by disclosure DIRECTION into labelled tiers ("What you disclose",
  * "What the exchange produces", "What you receive", "How records are matched",
@@ -452,7 +386,7 @@ function CondensableDetails({
  * (docs/COMPLIANCE.md).
  *
  * `perspective` selects the heading, intro, and viewer-centric framing for the
- * three contexts this renders in (`review`, `accepted`, `proposing`); `framing`
+ * two contexts this renders in (`review`, `proposing`); `framing`
  * overrides only the heading/intro strings, for the console's direct-exchange
  * flow. All partner-controlled free text is sanitized via
  * {@link summarizeInvitation}, mirroring the CLI's `displayInvitation`.
@@ -467,7 +401,6 @@ export function InvitationTerms({
   perspective = "review",
   headingOrder = 2,
   headingRef,
-  condensed = false,
   framing,
 }: {
   linkageTerms: LinkageTerms;
@@ -509,7 +442,7 @@ export function InvitationTerms({
    * `review`-only caveats on a partner's own word (the unverified identity and
    * the rule-set citation's attribution); the matching keys and the rest of the
    * body are identical. */
-  perspective?: "review" | "accepted" | "proposing";
+  perspective?: "review" | "proposing";
   /** Semantic heading level (its visual size is fixed at the h2 scale), so the
    * heading nests correctly under its container -- h1 when this is the page's
    * own heading (the console review step), h2 below the acceptor page's h1, h3
@@ -518,13 +451,6 @@ export function InvitationTerms({
   // tabIndex + ref so a screen the terms lead can move focus here when they
   // appear, announcing them to assistive tech.
   headingRef?: Ref<HTMLHeadingElement>;
-  /** Fold the lower reference tiers (what you receive, how records are matched, the
-   * legal agreement, and "Other details") into one default-collapsed disclosure,
-   * keeping only "What you disclose" and "What the exchange produces" always
-   * visible. NEVER set on the acceptor's pre-consent "review" screen, whose every
-   * tier must stay always-visible for informed consent. See
-   * {@link CondensableDetails}. */
-  condensed?: boolean;
   /** A direct-exchange framing override: replaces ONLY the perspective-derived
    * heading and intro copy, for a no-invitation direct exchange (the operator's own
    * inferred terms, no partner review/consent). Passed only by the console direct
@@ -744,7 +670,7 @@ export function InvitationTerms({
         ref={headingRef}
         tabIndex={-1}
         // Gated to review: the note (and so its id) renders only there, so pointing
-        // at it under "proposing"/"accepted" would dangle at an absent element.
+        // at it under "proposing" would dangle at an absent element.
         aria-describedby={perspective === "review" ? identityNoteId : undefined}
       >
         {framing?.heading ??
@@ -755,11 +681,10 @@ export function InvitationTerms({
       {/* summary.invitingParty is a free-text field the sender typed, accepted on a
           transcription checksum -- psilink has not authenticated it. This is a
           small honesty marker on that self-asserted field, not a directive to
-          reassess trust. Review-only: it is a pre-consent decision-point marker, so
-          it drops off the during-run "accepted" view once consent is committed --
-          not because the name becomes verified there (the run's key exchange
-          authenticates that the peer holds the invitation secret, never that the
-          name is true). Associated with the heading via aria-describedby
+          reassess trust. Review-only: it is a pre-consent decision-point marker,
+          and the run's key exchange authenticates that the peer holds the
+          invitation secret, never that the name is true. Associated with the
+          heading via aria-describedby
           (identityNoteId); pinned by render tests. */}
       {perspective === "review" && (
         <Text id={identityNoteId} size="sm" fw={500}>
@@ -770,9 +695,7 @@ export function InvitationTerms({
         {framing?.intro ??
           (perspective === "proposing"
             ? "Your partner must review and consent to these details before any data is exchanged."
-            : perspective === "accepted"
-              ? "These are the exchange details."
-              : "These are the details your partner proposes for linking your records.")}
+            : "These are the details your partner proposes for linking your records.")}
       </Text>
 
       {/* Direction tier -- WHAT YOU DISCLOSE: the viewer's own data leaving. Led
@@ -1019,78 +942,77 @@ export function InvitationTerms({
         )}
       </TermsTier>
 
-      <CondensableDetails condensed={condensed}>
-        {/* Direction tier -- WHAT YOU RECEIVE: partner data arriving to this viewer.
+      {/* Direction tier -- WHAT YOU RECEIVE: partner data arriving to this viewer.
           The acceptor's ingress (a count of the columns the invitation will send it
           for matched records) -- the weaker signal, since receiving is not a
           disclosure BY the acceptor -- or, mirrored, the inviter's own request of its
           partner under "proposing" (that request is the inviter's inbound). Rendered
           only when this viewer receives partner data. */}
-        {showsReceiveGroup && (
-          <TermsTier heading="What you receive" headingOrder={tierHeadingOrder}>
-            {ingressNotice !== undefined && (
-              <Text size="sm" fw={500}>
-                {ingressNotice}
-              </Text>
-            )}
-            {perspective === "proposing" && egressNotice !== undefined && (
-              <Text size="sm" fw={500}>
-                {egressNotice}
-              </Text>
-            )}
-          </TermsTier>
-        )}
+      {showsReceiveGroup && (
+        <TermsTier heading="What you receive" headingOrder={tierHeadingOrder}>
+          {ingressNotice !== undefined && (
+            <Text size="sm" fw={500}>
+              {ingressNotice}
+            </Text>
+          )}
+          {perspective === "proposing" && egressNotice !== undefined && (
+            <Text size="sm" fw={500}>
+              {egressNotice}
+            </Text>
+          )}
+        </TermsTier>
+      )}
 
-        {/* Tier -- HOW RECORDS ARE MATCHED: match mechanics, split out of "What the
+      {/* Tier -- HOW RECORDS ARE MATCHED: match mechanics, split out of "What the
           exchange produces" and placed below the disclosure/result tiers since it is
           verification detail the diligent open, not the headline the consent
           decision turns on. Always rendered, since there is always at least one
           linkage key. */}
-        <TermsTier
-          heading="How records are matched"
-          headingOrder={tierHeadingOrder}
-        >
-          {/* Single-pass is disclosure-affecting AND a mandatory-consistency term the
+      <TermsTier
+        heading="How records are matched"
+        headingOrder={tierHeadingOrder}
+      >
+        {/* Single-pass is disclosure-affecting AND a mandatory-consistency term the
             acceptor adopts, so it must be visible at the consent point. Shown only
             for single-pass (cascade is the baseline that discloses less).
             Viewer-neutral, since which party becomes the disclosing sender is
             settled at exchange time. Mirrors the inviter's Alert and the CLI's
             singlePassDisclosureNotice. */}
-          {summary.linkageStrategy === "single-pass" && (
-            // No emphasis tag on the lead: the Term's bold "Linkage strategy"
-            // caption already anchors the block, so a second bold restating it would
-            // double up for screen readers and visual scanning alike.
-            <Term label="Linkage strategy">
-              <Text size="sm">
-                This exchange matches in a single pass. That means one of you
-                sends the other everything it prepared for every linkage key at
-                once, so that party also sees matches on the weaker keys, not
-                only the strongest. Which of you sends is decided when the
-                exchange runs, so it may be you. Both parties must agree to
-                single-pass. The matched result is the same either way; what
-                differs is how much your partner can observe while it runs.
-              </Text>
-            </Term>
-          )}
+        {summary.linkageStrategy === "single-pass" && (
+          // No emphasis tag on the lead: the Term's bold "Linkage strategy"
+          // caption already anchors the block, so a second bold restating it would
+          // double up for screen readers and visual scanning alike.
+          <Term label="Linkage strategy">
+            <Text size="sm">
+              This exchange matches in a single pass. That means one of you
+              sends the other everything it prepared for every linkage key at
+              once, so that party also sees matches on the weaker keys, not only
+              the strongest. Which of you sends is decided when the exchange
+              runs, so it may be you. Both parties must agree to single-pass.
+              The matched result is the same either way; what differs is how
+              much your partner can observe while it runs.
+            </Text>
+          </Term>
+        )}
 
-          {/* Value-level matching multiplicity, beside the strategy it is coupled
+        {/* Value-level matching multiplicity, beside the strategy it is coupled
             to: a key element that splits its value is matched on each candidate.
             Copy is read from CONSENT_FACTS, so this surface and the CLI accept
             prompt state the consequence in the same words. Rendered from the
             element transforms the invitation declares; the inviter's own data
             standardization can fan out a field no invitation shows, so this claims
             nothing about the whole of what the inviter runs. */}
-          {summary.fansOut && (
-            <Term label="Several values per record">
-              <Text size="sm">
-                {summary.fanOutApplied
-                  ? CONSENT_FACTS.fanOutCandidates.note
-                  : CONSENT_FACTS.fanOutRefused.note}
-              </Text>
-            </Term>
-          )}
+        {summary.fansOut && (
+          <Term label="Several values per record">
+            <Text size="sm">
+              {summary.fanOutApplied
+                ? CONSENT_FACTS.fanOutCandidates.note
+                : CONSENT_FACTS.fanOutRefused.note}
+            </Text>
+          </Term>
+        )}
 
-          {/* The rules' citation renders above the matching list it cites: a reader
+        {/* The rules' citation renders above the matching list it cites: a reader
             meets the name before the enumeration it stands for. Both names and
             versions are partner-controlled, sanitized by summarizeInvitation and
             bound in their own Text between fixed chrome -- never joined into the
@@ -1108,125 +1030,121 @@ export function InvitationTerms({
             this build's own finding about the document on screen rather than an
             attribution to anyone. Which sentence a perspective gets is core's call
             (`linkageRuleSetVerdictNote`). */}
-          {summary.linkageRuleSet !== undefined && (
-            <Term label="Linkage rule set">
-              <Stack gap={2}>
-                <Text size="sm">
-                  Keys (
-                  {
-                    LINKAGE_RULE_SET_VERDICT_COPY[
-                      summary.linkageRuleSet.keySet.verdict
-                    ].marker
-                  }
-                  ):
-                </Text>
-                <Text size="sm" ff="monospace" style={ruleSetValueStyle}>
-                  {ruleSetCitation(
-                    summary.linkageRuleSet.keySet.name,
-                    summary.linkageRuleSet.keySet.version,
-                  )}
-                </Text>
-                <Text size="sm">
-                  Fields (
-                  {
-                    LINKAGE_RULE_SET_VERDICT_COPY[
-                      summary.linkageRuleSet.fieldSet.verdict
-                    ].marker
-                  }
-                  ):
-                </Text>
-                <Text size="sm" ff="monospace" style={ruleSetValueStyle}>
-                  {ruleSetCitation(
-                    summary.linkageRuleSet.fieldSet.name,
-                    summary.linkageRuleSet.fieldSet.version,
-                  )}
-                </Text>
-              </Stack>
-              {distinctLinkageRuleSetVerdicts(
-                summary.linkageRuleSet.keySet.verdict,
-                summary.linkageRuleSet.fieldSet.verdict,
+        {summary.linkageRuleSet !== undefined && (
+          <Term label="Linkage rule set">
+            <Stack gap={2}>
+              <Text size="sm">
+                Keys (
+                {
+                  LINKAGE_RULE_SET_VERDICT_COPY[
+                    summary.linkageRuleSet.keySet.verdict
+                  ].marker
+                }
+                ):
+              </Text>
+              <Text size="sm" ff="monospace" style={ruleSetValueStyle}>
+                {ruleSetCitation(
+                  summary.linkageRuleSet.keySet.name,
+                  summary.linkageRuleSet.keySet.version,
+                )}
+              </Text>
+              <Text size="sm">
+                Fields (
+                {
+                  LINKAGE_RULE_SET_VERDICT_COPY[
+                    summary.linkageRuleSet.fieldSet.verdict
+                  ].marker
+                }
+                ):
+              </Text>
+              <Text size="sm" ff="monospace" style={ruleSetValueStyle}>
+                {ruleSetCitation(
+                  summary.linkageRuleSet.fieldSet.name,
+                  summary.linkageRuleSet.fieldSet.version,
+                )}
+              </Text>
+            </Stack>
+            {distinctLinkageRuleSetVerdicts(
+              summary.linkageRuleSet.keySet.verdict,
+              summary.linkageRuleSet.fieldSet.verdict,
+            )
+              .filter(
+                (verdict) =>
+                  verdict === "contradicted" || perspective === "review",
               )
-                .filter(
-                  (verdict) =>
-                    verdict === "contradicted" || perspective === "review",
-                )
-                .map((verdict) => (
-                  <Text
-                    key={verdict}
-                    size="sm"
-                    fw={verdict === "contradicted" ? 500 : undefined}
-                  >
-                    {linkageRuleSetVerdictNote(
-                      verdict,
-                      perspective === "proposing"
-                        ? "citing-party"
-                        : "recipient",
-                    )}
-                  </Text>
-                ))}
-            </Term>
-          )}
+              .map((verdict) => (
+                <Text
+                  key={verdict}
+                  size="sm"
+                  fw={verdict === "contradicted" ? 500 : undefined}
+                >
+                  {linkageRuleSetVerdictNote(
+                    verdict,
+                    perspective === "proposing" ? "citing-party" : "recipient",
+                  )}
+                </Text>
+              ))}
+          </Term>
+        )}
 
-          {/* The matching list as a default-collapsed disclosure, mirroring the
+        {/* The matching list as a default-collapsed disclosure, mirroring the
             per-key and "Other details" disclosures: aria-expanded/aria-controls on
             the toggle, the id on the always-mounted wrapper (not the Collapse
             panel) so it stays a stable target, and the per-key list hidden from
             assistive tech and the tab order while closed. The toggle text doubles
             as the list's group label. */}
-          <Stack gap={2}>
-            <UnstyledButton
-              onClick={() => setMatchingOpen((open) => !open)}
-              aria-expanded={matchingOpen}
-              aria-controls={matchingPanelId}
-              aria-describedby={
-                summary.matchedFields.length > 0 ? matchingSublineId : undefined
-              }
-            >
-              <Group gap={4}>
-                <IconChevronRight
-                  size={16}
-                  aria-hidden
-                  style={{
-                    transform: matchingOpen ? "rotate(90deg)" : "rotate(0deg)",
-                    transition: reduceMotion
-                      ? undefined
-                      : "transform 150ms ease",
-                  }}
-                />
-                <Text size="sm" fw={600} id={matchedOnLabelId}>
-                  Matching strategies
-                </Text>
-              </Group>
-            </UnstyledButton>
-            {/* The always-visible field summary: WHICH fields the keys match on,
+        <Stack gap={2}>
+          <UnstyledButton
+            onClick={() => setMatchingOpen((open) => !open)}
+            aria-expanded={matchingOpen}
+            aria-controls={matchingPanelId}
+            aria-describedby={
+              summary.matchedFields.length > 0 ? matchingSublineId : undefined
+            }
+          >
+            <Group gap={4}>
+              <IconChevronRight
+                size={16}
+                aria-hidden
+                style={{
+                  transform: matchingOpen ? "rotate(90deg)" : "rotate(0deg)",
+                  transition: reduceMotion ? undefined : "transform 150ms ease",
+                }}
+              />
+              <Text size="sm" fw={600} id={matchedOnLabelId}>
+                Matching strategies
+              </Text>
+            </Group>
+          </UnstyledButton>
+          {/* The always-visible field summary: WHICH fields the keys match on,
               kept outside the collapse so the single fact consent most depends on
               is clear without expanding the detail. The compact field labels and
               the deduped order are derived (and sanitized) by summarizeInvitation;
               the per-key grouping and breadth markers stay one expand down. */}
-            {summary.matchedFields.length > 0 && (
-              <Text id={matchingSublineId} size="sm">
-                Matching on {summary.matchedFields.join(", ")}.
-              </Text>
-            )}
-            {/* A labelled list of per-key disclosures. role=list/listitem (not
+          {summary.matchedFields.length > 0 && (
+            <Text id={matchingSublineId} size="sm">
+              Matching on {summary.matchedFields.join(", ")}.
+            </Text>
+          )}
+          {/* A labelled list of per-key disclosures. role=list/listitem (not
               Mantine List.Item, whose inline span body cannot hold the disclosure's
               flow content) so AT announces the set; keyed by each key's stable id
               (InvitationKeySummary.id) rather than array index, so a key's own
               expanded/collapsed state follows the key when the inviter reorders the
               list. */}
-            <div id={matchingPanelId}>
-              <Collapse expanded={matchingOpen}>
-                <Stack gap="xs" role="list" aria-labelledby={matchedOnLabelId}>
-                  {summary.linkageKeys.map((key) => (
-                    <MatchKeyDisclosure key={key.id} summary={key} />
-                  ))}
-                </Stack>
-              </Collapse>
-            </div>
-          </Stack>
-        </TermsTier>
+          <div id={matchingPanelId}>
+            <Collapse expanded={matchingOpen}>
+              <Stack gap="xs" role="list" aria-labelledby={matchedOnLabelId}>
+                {summary.linkageKeys.map((key) => (
+                  <MatchKeyDisclosure key={key.id} summary={key} />
+                ))}
+              </Stack>
+            </Collapse>
+          </div>
+        </Stack>
+      </TermsTier>
 
-        {/* Partner-authored allowed-character constraints, promoted to the
+      {/* Partner-authored allowed-character constraints, promoted to the
           always-visible core so a partner-defined character-class rule is on notice
           at the consent point, not dimmed inside "Other details". Each entry names
           the field, a FIXED system label marking the class as partner-supplied and
@@ -1234,87 +1152,85 @@ export function InvitationTerms({
           joined into one sentence, since a crafted value could impersonate system
           chrome. Advisory (core's `withinAllowedCharacters` warns, does not
           enforce), so the copy states an expectation, not a guarantee. */}
-        {constrainedFields.length > 0 && (
-          <TermsTier
-            heading="Partner-defined character constraints"
-            headingOrder={tierHeadingOrder}
-          >
-            <Text size="sm">{CONSENT_FACTS.allowedCharacterPatterns.note}</Text>
-            <Stack gap="xs">
-              {/* Keyed by index: the fields are already deduped and their order is
+      {constrainedFields.length > 0 && (
+        <TermsTier
+          heading="Partner-defined character constraints"
+          headingOrder={tierHeadingOrder}
+        >
+          <Text size="sm">{CONSENT_FACTS.allowedCharacterPatterns.note}</Text>
+          <Stack gap="xs">
+            {/* Keyed by index: the fields are already deduped and their order is
                   fixed for a given terms document, and the sanitized label is not
                   unique across fields of one type. */}
-              {constrainedFields.map((field, index) => (
-                <Stack key={index} gap={2}>
-                  <Text size="sm" fw={500}>
-                    {field.label}
-                  </Text>
-                  {/* The fixed system label as static JSX, then the raw class in
+            {constrainedFields.map((field, index) => (
+              <Stack key={index} gap={2}>
+                <Text size="sm" fw={500}>
+                  {field.label}
+                </Text>
+                {/* The fixed system label as static JSX, then the raw class in
                       its own bounded Text between core-derived chrome -- mirroring
                       the coercion-note pattern -- so partner text cannot display as
                       the label. field.allowedCharacters is present here (the filter
                       above selects on it), sanitized once in summarizeInvitation. */}
-                  <Text size="sm">
-                    Allowed characters (partner-supplied, unverified):
-                  </Text>
-                  <Text
-                    size="sm"
-                    ff="monospace"
-                    style={{
-                      border: "1px solid var(--mantine-color-default-border)",
-                      borderRadius: "var(--mantine-radius-sm)",
-                      padding: "2px 6px",
-                      wordBreak: "break-all",
-                    }}
-                  >
-                    {field.allowedCharacters}
-                  </Text>
-                </Stack>
-              ))}
-            </Stack>
-          </TermsTier>
-        )}
+                <Text size="sm">
+                  Allowed characters (partner-supplied, unverified):
+                </Text>
+                <Text
+                  size="sm"
+                  ff="monospace"
+                  style={{
+                    border: "1px solid var(--mantine-color-default-border)",
+                    borderRadius: "var(--mantine-radius-sm)",
+                    padding: "2px 6px",
+                    wordBreak: "break-all",
+                  }}
+                >
+                  {field.allowedCharacters}
+                </Text>
+              </Stack>
+            ))}
+          </Stack>
+        </TermsTier>
+      )}
 
-        {/* The legal agreement is a cross-cutting GOVERNANCE frame, not a disclosure
+      {/* The legal agreement is a cross-cutting GOVERNANCE frame, not a disclosure
           direction, so it has its own labelled group, placed last: it frames the
           decision rather than leading ahead of what the acceptor actually
           discloses. Its purpose is the field a 45 CFR 164.528 / FERPA exception
           turns on (docs/COMPLIANCE.md), so it is shown whole -- reference,
           purpose, and expiry -- with no "Other details" entry. Pre-sanitized by
           summarizeInvitation. */}
-        {summary.legalAgreement !== undefined && (
-          <TermsTier
-            heading="This invitation attaches a legal agreement."
-            headingOrder={tierHeadingOrder}
-            accessibleName="Legal agreement"
-          >
-            {/* The agreement's three fields display as one block, tighter than the
+      {summary.legalAgreement !== undefined && (
+        <TermsTier
+          heading="This invitation attaches a legal agreement."
+          headingOrder={tierHeadingOrder}
+          accessibleName="Legal agreement"
+        >
+          {/* The agreement's three fields display as one block, tighter than the
                 spacing between a tier's heading and its content. */}
-            <Stack gap={2}>
-              <Text size="sm">
-                Reference: {summary.legalAgreement.reference}
-              </Text>
-              {/* "Stated purpose", not "Purpose": the value is partner-authored free
+          <Stack gap={2}>
+            <Text size="sm">Reference: {summary.legalAgreement.reference}</Text>
+            {/* "Stated purpose", not "Purpose": the value is partner-authored free
                 text, sanitized but never vetted by psilink (only byte-compared
                 against the partner's own copy at exchange time), so the label marks
                 it as partner-attested rather than an authorization psilink endorses
                 -- the same provenance-marking the allowed-character constraint
                 uses. */}
-              <Text size="sm">
-                Stated purpose: {summary.legalAgreement.purpose}
-              </Text>
-              {/* Name the subject ("Agreement valid through ...") rather than a bare
+            <Text size="sm">
+              Stated purpose: {summary.legalAgreement.purpose}
+            </Text>
+            {/* Name the subject ("Agreement valid through ...") rather than a bare
                 "Valid through <date>": it sits on the same screen as the separate
                 invitation-expiry line below, and at a glance the two same-weight
                 dates are otherwise easy to conflate. */}
-              <Text size="xs" c="dimmed">
-                Agreement valid through {summary.legalAgreement.expirationDate}
-              </Text>
-            </Stack>
-          </TermsTier>
-        )}
+            <Text size="xs" c="dimmed">
+              Agreement valid through {summary.legalAgreement.expirationDate}
+            </Text>
+          </Stack>
+        </TermsTier>
+      )}
 
-        {/* The toggle has aria-expanded and aria-controls; while closed Mantine's
+      {/* The toggle has aria-expanded and aria-controls; while closed Mantine's
           Collapse hides the panel from assistive tech and the tab order.
           aria-controls points at the stable wrapper below, not the Collapse panel,
           so the reference resolves to a present element however Mantine mounts or
@@ -1325,113 +1241,91 @@ export function InvitationTerms({
           below (detailsSummaryId). Other details always holds the personal-data
           and duplicate-match blocks, so the summary always renders and the
           reference never dangles. */}
-        <UnstyledButton
-          onClick={() => setDetailsOpen((open) => !open)}
-          aria-expanded={detailsOpen}
-          aria-controls={detailsId}
-          aria-describedby={detailsSummaryId}
-        >
-          <Group gap={4}>
-            <IconChevronRight
-              size={16}
-              aria-hidden
-              style={{
-                transform: detailsOpen ? "rotate(90deg)" : "rotate(0deg)",
-                transition: reduceMotion ? undefined : "transform 150ms ease",
-              }}
-            />
-            <Text size="sm" fw={500}>
-              Other details
-            </Text>
-          </Group>
-        </UnstyledButton>
-        {/* The self-describing summary: a fixed-copy, one-line enumeration of the
+      <UnstyledButton
+        onClick={() => setDetailsOpen((open) => !open)}
+        aria-expanded={detailsOpen}
+        aria-controls={detailsId}
+        aria-describedby={detailsSummaryId}
+      >
+        <Group gap={4}>
+          <IconChevronRight
+            size={16}
+            aria-hidden
+            style={{
+              transform: detailsOpen ? "rotate(90deg)" : "rotate(0deg)",
+              transition: reduceMotion ? undefined : "transform 150ms ease",
+            }}
+          />
+          <Text size="sm" fw={500}>
+            Other details
+          </Text>
+        </Group>
+      </UnstyledButton>
+      {/* The self-describing summary: a fixed-copy, one-line enumeration of the
           sections the disclosure contains, derived from what actually renders
           (otherDetailsContents). No partner text enters it -- the section names are
           fixed, and the payload-detail phrase is gated on showsPayloadDetail, the
           same predicate that renders the block. */}
-        <Text id={detailsSummaryId} size="xs" c="dimmed">
-          Contains {joinList(otherDetailsContents)}.
-        </Text>
+      <Text id={detailsSummaryId} size="xs" c="dimmed">
+        Contains {joinList(otherDetailsContents)}.
+      </Text>
 
-        <div id={detailsId}>
-          <Collapse expanded={detailsOpen}>
-            <Stack gap="sm">
-              <Term label="Personal data used">
-                <Stack gap="xs">
-                  {summary.linkageFields.map((field, index) =>
-                    field.constraints.length > 0 ? (
-                      <Stack key={index} gap={2}>
-                        <Text size="sm">{field.label}</Text>
-                        {/* Each constraint as its own item. These are fixed
+      <div id={detailsId}>
+        <Collapse expanded={detailsOpen}>
+          <Stack gap="sm">
+            <Term label="Personal data used">
+              <Stack gap="xs">
+                {summary.linkageFields.map((field, index) =>
+                  field.constraints.length > 0 ? (
+                    <Stack key={index} gap={2}>
+                      <Text size="sm">{field.label}</Text>
+                      {/* Each constraint as its own item. These are fixed
                         plain-language phrases (validity, affix removal, a count
                         of excluded values) containing no partner free text; the
                         partner-authored allowedCharacters class is shown apart,
                         in the always-visible constraints group above. Keyed by
                         index -- order is fixed for a field. */}
-                        <List size="xs" withPadding listStyleType="circle">
-                          {field.constraints.map((constraint, ci) => (
-                            <List.Item key={ci}>
-                              <Text span size="xs" c="dimmed">
-                                {constraint}
-                              </Text>
-                            </List.Item>
-                          ))}
-                        </List>
-                      </Stack>
-                    ) : (
-                      <Text key={index} size="sm">
-                        {field.label}
-                      </Text>
-                    ),
-                  )}
-                </Stack>
-              </Term>
+                      <List size="xs" withPadding listStyleType="circle">
+                        {field.constraints.map((constraint, ci) => (
+                          <List.Item key={ci}>
+                            <Text span size="xs" c="dimmed">
+                              {constraint}
+                            </Text>
+                          </List.Item>
+                        ))}
+                      </List>
+                    </Stack>
+                  ) : (
+                    <Text key={index} size="sm">
+                      {field.label}
+                    </Text>
+                  ),
+                )}
+              </Stack>
+            </Term>
 
-              {/* Renders only when it has content: the acceptor's send list (hidden
+            {/* Renders only when it has content: the acceptor's send list (hidden
                 in the inviter's "proposing" preview, which shows its send as chips
                 above) or a declared receive (present even when empty). The guard is
                 showsPayloadDetail -- the same predicate the self-describing "Other
                 details" summary names this block by, so the summary lists exactly the
                 sections that actually render. */}
-              {showsPayloadDetail && summary.payload !== undefined && (
-                <Term label="Additional data for matched records">
-                  {/* Viewer-centric, like Result sharing: the acceptor reads the
+            {showsPayloadDetail && summary.payload !== undefined && (
+              <Term label="Additional data for matched records">
+                {/* Viewer-centric, like Result sharing: the acceptor reads the
                     inviter's send as the partner's ("Your partner will send"). The
                     inviter's own send is shown as chips above "Other details"
                     instead, so it is suppressed here under "proposing". */}
-                  {/* Shown whenever the send set is a definite declaration --
+                {/* Shown whenever the send set is a definite declaration --
                     including the empty set, rendered "(none)" so the strict
                     "receive nothing" commitment is visible rather than inferred from
                     a missing line. A lazy (undeclared) send is omitted instead. */}
-                  {summary.payload.sendDeclared &&
-                    perspective !== "proposing" && (
-                      <Stack gap={2}>
-                        <Text size="sm">Your partner will send:</Text>
-                        {summary.payload.send.length > 0 ? (
-                          <DeclaredColumnList columns={summary.payload.send} />
-                        ) : (
-                          <Text size="sm" c="dimmed">
-                            (none)
-                          </Text>
-                        )}
-                      </Stack>
-                    )}
-                  {/* Mirror of the send block: a declared receive is shown even
-                      when empty, rendered "(none)" so the strict "the acceptor
-                      sends nothing" assertion is visible rather than inferred from
-                      a missing line. A lazy (undeclared) receive is omitted, so the
-                      "(none)" is the inviter asking for no column rather than asking
-                      for none in particular. */}
-                  {summary.payload.receiveDeclared && (
+                {summary.payload.sendDeclared &&
+                  perspective !== "proposing" && (
                     <Stack gap={2}>
-                      <Text size="sm">
-                        {perspective === "proposing"
-                          ? "You request from your partner:"
-                          : "Your partner requests from you:"}
-                      </Text>
-                      {summary.payload.receive.length > 0 ? (
-                        <DeclaredColumnList columns={summary.payload.receive} />
+                      <Text size="sm">Your partner will send:</Text>
+                      {summary.payload.send.length > 0 ? (
+                        <DeclaredColumnList columns={summary.payload.send} />
                       ) : (
                         <Text size="sm" c="dimmed">
                           (none)
@@ -1439,16 +1333,38 @@ export function InvitationTerms({
                       )}
                     </Stack>
                   )}
-                </Term>
-              )}
+                {/* Mirror of the send block: a declared receive is shown even
+                      when empty, rendered "(none)" so the strict "the acceptor
+                      sends nothing" assertion is visible rather than inferred from
+                      a missing line. A lazy (undeclared) receive is omitted, so the
+                      "(none)" is the inviter asking for no column rather than asking
+                      for none in particular. */}
+                {summary.payload.receiveDeclared && (
+                  <Stack gap={2}>
+                    <Text size="sm">
+                      {perspective === "proposing"
+                        ? "You request from your partner:"
+                        : "Your partner requests from you:"}
+                    </Text>
+                    {summary.payload.receive.length > 0 ? (
+                      <DeclaredColumnList columns={summary.payload.receive} />
+                    ) : (
+                      <Text size="sm" c="dimmed">
+                        (none)
+                      </Text>
+                    )}
+                  </Stack>
+                )}
+              </Term>
+            )}
 
-              <Term label="Duplicate matches">
-                <Text size="sm">
-                  {summary.deduplicate
-                    ? "More than one of the inviting party's records may match a single one of the accepting party's records."
-                    : "Each of the inviting party's records matches at most one of the accepting party's records."}
-                </Text>
-                {/* What a deduplicating match reveals, and whose records are
+            <Term label="Duplicate matches">
+              <Text size="sm">
+                {summary.deduplicate
+                  ? "More than one of the inviting party's records may match a single one of the accepting party's records."
+                  : "Each of the inviting party's records matches at most one of the accepting party's records."}
+              </Text>
+              {/* What a deduplicating match reveals, and whose records are
                 grouped to reveal it -- the inviting party's alone, since
                 acceptance derives the accepting party's own side as false
                 (deriveAcceptedLinkageTerms). Shared wording with the CLI accept
@@ -1457,46 +1373,45 @@ export function InvitationTerms({
                 sole receiver. Rendered for exactly a deduplicating invitation the
                 run applies -- a strategy that cannot deduplicate is refused at
                 acceptance (assertDeduplicateImplemented). */}
-                {summary.deduplicate && summary.deduplicateApplied && (
-                  <>
-                    <Text size="xs" c="dimmed">
-                      {summary.inviterSharesResult
-                        ? DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT
-                        : DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT}
-                    </Text>
-                    {/* The sole-receiver statement states the withholding this
+              {summary.deduplicate && summary.deduplicateApplied && (
+                <>
+                  <Text size="xs" c="dimmed">
+                    {summary.inviterSharesResult
+                      ? DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT
+                      : DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT}
+                  </Text>
+                  {/* The sole-receiver statement states the withholding this
                     client makes; what the rounds still disclose to the accepting
                     party's own process is the fact beside it, read from the shared
                     table. Only that shape needs it: where the inviting party shares
                     the result, the accepting party is presented the grouping and
                     there is no display limit to qualify. */}
-                    {!summary.inviterSharesResult && (
-                      <Text size="xs" c="dimmed">
-                        {CONSENT_FACTS.duplicateGroupingDisplayLimit.note}
-                      </Text>
-                    )}
+                  {!summary.inviterSharesResult && (
                     <Text size="xs" c="dimmed">
-                      {DEDUPLICATE_ACCEPTOR_SIDE_NOTE}
+                      {CONSENT_FACTS.duplicateGroupingDisplayLimit.note}
                     </Text>
-                  </>
-                )}
-              </Term>
-            </Stack>
-          </Collapse>
-        </div>
+                  )}
+                  <Text size="xs" c="dimmed">
+                    {DEDUPLICATE_ACCEPTOR_SIDE_NOTE}
+                  </Text>
+                </>
+              )}
+            </Term>
+          </Stack>
+        </Collapse>
+      </div>
 
-        {summary.expires !== undefined && (
-          <Text size="xs" c="dimmed">
-            {/* Label the time zone: the expiry is one instant, but inviter and
+      {summary.expires !== undefined && (
+        <Text size="xs" c="dimmed">
+          {/* Label the time zone: the expiry is one instant, but inviter and
               acceptor may be in different zones, so a bare local wall-clock time
               would display as a different deadline on each end. */}
-            This invitation expires{" "}
-            {new Date(summary.expires).toLocaleString(undefined, {
-              timeZoneName: "short",
-            })}
-          </Text>
-        )}
-      </CondensableDetails>
+          This invitation expires{" "}
+          {new Date(summary.expires).toLocaleString(undefined, {
+            timeZoneName: "short",
+          })}
+        </Text>
+      )}
     </Stack>
   );
 }

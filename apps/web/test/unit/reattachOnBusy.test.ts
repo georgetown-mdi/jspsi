@@ -3,19 +3,19 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   JobApiRequestError,
   RelayedTerminalError,
-} from "@psi/serverJobExchangeDriver";
-import { isExchangeBusyError, reattachOnBusy } from "@bench/reattachOnBusy";
-import { failureFor } from "@bench/useInviterExchange";
-import { writeAttachment } from "@psi/consoleJobAttachment";
+} from "@psi/jobClient/serverJobExchangeDriver";
+import { isExchangeBusyError, reattachOnBusy } from "@exchange/reattachOnBusy";
+import { failureFor } from "@exchange/useInviterExchange";
+import { writeAttachment } from "@psi/jobClient/consoleJobAttachment";
 
 import type {
   JobApiClient,
   JobStatusProbe,
-} from "@psi/serverJobExchangeDriver";
+} from "@psi/jobClient/serverJobExchangeDriver";
 import type { ExchangeDriverEvents } from "@psi/exchangeDriver";
 import type { ExchangeErrorCategory } from "@psi/exchangeLifecycle";
 import type { RelayEvent } from "@jobs/cliDriver";
-import type { RunOutputs } from "@bench/runOutputs";
+import type { RunOutputs } from "@psi/runOutputs";
 
 const STORAGE_KEY = "psilink-console-last-job";
 
@@ -307,7 +307,7 @@ describe("reattachOnBusy", () => {
 // can hold text an untrusted party chose. This pins that the replay's failure
 // reaches the operator through the same failureFor composition path any other
 // run uses -- the re-attach adds nothing of its own. The class-kill pins in
-// jobRunDiagnostics.unit.test.ts and scripts/bench-failure-passthrough.test.mjs
+// jobRunDiagnostics.unit.test.ts and scripts/run-failure-passthrough.test.mjs
 // hold the same invariant elsewhere.
 describe("a re-attached run's terminal shows as it arrived", () => {
   /** A terminal the CLI never composed as a refusal: the CLI's own refusal

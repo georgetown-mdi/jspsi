@@ -2,13 +2,13 @@
 
 import { describe, expect, test } from "vitest";
 
-import { createBrowserPsiEngineFactory } from "@psi/psiCryptoController";
-import { defaultSpawnPsiCryptoWorker } from "@psi/psiCryptoWorkerClient";
+import { createBrowserPsiEngineFactory } from "@psi/workers/psiCryptoController";
+import { defaultSpawnPsiCryptoWorker } from "@psi/workers/psiCryptoWorkerClient";
 
 import type {
   PsiCryptoWorker,
   SpawnPsiCryptoWorker,
-} from "@psi/psiCryptoController";
+} from "@psi/workers/psiCryptoController";
 import type { PsiEngine } from "@psilink/core";
 
 // The browser PSI crypto offload, exercised against the REAL Vite-native worker

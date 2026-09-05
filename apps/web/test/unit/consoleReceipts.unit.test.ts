@@ -32,14 +32,17 @@ import {
   receiptsProblems,
   receiptsSummary,
   receiptsWithField,
-} from "@bench/receiptsModel";
+} from "@psi/receiptsModel";
 import {
-  JOB_FILE_NAMES,
   composeConfigDocument,
   composeSftpConfigDocument,
+} from "@jobs/intentConfig";
+
+import {
+  JOB_FILE_NAMES,
   jobCreateIntentSchema,
   jobExchangeIntentSchema,
-} from "@jobs/intent";
+} from "@jobs/intentSchemas";
 import {
   SIGNING_CERTIFICATE_FILE_NAME,
   SIGNING_IDENTITY_FILE_NAME,
@@ -64,10 +67,10 @@ import {
   validZeroSetupIntent,
 } from "../utils/jobFixtures";
 
-import type { JobRendezvousConfig } from "@psi/workInputClient";
-import type { JobSigningPaths } from "@jobs/intent";
+import type { JobRendezvousConfig } from "@psi/jobClient/workInputClient";
+import type { JobSigningPaths } from "@jobs/intentSchemas";
 import type { LinkageTerms } from "@psilink/core";
-import type { ReceiptsDraft } from "@bench/receiptsModel";
+import type { ReceiptsDraft } from "@psi/receiptsModel";
 
 // The console's receipt-signing and retention authoring surface, end to end: what
 // the boundary schema admits, what the two composers emit per mode, what the
@@ -913,8 +916,8 @@ describe("the receipts card's model", () => {
 
   test("a control character in the retention note is caught on the card, not only at submit", () => {
     // Mirrors the server's own refusal (NOTE_CONTROL_CHAR_PATTERN in
-    // apps/web/src/jobs/intent.ts, via the shared @psi/retentionNoteShape
-    // pattern): a NUL or an ESC pasted into the note must report a card
+    // apps/web/src/jobs/intentSchemas.ts, the pattern both surfaces read):
+    // a NUL or an ESC pasted into the note must report a card
     // problem here, or the operator would see nothing wrong until the run
     // failed at submit with a generic 400.
     expect(
@@ -1183,7 +1186,7 @@ describe("the receipts card's model", () => {
 
   test("the receipt notice names where the download appears, not this screen", () => {
     // It renders on the authoring screens (review & create, and the acceptor
-    // bench) while the download control renders on the run screen once the run
+    // screen) while the download control renders on the run screen once the run
     // settles -- disjoint surfaces, so copy pointing at "here" would send the
     // operator looking for a control that is not on the screen they are reading.
     // That control is offered on any settled run, so the sentence names failure
@@ -1274,7 +1277,7 @@ describe("the receipts card's model", () => {
   });
 });
 
-describe("the verify bench reads a config the way --config-file does", () => {
+describe("the verify screen reads a config the way --config-file does", () => {
   test("a whole exchange configuration is accepted for its linkage_terms", () => {
     const yaml = composeConfigDocument(
       validIntent(),

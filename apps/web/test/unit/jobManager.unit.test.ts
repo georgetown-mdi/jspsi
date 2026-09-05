@@ -18,8 +18,8 @@ import {
 } from "@jobs/handoff";
 import { generateJobId, writeJobFile } from "@jobs/workdir";
 import { JobInputNotFoundError } from "@jobs/workInputs";
-import { createServerJobExchangeDriver } from "@psi/serverJobExchangeDriver";
-import { failureFor } from "@bench/useInviterExchange";
+import { createServerJobExchangeDriver } from "@psi/jobClient/serverJobExchangeDriver";
+import { failureFor } from "@exchange/useInviterExchange";
 
 import {
   STUB_CLI_PATH,
@@ -41,9 +41,9 @@ import type { CliDriverHandlers, RelayEvent } from "@jobs/cliDriver";
 import type {
   JobFiledropExchangeIntent,
   JobInputFileReference,
-} from "@jobs/intent";
+} from "@jobs/intentSchemas";
 import type { ExchangeErrorCategory } from "@psi/exchangeLifecycle";
-import type { JobApiClient } from "@psi/serverJobExchangeDriver";
+import type { JobApiClient } from "@psi/jobClient/serverJobExchangeDriver";
 
 vi.mock("@jobs/workdir", { spy: true });
 

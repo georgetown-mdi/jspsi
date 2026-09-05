@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { BenchLobby } from "@bench/BenchLobby";
-import { RecoveredExchangePanel } from "@bench/RecoveredExchangePanel";
-import { SavedExchangesHome } from "@bench/SavedExchanges";
+import { Lobby } from "@exchange/Lobby";
+import { RecoveredExchangePanel } from "@exchange/RecoveredExchangePanel";
+import { SavedExchangesHome } from "@recurring/SavedExchanges";
 import { isConsoleBuild } from "@utils/clientConfig";
 import { seo } from "@utils/seo";
 
@@ -16,7 +16,7 @@ function IndexHome() {
     return (
       <>
         <RecoveredExchangePanel />
-        <BenchLobby />
+        <Lobby />
       </>
     );
   return <SavedExchangesHome />;

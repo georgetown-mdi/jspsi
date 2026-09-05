@@ -12,20 +12,21 @@ import {
   acceptorColumnsEditorState,
   acceptorInitialColumnsState,
   acceptorVerdict,
-} from "@bench/acceptorColumnsModel";
-import { AcceptorColumnsStep } from "@bench/AcceptorColumnsStep";
-import { BenchLobby } from "@bench/BenchLobby";
-import { DIRECT_LINKAGE_STRATEGY_DEFAULT } from "@bench/directExchangeModel";
-import { DirectConfirmSection } from "@bench/DirectConfirmSection";
-import { InviterBench } from "@bench/InviterBench";
-import { OFFLINE_EXCHANGE_REASON } from "@bench/offlineExchangeGate";
-import styles from "@bench/bench.module.css";
+} from "@exchange/acceptorColumnsModel";
+import { AcceptorColumnsStep } from "@exchange/AcceptorColumnsStep";
+import { Lobby } from "@exchange/Lobby";
+
+import { DIRECT_LINKAGE_STRATEGY_DEFAULT } from "@exchange/directExchangeModel";
+import { DirectConfirmSection } from "@exchange/DirectConfirmSection";
+import { InviterScreen } from "@exchange/InviterScreen";
+import { OFFLINE_EXCHANGE_REASON } from "@psi/offlineExchangeGate";
+import styles from "@styles/app.module.css";
 
 import { restoreConnectivity, setConnectivity } from "./connectivity";
 import { createAppMount } from "./renderApp";
 
 import type { LinkageTerms } from "@psilink/core";
-import type { ProfiledJobInput } from "@psi/workInputClient";
+import type { ProfiledJobInput } from "@psi/jobClient/workInputClient";
 
 // The block sits on the control that begins a live run -- the inviter's create,
 // the acceptor's launch, the console's direct run -- each held with the same
@@ -42,9 +43,9 @@ vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
 );
 
-// The inviter bench transitively imports the rendezvous module, whose top-level
+// The inviter screen transitively imports the rendezvous module, whose top-level
 // config load reads `process`; nothing here opens a transport.
-vi.mock("@psi/rendezvous", async () =>
+vi.mock("@psi/transport/rendezvous", async () =>
   (await import("./moduleMocks")).rendezvousMock(),
 );
 
@@ -57,7 +58,7 @@ afterEach(() => {
 
 /** Walk the inviter spine to Review & create, where the create action lives. */
 async function reachReviewCreate() {
-  app.render(createElement(InviterBench));
+  app.render(createElement(InviterScreen));
   await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
   await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
   const fileInput = document.querySelector('input[type="file"]');
@@ -186,7 +187,7 @@ describe("the lobby's two ways into an exchange", () => {
   test("stay open offline under an advisory the connection clears", async () => {
     setConnectivity(false);
 
-    app.render(createElement(BenchLobby));
+    app.render(createElement(Lobby));
     await userEvent.fill(page.getByLabelText("Invitation"), "an-invitation");
 
     // Neither entry runs anything: one navigates to the authoring spine, whose

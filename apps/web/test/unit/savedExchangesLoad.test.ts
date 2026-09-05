@@ -4,12 +4,12 @@ import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
 import {
   MANAGED_EXCHANGE_SCHEMA_VERSION,
   composeManagedExchangeFile,
-} from "@psi/managedExchangeRecord";
-import { loadSavedExchanges } from "@bench/savedExchangesLoad";
+} from "@psi/managed/managedExchangeRecord";
+import { loadSavedExchanges } from "@recurring/savedExchangesLoad";
 
-import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
-import type { ManagedLocalState } from "@psi/managedLocalState";
-import type { SavedExchangesLoadDeps } from "@bench/savedExchangesLoad";
+import type { ManagedExchangeRecord } from "@psi/managed/managedExchangeRecord";
+import type { ManagedLocalState } from "@psi/managed/managedLocalState";
+import type { SavedExchangesLoadDeps } from "@recurring/savedExchangesLoad";
 
 // The home list's async load model, tested in Node with the store reads injected:
 // the loading -> populated and loading -> empty ordering (the promise never resolves

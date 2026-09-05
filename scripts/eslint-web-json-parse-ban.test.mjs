@@ -14,7 +14,7 @@ import {
 // Coverage of the two parse bans in apps/web/eslint.config.js, which share one
 // no-restricted-properties block: JSON this app did not produce is parsed
 // through @psilink/core's parseBoundedJson, and a fetched body is read through
-// the bounded read in src/psi/jobApiBody.ts rather than Response.json(). The
+// the bounded read in src/psi/jobClient/jobApiBody.ts rather than Response.json(). The
 // property-access form of each (the same form packages/core/src uses) closes the
 // alias, computed-access, and destructure routes around a direct call as well.
 //

@@ -71,7 +71,7 @@ runs unmodified in Node, where `pack` and `unpack` are synchronous for the
 `Buffer` and `Uint8Array` payloads Node produces. Only the chunk envelope around
 it had to be written. The web app also depends on the `binary` default
 concretely: its inbound reassembly bound reaches into PeerJS's internal chunk
-map (`apps/web/src/psi/boundedReassembly.ts`,
+map (`apps/web/src/psi/transport/boundedReassembly.ts`,
 [CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md#webrtc-data-channel-inbound-bound)),
 so BinaryPack chunking is wired into a security control, not merely a default.
 

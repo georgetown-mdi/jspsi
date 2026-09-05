@@ -15,18 +15,18 @@ import {
   CRON_EXPORT_KEY_FILE_NAME,
   CRON_EXPORT_OUTPUT_FILE_NAME,
   composeManagedCronExport,
-} from "@psi/managedCronExport";
+} from "@psi/managed/managedCronExport";
 import {
   MANAGED_EXCHANGE_ARTIFACT_VERSION,
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
   keyFileFieldsSchema,
   parseManagedExchangeRecord,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 import {
   importManagedExchangeArtifact,
   serializeExchangeDocument,
-} from "@psi/managedExchangeArtifact";
+} from "@psi/managed/managedExchangeArtifact";
 
 import type {
   ExchangeLocator,
@@ -38,7 +38,7 @@ import type {
   ManagedExchangeRecord,
   ManagedExchangeSide,
   NewManagedExchange,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 
 // The command-line export composer, tested in Node without a store, a download,
 // or a spend: the two files it emits are the ones `psilink exchange` opens, the

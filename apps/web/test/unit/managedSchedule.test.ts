@@ -11,22 +11,22 @@ import {
   nextConsecutiveMisses,
   nextManagedScheduleWindowAfter,
   resolveLocalCadenceAnchor,
-} from "@psi/managedSchedule";
+} from "@psi/managed/managedSchedule";
 import {
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
   scheduleSchema,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 import {
   encodeManagedExchangeArtifact,
   reconstructRecordFromArtifact,
-} from "@psi/managedExchangeArtifact";
+} from "@psi/managed/managedExchangeArtifact";
 import { withTimeZone } from "../utils/hostTimeZone";
 
 import type {
   ManagedExchangeRecord,
   ManagedExchangeSchedule,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 
 // The schedule arithmetic in Node, with every clock injected. The recurrence is
 // UTC-millisecond arithmetic against the record's stored-UTC anchor, so the suite
@@ -1051,7 +1051,7 @@ describe("localCadenceFromAnchor", () => {
   test("reads to the minute, so an anchor finer than that does not round-trip", () => {
     // The cadence holds no seconds, which is why an entry surface holding a
     // stored anchor at this resolution passes it through rather than resolving
-    // the reading back (see ../../src/bench/scheduleEntryModel.ts).
+    // the reading back (see ../../src/recurring/scheduleEntryModel.ts).
     withTimeZone("UTC", () => {
       const cadence = localCadenceFromAnchor("2026-03-03T14:00:30.500Z");
       expect(cadence).toEqual({

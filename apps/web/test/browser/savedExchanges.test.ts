@@ -9,29 +9,29 @@ import { createElement } from "react";
 
 import "@mantine/core/styles.css";
 
-import { SavedExchanges, SavedExchangesHome } from "@bench/SavedExchanges";
+import { SavedExchanges, SavedExchangesHome } from "@recurring/SavedExchanges";
 import {
   clearManagedExchanges,
   createManagedExchange,
   spendManagedExchangeIfCurrent,
-} from "@psi/managedExchangeStore";
-import { BenchLobby } from "@bench/BenchLobby";
-import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
-import { markManagedExchangeBackedUp } from "@psi/managedLocalState";
-import styles from "@bench/bench.module.css";
+} from "@psi/managed/managedExchangeStore";
+import { Lobby } from "@exchange/Lobby";
+import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
+import { markManagedExchangeBackedUp } from "@psi/managed/managedLocalState";
+import styles from "@styles/app.module.css";
 
 import { createAppMount } from "./renderApp";
 
 import type {
   ManagedExchangeSchedule,
   NewManagedExchange,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 
 // The component's delete goes through this module. It is mocked so the delete-failure
 // test can make a single delete reject while every other case uses the real
 // transaction; `deleteOverride`, when set, replaces the real delete for one test.
 let deleteOverride: ((id: string) => Promise<void>) | undefined;
-vi.mock("@psi/managedExchangeStore", async (importOriginal) => {
+vi.mock("@psi/managed/managedExchangeStore", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   const realDelete = actual.deleteManagedExchange as (
     id: string,
@@ -154,7 +154,7 @@ describe("home route: conditional on a stored exchange existing", () => {
 
 describe("lobby: the recurring-exchange pointer is gated on a saved exchange", () => {
   test("no saved exchange -> the restore-from-backup pointer stands, the run-again framing is withheld", async () => {
-    app.render(createElement(BenchLobby));
+    app.render(createElement(Lobby));
 
     // The restore path must stay discoverable with nothing saved: a wholesale
     // eviction leaves no rows yet is exactly when a backup import matters.
@@ -172,7 +172,7 @@ describe("lobby: the recurring-exchange pointer is gated on a saved exchange", (
   test("a saved exchange -> the run-again framing appears", async () => {
     await createManagedExchange(newExchange());
 
-    app.render(createElement(BenchLobby));
+    app.render(createElement(Lobby));
 
     await expect
       .element(

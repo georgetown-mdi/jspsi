@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 
 import { TEXT_CONTROL_CHAR_PATTERN } from "@psilink/core";
 
-import { IDENTITY_CONTROL_CHAR_PATTERN } from "@psi/identityLabel";
+import { IDENTITY_CONTROL_CHAR_PATTERN } from "@jobs/intentSchemas";
 
 // The two control-character rules the identity label passes through, held equal
 // here rather than by the cross-reference each file used to hold. An operator's

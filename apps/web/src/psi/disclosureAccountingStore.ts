@@ -32,7 +32,7 @@ import { parseExchangeRecord } from "@psilink/core";
 import {
   MANAGED_EXCHANGE_DISCLOSURE_STORE_NAME,
   openManagedExchangeDatabase,
-} from "./managedExchangeStore";
+} from "./managed/managedExchangeStore";
 import {
   appendDisclosureRecord,
   parseDisclosureAccounting,
@@ -95,7 +95,7 @@ export type DisclosureAccountingRead =
    * been filed here, or what was filed has been cleared by
    * {@link resetDisclosureAccounting}. Empty is not the same as never-run, so the
    * surface reading this states the emptiness against the record's own run
-   * bookkeeping (see {@link ../bench/managedDetailModel.ts},
+   * bookkeeping (see {@link ../recurring/managedDetailModel.ts},
    * `completedRunRecorded`). */
   | { kind: "none" }
   /** The stored accounting, validated through {@link parseDisclosureAccounting}. */
@@ -136,7 +136,7 @@ function recoverableStored(
  *
  * The classification is what keeps a transient store condition off the
  * destructive recovery. A failed open is separated from a failed PARSE, the same
- * split {@link ../bench/savedExchangesLoad.ts} makes for the saved-exchanges
+ * split {@link ../recurring/savedExchangesLoad.ts} makes for the saved-exchanges
  * list: only a value actually read and then refused reaches `"unreadable"`, so a
  * blocked open -- which self-heals when the other tab yields -- can never present
  * as the irreversible-reset case. A value that WAS refused is then split by

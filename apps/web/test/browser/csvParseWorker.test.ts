@@ -7,8 +7,8 @@ import { loadCSVFile } from "@psilink/core";
 import {
   CSV_WORKER_FILE_BYTE_THRESHOLD,
   loadCSVFileOffMainThread,
-} from "@psi/csvParseController";
-import { defaultSpawnCSVParseWorker } from "@psi/csvParseWorkerClient";
+} from "@psi/workers/csvParseController";
+import { defaultSpawnCSVParseWorker } from "@psi/workers/csvParseWorkerClient";
 
 // The off-main-thread CSV parse, exercised against the REAL Vite-native worker in a
 // real browser (dev). The controller's dispatch plumbing is pinned in Node with a

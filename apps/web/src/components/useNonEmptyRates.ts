@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 
-import { NonEmptyRateController } from "@psi/nonEmptyAggregateController";
-import { defaultSpawnAggregateWorker } from "@psi/nonEmptyAggregateWorkerClient";
-import { postJobInputCoverage } from "@psi/workInputClient";
+import { NonEmptyRateController } from "@psi/workers/nonEmptyAggregateController";
+import { defaultSpawnAggregateWorker } from "@psi/workers/nonEmptyAggregateWorkerClient";
+import { postJobInputCoverage } from "@psi/jobClient/workInputClient";
 
-import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
-import type { WorkInputReference } from "@psi/workInputClient";
+import type { FieldValueCoverage } from "@psi/workers/nonEmptyAggregate";
+import type { WorkInputReference } from "@psi/jobClient/workInputClient";
 
 import type { CSVRow, Standardization } from "@psilink/core";
 
@@ -13,10 +13,10 @@ import type { CSVRow, Standardization } from "@psilink/core";
  * keystrokes recomputes the full-CSV coverage once rather than per edit. Distinct
  * from the visible UI, which tracks each edit synchronously; only this background
  * sweep is debounced. */
-export const AGGREGATE_DEBOUNCE_MS = 500;
+const AGGREGATE_DEBOUNCE_MS = 500;
 
 /** The hook's view of the per-field value coverage. */
-export interface NonEmptyRatesState {
+interface NonEmptyRatesState {
   /** Per-field coverage keyed by linkage-field name (the transformation `output`),
    * or `null` before the first sweep settles. */
   rates: ReadonlyMap<string, FieldValueCoverage> | null;
@@ -35,7 +35,7 @@ export interface NonEmptyRatesState {
  * browser's parsed rows; the console provider ({@link consoleCoverageProvider}) fetches
  * the server-side coverage sweep through this same boundary.
  */
-export interface CoverageProvider {
+interface CoverageProvider {
   /** Resolve the per-field rates for `standardization`. A compute the hook
    * supersedes may never settle -- the hook guards with its own cancellation flag. */
   compute: (
@@ -48,16 +48,13 @@ export interface CoverageProvider {
 /** Build a {@link CoverageProvider} for a coverage input -- injected so the hook is
  * agnostic to whether the input is the browser's rows or a server-side file
  * reference. */
-export type CoverageProviderFactory<TInput> = (
-  input: TInput,
-) => CoverageProvider;
+type CoverageProviderFactory<TInput> = (input: TInput) => CoverageProvider;
 
 /** The hosted coverage provider: {@link NonEmptyRateController} over the parsed rows,
  * preserving its inline-below-threshold / worker-above-threshold behavior exactly. */
-export const rowsCoverageProvider: CoverageProviderFactory<
-  ReadonlyArray<CSVRow>
-> = (rawRows) =>
-  new NonEmptyRateController(rawRows, defaultSpawnAggregateWorker);
+const rowsCoverageProvider: CoverageProviderFactory<ReadonlyArray<CSVRow>> = (
+  rawRows,
+) => new NonEmptyRateController(rawRows, defaultSpawnAggregateWorker);
 
 /**
  * The console coverage provider: each `compute` POSTs the file's name and the
@@ -106,7 +103,7 @@ export const consoleCoverageProvider: CoverageProviderFactory<
 
 /** The coverage input, unifying the hosted browser rows and the console's
  * mounted-file reference so one {@link useNonEmptyRates} call serves both builds. */
-export type BenchCoverageInput =
+export type CoverageInput =
   | { kind: "rows"; rows: ReadonlyArray<CSVRow> }
   | { kind: "workFile"; reference: WorkInputReference };
 
@@ -114,9 +111,9 @@ export type BenchCoverageInput =
  * worker-backed provider and a `workFile` input to the console fetch-backed sweep.
  * A stable module-level factory so the hook rebuilds the provider only when the
  * coverage input identity changes. */
-export const benchCoverageProvider: CoverageProviderFactory<
-  BenchCoverageInput
-> = (input) =>
+export const coverageProvider: CoverageProviderFactory<CoverageInput> = (
+  input,
+) =>
   input.kind === "rows"
     ? rowsCoverageProvider(input.rows)
     : consoleCoverageProvider(input.reference);

@@ -43,7 +43,7 @@ that workdir. That is file handling, subprocess supervision, and on-disk state
 Which channel goes there is the profile's decision rather than the API's. On a
 console build a filedrop or SFTP exchange runs as a server job, while a WebRTC
 exchange still runs in the tab exactly as it does on the hosted build
-(`apps/web/src/bench/exchangeDriverSelection.ts`). The console does not move the
+(`apps/web/src/psi/exchangeDriverSelection.ts`). The console does not move the
 browser-to-browser exchange onto the server; it adds the channels a browser
 cannot open a socket for.
 

@@ -35,7 +35,7 @@ import {
   removeKey,
   updateElementAt,
   updateKeyAt,
-} from "@psi/advancedInvite";
+} from "@psi/authoring/advancedInvite";
 import { SEMANTIC_TYPE_LABELS } from "@psi/metadataEditing";
 
 import { StepListEditor } from "@components/StepListEditor";
@@ -46,8 +46,11 @@ import type {
   LinkageKeyElement,
 } from "@psilink/core";
 
-import type { AdvancedInviteDraft, FuzzyComparison } from "@psi/advancedInvite";
-import type { KeyVerdict } from "@bench/inviterModel";
+import type {
+  AdvancedInviteDraft,
+  FuzzyComparison,
+} from "@psi/authoring/advancedInvite";
+import type { KeyVerdict } from "@psi/inviterEditor";
 
 /** The expert-editor badge copy and Mantine color for each per-key verdict
  * ({@link KeyVerdict}), reading consistently with the guided list. A dead key is

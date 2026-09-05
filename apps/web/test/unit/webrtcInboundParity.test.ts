@@ -8,7 +8,7 @@ import {
   unpackFrame,
 } from "@psilink/testkit/webrtcInboundFrames";
 
-import { boundChunkReassembly } from "../../src/psi/boundedReassembly.js";
+import { boundChunkReassembly } from "../../src/psi/transport/boundedReassembly.js";
 
 import type {
   FrameVerdict,
@@ -18,11 +18,12 @@ import type { ConnectionError } from "@psilink/core";
 import type { DataConnection } from "peerjs";
 
 // Core's structural pre-scan (packages/core/src/connection/binaryPackBounds.ts) and
-// this app's PeerJS wrap (src/psi/boundedReassembly.ts) enforce the same bound; the
-// wrap calls the scan at the unpack chokepoint for every datagram and reassembled
-// frame. The fixture set (`@psilink/testkit/webrtcInboundFrames`), also driven
-// by the CLI's own parity suite, drives both here, and every divergence fails --
-// including a rule that fires on a whole frame but not the same frame in chunks.
+// this app's PeerJS wrap (src/psi/transport/boundedReassembly.ts) enforce the same
+// bound; the wrap calls the scan at the unpack chokepoint for every datagram and
+// reassembled frame. The fixture set (`@psilink/testkit/webrtcInboundFrames`), also
+// driven by the CLI's own parity suite, drives both here, and every divergence
+// fails -- including a rule that fires on a whole frame but not the same frame in
+// chunks.
 
 /** PeerJS's chunk message ids start at 1: the receive dispatch keys off `__peerData`
  * being TRUTHY, so a chunk numbered 0 would be read as a plain application frame. */

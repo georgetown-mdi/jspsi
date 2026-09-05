@@ -11,7 +11,7 @@ import { isPathWithin } from "./pathContainment";
  * as `file`; a broken or otherwise unstattable entry is dropped. No file bytes
  * are ever read.
  */
-export interface MountEntry {
+interface MountEntry {
   name: string;
   kind: "dir" | "file";
 }
@@ -23,7 +23,7 @@ export interface MountEntry {
  * or a traversal attempt is indistinguishable from an empty-but-readable
  * directory and neither the errno nor the absolute path rides the wire.
  */
-export interface MountListing {
+interface MountListing {
   readable: boolean;
   entries: Array<MountEntry>;
 }

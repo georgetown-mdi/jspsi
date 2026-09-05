@@ -20,7 +20,7 @@ import {
   parseHandoff,
   shellJoinCommand,
   windowsJoinCommand,
-} from "@psi/recurringHandoff";
+} from "@psi/managed/recurringHandoff";
 import { JobManager } from "@jobs/jobManager";
 
 import { Route as CreateRoute } from "../../src/routes/api/jobs/index";

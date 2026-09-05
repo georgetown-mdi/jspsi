@@ -12,13 +12,13 @@ import "@mantine/core/styles.css";
 import {
   clearManagedExchanges,
   createManagedExchange,
-} from "@psi/managedExchangeStore";
-import { ManagedRunSurface } from "@bench/ManagedRunSurface";
-import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeStore";
+import { ManagedRunSurface } from "@recurring/ManagedRunSurface";
+import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
 
 import { createAppMount } from "./renderApp";
 
-import type { NewManagedExchange } from "@psi/managedExchangeRecord";
+import type { NewManagedExchange } from "@psi/managed/managedExchangeRecord";
 
 // A managed re-run is a live two-party session with no resumption, and the
 // app-shell update notice renders its Reload button above every route -- so the
@@ -31,7 +31,7 @@ vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
 );
 
-vi.mock("@psi/rendezvous", async () =>
+vi.mock("@psi/transport/rendezvous", async () =>
   (await import("./moduleMocks")).rendezvousMock(),
 );
 
@@ -42,7 +42,7 @@ vi.mock("@psi/rendezvous", async () =>
 const liveRun = vi.hoisted(() => ({
   end: undefined as (() => void) | undefined,
 }));
-vi.mock("@psi/managedRunDriver", () => ({
+vi.mock("@psi/managed/managedRunDriver", () => ({
   runManagedExchangeInBrowser: () =>
     new Promise((_resolve, reject) => {
       liveRun.end = () => reject(new Error("the test ended the run"));

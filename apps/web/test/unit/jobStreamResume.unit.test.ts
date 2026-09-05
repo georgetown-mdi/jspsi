@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { JobManager } from "@jobs/jobManager";
 import { SSE_KEEPALIVE_FRAME } from "@jobs/sse";
-import { createFetchJobApiClient } from "@psi/serverJobExchangeDriver";
+import { createFetchJobApiClient } from "@psi/jobClient/serverJobExchangeDriver";
 
 import { Route as EventsRoute } from "../../src/routes/api/jobs/$jobId/events";
 

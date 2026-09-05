@@ -1,16 +1,16 @@
+import { zeroSetupOptionsArgv, zeroSetupSftpArgv } from "./intentArgv";
+
 import {
   composeConfigDocument,
   composeSftpConfigDocument,
-  zeroSetupOptionsArgv,
-  zeroSetupSftpArgv,
-} from "./intent";
+} from "./intentConfig";
 
 import type {
   JobCreateIntent,
   JobExchangeIntent,
   JobSigningPaths,
   JobZeroSetupIntent,
-} from "./intent";
+} from "./intentSchemas";
 import type { JobSftpServerEntry } from "./sftpServer";
 
 /**
@@ -287,7 +287,7 @@ function buildZeroSetupHandoffTemplate(
  * A record rather than two positional flags, because the two are same-typed and a
  * transposed pair would otherwise typecheck.
  */
-export interface JobHandoffRunFacts {
+interface JobHandoffRunFacts {
   /**
    * Whether the sftp credential the run used was a PASTED, server-materialized
    * value rather than a file the operator owns. Forced false on the filedrop

@@ -8,14 +8,14 @@ import { createElement } from "react";
 
 import { authoredLinkageFields } from "@psilink/core";
 
-import { seedAdvancedInvite } from "@psi/advancedInvite";
+import { seedAdvancedInvite } from "@psi/authoring/advancedInvite";
 
 import { ExpertKeyEditor } from "@components/ExpertKeyEditor";
 
 import { restoreMatchMedia, stubReducedMotion } from "./reducedMotion";
 import { createAppMount } from "./renderApp";
 
-import type { KeyVerdict } from "@bench/inviterModel";
+import type { KeyVerdict } from "@psi/inviterEditor";
 
 // A file holding every default linkage column, so the seed keeps the full key set
 // -- several collapsed key cards, each its own disclosure.

@@ -4,7 +4,7 @@ import {
   breadcrumbTrail,
   enterSubdir,
   fileSubPath,
-} from "@bench/mountNavigation";
+} from "@console/mountNavigation";
 
 describe("mount navigation", () => {
   test("enterSubdir appends one segment without mutating the input", () => {

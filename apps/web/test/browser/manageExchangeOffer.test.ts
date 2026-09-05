@@ -8,7 +8,7 @@ import { createElement } from "react";
 
 import "@mantine/core/styles.css";
 
-import { ManageExchangeOffer } from "@bench/ManageExchangeOffer";
+import { ManageExchangeOffer } from "@exchange/ManageExchangeOffer";
 
 import { createAppMount } from "./renderApp";
 
@@ -26,7 +26,7 @@ vi.mock("@tanstack/react-router", async () =>
 // The availability probe is the only store surface the offer touches; resolving it
 // controls the branch under test. Set per test before mount.
 const probeStoreOpen = vi.fn<() => Promise<boolean>>();
-vi.mock("@psi/managedExchangeStore", () => ({
+vi.mock("@psi/managed/managedExchangeStore", () => ({
   probeManagedStoreOpen: () => probeStoreOpen(),
 }));
 

@@ -11,24 +11,24 @@ import {
   getManagedExchange,
   openManagedExchangeDatabase,
   spendManagedExchangeIfCurrent,
-} from "@psi/managedExchangeStore";
+} from "@psi/managed/managedExchangeStore";
 import {
   ManagedExchangeCustodyUnreadableError,
   ManagedExchangeSpentError,
   runManagedExchange,
-} from "@psi/managedExchangeRun";
+} from "@psi/managed/managedExchangeRun";
 import {
   ManagedExchangeLockUnavailableError,
   managedExchangeLockName,
   withManagedExchangeLock,
-} from "@psi/managedExchangeLock";
-import { ManagedInputError } from "@psi/managedInputGuard";
-import { RotationPersistError } from "@psi/managedRunRotate";
-import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
-import { deriveManagedFailureTier } from "@psi/managedFailureTiers";
-import { getManagedLocalState } from "@psi/managedLocalState";
+} from "@psi/managed/managedExchangeLock";
+import { ManagedInputError } from "@psi/managed/managedInputGuard";
+import { RotationPersistError } from "@psi/managed/managedRunRotate";
+import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
+import { deriveManagedFailureTier } from "@psi/managed/managedFailureTiers";
+import { getManagedLocalState } from "@psi/managed/managedLocalState";
 
-import type { NewManagedExchange } from "@psi/managedExchangeRecord";
+import type { NewManagedExchange } from "@psi/managed/managedExchangeRecord";
 import type { WebRTCExchangeLocator } from "@psilink/core";
 
 // The platform half of the run+rotate critical section, exercised against real

@@ -61,7 +61,7 @@ const CONTAINER_SIZES = {
  * speaks. A route declares one of these and the shell sizes both its chrome
  * and the route's content to it, so neither side names a raw pixel width.
  */
-export type ContainerWidth = keyof typeof CONTAINER_SIZES;
+type ContainerWidth = keyof typeof CONTAINER_SIZES;
 
 export const mantineTheme: MantineThemeOverride = createTheme({
   fontSizes: {

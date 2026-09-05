@@ -26,7 +26,7 @@
 //     re-run on every werift bump per docs/spec/DEPENDENCY_PINS.md. A check
 //     reading the library's source to predict its default would be a second
 //     implementation of it, which this repository does not accept.
-//   - The web app's OWN ICE list (apps/web/src/psi/rendezvous.ts, described in
+//   - The web app's OWN ICE list (apps/web/src/psi/transport/rendezvous.ts, described in
 //     PRIVACY.md). It is a different list, for exchanges a browser runs itself,
 //     and it happens to include the same Google server. Tying it here would fuse
 //     two independent decisions -- what the hosted app configures, and what the
@@ -55,7 +55,7 @@ const SOURCE = {
 /** First-party source holding its own copy because it cannot import SOURCE. */
 const CODE_COPIES = [
   {
-    file: "apps/web/src/bench/managedCronExportModel.ts",
+    file: "apps/web/src/recurring/managedCronExportModel.ts",
     name: "CLI_BUILT_IN_STUN_URI",
   },
 ];
@@ -71,7 +71,7 @@ const CLAIM_TEXTS = [
   { file: "docs/CLI.md", stated: true },
   { file: "docs/spec/DEPENDENCY_PINS.md", stated: true },
   { file: "docs/notes/cli-webrtc-stack.md", stated: true },
-  { file: "apps/web/src/bench/ManagedCronExportPanel.tsx", stated: false },
+  { file: "apps/web/src/recurring/ManagedCronExportPanel.tsx", stated: false },
 ];
 
 /**

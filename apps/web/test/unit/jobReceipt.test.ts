@@ -4,9 +4,9 @@ import {
   RECEIPT_AVAILABILITY_UNANSWERED_LIMIT,
   askJobReceiptOffer,
   fetchJobReceiptOffer,
-} from "@psi/jobReceipt";
+} from "@psi/jobClient/jobReceipt";
 
-import type { JobReceiptOffer } from "@psi/jobReceipt";
+import type { JobReceiptOffer } from "@psi/jobClient/jobReceipt";
 
 const CREATED_AT = "2026-07-08T14:32:00.000Z";
 const RECORD_STAMP = "2026-07-08T14-32-00-000Z";

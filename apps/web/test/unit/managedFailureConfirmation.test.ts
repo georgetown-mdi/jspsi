@@ -4,14 +4,14 @@ import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
 import {
   MANAGED_EXCHANGE_SCHEMA_VERSION,
   composeManagedExchangeFile,
-} from "@psi/managedExchangeRecord";
+} from "@psi/managed/managedExchangeRecord";
 import {
   composeConfirmationMessage,
   composeManagedFailureConfirmation,
   routeConfirmationReply,
-} from "@psi/managedFailureConfirmation";
+} from "@psi/managed/managedFailureConfirmation";
 
-import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
+import type { ManagedExchangeRecord } from "@psi/managed/managedExchangeRecord";
 
 // The Tier-2 out-of-band confirmation, tested in Node: the forwardable message includes
 // the doc's three asks and interpolates only this record's OWN local fields, and the
