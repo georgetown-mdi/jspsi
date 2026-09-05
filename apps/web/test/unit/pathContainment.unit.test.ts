@@ -1,5 +1,3 @@
-import path from "node:path";
-
 import { describe, expect, test } from "vitest";
 
 import { isPathWithin } from "@jobs/pathContainment";
@@ -29,11 +27,16 @@ describe.each(BOUNDS)("isPathWithin (%s)", (bound) => {
     expect(isPathWithin("/x", "/etc/shadow", bound)).toBe(false);
   });
 
-  test("a relative child resolves against the working directory", () => {
-    expect(isPathWithin(process.cwd(), "..data", bound)).toBe(true);
-    expect(
-      isPathWithin(path.join(process.cwd(), "elsewhere"), "..data", bound),
-    ).toBe(false);
+  test("a relative child throws rather than resolving against the working directory", () => {
+    expect(() => isPathWithin(process.cwd(), "..data", bound)).toThrow(
+      /child must be an absolute path/,
+    );
+  });
+
+  test("a relative parent throws rather than resolving against the working directory", () => {
+    expect(() => isPathWithin("mount", "/mount/file", bound)).toThrow(
+      /parent must be an absolute path/,
+    );
   });
 });
 

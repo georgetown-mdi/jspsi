@@ -303,6 +303,20 @@ describe("display helpers", () => {
     const now = new Date("2026-07-08T19:00:00.000Z");
     expect(invitationUsable("not-a-date", now)).toBe(false);
   });
+
+  test("invitationUsable refuses an absent expiry moment: a type error for a typed caller, false for an untyped one", () => {
+    const now = new Date("2026-07-08T19:00:00.000Z");
+    expect(
+      // @ts-expect-error -- exercising the runtime guard for an untyped caller
+      invitationUsable(undefined, now),
+    ).toBe(false);
+  });
+
+  test("invitationUsable fails closed on an unreadable clock", () => {
+    expect(
+      invitationUsable("2026-07-08T19:32:00.000Z", new Date("not-a-date")),
+    ).toBe(false);
+  });
 });
 
 describe("review and create", () => {

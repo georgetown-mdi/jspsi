@@ -2261,6 +2261,30 @@ describe("readJobRequestBody caps the read, not Content-Length", () => {
     expect(result.kind).toBe("invalid");
   });
 
+  test("a body holding an invalid UTF-8 byte is invalid, never parsed with U+FFFD substituted", async () => {
+    // The bytes reach the bounded parse undecoded, so its UTF-8-fatal decode
+    // rejects the body instead of a lenient decode handing the schema a name
+    // the operator never sent.
+    const bytes = Uint8Array.from([
+      ...new TextEncoder().encode('{"host":"a'),
+      0xff,
+      ...new TextEncoder().encode('b"}'),
+    ]);
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(bytes);
+        controller.close();
+      },
+    });
+    const request = jobRequest("http://localhost/api/jobs", {
+      method: "POST",
+      body: stream,
+      duplex: "half",
+    } as RequestInit & { duplex: "half" });
+    const result = await readJobRequestBody(request, 1024);
+    expect(result.kind).toBe("invalid");
+  });
+
   test("a body filling the authoring cap parses", async () => {
     // A body filling the authoring route's byte cap exactly: no realistic
     // authored body reaches the structural bounds the bounded parse also

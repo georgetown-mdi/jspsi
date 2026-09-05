@@ -900,10 +900,11 @@ export async function decodeInvitation(
 }
 
 /**
- * The verdict {@link hasExpiryInstantPassed} returns for an `expires` it cannot
- * parse: `"fail-closed"` treats the value as already passed, `"fail-open"` as
- * not passed. The safe direction belongs to what the bound governs, not to the
- * comparison, so a caller states one explicitly.
+ * The verdict {@link hasExpiryInstantPassed} returns for an instant it cannot
+ * read -- `expires`, or the `now` it is compared against: `"fail-closed"` treats
+ * the bound as already passed, `"fail-open"` as not passed. The safe direction
+ * belongs to what the bound governs, not to the comparison, so a caller states
+ * one explicitly.
  */
 export type UnparseableExpiryVerdict = "fail-closed" | "fail-open";
 
@@ -923,6 +924,9 @@ export type UnparseableExpiryVerdict = "fail-closed" | "fail-open";
  * cannot parse and a bare `<=` against `NaN` is `false`, so an unparseable bound
  * reads as not-passed unless a caller decides otherwise; requiring the verdict
  * puts that decision at the call site, where what the bound governs is visible.
+ * An unreadable `now` -- an Invalid Date -- takes the same verdict: neither
+ * instant is comparable, and one side being the clock rather than the bound does
+ * not make the answer safer.
  */
 export function hasExpiryInstantPassed(
   expires: string | undefined,
@@ -931,8 +935,10 @@ export function hasExpiryInstantPassed(
 ): boolean {
   if (expires === undefined) return false;
   const expiresMs = new Date(expires).getTime();
-  if (Number.isNaN(expiresMs)) return onUnparseable === "fail-closed";
-  return expiresMs <= now.getTime();
+  const nowMs = now.getTime();
+  if (Number.isNaN(expiresMs) || Number.isNaN(nowMs))
+    return onUnparseable === "fail-closed";
+  return expiresMs <= nowMs;
 }
 
 /**

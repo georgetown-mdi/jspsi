@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { ESLint } from "eslint";
 import { describe, expect, it } from "vitest";
 import repoConfig from "../eslint.config.mjs";
+import webConfig from "../apps/web/eslint.config.js";
 import {
   PROJECT_PARSER_OPTIONS,
   typeAwareRuleNames,
@@ -50,10 +51,23 @@ async function parseHits(filePath, source) {
   );
 }
 
-// A src file the ban covers, and a test file outside it: the web test tree
-// parses fixtures of its own and is not a trust boundary.
+// Two files the ban covers -- one in the browser-and-console tree, one in the
+// Nitro server entry tree -- and a test file outside it: the web test tree parses
+// fixtures of its own and is not a trust boundary.
 const WEB_SRC = resolve(repoRoot, "apps/web/src/jobs/routeSupport.ts");
+const WEB_SERVER = resolve(repoRoot, "apps/web/server/upgradeHardening.ts");
 const WEB_TEST = resolve(repoRoot, "apps/web/test/unit/jobRoutes.unit.test.ts");
+
+/** The apps/web block whose rules carry the JSON.parse property ban. */
+function jsonParseBanBlock() {
+  return webConfig.find((block) => {
+    const rule = block.rules?.["no-restricted-properties"];
+    if (!Array.isArray(rule)) return false;
+    return rule
+      .slice(1)
+      .some((entry) => entry.object === "JSON" && entry.property === "parse");
+  });
+}
 
 // Loading the flat config and the typescript-eslint parser for the first time is
 // the expensive part of a lintText call, independent of which file or how much
@@ -61,13 +75,13 @@ const WEB_TEST = resolve(repoRoot, "apps/web/test/unit/jobRoutes.unit.test.ts");
 // outrun the default per-test timeout on a CI runner.
 describe("the web raw-JSON.parse ban", { timeout: 60_000 }, () => {
   it("lints paths that exist", () => {
-    for (const path of [WEB_SRC, WEB_TEST]) {
+    for (const path of [WEB_SRC, WEB_SERVER, WEB_TEST]) {
       expect(existsSync(path), `${path} no longer exists`).toBe(true);
     }
   });
 
   it("lints the text it is handed, not the file on disk", async () => {
-    for (const filePath of [WEB_SRC, WEB_TEST]) {
+    for (const filePath of [WEB_SRC, WEB_SERVER, WEB_TEST]) {
       const [result] = await eslint.lintText(
         "this is not typescript !!! (((\n",
         {
@@ -81,9 +95,10 @@ describe("the web raw-JSON.parse ban", { timeout: 60_000 }, () => {
     }
   });
 
-  it("resolves the ban for the src file and not the test file", async () => {
+  it("resolves the ban for the shipped trees and not the test tree", async () => {
     for (const [filePath, expected] of [
       [WEB_SRC, true],
+      [WEB_SERVER, true],
       [WEB_TEST, false],
     ]) {
       const config = await eslint.calculateConfigForFile(filePath);
@@ -118,6 +133,10 @@ describe("the web raw-JSON.parse ban", { timeout: 60_000 }, () => {
       expect(await parseHits(WEB_SRC, `${source}\n`)).not.toHaveLength(0);
     });
 
+    it(`refuses ${shape} in apps/web/server`, async () => {
+      expect(await parseHits(WEB_SERVER, `${source}\n`)).not.toHaveLength(0);
+    });
+
     it(`accepts ${shape} in the web test tree`, async () => {
       expect(await parseHits(WEB_TEST, `${source}\n`)).toHaveLength(0);
     });
@@ -139,5 +158,28 @@ describe("the web raw-JSON.parse ban", { timeout: 60_000 }, () => {
     expect(
       await parseHits(WEB_SRC, "const text = JSON.stringify({});\n"),
     ).toHaveLength(0);
+  });
+
+  // A disable directive that no longer silences anything is an error rather than
+  // a warning, so an exemption left behind on a parse that stopped needing one
+  // fails CI instead of sitting unread. The setting is per config block, so the
+  // ban's block has to carry it: inherited from a sibling, it would lapse the day
+  // the sibling's `files` stopped covering the same tree, and nothing linted here
+  // would report differently.
+  it("carries its own unused-disable-directive setting", () => {
+    const block = jsonParseBanBlock();
+    expect(block, "no apps/web block carries the JSON.parse ban").toBeDefined();
+    expect(block.linterOptions?.reportUnusedDisableDirectives).toBe("error");
+  });
+
+  it("reports an unused disable directive on the ban as an error", async () => {
+    const [result] = await eslint.lintText(
+      "// eslint-disable-next-line no-restricted-properties -- nothing to silence\nconst text = JSON.stringify({});\n",
+      { filePath: WEB_SRC },
+    );
+    expect(
+      result.messages.map((message) => message.message).join("; "),
+    ).toMatch(/Unused eslint-disable directive/);
+    expect(result.errorCount).toBeGreaterThan(0);
   });
 });
